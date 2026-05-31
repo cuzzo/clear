@@ -1213,4 +1213,453 @@ RSpec.describe "annotator branch gap burndown" do
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:UNION_METHOD_MISSING, :TYPO_SUGGESTION_REJECTED)
   end
+
+  it "covers catch clause normalization branch matrix directly" do
+    ann = quiet_annotator
+    visited = []
+    ann.define_singleton_method(:visit) do |node|
+      visited << node
+      node.full_type = Type.new(:String) if node.respond_to?(:full_type=)
+    end
+
+    msg = AST::Literal.new(token(:STRING, "\"retry\""), :STRING, "retry", :rodata)
+    clause = AST::CatchClause.new(
+      items: [
+        AST::CatchItem.new(form: :kind, name: "Transient", token: token(:TYPE_ID, "Transient")),
+        AST::CatchItem.new(form: :kind, name: "Transint", token: token(:TYPE_ID, "Transint")),
+        AST::CatchItem.new(form: :type, name: "LockTimeout", token: token(:TYPE_ID, "LockTimeout")),
+        AST::CatchItem.new(form: :type, name: "MadeUpFailure", token: token(:TYPE_ID, "MadeUpFailure")),
+      ],
+      filters: [
+        AST::CatchFilter.new(form: :type, value: "MvccConflict", token: token(:TYPE_ID, "MvccConflict")),
+        AST::CatchFilter.new(form: :type, value: "MadeUpFilter", token: token(:TYPE_ID, "MadeUpFilter")),
+        AST::CatchFilter.new(form: :message, value: msg, token: token(:STRING, "\"retry\"")),
+        AST::CatchFilter.new(form: :other, value: "ignored", token: token(:VAR_ID, "ignored")),
+      ],
+    )
+
+    ann.send(:resolve_catch_clause!, clause)
+
+    expect(clause.kinds).to eq([:Transient])
+    expect(clause.types).to eq(["LockTimeout"])
+    expect(clause.filter_types).to include("MvccConflict", "MadeUpFilter")
+    expect(clause.filter_messages).to eq([msg])
+    expect(visited).to eq([msg])
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:REGISTRY_MISMATCH_REJECTED, :CATCH_WITH_UNREGISTERED)
+  end
+
+  it "covers snapshot match handler validation branch matrix directly" do
+    ann = quiet_annotator
+    visited = []
+    policy_msg = AST::Literal.new(token(:STRING, "\"policy\""), :STRING, "policy", :rodata)
+    ann.define_singleton_method(:synthesize_clause_from_policy) do |name|
+      name == :MvccConflict ? { action: :exit, message: policy_msg } : nil
+    end
+    ann.define_singleton_method(:visit) do |node|
+      visited << node
+      node.full_type = Type.new(:String) if node.respond_to?(:full_type=)
+    end
+    ann.define_singleton_method(:visit_stmts) { |body| visited.concat(body) }
+
+    block_body = [AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)]
+    node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
+    node.arms = [
+      { family: :VERSIONED, lock_error_clauses: [], body: [] },
+      { family: :ATOMIC, lock_error_clauses: [{ action: :raise }], body: [] },
+      { family: :LOCKED, lock_error_clauses: [{ action: :block, body: block_body }], body: [] },
+      { family: :OTHER, lock_error_clauses: [{ action: :exit, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata) }], body: [] },
+    ]
+
+    ann.send(:validate_snapshot_match_arms!, node)
+
+    expect(node.arms.first[:lock_error_clauses].first[:action]).to eq(:exit)
+    expect(visited).to include(node.arms.first[:lock_error_clauses].first[:message], block_body.first, node.arms.last[:lock_error_clauses].first[:message])
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_ATOMIC_FORBIDS_HANDLER)
+
+    miss = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
+    miss.arms = [{ family: :VERSIONED, lock_error_clauses: [], body: [] }]
+    ann.define_singleton_method(:synthesize_clause_from_policy) { |_name| nil }
+    ann.send(:validate_snapshot_match_arms!, miss)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER)
+  end
+
+  it "covers lock handler reachability branch matrix directly" do
+    ann = quiet_annotator
+
+    lock_node = AST::WithBlock.new(token(:WITH, "WITH"), [
+      AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock")),
+      AST::Capability.new(capability: :RESTRICT, var_node: AST::Identifier.new(token, "guarded"), guard_expr: AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)),
+    ], [])
+    lock_node.lock_error_clause = {
+      selectors: [
+        { form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout") },
+        { form: :type, name: :LockCycle, token: token(:TYPE_ID, "LockCycle") },
+        { form: :type, name: :Deadlock, token: token(:TYPE_ID, "Deadlock") },
+        { form: :type, name: :GuardFail, token: token(:TYPE_ID, "GuardFail") },
+        { form: :kind, name: :System, token: token(:TYPE_ID, "System") },
+        { form: :message, name: :Ignored, token: token(:STRING, "\"ignored\"") },
+      ]
+    }
+    ann.send(:verify_handler_reachability!,
+      { node: lock_node, cap_types: [:Counter] },
+      Set[:Counter],
+      Set[:Counter])
+
+    atomic_sym = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: :atomic, layout: :indirect)
+    atomic_var = AST::Identifier.new(token, "cell")
+    atomic_var.symbol = atomic_sym
+    atomic_node = AST::WithBlock.new(token(:WITH, "WITH"), [
+      AST::Capability.new(capability: :SNAPSHOT, var_node: atomic_var)
+    ], [])
+    atomic_node.snapshot_mode = :transaction
+    atomic_node.lock_error_clause = {
+      selectors: [
+        { form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict") },
+        { form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict") },
+      ]
+    }
+    ann.send(:verify_handler_reachability!, { node: atomic_node, cap_types: [] }, Set.new, Set.new)
+
+    versioned_node = AST::WithBlock.new(token(:WITH, "WITH"), [
+      AST::Capability.new(capability: :SNAPSHOT, var_node: AST::Identifier.new(token, "versioned"))
+    ], [])
+    versioned_node.snapshot_mode = :transaction
+    versioned_node.lock_error_clause = {
+      selectors: [
+        { form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict") },
+        { form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict") },
+      ]
+    }
+    ann.send(:verify_handler_reachability!, { node: versioned_node, cap_types: [] }, Set.new, Set.new)
+
+    expect(direct_errors(ann).map { |e| e[1] }.count(:SELECTOR_NOT_POSSIBLE)).to be >= 3
+  end
+
+  it "covers stack tier escalation and propagation branch matrix directly" do
+    ann = quiet_annotator
+    mk = lambda do |name|
+      fn = function_from("FN #{name}() RETURNS Void -> RETURN; END", name)
+      fn.effects = Set.new
+      fn.stack_vars_bytes = 0
+      fn
+    end
+
+    micro = mk.call("micro")
+    standard = mk.call("standard")
+    standard.effects = Set[EffectTracker::HEAP]
+    large = mk.call("large")
+    large.stack_vars_bytes = EffectTracker::STACK_TIER_BUDGET[:standard]
+    xl = mk.call("xl")
+    xl.stack_vars_bytes = EffectTracker::STACK_TIER_BUDGET[:large]
+    unbounded = mk.call("unbounded")
+    unbounded.reentrance_kind = :reentrant
+    bounded = mk.call("bounded")
+    bounded.reentrance_kind = :reentrant_max_depth
+    bounded.max_depth_n = 3
+    bounded.stack_vars_bytes = 2_000
+    mutual = mk.call("mutual")
+    mutual.reentrance_kind = :reentrant_max_depth
+    mutual.max_depth_n = 3
+    caller = mk.call("caller")
+    missing_caller = mk.call("missing_caller")
+
+    ann.instance_variable_set(:@fn_nodes, {
+      "micro" => micro,
+      "standard" => standard,
+      "large" => large,
+      "xl" => xl,
+      "unbounded" => unbounded,
+      "bounded" => bounded,
+      "mutual" => mutual,
+      "caller" => caller,
+      "missing_caller" => missing_caller,
+    })
+    ann.instance_variable_set(:@call_graph, {
+      "micro" => Set.new,
+      "standard" => Set.new,
+      "large" => Set.new,
+      "xl" => Set.new,
+      "unbounded" => Set.new,
+      "bounded" => Set.new,
+      "mutual" => Set["mutual_partner"],
+      "mutual_partner" => Set["mutual"],
+      "caller" => Set["unbounded"],
+      "missing_caller" => Set["missing"],
+    })
+
+    ann.send(:compute_stack_tiers!)
+
+    expect(micro.stack_tier).to eq(:micro)
+    expect(standard.stack_tier).to eq(:standard)
+    expect(large.stack_tier).to eq(:large)
+    expect(xl.stack_tier).to eq(:xl)
+    expect(unbounded.stack_tier).to eq(:unbounded)
+    expect(bounded.stack_vars_bytes).to eq(6_000)
+    expect(mutual.stack_tier).to eq(:unbounded)
+    expect(caller.stack_tier).to eq(:unbounded)
+    expect(missing_caller.stack_tier).to eq(:micro)
+  end
+
+  it "covers with-block arm effect and snapshot violation branches directly" do
+    ann = quiet_annotator
+    fn_ctx = FunctionContext.new(name: "with_fn", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    ann.instance_variable_get(:@function_context_stack) << fn_ctx
+    ann.instance_variable_set(:@fn_direct_effects, { "with_fn" => Set.new })
+
+    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded << cap }
+    ann.define_singleton_method(:check_nested_lock_reacquire!) { |_node, _caps| nil }
+    ann.define_singleton_method(:check_lock_rank_ordering!) { |_node, _caps| nil }
+    ann.define_singleton_method(:record_with_acquire!) { |_fn, _cap, _held, _escape| nil }
+    ann.define_singleton_method(:cap_var_name) { |node| node.respond_to?(:name) ? node.name : "cap" }
+    ann.define_singleton_method(:lock_identity_of) { |_cap| :Counter }
+    ann.define_singleton_method(:with_new_scope) { |_scope, &blk| blk.call }
+    ann.define_singleton_method(:current_scope) { nil }
+    ann.define_singleton_method(:declare_capability_scope!) { |_cap| nil }
+    ann.define_singleton_method(:validate_and_visit_with_guards!) { |_node| nil }
+    ann.define_singleton_method(:validate_with_guard_no_body_mutation!) { |_node| nil }
+    ann.define_singleton_method(:retryable_with_fallible_sources) { |_body| [] }
+    ann.define_singleton_method(:retryable_with_universal_poly_candidate?) { |_node| false }
+    ann.define_singleton_method(:finalize_scope) { |_node| nil }
+    ann.define_singleton_method(:validate_no_multi_object_atomic!) { |_node| nil }
+    ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
+    ann.define_singleton_method(:visit_stmts) do |body|
+      record_effect(EffectTracker::HEAP) if body.include?(:heap_arm)
+      @snapshot_txn_violations << { effect: EffectTracker::BLOCKING } if body.include?(:snapshot_violation)
+    end
+
+    cap_var = AST::Identifier.new(token, "locked")
+    cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: cap_var)
+    node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [:snapshot_violation])
+    node.snapshot_mode = :transaction
+    node.arms = [
+      { family: :LOCKED, body: [:heap_arm], lock_error_clauses: [] },
+      { family: :VERSIONED, body: [], lock_error_clauses: [] },
+      { family: :ATOMIC, body: [], lock_error_clauses: [] },
+      { family: :OTHER, body: [], lock_error_clauses: [] },
+    ]
+
+    ann.send(:visit_WithBlock, node)
+
+    effects = ann.instance_variable_get(:@fn_direct_effects)["with_fn"]
+    expect(effects).to include(EffectTracker::CONTENTION_MAYBE)
+    expect(effects).to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::HEAP)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_BODY_NOT_PURE)
+  end
+
+  it "covers auto method-call shape collection branches directly" do
+    decl = AST::VarDecl.new(token(:VAR_ID, "xs"), "xs", auto_type, nil, false)
+    list_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: decl, sources: [], shape: :list)
+    key_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: decl, sources: [], shape: :map_key)
+    val_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: decl, sources: [], shape: :map_value)
+    slots = AutoShapeSlots.new(list: list_slot, key: key_slot, value: val_slot)
+    name_map = { "xs" => slots }
+
+    elem = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    key = AST::Literal.new(token(:STRING, "\"k\""), :STRING, "k", :rodata)
+    val = AST::Literal.new(token(:NUMBER, "2_i64"), :INT64, 2, :stack)
+    target = AST::Identifier.new(token, "xs")
+    collector = ShapeEvidenceCollector.new({}, {})
+
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), target, "append", [elem]), name_map)
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), target, "insert", [key, val]), name_map)
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), target, "put", [key, val]), name_map)
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), target, "ignored", [elem]), name_map)
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), AST::GetField.new(token, target, "field"), "append", [elem]), name_map)
+    collector.send(:record_method_call, AST::MethodCall.new(token(:DOT, "."), AST::Identifier.new(token, "missing"), "append", [elem]), name_map)
+
+    expect(list_slot.sources).to eq([elem])
+    expect(key_slot.sources).to eq([key, key])
+    expect(val_slot.sources).to eq([val, val])
+  end
+
+  it "covers capability variable label shapes directly" do
+    ann = quiet_annotator
+    root = AST::Identifier.new(token, "root")
+    field = AST::GetField.new(token, root, "field")
+    index = AST::GetIndex.new(token, root, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack))
+    ann.define_singleton_method(:cap_var_name) { |node| "index:#{node.target.name}" }
+
+    expect(ann.send(:cap_var_label, root)).to eq("root")
+    expect(ann.send(:cap_var_label, field)).to eq("field")
+    expect(ann.send(:cap_var_label, index)).to eq("index:root")
+    expect(ann.send(:cap_var_label, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))).to eq("__unknown")
+  end
+
+  it "covers fallible return enforcement branches directly" do
+    ann = quiet_annotator
+    good = function_from("FN good() RETURNS !Int64 -> RETURN 1_i64; END", "good")
+    good.error_fallible = true
+    good.explicit_return_type = true
+
+    caught = function_from("FN caught() RETURNS Int64 -> RETURN 1_i64; CATCH Input RETURN 0_i64; END", "caught")
+    caught.error_fallible = true
+    caught.explicit_return_type = true
+    caught.catch_clauses = [AST::CatchClause.new]
+
+    no_ret = function_from("FN no_ret() RETURNS Int64 -> RETURN 1_i64; END", "no_ret")
+    no_ret.error_fallible = true
+    no_ret.explicit_return_type = true
+    no_ret.return_type = nil
+
+    fixable = function_from("FN fixable() RETURNS Int64 -> RETURN 1_i64; END", "fixable")
+    fixable.error_fallible = true
+    fixable.explicit_return_type = true
+    fixable.return_type_token = token(:TYPE_ID, "Int64")
+    ann.instance_variable_set(:@fn_raises_directly, { "fixable" => true })
+
+    plain_error = function_from("FN plain_error() RETURNS Int64 -> RETURN 1_i64; END", "plain_error")
+    plain_error.error_fallible = true
+    plain_error.explicit_return_type = true
+    plain_error.return_type_token = nil
+
+    main = function_from("FN main() RETURNS Void -> RETURN; END", "main")
+    main.error_fallible = true
+    main.explicit_return_type = true
+
+    ann.instance_variable_set(:@fn_nodes, {
+      "good" => good,
+      "caught" => caught,
+      "no_ret" => no_ret,
+      "fixable" => fixable,
+      "plain_error" => plain_error,
+      "main" => main,
+    })
+
+    ann.send(:enforce_fallible_returns!)
+
+    codes = direct_errors(ann).map { |e| e[1] }
+    expect(codes).to include(:fixable, :PURITY_VIOLATION)
+  end
+
+  it "covers remaining helper guard and fallback branch matrix directly" do
+    ann = quiet_annotator
+
+    families = Hash.new { |h, caller| h[caller] = Hash.new { |hh, callee| hh[callee] = [] } }
+    ann.instance_variable_set(:@call_site_arg_families, families)
+    maybe = Set[EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE]
+    families["caller"]["poly_sync"] << [Set[:ATOMIC, :VERSIONED]]
+    poly_sync = ann.send(:resolve_maybe_effects, maybe, "caller", "poly_sync")
+    expect(poly_sync).to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE)
+    families["caller"]["plain_family"] << [Set[:LOCAL]]
+    plain_family = ann.send(:resolve_maybe_effects, maybe, "caller", "plain_family")
+    expect(plain_family).to include(EffectTracker::BLOCKING_MAYBE)
+    expect(plain_family).not_to include(EffectTracker::CONTENTION_MAYBE)
+    families["caller"]["contention_only"] << [Set[:VERSIONED]]
+    contention_only = ann.send(:resolve_maybe_effects, Set[EffectTracker::CONTENTION_MAYBE], "caller", "contention_only")
+    expect(contention_only).to include(EffectTracker::CONTENTION)
+
+    expect(ann.send(:sum_result_clear_type, :UInt16)).to eq(:UInt64)
+    expect(ann.send(:sum_result_clear_type, :Float32)).to eq(:Float32)
+    expect(ann.send(:sum_result_clear_type, :String)).to eq(:Float64)
+
+    fn = function_from("FN auto_fn(x: Auto) RETURNS Auto -> RETURN x; END", "auto_fn")
+    param_slot = AutoConstraintCollector::Slot.new(kind: :param, fn_name: nil, index: 0, decl_node: fn, sources: [])
+    return_slot = AutoConstraintCollector::Slot.new(kind: :return, fn_name: nil, decl_node: fn, sources: [])
+    unknown_slot = AutoConstraintCollector::Slot.new(kind: :other, decl_node: fn, sources: [])
+    expect(ann.send(:slot_id_for, param_slot)).to be_nil
+    expect(ann.send(:slot_id_for, return_slot)).to be_nil
+    expect(ann.send(:slot_id_for, unknown_slot)).to be_nil
+
+    ann.instance_variable_set(:@source_code, nil)
+    expect(ann.send(:consumer_source_text, 1)).to be_nil
+    ann.instance_variable_set(:@source_code, ";\n  process(GIVE msg);\n")
+    expect(ann.send(:consumer_source_text, 1)).to be_nil
+    expect(ann.send(:consumer_source_text, 2)).to eq("process(GIVE msg)")
+    expect(ann.send(:consumer_source_text, 99)).to be_nil
+
+    expect(ann.send(:variant_anchor_from_getfield, AST::GetField.new(token, AST::Identifier.new(nil, "Shape"), "Wrong"))).to be_nil
+    expect(ann.send(:build_cast_wrap_fix, nil, :Int64)).to be_nil
+    expect(ann.send(:build_cast_wrap_fix, AST::Identifier.new(nil, "x"), :Int64)).to be_nil
+    expect(ann.send(:build_cast_wrap_fix, AST::PassStmt.new(token), :Int64)).to be_nil
+
+    ann.instance_variable_set(:@source_code, "x = 999_i64;\ny: Int64 = 999_i64;\n")
+    no_token = AST::Literal.new(nil, :INT64, 999, :stack)
+    ann.send(:emit_int_overflow_error!, no_token, 999, :Int8, -128, 127)
+    no_best = AST::Literal.new(token(:NUMBER, "999999999999999999999999_i64"), :INT64, 999999999999999999999999, :stack)
+    no_best.token.line = 1
+    no_best.token.column = 5
+    ann.send(:emit_int_overflow_error!, no_best, 999999999999999999999999, :Int8, -128, 127)
+    same_suffix = AST::Literal.new(token(:NUMBER, "999_i64"), :INT64, 999, :stack)
+    same_suffix.token.line = 2
+    same_suffix.token.column = 12
+    ann.send(:emit_int_overflow_error!, same_suffix, 999, :Int64, -9_223_372_036_854_775_808, 9_223_372_036_854_775_807)
+
+    atomic_type = Type.new(:Int64)
+    atomic_sym = SymbolEntry.new(reg: nil, type: atomic_type, mutable: true, storage: :heap, sync: :atomic)
+    expect(ann.send(:build_atomic_escape_migration_fix, SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap), "cell")).to be_nil
+    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    ann.instance_variable_set(:@source_code, "cell: Int64 = 0_i64;\n")
+    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    no_token_decl = AST::VarDecl.new(nil, "cell", Type.new(:Int64), nil, true)
+    atomic_sym.reg = no_token_decl
+    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    no_line_token = token(:VAR_ID, "cell")
+    no_line_token.line = nil
+    atomic_sym.reg = AST::VarDecl.new(no_line_token, "cell", Type.new(:Int64), nil, true)
+    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+  end
+
+  it "covers auto inference and fixable fallback arms directly" do
+    collector = AutoConstraintCollector.new({})
+    auto_fn = function_from("FN inferred(x: Auto) RETURNS Auto -> RETURN x; END", "inferred")
+    auto_arg = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    collector.instance_variable_set(:@fn_nodes, { "inferred" => auto_fn })
+    collector.send(:record_call_site, AST::FuncCall.new(token, "inferred", [auto_arg]))
+    collector.send(:record_return, AST::ReturnNode.new(token(:RETURN, "RETURN"), auto_arg), auto_fn)
+    collector.send(:record_reassignment_sources, AutoSlotId.local(AST::VarDecl.new(token, "x", auto_type, nil, true)), nil)
+
+    nil_value_decl = AST::VarDecl.new(token(:VAR_ID, "unseen"), "unseen", auto_type, nil, true)
+    collector.send(:record_local, nil_value_decl)
+    slots = collector.instance_variable_get(:@slots)
+    expect(slots[AutoSlotId.local(nil_value_decl)].sources).to be_empty
+
+    list_decl = AST::VarDecl.new(token(:VAR_ID, "list"), "list", auto_type, AST::ListLit.new(token(:LBRACKET, "["), [], :stack), true)
+    map_decl = AST::VarDecl.new(token(:VAR_ID, "map"), "map", auto_type, AST::HashLit.new(token(:LBRACE, "{"), [], :stack), true)
+    collector.send(:register_list_shape_slot, list_decl)
+    collector.send(:register_map_shape_slots, map_decl)
+
+    key_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: map_decl, sources: [], shape: :map_key)
+    val_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: map_decl, sources: [], shape: :map_value)
+    list_slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: list_decl, sources: [], shape: :list_element)
+    shape = ShapeEvidenceCollector.new({}, {})
+    key = AST::Literal.new(token(:STRING, "\"k\""), :STRING, "k", :rodata)
+    val = AST::Literal.new(token(:NUMBER, "2_i64"), :INT64, 2, :stack)
+    target = AST::Identifier.new(token, "map")
+    shape.send(:record_method_call, AST::MethodCall.new(token, target, "insert", [key, val]), { "map" => AutoShapeSlots.new(list: nil, key: key_slot, value: val_slot) })
+    shape.send(:record_method_call, AST::MethodCall.new(token, target, "put", [key]), { "map" => AutoShapeSlots.new(list: nil, key: key_slot, value: val_slot) })
+    shape.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), AST::GetIndex.new(token, target, key), val), { "map" => AutoShapeSlots.new(list: nil, key: key_slot, value: val_slot) })
+    shape.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), AST::GetIndex.new(token, AST::Identifier.new(token, "list"), key), val), { "list" => AutoShapeSlots.new(list: list_slot, key: nil, value: nil) })
+    expect(key_slot.sources).to include(key)
+    expect(val_slot.sources).to include(val)
+    expect(list_slot.sources).to include(val)
+
+    ann = quiet_annotator
+    ann.instance_variable_set(:@source_code, [
+      "a: Int64 @local= 1_i64;",
+      "b: Int64@local = 2_i64;",
+      "c: Int64 = 3_i64",
+      "d: Int64 @locked = 4_i64;"
+    ].join("\n"))
+    ann.send(:emit_local_never_shared_finding!, { var: "a", line: 1, column: 1 })
+    ann.send(:emit_local_never_shared_finding!, { var: "b", line: 2, column: 1 })
+    ann.send(:emit_local_never_shared_finding!, { var: "noloc", line: nil, column: 1 })
+
+    scope = Scope.new
+    decl_c_tok = token(:VAR_ID, "c")
+    decl_c_tok.line = 3
+    decl_c_tok.column = 1
+    decl_d_tok = token(:VAR_ID, "d")
+    decl_d_tok.line = 4
+    decl_d_tok.column = 1
+    scope.locals["c"] = SymbolEntry.new(reg: AST::VarDecl.new(decl_c_tok, "c", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack)
+    scope.locals["d"] = SymbolEntry.new(reg: AST::VarDecl.new(decl_d_tok, "d", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack)
+    ann.define_singleton_method(:lookup_scope_for) { |_name| scope }
+    expect(ann.send(:build_decl_cap_insert_fix, "c", "@locked")).to be_nil
+    expect(ann.send(:build_decl_cap_insert_fix, "d", "@locked")).to be_nil
+    mutable_tok = token(:MUTABLE, "MUTABLE")
+    mutable_tok.line = 1
+    mutable_tok.column = 1
+    scope.locals["m"] = SymbolEntry.new(reg: AST::VarDecl.new(mutable_tok, "m", Type.new(:Int64), nil, true), type: Type.new(:Int64), mutable: true, storage: :stack)
+    expect(ann.send(:build_declare_mutable_fix, "m", scope)).to be_nil
+  end
 end

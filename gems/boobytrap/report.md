@@ -26,7 +26,7 @@ _normalized fix-churn x branch-gap; highest = most likely defect source._
 | 4 | `src/mir/mir_pass.rb` | 0.0639 | 0.257 | 24.8% | 75/302 |
 | 5 | `src/mir/mir_emitter.rb` | 0.0454 | 0.27 | 16.8% | 67/399 |
 | 6 | `src/mir/mir.rb` | 0.0444 | 0.154 | 28.7% | 77/268 |
-| 7 | `src/ast/ast.rb` | 0.0416 | 0.157 | 26.4% | 107/405 |
+| 7 | `src/ast/ast.rb` | 0.0404 | 0.157 | 25.7% | 104/405 |
 | 8 | `src/mir/control_flow.rb` | 0.04 | 0.204 | 19.7% | 90/458 |
 | 9 | `src/mir/hoist.rb` | 0.0386 | 0.146 | 26.5% | 131/494 |
 | 10 | `src/ast/diagnostic_registry.rb` | 0.0323 | 0.091 | 35.7% | 5/14 |
@@ -59,7 +59,7 @@ _normalized fix-churn x branch-gap; highest = most likely defect source._
 | 37 | `src/mir/test_lowering.rb` | 0.0056 | 0.033 | 17.0% | 8/47 |
 | 38 | `src/ast/fixable_error.rb` | 0.0056 | 0.01 | 57.1% | 8/14 |
 | 39 | `src/mir/lowering/literals.rb` | 0.0055 | 0.026 | 21.2% | 11/52 |
-| 40 | `src/annotator/annotator.rb` | 0.005 | 0.025 | 20.2% | 475/2346 |
+| 40 | `src/mir/lowering/concurrency.rb` | 0.0049 | 0.052 | 9.4% | 21/224 |
 
 - ...(+16 more)
 

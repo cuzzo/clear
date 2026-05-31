@@ -7,7 +7,7 @@
 > Owns categorization; consumes boobytrap (churn) and
 > optional decomplex (spurious filter + deviance rank).
 
-## Top True Gaps (1212) — test these, ranked by fix-churn
+## Top True Gaps (1172) — test these, ranked by fix-churn
 
 | # | gap | method | churn | decomplex deviance |
 |---|---|---|---|---|
@@ -92,25 +92,25 @@
 | 79 | [`src/backends/pipeline_host.rb:3777`](../../src/backends/pipeline_host.rb#L3777) | `lower_concurrent_bc` | 0.266 | **10** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +1) |
 | 80 | [`src/backends/pipeline_host.rb:3784`](../../src/backends/pipeline_host.rb#L3784) | `lower_concurrent_bc` | 0.266 | **10** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +1) |
 
-- ...(+1132 more genuine gaps)
+- ...(+1092 more genuine gaps)
 
-> decomplex attribution on listed gaps: **398 span-precise**, **737 method-coarse (†)**, **174 ⚠dup?** (possibly redundant, not localised -- verify before testing). Coarse rows are whole-method: treat as a hint, not an arm-level discriminator.
+> decomplex attribution on listed gaps: **384 span-precise**, **716 method-coarse (†)**, **168 ⚠dup?** (possibly redundant, not localised -- verify before testing). Coarse rows are whole-method: treat as a hint, not an arm-level discriminator.
 
 ## Category Summary
-_4106 dark arms; only 1212 are genuine gaps. The rest are not test targets:_
+_4051 dark arms; only 1172 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 1165 | 28.4% | type/nil guard -- likely dead if runtime contracts were stricter |
-| dead | 704 | 17.1% | decision never executes in coverage -- audit as missing test or statically-dead code |
+| type_norm | 1162 | 28.7% | type/nil guard -- likely dead if runtime contracts were stricter |
+| dead | 702 | 17.3% | decision never executes in coverage -- audit as missing test or statically-dead code |
 | defensive | 40 | 1.0% | inert / invariant-pinned -- accept, exclude from denominator |
-| spurious | 86 | 2.1% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
+| spurious | 76 | 1.9% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
 | ffi | 0 | 0.0% | external/boundary call -- needs an integration test |
-| diagnostic | 899 | 21.9% | error/raise/diagnostic path -- reachable only by invalid input (negative test) |
-| genuine | 1212 | 29.5% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
+| diagnostic | 899 | 22.2% | error/raise/diagnostic path -- reachable only by invalid input (negative test) |
+| genuine | 1172 | 28.9% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Files: 84; dark arms: 4106; genuine gaps: 1212
+- Files: 84; dark arms: 4051; genuine gaps: 1172
 - General engine: categorizes uncovered branches, ranks genuine gaps by consumed boobytrap churn x optional decomplex structural deviance. Project lexicons (external-boundary methods and domain diagnostic methods) are caller-supplied, not baked in (see docs/agents/design.md).
 - decomplex join is span-precise (the arm's line falls inside the flagged decision's source extent); `†` marks a (file, method) fallback when no flagged span contained the arm. A ranked candidate, not a verdict (Engler discipline).
