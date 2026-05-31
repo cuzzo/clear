@@ -1735,9 +1735,9 @@ module MIRLoweringExpressions
 
   sig { params(source: T.untyped).returns(Type) }
   def copy_source_type_info(source)
-    node_type = Type.from_node(source)
-    raise "COPY value: missing type info for #{source.class}" unless node_type
-    return node_type unless node_type.untyped?
+    if source.respond_to?(:typed?) && source.typed?
+      return source.full_type!(context: "COPY value")
+    end
 
     if source.is_a?(AST::GetIndex)
       target_ti = Type.from_node!(source.target, context: "COPY index target")
