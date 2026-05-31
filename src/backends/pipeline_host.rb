@@ -295,7 +295,7 @@ class PipelineHost
       new_assign
     end
 
-    sig { params(node: AST::Node).returns(AST::Node) }
+    sig { params(node: T.any(AST::Node, String)).returns(T.any(AST::Node, String)) }
     def substitute_assignment_target(node)
       node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ? substitute(node) : node
     end

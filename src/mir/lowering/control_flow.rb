@@ -990,10 +990,10 @@ module MIRLoweringControlFlow
     !!(root && current_function_takes_param_name?(root.name.to_s) && root.symbol&.heap_storage?)
   end
 
-  sig { params(node: AST::ReturnNode).returns(T.untyped) }
+  sig { params(node: AST::ReturnNode).returns(T.nilable(Type)) }
   def return_destination_type(node)
     T.bind(self, MIRLowering) rescue nil
-    ti = Type.from_node(current_function_return_type)
+    ti = current_function_return_type
     ti&.success_type
   end
 

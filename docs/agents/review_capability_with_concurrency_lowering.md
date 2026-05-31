@@ -114,3 +114,55 @@ contracts:
 If those plan objects do not let us delete branchy classification code from the
 lowering methods, stop and cut the loss.
 
+## Implementation Result
+
+Implemented the scoped-state slice instead of adding parallel plan objects:
+
+- `with_capability_alias_maps` now owns the WITH alias, owner, locked unwrap,
+  and RC unwrap map lifetime used by `lower_with_block`.
+- `with_bg_fiber_body_context` now owns BG pointer-capture and pending-hoist
+  context while lowering a spawned body.
+- `with_stream_body_context` now owns BG STREAM yield context in both the BC
+  eager-materialization path and the Zig producer path.
+
+The old direct push/pop call sites were deleted. No compatibility path was
+kept.
+
+Validation:
+
+- `bundle exec srb tc`
+- `bundle exec prspec spec/mir_lowering_spec.rb spec/with_guard_spec.rb
+  spec/with_fallible_body_spec.rb spec/with_view_spec.rb
+  spec/with_view_codegen_spec.rb spec/with_view_fix_spec.rb
+  spec/with_alias_escape_spec.rb spec/with_polymorphic_dispatch_spec.rb
+  spec/with_match_versioned_spec.rb spec/requires_with_match_spec.rb
+  spec/atomic_ptr_snapshot_spec.rb spec/atomic_ptr_snapshot_match_spec.rb
+  spec/atomic_ptr_snapshot_match_annotator_spec.rb spec/concurrency_spec.rb
+  spec/concurrency_checks_spec.rb spec/mixed_cap_returned_bg_spec.rb
+  spec/doctor_parallel_bg_hint_spec.rb spec/bg_profile_metadata_spec.rb
+  spec/bg_handle_lifetime_spec.rb spec/vm_bg_capture_bugs_spec.rb
+  spec/stream_spec.rb spec/shard_concurrent_lowering_spec.rb
+  spec/pipeline_backend_coverage_spec.rb`
+
+Metric files:
+
+- `tmp/agent-metrics/decomplex-before-capability-concurrency.md`
+- `tmp/agent-metrics/decomplex-after-capability-concurrency.md`
+- `tmp/agent-metrics/slopcop-before-capability-concurrency.md`
+- `tmp/agent-metrics/slopcop-after-capability-concurrency.md`
+
+Metric result:
+
+- Decomplex total findings: `834 -> 825`.
+- Decomplex Broken Protocols: `313 -> 301`.
+- Decomplex root-cause clusters: `64 -> 63`.
+- Decomplex False Simplicity: `293 -> 296`.
+- SlopCop genuine gaps: `121 -> 102`.
+
+Evaluation:
+
+Worth keeping. This is a clear win because it deletes inline state mutation
+paths, improves SlopCop and Decomplex protocol counts, and adds `ensure`
+restoration for compiler-lowering contexts that previously relied on linear
+control flow. The False Simplicity increase is the scoped block helper cost, not
+a second implementation path.

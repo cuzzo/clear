@@ -149,3 +149,46 @@ Do before v0.1 only in targeted form:
 - extract WITH capability resolution facts if they replace mutated hash logic
 - defer a broader MATCH visitor split unless metrics or bugs justify it
 
+## Implementation Result
+
+Implemented the targeted state-lifetime cleanup:
+
+- `with_match_pattern_context` now owns the match-pattern flag lifetime.
+- `with_held_locks` now owns held-lock map and lock-type stack lifetime.
+- `with_snapshot_transaction_body` now owns snapshot transaction purity state.
+
+The old direct push/pop call sites in `visit_MatchStatement` and
+`visit_WithBlock` were deleted. No compatibility path was kept.
+
+Validation:
+
+- `bundle exec srb tc`
+- `bundle exec prspec spec/with_guard_spec.rb spec/with_fallible_body_spec.rb
+  spec/with_view_spec.rb spec/with_match_versioned_spec.rb
+  spec/requires_with_match_spec.rb spec/atomic_ptr_snapshot_spec.rb
+  spec/atomic_ptr_snapshot_match_spec.rb
+  spec/atomic_ptr_snapshot_match_annotator_spec.rb spec/match_spec.rb
+  spec/match_multi_arm_spec.rb spec/polymorphic_transaction_acceptance_spec.rb
+  spec/effects_spec.rb spec/predicate_impurity_spec.rb
+  spec/annotator_gap_burndown_spec.rb`
+
+Metric files:
+
+- `tmp/agent-metrics/decomplex-before-annotator-match-with.md`
+- `tmp/agent-metrics/decomplex-after-annotator-match-with.md`
+- `tmp/agent-metrics/slopcop-before-annotator-match-with.md`
+- `tmp/agent-metrics/slopcop-after-annotator-match-with.md`
+
+Metric result:
+
+- Decomplex total findings: `899 -> 896`.
+- Decomplex Broken Protocols: `340 -> 333`.
+- Decomplex False Simplicity: `289 -> 293`.
+- SlopCop genuine gaps: `117 -> 114`.
+
+Evaluation:
+
+Worth keeping. This was a modest metrics win and a stronger correctness win:
+ambient annotator state now restores through scoped helpers instead of open-coded
+mutation. The only new cost is a small False Simplicity increase from the helper
+blocks, and the old direct state path was fully removed.

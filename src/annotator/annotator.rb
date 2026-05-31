@@ -105,6 +105,77 @@ class SemanticAnnotator
     end
   end
 
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_match_pattern_context(&blk)
+    previous = @match_pattern_context
+    @match_pattern_context = true
+    blk.call
+  ensure
+    @match_pattern_context = previous == true
+  end
+
+  HeldLockEntry = T.type_alias { T::Hash[Symbol, T.nilable(Lexer::Token)] }
+  HeldLockMap = T.type_alias { T::Hash[String, HeldLockEntry] }
+  HeldLockTypeEntry = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        node: AST::WithBlock,
+        expanded_capabilities: T::Array[AST::Capability],
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_held_locks(node, expanded_capabilities, &blk)
+    previous_locks = T.let(@held_locks || {}, HeldLockMap)
+    previous_types = T.let(@held_lock_types || [], T::Array[HeldLockTypeEntry])
+    @held_locks = previous_locks.dup
+    @held_lock_types = previous_types.dup
+    opted_out = !node.deadlock_escape.nil?
+
+    expanded_capabilities.each do |capability|
+      next unless capability[:capability] == :EXCLUSIVE || capability[:capability] == :write_locked_read
+
+      variable_name = cap_var_name(capability[:var_node])
+      token = capability[:var_node].respond_to?(:token) ? capability[:var_node].token : node.token
+      @held_locks[variable_name] ||= { token: token }
+      lock_type = lock_identity_of(capability)
+      @held_lock_types << { type: lock_type, opted_out: opted_out } if lock_type
+    end
+
+    blk.call
+  ensure
+    @held_locks = previous_locks
+    @held_lock_types = previous_types
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(node: AST::WithBlock, blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_snapshot_transaction_body(node, &blk)
+    previous_depth = @inside_snapshot_txn || 0
+    previous_violations = @snapshot_txn_violations
+    @inside_snapshot_txn = previous_depth + 1
+    @snapshot_txn_violations = []
+    result = blk.call
+    txn_violations = @snapshot_txn_violations
+    unless txn_violations.empty?
+      kinds = txn_violations.map { |violation| EffectTracker.display(violation[:effect]) }.uniq.join(", ")
+      error!(node, :WITH_SNAPSHOT_BODY_NOT_PURE, kinds: kinds)
+    end
+    result
+  ensure
+    @inside_snapshot_txn = previous_depth
+    @snapshot_txn_violations = previous_violations || []
+  end
+
   # `source_code` is optional — used ONLY by fixable-error helpers to
   # locate source-level spans (e.g., the `;` at the end of a
   # declaration line so `@multiowned` can be inserted before it).
@@ -1564,20 +1635,20 @@ private
         else
           # Suppress inline-struct "needs braces" error: variant names in MATCH cases are
           # patterns (tag identifiers), not constructors — they don't need field values.
-          @match_pattern_context = true
-          visit(c.value)
-          # Multi-pattern arm: visit + type-check each extra pattern
-          # too. A `{ field }` destructure goes through the SAME
-          # handler as a single :struct_pattern arm so it is typed
-          # (and its binds declared), not just visited.
-          c.extra_values&.each do |ev|
-            if ev.is_a?(AST::StructPattern)
-              annotate_struct_pattern!(node, ev)
-            else
-              visit(ev)
+          with_match_pattern_context do
+            visit(c.value)
+            # Multi-pattern arm: visit + type-check each extra pattern
+            # too. A `{ field }` destructure goes through the SAME
+            # handler as a single :struct_pattern arm so it is typed
+            # (and its binds declared), not just visited.
+            c.extra_values&.each do |ev|
+              if ev.is_a?(AST::StructPattern)
+                annotate_struct_pattern!(node, ev)
+              else
+                visit(ev)
+              end
             end
           end
-          @match_pattern_context = false
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
           # Type-check the head pattern, then each extra. Patterns share
           # the arm's body so they must all have the same subject type.
@@ -4565,114 +4636,87 @@ private
       end
     end
 
-    # Track which variable names / lock types become "held" on entering
-    # this WITH. Only fallible captures qualify — BORROWED / RESTRICT
-    # don't acquire a mutex. @held_lock_types is an Array of
-    # { type:, opted_out: } so a WITH's deadlock_escape propagates to
-    # every edge emitted from within its held scope.
-    prev_held = @held_locks || {}
-    @held_locks = prev_held.dup
-    prev_held_types = @held_lock_types || []
-    @held_lock_types = prev_held_types.dup
-    cur_opt = !node.deadlock_escape.nil?
-    expanded_capabilities.each do |cap|
-      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
-      vn = cap_var_name(cap[:var_node])
-      @held_locks[vn] ||= { token: cap[:var_node].respond_to?(:token) ? cap[:var_node].token : node.token }
-      t = lock_identity_of(cap)
-      @held_lock_types << { type: t, opted_out: cur_opt } if t
-    end
-
     # The child scope inherits parent variables for reads, but declarations
     # inside the WITH remain isolated. SNAPSHOT transaction bodies also need
     # effect tracking so retryable bodies cannot suspend after mutation starts.
     is_snapshot_txn_body = (node.snapshot_mode == :transaction)
-    if is_snapshot_txn_body
-      @inside_snapshot_txn = (@inside_snapshot_txn || 0) + 1
-      prev_violations = @snapshot_txn_violations
-      @snapshot_txn_violations = []
-    end
-    with_new_scope(current_scope) do
-      expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
-      validate_and_visit_with_guards!(node)
-      visit_stmts(node.body)
-      validate_with_guard_no_body_mutation!(node)
-      fallible_sources = retryable_with_fallible_sources(node.body)
-      if is_snapshot_txn_body && !T.must(fallible_sources).empty?
-        retryable_with_fallible_body_error!(
-          node,
-          "WITH SNAPSHOT ... AS MUTABLE",
-          fallible_sources
-        )
-      end
-      if retryable_with_universal_poly_candidate?(node) && !T.must(fallible_sources).empty?
-        retryable_with_fallible_body_error!(
-          node,
-          "WITH POLYMORPHIC",
-          fallible_sources
-        )
-      end
-      if node.arms
-        # Record family-specific prelude effects before each arm body so
-        # the per-arm delta includes synthetic acquire/snapshot work.
-        fn_ctx_name = current_fn_ctx&.name
-        snapshot = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
-        per_arm_effects = []
-        node.arms.each do |arm|
-          before = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
-          # Family-specific prelude effects that the lowering will emit
-          # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
-          # + SUSPENDS); VERSIONED takes a snapshot via EBR pin
-          # (CONTENTION); ATOMIC binds the alias to the cell ref so any
-          # subsequent body access contends on the cache line (CONTENTION,
-          # no BLOCKING — atomics never park).
-          family_effects = {
-            LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
-            VERSIONED: [EffectTracker::CONTENTION],
-            ATOMIC: [EffectTracker::CONTENTION],
-          }
-          family_effects.fetch(arm[:family], []).each { |effect| record_effect(effect) }
-          with_new_scope(current_scope) do
-            visit_stmts(arm[:body])
-            finalize_scope(node)
+    with_body = proc do
+      with_new_scope(current_scope) do
+        expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
+        validate_and_visit_with_guards!(node)
+        visit_stmts(node.body)
+        validate_with_guard_no_body_mutation!(node)
+        fallible_sources = retryable_with_fallible_sources(node.body)
+        if is_snapshot_txn_body && !T.must(fallible_sources).empty?
+          retryable_with_fallible_body_error!(
+            node,
+            "WITH SNAPSHOT ... AS MUTABLE",
+            fallible_sources
+          )
+        end
+        if retryable_with_universal_poly_candidate?(node) && !T.must(fallible_sources).empty?
+          retryable_with_fallible_body_error!(
+            node,
+            "WITH POLYMORPHIC",
+            fallible_sources
+          )
+        end
+        if node.arms
+          # Record family-specific prelude effects before each arm body so
+          # the per-arm delta includes synthetic acquire/snapshot work.
+          fn_ctx_name = current_fn_ctx&.name
+          snapshot = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+          per_arm_effects = []
+          node.arms.each do |arm|
+            before = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+            # Family-specific prelude effects that the lowering will emit
+            # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
+            # + SUSPENDS); VERSIONED takes a snapshot via EBR pin
+            # (CONTENTION); ATOMIC binds the alias to the cell ref so any
+            # subsequent body access contends on the cache line (CONTENTION,
+            # no BLOCKING — atomics never park).
+            family_effects = {
+              LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
+              VERSIONED: [EffectTracker::CONTENTION],
+              ATOMIC: [EffectTracker::CONTENTION],
+            }
+            family_effects.fetch(arm[:family], []).each { |effect| record_effect(effect) }
+            with_new_scope(current_scope) do
+              visit_stmts(arm[:body])
+              finalize_scope(node)
+            end
+            if fn_ctx_name
+              after = @fn_direct_effects[fn_ctx_name]
+              arm_delta = after - before
+              per_arm_effects << arm_delta
+              # Roll back the fn's direct effects so the next arm sees a
+              # clean baseline. We re-stamp the consensus and ?-form below.
+              @fn_direct_effects[fn_ctx_name] = snapshot.dup
+            end
           end
-          if fn_ctx_name
-            after = @fn_direct_effects[fn_ctx_name]
-            arm_delta = after - before
-            per_arm_effects << arm_delta
-            # Roll back the fn's direct effects so the next arm sees a
-            # clean baseline. We re-stamp the consensus and ?-form below.
-            @fn_direct_effects[fn_ctx_name] = snapshot.dup
+          if fn_ctx_name && !per_arm_effects.empty?
+            # Concrete: effects present in EVERY arm (intersection).
+            concrete = per_arm_effects.reduce(:&) || Set.new
+            # Maybe: effects present in SOME arm but not all (symmetric diff
+            # ∪ across arms minus intersection). Project to ?-form variants
+            # for the contention/blocking axis.
+            all_union = per_arm_effects.reduce(Set.new, :|)
+            maybe_set = all_union - concrete
+            concrete.each { |eff| @fn_direct_effects[fn_ctx_name].add(eff) }
+            maybe_projection = {
+              EffectTracker::CONTENTION => EffectTracker::CONTENTION_MAYBE,
+              EffectTracker::BLOCKING => EffectTracker::BLOCKING_MAYBE,
+            }
+            maybe_set.each do |eff|
+              @fn_direct_effects[fn_ctx_name].add(maybe_projection.fetch(eff, eff))
+            end
           end
         end
-        if fn_ctx_name && !per_arm_effects.empty?
-          # Concrete: effects present in EVERY arm (intersection).
-          concrete = per_arm_effects.reduce(:&) || Set.new
-          # Maybe: effects present in SOME arm but not all (symmetric diff
-          # ∪ across arms minus intersection). Project to ?-form variants
-          # for the contention/blocking axis.
-          all_union = per_arm_effects.reduce(Set.new, :|)
-          maybe_set = all_union - concrete
-          concrete.each { |eff| @fn_direct_effects[fn_ctx_name].add(eff) }
-          maybe_projection = {
-            EffectTracker::CONTENTION => EffectTracker::CONTENTION_MAYBE,
-            EffectTracker::BLOCKING => EffectTracker::BLOCKING_MAYBE,
-          }
-          maybe_set.each do |eff|
-            @fn_direct_effects[fn_ctx_name].add(maybe_projection.fetch(eff, eff))
-          end
-        end
+        finalize_scope(node)
       end
-      finalize_scope(node)
     end
-    if is_snapshot_txn_body
-      txn_violations = @snapshot_txn_violations
-      @inside_snapshot_txn -= 1
-      @snapshot_txn_violations = prev_violations
-      unless txn_violations.empty?
-        kinds = txn_violations.map { |v| EffectTracker.display(v[:effect]) }.uniq.join(", ")
-        error!(node, :WITH_SNAPSHOT_BODY_NOT_PURE, kinds: kinds)
-      end
+    with_held_locks(node, expanded_capabilities) do
+      is_snapshot_txn_body ? with_snapshot_transaction_body(node, &with_body) : with_body.call
     end
 
     # Release borrows after the WITH block exits
@@ -4684,13 +4728,6 @@ private
         @og.release_borrow("__borrowed_#{vname}")
       end
     end
-
-    # Restore held-lock state BEFORE visiting the ON/RETRY clause's action
-    # body or message — on the error path the lock was never acquired, so
-    # the action runs outside the held scope. Lock-cycle analysis must
-    # see the action body as lock-free.
-    @held_locks = prev_held
-    @held_lock_types = prev_held_types
 
     validate_no_multi_object_atomic!(node)
     validate_lock_error_clause!(node, expanded_capabilities)

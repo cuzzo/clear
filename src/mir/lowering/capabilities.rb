@@ -429,50 +429,20 @@ module MIRLoweringCapabilities
       end
     end
 
-    # Set up unwrap maps so lower_get_field uses aliases inside the WITH body
-    prev_locked = @locked_unwrap_map
-    prev_rc = @rc_unwrap_map
-    prev_alias_alloc = @with_alias_alloc_map
-    prev_alias_owner = @with_alias_owner_map
-    @locked_unwrap_map = (prev_locked || {}).dup
-    @rc_unwrap_map = (prev_rc || {}).dup
-    @with_alias_alloc_map = (prev_alias_alloc || {}).dup
-    @with_alias_owner_map = (prev_alias_owner || {}).dup
-
-    (node.capabilities || []).each do |cap|
-      var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
-      alias_name = cap[:alias] || var_name
-      if cap[:alias]
-        @with_alias_alloc_map[alias_name.to_s] = placement_for_node(cap[:var_node])
-        @with_alias_owner_map[alias_name.to_s] = var_name.to_s
-      end
-      case cap[:capability]
-      when :EXCLUSIVE, :write_locked_read
-        @locked_unwrap_map[alias_name] = true
-        # Also map original var_name → alias so field accesses on the original
-        # variable get rewritten to use the unwrapped inner alias.
-        @locked_unwrap_map[var_name] = alias_name if alias_name != var_name
-      when :multiowned, :shared
-        @rc_unwrap_map[var_name] = "__#{var_name}_unwrap"
+    body_stmts = with_capability_alias_maps(node) do
+      # Mutable snapshots own the WITH body inside an update closure, so no
+      # body statements remain for the surrounding WITH scope.
+      mutable_snap_caps = (node.capabilities || []).select { |c|
+        c[:capability] == :SNAPSHOT && c[:alias_mutable]
+      }
+      if mutable_snap_caps.any?
+        bindings << emit_snapshot_mutable_call(node, with_label)
+        []
+      else
+        lowered_body = lower_body(node.body)
+        wrap_body_with_guard(node, T.must(lowered_body), with_label)
       end
     end
-
-    # Mutable snapshots own the WITH body inside an update closure, so no
-    # body statements remain for the surrounding WITH scope.
-    mutable_snap_caps = (node.capabilities || []).select { |c|
-      c[:capability] == :SNAPSHOT && c[:alias_mutable]
-    }
-    if mutable_snap_caps.any?
-      bindings << emit_snapshot_mutable_call(node, with_label)
-      body_stmts = []
-    else
-      body_stmts = lower_body(node.body)
-      body_stmts = wrap_body_with_guard(node, T.must(body_stmts), with_label)
-    end
-    @locked_unwrap_map = prev_locked
-    @rc_unwrap_map = prev_rc
-    @with_alias_alloc_map = prev_alias_alloc
-    @with_alias_owner_map = prev_alias_owner
 
     # Bindings is mixed: legacy WITH paths (EXCLUSIVE / BORROWED /
     # RESTRICT / multiowned / shared) push String entries that get
@@ -503,6 +473,54 @@ module MIRLoweringCapabilities
     stmts.concat(mir_bindings)
     stmts.concat(body_stmts)
     with_label ? MIR::BlockExpr.new(with_label, stmts) : MIR::ScopeBlock.new(stmts)
+  end
+
+  LockedUnwrapMap = T.type_alias { T::Hash[String, T.any(String, T::Boolean)] }
+  RcUnwrapMap = T.type_alias { T::Hash[String, String] }
+
+  sig do
+    type_parameters(:Result)
+      .params(node: AST::WithBlock, blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_capability_alias_maps(node, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    prev_locked = @locked_unwrap_map
+    prev_rc = @rc_unwrap_map
+    prev_alias_alloc = @with_alias_alloc_map
+    prev_alias_owner = @with_alias_owner_map
+    locked_map = T.let(T.cast((prev_locked || {}).dup, LockedUnwrapMap), LockedUnwrapMap)
+    rc_map = T.let(T.cast((prev_rc || {}).dup, RcUnwrapMap), RcUnwrapMap)
+    @locked_unwrap_map = locked_map
+    @rc_unwrap_map = rc_map
+    @with_alias_alloc_map = (prev_alias_alloc || {}).dup
+    @with_alias_owner_map = (prev_alias_owner || {}).dup
+
+    (node.capabilities || []).each do |cap|
+      var_node = cap[:var_node]
+      var_name = var_node.respond_to?(:name) ? var_node.name : var_node.to_s
+      alias_name = (cap[:alias] || var_name).to_s
+      if cap[:alias]
+        @with_alias_alloc_map[alias_name] = placement_for_node(var_node)
+        @with_alias_owner_map[alias_name] = var_name.to_s
+      end
+      case cap[:capability]
+      when :EXCLUSIVE, :write_locked_read
+        @locked_unwrap_map[alias_name] = true
+        # Also map original var_name to alias so field accesses on the original
+        # variable get rewritten to use the unwrapped inner alias.
+        @locked_unwrap_map[var_name] = alias_name if alias_name != var_name
+      when :multiowned, :shared
+        @rc_unwrap_map[var_name] = "__#{var_name}_unwrap"
+      end
+    end
+
+    blk.call
+  ensure
+    @locked_unwrap_map = prev_locked
+    @rc_unwrap_map = prev_rc
+    @with_alias_alloc_map = prev_alias_alloc
+    @with_alias_owner_map = prev_alias_owner
   end
 
   # Structured representation of a fallible-acquire clause for the BC

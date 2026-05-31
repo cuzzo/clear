@@ -187,3 +187,39 @@ The remaining increase is from explicit helper operations such as
 Do not reintroduce direct primitive calls to improve the detector count. The
 next legitimate cleanup would be deleting or merging those helper operations if
 their semantics can be folded into one real pipeline materialization operation.
+
+## Completion Attempt
+
+Tried to merge `pipeline_alloc_mark_fact`, `pipeline_owned_cleanup_entry`, and
+`pipeline_index_insert_with_ownership` into one `pipeline_materialize_value`
+contract.
+
+Result:
+
+- Validation stayed green, but the metrics moved the wrong way.
+- SlopCop genuine gaps regressed: `133 -> 148`.
+- Decomplex total candidates regressed: `1374 -> 1378`.
+- Broken Protocols regressed: `440 -> 455`.
+
+Assessment:
+
+Scrapped. The attempted merge created a broader helper protocol and moved too
+many unrelated decisions behind one method. The current committed split is the
+better architecture: small coarse operations with no direct primitive calls from
+`PipelineHost`. Further work here should wait until there is a real semantic
+object to delete call surface, not a broader materialization helper.
+
+## Validation Bug Found
+
+Full-suite validation exposed a bug in the earlier placeholder rewriter
+extraction:
+
+- `PipelinePlaceholderRewriter#substitute_assignment_target` accepted only
+  `AST::Node`.
+- `AST::BindExpr#name` can be a binding-name string in pipeline rewrites.
+- SHARD and bounded stream pipeline lowering then failed at runtime under
+  Sorbet validation with `Expected type AST::Locatable, got type String`.
+
+Fixed by typing assignment targets as `T.any(AST::Node, String)` and preserving
+string targets unchanged. The failing pipeline examples and the pipeline legacy
+matrix are now green.

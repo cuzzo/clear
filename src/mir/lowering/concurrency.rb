@@ -56,6 +56,45 @@ module MIRLoweringConcurrency
     )
   end
 
+  sig do
+    type_parameters(:Result)
+      .params(
+        pointer_captures: T::Set[String],
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_bg_fiber_body_context(pointer_captures, &blk)
+    prev_bg_ptr_caps = @current_bg_pointer_captures
+    prev_fiber_pending = @pending_stmts
+    @current_bg_pointer_captures = pointer_captures
+    @pending_stmts = []
+    blk.call
+  ensure
+    @pending_stmts = prev_fiber_pending
+    @current_bg_pointer_captures = prev_bg_ptr_caps
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        local_stream: String,
+        is_inf: T::Boolean,
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_stream_body_context(local_stream, is_inf, &blk)
+    prev_stream_local = @current_stream_local
+    prev_stream_is_inf = @current_stream_is_inf
+    @current_stream_local = local_stream
+    @current_stream_is_inf = is_inf
+    blk.call
+  ensure
+    @current_stream_local = prev_stream_local
+    @current_stream_is_inf = prev_stream_is_inf
+  end
+
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String).returns(T::Array[MIR::Stmt]) }
   def capture_ownership_mirror_nodes(caps, analysis, receiver)
     captured = T.let(
@@ -403,86 +442,81 @@ module MIRLoweringConcurrency
     last_step = flat_steps.pop
     pre_steps = flat_steps
 
-    # Rewrite captured variable references and rt inside the fiber body
-    prev_bg_ptr_caps = @current_bg_pointer_captures
-    @current_bg_pointer_captures = pointer_captures
     # Lower the fiber body to MIR nodes (for checker visibility) and build Zig strings.
     # run_body carries the MIR stmts so the checker can walk allocations inside the fiber.
     # Save outer @pending_stmts: hoists from fiber body (e.g. auto-COPY string fields in
     # OR fallback struct literals) must be emitted INSIDE the fiber's run function, not in
     # the outer function where Zig's inner-function capture rules would reject them.
     run_body = T.let(nil, T.untyped)
-    prev_fiber_pending = @pending_stmts
-    @pending_stmts = []
-    stmt_code, result_line = with_fiber_capture_map(caps.capture_map,
-                                                    capture_symbols: caps.capture_symbols,
-                                                    rt_override: bg_rt) do
-      body_mir = []
-      sc = pre_steps.flat_map { |step|
-        mir = lower(step[:expr])
-        step_pending = flush_pending
-        body_mir.concat(step_pending)
+    stmt_code, result_line = with_bg_fiber_body_context(T.cast(pointer_captures, T::Set[String])) do
+      with_fiber_capture_map(caps.capture_map,
+                             capture_symbols: caps.capture_symbols,
+                             rt_override: bg_rt) do
+        body_mir = []
+        sc = pre_steps.flat_map { |step|
+          mir = lower(step[:expr])
+          step_pending = flush_pending
+          body_mir.concat(step_pending)
 
-        # `lower_var_decl` may return [AllocMark, Let, Cleanup] when the
-        # binding needs cleanup (e.g. `snapshot = COPY items` inside a
-        # BG body). Each element is its own MIR statement; AllocMark /
-        # Cleanup are checker-visible markers that emit no code.
-        mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-        step[:binding] ? body_mir << MIR::Let.new(step[:binding], mir_nodes.last, false, nil, nil) : body_mir.concat(mir_nodes)
+          # `lower_var_decl` may return [AllocMark, Let, Cleanup] when the
+          # binding needs cleanup (e.g. `snapshot = COPY items` inside a
+          # BG body). Each element is its own MIR statement; AllocMark /
+          # Cleanup are checker-visible markers that emit no code.
+          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+          step[:binding] ? body_mir << MIR::Let.new(step[:binding], mir_nodes.last, false, nil, nil) : body_mir.concat(mir_nodes)
 
-        pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }
-        emit_lines = mir_nodes.filter_map.with_index do |m, i|
-          code = emit_expr(m)
-          # AllocMark and other verification-only nodes emit nil -- skip them.
-          next nil if code.nil?
-          if step[:binding] && i == mir_nodes.size - 1
-            "const #{step[:binding]} = #{code};"
-          elsif code.strip.end_with?(";") || code.strip.end_with?("}")
-            code
-          else
-            expr_type = step[:expr].full_type!
-            is_void_step = ast_void_type?(expr_type)
-            is_void_step ? "#{code};" : "_ = #{code};"
+          pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }
+          emit_lines = mir_nodes.filter_map.with_index do |m, i|
+            code = emit_expr(m)
+            # AllocMark and other verification-only nodes emit nil -- skip them.
+            next nil if code.nil?
+            if step[:binding] && i == mir_nodes.size - 1
+              "const #{step[:binding]} = #{code};"
+            elsif code.strip.end_with?(";") || code.strip.end_with?("}")
+              code
+            else
+              expr_type = step[:expr].full_type!
+              is_void_step = ast_void_type?(expr_type)
+              is_void_step ? "#{code};" : "_ = #{code};"
+            end
           end
-        end
-        pending_code + emit_lines
-      }.join("\n            ")
+          pending_code + emit_lines
+        }.join("\n            ")
 
-      last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
-      rl = if last_step.nil? || is_void || last_is_assign
-        if last_step
-          last_mir = lower(last_step[:expr])
+        last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
+        rl = if last_step.nil? || is_void || last_is_assign
+          if last_step
+            last_mir = lower(last_step[:expr])
+            last_pending = flush_pending
+            body_mir.concat(last_pending)
+            body_mir << last_mir
+            last_code = emit_expr(last_mir)
+            pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
+            stmt = (T.must(last_code).strip.end_with?("}") || T.must(last_code).strip.end_with?(";")) ? last_code : "#{last_code};"
+            pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
+          else
+            ""
+          end
+        else
+          result_alloc = escaping_value_alloc(inner_t)
+          last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
+          last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, inner_t)
+          last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
           last_pending = flush_pending
           body_mir.concat(last_pending)
-          body_mir << last_mir
-          last_code = emit_expr(last_mir)
+          result_code = emit_expr(last_mir)
           pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-          stmt = (T.must(last_code).strip.end_with?("}") || T.must(last_code).strip.end_with?(";")) ? last_code : "#{last_code};"
-          pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
-        else
-          ""
+          result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
+          result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
+          body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
+          body_mir << MIR::Set.new(result_target, last_mir)
+          assignment = "__ctx_#{id}.inner.result = #{result_code};"
+          pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
         end
-      else
-        result_alloc = escaping_value_alloc(inner_t)
-        last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
-        last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, inner_t)
-        last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
-        last_pending = flush_pending
-        body_mir.concat(last_pending)
-        result_code = emit_expr(last_mir)
-        pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-        result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
-        result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
-        body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
-        body_mir << MIR::Set.new(result_target, last_mir)
-        assignment = "__ctx_#{id}.inner.result = #{result_code};"
-        pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
+        run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}") + body_mir)
+        [sc, rl]
       end
-      run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}") + body_mir)
-      [sc, rl]
     end
-    @pending_stmts = prev_fiber_pending
-    @current_bg_pointer_captures = prev_bg_ptr_caps
 
     arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
@@ -700,13 +734,9 @@ module MIRLoweringConcurrency
     # rendezvous-channel form (MIR::StreamSpawn / MIR::StreamYield)
     # that the bc_emitter compiles to STREAM_SPAWN + STREAM_YIELD opcodes.
     if @target == :bc
-      prev_stream_local = @current_stream_local
-      prev_stream_is_inf = @current_stream_is_inf
-      @current_stream_local = T.let(local_stream, T.nilable(String))
-      @current_stream_is_inf = T.let(is_inf, T.nilable(T::Boolean))
-      run_body = node.body.map { |expr| lower(expr) }
-      @current_stream_local = prev_stream_local
-      @current_stream_is_inf = prev_stream_is_inf
+      run_body = with_stream_body_context(local_stream, is_inf) do
+        node.body.map { |expr| lower(expr) }
+      end
 
       if is_inf
         # Real producer fiber. The captures handed to FiberCtxBuilder
@@ -754,42 +784,35 @@ module MIRLoweringConcurrency
     capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
                      caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
-    # Save/restore stream context for YieldExpr
-    prev_stream_local = @current_stream_local
-    prev_stream_is_inf = @current_stream_is_inf
-    @current_stream_local = T.let(local_stream, T.nilable(String))
-    @current_stream_is_inf = T.let(is_inf, T.nilable(T::Boolean))
-
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = T.let(nil, T.untyped)
     inherited_capture_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? "ctx.#{spec.name}" : nil }.to_set
     prev_stream_inherited_allocs = instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
-    body_code = begin
-      instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
-      with_fiber_capture_map(caps.capture_map,
-                             capture_symbols: caps.capture_symbols,
-                             rt_override: "__rt") do
-        body_mir = node.body.flat_map { |expr|
-          mir = lower(expr)
-          pending = flush_pending
-          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-          pending + mir_nodes
-        }
-        stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
-        stream_run_body.filter_map { |mir|
-          next nil if capture_ownership_mirror_node?(mir, "ctx")
-          code = emit_expr(mir)
-          next nil if code.nil? || code.empty?
-          code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-          code
-        }.join("\n            ")
+    body_code = with_stream_body_context(local_stream, is_inf) do
+      begin
+        instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
+        with_fiber_capture_map(caps.capture_map,
+                               capture_symbols: caps.capture_symbols,
+                               rt_override: "__rt") do
+          body_mir = node.body.flat_map { |expr|
+            mir = lower(expr)
+            pending = flush_pending
+            mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+            pending + mir_nodes
+          }
+          stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
+          stream_run_body.filter_map { |mir|
+            next nil if capture_ownership_mirror_node?(mir, "ctx")
+            code = emit_expr(mir)
+            next nil if code.nil? || code.empty?
+            code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+            code
+          }.join("\n            ")
+        end
+      ensure
+        instance_variable_set(:@current_fsm_inherited_alloc_names, prev_stream_inherited_allocs)
       end
-    ensure
-      instance_variable_set(:@current_fsm_inherited_alloc_names, prev_stream_inherited_allocs)
     end
-
-    @current_stream_local = prev_stream_local
-    @current_stream_is_inf = prev_stream_is_inf
 
     promoted_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
     string_frees = caps.specs.filter_map(&:body_cleanup_zig).join("\n                  ")
