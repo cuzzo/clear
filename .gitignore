@@ -153,3 +153,6 @@ transpile-tests/fuzz/*.cht
 **/*.profile/
 **/.zig-cache/
 **/*.clear-build.json
+
+# Generated architecture reports
+gems/espalier/architecture.yml
