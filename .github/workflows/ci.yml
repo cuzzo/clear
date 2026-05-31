@@ -703,6 +703,7 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
       - name: Download Ruby coverage artifacts
         uses: actions/download-artifact@v4
         with:
@@ -721,7 +722,7 @@ jobs:
           zig_paths="$(find tmp/zig-coverage-artifacts -name cobertura.xml -type f | sort | paste -sd: -)"
           RUBY_COVERAGE_PATHS="$ruby_paths" \
           ZIG_COVERAGE_PATHS="$zig_paths" \
-            ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown \
+            bundle exec ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown \
             > tmp/diff-bucket-summary.md
       - name: Update PR comment
         uses: actions/github-script@v7
