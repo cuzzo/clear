@@ -126,8 +126,6 @@ In practice, complex types like these are often created inline, via streaming pi
 | `~(T[])` | Future to an Optional Array | Rare |
 | `? (~T[])` | Optional Stream of Ts | Ultra-Rare |
 
-`?(~T[])` you *THEORETICALLY* might want to distinguish between something that could block `NEXT v` and something that can't block if it doesn't even exist `NEXT v?` -> but I can just eliminate that. `?(~T[])` this is essentially an unbounded finite list, yes? One of them says -> this list *MAY* exist, if it does, it's infinite. The other says, this list exists, it is NOT infinite, and it may close on your first call (be optional entirely). These are not entirely the same, but can they be substituted?
-
 ## Streaming HashMaps:
 
 | Syntax | Semantic Meaning | Real-World Use Case |
