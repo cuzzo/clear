@@ -142,14 +142,13 @@ In practice, complex types like these are often created inline, via streaming pi
 m: ~T{} = getInfMap(); // infinite
 m2: ~?T{} = getUnboundFiniteMap(); // unbound, finite
 
-
-// Loop through mutations as they hit the map
-while NEXT m AS (key, value) {
+# Loop through mutations as they hit the map
+WHILE NEXT m AS (key, value) {
     print("Key {key} changed to {value}");
 }
 
-// Loop through mutations as they hit the map
-while NEXT m2 AS (key, value) {
+# Loop through mutations as they hit the map
+WHILE NEXT m2 AS (key, value) {
   IF value AS v {
     print("Key {key} changed to {v}");
   }
@@ -157,7 +156,7 @@ while NEXT m2 AS (key, value) {
     print("Key {key} was deleted");
   }
 }
-print(“stream closed.”);
+print("stream closed.");
 ```
 
 ## Combine with failibility:
