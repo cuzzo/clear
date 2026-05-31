@@ -77,6 +77,34 @@ class MIRLowering
     def heap?
       dest_alloc == :heap
     end
+
+    sig { params(lowering: MIRLowering, mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+    def place(lowering, mir, ast_node)
+      return mir if keep?
+
+      case action
+      when :heap_indirect
+        lowering.place_indirect_value_for_heap_destination(mir, T.must(type_info))
+      when :cast_wrapped_or
+        cast = T.cast(mir, MIR::Cast)
+        placed = lowering.place_value_for_destination(cast.expr, ast_node, dest_alloc, type_info)
+        MIR::Cast.new(placed, cast.target_type, cast.method)
+      when :owned_orelse
+        lowering.place_owned_orelse_for_destination(T.cast(mir, MIR::Orelse), T.must(type_info), T.must(dest_alloc))
+      when :owned_try_catch
+        lowering.place_owned_try_catch_for_destination(T.cast(mir, MIR::TryCatch), T.must(type_info), T.must(dest_alloc))
+      when :owned_alloc_mismatch
+        lowering.place_owned_alloc_mismatch_for_destination(mir, T.must(type_info), T.must(dest_alloc), T.must(source_alloc))
+      when :owned_copy
+        lowering.place_owned_branch_value_for_destination(mir, T.must(type_info), T.must(dest_alloc))
+      when :string_or
+        lowering.place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
+      when :string
+        lowering.place_string_value_for_heap_destination(mir, ast_node)
+      else
+        raise "unknown destination placement action #{action.inspect}"
+      end
+    end
   end
 
   class DestinationSourceFact < T::Struct
@@ -407,29 +435,7 @@ class MIRLowering
   sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(T.untyped) }
   def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
     plan = destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
-    return mir if plan.keep?
-
-    case plan.action
-    when :heap_indirect
-      return place_indirect_value_for_heap_destination(mir, T.must(plan.type_info))
-    when :cast_wrapped_or
-      placed = place_value_for_destination(mir.expr, ast_node, dest_alloc, dest_type)
-      return MIR::Cast.new(placed, mir.target_type, mir.method)
-    when :owned_orelse
-      return place_owned_orelse_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
-    when :owned_try_catch
-      return place_owned_try_catch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
-    when :owned_alloc_mismatch
-      return place_owned_alloc_mismatch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc), T.must(plan.source_alloc))
-    when :owned_copy
-      return place_owned_branch_value_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
-    when :string_or
-      return place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
-    when :string
-      return place_string_value_for_heap_destination(mir, ast_node)
-    else
-      raise "unknown destination placement action #{plan.action.inspect}"
-    end
+    plan.place(self, T.cast(mir, MIR::Node), T.cast(ast_node, AST::Node))
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(DestinationPlacementPlan) }

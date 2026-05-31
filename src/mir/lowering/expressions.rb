@@ -430,156 +430,178 @@ module MIRLoweringExpressions
   def lower_smooth(node)
     T.bind(self, MIRLowering) rescue nil
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @rt_name = T.let(@rt_name, T.untyped)
+    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
     rhs = node.right
 
-    # Complex pipeline ops that survived PipelineRewriter (pool/sharded/SOA
-    # sources, OrderByOp, IndexOp, WindowOp, JoinOp, ConcurrentOp).
-    # All decisions are made here in lowering.
-    if AST.pipeline_complex_op?(rhs)
-      host = pipeline_host
+    return lower_complex_smooth(node) if AST.pipeline_complex_op?(rhs)
+    return lower_collect_smooth(node, rhs) if rhs.is_a?(AST::CollectOp)
+    return lower_recover_smooth(node, rhs) if rhs.is_a?(AST::RecoverOp)
 
-      # Detect source type for pipeline IR metadata.
-      source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
+    lower_call_smooth(node)
+  end
 
-      # Try MIR path first (migrated operators return MIR node tree)
-      mir_result = host.lower_pipeline(node)
-      if mir_result.is_a?(MIR::BlockExpr)
-        mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
-      end
-      result_type = Type.from_node!(node, context: "pipeline result ownership")
-      sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
-      return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
-
-      raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
+  def lower_complex_smooth(node)
+    T.bind(self, MIRLowering) rescue nil
+    rhs = node.right
+    source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
+    mir_result = pipeline_host.lower_pipeline(node)
+    if mir_result.is_a?(MIR::BlockExpr)
+      mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
     end
+    result_type = Type.from_node!(node, context: "pipeline result ownership")
+    sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
+    return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
 
-    # COLLECT: x |> COLLECT -> joins the observable + destroys the heap
-    # allocation when `x` is an inline sub-expression (no binding owns
-    # cleanup). When `x` is a named binding, the binding's
-    # `:observable` cleanup entry handles destroy at scope exit;
-    # COLLECT only needs to call .next() to read the final value.
-    if rhs.is_a?(AST::CollectOp)
-      left = lower(node.left)
-      ft = node.left.full_type!
-      # Collection observable (DISTINCT producing `~T[]@set:observable`):
-      # COLLECT must yield an owned ArrayList(T), not the StreamSetSnapshot
-      # that `next()` returns. Mirrors lower_next_expr's collection branch
-      # so `final = stream |> DISTINCT _ |> COLLECT` and `final = NEXT
-      # (stream |> DISTINCT _)` produce the same shape.
-      collect_method = (ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
-      # The materialized list is placed by the receiving binding's
-      # allocator -- one allocator per binding.
-      @current_decl_alloc = T.let(@current_decl_alloc, T.untyped)
-      collect_alloc = @current_decl_alloc == :heap ? :heap : :frame
-      collect_args = collect_method == "materializeNext" ?
-        [MIR::AllocatorRef.new(collect_alloc)] : []
-      collect_type = if collect_method == "materializeNext"
-        elem_t = ft.tense_type.element_type
-        Type.new("#{elem_t.resolved}[]", collection: :list)
-      else
-        ft.tense_type ? Type.new(ft.tense_type) : Type.new(ft)
-      end
-      collect_alloc_fact = collect_method == "materializeNext" ? collect_alloc : nil
-      named_source = node.left.is_a?(AST::Identifier)
-      if named_source
-        call = MIR::MethodCall.new(left, collect_method, collect_args, true,
-          MIR::CallableContract.no_ownership(collect_args.length), collect_alloc_fact)
-        call.result_type = collect_type
-        return call
-      end
-      # The accumulator's Zig type comes from the observable's full_type
-      # (e.g. *ObservableCount() / *ObservableSum(i64) / *ObservableMax(f64))
-      # — `transpile_type` honors `observable_terminal` to pick the right
-      # per-terminal wrapper. Hardcoding ObservableSum here breaks every
-      # non-SUM terminal (COUNT/AVG/MIN/MAX/ANY/ALL/FIND/...).
-      acc_zig = transpile_type(ft)
-      @block_expr_counter += 1
-      label = "__collect_blk_#{@block_expr_counter}"
-      collect_var = "__collect_acc_#{@block_expr_counter}"
-      val_var = "__collect_val_#{@block_expr_counter}"
-      left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
-      observable_alloc = left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap
-      collect_cleanup = CleanupEntry.build(:uniform, alloc: observable_alloc,
-        has_moved_guard: false, zig_type: acc_zig)
-      return MIR::BlockExpr.new(label, [
-        MIR::Let.new(collect_var, left, false,
-          acc_zig, nil),
-        MIR::Cleanup.new(collect_var, collect_cleanup),
-        # Let Zig infer the View type — observable terminals expose
-        # different View shapes per terminal (scalars expose T directly;
-        # DISTINCT exposes StreamSetSnapshot(T); etc.). Hardcoding
-        # `tense_type` only matches scalar terminals and breaks
-        # DISTINCT/REDUCE-collection paths.
-        MIR::Let.new(val_var,
-          begin
-            call = MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,
-              MIR::CallableContract.no_ownership(collect_args.length), collect_alloc_fact)
-            call.result_type = collect_type
-            call
-          end,
-          false, collect_type.zig_type, nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
-      ])
+    Kernel.raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
+  end
+
+  sig { params(node: AST::BinaryOp, rhs: AST::CollectOp).returns(MIR::Node) }
+  def lower_collect_smooth(node, rhs)
+    T.bind(self, MIRLowering) rescue nil
+    left = T.cast(lower(node.left), MIR::Node)
+    ft = node.left.full_type!
+    collect_method = (ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
+    collect_alloc = @current_decl_alloc == :heap ? :heap : :frame
+    collect_args = collect_method == "materializeNext" ? [MIR::AllocatorRef.new(collect_alloc)] : []
+    collect_type = smooth_collect_type(ft, collect_method)
+    collect_alloc_fact = collect_method == "materializeNext" ? collect_alloc : nil
+    return smooth_collect_call(left, collect_method, collect_args, collect_type, collect_alloc_fact) if node.left.is_a?(AST::Identifier)
+
+    smooth_collect_block(left, ft, collect_method, collect_args, collect_type, collect_alloc_fact)
+  end
+
+  sig { params(type_info: Type, collect_method: String).returns(Type) }
+  def smooth_collect_type(type_info, collect_method)
+    if collect_method == "materializeNext"
+      elem_t = type_info.tense_type.element_type
+      Type.new("#{elem_t.resolved}[]", collection: :list)
+    else
+      type_info.tense_type ? Type.new(type_info.tense_type) : Type.new(type_info)
     end
+  end
 
-    # RecoverOp: x |> RECOVER(default) -> (x catch default)
-    if rhs.is_a?(AST::RecoverOp)
-      left = lower(node.left)
-      default_val = lower(rhs.default_expr)
-      out = MIR::TryCatch.new(strip_try(left), default_val, nil)
-      out.result_type = Type.new(node.full_type!(context: "RECOVER result"))
-      return out
-    end
+  sig do
+    params(
+      receiver: MIR::Node,
+      collect_method: String,
+      collect_args: T::Array[MIR::Node],
+      collect_type: Type,
+      collect_alloc_fact: T.nilable(Symbol)
+    ).returns(MIR::MethodCall)
+  end
+  def smooth_collect_call(receiver, collect_method, collect_args, collect_type, collect_alloc_fact)
+    call = MIR::MethodCall.new(receiver, collect_method, collect_args, true,
+      MIR::CallableContract.no_ownership(collect_args.length), collect_alloc_fact)
+    call.result_type = collect_type
+    call
+  end
 
-    # Simple pipe: x |> f -> f(x) or x |> f(y) -> f(x, y)
+  sig do
+    params(
+      left: MIR::Node,
+      ft: Type,
+      collect_method: String,
+      collect_args: T::Array[MIR::Node],
+      collect_type: Type,
+      collect_alloc_fact: T.nilable(Symbol)
+    ).returns(MIR::BlockExpr)
+  end
+  def smooth_collect_block(left, ft, collect_method, collect_args, collect_type, collect_alloc_fact)
+    T.bind(self, MIRLowering) rescue nil
+    acc_zig = transpile_type(ft)
+    @block_expr_counter += 1
+    label = "__collect_blk_#{@block_expr_counter}"
+    collect_var = "__collect_acc_#{@block_expr_counter}"
+    val_var = "__collect_val_#{@block_expr_counter}"
+    left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
+    observable_alloc = left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap
+    collect_cleanup = CleanupEntry.build(:uniform, alloc: observable_alloc,
+      has_moved_guard: false, zig_type: acc_zig)
+    MIR::BlockExpr.new(label, [
+      MIR::Let.new(collect_var, left, false, acc_zig, nil),
+      MIR::Cleanup.new(collect_var, collect_cleanup),
+      MIR::Let.new(val_var,
+        smooth_collect_call(MIR::Ident.new(collect_var), collect_method, collect_args, collect_type, collect_alloc_fact),
+        false, collect_type.zig_type, nil),
+      MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
+    ])
+  end
+
+  sig { params(node: AST::BinaryOp, rhs: AST::RecoverOp).returns(MIR::TryCatch) }
+  def lower_recover_smooth(node, rhs)
+    T.bind(self, MIRLowering) rescue nil
     left = lower(node.left)
+    default_val = lower(rhs.default_expr)
+    out = MIR::TryCatch.new(strip_try(left), default_val, nil)
+    out.result_type = Type.new(node.full_type!(context: "RECOVER result"))
+    out
+  end
 
-    # Capture snapshot for CATCH blocks: store LHS before the failable call
-    snapshot_stmts = nil
-    if current_function_has_catch? && current_function_snapshot_types.size == 1
-      lhs_type = node.left.full_type!
-      t = Type.new(lhs_type)
-      unless t.void? || t.error_union?
-        snap_zig_type = transpile_type(t)
-        snapshot_stmts = [
-          MIR::Let.new("__snap_input", left, false, nil, nil),
-          MIR::ExprStmt.new(
-            MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
-              MIR::Ident.new(snap_zig_type),
-              MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
-            ], false, MIR::CallableContract.no_ownership(2)), false)
-        ]
-        # Rewrite left to use the hoisted variable
-        left = MIR::Ident.new("__snap_input")
-      end
-    end
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
+  def lower_call_smooth(node)
+    T.bind(self, MIRLowering) rescue nil
+    left = T.cast(lower(node.left), MIR::Node)
+    snapshot_stmts = smooth_snapshot_stmts(node, left)
+    left = MIR::Ident.new("__snap_input") if snapshot_stmts
+    call_mir = lower_smooth_call_rhs(node)
+    return call_mir unless snapshot_stmts
 
-    call_mir = if rhs.is_a?(AST::Identifier)
-      # x |> f -> f(x)
-      synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
-      AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
-      synthetic.storage = node.storage
-      synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
-      lower_func_call(synthetic)
+    label = "__snap_blk"
+    MIR::BlockExpr.new(label, snapshot_stmts + [MIR::BreakStmt.new(label, call_mir)])
+  end
+
+  sig { params(node: AST::BinaryOp, left: MIR::Node).returns(T.nilable(T::Array[MIR::Stmt])) }
+  def smooth_snapshot_stmts(node, left)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless current_function_has_catch? && current_function_snapshot_types.size == 1
+
+    t = Type.new(node.left.full_type!)
+    return nil if t.void? || t.error_union?
+
+    snap_zig_type = transpile_type(t)
+    [
+      MIR::Let.new("__snap_input", left, false, nil, nil),
+      MIR::ExprStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
+          MIR::Ident.new(snap_zig_type),
+          MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
+        ], false, MIR::CallableContract.no_ownership(2)), false)
+    ]
+  end
+
+  sig { params(node: AST::BinaryOp).returns(MIR::Node) }
+  def lower_smooth_call_rhs(node)
+    T.bind(self, MIRLowering) rescue nil
+    rhs = node.right
+    if rhs.is_a?(AST::Identifier)
+      return lower_smooth_identifier_call(node, rhs)
     elsif rhs.is_a?(AST::FuncCall)
-      # x |> f(y) -> f(x, y)
-      synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
-      AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
-      synthetic.storage = node.storage
-      synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
-      synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
-      lower_func_call(synthetic)
-    else
-      raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
+      return lower_smooth_func_call(node, rhs)
     end
 
-    if snapshot_stmts
-      label = "__snap_blk"
-      MIR::BlockExpr.new(label, snapshot_stmts + [MIR::BreakStmt.new(label, call_mir)])
-    else
-      call_mir
-    end
+    Kernel.raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
+  end
+
+  sig { params(node: AST::BinaryOp, rhs: AST::Identifier).returns(MIR::Node) }
+  def lower_smooth_identifier_call(node, rhs)
+    T.bind(self, MIRLowering) rescue nil
+    synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
+    AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
+    synthetic.storage = node.storage
+    synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
+    T.cast(lower_func_call(synthetic), MIR::Node)
+  end
+
+  sig { params(node: AST::BinaryOp, rhs: AST::FuncCall).returns(MIR::Node) }
+  def lower_smooth_func_call(node, rhs)
+    T.bind(self, MIRLowering) rescue nil
+    synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
+    AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
+    synthetic.storage = node.storage
+    synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
+    synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
+    T.cast(lower_func_call(synthetic), MIR::Node)
   end
 
   # ================================================================
