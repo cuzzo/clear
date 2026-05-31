@@ -1877,6 +1877,25 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("__ctx_0.file.close()")
     end
 
+    it "allows a captured TCPClient to be reused inside a BG loop" do
+      expect {
+        transpile_fn(<<~CLEAR)
+          FN f() RETURNS !Void ->
+            conn = TCPClient::connect("127.0.0.1", 8080);
+            p: ~Void = BG {
+              MUTABLE i = 0;
+              WHILE i < 2 DO
+                conn.tcpWrite("hi");
+                i += 1;
+              END
+            };
+            r: Void = NEXT p;
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
     it "unconditional BG capture eliminates outer defer entirely" do
       out = transpile_fn(<<~CLEAR)
         FN f(server: TCPServer) RETURNS !Void ->

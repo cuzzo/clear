@@ -82,7 +82,7 @@ module AST
     sig { returns(T::Boolean) }
     def atomic? = sync == :atomic
 
-    sig { params(val: T.untyped).void }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -815,8 +815,7 @@ module AST
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
-      ft = Type.new(ft) unless ft.nil? || ft.is_a?(Type)
-      raise "#{context}: missing type info for #{self.class}" unless ft
+      ft = Type.new(ft) unless ft.is_a?(Type)
       raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
       ft
     end
@@ -1137,7 +1136,7 @@ module AST
       self[:params] = self[:params] || []
     end
 
-    sig { params(val: T.untyped).void }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def return_type=(val)
       self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1301,7 +1300,7 @@ module AST
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1339,7 +1338,7 @@ module AST
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end

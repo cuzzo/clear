@@ -301,7 +301,8 @@ class PipelineHost
   # Returns the node (possibly modified) or a new synthetic Identifier.
   sig { params(node: T.untyped).returns(T.untyped) }
   def substitute_placeholders(node)
-    return node unless @placeholder_name || @acc_placeholder || @join_param_map || @soa_each_mode || !@named_bindings.empty?
+    return node unless @placeholder_name || @acc_placeholder || @join_param_map ||
+                       @soa_each_mode || @soa_rewrite_active || !@named_bindings.empty?
 
     # SOA EACH: _.field -> synthetic identifier __soa_field[__soa_i]
     if @soa_each_mode && node.is_a?(AST::GetField) &&

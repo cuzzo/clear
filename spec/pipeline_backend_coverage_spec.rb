@@ -234,6 +234,16 @@ RSpec.describe "pipeline backend coverage" do
       expect(pipeline_host.send(:substitute_placeholders, assign).name.name).to eq("__soa_x[__soa_i]")
     end
 
+    it "does not skip SOA rewrite-active substitution when no placeholder is active" do
+      pipeline_host.instance_variable_set(:@placeholder_name, nil)
+      pipeline_host.instance_variable_set(:@soa_rewrite_active, true)
+
+      rewritten = pipeline_host.send(:substitute_placeholders, typed(AST::GetField.new(tok, id("_"), :x)))
+
+      expect(rewritten).to be_a(AST::GetIndex)
+      expect(rewritten.target.name).to eq("__soa_x")
+    end
+
     it "detects placeholder usage in nested statement trees" do
       stmt = AST::FuncCall.new(tok, "f", [AST::BinaryOp.new(tok, id("x"), :ADD, id("_"))])
       expect(pipeline_host.send(:ast_stmts_use_placeholder?, [stmt])).to be true

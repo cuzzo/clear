@@ -14,25 +14,6 @@ QUERY_DIR = File.join(ROOT, "tools", "codeql")
 STATE_QUERY = File.join(QUERY_DIR, "StateFieldAccess.ql")
 CALL_QUERY = File.join(QUERY_DIR, "CallEdges.ql")
 
-DEFAULT_FIELDS = %w[
-  full_type
-  storage
-  provenance
-  ownership
-  sync
-  layout
-  emit
-  target
-  value
-  symbol
-  name
-  type
-  left
-  right
-  expr
-  result_type
-].freeze
-
 options = {
   db: DEFAULT_DB,
   out: DEFAULT_OUT,
@@ -41,7 +22,6 @@ options = {
   source_root: ROOT,
   top: 40,
   format: "md",
-  fields: DEFAULT_FIELDS,
   only: %w[src/],
   call_edges: false
 }
@@ -119,6 +99,47 @@ rescue CSV::MalformedCSVError
   []
 end
 
+def span_for(row)
+  [
+    row["startLine"].to_i,
+    row["startColumn"].to_i,
+    row["endLine"].to_i,
+    row["endColumn"].to_i
+  ]
+end
+
+def facts_json(state_rows, call_rows, options)
+  {
+    "schema" => "decomplex-codeql-facts/v1",
+    "source_root" => ROOT,
+    "database" => options[:db],
+    "included_paths" => options[:only],
+    "state_accesses" => state_rows.map do |row|
+      {
+        "file" => row["file"],
+        "module" => row["moduleName"],
+        "method" => row["methodName"],
+        "method_label" => row["method"],
+        "field" => row["field"],
+        "access_kind" => row["access_kind"],
+        "line" => row["startLine"].to_i,
+        "span" => span_for(row),
+        "source" => row["col10"] || row["col6"] || row["access"]
+      }
+    end,
+    "call_edges" => call_rows.map do |row|
+      {
+        "file" => row["file"],
+        "caller_module" => row["callerModule"],
+        "caller" => row["caller"],
+        "call_name" => row["col4"],
+        "callee" => row["callee"],
+        "source" => row["col6"] || row["access"]
+      }
+    end
+  }
+end
+
 def count_by(rows, *keys)
   rows.each_with_object(Hash.new(0)) do |row, acc|
     values = keys.map { |k| row[k].to_s }
@@ -145,7 +166,7 @@ def report_markdown(state_rows, call_rows, options)
   out << "- Database: `#{Pathname.new(options[:db]).relative_path_from(Pathname.new(ROOT))}`\n"
   out << "- State rows: #{state_rows.size}\n"
   out << "- Call edge rows: #{call_rows.size}\n"
-  out << "- Tracked fields: #{options[:fields].join(", ")}\n\n"
+  out << "- State fields: discovered from setter and instance-variable writes\n\n"
   out << "- Included paths: #{options[:only].empty? ? "(all)" : options[:only].join(", ")}\n\n"
 
   out << "## Field Pressure\n\n"
@@ -170,7 +191,7 @@ end
 def report_json(state_rows, call_rows, options)
   JSON.pretty_generate(
     db: options[:db],
-    tracked_fields: options[:fields],
+    field_source: "discovered from setter and instance-variable writes",
     state_rows: state_rows,
     call_rows: call_rows,
     rankings: {
@@ -187,9 +208,6 @@ create_database!(options[:db], options[:source_root], options[:overwrite_db]) if
 abort "missing CodeQL database at #{options[:db]} (pass --create-db)" unless Dir.exist?(options[:db])
 
 FileUtils.mkdir_p(options[:out])
-fields_path = File.join(options[:out], "tracked-fields.json")
-File.write(fields_path, JSON.pretty_generate(options[:fields]))
-
 state_bqrs = File.join(options[:out], "state-field-access.bqrs")
 state_csv = File.join(options[:out], "state-field-access.csv")
 call_bqrs = File.join(options[:out], "call-edges.bqrs")
@@ -204,7 +222,10 @@ end
 
 state_rows = csv_rows(state_csv, options[:only])
 call_rows = csv_rows(call_csv, options[:only])
+facts_path = File.join(options[:out], "facts.json")
+File.write(facts_path, JSON.pretty_generate(facts_json(state_rows, call_rows, options)))
 report = options[:format] == "json" ? report_json(state_rows, call_rows, options) : report_markdown(state_rows, call_rows, options)
 report_path = File.join(options[:out], "report.#{options[:format] == "json" ? "json" : "md"}")
 File.write(report_path, report)
 puts "wrote #{report_path}"
+puts "wrote #{facts_path}"

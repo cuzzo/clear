@@ -1897,6 +1897,10 @@ private
           was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
           is_moved = @og&.moved?(name)
           if was_live && is_moved
+            if @og&.[](name)&.move_action == :capture &&
+               current_capture_context&.analysis&.captures&.key?(name)
+              next
+            end
             next unless loop_body_names.include?(name)
             var_type = current_scope.locals[name]&.type
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
@@ -1974,6 +1978,10 @@ private
           was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
           is_moved = @og&.moved?(name)
           if was_live && is_moved
+            if @og&.[](name)&.move_action == :capture &&
+               current_capture_context&.analysis&.captures&.key?(name)
+              next
+            end
             next unless loop_body_names.include?(name)
             var_type = current_scope.locals[name]&.type
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
@@ -2353,18 +2361,19 @@ private
       end
     end
 
-    node.zig_pattern = method_def.emit&.zig
+    emit = method_def.emit
+    node.zig_pattern = emit&.zig
     stamp_type!(node, method_def.return_def.resolve(nil, node.args, self))
     node.matched_stdlib_def = method_def
     node.matched_signature = method_def if node.respond_to?(:matched_signature=)
-    node.stdlib_allocates = true if method_def.emit&.allocates
-    node.mutates_receiver = true if method_def.emit&.mutates_receiver
+    node.stdlib_allocates = true if emit&.allocates
+    node.mutates_receiver = true if emit&.mutates_receiver
     node.can_fail = true if method_def.can_fail
-    node.error_kind = method_def.emit&.error_kind if method_def.emit&.error_kind
-    node.error_type = method_def.emit&.error_type if method_def.emit&.error_type
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def.emit&.allocates || method_def.can_fail)
+    node.error_kind = emit.error_kind if emit&.error_kind
+    node.error_type = emit.error_type if emit&.error_type
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (emit&.allocates || method_def.can_fail)
 
-    if method_def.emit&.mutates_receiver && node.is_a?(AST::MethodCall)
+    if emit&.mutates_receiver && node.is_a?(AST::MethodCall)
       root = chain_root_name(node.object)
       mark_var_mutated(root) if root
     end
@@ -2535,8 +2544,9 @@ private
     # `u32_val.negative?()` where Int64 autocast would otherwise mask
     # the bug. Generic — keyed by symbol so std_lib.rb stays
     # declarative and annotator.rb has no per-function logic.
-    if matched_def.emit&.reject_when && reject_arg_type_matches?(args.first, matched_def.emit.reject_when)
-      reason = matched_def.emit&.reject_error ||
+    emit = matched_def.emit
+    if emit&.reject_when && reject_arg_type_matches?(args.first, emit.reject_when)
+      reason = emit&.reject_error ||
                "#{node.name}() is not valid for #{args.first.resolved_type}"
       error!(node, :INTRINSIC_REJECTED, message: reason)
       return
@@ -2548,22 +2558,22 @@ private
     stamp_type!(node, matched_def.return_def.resolve(nil, args, self))
 
     # 4. Store Zig pattern and stdlib metadata for transpiler
-    node.zig_pattern = matched_def.emit&.zig
+    node.zig_pattern = emit&.zig
     node.matched_stdlib_def = matched_def
     node.matched_signature = matched_def if node.respond_to?(:matched_signature=)
-    node.stdlib_allocates = true if matched_def.emit&.allocates
-    node.mutates_receiver = true if matched_def.emit&.mutates_receiver
-    node.can_fail = true if matched_def.can_fail || matched_def.emit&.allocates
-    node.error_kind = matched_def.emit&.error_kind if matched_def.emit&.error_kind
-    node.error_type = matched_def.emit&.error_type if matched_def.emit&.error_type
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def.emit&.allocates || matched_def.can_fail || matched_def.needs_rt)
-    record_effect(EffectTracker::SUSPENDS) if matched_def.emit&.suspends
+    node.stdlib_allocates = true if emit&.allocates
+    node.mutates_receiver = true if emit&.mutates_receiver
+    node.can_fail = true if matched_def.can_fail || emit&.allocates
+    node.error_kind = emit.error_kind if emit&.error_kind
+    node.error_type = emit.error_type if emit&.error_type
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (emit&.allocates || matched_def.can_fail || matched_def.needs_rt)
+    record_effect(EffectTracker::SUSPENDS) if emit&.suspends
 
     # 5. Flag mutable access through list indexing.
     #    When a mutating intrinsic (e.g., append, remove) is called on a receiver
     #    that chains through a GetIndex, the GetIndex must emit pointer access
     #    instead of by-value getAt().
-    if matched_def.emit&.mutates_receiver && node.is_a?(AST::MethodCall)
+    if emit&.mutates_receiver && node.is_a?(AST::MethodCall)
       mark_chain_needs_mut_ref!(node.object)
       root = chain_root_name(node.object)
       mark_var_mutated(root) if root

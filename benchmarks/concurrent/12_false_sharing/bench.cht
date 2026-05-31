@@ -16,7 +16,7 @@ STRUCT Counter {
   value: Int64
 }
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
   workers = threadCount();
   totalWork = 40_000_000;
   increments = totalWork / workers;
@@ -32,7 +32,8 @@ FN main() RETURNS Void ->
   MUTABLE futures: ~Void[]@list = [];
   MUTABLE wi = 0;
   WHILE wi < workers DO
-    ref = counters[wi];
+    ref0 = counters[wi];
+    ref = CLONE ref0;
     futures
       .append(
         BG {

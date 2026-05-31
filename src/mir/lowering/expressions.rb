@@ -491,7 +491,6 @@ module MIRLoweringExpressions
         call.result_type = collect_type
         return call
       end
-      inner_zig = ft.tense? && ft.tense_type ? Type.new(ft.tense_type).zig_type : "i64"
       # The accumulator's Zig type comes from the observable's full_type
       # (e.g. *ObservableCount() / *ObservableSum(i64) / *ObservableMax(f64))
       # — `transpile_type` honors `observable_terminal` to pick the right
@@ -513,8 +512,8 @@ module MIRLoweringExpressions
         # Let Zig infer the View type — observable terminals expose
         # different View shapes per terminal (scalars expose T directly;
         # DISTINCT exposes StreamSetSnapshot(T); etc.). Hardcoding
-        # `inner_zig` from `tense_type` only matches scalar terminals
-        # and breaks DISTINCT/REDUCE-collection paths.
+        # `tense_type` only matches scalar terminals and breaks
+        # DISTINCT/REDUCE-collection paths.
         MIR::Let.new(val_var,
           begin
             call = MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,

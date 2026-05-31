@@ -483,10 +483,6 @@ module MIRLoweringVariables
     elsif mir_allocates?(init) && !generic_id
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      if binding_entry.present? && !binding_entry.needs_cleanup?
-        next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
-        next_nodes
-      else
       cleanup_required = type_requires_alloc_cleanup?(ft, mir_alloc)
       unless cleanup_required
         next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
@@ -496,7 +492,6 @@ module MIRLoweringVariables
         build_drop_entry!(cleanup_entry, node.full_type!, node)
         mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
         [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-      end
       end
     else
       let_node

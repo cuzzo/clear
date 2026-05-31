@@ -2636,7 +2636,7 @@ class MIRLowering
     end
 
     return nil if visible_names.empty?
-    filter_zig_blocks(mod.type_defs, visible_names)
+    keep_zig_const_blocks(mod.type_defs, visible_names)
   end
 
   sig { params(body: String).returns(String) }
@@ -2644,11 +2644,6 @@ class MIRLowering
     result = body.dup
     zig_const_blocks(body).each { |block| result.sub!(block.text, "") if block.kind }
     result
-  end
-
-  sig { params(source: String, names: T::Set[String]).returns(String) }
-  def filter_zig_blocks(source, names)
-    keep_zig_const_blocks(source, names)
   end
 
   sig { params(source: String).returns(T::Array[ZigConstBlock]) }

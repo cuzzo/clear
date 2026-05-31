@@ -8,31 +8,19 @@
 
 import codeql.ruby.AST
 
-predicate trackedField(string field) {
-  field = "full_type" or
-  field = "storage" or
-  field = "provenance" or
-  field = "ownership" or
-  field = "sync" or
-  field = "layout" or
-  field = "emit" or
-  field = "target" or
-  field = "value" or
-  field = "symbol" or
-  field = "name" or
-  field = "type" or
-  field = "left" or
-  field = "right" or
-  field = "expr" or
-  field = "result_type"
-}
-
-predicate trackedSetter(string methodName, string field) {
-  trackedField(field) and methodName = field + "="
-}
-
-predicate trackedReader(string methodName, string field) {
-  trackedField(field) and methodName = field
+predicate discoveredField(string field) {
+  exists(SetterMethodCall call |
+    call.getTargetName() = field and
+    field != "" and
+    field != "[]" and
+    call.getFile().getRelativePath().matches("src/%")
+  )
+  or
+  exists(InstanceVariableWriteAccess ivar |
+    ivar.getVariable().getName() = "@" + field and
+    field != "" and
+    ivar.getFile().getRelativePath().matches("src/%")
+  )
 }
 
 string methodLabel(AstNode n) {
@@ -53,12 +41,13 @@ string moduleLabel(AstNode n) {
   not exists(n.getEnclosingModule()) and result = "(top-level)"
 }
 
-from AstNode access, string field, string accessKind, string file, string moduleName, string methodName
+from AstNode access, string field, string accessKind, string file, string moduleName, string methodName,
+  int startLine, int startColumn, int endLine, int endColumn
 where
   (
     exists(InstanceVariableAccess iv |
       access = iv and
-      trackedField(field) and
+      discoveredField(field) and
       iv.getVariable().getName() = "@" + field and
       (
         iv instanceof InstanceVariableWriteAccess and accessKind = "ivar_write"
@@ -67,16 +56,24 @@ where
       )
     )
     or
+    exists(SetterMethodCall call |
+      access = call and
+      call.getTargetName() = field and
+      discoveredField(field) and
+      accessKind = "setter_call"
+    )
+    or
     exists(MethodCall call |
       access = call and
-      (
-        trackedSetter(call.getMethodName(), field) and accessKind = "setter_call"
-        or
-        trackedReader(call.getMethodName(), field) and accessKind = "reader_call"
-      )
+      call.getMethodName() = field and
+      call.getNumberOfArguments() = 0 and
+      exists(call.getReceiver()) and
+      discoveredField(field) and
+      accessKind = "reader_call"
     )
   ) and
   file = access.getFile().getRelativePath() and
   moduleName = moduleLabel(access) and
-  methodName = methodLabel(access)
-select access, file, moduleName, methodName, field, accessKind, access.toString()
+  methodName = methodLabel(access) and
+  access.getLocation().hasLocationInfo(_, startLine, startColumn, endLine, endColumn)
+select access, file, moduleName, methodName, field, accessKind, startLine, startColumn, endLine, endColumn, access.toString()
