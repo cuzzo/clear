@@ -119,16 +119,6 @@ Function parameters are **implicit borrows** by default. Only `TAKES` transfers 
 | `TAKES MUTABLE v: Value` | Owned | Yes | Yes |
 
 ```ruby clear
-UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect } }
-
-# Borrow: can read, cannot store or move
-FN inspect(v: Value) RETURNS String ->
-    MATCH v START
-        Value.Num AS n -> RETURN n.toString();,
-        DEFAULT -> RETURN "other";
-    END
-END
-
 # Owned: can store into collections
 FN store!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
     map["item"] = v;                # OKAY: v is owned via TAKES
