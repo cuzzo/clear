@@ -108,6 +108,10 @@ Note that there is a space between optionals and errors, when combine with any n
 * `! (~?T)`
 * `!? (~T)`
 
+If you don't include the spaces and parenthesis, the compiler will typically auto-correct it for you.
+
+In practice, complex types like these are often created inline, via streaming pipelines, and you never need to know the correct formatting.
+
 ## Streaming Arrays:
 
 | Syntax | Semantic Meaning | Commonality |
