@@ -185,12 +185,31 @@ FN main() RETURNS Void ->
 END
 ```
 
-Failable and optional returns:
+Failable returns:
+
+```ruby clear illustrative
+FN findUser(id: Int64) RETURNS !User ->
+    IF id < 0 -> RAISE "Invalid ID";
+    RETURN User{ name: "Alice" };
+END
+```
+
+Optional returns:
+
+```ruby clear illustrative
+FN findUser(id: Int64) RETURNS ?User ->
+    IF id < 0 -> RETURN;
+    RETURN User{ name: "Alice" };
+END
+```
+
+Failible/Optional returns:
 
 ```ruby clear illustrative
 FN findUser(id: Int64) RETURNS !?User ->
     IF id < 0 -> RAISE "Invalid ID";
-    RETURN result;
+    IF id == 42 -> RETURN;
+    RETURN User{ name: "Alice" };
 END
 ```
 
