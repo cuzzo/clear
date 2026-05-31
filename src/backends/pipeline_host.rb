@@ -336,8 +336,7 @@ class PipelineHost
       if new_args != node.args
         new_call = AST::FuncCall.new(node.token, node.name, new_args)
         copy_type_info(node, new_call)
-        new_call.zig_pattern = node.zig_pattern
-        new_call.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+        copy_call_metadata(node, new_call)
         return new_call
       end
     when AST::MethodCall
@@ -346,8 +345,7 @@ class PipelineHost
       if new_target != node.object || new_args != node.args
         new_mc = AST::MethodCall.new(node.token, new_target, node.name, new_args)
         copy_type_info(node, new_mc)
-        new_mc.zig_pattern = node.zig_pattern if node.zig_pattern
-        new_mc.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+        copy_call_metadata(node, new_mc)
         return new_mc
       end
     when AST::BinaryOp
@@ -463,6 +461,12 @@ class PipelineHost
     dst.coerced_type = src.coerced_type if src.coerced_type
     dst.storage = src.storage if src.storage
     dst.var_used = src.var_used
+  end
+
+  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+  def copy_call_metadata(src, dst)
+    dst.zig_pattern = src.zig_pattern
+    dst.matched_stdlib_def = src.matched_stdlib_def
   end
 
   sig { params(field_node: AST::GetField).returns(Type) }

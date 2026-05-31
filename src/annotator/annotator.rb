@@ -4692,31 +4692,7 @@ private
     # Set `needs_rt` directly so compute_needs_rt! picks it up;
     # heap_count is reserved for actual heap allocations (T1 cleanup --
     # earlier code abused heap_count as a needs_rt sentinel).
-    if current_fn_ctx
-      versioned_arm = node.arms&.any? { |arm| arm[:family] == :VERSIONED }
-      # MVCC: any WITH SNAPSHOT lowers to `Versioned.read(rt)` (read mode)
-      # or `Versioned.update[Multi](rt, ...)` (transaction mode). Both
-      # need rt threaded through the enclosing fn. Plus a WITH MATCH with
-      # a VERSIONED arm uses Versioned.read(rt) inside the arm's prelude.
-      if node.snapshot_mode == :read || node.snapshot_mode == :transaction || versioned_arm
-        current_fn_ctx.uses_rt = true
-      end
-      # Universal-polymorphic mutation can route through Versioned/AtomicPtr
-      # update helpers, so mark rt/fail here before compute_needs_rt! runs.
-      if node.polymorphic && (node.capabilities || []).length == 1
-        bound_var = node.capabilities.first[:var_node]
-        bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
-        bound_sym  = bound_var.symbol
-        is_param   = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
-        fn_node    = @fn_nodes[current_fn_ctx.name]
-        has_req    = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
-                     fn_node.requires.key?(bound_name)
-        if is_param && !has_req && fn_node
-          current_fn_ctx.uses_rt = true
-          fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
-        end
-      end
-    end
+    mark_with_runtime_requirements!(node)
     # Queue this WITH for the post-pass handler-reachability check. Running
     # it here (during annotation) is too early — cycle information isn't
     # known until compute_lock_cycles! has propagated through @call_graph.
@@ -4724,6 +4700,55 @@ private
 
     @with_block_depth -= 1
     stamp_type!(node, :Void)
+  end
+
+  sig { params(node: AST::WithBlock).void }
+  def mark_with_runtime_requirements!(node)
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx
+
+    # MVCC: any WITH SNAPSHOT lowers to `Versioned.read(rt)` (read mode)
+    # or `Versioned.update[Multi](rt, ...)` (transaction mode). Both
+    # need rt threaded through the enclosing fn. Plus a WITH MATCH with
+    # a VERSIONED arm uses Versioned.read(rt) inside the arm's prelude.
+    fn_ctx.uses_rt = true if with_block_uses_runtime?(node)
+
+    # Universal-polymorphic mutation can route through Versioned/AtomicPtr
+    # update helpers, so mark rt/fail here before compute_needs_rt! runs.
+    mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
+  end
+
+  sig { params(node: AST::WithBlock).returns(T::Boolean) }
+  def with_block_uses_runtime?(node)
+    node.snapshot_mode == :read ||
+      node.snapshot_mode == :transaction ||
+      with_block_has_versioned_arm?(node)
+  end
+
+  sig { params(node: AST::WithBlock).returns(T::Boolean) }
+  def with_block_has_versioned_arm?(node)
+    !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
+  end
+
+  sig { params(node: AST::WithBlock, fn_ctx: T.untyped).void }
+  def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
+    return unless node.polymorphic && node.capabilities.length == 1
+
+    bound_var = node.capabilities.first[:var_node]
+    bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
+    bound_sym = bound_var.symbol
+    return unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+
+    fn_node = @fn_nodes[fn_ctx.name]
+    return unless fn_node && !with_requires_binding?(fn_node, bound_name)
+
+    fn_ctx.uses_rt = true
+    fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
+  end
+
+  sig { params(fn_node: T.untyped, bound_name: T.nilable(String)).returns(T::Boolean) }
+  def with_requires_binding?(fn_node, bound_name)
+    !!(fn_node.respond_to?(:requires) && fn_node.requires && fn_node.requires.key?(bound_name))
   end
 
   # Validate WithBlock#lock_error_clause. Requires at least one fallible
