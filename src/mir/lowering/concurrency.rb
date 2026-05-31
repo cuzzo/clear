@@ -650,8 +650,6 @@ module MIRLoweringConcurrency
     end
     bg_code = transform_result.code
     fsm_structure = transform_result.structure
-    moved_captures = (analysis&.move_mark_names || Set.new).map(&:to_s) & captured.keys.map(&:to_s)
-    fsm_structure.required_move_guards = moved_captures
     result_type = Type.from_node!(node, context: "FSM BG result").tense_type
     fsm_structure.owned_result_required =
       !!(result_type && T.unsafe(self).ownership_tracked_transfer_type?(result_type))
