@@ -332,7 +332,7 @@ class MIRPass
 
   sig { params(expr: T.untyped).returns(T.untyped) }
   def unwrap_return_expr(expr)
-    node = T.let(expr, T.untyped)
+    node = T.let(expr, T.any(AST::GetField, AST::Identifier, AST::Literal))
     while node.is_a?(AST::MoveNode) || node.is_a?(AST::Cast) || node.is_a?(AST::FreezeNode)
       node = node.value
     end

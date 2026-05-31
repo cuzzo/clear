@@ -46,6 +46,12 @@ module PipeAnalysis
       node.full_type!(context: "pipeline result").bounded_stream? || node.full_type!(context: "pipeline result").open_stream?
   end
 
+  sig { params(options: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  def concurrent_parallel_enabled?(options)
+    value = options["parallel"]
+    !!(value.is_a?(AST::Identifier) && %w[true TRUE].include?(value.name))
+  end
+
   # Observable Phase 2.2 + COLLECT-default: a fold-terminal whose
   # source is a tense stream (`~T[...]`) is observable by default.
   # The pipe BinaryOp gets:
@@ -607,12 +613,12 @@ module PipeAnalysis
     # Also accepts range and stream sources (fused lazy path).
     is_range  = node.left.is_a?(AST::RangeLit)
     lhs_ti    = node.left.full_type!(context: "pipeline left")
-    is_stream = lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream? || lhs_ti&.inf_stream?
+    is_stream = lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? || lhs_ti.inf_stream?
     require_array_input!(node, "LIMIT", allow_range: is_range || is_stream, allow_stream: is_stream)
 
     item_type = if is_range
       range_element_type(node.left)
-    elsif lhs_ti&.inf_stream?
+    elsif lhs_ti.inf_stream?
       lhs_ti.inf_stream_element_type.resolved
     elsif is_stream
       lhs_ti.tense_type.element_type.resolved
@@ -1112,7 +1118,7 @@ module PipeAnalysis
     # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
     key_type = if shard_node
       ti = shard_node.target_map.full_type!(context: "shard target map")
-      (ti&.numeric_map? && ti&.key_type&.resolved) || :String
+      (ti.numeric_map? && ti.key_type&.resolved) || :String
     else
       :String
     end
@@ -1155,47 +1161,26 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[T.untyped]).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: T.untyped, names: T::Set[String]).returns(T.nilable(T::Array[Symbol])) }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless node.is_a?(AST::Locatable)
-    if node.is_a?(AST::Identifier)
-      entry = node.symbol
-      if entry
-        names << node.name if entry.type.sharded? && entry.sync.nil?
-      end
+    each_shard_scan_node(node) do |n|
+      names << n.name if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
     end
-    return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-    node.class.members.each do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.each { |v| collect_sharded_names(v, names) }
-      elsif val.is_a?(AST::Locatable)
-        collect_sharded_names(val, names)
-      end
-    end
+    nil
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def pre_scan_node_for_sharded(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false unless node.is_a?(AST::Locatable)
-    if node.is_a?(AST::Identifier)
-      entry = node.symbol
-      return false unless entry
-      return entry.type.sharded? && entry.sync.nil?
-    end
-    return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-    node.class.members.any? do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.any? { |v| pre_scan_node_for_sharded(v) }
-      elsif val.is_a?(AST::Locatable)
-        pre_scan_node_for_sharded(val)
-      else
-        false
+    found = T.let(false, T::Boolean)
+    each_shard_scan_node(node) do |n|
+      if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
+        found = true
+        break
       end
     end
+    found
   end
 
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
@@ -1287,58 +1272,65 @@ module PipeAnalysis
   sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
   def walk_for_sharded_access(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-
-      # Assignment: map[key] = value
-      if node.is_a?(AST::Assignment) && node.name.is_a?(AST::GetIndex)
-        gi = node.name
-        if gi.target.is_a?(AST::Identifier)
-          ti = gi.target.full_type!(context: "group target")
-          if ti.is_a?(Type) && ti.sharded? && gi.target.symbol&.sync.nil?
-            results << { map_name: gi.target.name, key_expr: gi.index, map_token: gi.target.token }
-          end
-        end
-      end
-
-      # BindExpr: got = map[key] OR "" (the map[key] is inside value)
-      if node.is_a?(AST::BindExpr) && node.value
-        walk_for_sharded_getindex([node.value], results)
-      end
-
-      # Walk children (skip nested BG/DO blocks)
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array) && member != :body  # don't re-walk body arrays we handle above
-          walk_for_sharded_access(val, results)
-        end
-      end
+    each_shard_scan_node(nodes) do |node|
+      access = sharded_get_index_access(node, context: "sharded pipeline target")
+      results << access if access
     end
   end
 
   # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
+  sig { params(nodes: T.untyped, results: T.untyped).void }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
-        ti = node.target.full_type!(context: "pipeline target")
-        if ti.is_a?(Type) && ti.sharded? && node.target.symbol&.sync.nil?
-          results << { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
-        end
-      end
-      # Recurse into sub-expressions
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          walk_for_sharded_getindex(val, results)
-        elsif val.is_a?(AST::Locatable)
-          walk_for_sharded_getindex([val], results)
-        end
+    each_shard_scan_node(nodes) do |node|
+      access = sharded_get_index_access(node, context: "pipeline target")
+      results << access if access
+    end
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(n: AST::Locatable).void).void }
+  def each_shard_scan_node(node, &blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+    if node.is_a?(Array)
+      node.each { |child| each_shard_scan_node(child, &blk) }
+      return
+    end
+    return unless node.is_a?(AST::Locatable)
+
+    yield node
+    return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array) || val.is_a?(AST::Locatable)
+        each_shard_scan_node(val, &blk)
       end
     end
+  end
+
+  sig { params(entry: T.untyped).returns(T::Boolean) }
+  def sharded_unsynced_entry?(entry)
+    return false unless entry
+    type = entry.type
+    type = Type.new(type) unless type.is_a?(Type)
+    type.sharded? && entry.sync.nil?
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def sharded_unsynced_identifier?(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.locals&.[](node.name))
+  end
+
+  sig { params(node: T.untyped, context: String).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  def sharded_get_index_access(node, context:)
+    return nil unless node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
+    return nil unless sharded_unsynced_identifier?(node.target)
+
+    ti = node.target.full_type!(context: context)
+    return nil unless ti.is_a?(Type) && ti.sharded?
+
+    { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
@@ -1551,29 +1543,15 @@ module PipeAnalysis
         sharded_names = Set.new
         conc.op.body.each { |stmt| collect_sharded_names(stmt, sharded_names) }
 
-        if sharded_names.length > 1
-          emit_multi_map_warning(conc, sharded_names)
-          analyze_each_op(proxy)
-        elsif sharded_names.length == 1
-          analyze_auto_shard_each_op(node, conc, proxy)
-        else
-          analyze_each_op(proxy)
-        end
-        # List-source CONCURRENT EACH lowers via build_bounded_concurrent_callback
-        # which reads conc.capture_analysis. The non-concurrent
-        # analyze_each_op above doesn't set it -- without explicit
-        # capture analysis, the callback's ctx struct is empty and the
-        # body's outer-scope references depend on Zig's
-        # struct-method-can-see-outer-scope feature, which breaks for
-        # Arc-wrapped captures (WITH EXCLUSIVE c emits c.* deref expecting
-        # a pointer; outer c is Arc(Locked(T)) by value). Run the
-        # capture analysis so list-source CONCURRENT EACH goes through
-        # the same capture machinery as bounded/stream and BG/DO.
-        # Repro: transpile-tests/257_concurrent_capture_locked_param.cht.
-        with_new_scope(current_scope) do
-          item_type = node.left.full_type!(context: "pipeline left").element_type.resolved
-          current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-          conc.capture_analysis = analyze_fiber_captures(conc.op.body, is_parallel: false)
+        conc.capture_analysis = with_fiber_capture_analysis(is_parallel: false) do
+          if sharded_names.length > 1
+            emit_multi_map_warning(conc, sharded_names)
+            analyze_each_op(proxy)
+          elsif sharded_names.length == 1
+            analyze_auto_shard_each_op(node, conc, proxy)
+          else
+            analyze_each_op(proxy)
+          end
         end
       end
     when AST::SumOp
@@ -1643,19 +1621,19 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
     item_type = lhs_type.stream_element_type.resolved
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope do
-      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        visit(node.right.op.expression)
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          visit(node.right.op.expression)
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], T.must(is_parallel), false) ||
-      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
       error!(node.right.op, :WHERE_NEEDS_BOOL)
@@ -1677,19 +1655,19 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
     item_type = lhs_type.stream_element_type.resolved
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope(current_scope) do
-      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        node.right.op.body.each { |stmt| visit(stmt) }
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope(current_scope) do
+        current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          node.right.op.body.each { |stmt| visit(stmt) }
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, T.must(is_parallel), false) ||
-      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     stamp_type!(node, :Void)
     node.storage   = :stack
@@ -1707,19 +1685,19 @@ module PipeAnalysis
     else
       finite_stream_element_type(node.left)
     end
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope do
-      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        visit(node.right.op.expression)
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          visit(node.right.op.expression)
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], T.must(is_parallel), false) ||
-      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
       error!(node.right.op, :WHERE_NEEDS_BOOL)
@@ -1744,19 +1722,19 @@ module PipeAnalysis
     else
       finite_stream_element_type(node.left)
     end
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope(current_scope) do
-      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        node.right.op.body.each { |stmt| visit(stmt) }
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope(current_scope) do
+        current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          node.right.op.body.each { |stmt| visit(stmt) }
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, T.must(is_parallel), false) ||
-      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     stamp_type!(node, :Void)
     node.storage   = :stack

@@ -1395,10 +1395,7 @@ class MIRLowering
     return nil if mutating_receiver_allocator_op?(init)
 
     name = node.name.to_s
-    existing_mark = T.let(nil, T.nilable(MIR::AllocMark))
-    MIR.each_surface_node(out) do |child|
-      existing_mark = child if child.is_a?(MIR::AllocMark) && child.name.to_s == name
-    end
+    existing_mark = existing_alloc_mark(out, name)
     if existing_mark
       stamp_allocating_result_target!(init, name, alloc: existing_mark.alloc)
       return nil
@@ -1414,6 +1411,14 @@ class MIRLowering
       type_info: type_info,
       scope: MIR::Placement.alloc_scope(alloc),
     )
+  end
+
+  sig { params(nodes: T::Array[T.untyped], name: String).returns(T.nilable(MIR::AllocMark)) }
+  def existing_alloc_mark(nodes, name)
+    mark = MIR.surface_nodes(nodes).find do |child|
+      child.is_a?(MIR::AllocMark) && child.name.to_s == name
+    end
+    T.cast(mark, T.nilable(MIR::AllocMark))
   end
 
   sig { params(stmt: T.untyped, guarded_cleanup_names: T::Set[String]).returns(T::Array[T.untyped]) }
@@ -1927,7 +1932,7 @@ class MIRLowering
   # instead of a regular statement. Used for IF/MATCH expression branches.
   sig { params(stmts: T::Array[T.untyped], label: String).returns(T::Array[T.untyped]) }
   def lower_body_with_break(stmts, label)
-    return [] unless stmts && !stmts.empty?
+    return [] if stmts.empty?
 
     # Find the last non-old-MIR-verification node (the result expression)
     last_user_idx = stmts.rindex { |s|
@@ -1940,7 +1945,7 @@ class MIRLowering
     prefix_lowered = lower_body(stmts[0...last_user_idx])
     result_mir = lower(stmts[last_user_idx])
     pending = flush_pending
-    suffix_lowered = T.must(stmts[(last_user_idx + 1)..]).empty? ? [] : lower_body(stmts[(last_user_idx + 1)..])
+    suffix_lowered = lower_body(stmts.drop(last_user_idx + 1))
 
     tail = pending + T.must(suffix_lowered) + [MIR::BreakStmt.new(label, result_mir)]
     T.must(prefix_lowered) + normalize_allocating_mir_body(tail)
@@ -2631,7 +2636,7 @@ class MIRLowering
     end
 
     return nil if visible_names.empty?
-    filter_zig_blocks(mod.type_defs, visible_names)
+    keep_zig_const_blocks(mod.type_defs, visible_names)
   end
 
   sig { params(body: String).returns(String) }
@@ -2639,11 +2644,6 @@ class MIRLowering
     result = body.dup
     zig_const_blocks(body).each { |block| result.sub!(block.text, "") if block.kind }
     result
-  end
-
-  sig { params(source: String, names: T::Set[String]).returns(String) }
-  def filter_zig_blocks(source, names)
-    keep_zig_const_blocks(source, names)
   end
 
   sig { params(source: String).returns(T::Array[ZigConstBlock]) }

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "bundler/setup"
 require "tempfile"
 require_relative "../lib/decomplex"
 

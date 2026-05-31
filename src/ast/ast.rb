@@ -82,7 +82,7 @@ module AST
     sig { returns(T::Boolean) }
     def atomic? = sync == :atomic
 
-    sig { params(val: T.untyped).void }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -631,8 +631,7 @@ module AST
   # Yield every CaptureAnalysis instance reachable from `body`. A
   # CaptureAnalysis is attached to any "fiber-like context" -- BG block,
   # BgStream block, DO block branch, or ConcurrentOp (CONCURRENT
-  # SELECT/WHERE/EACH/etc.). All four use the same `analyze_fiber_captures`
-  # machinery; this single walker lets BgCaptureClassifier process every
+  # SELECT/WHERE/EACH/etc.). This lets BgCaptureClassifier process every
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
@@ -706,12 +705,12 @@ module AST
     def type_object; @type_object = T.let(@type_object, T.nilable(Type)); end
 
     sig { returns(T.untyped) }
-    def zig_pattern; @zig_pattern = T.let(@zig_pattern, T.untyped); end
+    def zig_pattern; @zig_pattern = T.let(@zig_pattern, T.nilable(T.any(String, Symbol))); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def zig_pattern=(val); @zig_pattern = T.let(val, T.untyped); end
+    def zig_pattern=(val); @zig_pattern = T.let(val, T.nilable(T.any(String, Symbol))); end
 
     sig { returns(T.untyped) }
-    def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
+    def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.nilable(FunctionSignature)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val)
       fs = IntrinsicRegistry.fs(val)
@@ -720,7 +719,7 @@ module AST
     end
 
     sig { returns(T.untyped) }
-    def matched_signature; @matched_signature = T.let(@matched_signature, T.untyped); end
+    def matched_signature; @matched_signature = T.let(@matched_signature, T.nilable(FunctionSignature)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_signature=(val); @matched_signature = T.let(val, T.untyped); end
 
@@ -730,27 +729,27 @@ module AST
     def stdlib_allocates=(val); @stdlib_allocates = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def mutates_receiver; @mutates_receiver = T.let(@mutates_receiver, T.untyped); end
+    def mutates_receiver; @mutates_receiver = T.let(@mutates_receiver, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def mutates_receiver=(val); @mutates_receiver = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def was_moved; @was_moved = T.let(@was_moved, T.untyped); end
+    def was_moved; @was_moved = T.let(@was_moved, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def was_moved=(val); @was_moved = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def container_borrow; @container_borrow = T.let(@container_borrow, T.untyped); end
+    def container_borrow; @container_borrow = T.let(@container_borrow, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def container_borrow=(val); @container_borrow = T.let(val, T.untyped); end
+    def container_borrow=(val); @container_borrow = T.let(val, T.nilable(T::Boolean)); end
 
     sig { returns(T.untyped) }
-    def needs_mut_ref; @needs_mut_ref = T.let(@needs_mut_ref, T.untyped); end
+    def needs_mut_ref; @needs_mut_ref = T.let(@needs_mut_ref, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.untyped); end
+    def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
 
@@ -765,39 +764,39 @@ module AST
     def slot_size=(val); @slot_size = T.let(val, T.nilable(Integer)); end
 
     sig { returns(T.untyped) }
-    def resource_close_zig; @resource_close_zig = T.let(@resource_close_zig, T.untyped); end
+    def resource_close_zig; @resource_close_zig = T.let(@resource_close_zig, T.nilable(String)); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def resource_close_zig=(val); @resource_close_zig = T.let(val, T.untyped); end
+    def resource_close_zig=(val); @resource_close_zig = T.let(val, T.nilable(String)); end
 
     sig { returns(T.untyped) }
-    def can_fail; @can_fail = T.let(@can_fail, T.untyped); end
+    def can_fail; @can_fail = T.let(@can_fail, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def can_fail=(val); @can_fail = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
     def error_kind; @error_kind = T.let(@error_kind, T.untyped); end
     sig { params(val: T.untyped).void }
-    def error_kind=(val); @error_kind = T.let(val, T.untyped); end
+    def error_kind=(val); @error_kind = T.let(val, T.nilable(Symbol)); end
 
     sig { returns(T.untyped) }
     def error_type; @error_type = T.let(@error_type, T.untyped); end
     sig { params(val: T.untyped).void }
-    def error_type=(val); @error_type = T.let(val, T.untyped); end
+    def error_type=(val); @error_type = T.let(val, T.nilable(Symbol)); end
 
     sig { returns(T.untyped) }
-    def var_used; @var_used = T.let(@var_used, T.untyped); end
+    def var_used; @var_used = T.let(@var_used, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def var_used=(val); @var_used = T.let(val, T.untyped); end
+    def var_used=(val); @var_used = T.let(val, T.nilable(T::Boolean)); end
 
     sig { returns(T.untyped) }
-    def var_mutated; @var_mutated = T.let(@var_mutated, T.untyped); end
+    def var_mutated; @var_mutated = T.let(@var_mutated, T.nilable(T::Boolean)); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def var_mutated=(val); @var_mutated = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def symbol; @symbol = T.let(@symbol, T.untyped); end
+    def symbol; @symbol = T.let(@symbol, T.nilable(SymbolEntry)); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def symbol=(val); @symbol = T.let(val, T.untyped); end
+    def symbol=(val); @symbol = T.let(val, T.nilable(SymbolEntry)); end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).
@@ -816,8 +815,7 @@ module AST
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
-      ft = Type.new(ft) unless ft.nil? || ft.is_a?(Type)
-      raise "#{context}: missing type info for #{self.class}" unless ft
+      ft = Type.new(ft) unless ft.is_a?(Type)
       raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
       ft
     end
@@ -1138,7 +1136,7 @@ module AST
       self[:params] = self[:params] || []
     end
 
-    sig { params(val: T.untyped).void }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def return_type=(val)
       self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1302,7 +1300,7 @@ module AST
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1340,7 +1338,7 @@ module AST
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end

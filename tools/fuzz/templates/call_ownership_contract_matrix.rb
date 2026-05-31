@@ -19,6 +19,17 @@ CALL_OWNERSHIP_CELLS = []
   end
 end
 
+%i[
+  named_lifetime_return wildcard_lifetime_return
+  mutable_lifetime_plain mixed_atomic_return_lifetime
+].each do |mode|
+  CALL_OWNERSHIP_CELLS << {
+    shape: :string,
+    mode: mode,
+    expected: %i[mutable_lifetime_plain mixed_atomic_return_lifetime].include?(mode) ? :compile_error : :run
+  }
+end
+
 def com_type(shape)
   case shape
   when :string then "String"
@@ -225,6 +236,46 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
         running: ~Int64@observable = src |> SELECT size(_) |> SUM _;
         total = NEXT running;
         ASSERT total == 6_i64, "call in pipeline";
+        RETURN;
+      END
+    CHT
+
+  when :named_lifetime_return, :wildcard_lifetime_return
+    lifetime = p[:mode] == :named_lifetime_return ? "x" : "*"
+    <<~CHT
+      FN borrow(x: String) RETURNS #{lifetime}:String -> RETURN x; END
+
+      FN main() RETURNS Void ->
+        s: String = COPY "abc";
+        out: String = borrow(s);
+        ASSERT out.length() == 3_i64, "call returned lifetime";
+        RETURN;
+      END
+    CHT
+
+  when :mutable_lifetime_plain
+    <<~CHT
+      FN borrow(MUTABLE x: String) RETURNS x:String -> RETURN x; END
+
+      FN main() RETURNS Void ->
+        MUTABLE s: String = COPY "abc";
+        out: String = borrow(s);
+        RETURN;
+      END
+    CHT
+
+  when :mixed_atomic_return_lifetime
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN spawn(MUTABLE c: Counter) RETURNS c:~Void
+        REQUIRES c: ATOMIC | LOCKED ->
+        RETURN BG { RETURN; };
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+        h = spawn(c);
+        NEXT h;
         RETURN;
       END
     CHT

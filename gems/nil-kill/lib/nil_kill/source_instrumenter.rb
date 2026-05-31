@@ -143,7 +143,7 @@ module NilKill
         # suffix anchors on end_keyword_loc, not the end line start.
         ek = node.end_keyword_loc
         # Punt ONLY shapes the inline wrapper genuinely cannot express:
-        # endless defs (no `end` to anchor the suffix) and `ensure`.
+        # endless defs (no `end` to anchor the suffix).
         # - A `return` inside an iterator / `proc` block is a NON-LOCAL
         #   method return: rewritten to `throw __nil_kill_return_tag`,
         #   stays source-wrapped.
@@ -154,7 +154,7 @@ module NilKill
         # The TracePoint fallback is unreliable in the real
         # multi-process collect; inline wrappers are not.
         ek = nil if ek && ek.length.zero?
-        if ek.nil? || contains_ensure?(node.body)
+        if ek.nil?
           @tracepoint_methods[plan.fetch("raw_key")] = plan.fetch("plan")
           return
         end
@@ -201,14 +201,6 @@ module NilKill
       loc = node.rparen_loc || node.parameters&.location || node.name_loc || node.location
       loc.start_offset + loc.length
     end
-
-    def contains_ensure?(node)
-      return false unless node
-      return false if node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-      return true if node.is_a?(Prism::EnsureNode)
-      node.respond_to?(:child_nodes) && node.child_nodes.compact.any? { |child| contains_ensure?(child) }
-    end
-
 
     def collect_return_edits(node, plan, edits)
       return unless node

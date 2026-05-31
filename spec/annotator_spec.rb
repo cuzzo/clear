@@ -242,6 +242,26 @@ RSpec.describe SemanticAnnotator do
           expect(return_node.value.coerced_type).to eq(:"Float64[]")
         end
       end
+
+      context "Fallible call returned from fallible function" do
+        let(:code) {
+          <<~FLUX
+            FN may() RETURNS !Int64 ->
+              RETURN 1_i64;
+            END
+            FN wrap() RETURNS !Int64 ->
+              RETURN may();
+            END
+          FLUX
+        }
+
+        it "keeps the error-union coercion target for fallible values" do
+          return_node = ast.statements[1].body.last
+
+          expect(return_node.value.error_union_type.resolved).to eq(:"!Int64")
+          expect(return_node.value.coerced_type).to eq(:"!Int64")
+        end
+      end
     end
 
     context "Implicit / Any Return" do
@@ -468,6 +488,16 @@ RSpec.describe SemanticAnnotator do
           expect { run(code) }.not_to raise_error
           expect(get_last_type(code)).to eq(:Float64)
         end
+
+        it "does not inject defaults across a missing required param" do
+          code = <<~FLUX
+            FN needs_later(a=1: Int64, b: Int64) RETURNS Int64 ->
+              RETURN b;
+            END
+            needs_later();
+          FLUX
+          expect { run(code) }.to raise_error(/expects between 1 and 2 arguments/i)
+        end
       end
 
       context "DEFAULT keyword for struct params" do
@@ -497,6 +527,17 @@ RSpec.describe SemanticAnnotator do
           expect(get_last_type(code)).to eq(:Int64)
         end
 
+        it "allows an optional default before a required parameter" do
+          code = <<~FLUX
+            FN pick(a=1: Int64, b: Int64) RETURNS Int64 ->
+              RETURN b;
+            END
+            pick(2);
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Int64)
+        end
+
         it "errors DEFAULT for a primitive-type param" do
           expect {
             run(<<~FLUX)
@@ -512,6 +553,186 @@ RSpec.describe SemanticAnnotator do
               FN foo(p=DEFAULT: Partial) -> RETURN p.x; END
             FLUX
           }.to raise_error(/Type Error.*DEFAULT.*missing/i)
+        end
+
+        it "errors DEFAULT when the parameter omits a type annotation" do
+          expect {
+            run(<<~FLUX)
+              FN foo(cfg=DEFAULT) -> RETURN; END
+            FLUX
+          }.to raise_error(/Type Error.*DEFAULT.*struct/i)
+        end
+
+        it "errors DEFAULT when direct param analysis has no type" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "cfg", 1, 1)
+          param = AST::Param.new(name: "cfg", type: nil, default: AST::DefaultLit.new(token),
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: false, sync: nil)
+          node = Struct.new(:params, :requires).new([param], {})
+
+          expect {
+            annotator.send(:declare_and_verify_params, node)
+          }.to raise_error(/DEFAULT.*struct/i)
+        end
+      end
+
+      context "shared handle params" do
+        it "accepts a shared binding for a shared parameter" do
+          code = <<~FLUX
+            STRUCT Point { x: Int64 }
+            FN take(p: Point @shared) RETURNS Void ->
+              RETURN;
+            END
+            FN main() RETURNS Void ->
+              p = Point{ x: 1 } @shared;
+              take(p);
+              RETURN;
+            END
+          FLUX
+          expect { run(code) }.not_to raise_error
+        end
+
+        it "rejects bare bindings for shared parameters" do
+          code = <<~FLUX
+            STRUCT Point { x: Int64 }
+            FN take(p: Point @shared) RETURNS Void ->
+              RETURN;
+            END
+            FN main() RETURNS Void ->
+              p = Point{ x: 1 };
+              take(p);
+              RETURN;
+            END
+          FLUX
+          expect { run(code) }.to raise_error(CompilerError, /expects Point @shared, got Point/i)
+        end
+      end
+
+      context "observable type annotations" do
+        it "rejects sync and ownership wrappers layered onto observables" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
+          node = AST::Identifier.new(token, "running")
+          type = Type.new(:"~Float64", ownership: :shared, sync: :locked, observable: true)
+
+          expect {
+            annotator.send(:validate_type_annotation!, node, type)
+          }.to raise_error(CompilerError, /observable.*lock-free.*sharing it/i)
+        end
+      end
+
+      context "direct visitor type propagation" do
+        it "preserves sync and link metadata when unwrapping optionals" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_box", 1, 1)
+          target = AST::Identifier.new(token, "maybe_box")
+          optional = Type.new(:"?Box", ownership: :shared, sync: :locked)
+          optional.link_source = :shared
+          target.full_type = optional
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:shared)
+          expect(node.full_type.sync).to eq(:locked)
+          expect(node.full_type.link_source).to eq(:shared)
+        end
+
+        it "allows optional unwrap results without ownership metadata" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
+          target = AST::Identifier.new(token, "maybe_n")
+          target.full_type = Type.new(:"?Int64")
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:affine)
+          expect(node.full_type.resolved).to eq(:Int64)
+        end
+
+        it "allows optional unwrap targets whose ownership was unset" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
+          target = AST::Identifier.new(token, "maybe_n")
+          optional = Type.new(:"?Int64")
+          optional.ownership = nil
+          target.full_type = optional
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:affine)
+          expect(node.full_type.resolved).to eq(:Int64)
+        end
+
+        it "types open-ended slice nodes" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+          target = AST::Identifier.new(token, "items")
+          target.full_type = Type.new(:"Int64[]")
+
+          node = AST::Slice.new(token, target, nil, nil)
+          annotator.send(:visit_Slice, node)
+
+          expect(node.full_type.resolved).to eq(:"Int64[]")
+        end
+
+        it "marks explicit non-value COPY outside a function as heap-owned" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "label", 1, 1)
+          value = AST::Identifier.new(token, "label")
+          value.full_type = Type.new(:String)
+
+          node = AST::CopyNode.new(token, value)
+          annotator.send(:visit_CopyNode, node)
+
+          expect(node.storage).to eq(:heap)
+          expect(node.full_type.provenance).to eq(:heap)
+        end
+
+        it "ignores unknown intrinsic reject predicates" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "n", 1, 1)
+          arg = AST::Identifier.new(token, "n")
+
+          expect(annotator.send(:reject_arg_type_matches?, arg, :unknown_shape)).to be false
+        end
+
+        it "accepts assignment narrowing from NIL" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "x", 1, 1)
+          value = AST::Identifier.new(token, "value")
+          node = AST::Assignment.new(token, "x", value)
+
+          expect {
+            annotator.send(:validate_assignment_type, node, :NIL, :String)
+          }.not_to raise_error
+          expect(value.coerced_type).to be_nil
+        end
+
+        it "declares params with direct sync and ignores unknown requires families" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "locked", 1, 1)
+          locked = AST::Param.new(name: "locked", type: Type.new(:Int64), default: nil,
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: true, sync: :locked)
+          unknown = AST::Param.new(name: "unknown", type: Type.new(:Int64), default: nil,
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: true, sync: nil)
+          node = Struct.new(:params, :requires).new([locked, unknown], { "unknown" => Set[:BOGUS] })
+
+          annotator.send(:declare_and_verify_params, node)
+
+          expect(locked.symbol.sync).to eq(:locked)
+          expect(unknown.symbol.sync).to be_nil
+          expect(unknown.symbol.sync_families).to eq(Set[:BOGUS])
         end
       end
 
@@ -2089,6 +2310,18 @@ RSpec.describe SemanticAnnotator do
           expect(result).to eq(:Int64)
         end
       end
+
+      it "rejects unsigned negative? calls before autocast can mask them" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              n: UInt64 = 1_u64;
+              bad = n.negative?();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /negative\?\(\).*unsigned integers/i)
+      end
     end
 
     context "Polymorphic Conversion (toFloat)" do
@@ -2875,6 +3108,78 @@ RSpec.describe SemanticAnnotator do
         ret_node  = caller_fn.body.last
         call = ret_node.value
         expect(call.module_alias).to eq("native_math")
+      end
+
+      it "records extern effects on calls and charges allocator effects" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN allocThing() RETURNS !String EFFECTS :alloc:heap FROM "native_alloc";
+          FN caller() RETURNS !String ->
+            RETURN allocThing();
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.extern_effects).to eq({ alloc: :heap })
+        expect(caller_fn.uses_heap).to be true
+      end
+
+      it "marks ordinary extern calls without allocator effects" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN nativeLen(s: String) RETURNS Int64 FROM "native";
+          FN caller() RETURNS Int64 ->
+            RETURN nativeLen("abc");
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.extern_call).to be true
+        expect(call.extern_effects).to eq({})
+        expect(caller_fn.uses_heap).to be false
+      end
+
+      it "extracts comptime type arguments for generic extern functions" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN STRUCT Parsed {} FROM "std_json";
+          EXTERN FN parseFromSlice<T>(comptime: T, content: String) RETURNS !Parsed EFFECTS :alloc:heap FROM "std_json";
+          STRUCT Doc { value: Int64 }
+          FN caller() RETURNS !Parsed ->
+            RETURN parseFromSlice(Doc, "{}");
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.generic_type_args).to eq([:Doc])
+        expect(call.args.first.resolved_type).to eq(:Type)
+      end
+
+      it "allows generic extern functions with fewer comptime args than type params" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN tag<T, U>(comptime: T) RETURNS Void FROM "native";
+          STRUCT Doc { value: Int64 }
+          FN caller() RETURNS Void ->
+            tag(Doc);
+            RETURN;
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        call = caller_fn.body.first
+        expect(call.generic_type_args).to eq([:Doc, nil])
+        expect(call.args.first.resolved_type).to eq(:Type)
+      end
+
+      it "rejects hash-shaped intrinsic overloads when the base type cannot match" do
+        annotator = SemanticAnnotator.new
+        arg = Struct.new(:resolved_type) do
+          def full_type!(context:)
+            Type.new(:String)
+          end
+        end.new(:String)
+
+        match = annotator.send(:find_matching_intrinsic, [{ args: [{ type: :Int64 }] }], [arg])
+        expect(match).to be_nil
       end
     end
 

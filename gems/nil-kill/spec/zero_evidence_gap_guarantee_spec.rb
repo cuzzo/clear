@@ -3,7 +3,7 @@
 # THE GATE. A hermetic end-to-end collect over a fixture corpus that
 # exercises every load path (plain require, require_relative,
 # Kernel#load, autoload, absolute require, a spawned-ruby subprocess,
-# the recursive-from-.each collect_bg_blocks shape, an ensure-punt, an
+# the recursive-from-.each collect_bg_blocks shape, an ensure-body method, an
 # endless def, splat/kwsplat/block slots, a Struct field, a T.let, a
 # collection). It asserts the report's "Untyped Evidence Gaps" table
 # has EXACTLY ZERO `collect_ran_untraced` and `untraced_covered`, and

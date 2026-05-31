@@ -59,8 +59,8 @@ module MIRLoweringCapabilities
   # the LIVE SymbolEntry from @current_fiber_capture_symbols. The AST
   # node's var_node.symbol can carry a stale snapshot of sync/storage;
   # the live entry was refreshed by EscapeAnalysis.propagate_caller_sync!
-  # and recorded into capture_analysis.capture_symbols by
-  # _unified_capture_walk. This is what makes WITH EXCLUSIVE c inside a
+  # and recorded into capture_analysis.capture_symbols during annotation.
+  # This is what makes WITH EXCLUSIVE c inside a
   # CONCURRENT EACH callback take the direct c.ctrl.data.* Arc-unwrap
   # path (storage = :shared) instead of the polymorphic c.* path that
   # only works for non-Arc parameters.
@@ -166,7 +166,7 @@ module MIRLoweringCapabilities
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.nilable(String))
     @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
     @with_alias_alloc_map = T.let(@with_alias_alloc_map, T.untyped)

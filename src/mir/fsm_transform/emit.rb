@@ -13,6 +13,8 @@
 # than one dispatch arm. Per CLAUDE.md Invariant 13, never a new
 # top-level build_* function.
 
+require "sorbet-runtime"
+
 require "set"
 require_relative "../mir"
 require_relative "../fsm_wrapper_emitter"
@@ -96,7 +98,7 @@ module FsmTransform
     #     descriptor's ctx_field_decls; member_fns = one per segment;
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
-    sig { params(ctx: T.untyped, segment_specs: T.untyped, promoted_field_decls: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(ctx: T.untyped, segment_specs: T.untyped, promoted_field_decls: T.untyped, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
     def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       T.bind(self, T.untyped) rescue nil
       return nil if segment_specs.nil? || segment_specs.empty?
@@ -248,6 +250,8 @@ module FsmTransform
       end
       structure = MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
       all_text = fsm_structure_text(structure_sources)
+      structure.required_move_guards =
+        collect_required_move_guards(structure_sources, id, cleanup_names)
       structure.move_guard_writes =
         (
           collect_move_guard_writes(structure_sources, id) +
@@ -275,6 +279,16 @@ module FsmTransform
         [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
       end
       structure
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
+    def collect_required_move_guards(sources, id, cleanup_names)
+      collect_fsm_nodes(sources).filter_map do |node|
+        next nil unless node.is_a?(MIR::TransferMark)
+        next nil unless node.target == :owned_sink || node.target == :return
+        name = normalized_ctx_field_name(node.name.to_s, id)
+        cleanup_names.include?(name) ? name : nil
+      end.uniq
     end
 
     sig { params(segment_specs: T::Array[T.untyped]).returns(T::Array[FsmStructureSource]) }
@@ -318,6 +332,11 @@ module FsmTransform
         next nil unless field&.end_with?("_moved")
         field.delete_suffix("_moved")
       end.uniq
+    end
+
+    sig { params(name: String, id: Integer).returns(String) }
+    def normalized_ctx_field_name(name, id)
+      name.delete_prefix("__ctx_#{id}.")
     end
 
     sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
@@ -1117,7 +1136,7 @@ module FsmTransform
     # encountered. Returns { seg.index => sp_N }. Suspends that are
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
-    sig { params(segments: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    sig { params(segments: T.untyped).returns(T::Hash[Integer, Integer]) }
     def compute_sp_indices(segments)
       T.bind(self, T.untyped) rescue nil
       out = {}

@@ -22,7 +22,11 @@ end
   [:bg_stream_bound].each { |source| PIPELINE_SOURCE_CELLS << { source: source, op: op } }
 end
 
-[:max_int, :min_int, :average_int, :any_int, :all_int, :collect_sum].each do |op|
+[:max_int, :min_int, :average_int, :any_int, :all_int, :collect_sum,
+ :collect_distinct, :batch_window_list, :batch_window_open, :join_lambda,
+ :tap_inf, :shard_each_string, :shard_each_numeric,
+ :concurrent_bounded_select, :concurrent_bounded_where,
+ :concurrent_stream_select, :concurrent_stream_where].each do |op|
   PIPELINE_SOURCE_CELLS << { source: :bg_stream_bound, op: op }
 end
 
@@ -281,6 +285,132 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
         running: ~Int64@observable = s |> SUM _;
         total = running |> COLLECT;
         ASSERT total == 10_i64, "pipeline collect";
+        RETURN;
+      END
+    CHT
+  when :collect_distinct
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 1_i64; };
+        vals = s |> DISTINCT _ |> COLLECT;
+        ASSERT vals.length() == 2_i64, "collect distinct";
+        RETURN;
+      END
+    CHT
+
+  when :batch_window_list
+    <<~CHT
+      FN sumBatch(xs: Int64[]) RETURNS Int64 ->
+        MUTABLE total: Int64 = 0_i64;
+        xs |> EACH { total = total + _; };
+        RETURN total;
+      END
+
+      FN main() RETURNS Void ->
+        xs: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64];
+        sums = xs |> WINDOW(size: 2) sumBatch(_);
+        ASSERT sums.length() == 2_i64, "batch window list";
+        RETURN;
+      END
+    CHT
+
+  when :batch_window_open
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 3_i64; YIELD 4_i64; };
+        lens = s |> WINDOW(size: 2) _.length();
+        ASSERT lens.length() == 2_i64, "batch window stream";
+        RETURN;
+      END
+    CHT
+
+  when :join_lambda
+    <<~CHT
+      STRUCT User { id: Int64 }
+      STRUCT Order { userId: Int64 }
+      FN main() RETURNS Void ->
+        users: User[] = [User{ id: 1_i64 }, User{ id: 2_i64 }];
+        orders: Order[] = [Order{ userId: 1_i64 }];
+        joined = users |> JOIN(orders) %(u, o) -> u.id == o.userId;
+        ASSERT joined.length() == 2_i64, "join lambda";
+        RETURN;
+      END
+    CHT
+
+  when :tap_inf
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~Int64[INF] = BG STREAM { MUTABLE i = 1_i64; WHILE TRUE DO YIELD i; i = i + 1_i64; END };
+        total = s |> TAP { ASSERT _ > 0_i64, "tap inf"; } |> LIMIT 3 |> SUM _;
+        ASSERT total == 6_i64, "tap inf sum";
+        RETURN;
+      END
+    CHT
+
+  when :concurrent_bounded_select
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~Int64[4] = [BG { 1_i64; }, BG { 2_i64; }, BG { 3_i64; }, BG { 4_i64; }];
+        vals = s |> CONCURRENT(workers: 2) SELECT _ * 2_i64;
+        ASSERT vals.length() == 4_i64, "concurrent bounded select";
+        RETURN;
+      END
+    CHT
+
+  when :concurrent_bounded_where
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~Int64[4] = [BG { 1_i64; }, BG { 2_i64; }, BG { 3_i64; }, BG { 4_i64; }];
+        vals = s |> CONCURRENT(workers: 2) WHERE _ > 2_i64;
+        ASSERT vals.length() == 2_i64, "concurrent bounded where";
+        RETURN;
+      END
+    CHT
+
+  when :concurrent_stream_select
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM {
+          MUTABLE i = 1_i64;
+          WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
+        };
+        vals = s |> CONCURRENT(workers: 2) SELECT _ * 2_i64;
+        ASSERT vals.length() == 4_i64, "concurrent stream select";
+        RETURN;
+      END
+    CHT
+
+  when :concurrent_stream_where
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM {
+          MUTABLE i = 1_i64;
+          WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
+        };
+        vals = s |> CONCURRENT(workers: 2) WHERE _ > 2_i64;
+        ASSERT vals.length() == 2_i64, "concurrent stream where";
+        RETURN;
+      END
+    CHT
+
+  when :shard_each_string
+    <<~CHT
+      FN main() RETURNS Void ->
+        MUTABLE counts: HashMap<String>@sharded(4) = {};
+        (0_i64 ..< 4_i64) |> SHARD("k:${toString(_)}", counts) |> CONCURRENT EACH {
+          counts[_] = "seen";
+        };
+        RETURN;
+      END
+    CHT
+
+  when :shard_each_numeric
+    <<~CHT
+      FN main() RETURNS Void ->
+        MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+        (0_i64 ..< 4_i64) |> SHARD(_ MOD 4_i64, counts) |> CONCURRENT EACH {
+          counts[_] = (counts[_] OR 0_i64) + 1_i64;
+        };
         RETURN;
       END
     CHT

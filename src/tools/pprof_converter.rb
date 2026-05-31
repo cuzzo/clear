@@ -1,3 +1,5 @@
+require "sorbet-runtime"
+
 require_relative 'pprof'
 
 # Converts the text-format profile data emitted by `clear profile`
@@ -12,6 +14,8 @@ require_relative 'pprof'
 # show up in pprof as proper function names + CLEAR source lines (via
 # the `// CLR:N` markers the transpiler emits into transpiled.zig).
 module PprofConverter
+  extend T::Sig
+
   module_function
 
   # Run all available converters for a `.profile/` directory. Returns
@@ -175,6 +179,7 @@ module PprofConverter
 
   # addr2line emits `path:line` for each address. Pull the trailing
   # line number; returns 0 if absent.
+  sig { params(addr2line_file: String).returns(Integer) }
   def extract_zig_line(addr2line_file)
     return 0 unless addr2line_file
     addr2line_file =~ /:(\d+)\b/ ? Regexp.last_match(1).to_i : 0
@@ -393,6 +398,7 @@ module PprofConverter
     File.basename(bare).match?(/\A\._clear_tmp_.*\.zig\z/)
   end
 
+  sig { params(s: String).returns(Integer) }
   def parse_addr(s)
     s.start_with?('0x') ? s.to_i(16) : s.to_i
   end

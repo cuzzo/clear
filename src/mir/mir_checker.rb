@@ -354,7 +354,7 @@ class MIRChecker
     end
   end
 
-  sig { params(nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  sig { params(nodes: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def verify_structural_ownership_contracts!(nodes, transfers, allocs)
     nodes.uniq.each do |node|
       consumed = structural_consumed_names(node)
@@ -962,7 +962,7 @@ class MIRChecker
   # error path because success transfers ownership". Success transfer must be
   # represented by TransferMark; otherwise the compiler is relying on context
   # folklore and the checker cannot distinguish a valid move from a leak.
-  sig { params(err_cleanups: T::Hash[String, T::Array[T.untyped]], transfers: T::Set[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(err_cleanups: T::Hash[String, T::Array[T.untyped]], transfers: T::Set[String]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_err_cleanup_transfers!(err_cleanups, transfers)
     err_cleanups.each_key do |name|
       next if transfers.include?(name)
@@ -1711,7 +1711,7 @@ class MIRChecker
   # insert_drop!) must have a corresponding AllocMark. A Cleanup with no AllocMark
   # is a compiler bug: the allocation event is invisible to the checker, so
   # ALLOC_CLEANUP_MISMATCH cannot fire even if the allocators diverge.
-  sig { params(allocs: T::Hash[String, T::Array[T.untyped]], cleanups: T::Hash[String, T::Array[T.untyped]], errdefer_destroy_names: T::Set[T.untyped], transfers: T::Set[T.untyped]).returns(T::Hash[String, T::Array[T.untyped]]) }
+  sig { params(allocs: T::Hash[String, T::Array[T.untyped]], cleanups: T::Hash[String, T::Array[T.untyped]], errdefer_destroy_names: T::Set[String], transfers: T::Set[String]).returns(T::Hash[String, T::Array[T.untyped]]) }
   def verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names = Set.new, transfers = Set.new)
     allocs.each do |name, alloc_marks|
       next unless cleanups.key?(name)
@@ -1809,7 +1809,7 @@ class MIRChecker
       code.match?(/\b(?:alloc|dupe|create|destroy|free|deinit)\s*\(/)
   end
 
-  sig { params(body: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  sig { params(body: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def verify_call_contracts!(body, transfers, allocs)
     walk_mir(body) do |node|
       case node
@@ -1824,7 +1824,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(contract: T.untyped, label: String, node_kind: String, transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  sig { params(contract: T.untyped, label: String, node_kind: String, transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def verify_callable_contract!(contract, label, node_kind, transfers, allocs)
     unless contract.is_a?(MIR::CallableContract)
       @errors << error(:MIR_CALL_NO_CONTRACT, label,
@@ -1866,7 +1866,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(contract: MIR::OwnershipContract, label: String, transfers: T::Set[T.untyped], require_operands: T::Boolean).void }
+  sig { params(contract: MIR::OwnershipContract, label: String, transfers: T::Set[String], require_operands: T::Boolean).void }
   def verify_ownership_contract_operands!(contract, label, transfers, require_operands: false)
     if contract.operands.empty?
       if require_operands
@@ -1911,7 +1911,7 @@ class MIRChecker
   # ownership; the ownership_contract says which concrete lowered bindings are
   # consumed at this callsite. Without that binding list, TransferMark/Cleanup
   # verification cannot prove leak/double-free safety.
-  sig { params(zig_nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(zig_nodes: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_explicit_ownership_contracts!(zig_nodes, transfers, allocs)
     zig_nodes.each do |node|
       next unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)

@@ -19,11 +19,11 @@ gem. Fixed:
 - **Vocabulary is generic.** Category actions are
   testing-strategy-neutral ("error/raise path — invalid input only",
   "external/boundary — integration test"). No project jargon.
-- **The project lexicon is caller-supplied.** `ffi_boundary:` (the
-  external/boundary method names) defaults to empty in the gem; the
-  consuming project passes its own (CLEAR's set lives in the CLI
-  `exe/slopcop`, not the library). `DIAGNOSTIC_MIDS` is general Ruby
-  (`raise`/`fail`/`abort`).
+- **Project lexicons are caller-supplied.** `ffi_boundary:` (external
+  or boundary method names) and `diagnostic_mids:` (domain helpers that
+  report invalid input) default to empty in the gem; consuming projects
+  pass their own. The only built-in diagnostic methods are general Ruby
+  `raise`/`fail`/`abort`.
 
 The *engine* — categorize uncovered branches, rank genuine by churn —
 is general to any Ruby project with branch coverage + git history.
@@ -93,12 +93,12 @@ line. Still a ranked candidate, not a verdict (same discipline as the
 
 | category | meaning | not a test target? |
 |---|---|---|
-| `type_norm` | type/nil guard (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | yes — likely dead if the contract were strictly typed |
+| `type_norm` | type/nil guard (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | yes — likely dead if the code's runtime contracts were stricter |
 | `dead` | no sibling arm ever taken in coverage: decision never executes in the measured corpus | yes — audit as missing test; delete only if static reachability agrees |
 | `defensive` | live, inert/invariant-pinned | yes — accept |
 | `spurious` | decomplex: decision is redundant/cloned/re-derived | yes — refactor or delete; resolving the decomplex finding collapses the arm |
 | `ffi` | caller-declared external/boundary method | special — integration test |
-| `diagnostic` | arm raises/diagnoses | special — invalid-input only |
+| `diagnostic` | arm raises or calls a caller-declared invalid-input diagnostic helper | special — invalid-input only |
 | `genuine` | live, reachable, input-determined | **NO — this is the gap; ranked by churn × decomplex structural deviance** |
 
 ## Report shape (per the user's ask)
@@ -117,6 +117,9 @@ type-guard lives) and the arm body are inspected.
 
 ## Honest v0 precision caveats (Engler: ranked, refine)
 
+- `diagnostic` precision depends on the caller-provided helper list:
+  include methods that report invalid input, not ordinary logging or
+  warning calls.
 - `diagnostic` over-greedy: tags any arm whose subtree contains
   `raise`/`fail`/`abort` anywhere, not "the arm IS primarily a
   raise." Over-counts. Refine: require it to be the dominant outcome.
@@ -131,6 +134,6 @@ type-guard lives) and the arm body are inspected.
 
 ## Self-tested
 
-`test/classifier_test.rb` (incl. a real stdlib-`Coverage` resultset
-integration), `test/rollup_test.rb` (real temp git repo + churn
-overlay). 6 runs / 30 assertions / 0 failures.
+`test/classifier_test.rb` (incl. real stdlib-`Coverage` resultset
+integration and caller-supplied diagnostic lexicon coverage),
+`test/rollup_test.rb` (real temp git repo + churn overlay).

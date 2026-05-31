@@ -192,14 +192,14 @@ module MIRLoweringFunctions
     @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
     @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
-    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
+    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.nilable(T::Boolean))
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
-    @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.nilable(String))
+    @current_fn_return_type = T.let(@current_fn_return_type, T.nilable(Type))
     @current_fn_returned_names = T.let(@current_fn_returned_names, T.untyped)
     @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
-    @current_fn_tail_call = T.let(@current_fn_tail_call, T.untyped)
-    @current_fn_zig_name = T.let(@current_fn_zig_name, T.untyped)
+    @current_fn_tail_call = T.let(@current_fn_tail_call, T.nilable(T::Boolean))
+    @current_fn_zig_name = T.let(@current_fn_zig_name, T.nilable(String))
     @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
     @fn_alloc_marked_names = T.let(@fn_alloc_marked_names, T.untyped)
     @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
@@ -621,7 +621,7 @@ module MIRLoweringFunctions
     )]
   end
 
-  sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[T.untyped], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
+  sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[String], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
   def unused_param_suppressions(node, mutable_scalar_params, used_names)
     out = T.let([], T::Array[MIR::Node])
     node.params.each do |p|
@@ -632,7 +632,7 @@ module MIRLoweringFunctions
     out
   end
 
-  sig { params(mutable_scalar_params: T::Set[T.untyped], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
+  sig { params(mutable_scalar_params: T::Set[String], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
   def mutable_scalar_param_shadows(mutable_scalar_params, used_names)
     out = T.let([], T::Array[MIR::Node])
     mutable_scalar_params.each do |name|

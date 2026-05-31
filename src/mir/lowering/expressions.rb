@@ -470,7 +470,7 @@ module MIRLoweringExpressions
       # that `next()` returns. Mirrors lower_next_expr's collection branch
       # so `final = stream |> DISTINCT _ |> COLLECT` and `final = NEXT
       # (stream |> DISTINCT _)` produce the same shape.
-      collect_method = (ft && ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
+      collect_method = (ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
       # The materialized list is placed by the receiving binding's
       # allocator -- one allocator per binding.
       @current_decl_alloc = T.let(@current_decl_alloc, T.untyped)
@@ -481,7 +481,7 @@ module MIRLoweringExpressions
         elem_t = ft.tense_type.element_type
         Type.new("#{elem_t.resolved}[]", collection: :list)
       else
-        ft&.tense_type ? Type.new(ft.tense_type) : Type.new(ft)
+        ft.tense_type ? Type.new(ft.tense_type) : Type.new(ft)
       end
       collect_alloc_fact = collect_method == "materializeNext" ? collect_alloc : nil
       named_source = node.left.is_a?(AST::Identifier)
@@ -491,13 +491,12 @@ module MIRLoweringExpressions
         call.result_type = collect_type
         return call
       end
-      inner_zig = ft && ft.tense? && ft.tense_type ? Type.new(ft.tense_type).zig_type : "i64"
       # The accumulator's Zig type comes from the observable's full_type
       # (e.g. *ObservableCount() / *ObservableSum(i64) / *ObservableMax(f64))
       # — `transpile_type` honors `observable_terminal` to pick the right
       # per-terminal wrapper. Hardcoding ObservableSum here breaks every
       # non-SUM terminal (COUNT/AVG/MIN/MAX/ANY/ALL/FIND/...).
-      acc_zig = ft ? transpile_type(ft) : "*CheatLib.obs.ObservableSum(#{inner_zig})"
+      acc_zig = transpile_type(ft)
       @block_expr_counter += 1
       label = "__collect_blk_#{@block_expr_counter}"
       collect_var = "__collect_acc_#{@block_expr_counter}"
@@ -513,8 +512,8 @@ module MIRLoweringExpressions
         # Let Zig infer the View type — observable terminals expose
         # different View shapes per terminal (scalars expose T directly;
         # DISTINCT exposes StreamSetSnapshot(T); etc.). Hardcoding
-        # `inner_zig` from `tense_type` only matches scalar terminals
-        # and breaks DISTINCT/REDUCE-collection paths.
+        # `tense_type` only matches scalar terminals and breaks
+        # DISTINCT/REDUCE-collection paths.
         MIR::Let.new(val_var,
           begin
             call = MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,
@@ -543,21 +542,19 @@ module MIRLoweringExpressions
     snapshot_stmts = nil
     if @current_fn_has_catch && @current_fn_snapshot_types&.size == 1
       lhs_type = node.left.full_type!
-      if lhs_type
-        t = Type.new(lhs_type)
-        unless t.void? || t.error_union?
-          snap_zig_type = transpile_type(t)
-          snapshot_stmts = [
-            MIR::Let.new("__snap_input", left, false, nil, nil),
-            MIR::ExprStmt.new(
-              MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
-                MIR::Ident.new(snap_zig_type),
-                MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
-              ], false, MIR::CallableContract.no_ownership(2)), false)
-          ]
-          # Rewrite left to use the hoisted variable
-          left = MIR::Ident.new("__snap_input")
-        end
+      t = Type.new(lhs_type)
+      unless t.void? || t.error_union?
+        snap_zig_type = transpile_type(t)
+        snapshot_stmts = [
+          MIR::Let.new("__snap_input", left, false, nil, nil),
+          MIR::ExprStmt.new(
+            MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
+              MIR::Ident.new(snap_zig_type),
+              MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
+            ], false, MIR::CallableContract.no_ownership(2)), false)
+        ]
+        # Rewrite left to use the hoisted variable
+        left = MIR::Ident.new("__snap_input")
       end
     end
 
@@ -684,7 +681,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def or_fallback_expected_type(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     left_type = Type.from_node!(node.left, context: "OR fallback left type")
     success = left_type.success_type
     return success if success && !success.any?
@@ -1071,7 +1068,7 @@ module MIRLoweringExpressions
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1699,8 +1696,8 @@ module MIRLoweringExpressions
     # mir-lowering strict ivars
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     @union_schemas = T.let(@union_schemas, T.untyped)
-    @current_sink_type = T.let(@current_sink_type, T.untyped)
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_sink_type = T.let(@current_sink_type, T.nilable(Type))
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
     ti = copy_source_type_info(node.value)

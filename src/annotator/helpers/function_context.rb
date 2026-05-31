@@ -26,12 +26,12 @@ class FunctionContext
   sig { returns(T::Array[LifetimeSource]) }
   attr_reader :lifetime
 
-  sig { params(val: T.untyped).void }
+  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
   def return_type=(val)
     @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
-  sig { params(name: String, return_type: T.nilable(Type), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
+  sig { params(name: String, return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type: nil, lifetime: [], type_params: [])
     @name = name
     @return_type = T.let(Type.new(:Void), Type)

@@ -301,7 +301,8 @@ class PipelineHost
   # Returns the node (possibly modified) or a new synthetic Identifier.
   sig { params(node: T.untyped).returns(T.untyped) }
   def substitute_placeholders(node)
-    return node unless @placeholder_name || @acc_placeholder || @join_param_map || @soa_each_mode || !@named_bindings.empty?
+    return node unless @placeholder_name || @acc_placeholder || @join_param_map ||
+                       @soa_each_mode || @soa_rewrite_active || !@named_bindings.empty?
 
     # SOA EACH: _.field -> synthetic identifier __soa_field[__soa_i]
     if @soa_each_mode && node.is_a?(AST::GetField) &&
@@ -336,8 +337,7 @@ class PipelineHost
       if new_args != node.args
         new_call = AST::FuncCall.new(node.token, node.name, new_args)
         copy_type_info(node, new_call)
-        new_call.zig_pattern = node.zig_pattern
-        new_call.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+        copy_call_metadata(node, new_call)
         return new_call
       end
     when AST::MethodCall
@@ -346,8 +346,7 @@ class PipelineHost
       if new_target != node.object || new_args != node.args
         new_mc = AST::MethodCall.new(node.token, new_target, node.name, new_args)
         copy_type_info(node, new_mc)
-        new_mc.zig_pattern = node.zig_pattern if node.zig_pattern
-        new_mc.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+        copy_call_metadata(node, new_mc)
         return new_mc
       end
     when AST::BinaryOp
@@ -463,6 +462,12 @@ class PipelineHost
     dst.coerced_type = src.coerced_type if src.coerced_type
     dst.storage = src.storage if src.storage
     dst.var_used = src.var_used
+  end
+
+  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+  def copy_call_metadata(src, dst)
+    dst.zig_pattern = src.zig_pattern
+    dst.matched_stdlib_def = src.matched_stdlib_def
   end
 
   sig { params(field_node: AST::GetField).returns(Type) }
@@ -2461,7 +2466,7 @@ class PipelineHost
     # Terminal must be a fold op
     fold = node.right
     return nil unless AST.pipeline_range_fold?(fold)
-    cursor = T.let(node.left, T.untyped)
+    cursor = T.let(node.left, T.any(AST::BinaryOp, AST::Identifier))
 
     # Collect optional intermediate WHERE/SELECT stages (in chain order)
     stages = []
@@ -2601,7 +2606,7 @@ class PipelineHost
   # post_inner_stmts are placed in the OUTER loop after the inner for-loop.
   # placeholder is the Zig inner loop var name. smooth_node is the outer SMOOTH node.
   # names: hash of bc-suffixed binding names (acc, sum, cnt, val, result, found).
-  sig { params(fold: T.untyped, stages: T::Array[T.untyped], placeholder: String, smooth_node: T.nilable(AST::BinaryOp), names: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fold: T.untyped, stages: T::Array[T.untyped], placeholder: String, smooth_node: T.nilable(AST::BinaryOp), names: T.nilable(T::Hash[Symbol, String])).returns(T.nilable(T::Array[T.untyped])) }
   def lower_binding_fold(fold, stages, placeholder, smooth_node = nil, names = nil)
     names ||= { acc: "__bc_acc", sum: "__bc_sum", cnt: "__bc_cnt",
                 val: "__bc_val", result: "__bc_result", found: "__bc_found" }
@@ -3814,7 +3819,7 @@ class PipelineHost
   # computes the routing key/hash and enqueues an owned WorkItem; each worker
   # serially drains its shard and lowers the body in shard-direct mode so
   # map[k]/map[k]=v compile to getDirect/putDirect.
-  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(T.untyped) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(MIR::ForStmt) }
   def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = conc_op.shard_context
     each_op = conc_op.op

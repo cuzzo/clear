@@ -372,7 +372,7 @@ module FsmLowering
 
   # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
   # finalizes ownership once, then renders through MIREmitter.
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T.untyped) }
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     @last_fsm_result_transfer_facts = T.let([], T.untyped)

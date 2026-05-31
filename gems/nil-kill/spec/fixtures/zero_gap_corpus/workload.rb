@@ -59,7 +59,7 @@ step.call("subprocess") do
   Process.wait(pid)
 end
 
-# 7. ensure-punt (TracePoint fallback)
+# 7. ensure body source wrapping
 step.call("ensure_punt") do
   require_relative "ensure_punt_lib"
   EnsurePunt.new.guarded(7)

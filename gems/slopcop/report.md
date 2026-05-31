@@ -7,80 +7,110 @@
 > Owns categorization; consumes boobytrap (churn) and
 > optional decomplex (spurious filter + deviance rank).
 
-## Top True Gaps (198) — test these, ranked by fix-churn
+## Top True Gaps (1172) — test these, ranked by fix-churn
 
 | # | gap | method | churn | decomplex deviance |
 |---|---|---|---|---|
-| 1 | [`src/mir/mir_lowering.rb:418`](../../src/mir/mir_lowering.rb#L418) | `place_string_or_for_heap_destination` | 1.0 | **12** † (Decision Pressure, Derived-State Staleness, False Simplicity) |
-| 2 | [`src/mir/mir_lowering.rb:425`](../../src/mir/mir_lowering.rb#L425) | `place_string_or_for_heap_destination` | 1.0 | **12** (False Simplicity) |
-| 3 | [`src/mir/mir_lowering.rb:428`](../../src/mir/mir_lowering.rb#L428) | `place_string_or_for_heap_destination` | 1.0 | **12** † (Decision Pressure, Derived-State Staleness, False Simplicity) |
-| 4 | [`src/mir/mir_lowering.rb:429`](../../src/mir/mir_lowering.rb#L429) | `place_string_or_for_heap_destination` | 1.0 | **12** † (Decision Pressure, Derived-State Staleness, False Simplicity) |
-| 5 | [`src/mir/mir_lowering.rb:2234`](../../src/mir/mir_lowering.rb#L2234) | `filter_zig_blocks` | 1.0 | **12** † ⚠dup? (Decision Pressure, Derived-State Staleness, False Simplicity, +1) |
-| 6 | [`src/mir/mir_lowering.rb:1177`](../../src/mir/mir_lowering.rb#L1177) | `implicit_allocating_result_fact` | 1.0 | **10** † (Broken Protocols, Decision Pressure, False Simplicity) |
-| 7 | [`src/mir/mir_lowering.rb:2406`](../../src/mir/mir_lowering.rb#L2406) | `emit_builtin` | 1.0 | **10** † (Broken Protocols, Decision Pressure, False Simplicity) |
-| 8 | [`src/mir/mir_lowering.rb:480`](../../src/mir/mir_lowering.rb#L480) | `alloc_mark_type_info` | 1.0 | **8** (False Simplicity) |
-| 9 | [`src/mir/mir_lowering.rb:1232`](../../src/mir/mir_lowering.rb#L1232) | `ownership_transfers_for_mir` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 10 | [`src/mir/mir_lowering.rb:1234`](../../src/mir/mir_lowering.rb#L1234) | `ownership_transfers_for_mir` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 11 | [`src/mir/mir_lowering.rb:1408`](../../src/mir/mir_lowering.rb#L1408) | `collect_moved_arg_roots` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 12 | [`src/mir/mir_lowering.rb:1543`](../../src/mir/mir_lowering.rb#L1543) | `lower_program` | 1.0 | **8** (False Simplicity) |
-| 13 | [`src/mir/mir_lowering.rb:1553`](../../src/mir/mir_lowering.rb#L1553) | `lower_program` | 1.0 | **8** (False Simplicity) |
-| 14 | [`src/mir/mir_lowering.rb:1562`](../../src/mir/mir_lowering.rb#L1562) | `lower_program` | 1.0 | **8** (False Simplicity) |
-| 15 | [`src/mir/mir_lowering.rb:1907`](../../src/mir/mir_lowering.rb#L1907) | `lower_union_def` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 16 | [`src/mir/mir_lowering.rb:1916`](../../src/mir/mir_lowering.rb#L1916) | `lower_union_def` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 17 | [`src/mir/mir_lowering.rb:1921`](../../src/mir/mir_lowering.rb#L1921) | `lower_union_def` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 18 | [`src/mir/mir_lowering.rb:1954`](../../src/mir/mir_lowering.rb#L1954) | `lower_union_def` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 19 | [`src/mir/mir_lowering.rb:1957`](../../src/mir/mir_lowering.rb#L1957) | `lower_union_def` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 20 | [`src/mir/mir_lowering.rb:2523`](../../src/mir/mir_lowering.rb#L2523) | `strip_try` | 1.0 | **8** † (Broken Protocols, Derived-State Staleness, False Simplicity) |
-| 21 | [`src/mir/mir_lowering.rb:2527`](../../src/mir/mir_lowering.rb#L2527) | `strip_try` | 1.0 | **8** † (Broken Protocols, Derived-State Staleness, False Simplicity) |
-| 22 | [`src/mir/mir_lowering.rb:2638`](../../src/mir/mir_lowering.rb#L2638) | `owned_sink_plan` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
-| 23 | [`src/mir/mir_lowering.rb:870`](../../src/mir/mir_lowering.rb#L870) | `visible_guarded_cleanup_names_for_transfer` | 1.0 | **4** † (Broken Protocols, False Simplicity) |
-| 24 | [`src/mir/mir_lowering.rb:1367`](../../src/mir/mir_lowering.rb#L1367) | `with_ownership_consumption` | 1.0 | **4** (False Simplicity) |
-| 25 | [`src/mir/mir_lowering.rb:1796`](../../src/mir/mir_lowering.rb#L1796) | `mir_cast` | 1.0 | **3** † (Decision Pressure) |
-| 26 | [`src/mir/mir_lowering.rb:1797`](../../src/mir/mir_lowering.rb#L1797) | `mir_cast` | 1.0 | **3** † (Decision Pressure) |
-| 27 | [`src/mir/mir_lowering.rb:1800`](../../src/mir/mir_lowering.rb#L1800) | `mir_cast` | 1.0 | **3** † (Decision Pressure) |
-| 28 | [`src/mir/mir_lowering.rb:1801`](../../src/mir/mir_lowering.rb#L1801) | `mir_cast` | 1.0 | **3** † (Decision Pressure) |
-| 29 | [`src/mir/mir_lowering.rb:2714`](../../src/mir/mir_lowering.rb#L2714) | `borrowed_union_sink_source?` | 1.0 | **3** † (Decision Pressure) |
-| 30 | [`src/mir/mir_lowering.rb:458`](../../src/mir/mir_lowering.rb#L458) | `place_string_value_for_heap_destination` | 1.0 | **1** † (False Simplicity) |
-| 31 | [`src/mir/mir_lowering.rb:503`](../../src/mir/mir_lowering.rb#L503) | `scoped_owning_branch_value` | 1.0 | **1** † (False Simplicity) |
-| 32 | [`src/mir/mir_lowering.rb:507`](../../src/mir/mir_lowering.rb#L507) | `scoped_owning_branch_value` | 1.0 | **1** † (False Simplicity) |
-| 33 | [`src/mir/mir_lowering.rb:510`](../../src/mir/mir_lowering.rb#L510) | `scoped_owning_branch_value` | 1.0 | **1** (False Simplicity) |
-| 34 | [`src/mir/mir_lowering.rb:672`](../../src/mir/mir_lowering.rb#L672) | `lower_body` | 1.0 | **1** † (False Simplicity) |
-| 35 | [`src/mir/mir_lowering.rb:681`](../../src/mir/mir_lowering.rb#L681) | `lower_body` | 1.0 | **1** (False Simplicity) |
-| 36 | [`src/mir/mir_lowering.rb:853`](../../src/mir/mir_lowering.rb#L853) | `register_visible_alloc_names!` | 1.0 | **1** † (False Simplicity) |
-| 37 | [`src/mir/mir_lowering.rb:1635`](../../src/mir/mir_lowering.rb#L1635) | `with_decl_alloc` | 1.0 | **1** † (False Simplicity) |
-| 38 | [`src/mir/mir_lowering.rb:1639`](../../src/mir/mir_lowering.rb#L1639) | `with_decl_alloc` | 1.0 | **1** † (False Simplicity) |
-| 39 | [`src/mir/mir_lowering.rb:2163`](../../src/mir/mir_lowering.rb#L2163) | `merge_module_schemas!` | 1.0 | **1** (False Simplicity) |
-| 40 | [`src/mir/mir_lowering.rb:2341`](../../src/mir/mir_lowering.rb#L2341) | `lower_struct_pattern` | 1.0 | **1** † (False Simplicity) |
-| 41 | [`src/mir/mir_lowering.rb:2345`](../../src/mir/mir_lowering.rb#L2345) | `lower_struct_pattern` | 1.0 | **1** † (False Simplicity) |
-| 42 | [`src/mir/mir_lowering.rb:2585`](../../src/mir/mir_lowering.rb#L2585) | `with_fiber_capture_map` | 1.0 | **1** † (False Simplicity) |
-| 43 | [`src/mir/mir_lowering.rb:2736`](../../src/mir/mir_lowering.rb#L2736) | `make_rc_retain` | 1.0 | **1** (False Simplicity) |
-| 44 | [`src/mir/mir_lowering.rb:2738`](../../src/mir/mir_lowering.rb#L2738) | `make_rc_retain` | 1.0 | **1** † (False Simplicity) |
-| 45 | [`src/mir/mir_checker.rb:1434`](../../src/mir/mir_checker.rb#L1434) | `scan_expr_for_hpt_leak!` | 0.0688 | **12** † (Broken Protocols, Decision Pressure, False Simplicity, +1) |
-| 46 | [`src/mir/mir_lowering.rb:161`](../../src/mir/mir_lowering.rb#L161) | `(top-level)` | 1.0 | - |
-| 47 | [`src/mir/mir_lowering.rb:191`](../../src/mir/mir_lowering.rb#L191) | `(top-level)` | 1.0 | - |
-| 48 | [`src/mir/mir_lowering.rb:300`](../../src/mir/mir_lowering.rb#L300) | `runtime_binding_name` | 1.0 | - |
-| 49 | [`src/mir/mir_lowering.rb:347`](../../src/mir/mir_lowering.rb#L347) | `destination_placement_plan` | 1.0 | **0** † ⚠dup? (Reification Misses) |
-| 50 | [`src/mir/mir_lowering.rb:395`](../../src/mir/mir_lowering.rb#L395) | `place_owned_orelse_for_destination` | 1.0 | - |
+| 1 | [`src/mir/mir_lowering.rb:1395`](../../src/mir/mir_lowering.rb#L1395) | `implicit_allocating_result_fact` | 1.0 | **8** † (Decision Pressure, False Simplicity) |
+| 2 | [`src/mir/mir_lowering.rb:1938`](../../src/mir/mir_lowering.rb#L1938) | `lower_body_with_break` | 1.0 | **8** † ⚠dup? (Broken Protocols, Decision Pressure, Missing Abstractions) |
+| 3 | [`src/mir/mir_lowering.rb:1943`](../../src/mir/mir_lowering.rb#L1943) | `lower_body_with_break` | 1.0 | **8** † ⚠dup? (Broken Protocols, Decision Pressure, Missing Abstractions) |
+| 4 | [`src/mir/mir_lowering.rb:2159`](../../src/mir/mir_lowering.rb#L2159) | `extract_root_var_name` | 1.0 | **6** † ⚠dup? (Decision Pressure, Missing Abstractions) |
+| 5 | [`src/backends/pipeline_host.rb:336`](../../src/backends/pipeline_host.rb#L336) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 6 | [`src/backends/pipeline_host.rb:346`](../../src/backends/pipeline_host.rb#L346) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 7 | [`src/backends/pipeline_host.rb:383`](../../src/backends/pipeline_host.rb#L383) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 8 | [`src/backends/pipeline_host.rb:410`](../../src/backends/pipeline_host.rb#L410) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 9 | [`src/backends/pipeline_host.rb:424`](../../src/backends/pipeline_host.rb#L424) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 10 | [`src/backends/pipeline_host.rb:431`](../../src/backends/pipeline_host.rb#L431) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 11 | [`src/backends/pipeline_host.rb:438`](../../src/backends/pipeline_host.rb#L438) | `substitute_placeholders` | 0.266 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 12 | [`src/mir/mir_lowering.rb:959`](../../src/mir/mir_lowering.rb#L959) | `materialize_statement_discard` | 1.0 | **4** † (Broken Protocols, False Simplicity, Neglected Updates) |
+| 13 | [`src/mir/mir_lowering.rb:1368`](../../src/mir/mir_lowering.rb#L1368) | `finalize_nested_mir_expr_bodies!` | 1.0 | **4** † (Broken Protocols, False Simplicity) |
+| 14 | [`src/mir/mir_lowering.rb:2009`](../../src/mir/mir_lowering.rb#L2009) | `lower_module` | 1.0 | **4** † (Broken Protocols, False Simplicity) |
+| 15 | [`src/mir/mir_lowering.rb:232`](../../src/mir/mir_lowering.rb#L232) | `ast_void_type?` | 1.0 | **3** † (Decision Pressure) |
+| 16 | [`src/ast/type.rb:2377`](../../src/ast/type.rb#L2377) | `compute_zig_type` | 0.1746 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 17 | [`src/mir/mir_lowering.rb:482`](../../src/mir/mir_lowering.rb#L482) | `place_owned_try_catch_for_destination` | 1.0 | **2** † (False Simplicity, Neglected Updates) |
+| 18 | [`src/mir/mir_lowering.rb:553`](../../src/mir/mir_lowering.rb#L553) | `place_string_or_for_heap_destination` | 1.0 | **2** † (False Simplicity, Neglected Updates) |
+| 19 | [`src/mir/mir_lowering.rb:557`](../../src/mir/mir_lowering.rb#L557) | `place_string_or_for_heap_destination` | 1.0 | **2** † (False Simplicity, Neglected Updates) |
+| 20 | [`src/mir/mir_lowering.rb:565`](../../src/mir/mir_lowering.rb#L565) | `place_string_or_for_heap_destination` | 1.0 | **2** † (False Simplicity, Neglected Updates) |
+| 21 | [`src/mir/mir_lowering.rb:600`](../../src/mir/mir_lowering.rb#L600) | `place_string_value_for_heap_destination` | 1.0 | **1** (False Simplicity) |
+| 22 | [`src/mir/mir_lowering.rb:832`](../../src/mir/mir_lowering.rb#L832) | `lower_body` | 1.0 | **1** † (False Simplicity) |
+| 23 | [`src/mir/mir_lowering.rb:1906`](../../src/mir/mir_lowering.rb#L1906) | `discard_owned_zig_type` | 1.0 | **1** † (False Simplicity) |
+| 24 | [`src/mir/mir_lowering.rb:2595`](../../src/mir/mir_lowering.rb#L2595) | `merge_module_schemas!` | 1.0 | **1** † (False Simplicity) |
+| 25 | [`src/mir/mir_lowering.rb:2598`](../../src/mir/mir_lowering.rb#L2598) | `merge_module_schemas!` | 1.0 | **1** † (False Simplicity) |
+| 26 | [`src/mir/mir_lowering.rb:2601`](../../src/mir/mir_lowering.rb#L2601) | `merge_module_schemas!` | 1.0 | **1** † (False Simplicity) |
+| 27 | [`src/mir/mir_lowering.rb:2802`](../../src/mir/mir_lowering.rb#L2802) | `zig_format_for_type` | 1.0 | **1** † (Broken Protocols) |
+| 28 | [`src/mir/lowering/expressions.rb:455`](../../src/mir/lowering/expressions.rb#L455) | `lower_smooth` | 0.0508 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 29 | [`src/mir/lowering/expressions.rb:494`](../../src/mir/lowering/expressions.rb#L494) | `lower_smooth` | 0.0508 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 30 | [`src/mir/lowering/expressions.rb:500`](../../src/mir/lowering/expressions.rb#L500) | `lower_smooth` | 0.0508 | **16** (Broken Protocols) |
+| 31 | [`src/mir/lowering/expressions.rb:506`](../../src/mir/lowering/expressions.rb#L506) | `lower_smooth` | 0.0508 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 32 | [`src/mir/lowering/expressions.rb:546`](../../src/mir/lowering/expressions.rb#L546) | `lower_smooth` | 0.0508 | **16** † (Broken Protocols, Decision Pressure, Derived-State Staleness, +3) |
+| 33 | [`src/mir/lowering/expressions.rb:548`](../../src/mir/lowering/expressions.rb#L548) | `lower_smooth` | 0.0508 | **16** (Neglected Path Conditions) |
+| 34 | [`src/mir/lowering/expressions.rb:576`](../../src/mir/lowering/expressions.rb#L576) | `lower_smooth` | 0.0508 | **16** (False Simplicity) |
+| 35 | [`src/mir/lowering/expressions.rb:577`](../../src/mir/lowering/expressions.rb#L577) | `lower_smooth` | 0.0508 | **16** (False Simplicity) |
+| 36 | [`src/mir/lowering/variables.rb:440`](../../src/mir/lowering/variables.rb#L440) | `build_var_decl_nodes` | 0.0508 | **16** (False Simplicity) |
+| 37 | [`src/mir/lowering/variables.rb:455`](../../src/mir/lowering/variables.rb#L455) | `build_var_decl_nodes` | 0.0508 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 38 | [`src/mir/lowering/variables.rb:460`](../../src/mir/lowering/variables.rb#L460) | `build_var_decl_nodes` | 0.0508 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 39 | [`src/mir/lowering/variables.rb:489`](../../src/mir/lowering/variables.rb#L489) | `build_var_decl_nodes` | 0.0508 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 40 | [`src/tools/doctor.rb:131`](../../src/tools/doctor.rb#L131) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 41 | [`src/tools/doctor.rb:142`](../../src/tools/doctor.rb#L142) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 42 | [`src/tools/doctor.rb:211`](../../src/tools/doctor.rb#L211) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 43 | [`src/tools/doctor.rb:232`](../../src/tools/doctor.rb#L232) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 44 | [`src/tools/doctor.rb:237`](../../src/tools/doctor.rb#L237) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 45 | [`src/tools/doctor.rb:240`](../../src/tools/doctor.rb#L240) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 46 | [`src/tools/doctor.rb:242`](../../src/tools/doctor.rb#L242) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 47 | [`src/tools/doctor.rb:243`](../../src/tools/doctor.rb#L243) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 48 | [`src/tools/doctor.rb:247`](../../src/tools/doctor.rb#L247) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 49 | [`src/tools/doctor.rb:264`](../../src/tools/doctor.rb#L264) | `section_heap` | 0.0329 | **16** (Neglected Path Conditions) |
+| 50 | [`src/tools/doctor.rb:266`](../../src/tools/doctor.rb#L266) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 51 | [`src/tools/doctor.rb:268`](../../src/tools/doctor.rb#L268) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 52 | [`src/tools/doctor.rb:271`](../../src/tools/doctor.rb#L271) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 53 | [`src/tools/doctor.rb:273`](../../src/tools/doctor.rb#L273) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 54 | [`src/tools/doctor.rb:275`](../../src/tools/doctor.rb#L275) | `section_heap` | 0.0329 | **16** † ⚠dup? (Broken Protocols, Decision Pressure, Derived-State Staleness, +4) |
+| 55 | [`src/tools/doctor.rb:283`](../../src/tools/doctor.rb#L283) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 56 | [`src/tools/doctor.rb:292`](../../src/tools/doctor.rb#L292) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 57 | [`src/tools/doctor.rb:295`](../../src/tools/doctor.rb#L295) | `section_heap` | 0.0329 | **16** (False Simplicity) |
+| 58 | [`src/backends/pipeline_host.rb:2868`](../../src/backends/pipeline_host.rb#L2868) | `lower_each_range` | 0.266 | **12** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +2) |
+| 59 | [`src/backends/pipeline_host.rb:2885`](../../src/backends/pipeline_host.rb#L2885) | `lower_each_range` | 0.266 | **12** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +2) |
+| 60 | [`src/backends/pipeline_host.rb:3692`](../../src/backends/pipeline_host.rb#L3692) | `lower_concurrent` | 0.266 | **12** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +2) |
+| 61 | [`src/mir/mir_lowering.rb:2496`](../../src/mir/mir_lowering.rb#L2496) | `lower_or_exit` | 1.0 | - |
+| 62 | [`src/ast/parser.rb:2850`](../../src/ast/parser.rb#L2850) | `parse_type_annotation` | 0.1134 | **14** (Neglected Path Conditions) |
+| 63 | [`src/ast/parser.rb:2853`](../../src/ast/parser.rb#L2853) | `parse_type_annotation` | 0.1134 | **14** (Neglected Path Conditions) |
+| 64 | [`src/ast/parser.rb:2854`](../../src/ast/parser.rb#L2854) | `parse_type_annotation` | 0.1134 | **14** (Neglected Path Conditions) |
+| 65 | [`src/ast/parser.rb:2861`](../../src/ast/parser.rb#L2861) | `parse_type_annotation` | 0.1134 | **14** † ⚠dup? (Decision Pressure, Derived-State Staleness, False Simplicity, +3) |
+| 66 | [`src/ast/parser.rb:2898`](../../src/ast/parser.rb#L2898) | `parse_type_annotation` | 0.1134 | **14** (False Simplicity) |
+| 67 | [`src/ast/parser.rb:2906`](../../src/ast/parser.rb#L2906) | `parse_type_annotation` | 0.1134 | **14** (Neglected Path Conditions) |
+| 68 | [`src/ast/type.rb:1776`](../../src/ast/type.rb#L1776) | `elem_has_heap_internals?` | 0.1746 | **12** † (Broken Protocols, Decision Pressure, False Simplicity, +1) |
+| 69 | [`src/ast/ast.rb:908`](../../src/ast/ast.rb#L908) | `finalize_storage!` | 0.1574 | **12** (False Simplicity) |
+| 70 | [`src/ast/ast.rb:913`](../../src/ast/ast.rb#L913) | `finalize_storage!` | 0.1574 | **12** (False Simplicity) |
+| 71 | [`src/ast/ast.rb:989`](../../src/ast/ast.rb#L989) | `finalize_storage!` | 0.1574 | **12** (False Simplicity) |
+| 72 | [`src/mir/hoist.rb:120`](../../src/mir/hoist.rb#L120) | `collect_stmt_hoists!` | 0.1455 | **12** (False Simplicity) |
+| 73 | [`src/mir/hoist.rb:132`](../../src/mir/hoist.rb#L132) | `collect_stmt_hoists!` | 0.1455 | **12** † (Broken Protocols, Decision Pressure, False Simplicity, +1) |
+| 74 | [`src/mir/hoist.rb:141`](../../src/mir/hoist.rb#L141) | `collect_stmt_hoists!` | 0.1455 | **12** (False Simplicity) |
+| 75 | [`src/mir/hoist.rb:144`](../../src/mir/hoist.rb#L144) | `collect_stmt_hoists!` | 0.1455 | **12** (False Simplicity) |
+| 76 | [`src/backends/pipeline_host.rb:197`](../../src/backends/pipeline_host.rb#L197) | `visit` | 0.266 | **10** (Broken Protocols) |
+| 77 | [`src/backends/pipeline_host.rb:243`](../../src/backends/pipeline_host.rb#L243) | `visit` | 0.266 | **10** (False Simplicity) |
+| 78 | [`src/backends/pipeline_host.rb:2446`](../../src/backends/pipeline_host.rb#L2446) | `unwrap_range_chain` | 0.266 | **10** † ⚠dup? (Decision Pressure, Derived-State Staleness, Missing Abstractions) |
+| 79 | [`src/backends/pipeline_host.rb:3777`](../../src/backends/pipeline_host.rb#L3777) | `lower_concurrent_bc` | 0.266 | **10** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +1) |
+| 80 | [`src/backends/pipeline_host.rb:3784`](../../src/backends/pipeline_host.rb#L3784) | `lower_concurrent_bc` | 0.266 | **10** † ⚠dup? (Broken Protocols, Decision Pressure, False Simplicity, +1) |
 
-- ...(+148 more genuine gaps)
+- ...(+1092 more genuine gaps)
 
-> decomplex attribution on listed gaps: **36 span-precise**, **83 method-coarse (†)**, **4 ⚠dup?** (possibly redundant, not localised -- verify before testing). Coarse rows are whole-method: treat as a hint, not an arm-level discriminator.
+> decomplex attribution on listed gaps: **384 span-precise**, **716 method-coarse (†)**, **168 ⚠dup?** (possibly redundant, not localised -- verify before testing). Coarse rows are whole-method: treat as a hint, not an arm-level discriminator.
 
 ## Category Summary
-_999 dark arms; only 198 are genuine gaps. The rest are not test targets:_
+_4051 dark arms; only 1172 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 240 | 24.0% | type/nil guard -- likely dead if the contract were strictly typed |
-| dead | 14 | 1.4% | decision never executes in coverage -- audit as missing test or statically-dead code |
-| defensive | 129 | 12.9% | inert / invariant-pinned -- accept, exclude from denominator |
-| spurious | 0 | 0.0% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
-| ffi | 25 | 2.5% | external/boundary call -- needs an integration test |
-| diagnostic | 393 | 39.3% | error/raise path -- reachable only by invalid input (negative test) |
-| genuine | 198 | 19.8% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
+| type_norm | 1162 | 28.7% | type/nil guard -- likely dead if runtime contracts were stricter |
+| dead | 702 | 17.3% | decision never executes in coverage -- audit as missing test or statically-dead code |
+| defensive | 40 | 1.0% | inert / invariant-pinned -- accept, exclude from denominator |
+| spurious | 76 | 1.9% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
+| ffi | 0 | 0.0% | external/boundary call -- needs an integration test |
+| diagnostic | 899 | 22.2% | error/raise/diagnostic path -- reachable only by invalid input (negative test) |
+| genuine | 1172 | 28.9% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Files: 3; dark arms: 999; genuine gaps: 198
-- General engine: categorizes uncovered branches, ranks genuine gaps by consumed boobytrap churn x optional decomplex structural deviance. Project lexicon (external-boundary methods) is caller-supplied, not baked in (see docs/agents/design.md).
+- Files: 84; dark arms: 4051; genuine gaps: 1172
+- General engine: categorizes uncovered branches, ranks genuine gaps by consumed boobytrap churn x optional decomplex structural deviance. Project lexicons (external-boundary methods and domain diagnostic methods) are caller-supplied, not baked in (see docs/agents/design.md).
 - decomplex join is span-precise (the arm's line falls inside the flagged decision's source extent); `†` marks a (file, method) fallback when no flagged span contained the arm. A ranked candidate, not a verdict (Engler discipline).

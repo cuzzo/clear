@@ -117,7 +117,7 @@ module EffectTracker
   def record_effect(effect)
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.untyped)
+    @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.nilable(Integer))
     return unless current_fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)

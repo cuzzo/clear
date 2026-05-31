@@ -651,7 +651,7 @@ RSpec.describe MIRLowering do
         };
       ZIG
 
-      filtered = lowering.send(:filter_zig_blocks, source, Set["Keep", "AlsoKeep"])
+      filtered = lowering.send(:keep_zig_const_blocks, source, Set["Keep", "AlsoKeep"])
 
       expect(filtered).to include("const Keep")
       expect(filtered).to include("const AlsoKeep")

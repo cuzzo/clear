@@ -11,13 +11,14 @@ module SlopCop
     # hrefs resolve correctly (a report at gems/slopcop/report.md must
     # link ../../src/x.rb, not src/x.rb). Defaults to repo root
     # (correct for stdout / a root-level report).
-    def initialize(files:, repo:, resultset:, ffi_boundary: [], top: 50,
-                   link_base: nil)
+    def initialize(files:, repo:, resultset:, ffi_boundary: [],
+                   diagnostic_mids: [], top: 50, link_base: nil)
       @repo = File.realpath(repo)
       @top = top
       @link_root = Pathname.new(File.expand_path(link_base || @repo))
       @r = Rollup.run(files: files, repo: repo, resultset: resultset,
-                      ffi_boundary: ffi_boundary)
+                      ffi_boundary: ffi_boundary,
+                      diagnostic_mids: diagnostic_mids)
     end
 
     # href from the report's directory to a repo-relative source file.
@@ -117,9 +118,9 @@ module SlopCop
            "genuine gaps: #{gaps.size}\n"
       o << "- General engine: categorizes uncovered branches, ranks " \
            "genuine gaps by consumed boobytrap churn x optional " \
-           "decomplex structural deviance. Project lexicon " \
-           "(external-boundary methods) is caller-supplied, not baked " \
-           "in (see docs/agents/design.md).\n"
+           "decomplex structural deviance. Project lexicons " \
+           "(external-boundary methods and domain diagnostic methods) " \
+           "are caller-supplied, not baked in (see docs/agents/design.md).\n"
       o << "- decomplex join is span-precise (the arm's line falls " \
            "inside the flagged decision's source extent); `†` marks a " \
            "(file, method) fallback when no flagged span contained the " \

@@ -1732,11 +1732,11 @@ class RecursiveSplitter::Builder
 end
 
 class ResourceSchema
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def close_zig; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def extern_module; end
   sig { returns(T.untyped) }
   def fields; end
@@ -1767,11 +1767,11 @@ class Schemas::InlineStructVariant
 end
 
 class Schemas::ResourceSchema
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def close_zig; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def extern_module; end
   sig { returns(T.untyped) }
   def fields; end

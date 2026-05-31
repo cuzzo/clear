@@ -438,7 +438,7 @@ module MIRLoweringVariables
       node_alloc = decl_alloc == :heap ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || decl_alloc)
       drop_entry = drop_entry.with_alloc(node_alloc)
       @current_bindings[node.name.to_s] = drop_entry if @current_bindings
-      (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
+      mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
       mir_alloc = node_alloc
       cleanup = MIR::Cleanup.new(safe_name, drop_entry)
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, drop_entry)
@@ -448,7 +448,7 @@ module MIRLoweringVariables
       cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
       build_drop_entry!(cleanup_entry, node.full_type!, node)
       cleanup_entry[:has_moved_guard] = true
-      (@guarded_cleanup_names ||= {})[safe_name] = true
+      mark_guarded_cleanup_name!(safe_name)
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !generic_id
@@ -465,7 +465,7 @@ module MIRLoweringVariables
       mir_alloc = mir_owned_alloc(init) || binding_entry.alloc || decl_alloc
       cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
       build_drop_entry!(cleanup_entry, node.full_type!, node)
-      (@guarded_cleanup_names ||= {})[safe_name] = true
+      mark_guarded_cleanup_name!(safe_name)
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif binding_entry.present? && !binding_entry.needs_cleanup?
@@ -475,39 +475,51 @@ module MIRLoweringVariables
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       if ownership_bearing_type?(ft)
-        cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
-        build_drop_entry!(cleanup_entry, node.full_type!, node)
-        cleanup_entry[:has_moved_guard] = true
-        (@guarded_cleanup_names ||= {})[safe_name] = true
+        cleanup_entry = moved_guard_cleanup_entry(ft, mir_alloc, node)
+        mark_guarded_cleanup_name!(safe_name)
         return [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
       end
       [alloc_mark, let_node]
     elsif mir_allocates?(init) && !generic_id
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      if binding_entry.present? && !binding_entry.needs_cleanup?
-        next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
-        next_nodes
-      else
-      cleanup_required = !ft.primitive? && !ft.void? && !ft.any? &&
-                         !ft.id_handle? &&
-                         (ft.needs_explicit_cleanup?(mir_alloc, @schema_lookup) ||
-                          (mir_alloc == :heap && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
-                            ft.any_sync? || ft.any_rc? || ft.link? || ft.indirect? ||
-                            ft.recursive_cleanup_shape?(@schema_lookup))))
+      cleanup_required = type_requires_alloc_cleanup?(ft, mir_alloc)
       unless cleanup_required
         next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
         next_nodes
       else
         cleanup_entry = T.must(hoist_cleanup_entry(init, node))
         build_drop_entry!(cleanup_entry, node.full_type!, node)
-        (@guarded_cleanup_names ||= {})[safe_name] = true if cleanup_entry.has_moved_guard?
+        mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
         [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-      end
       end
     else
       let_node
     end
+  end
+
+  sig { params(name: String).void }
+  def mark_guarded_cleanup_name!(name)
+    (@guarded_cleanup_names ||= {})[name] = true
+  end
+
+  sig { params(ft: Type, alloc: Symbol, node: AST::VarDecl).returns(CleanupEntry) }
+  def moved_guard_cleanup_entry(ft, alloc, node)
+    T.bind(self, MIRLowering) rescue nil
+    entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: alloc, has_moved_guard: true)
+    build_drop_entry!(entry, node.full_type!, node)
+    entry[:has_moved_guard] = true
+    entry
+  end
+
+  sig { params(ft: Type, alloc: Symbol).returns(T::Boolean) }
+  def type_requires_alloc_cleanup?(ft, alloc)
+    return false if ft.primitive? || ft.void? || ft.any? || ft.id_handle?
+    return true if ft.needs_explicit_cleanup?(alloc, @schema_lookup)
+
+    alloc == :heap && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
+      ft.any_sync? || ft.any_rc? || ft.link? || ft.indirect? ||
+      ft.recursive_cleanup_shape?(@schema_lookup))
   end
 
   sig { params(name: String, alloc: Symbol, type_info: T.untyped, binding_entry: CleanupEntry).returns(MIR::AllocMark) }

@@ -12,12 +12,17 @@
 # Surfaced via FixCollector during `clear fix`. No-op when the
 # collector is disabled, so normal `clear build` is unaffected.
 
+require "sorbet-runtime"
+
 require_relative '../ast/lexer'
 require_relative '../ast/fixable_error'
 
 module MultiStatementLinter
+  extend T::Sig
+
   module_function
 
+  sig { params(source: String).returns(T.nilable(Hash)) }
   def lint!(source)
     return unless FixCollector.enabled?
 
@@ -33,6 +38,7 @@ module MultiStatementLinter
   # `;` doesn't count — those are STRUCT-field separators, hash kv
   # separators, FOR-loop variants, etc. that legitimately share a
   # line.
+  sig { params(source: String).returns(Hash) }
   def scan_top_level_semis(source)
     counts = Hash.new(0)
     line_no = 1

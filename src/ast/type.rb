@@ -372,7 +372,7 @@ class Type
     return :sync_wrapped   if any_sync?
     return (rodata? ? :slice_rodata : :slice_managed) if string?
     return :slice_managed  if collection?
-    return :value          if array? && !string?
+    return :value          if non_string_array?
     :by_ref
   end
 
@@ -630,7 +630,7 @@ class Type
   end
 
   # location is provenance (kept as alias for backward-compat callers).
-  sig { returns(T.untyped) }
+  sig { void }
   def location
     @provenance
   end
@@ -912,7 +912,7 @@ class Type
     elsif pool?             then :pool
     elsif set_collection?   then :set_collection
     elsif list_collection?              then :list
-    elsif array? && !string?            then :array
+    elsif non_string_array?             then :array
     elsif string? && symbol? then :string_symbol
     elsif string? && raw?    then :string_raw
     end
@@ -1688,7 +1688,7 @@ class Type
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
-    if array? && !string?
+    if non_string_array?
       return true unless fixed?
       et = element_type
       return false unless et

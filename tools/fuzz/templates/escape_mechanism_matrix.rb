@@ -27,7 +27,7 @@ ESCAPE_MECHANISM_CELLS = [
   { mechanism: :return_nested_struct_list },
   { mechanism: :return_recursive_union_payload },
   { mechanism: :outer_store_nested_array },
-  { mechanism: :bg_capture_recursive_aggregate },
+  { mechanism: :bg_capture_recursive_aggregate, expected: :compile_error },
   { mechanism: :do_capture_string },
   { mechanism: :takes_recursive_aggregate },
   { mechanism: :loop_carry_nested_map },

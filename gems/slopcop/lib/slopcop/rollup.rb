@@ -19,12 +19,12 @@ module SlopCop
     # testing-strategy-neutral; the consuming project decides what a
     # "negative test" / "integration test" concretely is.
     ACTION = {
-      type_norm:  "type/nil guard -- likely dead if the contract were strictly typed",
+      type_norm:  "type/nil guard -- likely dead if runtime contracts were stricter",
       dead:       "decision never executes in coverage -- audit as missing test or statically-dead code",
       defensive:  "inert / invariant-pinned -- accept, exclude from denominator",
       spurious:   "span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?)",
       ffi:        "external/boundary call -- needs an integration test",
-      diagnostic: "error/raise path -- reachable only by invalid input (negative test)",
+      diagnostic: "error/raise/diagnostic path -- reachable only by invalid input (negative test)",
       genuine:    "real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance"
     }.freeze
     CATS = ACTION.keys.freeze
@@ -32,9 +32,10 @@ module SlopCop
     module_function
 
     # files: repo-relative .rb paths. repo: absolute root. resultset:
-    # SimpleCov json. ffi_boundary: caller-supplied lexicon (the gem
-    # ships NONE -- it is general; the consuming repo provides its own).
-    def run(files:, repo:, resultset:, ffi_boundary: [])
+    # SimpleCov json. ffi_boundary and diagnostic_mids are
+    # caller-supplied lexicons (the gem ships none beyond general Ruby
+    # raise/fail/abort -- consuming projects provide their own).
+    def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [])
       repo = File.realpath(repo)
       churn = begin
         Boobytrap::Bugspots.from_git(repo)
@@ -55,7 +56,9 @@ module SlopCop
       per_file = {}
       gaps = []
       abs_for.each do |rel, abs|
-        arms = Classifier.classify_file(resultset, abs, ffi_boundary: ffi_boundary)
+        arms = Classifier.classify_file(resultset, abs,
+                                        ffi_boundary: ffi_boundary,
+                                        diagnostic_mids: diagnostic_mids)
         next if arms.empty?
 
         cn = ((churn[rel] || 0.0) / mx).round(4)

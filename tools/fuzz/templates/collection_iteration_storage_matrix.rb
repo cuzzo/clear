@@ -13,6 +13,9 @@ COLLECTION_ITER_STORAGE_CELLS = []
   end
 end
 
+COLLECTION_ITER_STORAGE_CELLS << { container: :list, mode: :while_bind_pop_continue }
+COLLECTION_ITER_STORAGE_CELLS << { container: :list, mode: :while_bind_pop_move, expected: :compile_error }
+
 FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_ITER_STORAGE_CELLS) do |p|
   case p[:container]
   when :array
@@ -152,6 +155,35 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
 
       FN main() RETURNS !Void ->
         ASSERT (run() OR RAISE) == #{sum_assert}, "collection return fn";
+        RETURN;
+      END
+    CHT
+
+  when :while_bind_pop_continue
+    <<~CHT
+      FN main() RETURNS Void ->
+        MUTABLE items: Int64[]@list = [];
+        items.append(1_i64);
+        items.append(2_i64);
+        MUTABLE total = 0_i64;
+        WHILE items.pop() AS v DO
+          IF v == 1_i64 THEN CONTINUE; END
+          total = total + v;
+        END
+        ASSERT total == 2_i64, "while bind pop continue";
+        RETURN;
+      END
+    CHT
+
+  when :while_bind_pop_move
+    <<~CHT
+      FN main() RETURNS Void ->
+        MUTABLE items: String[]@list = [];
+        items.append(COPY "a");
+        WHILE items.pop() AS v DO
+          GIVE v;
+          GIVE v;
+        END
         RETURN;
       END
     CHT

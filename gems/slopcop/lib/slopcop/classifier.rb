@@ -10,8 +10,8 @@ module SlopCop
   #
   # Categories (not all gaps are equal):
   #   :type_norm  arm/decision guards a type/nil check (is_a?/kind_of?/
-  #               nil?/respond_to?/safe-nav). Likely dead if the
-  #               contract were strictly typed.
+    #               nil?/respond_to?/safe-nav). Likely dead if runtime
+    #               contracts were stricter.
   #   :dead       no sibling arm of the decision is ever taken in the
   #               supplied coverage. Audit as unexercised code: it may
   #               be a missing test, or dead only if static reachability
@@ -20,7 +20,8 @@ module SlopCop
   #               nil, invariant-guaranteed). Accept.
   #   :ffi        a caller-declared external/boundary method -> needs
   #               an integration test.
-  #   :diagnostic arm raises/diagnoses -> invalid-input only.
+    #   :diagnostic arm raises or calls caller-declared diagnostic
+    #               helpers -> invalid-input only.
   #   :genuine    live, reachable, input-determined, none of the above.
   #               The real gap. Ranked by fix-churn downstream.
   module Classifier
@@ -129,7 +130,7 @@ module SlopCop
     end
 
     # -> [Arm, ...] for every dark arm in abspath.
-    def classify_file(resultset, abspath, ffi_boundary: [])
+    def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [])
       branches = merged_branches(resultset, abspath)
       return [] if branches.empty?
 
@@ -159,7 +160,9 @@ module SlopCop
           meth = midx[sl] || "(top-level)"
           anode = node_for(nodes, sl, sc, el, ec)
           source_line = sl > lines.length ? "" : lines[sl - 1]
-          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary, pnode, source_line, noise_lines.include?(sl))
+          cat = categorize(meth, pkind, anode, any_taken, cond,
+                           ffi_boundary, pnode, source_line,
+                           noise_lines.include?(sl), diagnostic_mids)
           next if cat.nil?
 
           out << Arm.new(file: abspath, defn: meth, line: sl, category: cat)
@@ -168,10 +171,11 @@ module SlopCop
       out
     end
 
-    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil, declaration_noise = false)
+    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil, declaration_noise = false, diagnostic_mids = [])
       return nil if coverage_noise?(pnode, sibling_taken, source_line, declaration_noise)
       return :ffi if ffi_boundary.include?(method)
-      return :diagnostic if anode && subtree(anode, mids: DIAGNOSTIC_MIDS)
+      diag = DIAGNOSTIC_MIDS + diagnostic_mids.map(&:to_sym)
+      return :diagnostic if anode && subtree(anode, mids: diag)
       # type/nil guard family: check the decision's CONDITION and the
       # arm body -> the decomplex DecisionPressure class.
       return :type_norm if (cond && type_guard?(cond)) || (anode && type_guard?(anode))

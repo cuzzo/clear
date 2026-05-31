@@ -138,7 +138,7 @@ module MIRLoweringControlFlow
     with_pending(cond_pending, MIR::IfStmt.new(cond, then_body, else_body))
   end
 
-  sig { params(node: AST::IfBind).returns(T.untyped) }
+  sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
   def lower_if_bind(node)
     T.bind(self, MIRLowering) rescue nil
     mir_bindings = node.bindings.map do |b|
@@ -209,7 +209,7 @@ module MIRLoweringControlFlow
     stamp_loop_frame_alloc_scopes!(stmts, mark_per_iter == true ? :iteration : :function)
   end
 
-  sig { params(node: AST::WhileLoop).returns(T.untyped) }
+  sig { params(node: AST::WhileLoop).returns(MIR::WhileStmt) }
   def lower_while(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -231,7 +231,7 @@ module MIRLoweringControlFlow
     MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, nil, nil, node.mark_per_iter, !!node.tight)
   end
 
-  sig { params(node: AST::WhileBindLoop).returns(T.untyped) }
+  sig { params(node: AST::WhileBindLoop).returns(MIR::WhileStmt) }
   def lower_while_bind(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -831,11 +831,11 @@ module MIRLoweringControlFlow
   def lower_return(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @current_fn_tail_call = T.let(@current_fn_tail_call, T.untyped)
-    @current_fn_zig_name = T.let(@current_fn_zig_name, T.untyped)
+    @current_fn_tail_call = T.let(@current_fn_tail_call, T.nilable(T::Boolean))
+    @current_fn_zig_name = T.let(@current_fn_zig_name, T.nilable(String))
     @debug_mode = T.let(@debug_mode, T.untyped)
     @pending_stmts = T.let(@pending_stmts, T.untyped)
-    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
+    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.nilable(T::Boolean))
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
     @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
     @lowered_guarded_cleanup_names = T.let(@lowered_guarded_cleanup_names, T.nilable(T::Set[T.untyped]))
@@ -1009,7 +1009,7 @@ module MIRLoweringControlFlow
   sig { params(node: AST::ReturnNode).returns(T.untyped) }
   def return_destination_type(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
+    @current_fn_return_type = T.let(@current_fn_return_type, T.nilable(Type))
     ti = Type.from_node(@current_fn_return_type)
     ti&.success_type
   end

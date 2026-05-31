@@ -3,10 +3,8 @@
 
 require "sorbet-runtime"
 
-# `ensure` -> the inline wrapper cannot express it, so the method is
-# punted to the targeted-TracePoint fallback. It must STILL produce a
-# record (the fallback fires in-process) -- a multi-line interior so
-# collect_ran? would also see it run.
+# Methods with `ensure` must remain source-wrapped so collect coverage
+# and method records agree.
 class EnsurePunt
   extend T::Sig
 

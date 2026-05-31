@@ -108,6 +108,7 @@ module FunctionAnalysis
     func_type = scope.resolve_type(func_name)
     entry = scope.locals[func_name]
     fsig = FunctionSignature.unwrap(func_type)
+    call_node = args.equal?(node.args) ? node : Struct.new(:token, :name, :args).new(node.token, func_name, args)
 
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
@@ -117,14 +118,15 @@ module FunctionAnalysis
     # NOT the storage shape of the signature — a fn-typed param/local
     # holds the same Type-wrapped FunctionSignature but is :stack and
     # routes to the fn_var_call path below.
-    elsif fsig && entry&.storage == :static && (func_type = fsig)
-      node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
-      if node.respond_to?(:extern_call=) && func_type.extern
+    elsif fsig && entry&.storage == :static
+      signature = fsig
+      node.module_alias = signature.module_alias if node.respond_to?(:module_alias=) && signature.module_alias
+      if node.respond_to?(:extern_call=) && signature.extern
         node.extern_call = true
-        node.extern_effects = func_type.extern_effects if func_type.extern_effects
+        node.extern_effects = signature.extern_effects
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
-        alloc_kind = func_type.extern_effects&.dig(:alloc)
+        alloc_kind = signature.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
             current_fn_ctx.heap_count += 1
@@ -134,7 +136,7 @@ module FunctionAnalysis
         end
       end
 
-      if func_type.extern
+      if signature.extern
         args.each do |arg|
           if arg.full_type!(context: "extern argument").soa?
             error!(arg, :SOA_TO_EXTERN_FN)
@@ -143,7 +145,7 @@ module FunctionAnalysis
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
-        params = func_type.params
+        params = signature.params
         params.each_with_index do |p, i|
           if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
@@ -155,31 +157,28 @@ module FunctionAnalysis
         end
       end
 
-      type_params = func_type.type_params
+      type_params = signature.type_params
       if type_params&.any?
         # For EXTERN FN with comptime params, the type bindings come directly from
         # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
         comptime_type_args ||= []
-        if func_type.extern && comptime_type_args.any?
+        if signature.extern && comptime_type_args.any?
           subst = {}
           type_params.each_with_index { |tp, i| subst[tp] = comptime_type_args[i] if comptime_type_args[i] }
         else
-          subst = infer_generic_type_args!(node, func_type, args, type_params)
+          subst = infer_generic_type_args!(node, signature, args, type_params)
         end
         node.generic_type_args = type_params.map { |tp| T.must(subst)[tp] } if node.respond_to?(:generic_type_args=)
-        substituted = substitute_type_params(func_type, T.must(subst))
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        substituted = substitute_type_params(signature, T.must(subst))
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         stamp_type!(node, substituted.return_type)
       else
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-        verify_function_signature!(call_node, func_type)
-        node.matched_signature = func_type if node.respond_to?(:matched_signature=)
+        verify_function_signature!(call_node, signature)
+        node.matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        rt = func_type.return_type
-        stamp_type!(node, rt.is_a?(Type) ? Type.new(rt) : rt)
+        stamp_type!(node, Type.new(signature.return_type))
         # Auto-propagate (CLEAR's error-handling default): the call's
         # *expression-level* type is the SUCCESS branch -- a binding
         # `h = call()` sees `T`, not `!T`. The error union flows
@@ -194,42 +193,7 @@ module FunctionAnalysis
         if call_type.respond_to?(:error_union?) &&
            call_type.error_union?
           node.error_union_type = call_type if node.respond_to?(:error_union_type=)
-          outer = call_type
-          inner = outer.payload_type
-          # The parser stamps storage/ownership/sync/layout on the
-          # OUTER error union (e.g. `!Node @multiowned` -> outer.ownership
-          # = :multiowned, payload = bare `Node`). Carry those over so
-          # the binding's type_info still classifies as multiowned/
-          # shared/heap/etc -- otherwise field-access lowering for `n.id`
-          # misses the `.ctrl.data` unwrap.
-          if inner.is_a?(Type)
-            inner = Type.new(inner)
-            if outer.respond_to?(:ownership) && outer.ownership && outer.ownership != :affine &&
-               inner.respond_to?(:ownership=) && (inner.ownership.nil? || inner.ownership == :affine)
-              inner.ownership = outer.ownership
-            end
-            if outer.respond_to?(:provenance) && outer.provenance &&
-               inner.respond_to?(:provenance) && inner.provenance.nil? &&
-               inner.respond_to?(:provenance=)
-              inner.provenance = outer.provenance
-            end
-            if outer.respond_to?(:sync) && outer.sync &&
-               inner.respond_to?(:sync) && inner.sync.nil? &&
-               inner.respond_to?(:sync=)
-              inner.sync = outer.sync
-            end
-            if outer.respond_to?(:layout) && outer.layout &&
-               inner.respond_to?(:layout) && inner.layout.nil? &&
-               inner.respond_to?(:layout=)
-              inner.layout = outer.layout
-            end
-            if outer.respond_to?(:collection) && outer.collection &&
-               inner.respond_to?(:collection) && inner.collection.nil? &&
-               inner.respond_to?(:collection=)
-              inner.collection = outer.collection
-            end
-          end
-          stamp_type!(node, inner)
+          stamp_type!(node, call_type.success_type)
         end
       end
 
@@ -242,7 +206,6 @@ module FunctionAnalysis
         params: sig.params,
         return_type: sig.return_type
       )
-      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, synthetic_sig)
       node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
       stamp_type!(node, sig.return_type)
@@ -494,7 +457,7 @@ module FunctionAnalysis
       if atomic_cell_to_atomic_param?(arg_node, param, signature)
         arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
       end
-      if !match && expected_type_obj.shared?
+      if !match && expected_type_obj.shared? && expected_type_obj.resolved == actual_type_obj.resolved
         unless actual_type_obj.shared?
           hint = if arg_node.is_a?(AST::Identifier)
             " Use SHARE #{arg_node.name} to create a shared handle."
@@ -504,7 +467,7 @@ module FunctionAnalysis
           error!(arg_node, :ARG_NEEDS_SHARED,
             index: i + 1, fn: node.name, expected: expected_type_obj, actual: actual_type_obj, hint: hint)
         end
-        match = true if expected_type_obj.resolved == actual_type_obj.resolved
+        match = true
       end
 
       if !match && (expected == :Any || actual == :Any || expected == actual)
@@ -559,7 +522,6 @@ module FunctionAnalysis
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_takes_argument?(node)
-    return false unless node
     return true if node.respond_to?(:container_borrow) && node.container_borrow
     return true if node.is_a?(AST::GetIndex)
     return false unless node.is_a?(AST::GetField)
@@ -576,9 +538,9 @@ module FunctionAnalysis
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.atomic?
-    return false if sym.respond_to?(:layout) && sym.indirect?
+    return false if sym.indirect?
     return false if param.atomic?
-    return false if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
+    return false if param.symbol&.atomic?
     return false if expected_type_obj.any? || expected_type_obj.fn_type?
     return false if expected_type_obj.shared? || expected_type_obj.any_sync?
 
@@ -594,7 +556,7 @@ module FunctionAnalysis
     ptype = param.type
     return true if ptype.is_a?(Type) && ptype.atomic?
     return true if param.atomic?
-    return true if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
+    return true if param.symbol&.atomic?
 
     requires = signature.requires
     families = requires && requires[param.name.to_s]
@@ -606,13 +568,13 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    sym&.atomic? && !(sym.respond_to?(:layout) && sym.indirect?)
+    sym&.atomic? && !sym.indirect?
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }
   def explicit_primitive_atomic_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.atomic? && type.primitive?
+    type.atomic? && type.primitive?
   end
 
   sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
@@ -642,7 +604,6 @@ module FunctionAnalysis
     lifetime_paths = signature.return_lifetime
     return true if lifetime_paths.empty?
 
-    borrow_type = param.mutable ? :mutable : :immutable
     return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
     # If `param` is named in the lifetime sources (any of the multi-
@@ -704,8 +665,7 @@ module FunctionAnalysis
     return if requires_map.empty?
 
     sources.each do |source|
-      path = get_path_to_root(source)
-      next unless path
+      path = T.must(get_path_to_root(source))
       root_name = path.first.to_s
       families = requires_map[root_name]
       next unless families.is_a?(Set) && families.size > 1
@@ -801,19 +761,15 @@ module FunctionAnalysis
         if families
           # Polymorphic family seeds are only defaults; visible callers
           # override them during caller-sync propagation.
-          if families.include?(:LOCKED)
-            param_sync = :locked
-          elsif families.include?(:VERSIONED)
-            param_sync = :versioned
-          elsif families.include?(:ATOMIC)
-            param_sync = :atomic
-          elsif families.include?(:SNAPSHOTTED)
-            param_sync = :versioned
-          elsif families.include?(:LOCAL)
-            # LOCAL admits @local, @multiowned, and plain T; seed :local so
-            # deferred WITH POLYMORPHIC validation can proceed.
-            param_sync = :local
-          end
+          sync_by_family = {
+            LOCKED: :locked,
+            VERSIONED: :versioned,
+            ATOMIC: :atomic,
+            SNAPSHOTTED: :versioned,
+            LOCAL: :local,
+          }
+          family = sync_by_family.keys.find { |candidate| families.include?(candidate) }
+          param_sync = sync_by_family[family] if family
         end
       end
       # Struct ATOMIC params are AtomicPtr cells; primitive ATOMIC params use

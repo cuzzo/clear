@@ -17,6 +17,20 @@ CWM_CELLS = %i[
   multiowned shared shared_locked shared_write_locked shared_versioned shared_atomic
 ].map { |m| { mode: m } }
 
+%i[
+  locked_direct_field write_locked_direct_field atomic_ptr_direct_field
+  snapshot_plain borrowed_shared borrowed_write_locked
+  materialized_plain view_plain
+].each do |m|
+  CWM_CELLS << { mode: m, expected: :compile_error }
+end
+
+%i[
+  restrict_plain materialized_distinct
+].each do |m|
+  CWM_CELLS << { mode: m }
+end
+
 FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
   case p[:mode]
   when :locked
@@ -131,6 +145,94 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
       FN main() RETURNS Void ->
           MUTABLE t: Int64 = 1_i64 @shared:atomic;
           ASSERT t == 1_i64, "shared:atomic primitive read";
+          RETURN;
+      END
+    CHT
+  when :locked_direct_field
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @locked;
+          _ = c.value;
+          RETURN;
+      END
+    CHT
+  when :write_locked_direct_field
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @writeLocked;
+          _ = c.value;
+          RETURN;
+      END
+    CHT
+  when :atomic_ptr_direct_field
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @indirect:atomic;
+          _ = c.value;
+          RETURN;
+      END
+    CHT
+  when :restrict_plain
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 };
+          WITH RESTRICT c AS MUTABLE r { r.value = 2_i64; }
+          RETURN;
+      END
+    CHT
+  when :snapshot_plain
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 };
+          WITH SNAPSHOT c AS r { _ = r.value; }
+          RETURN;
+      END
+    CHT
+  when :borrowed_shared
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @shared;
+          WITH BORROWED c AS r { _ = r.value; }
+          RETURN;
+      END
+    CHT
+  when :borrowed_write_locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @writeLocked;
+          WITH BORROWED c AS r { _ = r.value; }
+          RETURN;
+      END
+    CHT
+  when :materialized_plain
+    <<~CHT
+      FN main() RETURNS Void ->
+          n: Int64 = 1_i64;
+          WITH MATERIALIZED VIEW n AS snap { _ = snap; }
+          RETURN;
+      END
+    CHT
+  when :view_plain
+    <<~CHT
+      FN main() RETURNS Void ->
+          n: Int64 = 1_i64;
+          WITH VIEW n AS snap { _ = snap; }
+          RETURN;
+      END
+    CHT
+  when :materialized_distinct
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 1_i64; YIELD 2_i64; };
+          vals: ~Int64[]@set:observable = s |> DISTINCT _;
+          WITH MATERIALIZED VIEW vals AS snap { _ = snap.length(); }
           RETURN;
       END
     CHT

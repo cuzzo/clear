@@ -650,8 +650,6 @@ module MIRLoweringConcurrency
     end
     bg_code = transform_result.code
     fsm_structure = transform_result.structure
-    moved_captures = (analysis&.move_mark_names || Set.new).map(&:to_s) & captured.keys.map(&:to_s)
-    fsm_structure.required_move_guards = moved_captures
     result_type = Type.from_node!(node, context: "FSM BG result").tense_type
     fsm_structure.owned_result_required =
       !!(result_type && T.unsafe(self).ownership_tracked_transfer_type?(result_type))
@@ -674,7 +672,7 @@ module MIRLoweringConcurrency
     # mir-lowering strict ivars
     @current_stream_is_inf = T.let(@current_stream_is_inf, T.untyped)
     @current_stream_local = T.let(@current_stream_local, T.untyped)
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     @rt_name = T.let(@rt_name, T.untyped)
     @stream_gen_counter = T.let(@stream_gen_counter, T.untyped)
     @target = T.let(@target, T.untyped)
@@ -837,8 +835,8 @@ module MIRLoweringConcurrency
   def lower_yield(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @current_stream_is_inf = T.let(@current_stream_is_inf, T.untyped)
-    @current_stream_local = T.let(@current_stream_local, T.untyped)
+    @current_stream_is_inf = T.let(@current_stream_is_inf, T.nilable(T::Boolean))
+    @current_stream_local = T.let(@current_stream_local, T.nilable(String))
     @target = T.let(@target, T.untyped)
     stream_local = @current_stream_local || "__stream_local"
     lowered = with_decl_alloc(:heap) do

@@ -38,7 +38,7 @@ class FunctionSignature
   sig { returns(Type) }
   attr_reader :return_type
 
-  sig { params(val: T.untyped).void }
+  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
   def return_type=(val)
     @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
@@ -160,7 +160,7 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[AST::Param], return_type: T.nilable(Type), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
+  sig { params(params: T::Array[AST::Param], return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,

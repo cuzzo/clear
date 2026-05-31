@@ -50,7 +50,7 @@ RSpec.describe "nil-kill tracer capability matrix" do
     end
   end
 
-  it "method with ensure (punted -> TracePoint fallback)" do
+  it "method with ensure is source wrapped" do
     in_tmp do |dir|
       lib(dir, <<~RUBY)
         require "sorbet-runtime"
