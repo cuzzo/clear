@@ -9,7 +9,7 @@
 
 ## Table of Contents
 - [Project Prioritization](#project-prioritization)
-- [Cross-Detector Convergence (1349)](#cross-detector-convergence-1349)
+- [Cross-Detector Convergence (1366)](#cross-detector-convergence-1366)
 - [Root-Cause Clusters (330)](#root-cause-clusters-330)
 - [Decision Pressure (297)](#decision-pressure-297)
 - [Missing Abstractions (190)](#missing-abstractions-190)
@@ -17,7 +17,7 @@
 - [Semantic Predicate Aliases (3)](#semantic-predicate-aliases-3)
 - [Exact Predicate Aliases (7)](#exact-predicate-aliases-7)
 - [Inconsistent Rename Clones (71)](#inconsistent-rename-clones-71)
-- [Flay Similarity (Type-2/3) (0)](#flay-similarity-type23-0)
+- [Flay Similarity (Type-2/3) (47)](#flay-similarity-type23-47)
 - [Neglected Updates (1988)](#neglected-updates-1988)
 - [Derived-State Staleness (149)](#derivedstate-staleness-149)
 - [Neglected Conditions (10)](#neglected-conditions-10)
@@ -38,58 +38,59 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 - **[tier 2]** [Neglected Updates (1988)](#neglected-updates-1988): co-written state, one write missing -- *POSSIBLE* redundant-state desync
 - **[tier 2]** [Derived-State Staleness (149)](#derivedstate-staleness-149): b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug
 - **[tier 2]** [Inconsistent Rename Clones (71)](#inconsistent-rename-clones-71): pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug
+- **[tier 2]** [Flay Similarity (Type-2/3) (47)](#flay-similarity-type23-47): Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict
 - **[tier 2]** [Neglected Conditions (10)](#neglected-conditions-10): dispatch/conjunction minus one element -- *POSSIBLE* bug
 - **[tier 3]** [Neglected Path Conditions (1858)](#neglected-path-conditions-1858): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
 - **[tier 3]** [Broken Protocols (1461)](#broken-protocols-1461): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
 - **[tier 3]** [False Simplicity (754)](#false-simplicity-754): looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)
 - **[tier 3]** [Fat Unions (8)](#fat-unions-8): case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*
 
-## Cross-Detector Convergence (1349)
+## Cross-Detector Convergence (1366)
 _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest triage signal: agreement outranks any single detector's volume. Tier-weighted (1=3, 2=2, 3=1). **Start here.**_
 
 - `src/mir/lowering/variables.rb:437` (build_var_decl_nodes) -- **7 detectors** [score 13, 101 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/annotator/annotator.rb:5427` (handle_assign_move) -- **7 detectors** [score 13, 54 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/tools/doctor.rb:170` (section_heap) -- **7 detectors** [score 13, 46 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions
+- `src/annotator/annotator.rb:1978` (visit_WhileBindLoop) -- **7 detectors** [score 13, 39 findings]: Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/ast/type.rb:2259` (compute_zig_type) -- **7 detectors** [score 12, 47 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Neglected Path Conditions, Neglected Updates
 - `src/ast/parser.rb:2839` (parse_type_annotation) -- **6 detectors** [score 12, 78 findings]: Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/annotator/annotator.rb:4710` (visit_WithBlock) -- **6 detectors** [score 11, 88 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/tools/formatter.rb:1358` (expand_if_while_for) -- **6 detectors** [score 11, 76 findings]: Derived-State Staleness, False Simplicity, Inconsistent Rename Clones, Missing Abstractions, Neglected Conditions, Neglected Path Conditions
 - `src/annotator/helpers/pipe_analysis.rb:1527` (analyze_concurrent_op) -- **6 detectors** [score 11, 70 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/backends/pipeline_host.rb:3534` (lower_range_fold) -- **6 detectors** [score 11, 51 findings]: Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions
 - `src/annotator/helpers/generic_analysis.rb:229` (validate_type_annotation!) -- **6 detectors** [score 11, 47 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions
-- `src/tools/doctor.rb:170` (section_heap) -- **6 detectors** [score 11, 43 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions
-- `src/annotator/annotator.rb:1978` (visit_WhileBindLoop) -- **6 detectors** [score 11, 38 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/mir/lowering/variables.rb:848` (lower_assignment) -- **6 detectors** [score 11, 26 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/annotator/helpers/capabilities.rb:478` (visit_pre_clauses!) -- **6 detectors** [score 11, 15 findings]: Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions
 - `src/annotator/helpers/pipe_analysis.rb:811` (analyze_pipe_to_named_function) -- **6 detectors** [score 11, 12 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions
+- `src/annotator/annotator.rb:1546` (visit_MatchStatement) -- **6 detectors** [score 10, 148 findings]: Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Neglected Path Conditions, Neglected Updates
 - `src/backends/pipeline_host.rb:308` (substitute_placeholders) -- **6 detectors** [score 10, 78 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/mir/lowering/expressions.rb:484` (lower_smooth) -- **6 detectors** [score 10, 71 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/annotator/annotator.rb:3573` (visit_StructLit) -- **6 detectors** [score 10, 70 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
-- `src/ast/type.rb:2259` (compute_zig_type) -- **6 detectors** [score 10, 44 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/annotator/annotator.rb:3386` (visit_GetField) -- **6 detectors** [score 10, 38 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/mir/fsm_lowering.rb:327` (fsm_owned_transfer_identifier?) -- **5 detectors** [score 12, 11 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Updates, Reification Misses
 - `src/ast/ast.rb:906` (finalize_storage!) -- **5 detectors** [score 11, 55 findings]: Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Updates
+- `src/annotator/helpers/effects.rb:629` (enforce_fallible_returns!) -- **5 detectors** [score 11, 15 findings]: Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Updates
 - `src/mir/cleanup_classifier.rb:109` (stamp_binding_default_scope!) -- **5 detectors** [score 11, 10 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Reification Misses
 - `src/mir/lowering/functions.rb:222` (lower_function_def) -- **5 detectors** [score 10, 132 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator/helpers/function_analysis.rb:182` (resolve_call) -- **5 detectors** [score 10, 108 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/mir/lowering/concurrency.rb:501` (lower_bg_block) -- **5 detectors** [score 10, 57 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/annotator/annotator.rb:2867` (visit_BindExpr) -- **5 detectors** [score 10, 54 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/annotator/helpers/pipe_analysis.rb:288` (analyze_select_family_op) -- **5 detectors** [score 10, 28 findings]: Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Updates
-- `src/mir/hoist.rb:566` (hoist_alloc) -- **5 detectors** [score 10, 26 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Updates
-- ...(+1324 more)
+- ...(+1341 more)
 
 ### By file
-- `src/annotator/annotator.rb` -- 10 detectors across 144 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/ast/ast.rb` -- 10 detectors across 21 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Semantic Predicate Aliases
+- `src/annotator/annotator.rb` -- 11 detectors across 144 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
+- `src/ast/ast.rb` -- 11 detectors across 22 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates, Semantic Predicate Aliases
 - `src/mir/mir_lowering.rb` -- 9 detectors across 74 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/backends/pipeline_host.rb` -- 8 detectors across 63 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/annotator/helpers/pipe_analysis.rb` -- 8 detectors across 53 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/tools/formatter.rb` -- 8 detectors across 59 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Inconsistent Rename Clones, Missing Abstractions, Neglected Conditions, Neglected Path Conditions
+- `src/backends/pipeline_host.rb` -- 9 detectors across 67 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/annotator/helpers/pipe_analysis.rb` -- 9 detectors across 54 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/tools/formatter.rb` -- 9 detectors across 59 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Inconsistent Rename Clones, Missing Abstractions, Neglected Conditions, Neglected Path Conditions
+- `src/ast/parser.rb` -- 9 detectors across 57 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/mir/lowering/control_flow.rb` -- 8 detectors across 35 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/mir/lowering/functions.rb` -- 8 detectors across 37 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/ast/parser.rb` -- 8 detectors across 56 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/mir/lowering/variables.rb` -- 8 detectors across 28 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
+- `src/ast/type.rb` -- 8 detectors across 27 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/mir/lowering/capabilities.rb` -- 8 detectors across 19 method(s): Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Conditions, Neglected Path Conditions, Neglected Updates
 - `src/mir/mir_pass.rb` -- 8 detectors across 22 method(s): Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
+- `src/annotator/helpers/capabilities.rb` -- 8 detectors across 19 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator/helpers/auto_inference.rb` -- 8 detectors across 18 method(s): Broken Protocols, Decision Pressure, Exact Predicate Aliases, False Simplicity, Fat Unions, Missing Abstractions, Neglected Updates, Semantic Predicate Aliases
-- `src/mir/mir_checker.rb` -- 7 detectors across 61 method(s): Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Reification Misses
-- `src/mir/lowering/expressions.rb` -- 7 detectors across 42 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/mir/hoist.rb` -- 7 detectors across 42 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 
 ## Root-Cause Clusters (330)
 _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findings are really one invariant'. Convergence says where to look; this says **what one fix collapses the cluster**. Ranked candidate, not a verdict._
@@ -377,10 +378,35 @@ _pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename b
 - *POSSIBLE* `src/tools/formatter.rb:2434` (emit_record_type) clone of `src/tools/formatter.rb:1326` (expand_if_while_for): ref var `+` spelled ["-", "+"] here
 - ...(+46 more)
 
-## Flay Similarity (Type-2/3) (0)
+## Flay Similarity (Type-2/3) (47)
 _Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict_
 
-None.
+- *POSSIBLE* [type2] mass=340 node=`when` `src/backends/pipeline_rewriter.rb:539` (build_recursive_body) ; `src/backends/pipeline_rewriter.rb:566` (build_recursive_body)
+- *POSSIBLE* [type2] mass=252 node=`defn` `src/annotator/helpers/pipe_analysis.rb:943` (analyze_any_op) ; `src/annotator/helpers/pipe_analysis.rb:965` (analyze_all_op) ; `src/annotator/helpers/pipe_analysis.rb:987` (analyze_count_op)
+- *POSSIBLE* [type2] mass=242 node=`when` `src/backends/pipeline_host.rb:3460` (lower_range_fold) ; `src/backends/pipeline_host.rb:3477` (lower_range_fold)
+- *POSSIBLE* [type2] mass=212 node=`defn` `src/backends/pipeline_host.rb:1100` (lower_min) ; `src/backends/pipeline_host.rb:1126` (lower_max)
+- *POSSIBLE* [type2] mass=210 node=`iter` `src/ast/parser.rb:408` ((top-level)) ; `src/ast/parser.rb:415` ((top-level)) ; `src/ast/parser.rb:422` ((top-level)) ; `src/ast/parser.rb:429` ((top-level)) (+1 more)
+- *POSSIBLE* [type3] mass=192 node=`defn` `src/backends/pipeline_host.rb:280` (ast_node_uses_placeholder?) ; `src/backends/pipeline_host.rb:871` (ast_uses_bare_placeholder?)
+- *POSSIBLE* [type2] mass=188 node=`iter` `src/ast/parser.rb:372` ((top-level)) ; `src/ast/parser.rb:381` ((top-level)) ; `src/ast/parser.rb:390` ((top-level)) ; `src/ast/parser.rb:399` ((top-level))
+- *POSSIBLE* [type2] mass=180 node=`defn` `src/annotator/helpers/pipe_analysis.rb:1062` (analyze_min_op) ; `src/annotator/helpers/pipe_analysis.rb:1085` (analyze_max_op)
+- *POSSIBLE* [type2] mass=166 node=`when` `src/backends/pipeline_host.rb:987` (build_soa_scalar_fold_block) ; `src/backends/pipeline_host.rb:994` (build_soa_scalar_fold_block)
+- *POSSIBLE* [type2] mass=158 node=`or` `src/annotator/annotator.rb:5599` (expr_result_type) ; `src/annotator/helpers/pipe_analysis.rb:157` (higher_order_list_op?)
+- *POSSIBLE* [type2] mass=152 node=`when` `src/backends/pipeline_host.rb:2640` (lower_binding_fold) ; `src/backends/pipeline_host.rb:2650` (lower_binding_fold)
+- *POSSIBLE* [type2] mass=152 node=`cdecl` `src/mir/mir.rb:776` ((top-level)) ; `src/mir/mir.rb:797` ((top-level))
+- *POSSIBLE* [type2] mass=148 node=`defn` `src/mir/thunk_transform/recursive_splitter.rb:168` (match_mutual_base_case) ; `src/mir/thunk_transform/recursive_splitter.rb:214` (match_base_case)
+- *POSSIBLE* [type2] mass=144 node=`defn` `src/mir/fsm_wrapper_emitter.rb:58` (render_io_body) ; `src/mir/fsm_wrapper_emitter.rb:75` (render_b1_body) ; `src/mir/fsm_wrapper_emitter.rb:255` (render_generic_body)
+- *POSSIBLE* [type2] mass=132 node=`if` `src/annotator/helpers/fixable_helpers.rb:105` (emit_registry_mismatch!) ; `src/annotator/helpers/fixable_helpers.rb:144` (emit_typo_suggestion!) ; `src/annotator/helpers/fixable_helpers.rb:212` (emit_variant_typo!)
+- *POSSIBLE* [type3] mass=130 node=`block` `src/annotator/annotator.rb:1896` (visit_WhileLoop) ; `src/annotator/annotator.rb:1972` (visit_WhileBindLoop)
+- *POSSIBLE* [type2] mass=114 node=`iter` `src/ast/std_lib.rb:1162` ((top-level)) ; `src/ast/std_lib.rb:1180` ((top-level)) ; `src/ast/std_lib.rb:1197` ((top-level))
+- *POSSIBLE* [type2] mass=114 node=`hash` `src/tools/doctor.rb:676` (section_locks) ; `src/tools/pprof_converter.rb:203` (convert_locks)
+- *POSSIBLE* [type2] mass=106 node=`if` `src/annotator/annotator.rb:1400` (annotate_struct_pattern!) ; `src/annotator/annotator.rb:1676` (visit_MatchStatement)
+- *POSSIBLE* [type2] mass=104 node=`cdecl` `src/mir/mir.rb:959` ((top-level)) ; `src/mir/mir.rb:973` ((top-level))
+- *POSSIBLE* [type2] mass=102 node=`lasgn` `src/backends/pipeline_host.rb:4556` (lower_concurrent_stream_where) ; `src/backends/pipeline_host.rb:4591` (lower_concurrent_stream_each)
+- *POSSIBLE* [type2] mass=100 node=`if` `src/annotator/helpers/capabilities.rb:488` (visit_pre_clauses!) ; `src/annotator/helpers/effects.rb:663` (enforce_fallible_returns!)
+- *POSSIBLE* [type2] mass=99 node=`defn` `src/mir/mir.rb:716` (body_slots) ; `src/mir/mir.rb:736` (body_slots) ; `src/mir/mir.rb:2321` (body_slots)
+- *POSSIBLE* [type2] mass=94 node=`if` `src/ast/type.rb:2105` (parse_raw_input) ; `src/ast/type.rb:2117` (parse_raw_input)
+- *POSSIBLE* [type2] mass=90 node=`lasgn` `src/backends/pipeline_host.rb:4731` (lower_concurrent_list_count) ; `src/backends/pipeline_host.rb:4805` (lower_concurrent_list_each)
+- ...(+22 more)
 
 ## Neglected Updates (1988)
 _co-written state, one write missing -- *POSSIBLE* redundant-state desync_
@@ -569,7 +595,7 @@ _case dispatch over class consts whose arms read mostly variant-invariant member
 ## Run Summary
 - Files analyzed: 111
 - Detectors: 14 (all shipped, self-tested)
-- Convergence: 1349 unit(s) flagged by >=2 independent detectors
+- Convergence: 1366 unit(s) flagged by >=2 independent detectors
 - Root-cause clusters: 330 (one fix collapses each)
-- Total candidates: 6820
+- Total candidates: 6867
 - Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to; Flay similarity is an optional external signal consumed read-only (see docs/agents/design.md)

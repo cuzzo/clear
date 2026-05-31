@@ -38,6 +38,20 @@ RSpec.describe "annotator branch gap burndown" do
     ann
   end
 
+  def parse_source(source)
+    Parser.new(Lexer.new(source).tokenize, source).parse
+  end
+
+  def function_from(source, name)
+    parse_source(source).statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == name }
+  end
+
+  def auto_type
+    t = Type.new(:Auto, auto: true)
+    t.auto_token = token(:TYPE_ID, "Auto")
+    t
+  end
+
   def direct_errors(ann)
     ann.instance_variable_get(:@direct_errors)
   end
@@ -750,5 +764,453 @@ RSpec.describe "annotator branch gap burndown" do
     ])
 
     expect(sources).to include("RAISE", "OR RAISE", "fallible_fn", "fallible_method()", "fallible_static", "FREEZE")
+  end
+
+  it "covers effect maybe-resolution branch matrix directly" do
+    ann = SemanticAnnotator.new(source_code: "")
+    families = Hash.new { |h, caller| h[caller] = Hash.new { |hh, callee| hh[callee] = [] } }
+    ann.instance_variable_set(:@call_site_arg_families, families)
+
+    plain = Set[EffectTracker::HEAP]
+    expect(ann.send(:resolve_maybe_effects, plain, "caller", "plain")).to equal(plain)
+
+    maybe = Set[EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE]
+    expect(ann.send(:resolve_maybe_effects, maybe, "caller", "uncalled")).to equal(maybe)
+
+    families["caller"]["locked"] << [Set[:LOCKED]]
+    locked = ann.send(:resolve_maybe_effects, maybe, "caller", "locked")
+    expect(locked).to include(EffectTracker::BLOCKING, EffectTracker::CONTENTION)
+    expect(locked).not_to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE)
+
+    families["caller"]["atomic"] << [Set[:ATOMIC]]
+    atomic = ann.send(:resolve_maybe_effects, maybe, "caller", "atomic")
+    expect(atomic).to include(EffectTracker::CONTENTION)
+    expect(atomic).not_to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE)
+
+    families["caller"]["none"] << [Set.new]
+    none = ann.send(:resolve_maybe_effects, maybe, "caller", "none")
+    expect(none).to include(EffectTracker::BLOCKING_MAYBE)
+    expect(none).not_to include(EffectTracker::CONTENTION_MAYBE)
+
+    families["caller"]["poly"] << [Set[:LOCKED, :ATOMIC]]
+    poly = ann.send(:resolve_maybe_effects, maybe, "caller", "poly")
+    expect(poly).to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE)
+    expect(poly).not_to include(EffectTracker::BLOCKING, EffectTracker::CONTENTION)
+  end
+
+  it "covers reentrance validation and mutual thunk fix branches directly" do
+    ann = quiet_annotator
+    direct = function_from(<<~CHT, "direct")
+      FN direct(n: Int64) RETURNS !Int64
+        EFFECTS REENTRANT:NOT_LOGICAL ->
+        RETURN n;
+      END
+    CHT
+    mutual = function_from(<<~CHT, "mutual")
+      FN mutual(n: Int64) RETURNS !Int64
+        EFFECTS REENTRANT:NOT_LOGICAL ->
+        RETURN other(n);
+      END
+    CHT
+    other = function_from(<<~CHT, "other")
+      FN other(n: Int64) RETURNS !Int64
+        EFFECTS REENTRANT ->
+        RETURN mutual(n);
+      END
+    CHT
+    direct.reentrance_kind = :reentrant_not_logical
+    mutual.reentrance_kind = :reentrant_not_logical
+    other.reentrance_kind = :reentrant
+    ann.instance_variable_set(:@fn_nodes, { "direct" => direct, "mutual" => mutual, "other" => other })
+    ann.instance_variable_set(:@fn_direct_effects, { "direct" => Set[EffectTracker::REENTRANT], "mutual" => Set.new, "other" => Set.new })
+    ann.instance_variable_set(:@call_graph, { "direct" => Set.new, "mutual" => Set["other"], "other" => Set["mutual"] })
+
+    ann.send(:validate_not_logical_recursion!)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_NOT_LOGICAL_BUT_RECURSIVE)
+
+    max_depth = function_from(<<~CHT, "bounded")
+      FN bounded(n: Int64) RETURNS !Int64
+        EFFECTS REENTRANT:MAX_DEPTH(8) ->
+        RETURN partner(n);
+      END
+    CHT
+    partner = function_from(<<~CHT, "partner")
+      FN partner(n: Int64) RETURNS !Int64
+        EFFECTS REENTRANT ->
+        RETURN bounded(n);
+      END
+    CHT
+    max_depth.reentrance_kind = :reentrant_max_depth
+    max_depth.max_depth_n = 8
+    partner.reentrance_kind = :reentrant
+    ann.instance_variable_set(:@fn_nodes, { "bounded" => max_depth, "partner" => partner })
+    ann.instance_variable_set(:@fn_direct_effects, { "bounded" => Set.new, "partner" => Set.new })
+    ann.instance_variable_set(:@call_graph, { "bounded" => Set["partner"], "partner" => Set["bounded"] })
+    ann.send(:validate_max_depth_mutual_cycle!)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
+
+    lonely = function_from(<<~CHT, "lonely")
+      FN lonely(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN n;
+      END
+    CHT
+    lonely.reentrance_kind = :reentrant_thunk
+    ann.instance_variable_set(:@fn_nodes, { "lonely" => lonely })
+    ann.instance_variable_set(:@call_graph, { "lonely" => Set.new })
+    expect(ann.send(:try_stamp_mutual_thunk_plan!, lonely)).to eq(false)
+
+    a = function_from(<<~CHT, "a")
+      FN a(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN b(n);
+      END
+    CHT
+    b = function_from(<<~CHT, "b")
+      FN b(n: Int64) RETURNS Bool
+        EFFECTS REENTRANT:THUNK ->
+        RETURN TRUE;
+      END
+    CHT
+    a.reentrance_kind = :reentrant_thunk
+    b.reentrance_kind = :reentrant_thunk
+    ann.instance_variable_set(:@fn_nodes, { "a" => a, "b" => b })
+    ann.instance_variable_set(:@call_graph, { "a" => Set["b"], "b" => Set["a"] })
+    expect(ann.send(:try_stamp_mutual_thunk_plan!, a)).to eq(false)
+
+    c = function_from(<<~CHT, "c")
+      FN c(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN d(n);
+      END
+    CHT
+    d = function_from(<<~CHT, "d")
+      FN d(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN c(n);
+      END
+    CHT
+    c.reentrance_kind = :reentrant_thunk
+    d.reentrance_kind = :reentrant_thunk
+    ann.instance_variable_set(:@fn_nodes, { "c" => c, "d" => d })
+    ann.instance_variable_set(:@call_graph, { "c" => Set["d"], "d" => Set["c"] })
+    ann.send(:emit_mutual_thunk_unsupported!, c)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
+
+    no_span = function_from(<<~CHT, "no_span")
+      FN no_span(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN no_edit(n);
+      END
+    CHT
+    no_edit = function_from(<<~CHT, "no_edit")
+      FN no_edit(n: Int64) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        RETURN no_span(n);
+      END
+    CHT
+    [no_span, no_edit].each do |fn|
+      fn.reentrance_kind = :reentrant_thunk
+      fn.effects_span = nil
+      fn.return_type_token = nil
+    end
+    ann.instance_variable_set(:@fn_nodes, { "no_span" => no_span, "no_edit" => no_edit })
+    ann.instance_variable_set(:@call_graph, { "no_span" => Set["no_edit"], "no_edit" => Set["no_span"] })
+    ann.send(:emit_mutual_thunk_unsupported!, no_span)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_MUTUAL_THUNK_UNSUPPORTED)
+  end
+
+  it "covers pipe window, distinct, shard, and fixable-helper branches directly" do
+    ann = quiet_annotator
+    ann.define_singleton_method(:visit) do |node|
+      next unless node.respond_to?(:full_type=)
+      inferred = case node
+                 when AST::Literal
+                   node.type == :STRING ? Type.new(:String) : Type.new(:Int64)
+                 else
+                   Type.new(:Int64)
+                 end
+      node.full_type = inferred
+    end
+    ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "pipe", return_type: Type.new(:Void), lifetime: [], type_params: [])
+
+    left = AST::Identifier.new(token, "xs")
+    left.full_type = Type.new(:"Int64[]")
+    neg_size = AST::Literal.new(token(:NUMBER, "-1_i64"), :INT64, -1, :stack)
+    bad_time = AST::Literal.new(token(:STRING, "0ms"), :STRING, "0ms", :rodata)
+    expr = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    expr.full_type = Type.new(:Int64)
+    batch = AST::BatchWindowOp.new(token(:WINDOW, "WINDOW"), {
+      "bogus" => expr,
+      "size" => neg_size,
+      "time" => bad_time
+    }, expr)
+    ann.send(:analyze_batch_window_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, batch))
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:WINDOW_BAD_OPTION, :WINDOW_SIZE_NEEDS_POSITIVE, :WINDOW_TIME_NEEDS_POSITIVE)
+
+    no_opts = AST::BatchWindowOp.new(token(:WINDOW, "WINDOW"), {}, expr)
+    ann.send(:analyze_batch_window_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, no_opts))
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:WINDOW_NEEDS_SIZE_OR_TIME)
+
+    distinct_ann = quiet_annotator
+    observed_terminals = []
+    distinct_ann.define_singleton_method(:visit) { |node| node.full_type = Type.new(:String) if node.respond_to?(:full_type=) }
+    distinct_ann.define_singleton_method(:require_array_input!) { |_node, _op, **_kwargs| nil }
+    distinct_ann.define_singleton_method(:finite_stream_source?) { |_node| true }
+    distinct_ann.define_singleton_method(:finite_stream_element_type) { |_node| Type.new(:Int64) }
+    distinct_ann.define_singleton_method(:mark_observable_terminal!) do |_node, **kwargs|
+      observed_terminals << kwargs
+      nil
+    end
+    distinct_ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "distinct", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    bounded_left = AST::Identifier.new(token, "stream")
+    bounded_left.full_type = Type.new(:"~Int64[3]")
+    key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
+    key.full_type = Type.new(:String)
+    distinct_ann.send(:analyze_distinct_op, AST::BinaryOp.new(token(:PIPE, "|>"), bounded_left, :SMOOTH, AST::DistinctOp.new(token(:DISTINCT, "DISTINCT"), key)))
+
+    array_left = AST::Identifier.new(token, "array")
+    array_left.full_type = Type.new(:"Int64[]")
+    distinct_ann.define_singleton_method(:finite_stream_source?) { |_node| false }
+    distinct_ann.send(:analyze_distinct_op, AST::BinaryOp.new(token(:PIPE, "|>"), array_left, :SMOOTH, AST::DistinctOp.new(token(:DISTINCT, "DISTINCT"), key)))
+    expect(observed_terminals.map { |t| t[:collection] }).to eq([:set, :set])
+
+    shard_ann = quiet_annotator
+    shard_ann.define_singleton_method(:visit) { |node| node.full_type ||= Type.new(:String) if node.respond_to?(:full_type=) }
+    bad_left = AST::Identifier.new(token, "scalar")
+    bad_left.full_type = Type.new(:Int64)
+    bad_target = AST::Identifier.new(token, "plain_map")
+    bad_target.full_type = Type.new(:HashMap)
+    bad_key = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    bad_key.full_type = Type.new(:Int64)
+    shard_ann.send(:analyze_shard_op, AST::BinaryOp.new(token(:PIPE, "|>"), bad_left, :SMOOTH, AST::ShardOp.new(token(:SHARD, "SHARD"), bad_target, bad_key)))
+
+    map_type = Type.new(:HashMap)
+    map_type.define_singleton_method(:sharded?) { true }
+    map_type.define_singleton_method(:key_type) { Type.new(:String) }
+    target = AST::Identifier.new(token, "sharded")
+    target.full_type = map_type
+    target.symbol = SymbolEntry.new(reg: nil, type: map_type, mutable: true, storage: :heap)
+    shard_ann.send(:analyze_shard_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::ShardOp.new(token(:SHARD, "SHARD"), target, bad_key)))
+
+    numeric_map = Type.new(:HashMap)
+    numeric_map.define_singleton_method(:sharded?) { true }
+    numeric_map.define_singleton_method(:key_type) { Type.new(:Int64) }
+    numeric_target = AST::Identifier.new(token, "numeric")
+    numeric_target.full_type = numeric_map
+    numeric_target.symbol = SymbolEntry.new(reg: nil, type: numeric_map, mutable: true, storage: :heap)
+    string_key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
+    string_key.full_type = Type.new(:String)
+    shard_ann.send(:analyze_shard_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::ShardOp.new(token(:SHARD, "SHARD"), numeric_target, string_key)))
+    expect(direct_errors(shard_ann).map { |e| e[1] }).to include(:SHARD_NEEDS_RANGE_OR_COLLECTION, :SHARD_TARGET_BAD, :SHARD_KEY_NEEDS_STRING)
+
+    fix_ann = quiet_annotator
+    fix_ann.instance_variable_set(:@source_code, "WITH SNAPSHOT cell AS MUTABLE guard {\n  guard.value;\n}\n")
+    with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [], [])
+    fix_ann.send(:emit_with_guard_mutable_mutated!, with_node, ["guard"], "is")
+    expect(direct_errors(fix_ann).map { |e| e[1] }).to include(:fixable)
+
+    auto_decl = AST::VarDecl.new(token(:VAR_ID, "item"), "item", Type.new(:"Int64[]"), expr, false)
+    slot = AutoConstraintCollector::Slot.new(kind: :local, decl_node: auto_decl, sources: [], auto_token: token(:TYPE_ID, "Auto"))
+    fix_ann.send(:emit_auto_shape_resolved_finding!, auto_decl, slot)
+    expect(direct_errors(fix_ann).map { |e| e[1] }).to include(:fixable)
+  end
+
+  it "covers auto constraint collection branch matrix directly" do
+    callee = AST::FunctionDef.new(token, "callee", [
+      AST::Param.new(name: "x", type: auto_type),
+      AST::Param.new(name: "y", type: Type.new(:Int64))
+    ], [], auto_type, nil, [], [], nil, :package)
+    collector = AutoConstraintCollector.new({ "callee" => callee })
+    collector.send(:register_signature_slots)
+    slots = collector.instance_variable_get(:@slots)
+
+    arg = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    collector.send(:record_call_site, AST::FuncCall.new(token, "missing", [arg]))
+    collector.send(:record_call_site, AST::FuncCall.new(token, "callee", []))
+    collector.send(:record_call_site, AST::FuncCall.new(token, "callee", [arg]))
+    expect(slots[AutoSlotId.param("callee", 0)].sources).to include(arg)
+
+    ret = AST::ReturnNode.new(token(:RETURN, "RETURN"), arg)
+    collector.send(:record_return, AST::ReturnNode.new(token(:RETURN, "RETURN"), nil), callee)
+    collector.send(:record_return, ret, callee)
+    expect(slots[AutoSlotId.return("callee")].sources).to include(arg)
+
+    collector.instance_variable_set(:@local_decls, {})
+    scalar_value = AST::Literal.new(token(:STRING, "s"), :STRING, "s", :rodata)
+    scalar_decl = AST::VarDecl.new(token(:VAR_ID, "scalar"), "scalar", auto_type, scalar_value, true)
+    collector.send(:record_local, scalar_decl)
+    scalar_slot_id = AutoSlotId.local(scalar_decl)
+    expect(slots[scalar_slot_id].sources).to include(scalar_value)
+
+    reassigned = AST::Literal.new(token(:NUMBER, "2_i64"), :INT64, 2, :stack)
+    collector.send(:record_local, AST::BindExpr.new(token(:VAR_ID, "scalar"), "scalar", nil, reassigned))
+    expect(slots[scalar_slot_id].sources).to include(reassigned)
+    collector.send(:record_local, AST::BindExpr.new(token(:VAR_ID, "unknown"), "unknown", nil, reassigned))
+
+    list_decl = AST::VarDecl.new(token(:VAR_ID, "items"), "items", auto_type, AST::ListLit.new(token(:LBRACKET, "["), [], :stack), true)
+    collector.send(:record_local, list_decl)
+    list_slot = slots[AutoSlotId.list_element(list_decl)]
+    list_items = [
+      AST::Literal.new(token(:NUMBER, "3_i64"), :INT64, 3, :stack),
+      AST::Literal.new(token(:NUMBER, "4_i64"), :INT64, 4, :stack)
+    ]
+    collector.send(:record_reassignment_sources, AutoSlotId.list_element(list_decl), AST::ListLit.new(token(:LBRACKET, "["), list_items, :stack))
+    expect(list_slot.sources).to include(*list_items)
+
+    map_decl = AST::VarDecl.new(token(:VAR_ID, "map"), "map", auto_type, AST::HashLit.new(token(:LBRACE, "{"), [], :stack), true)
+    collector.send(:record_local, map_decl)
+    key_slot = slots[AutoSlotId.map_key(map_decl)]
+    val_slot = slots[AutoSlotId.map_value(map_decl)]
+    key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
+    val = AST::Literal.new(token(:NUMBER, "5_i64"), :INT64, 5, :stack)
+    collector.send(:record_reassignment_sources, AutoMapShapeEntry.new(key: AutoSlotId.map_key(map_decl), value: AutoSlotId.map_value(map_decl)), AST::HashLit.new(token(:LBRACE, "{"), [[key, val]], :stack))
+    expect(key_slot.sources).to include(key)
+    expect(val_slot.sources).to include(val)
+
+    shape_collector = ShapeEvidenceCollector.new(slots, {})
+    shape_slots = AutoShapeSlots.new(list: list_slot, key: key_slot, value: val_slot)
+    target = AST::Identifier.new(token, "items")
+    shape_collector.send(:record_method_call, AST::MethodCall.new(token, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack), "append", [arg]), {})
+    shape_collector.send(:record_method_call, AST::MethodCall.new(token, target, "append", [arg]), {})
+    shape_collector.send(:record_method_call, AST::MethodCall.new(token, target, "append", [arg]), { "items" => shape_slots })
+    shape_collector.send(:record_method_call, AST::MethodCall.new(token, target, "insert", [key, val]), { "items" => shape_slots })
+    shape_collector.send(:record_method_call, AST::MethodCall.new(token, target, "put", [key, val]), { "items" => shape_slots })
+    expect(list_slot.sources).to include(arg)
+    expect(key_slot.sources).to include(key)
+    expect(val_slot.sources).to include(val)
+
+    indexed = AST::GetIndex.new(token(:LBRACKET, "["), target, key)
+    shape_collector.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), AST::Identifier.new(token, "plain"), val), { "items" => shape_slots })
+    shape_collector.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), indexed, val), {})
+    shape_collector.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), indexed, val), { "items" => AutoShapeSlots.new(list: list_slot, key: nil, value: nil) })
+    shape_collector.send(:record_index_assign, AST::Assignment.new(token(:EQ, "="), indexed, val), { "items" => AutoShapeSlots.new(list: nil, key: key_slot, value: val_slot) })
+    expect(list_slot.sources).to include(val)
+    expect(key_slot.sources).to include(key)
+    expect(val_slot.sources).to include(val)
+  end
+
+  it "covers fixable helper branch matrix directly" do
+    ann = quiet_annotator
+    ann.instance_variable_set(:@source_code, [
+      "MUTABLE local: Int64 @local = 1_i64;",
+      "other: Byte = 1000_i64;",
+      "wide = 1000_i8;",
+      "cell: Int64 @shared:atomic = 0_i64;"
+    ].join("\n"))
+
+    reg = AST::VarDecl.new(token(:MUTABLE, "MUTABLE"), "local", Type.new(:Int64), nil, true)
+    reg.token.line = 1
+    reg.token.column = 1
+    ann.send(:emit_mutable_unused_finding!, reg, "local")
+    ann.send(:emit_mutable_unused_finding!, AST::VarDecl.new(token(:VAR_ID, "plain"), "plain", Type.new(:Int64), nil, true), "plain")
+    expect(ann.send(:levenshtein, "", "abc")).to eq(3)
+    expect(ann.send(:levenshtein, "abc", "")).to eq(3)
+
+    ann.send(:emit_local_never_shared_finding!, { var: "local", line: 1, column: 1 })
+    ann.send(:emit_local_never_shared_finding!, { var: "missing", line: 99, column: 1 })
+
+    overflow_suffix = AST::Literal.new(token(:NUMBER, "1000_i8"), :INT64, 1000, :stack)
+    overflow_suffix.token.line = 3
+    overflow_suffix.token.column = 8
+    ann.send(:emit_int_overflow_error!, overflow_suffix, 1000, :Int8, -128, 127)
+    overflow_annotation = AST::Literal.new(token(:NUMBER, "1000_i64"), :INT64, 1000, :stack)
+    overflow_annotation.token.line = 2
+    overflow_annotation.token.column = 15
+    ann.send(:emit_int_overflow_error!, overflow_annotation, 1000, :Byte, 0, 255)
+
+    close = token(:TYPE_ID, "Inpug")
+    ann.send(:emit_registry_mismatch!, close, :Inpug, [:Input], "bad registry", "known type")
+    ann.send(:emit_registry_mismatch!, token(:TYPE_ID, "zzzz"), :zzzz, [:Input], "bad registry", "known type")
+
+    ann.send(:emit_variant_typo!, FixableHelper::AnchorToken.new(1, 1), "Alpa", [:Alpha], "bad variant", "known variant")
+    ann.send(:emit_variant_typo!, FixableHelper::AnchorToken.new(1, 1), "zzzz", [:Alpha], "bad variant", "known variant")
+
+    match = AST::MatchStatement.new(token(:MATCH, "MATCH"), AST::Identifier.new(token, "x"), [], nil, [], nil, false, nil)
+    ann.send(:emit_match_partial_fix!, match, :MATCH_NON_EXHAUSTIVE, kind: "union", name: "Choice", missing: "Other")
+    no_tok_match = AST::MatchStatement.new(nil, AST::Identifier.new(token, "x"), [], nil, [], nil, false, nil)
+    ann.send(:emit_match_partial_fix!, no_tok_match, :MATCH_NON_EXHAUSTIVE, kind: "union", name: "Choice", missing: "Other")
+
+    borrowed = AST::Identifier.new(token, "borrowed")
+    borrowed.full_type = Type.new(:String)
+    ann.send(:emit_return_borrowed_no_copy_error!, borrowed)
+    borrowed_no_tok = AST::Identifier.new(nil, "borrowed")
+    borrowed_no_tok.full_type = Type.new(:String)
+    ann.send(:emit_return_borrowed_no_copy_error!, borrowed_no_tok)
+
+    fn = AST::FunctionDef.new(token, "mutates", [], [], Type.new(:Void), nil, [], [], nil, :package)
+    fn.name_token = token(:VAR_ID, "mutates")
+    ann.send(:emit_style_mutable_param_needs_bang!, fn)
+    fn.name_token = nil
+    ann.send(:emit_style_mutable_param_needs_bang!, fn)
+
+    scope = Scope.new
+    decl_tok = token(:VAR_ID, "cell")
+    decl_tok.line = 4
+    decl_tok.column = 1
+    cell_decl = AST::VarDecl.new(decl_tok, "cell", Type.new(:Int64), nil, true)
+    cell_sym = SymbolEntry.new(reg: cell_decl, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :atomic)
+    scope.locals["cell"] = cell_sym
+    expect(ann.send(:build_declare_mutable_fix, "missing", scope)).to be_nil
+    expect(ann.send(:build_atomic_escape_migration_fix, cell_sym, "cell")).not_to be_nil
+
+    codes = direct_errors(ann).map { |e| e[1] }
+    expect(codes.count(:fixable)).to be >= 8
+    expect(codes).to include(:REGISTRY_MISMATCH_REJECTED, :TYPO_SUGGESTION_REJECTED, :MATCH_NON_EXHAUSTIVE,
+      :RETURN_BORROWED_NO_COPY_OR_LIFETIME, :STYLE_MUTABLE_PARAM_NEEDS_BANG)
+  end
+
+  it "covers error selector resolution branch matrix directly" do
+    ann = quiet_annotator
+    node = AST::WithBlock.new(token(:WITH, "WITH"), [
+      AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock"))
+    ], [])
+    clause = {
+      token: token(:ON, "ON"),
+      retries: true,
+      selectors: [
+        { form: :kind, name: :Transient, token: token(:TYPE_ID, "Transient") },
+        { form: :kind, name: :Transint, token: token(:TYPE_ID, "Transint") },
+        { form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout") },
+        { form: :type, name: :MadeUpFailure, token: token(:TYPE_ID, "MadeUpFailure") },
+        { form: :message, name: :ignored, token: token(:STRING, "\"x\"") },
+      ]
+    }
+
+    ann.send(:resolve_error_selectors!, node, clause)
+
+    expect(clause[:matched_types]).to include(:LockTimeout, :LockCycle)
+    expect(clause[:bubble_types]).to include(:Deadlock)
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:REGISTRY_MISMATCH_REJECTED)
+  end
+
+  it "covers union method and schema validation branch matrix directly" do
+    ann = quiet_annotator
+    scope = Scope.new
+    ann.define_singleton_method(:lookup_scope_for) { |_name| scope }
+
+    scope.locals["not_a_function"] = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: false, storage: :stack)
+    short_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+    scope.locals["short"] = SymbolEntry.new(reg: nil, type: short_sig, mutable: false, storage: :stack)
+    no_return_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    scope.locals["no_return"] = SymbolEntry.new(reg: nil, type: no_return_sig, mutable: false, storage: :stack)
+
+    union = AST::UnionDef.new(token(:UNION, "UNION"), "Choice", {}, :package)
+    union.methods = [
+      { token: token(:VAR_ID, "not_a_function"), name: "not_a_function", params: [], return_type: Type.new(:Int64) },
+      { token: token(:VAR_ID, "short"), name: "short", params: [{ name: "x", type: Type.new(:Int64) }], return_type: Type.new(:Int64) },
+      { token: token(:VAR_ID, "no_return"), name: "no_return", params: [], return_type: nil },
+    ]
+
+    ann.send(:validate_union_methods!, union)
+
+    lit_token = token(:LBRACE, "{")
+    lit_token.column = 20
+    lit = AST::UnionVariantLit.new(lit_token, "Choice", "Missng", {}, :stack)
+    schema = Schemas::UnionSchema.new(variants: { "Present" => Schemas::InlineStructVariant.new(fields: {}) })
+    ann.send(:validate_union_schema!, lit, schema)
+
+    codes = direct_errors(ann).map { |e| e[1] }
+    expect(codes).to include(:UNION_METHOD_MISSING, :TYPO_SUGGESTION_REJECTED)
   end
 end

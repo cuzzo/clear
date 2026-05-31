@@ -7,15 +7,15 @@
 
 ## Table of Contents
 - [Project Prioritization](#project-prioritization)
-- [Hotspots (79)](#hotspots-79)
-- [Fixed But Unmeasured (779)](#fixed-but-unmeasured-779)
+- [Hotspots (56)](#hotspots-56)
+- [Fixed But Unmeasured (8)](#fixed-but-unmeasured-8)
 - [Run Summary](#run-summary)
 
 ## Project Prioritization
 - The single highest-risk file is **`src/mir/mir_lowering.rb`** (hotspot=0.1498: fix_norm=1.0, branch gap=15.0%).
 - 2 file(s) are within 50% of the top score (hotspot >= 0.0749); triage those first.
 
-## Hotspots (79)
+## Hotspots (56)
 _normalized fix-churn x branch-gap; highest = most likely defect source._
 
 | # | file | hotspot | fix_norm | branch gap | uncovered/total |
@@ -46,71 +46,39 @@ _normalized fix-churn x branch-gap; highest = most likely defect source._
 | 24 | `src/mir/fsm_transform/suspend_resolvers.rb` | 0.012 | 0.035 | 34.7% | 17/49 |
 | 25 | `src/mir/lowering/capabilities.rb` | 0.0115 | 0.052 | 22.1% | 57/258 |
 | 26 | `src/ast/diagnostic_buckets.rb` | 0.011 | 0.011 | 100.0% | 8/8 |
-| 27 | `tools/fuzz/templates/takes_move_modality.rb` | 0.0103 | 0.093 | 11.1% | 1/9 |
-| 28 | `src/mir/fiber_ctx_builder.rb` | 0.0102 | 0.046 | 22.1% | 15/68 |
-| 29 | `src/annotator/helpers/function_analysis.rb` | 0.0092 | 0.051 | 18.0% | 79/438 |
-| 30 | `src/mir/ownership_graph.rb` | 0.0088 | 0.039 | 22.4% | 17/76 |
-| 31 | `src/annotator/helpers/method_analysis.rb` | 0.0087 | 0.051 | 17.2% | 11/64 |
-| 32 | `src/mir/lowering/variables.rb` | 0.0087 | 0.051 | 17.1% | 77/450 |
-| 33 | `tools/fuzz/templates/collection_sink_escape_matrix.rb` | 0.0083 | 0.025 | 33.3% | 7/21 |
-| 34 | `src/ast/scope.rb` | 0.0083 | 0.035 | 23.8% | 15/63 |
-| 35 | `src/mir/pre_mir_type_check.rb` | 0.0081 | 0.021 | 38.5% | 10/26 |
-| 36 | `tools/fuzz/templates/infallible_signature.rb` | 0.0077 | 0.056 | 13.8% | 4/29 |
-| 37 | `tools/fuzz/templates/ownership_surface_smoke.rb` | 0.0068 | 0.036 | 18.8% | 9/48 |
-| 38 | `tools/fuzz/templates/list_append_modality.rb` | 0.0063 | 0.038 | 16.7% | 1/6 |
-| 39 | `src/mir/lowering/control_flow.rb` | 0.0062 | 0.026 | 23.9% | 85/355 |
-| 40 | `src/backends/pipeline_rewriter.rb` | 0.0059 | 0.024 | 24.6% | 45/183 |
+| 27 | `src/mir/fiber_ctx_builder.rb` | 0.0102 | 0.046 | 22.1% | 15/68 |
+| 28 | `src/annotator/helpers/function_analysis.rb` | 0.0092 | 0.051 | 18.0% | 79/438 |
+| 29 | `src/mir/ownership_graph.rb` | 0.0088 | 0.039 | 22.4% | 17/76 |
+| 30 | `src/annotator/helpers/method_analysis.rb` | 0.0087 | 0.051 | 17.2% | 11/64 |
+| 31 | `src/mir/lowering/variables.rb` | 0.0087 | 0.051 | 17.1% | 77/450 |
+| 32 | `src/ast/scope.rb` | 0.0083 | 0.035 | 23.8% | 15/63 |
+| 33 | `src/mir/pre_mir_type_check.rb` | 0.0081 | 0.021 | 38.5% | 10/26 |
+| 34 | `src/mir/lowering/control_flow.rb` | 0.0062 | 0.026 | 23.9% | 85/355 |
+| 35 | `src/backends/pipeline_rewriter.rb` | 0.0059 | 0.024 | 24.6% | 45/183 |
+| 36 | `src/mir/capture_strategy.rb` | 0.0058 | 0.018 | 31.7% | 19/60 |
+| 37 | `src/mir/test_lowering.rb` | 0.0056 | 0.033 | 17.0% | 8/47 |
+| 38 | `src/ast/fixable_error.rb` | 0.0056 | 0.01 | 57.1% | 8/14 |
+| 39 | `src/mir/lowering/literals.rb` | 0.0055 | 0.026 | 21.2% | 11/52 |
+| 40 | `src/annotator/annotator.rb` | 0.005 | 0.025 | 20.2% | 475/2346 |
 
-- ...(+39 more)
+- ...(+16 more)
 
-## Fixed But Unmeasured (779)
+## Fixed But Unmeasured (8)
 _files with recurring fixes but NO branch-coverage data -- recurring-fix code the corpus does not measure at all; itself a risk._
 
 - `src/annotator.rb` (fix_norm=0.667)
-- `examples/minivm/bc_emitter.rb` (fix_norm=0.475)
-- `zig/runtime/runtime-header.zig` (fix_norm=0.298)
-- `spec/mir_lowering_spec.rb` (fix_norm=0.209)
-- `sorbet/rbi/clear-attr-accessors.rbi` (fix_norm=0.197)
-- `spec/transpiler_spec.rb` (fix_norm=0.175)
-- `examples/minivm/_bc_runner.cht` (fix_norm=0.154)
-- `zig/runtime/scheduler.zig` (fix_norm=0.147)
-- `clear` (fix_norm=0.14)
-- `spec/annotator_spec.rb` (fix_norm=0.135)
-- `zig/runtime/stream-test.zig` (fix_norm=0.125)
-- `docs/agents/vm-bugs.md` (fix_norm=0.124)
-- `zig/lib/parking-lot.zig` (fix_norm=0.122)
-- `spec/loop_frame_analysis_spec.rb` (fix_norm=0.109)
-- `zig/runtime/parking-lot-loom.zig` (fix_norm=0.099)
-- `zig/lib/data-structures.zig` (fix_norm=0.098)
-- `examples/minivm/register_bc_emitter.rb` (fix_norm=0.089)
-- `zig/parking-lot-loom-test.zig` (fix_norm=0.085)
-- `spec/clear_fmt_spec.rb` (fix_norm=0.083)
-- `spec/generics_spec.rb` (fix_norm=0.082)
-- `.github/workflows/ci.yml` (fix_norm=0.075)
 - `src/tools/formatter.rb` (fix_norm=0.073)
-- `spec/mir_checker_spec.rb` (fix_norm=0.072)
-- `transpile-tests/known-failing/README.md` (fix_norm=0.072)
-- `spec/mir_emitter_spec.rb` (fix_norm=0.072)
-- `examples/minivm/docs/agents/compiler-bug-root-causes.md` (fix_norm=0.071)
-- `examples/minivm/docs/agents/stack-vm-fiber-replication.md` (fix_norm=0.071)
-- `zig/build.zig` (fix_norm=0.07)
-- `tools/fuzz/README.md` (fix_norm=0.068)
-- `spec/clear_fix_spec.rb` (fix_norm=0.067)
-- `zig/runtime/cleanup-test.zig` (fix_norm=0.066)
-- `zig/runtime/queues.zig` (fix_norm=0.064)
-- `tools/bc_lower_coverage.rb` (fix_norm=0.064)
-- `spec/concurrency_spec.rb` (fix_norm=0.062)
-- `spec/cleanup_plan_spec.rb` (fix_norm=0.061)
-- `CLAUDE.md` (fix_norm=0.059)
-- `spec/escape_promotion_matrix_spec.rb` (fix_norm=0.056)
-- `tools/fuzz/surface_registry.rb` (fix_norm=0.056)
-- `benchmarks/runner.rb` (fix_norm=0.055)
-- `benchmarks/24_json_api/server.cht` (fix_norm=0.05)
+- `src/tools/lint_fix_rewriter.rb` (fix_norm=0.022)
+- `src/tools/fmt_verifier.rb` (fix_norm=0.021)
+- `src/tools/method_rewriter.rb` (fix_norm=0.021)
+- `src/tools/pprof.rb` (fix_norm=0.012)
+- `src/tools/stack_verifier.rb` (fix_norm=0.011)
+- `src/tools/pprof_converter.rb` (fix_norm=0.011)
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Scope: whole repo
+- Scope: `src/`
 - Fix commits matched: 917 (time span over whole history, unfiltered)
-- Files ranked: 79; fixed-but-unmeasured: 779
+- Files ranked: 56; fixed-but-unmeasured: 8
 - Branch-coverage resultset: present
 - Method: vendored bugspots ([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) x SimpleCov branch gap; file granularity; zero deps (see [docs/agents/design.md](docs/agents/design.md))
