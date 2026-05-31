@@ -144,3 +144,39 @@ Slice 1:
   replacement removes more branches/guards than the strict object costs.
 - Item 3 slice 1 committed separately. Target hotspot improved, but follow-up
   should reduce the new ownership-graph helper protocol.
+
+## Closeout
+
+Validation:
+
+- `bundle exec srb tc`
+- `bundle exec prspec spec/` -- 4990 examples, 0 failures, 1 expected pending.
+
+Total metric differential from the pre-work snapshot:
+
+- SlopCop: 4051 -> 3989 dark arms (-62); 1162 -> 1116 type_norm arms (-46);
+  899 -> 892 diagnostic arms (-7); 1184 -> 1181 genuine gaps (-3).
+- Decomplex: 1349 -> 1353 cross-detector convergence units (+4); 297
+  decision-pressure findings unchanged; 190 missing-abstraction findings
+  unchanged. The targeted `handle_assign_move` hotspot dropped out of the top
+  convergence list, but the aggregate score worsened.
+- Boobytrap: 79 hotspots unchanged; top hotspot still `src/mir/mir_lowering.rb`
+  at 0.1498; annotator `function_analysis.rb` unchanged at rank 29, 79/438
+  uncovered branches.
+- Nil-kill: hygiene summary unchanged across methods indexed, missing sigs,
+  existing sigs, `T.let` candidates, untyped inputs/returns/fields, collection
+  pressure, HIGH, and REVIEW counts.
+
+Overall evaluation:
+
+- Type contract cleanup was worthwhile only as seam work. It reduced type_norm
+  pressure, but tiny one-off sig tightening is not enough to justify more
+  isolated slices.
+- Hash record reification was not worthwhile in the attempted local predicate
+  shape and was scrapped before code commit.
+- Decomplex hotspot cleanup was locally worthwhile for readability and SlopCop,
+  but not a global decomplex win yet. More pure extraction would be the wrong
+  next move; the follow-up has to collapse the ownership-graph declaration
+  protocol or target a different hotspot with a clearer deletion path.
+
+No real compiler bug was found in this pass.
