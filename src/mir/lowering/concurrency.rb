@@ -33,6 +33,36 @@ module MIRLoweringConcurrency
     end
   end
 
+  class BgLoweringNames < T::Struct
+    const :id, Integer
+    const :ctx_type, String
+    const :alloc_var, String
+    const :promise_var, String
+    const :ctx_var, String
+    const :blk_label, String
+    const :bg_rt, String
+  end
+
+  class BgBodyMaterialization < T::Struct
+    const :stmt_code, String
+    const :result_line, String
+    const :run_body, T::Array[MIR::Node]
+  end
+
+  class BgBodyStep < T::Struct
+    const :expr, AST::Node
+    const :binding, T.nilable(String)
+  end
+
+  class BgCaptureMaterialization < T::Struct
+    const :caps, FiberCtxBuilder::Result
+    const :capture_fields, String
+    const :capture_inits, String
+    const :fresh_heap_decls, String
+    const :fresh_heap_cleanups, String
+    const :fresh_heap_cleanup_names, T::Array[String]
+  end
+
   sig { params(parallel: T.nilable(T::Boolean), pinned: T.nilable(T.any(T::Boolean, Symbol))).returns(Symbol) }
   def execution_boundary_dispatch(parallel, pinned)
     return :parallel if parallel
@@ -430,93 +460,10 @@ module MIRLoweringConcurrency
     fresh_heap_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                    ")
     fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? spec.name : nil }
 
-    # Flatten ThenChain + lower body
-    flat_steps = []
-    node.body.each { |stmt|
-      if stmt.is_a?(AST::ThenChain)
-        stmt.steps.each { |s| flat_steps << s }
-      else
-        flat_steps << { expr: stmt, binding: nil }
-      end
-    }
-    last_step = flat_steps.pop
-    pre_steps = flat_steps
-
-    # Lower the fiber body to MIR nodes (for checker visibility) and build Zig strings.
-    # run_body carries the MIR stmts so the checker can walk allocations inside the fiber.
-    # Save outer @pending_stmts: hoists from fiber body (e.g. auto-COPY string fields in
-    # OR fallback struct literals) must be emitted INSIDE the fiber's run function, not in
-    # the outer function where Zig's inner-function capture rules would reject them.
-    run_body = T.let(nil, T.untyped)
-    stmt_code, result_line = with_bg_fiber_body_context(T.cast(pointer_captures, T::Set[String])) do
-      with_fiber_capture_map(caps.capture_map,
-                             capture_symbols: caps.capture_symbols,
-                             rt_override: bg_rt) do
-        body_mir = []
-        sc = pre_steps.flat_map { |step|
-          mir = lower(step[:expr])
-          step_pending = flush_pending
-          body_mir.concat(step_pending)
-
-          # `lower_var_decl` may return [AllocMark, Let, Cleanup] when the
-          # binding needs cleanup (e.g. `snapshot = COPY items` inside a
-          # BG body). Each element is its own MIR statement; AllocMark /
-          # Cleanup are checker-visible markers that emit no code.
-          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-          step[:binding] ? body_mir << MIR::Let.new(step[:binding], mir_nodes.last, false, nil, nil) : body_mir.concat(mir_nodes)
-
-          pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }
-          emit_lines = mir_nodes.filter_map.with_index do |m, i|
-            code = emit_expr(m)
-            # AllocMark and other verification-only nodes emit nil -- skip them.
-            next nil if code.nil?
-            if step[:binding] && i == mir_nodes.size - 1
-              "const #{step[:binding]} = #{code};"
-            elsif code.strip.end_with?(";") || code.strip.end_with?("}")
-              code
-            else
-              expr_type = step[:expr].full_type!
-              is_void_step = ast_void_type?(expr_type)
-              is_void_step ? "#{code};" : "_ = #{code};"
-            end
-          end
-          pending_code + emit_lines
-        }.join("\n            ")
-
-        last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
-        rl = if last_step.nil? || is_void || last_is_assign
-          if last_step
-            last_mir = lower(last_step[:expr])
-            last_pending = flush_pending
-            body_mir.concat(last_pending)
-            body_mir << last_mir
-            last_code = emit_expr(last_mir)
-            pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-            stmt = (T.must(last_code).strip.end_with?("}") || T.must(last_code).strip.end_with?(";")) ? last_code : "#{last_code};"
-            pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
-          else
-            ""
-          end
-        else
-          result_alloc = escaping_value_alloc(inner_t)
-          last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
-          last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, inner_t)
-          last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
-          last_pending = flush_pending
-          body_mir.concat(last_pending)
-          result_code = emit_expr(last_mir)
-          pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-          result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
-          result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
-          body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
-          body_mir << MIR::Set.new(result_target, last_mir)
-          assignment = "__ctx_#{id}.inner.result = #{result_code};"
-          pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
-        end
-        run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}") + body_mir)
-        [sc, rl]
-      end
-    end
+    body_materialization = bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t)
+    stmt_code = body_materialization.stmt_code
+    result_line = body_materialization.result_line
+    run_body = body_materialization.run_body
 
     arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
@@ -633,6 +580,154 @@ module MIRLoweringConcurrency
       analysis,
     )
     bg
+  end
+
+  sig do
+    params(
+      node: AST::BgBlock,
+      caps: FiberCtxBuilder::Result,
+      analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
+      pointer_captures: T::Set[String],
+      bg_rt: String,
+      id: Integer,
+      is_void: T::Boolean,
+      inner_t: Type,
+    ).returns(BgBodyMaterialization)
+  end
+  def bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t)
+    T.bind(self, MIRLowering) rescue nil
+    run_body = T.let([], T::Array[MIR::Node])
+    stmt_code, result_line = with_bg_fiber_body_context(pointer_captures) do
+      with_fiber_capture_map(caps.capture_map,
+                             capture_symbols: caps.capture_symbols,
+                             rt_override: bg_rt) do
+        lowered = lower_bg_body_steps(node, id, is_void, inner_t)
+        run_body = finalized_boundary_body_for_emit(
+          capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}") + lowered.run_body
+        )
+        [lowered.stmt_code, lowered.result_line]
+      end
+    end
+    BgBodyMaterialization.new(stmt_code: stmt_code, result_line: result_line, run_body: run_body)
+  end
+
+  sig { params(node: AST::BgBlock).returns(T::Array[BgBodyStep]) }
+  def bg_body_steps(node)
+    steps = T.let([], T::Array[BgBodyStep])
+    node.body.each do |stmt|
+      if stmt.is_a?(AST::ThenChain)
+        stmt.steps.each do |raw_step|
+          step = T.cast(raw_step, T::Hash[Symbol, T.any(AST::Node, String, NilClass)])
+          steps << BgBodyStep.new(expr: T.cast(step[:expr], AST::Node), binding: T.cast(step[:binding], T.nilable(String)))
+        end
+      else
+        steps << BgBodyStep.new(expr: stmt, binding: nil)
+      end
+    end
+    steps
+  end
+
+  sig { params(node: AST::BgBlock, id: Integer, is_void: T::Boolean, inner_t: Type).returns(BgBodyMaterialization) }
+  def lower_bg_body_steps(node, id, is_void, inner_t)
+    steps = bg_body_steps(node)
+    last_step = steps.pop
+    body_mir = T.let([], T::Array[MIR::Node])
+    stmt_code = steps.flat_map { |step| lower_bg_pre_step(step, body_mir) }.join("\n            ")
+    result_line = lower_bg_result_step(last_step, body_mir, id, is_void, inner_t)
+    BgBodyMaterialization.new(stmt_code: stmt_code, result_line: result_line, run_body: body_mir)
+  end
+
+  sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).returns(T::Array[String]) }
+  def lower_bg_pre_step(step, body_mir)
+    T.bind(self, MIRLowering) rescue nil
+    mir = lower(step.expr)
+    step_pending = flush_pending
+    body_mir.concat(step_pending)
+    mir_nodes = bg_mir_nodes(mir)
+    binding = step.binding
+    if binding
+      body_mir << MIR::Let.new(binding, T.must(mir_nodes.last), false, nil, nil)
+    else
+      body_mir.concat(mir_nodes)
+    end
+    bg_pending_code(step_pending) + bg_emit_step_lines(step, mir_nodes)
+  end
+
+  sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[String]) }
+  def bg_pending_code(nodes)
+    T.bind(self, MIRLowering) rescue nil
+    nodes.filter_map do |pending|
+      code = emit_expr(pending)
+      (code.nil? || code.empty?) ? nil : code
+    end
+  end
+
+  sig { params(step: BgBodyStep, mir_nodes: T::Array[MIR::Node]).returns(T::Array[String]) }
+  def bg_emit_step_lines(step, mir_nodes)
+    T.bind(self, MIRLowering) rescue nil
+    binding = step.binding
+    mir_nodes.filter_map.with_index do |mir, index|
+      code = emit_expr(mir)
+      next nil if code.nil?
+
+      if binding && index == mir_nodes.size - 1
+        "const #{binding} = #{code};"
+      elsif code.strip.end_with?(";") || code.strip.end_with?("}")
+        code
+      elsif ast_void_type?(step.expr.full_type!)
+        "#{code};"
+      else
+        "_ = #{code};"
+      end
+    end
+  end
+
+  sig { params(step: T.nilable(BgBodyStep), body_mir: T::Array[MIR::Node], id: Integer, is_void: T::Boolean, inner_t: Type).returns(String) }
+  def lower_bg_result_step(step, body_mir, id, is_void, inner_t)
+    return "" unless step
+
+    if is_void || step.expr.is_a?(AST::Assignment)
+      return lower_bg_statement_result(step, body_mir)
+    end
+
+    lower_bg_value_result(step, body_mir, id, inner_t)
+  end
+
+  sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).returns(String) }
+  def lower_bg_statement_result(step, body_mir)
+    T.bind(self, MIRLowering) rescue nil
+    last_mir = T.cast(lower(step.expr), MIR::Node)
+    last_pending = flush_pending
+    body_mir.concat(last_pending)
+    body_mir << last_mir
+    last_code = T.cast(emit_expr(last_mir), String)
+    pending_code = bg_pending_code(last_pending).join("\n            ")
+    stmt = (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
+    pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
+  end
+
+  sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node], id: Integer, inner_t: Type).returns(String) }
+  def lower_bg_value_result(step, body_mir, id, inner_t)
+    T.bind(self, MIRLowering) rescue nil
+    result_alloc = escaping_value_alloc(inner_t)
+    last_mir = T.cast(with_decl_alloc(result_alloc) { lower(step.expr) }, MIR::Node)
+    last_mir = T.cast(place_value_for_destination(last_mir, step.expr, result_alloc, inner_t), MIR::Node)
+    last_mir = T.cast(hoist_alloc(last_mir, step.expr, err_cleanup: true), MIR::Node) if mir_allocates?(last_mir)
+    last_pending = flush_pending
+    body_mir.concat(last_pending)
+    result_code = T.cast(emit_expr(last_mir), String)
+    pending_code = bg_pending_code(last_pending).join("\n            ")
+    result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+    result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
+    body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
+    body_mir << MIR::Set.new(result_target, last_mir)
+    assignment = "__ctx_#{id}.inner.result = #{result_code};"
+    pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
+  end
+
+  sig { params(mir: T.any(MIR::Node, T::Array[MIR::Node])).returns(T::Array[MIR::Node]) }
+  def bg_mir_nodes(mir)
+    mir.is_a?(Array) ? mir.compact : [mir]
   end
 
   # Raise a CLEAR-level diagnostic if any capture classifies as Refuse.

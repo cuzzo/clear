@@ -124,6 +124,13 @@ module MIRLoweringFunctions
     end
   end
 
+  class StdlibArgumentMaterialization < T::Struct
+    const :mir_args, T::Array[MIR::Node]
+    const :consumed_names, T::Array[String]
+    const :consumed_operands, T::Array[MIR::OwnershipOperandFact]
+    const :val_alloc_placeholder, T.nilable(Symbol)
+  end
+
   class FunctionEntryPlan < T::Struct
     const :prologue, T::Array[MIR::Node]
     const :takes_mir, T::Array[MIR::Node]
@@ -1645,53 +1652,17 @@ module MIRLoweringFunctions
       alloc_placeholder = resolved
     end
 
-    if stdlib_facts.args.any?
-      sink_alloc = alloc_placeholder || pre_resolved_alloc || :heap
-      stdlib_facts.args.each do |arg_fact|
-        i = arg_fact.index
-        next unless ownership_facts.takes?(i)
-        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type)
-      end
-    end
-
-    # Intrinsic templates inline their arguments directly into Zig. Heap-owning
-    # argument expressions still need the same hoist/cleanup treatment as normal
-    # calls: borrowed sinks clean them after the call, TAKES sinks clean only on
-    # error because ownership transfers on success.
-    if stdlib_facts.args.any?
-      mir_args = mir_args.each_with_index.map do |arg_mir, i|
-        hoist_alloc(arg_mir, stdlib_facts.ast_arg(i), err_cleanup: ownership_facts.takes?(i))
-      end
-    end
-    consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
-    consumed_operands = ownership_facts.takes_any? ? [] : ownership_facts.consumed_operands.dup
-    if ownership_facts.takes_any?
-      @pending_stmts = T.let(@pending_stmts, T.untyped)
-      mir_args.each_with_index do |arg_mir, i|
-        next unless ownership_facts.takes?(i)
-
-        operands = ownership_operands_for_lowered_takes_arg(
-          mir_args[i],
-          stdlib_facts.ast_arg(i),
-          "stdlib argument #{i}",
-          sink_alloc,
-        )
-        consumed_operands.concat(operands)
-        operands.each do |operand|
-          next unless operand.kind == :owned_binding && operand.name
-
-          consumed_names << T.must(operand.name)
-        end
-      end
-      consumed_names.uniq!
-      if !consumed_names.empty? && val_alloc_placeholder.nil?
-        consumed_alloc = consumed_names.filter_map do |name|
-          mark = @pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
-          mark&.alloc || T.must(@current_bindings)[name.to_s]&.alloc
-        end.uniq
-        val_alloc_placeholder = consumed_alloc.first if consumed_alloc.length == 1
-      end
-    end
+    arg_materialization = materialize_stdlib_arguments(
+      mir_args,
+      stdlib_facts,
+      ownership_facts,
+      alloc_placeholder || pre_resolved_alloc || :heap,
+      val_alloc_placeholder,
+    )
+    mir_args = arg_materialization.mir_args
+    consumed_names = arg_materialization.consumed_names
+    consumed_operands = arg_materialization.consumed_operands
+    val_alloc_placeholder = arg_materialization.val_alloc_placeholder
 
     # Emit all args to Zig strings
     args_zig = mir_args.map { |a| emit_expr(a) }
@@ -1757,6 +1728,74 @@ module MIRLoweringFunctions
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
+  end
+
+  sig do
+    params(
+      mir_args: T::Array[MIR::Node],
+      stdlib_facts: StdlibCallFacts,
+      ownership_facts: CallOwnershipFacts,
+      sink_alloc: Symbol,
+      val_alloc_placeholder: T.nilable(Symbol),
+    ).returns(StdlibArgumentMaterialization)
+  end
+  def materialize_stdlib_arguments(mir_args, stdlib_facts, ownership_facts, sink_alloc, val_alloc_placeholder)
+    T.bind(self, MIRLowering) rescue nil
+    materialized_args = mir_args.dup
+    stdlib_facts.args.each do |arg_fact|
+      index = arg_fact.index
+      next unless ownership_facts.takes?(index)
+
+      materialized_args[index] = T.cast(
+        materialize_owned_sink_value(materialized_args[index], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type),
+        MIR::Node,
+      )
+    end
+
+    materialized_args = materialized_args.each_with_index.map do |arg_mir, index|
+      T.cast(hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index)), MIR::Node)
+    end if stdlib_facts.args.any?
+
+    consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
+    consumed_operands = ownership_facts.takes_any? ? [] : ownership_facts.consumed_operands.dup
+    if ownership_facts.takes_any?
+      materialized_args.each_with_index do |arg_mir, index|
+        next unless ownership_facts.takes?(index)
+
+        operands = ownership_operands_for_lowered_takes_arg(
+          arg_mir,
+          stdlib_facts.ast_arg(index),
+          "stdlib argument #{index}",
+          sink_alloc,
+        )
+        consumed_operands.concat(operands)
+        operands.each do |operand|
+          consumed_names << T.must(operand.name) if operand.kind == :owned_binding && operand.name
+        end
+      end
+      consumed_names.uniq!
+      val_alloc_placeholder ||= stdlib_consumed_alloc(consumed_names)
+    end
+
+    StdlibArgumentMaterialization.new(
+      mir_args: materialized_args,
+      consumed_names: consumed_names,
+      consumed_operands: consumed_operands,
+      val_alloc_placeholder: val_alloc_placeholder,
+    )
+  end
+
+  sig { params(consumed_names: T::Array[String]).returns(T.nilable(Symbol)) }
+  def stdlib_consumed_alloc(consumed_names)
+    return nil if consumed_names.empty?
+
+    @pending_stmts = T.let(@pending_stmts, T.nilable(T::Array[MIR::Node]))
+    pending_stmts = @pending_stmts || []
+    allocs = consumed_names.filter_map do |name|
+      mark = T.cast(pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }, T.nilable(MIR::AllocMark))
+      mark&.alloc || T.must(@current_bindings)[name.to_s]&.alloc
+    end.uniq
+    allocs.length == 1 ? allocs.first : nil
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }
