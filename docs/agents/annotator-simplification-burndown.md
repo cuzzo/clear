@@ -86,7 +86,22 @@ Plan:
 - Replace raw `[:key]` consumers with a typed value object.
 - Do not reify parser/AST public hashes unless the replacement can be carried through all consumers.
 
-Status: pending.
+Status: scrap.
+
+Attempted slice:
+
+- Change tried: reified the local predicate context and predicate call-site
+  hashes in `CapabilityHelper` into strict value objects.
+- Validation before scrapping: `bundle exec srb tc`; `bundle exec prspec
+  spec/with_guard_spec.rb spec/with_pre_spec.rb spec/with_post_spec.rb
+  spec/predicate_impurity_spec.rb spec/annotator_gap_burndown_spec.rb`.
+- After metrics for the attempted slice:
+  - SlopCop: 4035 -> 4008 dark arms; 1139 -> 1125 type_norm arms; 1188 -> 1186 genuine gaps.
+  - Decomplex: 1349 -> 1350 convergence units; 297 -> 298 decision-pressure findings; 190 missing-abstraction unchanged.
+  - Nil-kill hygiene unchanged; full stale-runtime report still showed the same hash-record headline counts, so the target did not produce a measurable nil-kill win.
+  - Boobytrap unchanged.
+- Evaluation: **Scrap**. This was a bad trade: roughly a page of strict-mode value-object boilerplate for a small SlopCop improvement, no nil-kill movement, and worse decomplex totals. The right hash-record work needs to target a higher-pressure shape whose reification removes more code than it adds, not a small local predicate context.
+- Result: code slice reverted before commit; only this evaluation remains.
 
 ## Item 3: Decomplex Hotspot Cleanup
 
@@ -109,3 +124,5 @@ Status: pending.
 ## Progress Log
 
 - Item 1 slice 1 committed separately. Continue only with broader seam cleanup.
+- Item 2 attempted and scrapped. Do not reify small local hashes unless the
+  replacement removes more branches/guards than the strict object costs.
