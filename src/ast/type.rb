@@ -4,6 +4,12 @@ require "sorbet-runtime"
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
+class TypeCapabilitySuffix < T::Struct
+  const :base, String
+  const :ownership, T.nilable(Symbol)
+  const :sync, T.nilable(Symbol)
+end
+
 class Type
     extend T::Sig
 
@@ -2064,27 +2070,24 @@ class Type
       return
     end
 
-    str = @raw.to_s
+    raw_str = @raw.to_s
 
     # Type alias: Number → Float64 (canonical internal name for f64).
     # Both Number and Float64 are accepted; the type system uses :Float64 everywhere.
-    str = str.gsub(/\bNumber\b/, 'Float64')
+    normalized_str = raw_str.gsub(/\bNumber\b/, 'Float64')
 
-    suffix_ownership = nil
-    suffix_sync = nil
-    unless str.include?("<")
-      str, suffix_ownership, suffix_sync = strip_capability_suffix(str)
-    end
-    @raw = str.to_sym
+    suffix = normalized_str.include?("<") ? TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil) : strip_capability_suffix(normalized_str)
+    core_str = suffix.base
+    @raw = core_str.to_sym
 
     # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
     # Parsed first so ~!T = "promise of failable T", ~?T = "promise of optional T".
     # When tense, we bail early — tense_type handles its own inner parsing.
-    if str.start_with?("~")
-      inner = str[1..]
-      raise "Invalid type '#{str}': double tense (~~) is not allowed — ~T is already a promise" if inner.start_with?("~")
+    if core_str.start_with?("~")
+      tense_inner = T.must(core_str[1..])
+      raise "Invalid type '#{core_str}': double tense (~~) is not allowed — ~T is already a promise" if tense_inner.start_with?("~")
       @is_tense       = true
-      @tense_type_raw = inner.to_sym
+      @tense_type_raw = tense_inner.to_sym
       @is_error_union = false; @payload_type_raw = nil
       @is_optional    = false; @wrapped_type_raw  = nil
       @is_array       = false; @capacity = nil; @element_type_raw = nil
@@ -2102,32 +2105,34 @@ class Type
     end
 
     # A. Detect Error Union prefix: !Type (Zig-style error returns)
-    if str.start_with?("!")
-      raise "Invalid type '#{str}': double error union (!!) is not allowed" if str[1..].start_with?("!")
-      raise "Invalid type '#{str}': !~T (error union of tense) is not allowed — use ~!T instead" if str[1..].start_with?("~")
+    after_error_str = core_str
+    if core_str.start_with?("!")
+      after_error_str = T.must(core_str[1..])
+      raise "Invalid type '#{core_str}': double error union (!!) is not allowed" if after_error_str.start_with?("!")
+      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed — use ~!T instead" if after_error_str.start_with?("~")
       @is_error_union = true
-      @payload_type_raw = str[1..].to_sym
-      str = str[1..]
+      @payload_type_raw = after_error_str.to_sym
     else
       @is_error_union = false
       @payload_type_raw = nil
     end
 
     # B. Detect Optional prefix: ?Type
-    if str.start_with?("?")
-      raise "Invalid type '#{str}': double optional (??) is not allowed" if str[1..].start_with?("?")
-      raise "Invalid type '#{str}': ?~T (optional of tense) is not allowed — use ~?T instead" if str[1..].start_with?("~")
+    shape_str = after_error_str
+    if after_error_str.start_with?("?")
+      shape_str = T.must(after_error_str[1..])
+      raise "Invalid type '#{after_error_str}': double optional (??) is not allowed" if shape_str.start_with?("?")
+      raise "Invalid type '#{after_error_str}': ?~T (optional of tense) is not allowed — use ~?T instead" if shape_str.start_with?("~")
       @is_optional = true
-      @wrapped_type_raw = str[1..].to_sym
-      str = str[1..]
+      @wrapped_type_raw = shape_str.to_sym
     else
       @is_optional = false
       @wrapped_type_raw = nil
     end
 
     # C. Capability fields default — callers pass ownership:/sync:/location:/collection: as keyword args.
-    @ownership  = suffix_ownership || :affine
-    @sync       = suffix_sync
+    @ownership  = suffix.ownership || :affine
+    @sync       = suffix.sync
     @collection = nil
 
     # D. Detect Array Structure
@@ -2139,9 +2144,9 @@ class Type
     #           If this is missing, it matches "[]", meaning Dynamic.
     #   \]      Literal closing bracket
     #   $       End of string
-    if match = str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
+    if match = shape_str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
       @is_array = true
-      @element_type_raw = match[1].to_sym # Store "Float64"
+      @element_type_raw = T.must(match[1]).to_sym # Store "Float64"
 
       # Capacity: nil = dynamic, :STREAM_OPEN = open stream [?], :INF = infinite [INF], Integer = fixed [N]
       @capacity = case match[2]
@@ -2159,16 +2164,17 @@ class Type
     # E. Detect HashMap Structure: HashMap<ValueType> or HashMap<KeyType, ValueType>
     # Two-arg form: HashMap<Number, V> or HashMap<Int64, V> → numeric-keyed AutoHashMap.
     # One-arg form: HashMap<V> → String-keyed StringHashMap (original behaviour).
-    if match = str.match(/^HashMap<(.+)>$/)
+    map_match = shape_str.match(/^HashMap<(.+)>$/)
+    if map_match
       @is_map = true
-      inner = match[1]
-      if inner.include?(",")
-        parts = inner.split(",", 2).map(&:strip)
-        @key_type_raw   = parts[0].to_sym
-        @value_type_raw = parts[1].to_sym
+      map_inner = T.must(map_match[1])
+      if map_inner.include?(",")
+        parts = map_inner.split(",", 2).map(&:strip)
+        @key_type_raw   = T.must(parts[0]).to_sym
+        @value_type_raw = T.must(parts[1]).to_sym
       else
         @key_type_raw   = :String
-        @value_type_raw = inner.to_sym
+        @value_type_raw = map_inner.to_sym
       end
     else
       @is_map = false
@@ -2178,10 +2184,11 @@ class Type
 
     # E2. Detect Generic Struct Instance: Pair<Number> or Map<String,Number>
     # Only for non-HashMap types (HashMap is handled above).
-    if !@is_map && !@is_array && (match = str.match(/^([A-Z]\w*)<(.+)>$/))
+    generic_match = shape_str.match(/^([A-Z]\w*)<(.+)>$/)
+    if !@is_map && !@is_array && generic_match
       @is_generic_instance = true
-      @generic_base_raw    = match[1].to_sym
-      @generic_args_raw    = match[2].split(',').map(&:strip).map(&:to_sym)
+      @generic_base_raw    = T.must(generic_match[1]).to_sym
+      @generic_args_raw    = T.must(generic_match[2]).split(',').map(&:strip).map(&:to_sym)
     else
       @is_generic_instance = false
       @generic_base_raw    = nil
@@ -2197,9 +2204,9 @@ class Type
     @resolved_cache = @raw.to_sym
   end
 
-  sig { params(str: String).returns(T::Array[T.untyped]) }
+  sig { params(str: String).returns(TypeCapabilitySuffix) }
   def strip_capability_suffix(str)
-    return [str, nil, nil] unless str.include?("@")
+    return TypeCapabilitySuffix.new(base: str, ownership: nil, sync: nil) unless str.include?("@")
 
     base, *caps = str.gsub(/\s+/, "").split("@")
     ownership = T.let(nil, T.nilable(Symbol))
@@ -2220,7 +2227,131 @@ class Type
       end
     end
 
-    [base, ownership, sync]
+    TypeCapabilitySuffix.new(base: T.must(base), ownership: ownership, sync: sync)
+  end
+
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  def tense_zig_type(is_param:, is_field:)
+    if tense_observable? && !promise_list?
+      return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
+    end
+    if promise_list?
+      elem_zig = tense_type.element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
+    end
+    if bounded_stream?
+      elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
+    end
+    if dynamic_stream?
+      inner_t = tense_type.element_type
+      return case inner_t&.resolved
+             when :Int64 then "CheatLib.IntRange"
+             when :Float64 then "CheatLib.Range"
+             else
+               "CheatLib.Stream(#{inner_t.zig_type(is_param: is_param, is_field: is_field)})"
+             end
+    end
+    if shared_promise?
+      inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.SharedPromise(#{inner_zig})"
+    end
+    if split_open_stream?
+      elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.SplitStream(#{elem_zig})"
+    end
+    if open_stream?
+      elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.Stream(#{elem_zig})"
+    end
+    if inf_stream?
+      elem_zig = inf_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.InfStream(#{elem_zig})"
+    end
+
+    inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
+    "CheatLib.Promise(#{inner_zig})"
+  end
+
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }
+  def capability_wrapped_zig_type(is_param:, is_field:)
+    return nil unless (@ownership != :affine || any_sync?) && !(map? && striped? && @ownership == :affine)
+
+    inner_zig = capability_inner_zig_type(is_param: is_param, is_field: is_field)
+
+    if atomic? && (shared? || multiowned? || indirect?)
+      return "*#{inner_zig}"
+    end
+
+    case @ownership
+    when :multiowned
+      "CheatLib.Rc(#{inner_zig})"
+    when :shared
+      "CheatLib.Arc(#{inner_zig})"
+    when :link
+      source = link_source
+      source == :shared ? "CheatLib.WeakArc(#{inner_zig})" : "CheatLib.WeakRc(#{inner_zig})"
+    else
+      return nil if map? && striped?
+
+      "*#{inner_zig}"
+    end
+  end
+
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  def capability_inner_zig_type(is_param:, is_field:)
+    if map? && striped?
+      bare = Type.new(resolved.to_s)
+      bare.shard_count = @shard_count
+      bare.sync = @sync
+      return bare.zig_type(is_param: is_param, is_field: is_field)
+    end
+
+    inner_zig = if fixed_soa?
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      "CheatLib.SoaList(#{base_zig})"
+    else
+      bare_data_type.zig_type(is_param: is_param, is_field: is_field)
+    end
+
+    inner_zig = "CheatLib.Locked(#{inner_zig})" if locked?
+    inner_zig = "CheatLib.RwLocked(#{inner_zig})" if write_locked?
+    inner_zig = "CheatLib.RefCell(#{inner_zig})" if @sync == :always_mutable
+    inner_zig = "CheatLib.Versioned(#{inner_zig})" if versioned?
+    if atomic_ptr?
+      "CheatLib.AtomicPtr(#{inner_zig})"
+    elsif atomic?
+      "CheatLib.Atomic(#{inner_zig})"
+    else
+      inner_zig
+    end
+  end
+
+  sig { returns(String) }
+  def map_zig_type
+    val_zig = value_type.zig_type
+    if striped?
+      if numeric_map?
+        key_zig = key_type.zig_type
+        return "CheatLib.StripedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
+      end
+      return "CheatLib.MutexShardedStringMap(#{val_zig}, #{shard_count})" if locked?
+
+      return "CheatLib.ShardedStringMap(#{val_zig}, #{shard_count})"
+    end
+    if sharded?
+      if numeric_map?
+        key_zig = key_type.zig_type
+        return "CheatLib.PartitionedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
+      end
+      return "CheatLib.PartitionedStringMap(#{val_zig}, #{shard_count})"
+    end
+    if numeric_map?
+      key_zig = key_type.zig_type
+      return "CheatLib.NumericMapType(#{key_zig}, #{val_zig})"
+    end
+
+    "CheatLib.StringMap(#{val_zig})"
   end
 
   # Computes the Zig type string for this CHEAT type.
@@ -2243,44 +2374,7 @@ class Type
       # before the generic shape predicates so a `~Int64@observable`
       # binding doesn't fall through to BoundedStream / Promise.
       #
-      if tense_observable? && !promise_list?
-        return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
-      end
-      if promise_list?
-        elem_zig = tense_type.element_type.zig_type(is_param: is_param, is_field: is_field)
-        return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
-      end
-      if bounded_stream?
-        elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
-        return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
-      end
-      if dynamic_stream?
-        inner_t = tense_type.element_type
-        return case inner_t&.resolved
-               when :Int64 then "CheatLib.IntRange"
-               when :Float64 then "CheatLib.Range"
-               else
-                 "CheatLib.Stream(#{inner_t.zig_type(is_param: is_param, is_field: is_field)})"
-               end
-      end
-      if shared_promise?
-        inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
-        return "CheatLib.SharedPromise(#{inner_zig})"
-      end
-      if split_open_stream?
-        elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
-        return "CheatLib.SplitStream(#{elem_zig})"
-      end
-      if open_stream?
-        elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
-        return "CheatLib.Stream(#{elem_zig})"
-      end
-      if inf_stream?
-        elem_zig = inf_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
-        return "CheatLib.InfStream(#{elem_zig})"
-      end
-      inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
-      return "CheatLib.Promise(#{inner_zig})"
+      return tense_zig_type(is_param: is_param, is_field: is_field)
     end
 
     # 1. Handle Error Union: !T -> !zig_type
@@ -2322,61 +2416,8 @@ class Type
     # Only apply capability wrapping when there's an actual capability set.
     # Sharded maps with sync use StripedMap (sync built into the map type) —
     # skip Locked/RwLocked wrapping but still apply Arc/Rc if @shared/@multiowned.
-    if (@ownership != :affine || any_sync?) && !(map? && striped? && @ownership == :affine)
-      # For shared striped maps, the inner type is the striped map itself (sync built-in).
-      # For other types, get the plain inner type and wrap with Locked/RwLocked.
-      if map? && striped?
-        # Striped map: sync is built into ShardedStringMap — get it with shard_count.
-        bare = Type.new(resolved.to_s)
-        bare.shard_count = @shard_count
-        bare.sync = @sync
-        inner_zig = bare.zig_type(is_param: is_param, is_field: is_field)
-      else
-        if fixed_soa?
-          # T[N]@soa:shared etc. — inner type is SoaList, not bare [N]T
-          base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
-          inner_zig = "CheatLib.SoaList(#{base_zig})"
-        else
-          # Group 1 / Group 2 separation: the inner zig type is the data
-          # shape with sync/ownership stripped. bare_data_type preserves
-          # shape attrs (@pool, @sharded, capacity, element_type) that
-          # `Type.new(resolved.to_s)` would lose.
-          inner_zig = bare_data_type.zig_type(is_param: is_param, is_field: is_field)
-        end
-        inner_zig = "CheatLib.Locked(#{inner_zig})"   if locked?
-        inner_zig = "CheatLib.RwLocked(#{inner_zig})" if write_locked?
-        inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
-        inner_zig = "CheatLib.Versioned(#{inner_zig})" if versioned?
-        # @indirect:atomic wraps structs in AtomicPtr(T), not bare Atomic(T),
-        # because updates publish a refcounted heap payload via a pointer CAS.
-        if atomic_ptr?
-          inner_zig = "CheatLib.AtomicPtr(#{inner_zig})"
-        elsif atomic?
-          inner_zig = "CheatLib.Atomic(#{inner_zig})"
-        end
-      end
-
-      # Atomic cells are heap-allocated and bindings hold bare pointers. Zig
-      # auto-deref keeps `c.load()` / `c.fetchAdd(...)` working for pointer or
-      # value receivers, and lifetime checks make the outer refcount redundant.
-      #
-      # `@indirect:atomic` uses the same bare-pointer binding layout.
-      if atomic? && (shared? || multiowned? || indirect?)
-        return "*#{inner_zig}"
-      end
-
-      case @ownership
-      when :multiowned
-        return "CheatLib.Rc(#{inner_zig})"
-      when :shared
-        return "CheatLib.Arc(#{inner_zig})"
-      when :link
-        source = link_source
-        return source == :shared ? "CheatLib.WeakArc(#{inner_zig})" : "CheatLib.WeakRc(#{inner_zig})"
-      else
-        return "*#{inner_zig}" unless map? && striped?
-      end
-    end
+    wrapped_zig = capability_wrapped_zig_type(is_param: is_param, is_field: is_field)
+    return wrapped_zig if wrapped_zig
 
     # 3. Handle Special primitive mapping
     # String and Byte[N] (fixed-size string literals) both map to []const u8.
@@ -2443,30 +2484,7 @@ class Type
     #    HashMap<V>@sharded(N):locked      → CheatLib.MutexShardedStringMap(V, N)    (Mutex per shard)
     #    HashMap<V>@sharded(N):writeLocked → CheatLib.ShardedStringMap(V, N)         (RwLock per shard)
     if map?
-      val_zig = value_type.zig_type
-      if striped?  # sharded + sync = lock-striped
-        if numeric_map?
-          key_zig = key_type.zig_type
-          return "CheatLib.StripedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
-        end
-        if locked?
-          return "CheatLib.MutexShardedStringMap(#{val_zig}, #{shard_count})"
-        else
-          return "CheatLib.ShardedStringMap(#{val_zig}, #{shard_count})"
-        end
-      end
-      if sharded?  # sharded without sync = shared-nothing (no locks)
-        if numeric_map?
-          key_zig = key_type.zig_type
-          return "CheatLib.PartitionedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
-        end
-        return "CheatLib.PartitionedStringMap(#{val_zig}, #{shard_count})"
-      end
-      if numeric_map?
-        key_zig = key_type.zig_type
-        return "CheatLib.NumericMapType(#{key_zig}, #{val_zig})"
-      end
-      return "CheatLib.StringMap(#{val_zig})"
+      return map_zig_type
     end
 
     # 5b. Handle Generic Struct Instances

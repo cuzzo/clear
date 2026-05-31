@@ -1523,8 +1523,7 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_select_family_op(node)
-      elsif node.left.full_type!(context: "pipeline left").inf_stream? || node.left.full_type!(context: "pipeline left").dynamic_stream? ||
-            node.left.full_type!(context: "pipeline left").open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif concurrent_stream_source?(node.left, lhs_type)
         analyze_concurrent_stream_select_family_op(node)
       else
         analyze_select_family_op(proxy)
@@ -1532,8 +1531,7 @@ module PipeAnalysis
     when AST::EachOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_each_op(node)
-      elsif node.left.full_type!(context: "pipeline left").inf_stream? || node.left.full_type!(context: "pipeline left").dynamic_stream? ||
-            node.left.full_type!(context: "pipeline left").open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif concurrent_stream_source?(node.left, lhs_type)
         analyze_concurrent_stream_each_op(node)
       elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
@@ -1596,11 +1594,7 @@ module PipeAnalysis
     # SELECT/WHERE/EACH on stream sources set node.full_type!(context: "pipeline result") directly in their analyze
     # methods. REDUCE ops (SUM/COUNT/etc.) and array sources still use the proxy.
     stream_op_analyzed = AST.pipeline_stream_value_op?(conc.op) &&
-                         (bounded_stream_source?(node.left) ||
-                          node.left.full_type!(context: "pipeline left").inf_stream? ||
-                          node.left.full_type!(context: "pipeline left").dynamic_stream? ||
-                          node.left.full_type!(context: "pipeline left").open_stream? ||
-                          node.left.is_a?(AST::RangeLit))
+                         (bounded_stream_source?(node.left) || concurrent_stream_source?(node.left, lhs_type))
     unless stream_op_analyzed
       stamp_type!(node, proxy.full_type!(context: "concurrent proxy result"))
       node.storage   = (node.full_type!(context: "pipeline result") == :Void) ? :stack : :heap
@@ -1614,6 +1608,12 @@ module PipeAnalysis
     inner = conc.op
     stamp_type!(inner, node.full_type!(context: "CONCURRENT inner op result"))
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
+  end
+
+  sig { params(node: AST::Locatable, lhs_type: Type).returns(T::Boolean) }
+  def concurrent_stream_source?(node, lhs_type)
+    lhs_type.inf_stream? || lhs_type.dynamic_stream? ||
+      lhs_type.open_stream? || node.is_a?(AST::RangeLit)
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -1635,16 +1635,9 @@ module PipeAnalysis
     node.right.capture_analysis =
       validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
-    if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
-      error!(node.right.op, :WHERE_NEEDS_BOOL)
-    end
+    validate_concurrent_where_expression!(node)
 
-    result_type = case node.right.op
-                  when AST::SelectOp
-                    :"#{node.right.op.expression.full_type!(context: "concurrent op expression")}[]"
-                  when AST::WhereOp
-                    :"#{item_type}[]"
-                  end
+    result_type = concurrent_select_family_result_type(node, item_type)
     stamp_type!(node, Type.new(result_type))
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
@@ -1699,17 +1692,33 @@ module PipeAnalysis
     node.right.capture_analysis =
       validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
-    if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
-      error!(node.right.op, :WHERE_NEEDS_BOOL)
-    end
+    validate_concurrent_where_expression!(node)
 
-    result_type = case node.right.op
-                  when AST::SelectOp then :"#{node.right.op.expression.full_type!(context: "concurrent op expression")}[]"
-                  when AST::WhereOp  then :"#{item_type}[]"
-                  end
+    result_type = concurrent_select_family_result_type(node, item_type)
     stamp_type!(node, Type.new(result_type))
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  sig { params(node: AST::BinaryOp).void }
+  def validate_concurrent_where_expression!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    op = node.right.op
+    return unless op.is_a?(AST::WhereOp)
+    return if op.expression.resolved_type == :Bool
+
+    error!(op, :WHERE_NEEDS_BOOL)
+  end
+
+  sig { params(node: AST::BinaryOp, item_type: Symbol).returns(Symbol) }
+  def concurrent_select_family_result_type(node, item_type)
+    op = node.right.op
+    if op.is_a?(AST::SelectOp)
+      return :"#{op.expression.full_type!(context: "concurrent op expression")}[]"
+    end
+    return :"#{item_type}[]" if op.is_a?(AST::WhereOp)
+
+    Kernel.raise "expected CONCURRENT SELECT/WHERE, got #{op.class.name}"
   end
 
   # CONCURRENT EACH on ~T[] (dynamic stream) or ~T[INF] (InfStream).
