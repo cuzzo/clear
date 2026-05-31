@@ -105,7 +105,7 @@ FN main() RETURNS Void ->
 END
 ```
 
-For more details, see [docs/sharing-capabilities.md](docs/sharing-capabilities.md).
+For more details, see [Sharing Capabilities](sharing-capabilities.md).
 
 ### Parameter Ownership
 
