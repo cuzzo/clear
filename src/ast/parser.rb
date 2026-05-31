@@ -2831,40 +2831,9 @@ class Parser
     # Element-level capability: T@shared[] means Array<Arc<T>>.
     # Parsed BEFORE the [] suffix so it attaches to the element type, not the collection.
     # Also handles T@shared:locked[] (Arc<Mutex<T>>[]).
-    elem_ownership = nil
-    elem_sync = nil
-    if match?(:VAR_ID) && %w[@shared @multiowned @locked @writeLocked @link].include?(current.value)
-      # Lookahead: next token must be '[' (simple) or ':' followed by sync then '['
-      next_tok = peek_at(1)
-      is_elem_cap = (next_tok&.type == :CHAR && next_tok&.value == '[')
-      if !is_elem_cap && next_tok&.type == :CHAR && next_tok&.value == ':'
-        # Check for :locked[] or :writeLocked[] pattern
-        sync_tok = peek_at(2)
-        bracket_tok = peek_at(3)
-        is_elem_cap = sync_tok&.type == :VAR_ID &&
-                      %w[@locked @writeLocked locked writeLocked].include?(sync_tok&.value) &&
-                      bracket_tok&.type == :CHAR && bracket_tok&.value == '['
-      end
-      if is_elem_cap
-        cap_tok = consume(:VAR_ID)
-        case T.must(cap_tok).value
-        when "@shared"     then elem_ownership = :shared
-        when "@multiowned" then elem_ownership = :multiowned
-        when "@locked"     then elem_sync = :locked
-        when "@writeLocked" then elem_sync = :write_locked
-        when "@link"       then elem_ownership = :link
-        end
-        # Parse optional :sync suffix (e.g., @shared:locked)
-        if match?(:CHAR, ':')
-          consume(:CHAR, ':')
-          sync_tok = consume(:VAR_ID)
-          case T.must(sync_tok).value
-          when "@locked", "locked"       then elem_sync = :locked
-          when "@writeLocked", "writeLocked" then elem_sync = :write_locked
-          end
-        end
-      end
-    end
+    elem_caps = parse_element_capability
+    elem_ownership = elem_caps[:ownership]
+    elem_sync = elem_caps[:sync]
 
     if match!(:CHAR, '[')
       # Case 1: Dynamic "Number[]"
@@ -3096,6 +3065,8 @@ class Parser
   end
 
   # All recognized capability tokens.
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @locked @writeLocked @link].freeze
+  ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
   CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
@@ -3125,6 +3096,58 @@ class Parser
   end
 
   private
+
+  sig { returns(T::Hash[Symbol, T.untyped]) }
+  def parse_element_capability
+    result = { ownership: nil, sync: nil }
+    return result unless match?(:VAR_ID) && ELEMENT_CAPABILITY_TOKENS.include?(current.value)
+    return result unless element_capability_suffix?
+
+    apply_element_capability!(result, T.must(consume(:VAR_ID)).value)
+    if match?(:CHAR, ':')
+      consume(:CHAR, ':')
+      apply_element_capability!(result, T.must(consume(:VAR_ID)).value)
+    end
+    result
+  end
+
+  sig { returns(T::Boolean) }
+  def element_capability_suffix?
+    next_tok = peek_at(1)
+    return true if token_char?(next_tok, '[')
+    return false unless token_char?(next_tok, ':')
+
+    sync_tok = peek_at(2)
+    token_var?(sync_tok) && ELEMENT_SYNC_TOKENS.include?(sync_tok.value) && token_char?(peek_at(3), '[')
+  end
+
+  sig { params(result: T::Hash[Symbol, T.untyped], value: String).void }
+  def apply_element_capability!(result, value)
+    case value
+    when "@shared"
+      result[:ownership] = :shared
+    when "@multiowned"
+      result[:ownership] = :multiowned
+    when "@locked", "locked"
+      result[:sync] = :locked
+    when "@writeLocked", "writeLocked"
+      result[:sync] = :write_locked
+    when "@link"
+      result[:ownership] = :link
+    end
+  end
+
+  sig { params(token: T.nilable(Lexer::Token), value: String).returns(T::Boolean) }
+  def token_char?(token, value)
+    return false unless token
+
+    token.type == :CHAR && token.value == value
+  end
+
+  sig { params(token: T.nilable(Lexer::Token)).returns(T::Boolean) }
+  def token_var?(token)
+    token&.type == :VAR_ID
+  end
 
   # Apply a single capability token to the result hash. Detects duplicates.
   sig { params(result: T::Hash[Symbol, T.untyped], token: Lexer::Token, value: String).returns(T.untyped) }
