@@ -178,8 +178,7 @@ module FunctionAnalysis
         node.matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        rt = signature.return_type
-        stamp_type!(node, rt.is_a?(Type) ? Type.new(rt) : rt)
+        stamp_type!(node, Type.new(signature.return_type))
         # Auto-propagate (CLEAR's error-handling default): the call's
         # *expression-level* type is the SUCCESS branch -- a binding
         # `h = call()` sees `T`, not `!T`. The error union flows

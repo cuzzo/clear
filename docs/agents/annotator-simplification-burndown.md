@@ -56,7 +56,22 @@ Plan:
 - Remove only guards that are already guaranteed by a typed writer or authoritative accessor.
 - Snapshot reports after the slice and decide whether the contract cleanup should continue.
 
-Status: pending.
+Status: continue.
+
+Slice 1:
+
+- Change: narrowed `FunctionSignature#return_type=` and
+  `FunctionContext#return_type=` to the actual accepted contract, and removed
+  one redundant `Type`/non-`Type` branch at call result stamping.
+- Validation: `bundle exec srb tc`; `bundle exec prspec
+  spec/annotator_gap_burndown_spec.rb spec/first_class_function_spec.rb
+  spec/mir_lowering_spec.rb`.
+- After metrics:
+  - SlopCop: 4051 -> 4035 dark arms; 1162 -> 1139 type_norm arms; 1184 -> 1188 genuine gaps.
+  - Decomplex: 1349 convergence units unchanged; 297 decision-pressure unchanged; 190 missing-abstraction unchanged. `resolve_call` dropped out of the top excerpt captured by the baseline comparison.
+  - Boobytrap: unchanged for annotator `function_analysis.rb` at rank 29, 79/438 uncovered branches.
+  - Nil-kill hygiene summary unchanged.
+- Evaluation: **Continue**. The contract cleanup removed type-normalization pressure, but the small slice did not move nil-kill totals and converted/shifted a few SlopCop arms into genuine gaps. Continue only where a seam deletes repeated guards across multiple readers; do not do one-off sig tightening as a standalone win.
 
 ## Item 2: Hash Record Replacement / Reification
 
@@ -93,4 +108,4 @@ Status: pending.
 
 ## Progress Log
 
-No items closed yet.
+- Item 1 slice 1 committed separately. Continue only with broader seam cleanup.
