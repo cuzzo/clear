@@ -7,6 +7,7 @@ require_relative "../src/ast/symbol_entry"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
 require_relative "../src/backends/importer"
+require_relative "../src/mir/concurrency_checks"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/mir/escape_analysis"
 
@@ -702,5 +703,153 @@ RSpec.describe "MIR gap-burn characterization" do
     borrowed = fn([], params: [p], return_type: :String)
     borrowed.return_lifetime = :wildcard
     expect(EscapeAnalysis.send(:borrowed_return?, borrowed, id("value", type: :String))).to eq(true)
+  end
+
+  it "covers MIR expression type substitution and fallback type decisions" do
+    low = lowering
+    source = Type.new(:T, sync: :locked, layout: :indirect)
+    replaced = low.send(:substitute_mir_type, source, { T: :String })
+    expect(replaced.resolved).to eq(:String)
+    expect(replaced.sync).to eq(:locked)
+    expect(replaced.layout).to eq(:indirect)
+
+    generic = low.send(:substitute_mir_type, Type.new(:"Pair<T>"), { T: :String })
+    expect(generic.resolved).to eq(:"Pair<String>")
+
+    array = low.send(:substitute_mir_type, Type.new(:"T[]"), { T: :Int64 })
+    expect(array.resolved).to eq(:"Int64[]")
+
+    left = id("fallible", type: Type.new(:"!String"))
+    op = AST::BinaryOp.new(tok, left, :OR_RESCUE, lit("fallback", type: :String))
+    op.full_type = Type.new(:String)
+    expect(low.send(:or_fallback_expected_type, op).resolved).to eq(:String)
+
+    idx = AST::GetIndex.new(tok, id("items", type: Type.new(:"String[]")), lit(0, type: :Int64))
+    idx.full_type = Type.new(:Untyped)
+    expect(low.send(:copy_source_type_info, idx).resolved).to eq(:String)
+  end
+
+  it "covers non-switch match lowering branches that switch lowering intentionally bypasses" do
+    low = lowering
+    subject = id("point", type: :Point)
+    x_field = AST::PatternField.new(name: "x", value: :bind, name_token: tok)
+    y_field = AST::PatternField.new(name: "y", value: lit(3, type: :Int64), name_token: tok)
+    pattern = AST::StructPattern.new(tok, [x_field, y_field], false)
+    case_node = AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: [lit(1, type: :Int64)])
+    match = AST::MatchStatement.new(tok, subject, [case_node], nil, nil, nil, false, nil)
+    match.full_type = :Void
+
+    result = low.lower(match)
+    expect(result).to be_a(MIR::IfChain)
+    expect(result.branches.first[:body].grep(MIR::Let).map(&:name)).to include("x")
+    expect(result.branches.first[:cond]).to be_a(MIR::BinOp)
+
+    low.define_singleton_method(:emit_builtin) { |name, args| MIR::Call.new(name.to_s, args, false, false) }
+    string_case = AST::MatchCase.new(
+      kind: :eq,
+      value: lit("start", type: :String),
+      extra_values: [lit("stop", type: :String)],
+      body: [lit(2, type: :Int64)]
+    )
+    string_match = AST::MatchStatement.new(tok, id("cmd", type: :String), [string_case], nil, nil, nil, false, nil)
+    string_match.string_match = true
+    string_match.full_type = :Void
+    expect(low.lower(string_match).branches.first[:cond].op).to eq("or")
+
+    union_low = MIRLowering.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :Int64, Warn: :Int64 }) })
+    union_subject = id("result", type: :Result)
+    ok = AST::GetField.new(tok, id("Result"), "Ok")
+    err = AST::MethodCall.new(tok, id("Result"), "Err", [])
+    warn = AST::MethodCall.new(tok, id("Result"), "Warn", [])
+    destructure = AST::StructPattern.new(tok, [
+      AST::PatternField.new(name: "value", value: :bind, name_token: tok),
+      AST::PatternField.new(name: "ignored", value: :wildcard, name_token: tok),
+    ], true)
+    guard_true = AST::Literal.new(tok, :BOOLEAN, true, nil)
+    guard_true.full_type = :Boolean
+    union_cases = [
+      AST::MatchCase.new(kind: :eq, value: ok, extra_values: [err], binding: "payload", body: [lit(3, type: :Int64)]),
+      AST::MatchCase.new(kind: :eq, value: warn, destructure: destructure, body: [lit(4, type: :Int64)]),
+      AST::MatchCase.new(kind: :when, value: guard_true, body: [lit(5, type: :Int64)]),
+    ]
+    union_match = AST::MatchStatement.new(tok, union_subject, union_cases, nil, nil, nil, false, nil)
+    union_match.full_type = :Void
+    union_result = union_low.lower(union_match)
+    expect(union_result).to be_a(MIR::IfChain)
+    expect(union_result.branches.flat_map { |b| b[:body].grep(MIR::Let).map(&:name) }).to include("payload", "value")
+
+    generic_case = AST::MatchCase.new(kind: :eq, value: id("A", type: :Any),
+      extra_values: [id("B", type: :Any)], body: [lit(6, type: :Int64)])
+    generic_match = AST::MatchStatement.new(tok, id("subject", type: :Any), [generic_case], nil, nil, nil, false, nil)
+    generic_match.full_type = :Void
+    expect(low.lower(generic_match).branches.first[:cond].op).to eq("or")
+  end
+
+  it "covers heap-destination OR placement without flattening branch ownership" do
+    low = lowering
+    left = id("maybe", type: Type.new(:"?String"), storage: :frame)
+    right = id("fallback", type: :String, storage: :frame)
+    op = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+    op.full_type = Type.new(:String)
+
+    optional_placed = low.send(:place_string_or_for_heap_destination, MIR::Orelse.new(MIR::Ident.new("maybe"), MIR::Ident.new("fallback")), op)
+    expect(optional_placed).to be_a(MIR::DupeSlice)
+
+    fallible_left = id("fallible", type: Type.new(:"!String"), storage: :frame)
+    fallible = AST::BinaryOp.new(tok, fallible_left, :OR_RESCUE, right)
+    fallible.full_type = Type.new(:String)
+    low.define_singleton_method(:heap_owned_result?) { |_mir, ast| ast.equal?(fallible_left) }
+    placed = low.send(:place_string_or_for_heap_destination,
+      MIR::TryCatch.new(MIR::Ident.new("fallible"), MIR::Ident.new("fallback"), nil),
+      fallible)
+
+    expect(placed).to be_a(MIR::TryCatch)
+    expect(placed.expr).to be_a(MIR::Ident)
+    expect(placed.catch_body).to be_a(MIR::BlockExpr)
+    expect(placed.catch_body.body.grep(MIR::Let).first.init).to be_a(MIR::DupeSlice)
+  end
+
+  it "covers hoist container-borrow and deep-copy type decisions" do
+    low = MIRLowering.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :String }) })
+    borrowed = id("borrowed", type: :Result, storage: :heap)
+    borrowed.container_borrow = true
+    expr = MIR::Ident.new("borrowed")
+    captured = nil
+    low.define_singleton_method(:hoist_alloc) do |copied, ast_node, err_cleanup: false, **_|
+      captured = [copied, ast_node, err_cleanup]
+      MIR::Ident.new("__tmp_copy")
+    end
+
+    out = low.send(:copy_container_borrow_if_needed, expr, borrowed)
+    expect(out.name).to eq("__tmp_copy")
+    expect(captured[0]).to be_a(MIR::DeepCopy)
+    expect(captured[2]).to eq(true)
+
+    passthrough = low.send(:copy_container_borrow_if_needed, expr, id("plain", type: :String))
+    expect(passthrough).to equal(expr)
+
+    explicit = MIR::DeepCopy.new(MIR::Ident.new("x"), "[]const u8", nil, :full_value, :heap)
+    expect(low.send(:deep_copy_zig_type, explicit, nil)).to eq("[]const u8")
+    inferred_ast = id("owned", type: Type.new(:String, location: :heap))
+    inferred = MIR::DeepCopy.new(MIR::Ident.new("owned"), nil, nil, :full_value, :heap)
+    expect(low.send(:deep_copy_zig_type, inferred, inferred_ast)).to eq("[]const u8")
+  end
+
+  it "covers reentrant lock checks across WITH-held params" do
+    held_param = param("c", type: Type.new(:Counter))
+    call_arg = id("c", type: Type.new(:Counter))
+    call = AST::FuncCall.new(tok, "touch", [call_arg])
+    with_block = AST::WithBlock.new(tok, [{ capability: :EXCLUSIVE, var_node: call_arg }], [call], nil)
+    fn_node = fn([with_block], params: [held_param])
+
+    callee_param = param("x", type: Type.new(:Counter))
+    callee_sig = FunctionSignature.new(params: [callee_param], return_type: Type.new(:Void))
+    callee_sig.requires = { "x" => Set[:LOCKED] }
+    errors = []
+
+    ConcurrencyChecks.check_reentrant!(fn_node, ->(name) { name == "touch" ? callee_sig : nil }, ->(_node, msg) { errors << msg })
+
+    expect(errors.join).to include("Reentrant lock acquisition")
+    expect(errors.join).to include("already held")
   end
 end
