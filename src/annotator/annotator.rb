@@ -5422,55 +5422,77 @@ private
   # The scope handles type resolution, variable declarations, mutability,
   # and capability tracking. All ownership state is in the OwnershipGraph.
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: T.untyped).void }
   def handle_assign_move(node)
     return if node.value.is_a?(AST::CopyNode)
 
-    # Non-escaping values (WITH block aliases) cannot be moved/consumed.
-    # Copy types (Int64, Bool, Float64, etc.) are exempt: assignment copies the
-    # value with no pointer transfer, so no lifetime hazard exists.
-    if node.value.is_a?(AST::Identifier) && node.value.symbol&.non_escaping
-      vti = node.value.full_type!(context: "assignment scoped move value")
-      needs_move = begin
-        vti && Type.new(vti).requires_move?
-      rescue
-        true
-      end
-      if needs_move
-        error!(node, :MOVE_WITH_SCOPED, name: node.value.name)
-      end
-    end
+    reject_scoped_assignment_move!(node)
+
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
-      # Container indexing of borrowed source into an owned target (HashMap
-      # assignment) is an error. Plain variable declarations get borrow marking
-      # via register_container_borrow! instead.
-      if node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
-        vti = node.value.full_type!(context: "assignment index value")
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-        is_copy = vti.is_a?(Type) ?
-          (vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
-          true
-        unless is_copy
-          container = find_container_source(node.value)
-          if container
-            source_name = root_variable_name(node.value)
-            if source_name && @og[source_name]&.kind == :borrowed
-              error!(node, :MOVE_BORROWED_INDEX, source: source_name)
-            end
-          end
-        end
-      end
-      path = get_path_to_root(node.value)
-      return if path.nil?
-      if Type.new(node.value.resolved_type).requires_move?
-        graph_path = path.map(&:to_s).join(".")
-        @og.declare(graph_path, kind: :affine, type_info: Type.new(node.value.resolved_type),
-          scope_depth: @og_scope_depth) unless @og[graph_path]
-        og_set_moved(graph_path, at_token: node.value.token, action: :move)
-      end
+      handle_assignment_path_move!(node)
       return
     end
 
+    handle_assignment_identifier_move!(node)
+  end
+
+  sig { params(node: T.untyped).void }
+  def reject_scoped_assignment_move!(node)
+    # Non-escaping values (WITH block aliases) cannot be moved/consumed.
+    # Copy types (Int64, Bool, Float64, etc.) are exempt: assignment copies the
+    # value with no pointer transfer, so no lifetime hazard exists.
+    return unless node.value.is_a?(AST::Identifier) && node.value.symbol&.non_escaping
+
+    vti = node.value.full_type!(context: "assignment scoped move value")
+    needs_move = begin
+      vti && Type.new(vti).requires_move?
+    rescue
+      true
+    end
+    error!(node, :MOVE_WITH_SCOPED, name: node.value.name) if needs_move
+  end
+
+  sig { params(node: T.untyped).void }
+  def handle_assignment_path_move!(node)
+    reject_borrowed_index_assignment_move!(node)
+    path = get_path_to_root(node.value)
+    return if path.nil?
+    value_type = Type.new(node.value.resolved_type)
+    return unless value_type.requires_move?
+
+    graph_path = path.map(&:to_s).join(".")
+    declare_assignment_graph_path!(graph_path, value_type) unless @og[graph_path]
+    og_set_moved(graph_path, at_token: node.value.token, action: :move)
+  end
+
+  sig { params(graph_path: String, value_type: Type).void }
+  def declare_assignment_graph_path!(graph_path, value_type)
+    @og.declare(graph_path, kind: :affine, type_info: value_type, scope_depth: @og_scope_depth)
+  end
+
+  sig { params(node: T.untyped).void }
+  def reject_borrowed_index_assignment_move!(node)
+    # Container indexing of borrowed source into an owned target (HashMap
+    # assignment) is an error. Plain variable declarations get borrow marking
+    # via register_container_borrow! instead.
+    return unless node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
+
+    vti = node.value.full_type!(context: "assignment index value")
+    vti = Type.new(vti) if vti && !vti.is_a?(Type)
+    is_copy = vti.is_a?(Type) ?
+      (vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
+      true
+    return if is_copy
+    return unless find_container_source(node.value)
+
+    source_name = root_variable_name(node.value)
+    if source_name && @og[source_name]&.kind == :borrowed
+      error!(node, :MOVE_BORROWED_INDEX, source: source_name)
+    end
+  end
+
+  sig { params(node: T.untyped).void }
+  def handle_assignment_identifier_move!(node)
     return unless node.value.is_a?(AST::Identifier)
     rhs_name = node.value.name
     rhs_type = current_scope.resolve_type(rhs_name)

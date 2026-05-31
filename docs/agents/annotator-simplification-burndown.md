@@ -119,10 +119,28 @@ Plan:
 - Avoid large architectural rewrites unless the first slice proves the metric and readability payoff.
 - Snapshot reports after the slice and decide whether to continue or stop.
 
-Status: pending.
+Status: continue.
+
+Slice 1:
+
+- Change: split `handle_assign_move` into scoped-alias rejection,
+  path/index move handling, ownership-graph declaration, borrowed-index
+  rejection, and identifier move handling. No behavior change intended.
+- Validation: `bundle exec srb tc`; `bundle exec prspec
+  spec/annotator_gap_burndown_spec.rb spec/move_semantics_spec.rb
+  spec/use_after_move_spec.rb spec/affine_ownership_spec.rb
+  spec/borrowed_escape_spec.rb`.
+- After metrics:
+  - SlopCop: 4035 -> 3989 dark arms; 1139 -> 1116 type_norm arms; 1188 -> 1181 genuine gaps.
+  - Decomplex: `handle_assign_move` dropped out of the top convergence list, but total convergence moved 1349 -> 1353. Decision-pressure and missing-abstraction totals were unchanged.
+  - Nil-kill hygiene unchanged.
+  - Boobytrap hotspot count unchanged.
+- Evaluation: **Continue**. This improved SlopCop and removed the specific top annotator hotspot from the headline list, but the extraction increased total decomplex convergence by creating smaller protocol-shaped helpers. Keep the slice because the targeted hotspot is materially easier to read; next work should collapse the new ownership-graph declaration protocol instead of doing more pure extraction.
 
 ## Progress Log
 
 - Item 1 slice 1 committed separately. Continue only with broader seam cleanup.
 - Item 2 attempted and scrapped. Do not reify small local hashes unless the
   replacement removes more branches/guards than the strict object costs.
+- Item 3 slice 1 committed separately. Target hotspot improved, but follow-up
+  should reduce the new ownership-graph helper protocol.
