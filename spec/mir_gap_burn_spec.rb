@@ -138,6 +138,35 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(copied).to be_a(MIR::Ident)
   end
 
+  it "collects allocator facts from nested catch-body reassignments" do
+    low = lowering
+    heap_value = id("heap_value", storage: :heap)
+    frame_value = id("frame_value", storage: :frame)
+    ignored_value = lit("ro")
+
+    bind_assign = AST::BindExpr.new(tok, "slot", nil, heap_value)
+    bind_assign.mode = :assign
+    ident_assign = AST::Assignment.new(tok, id("other"), frame_value)
+    string_assign = AST::Assignment.new(tok, "not_a_target_identifier", heap_value)
+    if_stmt = AST::IfStatement.new(tok, lit(1, type: :Int64), [bind_assign], [ident_assign], nil, nil)
+    match_case = AST::MatchCase.new(kind: :literal, value: lit("E"), body: [string_assign])
+    default_bind = AST::BindExpr.new(tok, "ignored", nil, ignored_value)
+    default_bind.mode = :assign
+    match_stmt = AST::MatchStatement.new(tok, id("tag"), [match_case], [default_bind], nil, nil, false, false)
+
+    fun = fn([], return_type: :String)
+    fun.catch_clauses = [AST::CatchClause.new(body: [if_stmt, match_stmt])]
+    fun.default_catch = [AST::Assignment.new(tok, id("fallback"), heap_value)]
+
+    facts = low.send(:collect_catch_reassigns, fun)
+
+    expect(facts.map { |fact| [fact.name, fact.alloc] }).to contain_exactly(
+      ["slot", :heap],
+      ["other", :frame],
+      ["fallback", :heap],
+    )
+  end
+
   it "covers lowering coercion and implicit allocation facts as typed facts" do
     low = lowering
 

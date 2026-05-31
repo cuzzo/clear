@@ -917,6 +917,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return nil unless expr
     return :heap if expr.respond_to?(:symbol) && expr.symbol&.heap_storage? == true
+    sym_storage = expr.respond_to?(:symbol) ? expr.symbol&.storage : nil
+    return :frame if SymbolEntry.frame_storage_value?(sym_storage)
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return :heap if SymbolEntry.heap_storage_value?(storage)
     return :frame if SymbolEntry.frame_storage_value?(storage)

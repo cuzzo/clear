@@ -1,0 +1,174 @@
+# frozen_string_literal: true
+
+require "json"
+require "ripper"
+require_relative "decomplex_risk"
+
+module Boobytrap
+  # Method-level coverage gaps from SimpleCov line + branch data.
+  #
+  # Boobytrap's original signal is file-level: fix-churn x branch gap.
+  # This overlay answers a different triage question: "which whole
+  # methods are still mostly dark, and are any of them stateful enough
+  # to be risky?" It intentionally keeps method-range discovery local,
+  # but delegates complexity/risk pressure to Decomplex's detector
+  # score instead of maintaining a second complexity model here.
+  module MethodGap
+    Row = Struct.new(:file, :name, :first_line, :last_line,
+                     :executable_lines, :covered_lines, :missed_lines,
+                     :line_gap, :decomplex_score, :decomplex_findings,
+                     :decomplex_detectors, :state_writes,
+                     :uncovered_branches, :risk,
+                     keyword_init: true)
+
+    module_function
+
+    def from_resultset(path, root:, min_lines: 5, decomplex_scores: {})
+      data = JSON.parse(::File.read(path))
+      coverage = merge_coverage(data)
+      rootp = root.chomp("/") + "/"
+      rows = []
+
+      coverage.each do |abs, cov|
+        next unless abs.start_with?(rootp) && ::File.file?(abs)
+
+        rel = abs[rootp.length..]
+        lines = cov["lines"] || []
+        branch_misses = branch_misses_by_line(cov["branches"] || {})
+        source_lines = ::File.readlines(abs, chomp: true)
+
+        method_ranges(source_lines).each do |m|
+          exec = covered = 0
+          (m[:first_line]..m[:last_line]).each do |ln|
+            v = lines[ln - 1]
+            next if v.nil?
+
+            exec += 1
+            covered += 1 if v.to_i.positive?
+          end
+          next if exec < min_lines
+
+          missed = exec - covered
+          next if missed.zero?
+
+          body = source_lines[(m[:first_line] - 1)...m[:last_line]] || []
+          state_writes = state_write_count(body)
+          dark_branches = branch_misses.sum { |ln, n| m[:first_line] <= ln && ln <= m[:last_line] ? n : 0 }
+          gap = missed.to_f / exec
+          decomplex = decomplex_scores.fetch([rel, m[:name]], default_score)
+          rows << Row.new(
+            file: rel,
+            name: m[:name] || "(anonymous)",
+            first_line: m[:first_line],
+            last_line: m[:last_line],
+            executable_lines: exec,
+            covered_lines: covered,
+            missed_lines: missed,
+            line_gap: gap,
+            decomplex_score: decomplex.score,
+            decomplex_findings: decomplex.findings,
+            decomplex_detectors: decomplex.detectors,
+            state_writes: state_writes,
+            uncovered_branches: dark_branches,
+            risk: risk_score(missed, gap, decomplex.score, state_writes, dark_branches)
+          )
+        end
+      end
+
+      rows.sort_by { |r| [-r.risk, -r.missed_lines, r.file, r.first_line] }
+    end
+
+    def covered_files(path, root:)
+      rootp = root.chomp("/") + "/"
+      JSON.parse(::File.read(path)).each_value.flat_map do |entry|
+        (entry["coverage"] || {}).keys
+      end.uniq.filter_map do |abs|
+        next unless abs.start_with?(rootp) && ::File.file?(abs)
+
+        abs[rootp.length..]
+      end
+    end
+
+    def merge_coverage(data)
+      merged = {}
+      data.each_value do |entry|
+        (entry["coverage"] || {}).each do |abs, cov|
+          next unless cov.is_a?(Hash)
+
+          dst = (merged[abs] ||= { "lines" => [], "branches" => {} })
+          merge_lines!(dst["lines"], cov["lines"] || [])
+          merge_branches!(dst["branches"], cov["branches"] || {})
+        end
+      end
+      merged
+    end
+
+    def merge_lines!(dst, src)
+      src.each_with_index do |v, i|
+        next if v.nil?
+
+        dst[i] = 0 if dst[i].nil?
+        dst[i] += v.to_i
+      end
+    end
+
+    def merge_branches!(dst, src)
+      src.each do |parent, arms|
+        d = (dst[parent] ||= Hash.new(0))
+        arms.each { |arm, n| d[arm] += n.to_i }
+      end
+    end
+
+    def method_ranges(lines)
+      toks = Ripper.lex(lines.join("\n"))
+      stack = []
+      ranges = []
+      toks.each do |(pos, type, tok, _state)|
+        line = pos[0]
+        if type == :on_kw
+          case tok
+          when "def"
+            stack << { first_line: line, name: nil }
+          when "end"
+            m = stack.pop
+            ranges << m.merge(last_line: line) if m
+          end
+        elsif stack.any? && stack[-1][:name].nil? &&
+              %i[on_ident on_const on_op on_kw].include?(type)
+          stack[-1][:name] = tok
+        end
+      end
+      ranges
+    end
+
+    def branch_misses_by_line(branches)
+      out = Hash.new(0)
+      branches.each_value do |arms|
+        arms.each do |arm, count|
+          next unless count.to_i.zero?
+
+          fields = arm.gsub(/[\[\]:]/, "").split(",").map(&:strip)
+          line = fields[2].to_i
+          out[line] += 1 if line.positive?
+        end
+      end
+      out
+    end
+
+    def state_write_count(lines)
+      lines.count do |line|
+        line.match?(/@\w+\s*(?:[+\-*\/%|&^]?=|<<)/) ||
+          line.match?(/@\w+\.\w+!?[=(]/)
+      end
+    end
+
+    def risk_score(missed, gap, decomplex_score, state_writes, dark_branches)
+      (missed * gap) + (decomplex_score.to_f * 1.5) +
+        (state_writes * 1.0) + (dark_branches * 0.5)
+    end
+
+    def default_score
+      DecomplexRisk::Score.new(score: 0, findings: 0, detectors: [])
+    end
+  end
+end

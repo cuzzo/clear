@@ -238,6 +238,53 @@ RSpec.describe MIRChecker do
     end
   end
 
+  describe "allocator and transfer invariants" do
+    it "rejects return transfers without heap allocation proof" do
+      missing = checker.check_fn!(fn_def("missing_return_alloc", [
+        MIR::TransferMark.new("x", :return),
+      ]))
+      expect(missing.any? { |e| e.include?("RETURN_TRANSFER_WITHOUT_ALLOC") && e.include?("x") }).to be true
+
+      frame_backed = checker.check_fn!(fn_def("frame_return_alloc", [
+        alloc_mark("x", :frame),
+        MIR::TransferMark.new("x", :return),
+      ]))
+      expect(frame_backed.any? { |e| e.include?("RETURN_TRANSFER_FRAME_ALLOC") && e.include?("x") }).to be true
+    end
+
+    it "rejects invalid allocator metadata" do
+      iz = MIR::InlineZig.new("alloc({alloc})", "alloc", MIR::OwnershipContract.empty, nil, { alloc: :arena })
+      body = [
+        MIR::AllocMark.new("x", :arena, Type.new(:String), :heap),
+        MIR::AllocMark.new("y", :heap, Type.new(:String), :nowhere),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :arena, has_moved_guard: false })),
+        MIR::Let.new("x", iz, false, nil, nil),
+      ]
+
+      errors = checker.check_fn!(fn_def("bad_alloc_facts", body))
+      expect(errors.any? { |e| e.include?("INVALID_ALLOCATOR_MARK") && e.include?(":arena") }).to be true
+      expect(errors.any? { |e| e.include?("INVALID_ALLOCATOR_MARK") && e.include?(":nowhere") }).to be true
+      expect(errors.any? { |e| e.include?("INLINE_ALLOC_WITHOUT_TARGET") && e.include?("alloc") }).to be true
+    end
+
+    it "rejects double finalizers and cleanup after transfer" do
+      entry = CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })
+      double_finalizer = checker.check_fn!(fn_def("double_finalizer", [
+        alloc_mark("x", :heap),
+        MIR::Cleanup.new("x", entry),
+        MIR::ErrCleanup.new("x", entry),
+      ]))
+      expect(double_finalizer.any? { |e| e.include?("OWNERSHIP_DOUBLE_FINALIZER") && e.include?("x") }).to be true
+
+      after_transfer = checker.check_fn!(fn_def("cleanup_after_transfer", [
+        alloc_mark("x", :heap),
+        MIR::TransferMark.new("x", :moved),
+        MIR::Cleanup.new("x", entry),
+      ]))
+      expect(after_transfer.any? { |e| e.include?("OWNERSHIP_DOUBLE_RELEASE") && e.include?("x") }).to be true
+    end
+  end
+
   describe "linear ownership hard errors" do
     it "rejects a MIR statement that is not registered for linear ownership traversal" do
       unknown = Class.new(Struct.new(:expr)) do

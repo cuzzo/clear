@@ -1297,6 +1297,7 @@ private
       stamp_type!(node, node.result.full_type!(context: "catch branch result"))
       node.storage   = node.result.storage
     end
+    nil
   end
 
   sig { params(node: AST::IfStatement).returns(T.nilable(Symbol)) }
