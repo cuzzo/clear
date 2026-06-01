@@ -101,7 +101,8 @@ RSpec.describe MIRLowering do
   def compile_first_assignment(src, target: :zig)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
     result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
-    fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
+    fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" } ||
+      result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
     assignment = fn.body.find { |s| s.is_a?(AST::Assignment) }
     low = lowering(
       struct_schemas: result.struct_schemas,
@@ -113,6 +114,45 @@ RSpec.describe MIRLowering do
       target: target
     )
     [low, assignment]
+  end
+
+  def compile_first_binding_value(src, name, target: :zig)
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+    fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" } ||
+      result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
+    binding = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == name }
+    low = lowering(
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      importer: importer,
+      source_dir: Dir.pwd,
+      target: target
+    )
+    [low, binding.value]
+  end
+
+  def each_mir_node(root, &block)
+    seen = {}
+    visit = nil
+    visit = lambda do |obj|
+      return if obj.nil?
+      case obj
+      when Array
+        obj.each { |v| visit.call(v) }
+      when Hash
+        obj.each { |k, v| visit.call(k); visit.call(v) }
+      else
+        return unless obj.class.name&.start_with?("MIR::")
+        return if seen[obj.object_id]
+        seen[obj.object_id] = true
+        block.call(obj)
+        obj.each_pair { |_name, value| visit.call(value) } if obj.respond_to?(:each_pair)
+      end
+    end
+    visit.call(root)
   end
 
   def compile_fixture_lowering(path)
@@ -963,6 +1003,59 @@ RSpec.describe MIRLowering do
       expect(zig).to include("CheatLib.cleanupAt(Point, items, rt.frameAlloc(), 0)")
       expect(zig).to include("CheatLib.setAt(items, 0, __tmp_")
       expect(result.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) }).to be true
+    end
+  end
+
+  describe "BC concurrent pipeline lowering" do
+    {
+      "count" => ["COUNT _ > 2_i64", MIR::Lit],
+      "min" => ["MIN toFloat(_)", MIR::TypeSentinel],
+      "max" => ["MAX toFloat(_)", MIR::TypeSentinel],
+      "average" => ["AVERAGE toFloat(_)", MIR::FieldGet],
+    }.each do |name, (op, expected_node)|
+      it "lowers CONCURRENT #{name.upcase} through the BC sequential simulation" do
+        low, value = compile_first_binding_value(<<~CLEAR, "out", target: :bc)
+          FN main() RETURNS Void ->
+            vals = [1_i64, 2_i64, 3_i64, 4_i64];
+            out = vals |> CONCURRENT(workers: 2) #{op};
+            RETURN;
+          END
+        CLEAR
+
+        result = low.lower(value)
+        nodes = []
+        each_mir_node(result) { |node| nodes << node }
+
+        expect(result).to be_a(MIR::Pipeline)
+        expect(nodes).to include(a_kind_of(MIR::BlockExpr))
+        expect(nodes).to include(a_kind_of(expected_node))
+      end
+    end
+
+    it "lowers CONCURRENT WHERE OR PRUNE through the BC error-sentinel path" do
+      low, value = compile_first_binding_value(<<~CLEAR, "out", target: :bc)
+        FN maybePositive(x: Float64) RETURNS !Bool ->
+          RETURN x > 1.0;
+        END
+
+        FN main() RETURNS Void ->
+          vals: Float64[] = [1.0, 2.0, 3.0];
+          out = vals |> CONCURRENT(workers: 2) WHERE maybePositive(_) OR PRUNE;
+          RETURN;
+        END
+      CLEAR
+
+      result = low.lower(value)
+      inline_bc_ops = []
+      each_mir_node(result) do |node|
+        inline_bc_ops << node.op if node.is_a?(MIR::InlineBc)
+      end
+
+      expect(result).to be_a(MIR::Pipeline)
+      nodes = []
+      each_mir_node(result) { |node| nodes << node }
+      expect(nodes).to include(a_kind_of(MIR::BlockExpr))
+      expect(inline_bc_ops).to include(:is_error)
     end
   end
 

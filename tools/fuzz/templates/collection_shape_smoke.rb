@@ -22,6 +22,7 @@ COLLECTION_SHAPE_SMOKE_CELLS = [
   { shape: :sharded_hash_map },
   { shape: :soa_list },
   { shape: :soa_pool },
+  { shape: :constructor_modifiers },
   { shape: :nested_collection },
 ]
 
@@ -174,6 +175,25 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals.insert(Item{ value: 3.0, other: 30.0 });
           total = vals |> SUM _.value;
           ASSERT total == 6.0, "soa pool field sum";
+          RETURN;
+      END
+    CHT
+
+  when :constructor_modifiers
+    <<~CHT
+      STRUCT Item { value: Float64, other: Float64 }
+
+      FN main() RETURNS Void ->
+          MUTABLE vals: Float64[]@list:sharded(2) = List[]:sharded(2);
+          vals.append(1.0);
+          vals.append(2.0);
+          ASSERT vals.length() == 2_i64, "sharded list constructor";
+
+          MUTABLE pool: Item[8]@pool:soa = Pool[]:soa;
+          pool.insert(Item{ value: 1.0, other: 10.0 });
+          pool.insert(Item{ value: 2.0, other: 20.0 });
+          total = pool |> SUM _.value;
+          ASSERT total == 3.0, "soa pool constructor";
           RETURN;
       END
     CHT

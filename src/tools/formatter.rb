@@ -714,6 +714,13 @@ class Formatter::Emitter
   # arm-body top-level since `;` already inserts one.
   sig { params(out: Array, toks: Array, s: Integer, e: Integer).void }
   def emit_match_body(out, toks, s, e)
+    body_toks = T.must(toks[s...e])
+    body_toks = expand_match_blocks(body_toks)
+    body_toks = expand_then_do_blocks(body_toks)
+    toks = body_toks
+    s = 0
+    e = toks.length
+
     bdepth = 0
     kdepth = 0
     j = skip_nls(toks, s)

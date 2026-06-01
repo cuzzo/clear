@@ -23,11 +23,8 @@ class PipelineHost
   include PipelineGenerator
   include ZigTypeMapper
 
-  # Single-source loopMark save/restore pair for shard contexts that emit
-  # InlineZig (vs MIR::Let used by mir_lowering.prepend_loop_mark). Returns
-  # an array of two MIR::InlineZig nodes; caller concats into its inner
-  # body. Inline-string variant (for raw key_loop_mark / body_loop_mark
-  # interpolation) is shard_loop_mark_string below.
+  # Single-source loopMark save/restore pair for shard contexts. Returns an
+  # array of two MIR nodes; caller concats into its inner body.
   sig { params(var: String, rt: String, tag: String).returns(T::Array[T.untyped]) }
   def shard_loop_mark_pair(var, rt, tag: "shard_loop")
     rt_ident = MIR::Ident.new(rt)
@@ -35,13 +32,6 @@ class PipelineHost
       MIR::Let.new(var, MIR::MethodCall.new(rt_ident, "saveLoopMark", [], false, MIR::CallableContract.no_ownership(0)), false, nil, nil),
       MIR::DeferStmt.new(MIR::MethodCall.new(rt_ident, "restoreLoopMark", [MIR::Ident.new(var)], false, MIR::CallableContract.no_ownership(1))),
     ]
-  end
-
-  # String-template variant for sites that interpolate the marker into a
-  # larger Zig template literal (key_loop_mark / body_loop_mark).
-  sig { params(var: String, rt: String, indent: String).returns(String) }
-  def shard_loop_mark_string(var, rt, indent: "              ")
-    "const #{var} = #{rt}.saveLoopMark();\n#{indent}defer #{rt}.restoreLoopMark(#{var});"
   end
 
   sig { params(cb: T::Hash[T.untyped, T.untyped]).returns(T::Array[T.untyped]) }
@@ -3842,7 +3832,10 @@ class PipelineHost
   # data source. This makes `users AS $u |> CONCURRENT SELECT $u.field`
   # work: substitute_placeholders rewrites $u to it inside the inner
   # expression at MIR-build time.
-  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(FsmOps::CallExpr) }
+  sig do
+    params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped)
+      .returns(T.nilable(T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock)))
+  end
   def lower_concurrent_bc(lhs, conc_op, smooth_node)
     inner = conc_op.op
 
@@ -3874,9 +3867,6 @@ class PipelineHost
       when AST::MinOp     then lower_min(real_site, inner)
       when AST::MaxOp     then lower_max(real_site, inner)
       when AST::AverageOp then lower_average(real_site, inner)
-      when AST::AnyOp     then lower_any(real_site, inner)
-      when AST::AllOp     then lower_all(real_site, inner)
-      when AST::FindOp    then lower_find(real_site, inner)
       else
         raise "lower_concurrent_bc: unsupported inner op #{inner.class}"
       end
@@ -3898,11 +3888,9 @@ class PipelineHost
 
   # SHARD + CONCURRENT EACH.
   #
-  # BC remains sequential because the VM has no scheduler ownership model.
-  # Zig uses one bounded channel and one worker fiber per shard. The producer
-  # computes the routing key/hash and enqueues an owned WorkItem; each worker
-  # serially drains its shard and lowers the body in shard-direct mode so
-  # map[k]/map[k]=v compile to getDirect/putDirect.
+  # Both backends lower this as a verifier-visible structural loop. The body
+  # runs in shard-direct mode so map[k]/map[k]=v compile to direct shard ops
+  # for Zig and regular map ops for BC.
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(MIR::ForStmt) }
   def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = conc_op.shard_context
@@ -3970,228 +3958,7 @@ class PipelineHost
     MIR::ForStmt.new(MIR::IterRange.new(start_mir, end_expr, :i64), idx_var, inner, nil)
   end
 
-  sig { params(id: Integer, range_node: AST::RangeLit, conc_op: AST::ConcurrentOp, each_op: AST::EachOp, ctx: T::Hash[T.untyped, T.untyped], map_node: AST::Identifier, map_var_name: String, idx_var: String, key_var: String, sh_var: String, map_ptr: String, start_mir: MIR::Lit, end_mir: T.untyped).returns(MIR::InlineZig) }
-  def lower_shard_concurrent_each_zig(id, range_node, conc_op, each_op, ctx,
-                                      map_node, map_var_name, idx_var, key_var,
-                                      sh_var, map_ptr, start_mir, end_mir)
-    shard_count = ctx[:shard_count] || map_node.full_type!.shard_count
-    raise "SHARD target missing shard_count" unless shard_count
 
-    map_t = map_node.full_type!
-    key_t = if map_t&.numeric_map? && map_t&.key_type
-      map_t.key_type
-    else
-      Type.new(:String)
-    end
-    key_zig = key_t.zig_type
-    string_key = !map_t&.numeric_map?
-
-    start_zig = @lowering.emit_expr(start_mir)
-    end_zig   = @lowering.emit_expr(end_mir)
-    cap_mir = stream_concurrent_capacity_mir(conc_op, shard_count.to_s)
-    cap_zig = @lowering.emit_expr(cap_mir)
-    batch_mir = bounded_concurrent_batch_mir(conc_op)
-    batch_zig = @lowering.emit_expr(batch_mir)
-    task_cfg = task_config_zig(conc_op.options["size"]&.name&.downcase&.to_sym)
-
-    key_mir = with_pipeline_context(placeholder: idx_var) { visit_mir(ctx[:key_expr]) }
-    key_zig_expr = @lowering.emit_expr(key_mir)
-
-    caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
-    shard_map_field = "__shard_map"
-    map_capture_map = map_var_name ? { map_var_name => "ctx.#{shard_map_field}.*" } : {}
-    capture_fields_arr = ["        #{shard_map_field}: *@TypeOf(#{map_ptr}.*),"]
-    capture_fields_arr.concat(caps.specs.map { |s| "        #{s.name}: #{s.field_type_zig}," })
-    capture_fields = capture_fields_arr.join("\n")
-    capture_inits = [".#{shard_map_field} = #{map_ptr}"] + caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }
-    capture_inits_str = capture_inits.empty? ? "" : ", #{capture_inits.join(", ")}"
-
-    prev_ctx = @lowering.instance_variable_get(:@shard_context)
-    body_mir = nil
-    begin
-      @lowering.instance_variable_set(:@shard_context, {
-        map: map_var_name,
-        idx: "ctx.shard",
-        key: key_var,
-        hash: "0"
-      })
-      body_mir = with_pipeline_context(placeholder: key_var) do
-        with_fiber_capture_map(map_capture_map.merge(caps.capture_map), capture_symbols: caps.capture_symbols, rt_override: "__rt") do
-          visit_pipeline_body_mir(each_op.body, placeholder: key_var)
-        end
-      end
-    ensure
-      @lowering.instance_variable_set(:@shard_context, prev_ctx)
-    end
-
-    saved_low_rt = @lowering.instance_variable_get(:@rt_name)
-    @lowering.instance_variable_set(:@rt_name, "__rt")
-    body_zig = begin
-      body_mir.filter_map { |m|
-        code = @lowering.emit_expr(m)
-        next nil if code.nil? || code.empty?
-        code.strip.end_with?("}", ";") ? code : "#{code};"
-      }.join("\n                    ")
-    ensure
-      @lowering.instance_variable_set(:@rt_name, saved_low_rt)
-    end
-
-    key_loop_mark = ctx[:key_allocates_frame] ?
-      shard_loop_mark_string("__sh#{id}_key_mark", "rt") : ""
-    body_loop_mark = ctx[:body_allocates_frame] ?
-      shard_loop_mark_string("__sh#{id}_body_mark", "__rt", indent: " " * 22) : ""
-    key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
-    key_free_work = if string_key
-      "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n                  __rt.heapAlloc().free(__work.keys);"
-    else
-      "__rt.heapAlloc().free(__work.keys);"
-    end
-    key_free_success = string_key ? "__rt.heapAlloc().free(#{key_var});" : ""
-    key_free_remaining = string_key ? "errdefer for (__work.keys[__sh#{id}_ki..]) |__k| __rt.heapAlloc().free(__k);" : ""
-    key_slice_cleanup = string_key ? "for (__sh#{id}_keys) |__k| rt.heapAlloc().free(__k);" : ""
-    pending_batch_cleanup = string_key ? "for (__sh#{id}_batches[__s].items) |__k| rt.heapAlloc().free(__k);" : ""
-    channel_buffer_cleanup = if string_key
-      <<~ZIG.chomp
-        fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork#{id}), __rt: *Runtime) void {
-                          const inner = chan.inner;
-                          inner.mutex.lock();
-                          while (inner.tail != inner.head) {
-                              const __work = inner.buf[inner.tail & inner.mask];
-                              inner.tail += 1;
-                              for (__work.keys) |__k| __rt.heapAlloc().free(__k);
-                              __rt.heapAlloc().free(__work.keys);
-                          }
-                          inner.mutex.unlock();
-                      }
-      ZIG
-    else
-      <<~ZIG.chomp
-        fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork#{id}), __rt: *Runtime) void {
-                          const inner = chan.inner;
-                          inner.mutex.lock();
-                          while (inner.tail != inner.head) {
-                              const __work = inner.buf[inner.tail & inner.mask];
-                              inner.tail += 1;
-                              __rt.heapAlloc().free(__work.keys);
-                          }
-                          inner.mutex.unlock();
-                      }
-      ZIG
-    end
-    op_str = range_node.inclusive ? "<=" : "<"
-
-    code = <<~ZIG.chomp
-      {
-          const #{map_ptr} = &#{@lowering.emit_expr(visit_mir(map_node))};
-          #{map_ptr}.ensureOwnership();
-          const __sh#{id}_cap: usize = #{cap_zig};
-          const __sh#{id}_batch: usize = @max(@as(usize, #{batch_zig}), 1);
-          const __ShWork#{id} = struct {
-              keys: []#{key_zig},
-          };
-          const __ShCleanup#{id} = struct {
-              #{channel_buffer_cleanup}
-          };
-          var __sh#{id}_chans: [#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}) = undefined;
-          for (0..#{shard_count}) |__s| {
-              __sh#{id}_chans[__s] = try CheatLib.BoundedChannel(__ShWork#{id}).init(rt.heapAlloc(), __sh#{id}_cap);
-          }
-          defer for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].deinit();
-
-          var __sh#{id}_wg = CheatHeader.WaitGroup.init(rt.getSched());
-          var __sh#{id}_err = std.atomic.Value(bool).init(false);
-          const __ShWorker#{id} = struct {
-              wg: *CheatHeader.WaitGroup,
-              chans: *[#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}),
-              err: *std.atomic.Value(bool),
-              shard: usize,
-      #{capture_fields.empty? ? "" : capture_fields + "\n"}        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
-                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
-                  defer ctx.wg.done();
-                  errdefer {
-                      ctx.err.store(true, .release);
-                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(error.CheatError);
-                  }
-                  while (ctx.chans[ctx.shard].pop() catch |__err| {
-                      ctx.err.store(true, .release);
-                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(__err);
-                      return __err;
-                  }) |__work| {
-                      errdefer {
-                          #{key_free_work}
-                      }
-                      var __sh#{id}_ki: usize = 0;
-                      while (__sh#{id}_ki < __work.keys.len) : (__sh#{id}_ki += 1) {
-                          #{key_free_remaining}
-                          const #{key_var}: #{key_zig} = __work.keys[__sh#{id}_ki];
-                          #{body_loop_mark}
-                          #{body_zig}
-                          #{key_free_success}
-                      }
-                      __rt.heapAlloc().free(__work.keys);
-                      __rt.checkYield();
-                  }
-              }
-          };
-          var __sh#{id}_workers: [#{shard_count}]__ShWorker#{id} = undefined;
-          __sh#{id}_wg.add(#{shard_count});
-          for (0..#{shard_count}) |__s| {
-              __sh#{id}_workers[__s] = .{ .wg = &__sh#{id}_wg, .chans = &__sh#{id}_chans, .err = &__sh#{id}_err, .shard = __s#{capture_inits_str} };
-              try CheatHeader.spawnBest(
-                  @intFromPtr(&Runtime.entryWrapper),
-                  @as(CheatHeader.TaskFn, @ptrCast(&__ShWorker#{id}.run)),
-                  &__sh#{id}_workers[__s],
-                  #{task_cfg},
-              );
-          }
-
-          var __sh#{id}_batches: [#{shard_count}]std.ArrayListUnmanaged(#{key_zig}) = [_]std.ArrayListUnmanaged(#{key_zig}){.empty} ** #{shard_count};
-          defer for (0..#{shard_count}) |__s| {
-              #{pending_batch_cleanup}
-              __sh#{id}_batches[__s].deinit(rt.heapAlloc());
-          };
-
-          var #{idx_var}: i64 = #{start_zig};
-          const __sh#{id}_end: i64 = #{end_zig};
-          while ((#{idx_var} #{op_str} __sh#{id}_end) and !__sh#{id}_err.load(.acquire)) : (#{idx_var} += 1) {
-              #{key_loop_mark}
-              const #{key_var}: #{key_zig} = #{key_zig_expr};
-              const #{sh_var} = @TypeOf(#{map_ptr}.*).shardIndexWithHash(#{key_var});
-              try __sh#{id}_batches[#{sh_var}.shard].append(rt.heapAlloc(), #{key_store_expr});
-              if (__sh#{id}_batches[#{sh_var}.shard].items.len >= __sh#{id}_batch) {
-                  const __sh#{id}_keys = try __sh#{id}_batches[#{sh_var}.shard].toOwnedSlice(rt.heapAlloc());
-                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
-                  __sh#{id}_chans[#{sh_var}.shard].push(__sh#{id}_work) catch |__err| {
-                      #{key_slice_cleanup}
-                      rt.heapAlloc().free(__sh#{id}_keys);
-                      __sh#{id}_err.store(true, .release);
-                      for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].setError(__err);
-                      break;
-                  };
-              }
-          }
-          for (0..#{shard_count}) |__s| {
-              if (__sh#{id}_batches[__s].items.len > 0 and !__sh#{id}_err.load(.acquire)) {
-                  const __sh#{id}_keys = try __sh#{id}_batches[__s].toOwnedSlice(rt.heapAlloc());
-                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
-                  __sh#{id}_chans[__s].push(__sh#{id}_work) catch |__err| {
-                      #{key_slice_cleanup}
-                      rt.heapAlloc().free(__sh#{id}_keys);
-                      __sh#{id}_err.store(true, .release);
-                      for (0..#{shard_count}) |__ss| __sh#{id}_chans[__ss].setError(__err);
-                      break;
-                  };
-              }
-          }
-          for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].close();
-          __sh#{id}_wg.wait();
-          for (0..#{shard_count}) |__s| __ShCleanup#{id}.cleanupBuffered(&__sh#{id}_chans[__s], rt);
-          if (__sh#{id}_err.load(.acquire)) return error.CheatError;
-      }
-    ZIG
-    MIR::InlineZig.new(code, "shard_concurrent_each")
-  end
 
   # CONCURRENT SELECT ... OR PRUNE: build a structural for-loop that runs
   # the failable expression, checks for an error sentinel, and only appends

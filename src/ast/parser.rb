@@ -2560,14 +2560,9 @@ class Parser
         collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
-        if match?(:VAR_ID) && current.value == "@soa"
-          consume(:VAR_ID)
-          is_soa = true
-        elsif match?(:CHAR, ':')
-          dummy_tok = Lexer::Token.new(:VAR_ID, "@#{name.downcase}", T.must(type_token).line, T.must(type_token).column)
-          mods = parse_collection_modifiers!(dummy_tok)
-          shard_count = mods[:shard_count]
-          is_soa = mods[:soa]
+        if (caps = parse_constructor_capabilities(T.must(type_token), name))
+          shard_count = caps[:shard_count]
+          is_soa = caps[:is_soa] || false
         end
         node = AST::ListLit.new(type_token, ctor_items, storage)
         node.instance_variable_set(:@constructor_collection, collection)
@@ -3036,34 +3031,6 @@ class Parser
     end
   end
 
-  # Parses an optional `:sharded(N)` or `:soa` suffix after @pool or @list.
-  # Returns { shard_count:, soa: } hash with parsed values.
-  # Raises a ParserError if the syntax is malformed or N < 2.
-  sig { params(cap_tok: Lexer::Token).returns(T::Hash[Symbol, T.untyped]) }
-  def parse_collection_modifiers!(cap_tok)
-    result = T.let({ shard_count: nil, soa: false }, T::Hash[Symbol, T.untyped])
-    return result unless match?(:CHAR, ':')
-    consume(:CHAR, ':')
-    unless match?(:VAR_ID) && %w[sharded soa].include?(current.value)
-      error!(current, :CAP_BAD_MODIFIER, cap: cap_tok.value, modifier: current.value)
-    end
-    mod_name = current.value
-    consume(:VAR_ID)
-    if mod_name == 'sharded'
-      consume(:CHAR, '(')
-      count_tok = consume_number
-      n = count_tok.value.to_i
-      if n < 2
-        error!(count_tok, :SHARDED_TOO_FEW, count: n)
-      end
-      consume(:CHAR, ')')
-      result[:shard_count] = n
-    elsif mod_name == 'soa'
-      result[:soa] = true
-    end
-    result
-  end
-
   # All recognized capability tokens.
   ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @locked @writeLocked @link].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
@@ -3081,21 +3048,54 @@ class Parser
     apply_capability!(result, T.must(consume(:VAR_ID)))
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
-    while match?(:CHAR, ':')
-      consume(:CHAR, ':')
-      unless current.type == :VAR_ID || current.type == :INT64
-        error!(current, :EXPECTED_CAP_AFTER_COLON)
-      end
-      # After ':', accept both 'locked' and '@locked' forms.
-      tok = consume(:VAR_ID)
-      normalized_value = T.must(tok).value.start_with?('@') ? T.must(tok).value : "@#{T.must(tok).value}"
-      apply_capability!(result, T.must(tok), normalized_value)
-    end
+    parse_capability_chain!(result)
 
     result
   end
 
   private
+
+  sig { params(type_token: Lexer::Token, constructor_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  def parse_constructor_capabilities(type_token, constructor_name)
+    return nil unless (match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)) || match?(:CHAR, ':')
+
+    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil, observable: false }
+    allowed = ["@soa", "@sharded"]
+    cap_tok = Lexer::Token.new(:VAR_ID, "@#{constructor_name.downcase}", type_token.line, type_token.column)
+
+    if match?(:VAR_ID)
+      tok = T.must(consume(:VAR_ID))
+      normalized = tok.value.start_with?("@") ? tok.value : "@#{tok.value}"
+      unless allowed.include?(normalized)
+        error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok.value, modifier: tok.value)
+      end
+      apply_capability!(result, tok, normalized)
+    end
+
+    parse_capability_chain!(result, allowed_values: allowed, cap_tok: cap_tok)
+    result
+  end
+
+  sig do
+    params(
+      result: T::Hash[T.untyped, T.untyped],
+      allowed_values: T.nilable(T::Array[String]),
+      cap_tok: T.nilable(Lexer::Token)
+    ).void
+  end
+  def parse_capability_chain!(result, allowed_values: nil, cap_tok: nil)
+    while match?(:CHAR, ':')
+      consume(:CHAR, ':')
+      error!(current, :EXPECTED_CAP_AFTER_COLON) unless current.type == :VAR_ID
+
+      tok = T.must(consume(:VAR_ID))
+      normalized_value = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      if allowed_values && !allowed_values.include?(normalized_value)
+        error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok&.value || "capability", modifier: tok.value)
+      end
+      apply_capability!(result, tok, normalized_value)
+    end
+  end
 
   sig { returns(T::Hash[Symbol, T.untyped]) }
   def parse_element_capability
@@ -3204,7 +3204,10 @@ class Parser
     when "@sharded"
       error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result[:shard_count]
       consume(:CHAR, '(')
-      result[:shard_count] = consume_number.value.to_i
+      count_tok = consume_number
+      count = count_tok.value.to_i
+      error!(count_tok, :SHARDED_TOO_FEW, count: count) if count < 2
+      result[:shard_count] = count
       consume(:CHAR, ')')
     when "@observable"
       error!(token, :DUPLICATE_OBSERVABLE_CAP) if result[:observable]

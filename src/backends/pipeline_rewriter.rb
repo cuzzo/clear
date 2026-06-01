@@ -725,22 +725,12 @@ class PipelineRewriter
     actions
   end
 
-  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::Identifier) }
   def build_final_result(terminal, res_var, token, smooth_node)
-    if terminal.is_a?(AST::AverageOp)
-      sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
-      cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
-      AST.stamp_synthetic_type!(sum_ident, Type.new(:Float64), context: "synthetic AST type")
-      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Float64), context: "synthetic AST type")
-      div = AST::BinaryOp.new(token, sum_ident, :DIV, cnt_ident)
-      AST.stamp_synthetic_type!(div, Type.new(:Float64), context: "synthetic AST type")
-      div
-    else
-      res = AST::Identifier.new(token, res_var)
-      AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
-      res.storage   = smooth_node.storage
-      res
-    end
+    res = AST::Identifier.new(token, res_var)
+    AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
+    res.storage = smooth_node.storage
+    res
   end
 
   sig { returns(Proc) }
