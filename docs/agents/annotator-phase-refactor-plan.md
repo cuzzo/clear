@@ -254,7 +254,7 @@ Expected output:
   synthesized-function walk behind a typed body-analysis phase entry point.
   This is not the full body-summary phase; it is the no-dual-path boundary
   extraction that makes the remaining summary work visible.
-- [ ] `phase-body-summary`: introduce typed body-summary facts for the records
+- [x] `phase-body-summary`: introduce typed body-summary facts for the records
   already produced during the existing body walk. Done means at least one old
   deferred queue or ad hoc record payload is fully replaced, with no consumer
   reading both the old and new source for the same decision.
@@ -295,9 +295,8 @@ Expected output:
 
 Current priority order:
 
-1. `phase-body-summary`
-2. `phase-binding-flow-model`
-3. `phase-expression-domains`
+1. `phase-binding-flow-model`
+2. `phase-expression-domains`
 
 The remaining items are the actual state-ownership work. They should only be
 implemented when the old fact owner can be deleted rather than preserved as a
