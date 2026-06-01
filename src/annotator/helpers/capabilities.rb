@@ -134,14 +134,11 @@ module CapabilityHelper
   end
 
   # Validate that a capability type is legal for the given variable.
-  sig { params(node: AST::WithBlock, capability_type: Symbol, var_node: T.untyped).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, capability_type: Symbol, var_node: AST::Locatable).void }
   def validate_capability(node, capability_type, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @deferred_with_validations = T.let(@deferred_with_validations, T.untyped)
     var_type = var_node.full_type!(context: "WITH capability target")
-    allowed = T.let([AST::Identifier, AST::GetField], T::Array[T::Class[T.untyped]])
-    allowed << AST::GetIndex if capability_type == :BORROWED
-    unless allowed.any? { |t| var_node.is_a?(t) }
+    unless valid_capability_target?(capability_type, var_node)
       error!(var_node, :WITH_CAP_BAD_TARGET, capability: capability_type, got: var_node.class)
     end
 
@@ -152,9 +149,7 @@ module CapabilityHelper
         # Function parameters may not have propagated sync yet; locals error
         # eagerly because no later propagation can fix them.
         if var_node.symbol&.is_param
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :EXCLUSIVE
-          }
+          record_deferred_with_validation!(node, var_node, :EXCLUSIVE)
         else
           storage = cap_var_storage(var_node)
           name = cap_var_label(var_node)
@@ -174,9 +169,7 @@ module CapabilityHelper
       syn = cap_var_sync(var_node)
       unless syn == :write_locked
         if var_node.symbol&.is_param && syn.nil?
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :write_locked_read
-          }
+          record_deferred_with_validation!(node, var_node, :write_locked_read)
         else
           name = cap_var_label(var_node)
           emit_with_read_needs_write_lock!(node, name, var_node)
@@ -184,7 +177,7 @@ module CapabilityHelper
       end
 
     when :RESTRICT
-      if var_node.symbol && !var_node.symbol.mutable
+      if var_node.is_a?(AST::Identifier) && var_node.symbol && !var_node.symbol.mutable
         emit_with_restrict_immutable_error!(node, var_node)
       end
 
@@ -197,7 +190,13 @@ module CapabilityHelper
       # always-correct fallback for non-observable tense aggregates.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future? && t.observable?
-        emit_view_not_observable_finding!(node, var_node, t)
+        if var_node.is_a?(AST::Identifier)
+          emit_view_not_observable_finding!(node, var_node, t)
+        else
+          name = cap_var_label(var_node)
+          error!(node, :CAPABILITY_VIOLATION_FIXABLE,
+            message: "WITH VIEW requires an `@observable` source, but '#{name}' has type #{t.resolved}.")
+        end
       end
 
     when :MATERIALIZED_VIEW
@@ -262,9 +261,7 @@ module CapabilityHelper
       syn = cap_var_sync(var_node)
       unless syn == :atomic
         if var_node.symbol&.is_param && syn.nil?
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :ATOMIC
-          }
+          record_deferred_with_validation!(node, var_node, :ATOMIC)
         else
           name = cap_var_label(var_node)
           storage = cap_var_storage(var_node)
@@ -281,6 +278,13 @@ module CapabilityHelper
       error!(node, :UNKNOWN_WITH_CAP_TYPE, type: capability_type)
     end
   end
+
+  sig { params(capability_type: Symbol, var_node: AST::Locatable).returns(T::Boolean) }
+  def valid_capability_target?(capability_type, var_node)
+    return true if var_node.is_a?(AST::Identifier) || var_node.is_a?(AST::GetField)
+    capability_type == :BORROWED && var_node.is_a?(AST::GetIndex)
+  end
+  private :valid_capability_target?
 
   # Observables Phase 2.8: emit a fixable error for `WITH VIEW v AS s`
   # where v is not `@observable`. The :auto fix replaces `VIEW` with

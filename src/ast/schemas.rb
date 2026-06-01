@@ -106,12 +106,14 @@ module Schemas
   class InlineStructVariant
       extend T::Sig
 
+    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
+
     attr_reader :fields
     attr_accessor :deinit_entries
-    sig { params(fields: T.untyped, deinit_entries: T.nilable(T::Array[InlineStructDeinitEntry])).void }
+    sig { params(fields: FieldMap, deinit_entries: T.nilable(T::Array[InlineStructDeinitEntry])).void }
     def initialize(fields:, deinit_entries: nil)
-      @fields = fields
-      @deinit_entries = deinit_entries
+      @fields = T.let(fields, FieldMap)
+      @deinit_entries = T.let(deinit_entries, T.nilable(T::Array[InlineStructDeinitEntry]))
     end
 
     # Value equality on the field shape (not deinit_entries, which is

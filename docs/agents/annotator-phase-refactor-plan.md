@@ -233,6 +233,62 @@ Expected output:
 
 ## Recommended Implementation Order
 
+## Implementation Tracker
+
+- [x] `phase-declaration-index`: extract top-level import/type/function/extern
+  declaration indexing into a typed phase record.
+- [x] `phase-type-registration`: move top-level type shell registration behind
+  an explicit phase entry point.
+- [x] `phase-signature-registration`: move function, extern, and synthesized
+  union method signature registration behind an explicit phase entry point.
+- [x] `phase-auto-finalization`: isolate deferred `Auto` finalization from the
+  main annotation entry point.
+- [x] `phase-whole-program-semantics`: isolate caller-sync propagation, BG
+  capture classification, effect inference, WITH/MATCH checks, and concurrency
+  checks behind one whole-program semantic phase.
+- [x] `phase-builtin-environment`: move builtin/root-scope setup behind an
+  explicit typed builtin-environment phase. Done means annotator construction
+  delegates builtin setup to one phase entry point and builtin setup no longer
+  appears as anonymous constructor side effects.
+- [x] `phase-body-analysis-wrapper`: move the existing function-body and
+  synthesized-function walk behind a typed body-analysis phase entry point.
+  This is not the full body-summary phase; it is the no-dual-path boundary
+  extraction that makes the remaining summary work visible.
+- [ ] `phase-body-summary`: introduce typed body-summary facts for the records
+  already produced during the existing body walk. Done means at least one old
+  deferred queue or ad hoc record payload is fully replaced, with no consumer
+  reading both the old and new source for the same decision.
+- [x] `phase-body-summary-deferred-with`: replace the old
+  `@deferred_with_validations` hash queue with a typed
+  `DeferredWithValidation` fact consumed by the deferred-validation phase. This
+  also fixed a real bug: deferred `:ATOMIC` validations were previously queued
+  but never checked during flush.
+- [ ] `phase-binding-flow-model`: replace branch-local mutable `SymbolEntry`
+  copying with stable binding identity plus explicit flow state. This is the
+  large remaining architectural item. Done means migrated flow facts have one
+  owner and direct writes to the old `SymbolEntry` fact fields are deleted.
+- [ ] `phase-expression-domains`: after binding/flow ownership is explicit,
+  split expression typing domains only where it removes real branch hubs.
+- [x] `phase-program-finalization`: move post-body metadata computation,
+  call-graph checks, fallibility/effect propagation, FSM/stack metadata, and
+  program result stamping behind one typed program-finalization phase.
+- [x] `phase-deferred-validation`: move capability, lock, reentrancy, stack, and
+  other post-body validations behind a final validation phase that consumes
+  typed facts/queues and leaves no deferred work live.
+- [x] `phase-annotation-boundary`: add a final boundary checker that verifies
+  MIR-visible annotation invariants and marks `:annotated`. It must fail on
+  compiler bugs and must not repair facts.
+
+Current priority order:
+
+1. `phase-body-summary`
+2. `phase-binding-flow-model`
+3. `phase-expression-domains`
+
+The remaining items are the actual state-ownership work. They should only be
+implemented when the old fact owner can be deleted rather than preserved as a
+compatibility path.
+
 ### Step 1: Introduce Phase Result Structs Without Moving Logic
 
 Create typed records for facts that are already being produced:
@@ -393,4 +449,3 @@ mutable visitor for:
 If the result is seven full AST walkers that all mutate the same old
 `SymbolEntry` fields, the refactor failed. The value comes from explicit fact
 ownership, not from multiplying passes.
-

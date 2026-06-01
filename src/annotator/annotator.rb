@@ -7,8 +7,13 @@ require_relative "../ast/scope"
 require_relative "../ast/parser"
 require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
+require_relative "phases/annotation_boundary"
+require_relative "phases/body_analysis"
+require_relative "phases/builtin_environment"
 require_relative "phases/declaration_index"
 require_relative "phases/auto_finalization"
+require_relative "phases/deferred_validation"
+require_relative "phases/program_finalization"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
@@ -58,7 +63,12 @@ class SemanticAnnotator
   include UnionAnalysis
   include LockHelper
   include TestAnnotation
+  include Annotator::Phases::AnnotationBoundary
   include Annotator::Phases::AutoFinalization
+  include Annotator::Phases::BodyAnalysis
+  include Annotator::Phases::BuiltinEnvironment
+  include Annotator::Phases::DeferredValidation
+  include Annotator::Phases::ProgramFinalization
   include Annotator::Phases::TypeRegistration
   include Annotator::Phases::SignatureRegistration
   include Annotator::Phases::WholeProgramSemantics
@@ -89,6 +99,16 @@ class SemanticAnnotator
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
     @lock_type_ranks || {}
+  end
+
+  sig { returns(Integer) }
+  def pending_deferred_validation_count
+    @deferred_with_validations.length
+  end
+
+  sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
+  def deferred_with_validations
+    @deferred_with_validations
   end
 
   sig { returns(T.untyped) }
@@ -280,7 +300,7 @@ class SemanticAnnotator
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
-    @deferred_with_validations = T.let([], T::Array[T.untyped])
+    @deferred_with_validations = T.let([], T::Array[Annotator::Phases::DeferredWithValidation])
     @predicate_call_sites = T.let([], T.nilable(T::Array[CapabilityHelper::PredicateCallSite]))
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
@@ -294,7 +314,7 @@ class SemanticAnnotator
     @stream_yield_types = T.let([], T::Array[Type])
     effects_init!
     capability_audit_init!
-    setup_builtins
+    initialize_builtin_environment!
   end
 
   sig { params(node: AST::Program).returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
@@ -307,11 +327,8 @@ class SemanticAnnotator
     visit(node)
     finalize_auto_types!(node)
     run_whole_program_semantics!
-    # Residual deferred WITH validations (any param whose sync is still
-    # nil after propagation, e.g., a function called from no callsite).
-    flush_deferred_with_validations!
-    finalize_capability_audit!
-    MIRPassState.for!(node).mark!(:annotated)
+    run_deferred_validations!
+    mark_annotation_complete!(node)
     nil
   end
 
@@ -403,19 +420,25 @@ private
 
   # Replay deferred WITH-on-param checks after caller-sync propagation has
   # had a chance to populate entry.sync.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
   def flush_deferred_with_validations!
     @deferred_with_validations.each do |d|
-      var_node = d[:var_node]
+      var_node = d.var_node
       syn = var_node.symbol&.sync
-      case d[:capability]
+      case d.capability
       when :EXCLUSIVE
         next if syn
         storage = var_node.symbol&.storage
-        error!(d[:node], :WITH_EXCLUSIVE_NEEDS_LOCK_GOT, got: storage || 'unknown')
+        error!(d.node, :WITH_EXCLUSIVE_NEEDS_LOCK_GOT, got: storage || 'unknown')
       when :write_locked_read
         next if syn == :write_locked
-        error!(d[:node], :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: var_node.name)
+        error!(d.node, :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: cap_var_label(var_node))
+      when :ATOMIC
+        next if syn == :atomic
+        name = cap_var_label(var_node)
+        storage = var_node.symbol&.storage
+        actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
+        error!(d.node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: name, actual: actual)
       end
     end
     @deferred_with_validations.clear
@@ -522,74 +545,8 @@ private
     # passes read a single source of truth.
     validate_and_resolve_sync_policy!(node)
 
-    declarations.body_statements.each { |stmt| visit(stmt) }
-
-    # Analyze synthesized default function bodies and append to program so
-    # the transpiler emits them as top-level Zig functions.
-    @synthetic_fns.each do |fn|
-      visit_FunctionDef(fn)
-      node.statements << fn
-    end
-
-    # Indirect recursion needs the complete call graph.
-    check_indirect_reentrancy!
-
-    # Reject `:reentrant_not_logical` on a function the call-graph
-    # proves is reachable from itself; nudge toward `:THUNK` /
-    # `:MAX_DEPTH(N)` instead.
-    validate_not_logical_recursion!
-
-    # A `:MAX_DEPTH` fn in a mutual cycle demotes to ':unbounded'; warn
-    # so the user can choose an explicit fix.
-    validate_max_depth_mutual_cycle!
-
-    # Mutual thunk recursion needs tagged-union frames; until then, report
-    # a precise error instead of falling into incorrect codegen.
-    validate_thunk_recursion!
-
-    compute_needs_rt!
-    compute_can_fail!
-
-    # Transitive fallibility is known only after compute_can_fail!, so
-    # error-union return declarations are enforced here.
-    enforce_fallible_returns!
-
-    # Function values must match the fn-pointer calling convention emitted
-    # by type.rb#zig_type.
-    mark_fn_value_references!(node)
-
-    compute_effects!
-    validate_predicate_purity!
-
-    # FSM metadata is computed before lock-cycle and stack analysis so spawn
-    # form and suspend points are available to later passes.
-    compute_fsm_eligibility!
-    enumerate_fsm_suspend_points!
-    classify_bg_spawn_form!(node)
-
-    # Lock-cycle detection needs propagated held-while-calling edges.
-    check_lock_cycles!
-
-    compute_stack_tiers!
-
-    assign_fiber_stack_tiers!(node)
-
-    # Copy computed metadata to FunctionSignature objects so callers don't
-    # need direct access to @fn_nodes.
-    @fn_nodes.each do |name, fn|
-      sig = FunctionSignature.unwrap(fn.full_type!(context: "program function signature"))
-      next unless sig
-      sig.can_fail = fn.can_fail
-      sig.effects = fn.effects
-      sig.stack_tier = fn.stack_tier
-    end
-
-    # Determine Program Result Type (Type of the last statement)
-    if node.statements.any?
-      stamp_type!(node, node.statements.last.full_type!(context: "program final statement"))
-    else
-      stamp_type!(node, :Void)
-    end
+    analyze_program_bodies!(declarations, node)
+    finalize_program_semantics!(node)
   end
 
   sig { returns(T::Array[AST::FunctionDef]) }
