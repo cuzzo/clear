@@ -1,10 +1,12 @@
 # MIR Architecture
 
 The top-level compiler overview in [`src/README.md`](../README.md) shows how
-CLEAR moves from source text to Zig. This document zooms into the MIR slice of
-that pipeline.
+CLEAR transpiles CLEAR code to Zig.
 
-MIR has two jobs:
+The MIR lowering portion is ~40% of the entire compiler code. This document zooms into 
+how MIR works and why it exists.
+
+## MIR has two jobs:
 
 1. Make ownership and allocator choices explicit enough to check.
 2. Turn the annotated AST into a Zig-shaped tree that the emitter can print
@@ -24,17 +26,13 @@ FN makeData() RETURNS Data ->
 END
 
 FN consume(TAKES d: Data) RETURNS Int64 ->
-  RETURN 1_i64;
+  RETURN 1;
 END
 
 FN demo(flag: Bool) RETURNS Int64 ->
-  d = makeData();
+  IF flag -> RETURN consume(makeData());
 
-  IF flag THEN
-    RETURN consume(GIVE d);
-  END
-
-  RETURN 0_i64;
+  RETURN 0;
 END
 ```
 
@@ -58,7 +56,7 @@ annotated AST
   -> finalize runtime requirements
   -> stamp ownership facts onto the AST
   -> lower AST to MIR::Program
-  -> check MIR ownership invariants
+  -> check MIR ownership invariants (prevent Use After Free, Double Free, and Memory Leaks)
   -> emit Zig templates
 ```
 
@@ -68,7 +66,7 @@ The exact order is enforced by [`pass_state.rb`](pass_state.rb).
 
 MIR starts after parsing and annotation. Names have been resolved, types are
 known, `GIVE` sites have move semantics, and function signatures know which
-parameters are `TAKES`.
+parameters `TAKE`.
 
 ```ruby
 AST::FunctionDef(
@@ -76,25 +74,16 @@ AST::FunctionDef(
   params: [Param("flag", Bool)],
   return_type: Int64,
   body: [
-    AST::BindExpr(
-      name: "d",
-      full_type: Data,
-      value: AST::FuncCall(name: "makeData", args: [])
-    ),
     AST::IfStatement(
       cond: AST::Identifier("flag"),
       then_branch: [
         AST::ReturnNode(
           AST::FuncCall(
             name: "consume",
-            args: [AST::MoveNode(AST::Identifier("d"))]
-          )
-        )
-      ]
-    ),
+            args: [AST::MoveNode(...)]
+          ))]),
     AST::ReturnNode(AST::Literal(0_i64))
-  ]
-)
+  ])
 ```
 
 Nothing is MIR yet. The tree is still an annotated AST.
@@ -131,27 +120,28 @@ Hoist lifts anonymous allocation-producing expressions into named bindings when
 they occur in escape positions such as `RETURN`, `YIELD`, field stores, or
 container stores.
 
-The `demo` function already binds its owned value as `d`, so no hoist is needed
-there:
-
-```ruby
-# Before
-RETURN consume(GIVE d)
-
-# After
-RETURN consume(GIVE d)
-```
-
 The helper `makeData` returns an anonymous ownership-bearing union payload, so
 it is the kind of code Hoist may rewrite schematically as:
 
 ```ruby
 # Before
-RETURN Data{ Text: "hello" }
+RETURN consume(makeData())
 
 # After
-__hoist_1 = Data{ Text: "hello" }
-RETURN __hoist_1
+__hoist_1 = makeData()
+RETURN consume(__host_1)
+```
+
+This needs to happen, so that when transpiled to Zig, we can easily do cleanup using defer:
+
+```zig
+// Before
+return consume(makeData()); // memory leak
+
+// After
+__hoist_1 = makeData();
+defer { cleanup(rt.heapAllocator(), __hoist_1); } // no memory leak
+RETURN consume(__host_1);
 ```
 
 That makes every allocation that escape analysis cares about symbol-bearing:
@@ -184,13 +174,13 @@ Files:
 Escape analysis decides where bindings live. It updates symbol/storage facts
 that later passes read.
 
-For `demo`, `d` is a local union value returned from `makeData`. It does not
+For `demo`, `__hoist_1` is a local union value returned from `makeData`. It does not
 escape the function as a local binding, but it is transferred into a `TAKES`
 call on one path. The important fact is that the binding is ownership-bearing
 and has a concrete placement:
 
 ```ruby
-d:
+__hoist_1:
   type: Data
   storage: :heap
   owns_value: true
@@ -221,12 +211,12 @@ consume.cleanup_bindings = {
 }
 ```
 
-For `demo`, `d` is owned by the function until it is either cleaned up or
+For `demo`, `__hoist_1` is owned by the function until it is either cleaned up or
 transferred:
 
 ```ruby
 demo.cleanup_bindings = {
-  "d" => CleanupEntry(
+  "__hoist_1" => CleanupEntry(
     kind: :uniform,
     alloc: :heap,
     needs_cleanup: true,
@@ -296,23 +286,23 @@ entry
   |
   v
 block0:
-  d = makeData()
+  __hoist_1 = makeData()
   IF flag
   |        \
   v         v
 block1     block2
-  RETURN     RETURN 0
-  consume(GIVE d)
+RETURN     RETURN 0
+consume(__hoist_1)
   \         /
    v       v
-    exit
+     exit
 ```
 
-Ownership state for `d`:
+Ownership state for `__hoist_1`:
 
 ```text
 after declaration: owned
-then branch:       moved by GIVE d
+then branch:       moved by TAKES d
 else/fallthrough:  owned until function exit
 exit join:         maybe_moved
 ```
@@ -328,10 +318,10 @@ AST::FunctionDef("demo",
   },
   moved_guard_info: { "d" => true },
   body: [
-    BindExpr("d", FuncCall("makeData")),
+    BindExpr("__hoist_1", FuncCall("makeData")),
     IfStatement(
       then_branch: [
-        ReturnNode(FuncCall("consume", [MoveNode(Identifier("d"))]))
+        ReturnNode(FuncCall("consume", [MoveNode(Identifier("__hoist_1"))]))
       ]
     ),
     ReturnNode(Literal(0_i64))
@@ -414,11 +404,11 @@ It is the last semantic safety gate.
 For this example it verifies facts such as:
 
 ```text
-d has an allocation/ownership creation fact
+__hoist_1 has an allocation/ownership creation fact
 d has a cleanup on the local path
-the GIVE path has a TransferMark
+the TAKES path has a TransferMark
 the guarded cleanup has a matching MoveMark
-d is not used after the transfer path
+__hoist_1 is not used after the transfer path
 d is cleaned up inside consume
 ```
 
