@@ -467,7 +467,7 @@ module CapabilityHelper
       guarded.each do |gcap|
         own = gcap[:alias]
         siblings = aliases - [own]
-        @current_predicate_context = PredicateContext.new(
+        @current_predicate_context = T.let(PredicateContext.new(
           kind: :guard,
           with_node: node,
           fn_node: nil,
@@ -478,7 +478,7 @@ module CapabilityHelper
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: nil,
-        )
+        ), T.nilable(PredicateContext))
         visit(gcap[:guard_expr])
 
         guard_type = gcap[:guard_expr].full_type!(context: "WITH guard expression")
@@ -539,7 +539,7 @@ module CapabilityHelper
     begin
       pre_clauses.each do |entry|
         expr = entry[:expr]
-        @current_predicate_context = PredicateContext.new(
+        @current_predicate_context = T.let(PredicateContext.new(
           kind: :pre,
           with_node: nil,
           fn_node: fn_node,
@@ -550,7 +550,7 @@ module CapabilityHelper
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: fn_node.name,
-        )
+        ), T.nilable(PredicateContext))
         visit(expr)
 
         pred_type = expr.full_type!(context: "PRE expression")
@@ -612,7 +612,7 @@ module CapabilityHelper
       begin
         post_clauses.each do |entry|
           expr = entry[:expr]
-          @current_predicate_context = PredicateContext.new(
+          @current_predicate_context = T.let(PredicateContext.new(
             kind: :post,
             with_node: nil,
             fn_node: fn_node,
@@ -623,7 +623,7 @@ module CapabilityHelper
             allowed_names: allowed_names,
             rejected_param_names: rejected,
             fn_name: fn_node.name,
-          )
+          ), T.nilable(PredicateContext))
           visit(expr)
 
           pred_type = expr.full_type!(context: "DEBUG_POST expression")

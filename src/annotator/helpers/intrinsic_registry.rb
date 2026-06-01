@@ -278,6 +278,16 @@ module IntrinsicRegistry
   # Sorbet DSL inside this module after definition.
   sig { params(reg: T.untyped, name: T.untyped).returns(T.untyped) }
   def sig(reg, name)
-    sigs(reg)[name]
+    result = sigs(reg)[name]
+    return result if result
+
+    if Object.const_defined?(:MAP_METHODS) &&
+        Object.const_defined?(:MAP_METHOD_ALIASES) &&
+        reg.equal?(Object.const_get(:MAP_METHODS))
+      alias_name = Object.const_get(:MAP_METHOD_ALIASES)[name.to_s]
+      return sigs(reg)[alias_name] if alias_name
+    end
+
+    nil
   end
 end

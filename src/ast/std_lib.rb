@@ -1172,26 +1172,6 @@ MAP_METHODS = T.let({
     return_type: :Void,
     is_method: true,
   },
-  "insert" => {
-    arity: 2, tag: :map_method, allocates: true,
-    mutates_receiver: true,
-    bc: true,
-    takes_args: [1],  # value (arg 1) is TAKES
-    zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
-    alloc: :receiver_storage,
-    args: [:"String{}", :String, { type: :Any, takes: true }],
-    numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
-    validate: ->(node, args, obj_type, error_fn) {
-      key_type = Type.new(args[0].resolved_type)
-      if obj_type.numeric_map?
-        error_fn.call(node, "HashMap.insert: key must be a numeric type, got #{args[0].resolved_type}") unless key_type.numeric?
-      else
-        error_fn.call(node, "HashMap.insert: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
-      end
-    },
-    return_type: :Void,
-    is_method: true,
-  },
   "delete" => {
     arity: 1, tag: :map_method,
     bc: true,
@@ -1303,6 +1283,8 @@ MAP_METHODS = T.let({
     is_method: true,
   },
 }.freeze, T::Hash[String, T.untyped])
+
+MAP_METHOD_ALIASES = T.let({ "insert" => "put" }.freeze, T::Hash[String, String])
 
 # ============================================================================
 # Index Operations Registry — container[key] get/set semantics

@@ -14,6 +14,17 @@ require_relative "../annotator/helpers/fixable_helpers"
 class Parser
     extend T::Sig
 
+  class CapabilityParseResult < T::Struct
+    prop :ownership, T.nilable(Symbol), default: nil
+    prop :sync, T.nilable(Symbol), default: nil
+    prop :collection, T.nilable(Symbol), default: nil
+    prop :is_soa, T::Boolean, default: false
+    prop :is_indirect, T::Boolean, default: false
+    prop :shard_count, T.nilable(Integer), default: nil
+    prop :observable, T::Boolean, default: false
+    prop :observable_token, T.nilable(Lexer::Token), default: nil
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -2526,8 +2537,8 @@ class Parser
         is_soa = false
         shard_count = nil
         if (caps = parse_constructor_capabilities(T.must(type_token), name))
-          shard_count = caps[:shard_count]
-          is_soa = caps[:is_soa] || false
+          shard_count = caps.shard_count
+          is_soa = caps.is_soa
         end
         node = AST::ListLit.new(type_token, ctor_items, storage)
         node.instance_variable_set(:@constructor_collection, collection)
@@ -2846,14 +2857,14 @@ class Parser
     # Parser only does token consumption and duplicate detection. Semantic validation
     # (e.g., "@list requires array", "@soa requires fixed array") is in the annotator.
     caps = parse_capabilities
-    ownership   = caps&.dig(:ownership)
-    sync        = caps&.dig(:sync)
-    collection  = caps&.dig(:collection)
-    is_soa      = caps&.dig(:is_soa) || false
-    is_indirect = caps&.dig(:is_indirect) || false
-    shard_count = caps&.dig(:shard_count)
-    observable  = caps&.dig(:observable) || false
-    observable_token = caps&.dig(:observable_token)
+    ownership   = caps&.ownership
+    sync        = caps&.sync
+    collection  = caps&.collection
+    is_soa      = caps&.is_soa || false
+    is_indirect = caps&.is_indirect || false
+    shard_count = caps&.shard_count
+    observable  = caps&.observable || false
+    observable_token = caps&.observable_token
 
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
@@ -2998,14 +3009,13 @@ class Parser
   CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
-  # Returns nil if no capability token is present, or a Hash:
-  #   { ownership:, sync:, collection:, is_soa:, is_indirect:, shard_count: }
+  # Returns nil if no capability token is present.
   # No semantic validation — just token consumption and duplicate detection.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(CapabilityParseResult)) }
   def parse_capabilities
     return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
 
-    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil, observable: false }
+    result = CapabilityParseResult.new
     apply_capability!(result, T.must(consume(:VAR_ID)))
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
@@ -3016,11 +3026,11 @@ class Parser
 
   private
 
-  sig { params(type_token: Lexer::Token, constructor_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(type_token: Lexer::Token, constructor_name: String).returns(T.nilable(CapabilityParseResult)) }
   def parse_constructor_capabilities(type_token, constructor_name)
     return nil unless (match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)) || match?(:CHAR, ':')
 
-    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil, observable: false }
+    result = CapabilityParseResult.new
     allowed = ["@soa", "@sharded"]
     cap_tok = Lexer::Token.new(:VAR_ID, "@#{constructor_name.downcase}", type_token.line, type_token.column)
 
@@ -3039,7 +3049,7 @@ class Parser
 
   sig do
     params(
-      result: T::Hash[T.untyped, T.untyped],
+      result: CapabilityParseResult,
       allowed_values: T.nilable(T::Array[String]),
       cap_tok: T.nilable(Lexer::Token),
       validate_shard_count: T::Boolean
@@ -3112,70 +3122,70 @@ class Parser
   end
 
   # Apply a single capability token to the result hash. Detects duplicates.
-  sig { params(result: T::Hash[Symbol, T.untyped], token: Lexer::Token, value: String, validate_shard_count: T::Boolean).returns(T.untyped) }
+  sig { params(result: CapabilityParseResult, token: Lexer::Token, value: String, validate_shard_count: T::Boolean).void }
   def apply_capability!(result, token, value = token.value, validate_shard_count: false)
     case value
     when "@multiowned"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
-      result[:ownership] = :multiowned
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
+      result.ownership = :multiowned
     when "@shared"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
-      result[:ownership] = :shared
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
+      result.ownership = :shared
     when "@split"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
-      result[:ownership] = :split
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
+      result.ownership = :split
     when "@link"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
-      result[:ownership] = :link
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
+      result.ownership = :link
     when "@locked"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :locked
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :locked
     when "@writeLocked"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :write_locked
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :write_locked
     when "@local"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :local
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :local
     when "@versioned"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :versioned
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :versioned
     when "@atomic"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :atomic
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :atomic
     when "@raw"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :raw
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :raw
     when "@symbol"
-      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
-      result[:sync] = :symbol
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = :symbol
     when "@indirect"
-      error!(token, :DUPLICATE_LAYOUT_CAP) if result[:is_indirect]
-      result[:is_indirect] = true
+      error!(token, :DUPLICATE_LAYOUT_CAP) if result.is_indirect
+      result.is_indirect = true
     when "@soa"
-      error!(token, :DUPLICATE_SOA_CAP) if result[:is_soa]
-      result[:is_soa] = true
+      error!(token, :DUPLICATE_SOA_CAP) if result.is_soa
+      result.is_soa = true
     when "@list"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
-      result[:collection] = :list
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
+      result.collection = :list
     when "@pool"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
-      result[:collection] = :pool
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
+      result.collection = :pool
     when "@set"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
-      result[:collection] = :set
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
+      result.collection = :set
     when "@sharded"
-      error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result[:shard_count]
+      error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result.shard_count
       consume(:CHAR, '(')
       count_tok = consume_number
       count = count_tok.value.to_i
       error!(count_tok, :SHARDED_TOO_FEW, count: count) if validate_shard_count && count < 2
-      result[:shard_count] = count
+      result.shard_count = count
       consume(:CHAR, ')')
     when "@observable"
-      error!(token, :DUPLICATE_OBSERVABLE_CAP) if result[:observable]
-      result[:observable] = true
+      error!(token, :DUPLICATE_OBSERVABLE_CAP) if result.observable
+      result.observable = true
       # Keep the token span so fixable errors can delete the source capability.
-      result[:observable_token] = token
+      result.observable_token = token
     else
       emit_typo_suggestion!(
         token, value, CAPABILITY_TOKENS,

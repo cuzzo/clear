@@ -531,7 +531,7 @@ module AST
       node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
   end
 
-  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[T::Array[T.any(AST::Node, Struct)]]) }
   def self.child_bodies(node)
     node.is_a?(AST::HasBodies) ? node.child_bodies : []
   end

@@ -380,7 +380,7 @@ class Type
     @layout    = layout    if layout
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
-    @provenance = :heap if sync_requires_heap_provenance?
+    @provenance = T.let(:heap, T.nilable(Symbol)) if sync_requires_heap_provenance?
     # `:indirect` layout is the explicit "heap-pinned cell with a stable
     # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
     # provenance even without an active sync, mirroring the @indirect
