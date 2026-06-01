@@ -1019,6 +1019,7 @@ POOL_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
     mutates_receiver: true,
+    narrows_receiver_collection: true,
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
@@ -1093,6 +1094,7 @@ SET_METHODS = T.let({
     bc: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    narrows_receiver_collection: true,
     takes_args: [0],
     args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
@@ -1165,6 +1167,26 @@ MAP_METHODS = T.let({
         error_fn.call(node, "HashMap.put: key must be a numeric type, got #{args[0].resolved_type}") unless key_type.numeric?
       else
         error_fn.call(node, "HashMap.put: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
+      end
+    },
+    return_type: :Void,
+    is_method: true,
+  },
+  "insert" => {
+    arity: 2, tag: :map_method, allocates: true,
+    mutates_receiver: true,
+    bc: true,
+    takes_args: [1],  # value (arg 1) is TAKES
+    zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
+    alloc: :receiver_storage,
+    args: [:"String{}", :String, { type: :Any, takes: true }],
+    numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
+    validate: ->(node, args, obj_type, error_fn) {
+      key_type = Type.new(args[0].resolved_type)
+      if obj_type.numeric_map?
+        error_fn.call(node, "HashMap.insert: key must be a numeric type, got #{args[0].resolved_type}") unless key_type.numeric?
+      else
+        error_fn.call(node, "HashMap.insert: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
       end
     },
     return_type: :Void,

@@ -782,8 +782,10 @@ class ShapeEvidenceCollector
     end
   end
 
-  # Detect `x.append(e)` / `x.insert(e)` / `x.put(k, v)` and record
-  # the corresponding evidence onto the shape slots for `x`.
+  # Record collection-shape evidence for mutating stdlib methods. The
+  # method classes come from std_lib metadata, not from local method-name
+  # switches, so adding a new collection mutator updates inference by
+  # updating the registry entry.
   sig { params(call: AST::MethodCall, name_map: NameShapeMap).returns(T.nilable(T::Array[T.untyped])) }
   def record_method_call(call, name_map)
     target = call.object
@@ -792,19 +794,10 @@ class ShapeEvidenceCollector
     return unless slots
     args = call.args || []
 
-    case call.name.to_s
-    when "append", "push", "insert"
-      # List-append: 1-arg form is element evidence. Pool/Set
-      # `insert(e)` also fits this shape. Pool/Map `insert(k,v)`
-      # 2-arg form delivers map-pair evidence.
-      if slots.list && args.length == 1
-        T.must(slots.list).sources << args[0]
-      elsif args.length == 2
-        record_map_pair_evidence(slots, args)
-      end
-    when "put"
-      # HashMap put(k, v) — key + value evidence.
-      record_map_pair_evidence(slots, args) if args.length == 2
+    if slots.list && IntrinsicRegistry.collection_element_evidence_method?(call.name, args.length)
+      T.must(slots.list).sources << args[0]
+    elsif IntrinsicRegistry.map_pair_evidence_method?(call.name, args.length)
+      record_map_pair_evidence(slots, args)
     end
   end
 

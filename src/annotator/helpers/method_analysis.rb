@@ -126,19 +126,7 @@ module MethodAnalysis
     node.stdlib_allocates = true if em.allocates
     node.mutates_receiver = true if em.mutates_receiver
 
-    # Narrow Set element type on first insert (Any[] -> T[])
-    if AST.any_set_insert_call?(node, tag_field) && obj_type.element_type&.resolved == :Any
-      val_type = node.args[0].resolved_type
-      new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
-      new_type.provenance = obj_type.provenance
-      if node.object.is_a?(AST::Identifier)
-        entry = node.object.symbol
-        if entry
-          entry.type = new_type
-          stamp_type!(node.object, new_type)
-        end
-      end
-    end
+    narrow_receiver_collection!(node, obj_type, em)
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     if em.takes_args
@@ -157,6 +145,27 @@ module MethodAnalysis
     node.error_type = em.error_type
 
     true
+  end
+
+  sig { params(node: AST::MethodCall, obj_type: Type, emit: IntrinsicEmit).void }
+  def narrow_receiver_collection!(node, obj_type, emit)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return unless emit.narrows_receiver_collection
+    return unless node.args.length == 1
+    return unless obj_type.element_type&.resolved == :Any
+
+    val_type = node.args[0].resolved_type
+    new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
+    new_type.provenance = obj_type.provenance
+    new_type.elem_ownership = obj_type.elem_ownership if obj_type.elem_ownership
+    new_type.elem_sync = obj_type.elem_sync if obj_type.elem_sync
+    if node.object.is_a?(AST::Identifier)
+      entry = node.object.symbol
+      if entry
+        entry.type = new_type
+        stamp_type!(node.object, new_type)
+      end
+    end
   end
 
   # Look up the INDEX_OPS entry for a container type.

@@ -409,12 +409,6 @@ module AST
     )
   end
 
-  sig { params(node: T.nilable(AST::Node), tag_field: Symbol).returns(T::Boolean) }
-  def self.any_set_insert_call?(node, tag_field)
-    !!(tag_field == :set_method && node.is_a?(AST::MethodCall) &&
-      node.name == "insert" && node.args.length == 1)
-  end
-
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.empty_auto_collection_literal_decl?(node)
     return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)

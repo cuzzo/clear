@@ -14,8 +14,9 @@ module IntrinsicRegistry
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
   FS_KEYS = %i[args arity validate return return_type can_fail needs_rt].freeze
 
-  EMIT_BOOL = %i[bc is_method suspends narrows_collection mutates_receiver
-                 allocates takes_value container_borrow].freeze
+  EMIT_BOOL = %i[bc is_method suspends narrows_collection
+                 narrows_receiver_collection mutates_receiver allocates
+                 takes_value container_borrow].freeze
   EMIT_STRSYM = %i[zig numeric_zig sharded_zig shard_direct_zig].freeze
   EMIT_STR    = %i[reject_error fsm_finish_value elem].freeze
   EMIT_SYM    = %i[tag builtin alloc return_alloc val_alloc key_alloc
@@ -230,6 +231,45 @@ module IntrinsicRegistry
     return x if x.is_a?(FunctionSignature)
 
     convert_entry(name, x, registries) if x.is_a?(Hash)
+  end
+
+  sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
+  def collection_element_evidence_method?(name, arity)
+    return false unless arity == 1
+
+    method_name = name.to_s
+    [STD_LIB, POOL_METHODS, SET_METHODS].any? do |registry|
+      fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
+      emit = fs&.emit
+      !!(emit&.is_method &&
+        (emit.narrows_collection || emit.narrows_receiver_collection))
+    end
+  end
+
+  sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
+  def map_pair_evidence_method?(name, arity)
+    return false unless arity == 2
+
+    fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(MAP_METHODS, name.to_s))
+    emit = fs&.emit
+    takes_args = emit&.takes_args
+    !!(emit&.is_method && emit.mutates_receiver && takes_args && !takes_args.empty?)
+  end
+
+  sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
+  def collection_value_store_method?(name, arity)
+    method_name = name.to_s
+    [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
+      fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
+      next false unless fs
+      emit = fs&.emit
+      takes_args = emit&.takes_args
+      method_arity = fs.arity || [fs.params.length - 1, 0].max
+      takes_value = (takes_args && !takes_args.empty?) ||
+        fs.params.drop(1).any?(&:takes)
+      !!(method_arity == arity && emit&.is_method && emit.mutates_receiver &&
+        takes_value)
+    end
   end
 
   # Typed lookup into a registry: reg[name] as FunctionSignature

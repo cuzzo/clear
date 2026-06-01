@@ -684,10 +684,7 @@ class PipelineRewriter
       et = Type.new(inner_expr.full_type!(context: "pipeline unnest inner expression")).element_type
       AST.stamp_synthetic_type!(inner_it, et, context: "synthetic AST type") if et
 
-      append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
-      AST.stamp_synthetic_type!(append, Type.new(:Void), context: "synthetic AST type")
-      append.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      append.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      append = synthetic_append_call(token, res_ident, inner_it.dup)
 
       # Iterate directly over the expression (avoids ArrayList/slice confusion).
       # Mark collection as a slice so the transpiler uses &expr, not .items.
@@ -699,29 +696,41 @@ class PipelineRewriter
     when AST::DistinctOp
       # Set insert: result is a T[]@set; insert deduplicates in O(1).
       key_expr = replace_placeholder(terminal.expression, current_val)
-      insert_call = AST::MethodCall.new(token, res_ident.dup, "insert", [key_expr])
-      AST.stamp_synthetic_type!(insert_call, Type.new(:Void), context: "synthetic AST type")
-      insert_call.zig_pattern = "try {0}.insert({alloc}, {1})"
-      insert_call.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "insert") if STD_LIB.key?("insert")
+      insert_call = synthetic_set_insert_call(token, res_ident.dup, key_expr)
       [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = AST::MethodCall.new(token, res_ident, "append", [value])
-      AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-      call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      call = synthetic_append_call(token, res_ident, value)
       [call]
     else
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = AST::MethodCall.new(token, res_ident, "append", [value])
-      call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      call = synthetic_append_call(token, res_ident, value)
       [call]
     end
     actions
+  end
+
+  sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
+  def synthetic_append_call(token, receiver, value)
+    defn = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+    call = AST::MethodCall.new(token, receiver, "append", [value])
+    AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
+    call.zig_pattern = defn.emit&.zig
+    call.matched_stdlib_def = defn
+    call
+  end
+
+  sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
+  def synthetic_set_insert_call(token, receiver, value)
+    defn = T.must(IntrinsicRegistry.sig(SET_METHODS, "insert"))
+    call = AST::MethodCall.new(token, receiver, "insert", [value])
+    AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
+    call.zig_pattern = defn.emit&.zig
+    call.matched_stdlib_def = defn
+    call
   end
 
   sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::Identifier) }
