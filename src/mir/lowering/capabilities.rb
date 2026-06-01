@@ -33,7 +33,7 @@ module MIRLoweringCapabilities
   WithBindingNode = T.type_alias { T.any(String, MIR::Node) }
   ErrorSelectorFact = T.type_alias { T::Hash[Symbol, T.any(Symbol, String, ::Lexer::Token, NilClass)] }
   FallibleClauseValue = T.type_alias do
-    T.any(String, Symbol, Integer, Type, AST::Node, ::Lexer::Token, MIR::Node, T::Array[Symbol], T::Array[Type], T::Array[MIR::Node], T::Array[ErrorSelectorFact], NilClass)
+    T.any(String, Symbol, Integer, Type, AST::Node, ::Lexer::Token, MIR::Node, T::Array[Symbol], T::Array[Type], T::Array[AST::Node], T::Array[MIR::Node], T::Array[ErrorSelectorFact], NilClass)
   end
   FallibleClauseFact = T.type_alias { T::Hash[Symbol, FallibleClauseValue] }
 
@@ -305,7 +305,7 @@ module MIRLoweringCapabilities
     var_node = T.cast(cap[:var_node], AST::Identifier)
     var_name = with_cap_var_name(var_node)
     alias_name = (cap[:alias] || var_name).to_s
-    resolved = Type.from_node(cap[:resolved_type])
+    resolved = with_cap_resolved_type(cap)
     var_sync, var_storage = with_cap_sync_storage(var_node)
     WithCapabilityBindingContext.new(
       node: node,
@@ -322,6 +322,14 @@ module MIRLoweringCapabilities
       needs_sort: needs_sort,
       rt_name: rt_name,
     )
+  end
+
+  sig { params(cap: CapabilitySpec).returns(T.nilable(Type)) }
+  def with_cap_resolved_type(cap)
+    resolved_type = cap[:resolved_type]
+    return nil unless resolved_type
+
+    Type.from_node!(resolved_type, context: "WITH capability resolved_type")
   end
 
   sig { params(materialization: WithBindingMaterialization, context: WithCapabilityBindingContext).void }
