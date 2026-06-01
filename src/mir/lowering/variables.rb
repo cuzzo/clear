@@ -1037,7 +1037,7 @@ module MIRLoweringVariables
     val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
     val = hoist_alloc(val, node.value, err_cleanup: true)
 
-    if @target != :bc && receiver_type.map? && (receiver_type.shared? || receiver_type.multiowned?)
+    if @target != :bc && receiver_type.rc_map?
       # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
       # .ctrl.data wrapping and a single MapRef cell holds the data).
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))

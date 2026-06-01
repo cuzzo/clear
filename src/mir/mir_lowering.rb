@@ -159,17 +159,22 @@ class MIRLowering
     const :existing_owned_source, T::Boolean
     const :borrowed_union_sink, T::Boolean
 
-    sig { params(sink_alloc: Symbol, ti: Type).returns(T::Boolean) }
-    def satisfies_sink?(sink_alloc, ti)
+	    sig { params(sink_alloc: Symbol, ti: Type).returns(T::Boolean) }
+	    def satisfies_sink?(sink_alloc, ti)
       same_alloc = source_alloc == sink_alloc
       same_alloc_satisfies = same_alloc &&
                              ((moved_without_copy && (!ti.string? || !ti.rodata?)) ||
                               same_alloc_verifiable ||
                               same_alloc_transfer_source)
       same_alloc_satisfies || owned_parameter || needs_heap_create ||
-        transfer_without_local_cleanup || already_owned_value
-    end
-  end
+	        transfer_without_local_cleanup || already_owned_value
+	    end
+
+	    sig { returns(T::Boolean) }
+	    def satisfies_rc_sink?
+	      moved_without_copy || owned_parameter || needs_heap_create || already_owned_value
+	    end
+	  end
 
   class LoweredStmtPacket < T::Struct
     extend T::Sig
@@ -1403,8 +1408,7 @@ class MIRLowering
   sig { params(node: T.untyped).returns(T.untyped) }
   def ownership_contract_source_node(node)
     current = T.let(node, T.untyped)
-    while current.respond_to?(:expr) &&
-        (current.is_a?(MIR::Cast) || current.is_a?(MIR::TryExpr) || current.is_a?(MIR::TryCatch))
+    while MIR.expr_wrapper?(current)
       current = current.expr
     end
     current
@@ -1511,10 +1515,7 @@ class MIRLowering
   sig { params(stmt: T.untyped, guarded_cleanup_names: T::Set[String]).returns(T::Array[T.untyped]) }
   def ownership_transfers_for_stmt(stmt, guarded_cleanup_names)
     return [] if stmt.is_a?(AST::ReturnNode)
-    return [] if stmt.is_a?(AST::WhileLoop) || stmt.is_a?(AST::WhileBindLoop) ||
-                 stmt.is_a?(AST::ForRange) || stmt.is_a?(AST::ForEach) ||
-                 stmt.is_a?(AST::IfStatement) || stmt.is_a?(AST::MatchStatement) ||
-                 stmt.is_a?(AST::WithBlock) || stmt.is_a?(AST::DoBlock)
+    return [] if AST.ownership_transfer_stmt?(stmt)
     marks = T.let([], T::Array[T.untyped])
     collect_bg_capture_transfer_roots(stmt).uniq.each do |name|
       safe = zig_safe_name(name)
@@ -1770,8 +1771,7 @@ class MIRLowering
       if owned_binding_visible?(mapped) || (!require_visible_owned && (@current_bindings[root] || CleanupEntry::NONE).present?)
         return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
       end
-      if ast_value.is_a?(AST::Identifier) && value_mir.is_a?(MIR::Ident) &&
-         value_mir.name.to_s == mapped && !borrowed_ownership_ast?(ast_value)
+      if visible_owned_operand_value?(ast_value, value_mir, mapped)
         return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
       end
     end
@@ -1779,6 +1779,12 @@ class MIRLowering
     return [] unless require_visible_owned
 
     [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, "#{source} missing owned binding", target_alloc)]
+  end
+
+  sig { params(ast_value: AST::Node, value_mir: MIR::Node, mapped: String).returns(T::Boolean) }
+  def visible_owned_operand_value?(ast_value, value_mir, mapped)
+    !!(ast_value.is_a?(AST::Identifier) && value_mir.is_a?(MIR::Ident) &&
+      value_mir.name.to_s == mapped && !borrowed_ownership_ast?(ast_value))
   end
 
   sig { params(operands: T::Array[MIR::OwnershipOperandFact], target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
@@ -1901,8 +1907,7 @@ class MIRLowering
   sig { params(stmt: T.untyped).returns(T::Array[String]) }
   def collect_moved_arg_roots(stmt)
     names = T.let([], T::Array[String])
-    if (stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)) &&
-       stmt.respond_to?(:value) && stmt.value.is_a?(AST::Identifier)
+    if AST.declaration_with_identifier_value?(stmt)
       ti = Type.from_node!(stmt.value, context: "moved declaration root")
       entry = @current_bindings[stmt.value.name.to_s] || CleanupEntry::NONE
       names << stmt.value.name.to_s if ownership_tracked_transfer_type?(ti) && entry.present?
@@ -3021,13 +3026,18 @@ class MIRLowering
       code = emit_expr(s)
       next nil unless code
       stripped = code.strip
-      if s.respond_to?(:expr?) && s.expr? &&
-         !stripped.end_with?(";") && !stripped.end_with?("}") && !stripped.end_with?("{")
+      if zig_statement_semicolon_required?(s, stripped)
         "#{indent}#{code};"
       else
         "#{indent}#{code}"
       end
     }.join("\n")
+  end
+
+  sig { params(stmt: MIR::Node, stripped: String).returns(T::Boolean) }
+  def zig_statement_semicolon_required?(stmt, stripped)
+    stmt.expr? && !stripped.end_with?(";") &&
+      !stripped.end_with?("}") && !stripped.end_with?("{")
   end
 
   public
@@ -3173,8 +3183,7 @@ class MIRLowering
     end
 
     if ti.any_rc?
-      return keep if source.moved_without_copy || source.owned_parameter ||
-        source.needs_heap_create || source.already_owned_value
+      return keep if source.satisfies_rc_sink?
 
       return OwnedSinkPlan.new(
         action: :rc_retain,

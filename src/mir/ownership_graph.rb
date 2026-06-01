@@ -25,10 +25,12 @@ class OwnershipGraph
     extend T::Sig
     sig { returns(T::Boolean) }
     def live?;    state == :live; end
-    sig { returns(T::Boolean) }
-    def moved?;   state == :moved; end
-    sig { returns(T::Boolean) }
-    def dropped?; state == :dropped; end
+	    sig { returns(T::Boolean) }
+	    def moved?;   state == :moved; end
+	    sig { returns(T::Boolean) }
+	    def specific_move_action?; moved? && !move_action.nil? && move_action != :move; end
+	    sig { returns(T::Boolean) }
+	    def dropped?; state == :dropped; end
     # Carrier struct: member stays :type_info; expose the project-wide
     # canonical accessor name so readers use one name everywhere.
     sig { returns(T.untyped) }

@@ -1034,9 +1034,7 @@ module EffectTracker
 
       tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
-      elsif fn_node.uses_runtime? || fn_node.fn_value_ref == true ||
-            !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil? ||
-            recursion_yield_needed?(fn_node) || declared_runtime_return
+      elsif fn_node.runtime_stack_required?(recursion_yield_needed?(fn_node), declared_runtime_return)
         :standard
       else
         :micro

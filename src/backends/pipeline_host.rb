@@ -474,16 +474,13 @@ class PipelineHost
     end
 
     # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
-    if @soa_rewrite_active && node.is_a?(AST::GetField) &&
-       node.target.is_a?(AST::Identifier) && node.target.name == "_"
+    if @soa_rewrite_active && AST.soa_placeholder_field?(node)
       @soa_needed_fields << node.field
       return "__soa_#{node.field}[__soa_i]"
     end
 
     # SOA assignment rewrite: _.field = expr -> __soa_field[__soa_i] = expr
-    if @soa_rewrite_active && (node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment)) &&
-       node.name.is_a?(AST::GetField) && node.name.target.is_a?(AST::Identifier) &&
-       node.name.target.name == "_"
+    if @soa_rewrite_active && AST.soa_placeholder_assignment?(node)
       field = node.name.field
       @soa_needed_fields << field
       value = visit(node.value)
@@ -541,8 +538,7 @@ class PipelineHost
   sig { params(node: T.untyped).returns(T::Boolean) }
   def ast_node_uses_placeholder?(node)
     return false unless node
-    return false if node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
-                    node.is_a?(TrueClass) || node.is_a?(FalseClass)
+    return false if AST.scalar_literal_value?(node)
     return node.name == "_" if node.is_a?(AST::Identifier)
     # Traverse known child fields that may contain sub-expressions/statements
     [:left, :right, :value, :args, :object, :target, :index, :condition,
@@ -588,7 +584,7 @@ class PipelineHost
     # Zig backend; materializing full structs would erase the point of SOA.
     # The VM has no SoA layout (Value.List is uniform), so BC keeps using
     # the generic structural fold path.
-    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
+    is_soa = lhs_type&.soa_linear_collection?
     scalar_op = AST.pipeline_range_fold?(rhs)
     if is_soa && scalar_op && @lowering.instance_variable_get(:@target) != :bc
       return lower_soa_scalar_fold(PipelineSite.new(list: lhs, options: node), rhs)
@@ -688,7 +684,7 @@ class PipelineHost
       [build_mat_soa_pool(lhs_type), "pipe_items"]
     elsif lhs_type.pool? && !bc_mode
       [build_mat_pool(lhs_type), "pipe_items"]
-    elsif (lhs_type.list_collection? || lhs_type.fixed_soa?) && lhs_type.soa? && !bc_mode
+    elsif lhs_type.soa_list_materialization? && !bc_mode
       [build_mat_soa_list(lhs_type), "pipe_items"]
     elsif lhs_type.list_collection? && lhs_type.sharded? && !bc_mode
       [build_mat_sharded_list(lhs_type), "pipe_items"]
@@ -1515,8 +1511,7 @@ class PipelineHost
       # bc_emitter's compile_for routes channels via STREAM_NEXT and
       # bounded streams via list-ref iteration. Same shape as the
       # lower_each_range / lower_range_fold inf-stream branch.
-      if bc_target? && range_chain[:source].is_a?(AST::Identifier) &&
-         (source_ti&.dynamic_stream? || source_ti&.bounded_stream? || source_ti&.inf_stream?)
+      if bc_target? && range_chain[:source].is_a?(AST::Identifier) && source_ti&.runtime_stream?
         return MIR::BlockExpr.new(label, [
           *p[:outer_stmts],
           MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
@@ -2262,7 +2257,7 @@ class PipelineHost
     # In BC mode the VM has no SoA layout, so the field-slice optimization
     # has no benefit. Skip the SoaFieldAccess emission and let the regular
     # per-item ForStmt path below handle iteration uniformly.
-    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?) &&
+    is_soa = lhs_type&.soa_linear_collection? &&
              @lowering.instance_variable_get(:@target) != :bc
 
     if is_soa
@@ -3624,9 +3619,7 @@ class PipelineHost
         MIR::BreakStmt.new(label, result_expr)
       ])
     end
-    if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.full_type!.dynamic_stream? || range_lit.full_type!.bounded_stream? ||
-        range_lit.full_type!.inf_stream?)
+    if bc_target? && range_lit.is_a?(AST::Identifier) && source_ti&.runtime_stream?
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts], *acc_init_stmts,
         MIR::ForStmt.new(visit_mir(range_lit), capture_name,
@@ -3682,9 +3675,7 @@ class PipelineHost
         MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
       ])
     end
-    if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.full_type!.dynamic_stream? || range_lit.full_type!.bounded_stream? ||
-        range_lit.full_type!.inf_stream?)
+    if bc_target? && range_lit.is_a?(AST::Identifier) && source_ti&.runtime_stream?
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts],
         MIR::Let.new("acc", init_mir, true, acc_zig, nil),
@@ -4114,7 +4105,7 @@ class PipelineHost
       # WITH alias `t`, and writes through `t.value = ...` route via
       # BOX_STORE back to the same envId the outer binding holds).
       sym = caps.capture_symbols&.dig(s.name)
-      if sym && (sym.locked? || sym.write_locked? || sym.storage == :local)
+      if sym&.boxed_capture_storage?
         # Stamp the inner struct name (when knowable) so the BC pre-decode
         # can stamp `:struct_<Name>` on the worker's local slot — without
         # it, find_field_index for `t.value` walks every struct and may
@@ -4760,7 +4751,7 @@ class PipelineHost
       # WITH alias `t`, and writes through `t.value = ...` route via
       # BOX_STORE back to the same envId the outer binding holds).
       sym = caps.capture_symbols&.dig(s.name)
-      if sym && (sym.locked? || sym.write_locked? || sym.storage == :local)
+      if sym&.boxed_capture_storage?
         fd.boxed_capture = struct_name_hint_for_sym(sym) || true
       end
       fd

@@ -295,10 +295,12 @@ module CleanupClassifier
         moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
         cleanup = classify_binding(var_name, node.full_type!, node, promoted_fns, schema_lookup)
         cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
-        if !cleanup && node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
-            !optional_empty_initializer?(node.respond_to?(:value) ? node.value : nil)
-          ti = node.full_type!
-          cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
+        unless cleanup
+          if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
+             !optional_empty_initializer?(node.respond_to?(:value) ? node.value : nil)
+            ti = node.full_type!
+            cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
+          end
         end
         if cleanup
           cleanup[:alloc] = moved_alloc if moved_alloc
@@ -602,13 +604,14 @@ module CleanupClassifier
     return nil if ti.optional? && optional_empty_initializer?(value) &&
                   !(node.is_a?(AST::VarDecl) && node.mutable == true &&
                     node.respond_to?(:var_mutated) && node.var_mutated)
-    return nil if !node_sym&.heap_storage? &&
-                  (node_sym&.borrow_provenance? ||
-                   (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?))
-    return nil if ti.string? && !node_sym&.heap_storage? &&
-                  !mutable_owning_slot?(ti, node, schema_lookup) &&
-                  (node_sym&.rodata_provenance? ||
-                   (node.respond_to?(:rodata_provenance?) && node.rodata_provenance?))
+    unless node_sym&.heap_storage?
+      return nil if node_sym&.borrow_provenance? ||
+                    (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?)
+      if ti.string? && !mutable_owning_slot?(ti, node, schema_lookup)
+        return nil if node_sym&.rodata_provenance? ||
+                      (node.respond_to?(:rodata_provenance?) && node.rodata_provenance?)
+      end
+    end
 
     sync = node_sym&.sync
     entry = nil
@@ -640,7 +643,7 @@ module CleanupClassifier
     end
     entry ||= entry(:uniform, has_moved_guard: true) if !ti.optional? && (ti.heap_ptr? || ti.indirect?)
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
-    if !entry && ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
+    if !entry && ti.atomic_ptr?
       entry = entry(:uniform)
     end
     entry ||= classify_rc_or_link(ti, schema_lookup)

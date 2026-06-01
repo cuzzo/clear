@@ -200,7 +200,7 @@ module MIRLoweringExpressions
     capture_map = @do_capture_map || {}
     if capture_map.key?(node.name)
       ident = MIR::Ident.new(capture_map[node.name])
-      if node.symbol&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && node.symbol&.layout != :indirect
+      if atomic_capture_load?(node)
         return MIR::MethodCall.new(ident, "load", [], false, MIR::CallableContract.no_ownership(0))
       end
       return ident
@@ -231,6 +231,19 @@ module MIRLoweringExpressions
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def atomic_capture_load?(node)
+    sym = node.symbol
+    !!(sym&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && sym.layout != :indirect)
+  end
+
+  sig { params(ft: Object, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
+  def recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
+    lowering = T.cast(self, MIRLowering)
+    !!(ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
+      !lowering.ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
 
   sig { params(node: AST::UnaryOp).returns(MIR::UnaryOp) }
@@ -1004,7 +1017,7 @@ module MIRLoweringExpressions
     target = plan.target
     index = plan.index
     ti = plan.type_info
-    if ti.map? && (ti.shared? || ti.multiowned?) && @target != :bc
+    if ti.rc_map? && @target != :bc
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -1263,8 +1276,7 @@ module MIRLoweringExpressions
           end
           field_alloc = mir_owned_alloc(field_value)
           lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
-          if ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
-             !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc
+          if recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
             hoist_alloc(MIR::DeepCopy.new(lowered, ft.zig_type, nil, :full_value, field_sink_alloc),
               field_node, err_cleanup: true)
           else
@@ -1663,8 +1675,7 @@ module MIRLoweringExpressions
     lt = type_info_for(left)
     rt = type_info_for(right)
 
-    if (lt&.string? && (rt.nil? || rt.string?)) ||
-       (rt&.string? && (lt.nil? || lt.string?))
+    if (lt&.string_comparable_with?(rt)) || (rt&.string_comparable_with?(lt))
       return ["expectEqualStrings", []]
     end
 
@@ -1917,7 +1928,7 @@ module MIRLoweringExpressions
              when :multiowned then (node.atomic? ? nil : "rcCreate")
              end
 
-    strategy = if node.local? || (node.indirect? && !node.sync && !node.ownership)
+    strategy = if node.local_storage_wrap?
       :local
     elsif sync_fn && own_fn
       :both

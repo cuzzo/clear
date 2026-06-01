@@ -446,8 +446,7 @@ class Parser
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
     T.bind(self, Parser) rescue nil
-    if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
-        lhs.target.name[0] =~ /[A-Z]/
+    if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && AST.inline_union_constructor_target?(lhs)
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
         k = (T.must(current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID))).value
@@ -1158,8 +1157,7 @@ class Parser
     variants = {}
     method_reqs = []
     until match?(:CHAR, '}')
-      if match?(:KEYWORD, 'FN') || (match?(:KEYWORD, 'PUB') && peek.type == :KEYWORD && peek.value == 'FN') ||
-         (match?(:KEYWORD, 'PRIVATE') && peek.type == :KEYWORD && peek.value == 'FN')
+      if starts_function_requirement?
         # Method requirement stub: [PUB|PRIVATE] FN name(param: Type, ...) RETURNS Type
         stub_vis = :package
         if match?(:KEYWORD, 'PUB')
@@ -3032,10 +3030,10 @@ class Parser
       unless allowed.include?(normalized)
         error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok.value, modifier: tok.value)
       end
-      apply_capability!(result, tok, normalized)
+      apply_capability!(result, tok, normalized, validate_shard_count: true)
     end
 
-    parse_capability_chain!(result, allowed_values: allowed, cap_tok: cap_tok)
+    parse_capability_chain!(result, allowed_values: allowed, cap_tok: cap_tok, validate_shard_count: true)
     result
   end
 
@@ -3043,10 +3041,11 @@ class Parser
     params(
       result: T::Hash[T.untyped, T.untyped],
       allowed_values: T.nilable(T::Array[String]),
-      cap_tok: T.nilable(Lexer::Token)
+      cap_tok: T.nilable(Lexer::Token),
+      validate_shard_count: T::Boolean
     ).void
   end
-  def parse_capability_chain!(result, allowed_values: nil, cap_tok: nil)
+  def parse_capability_chain!(result, allowed_values: nil, cap_tok: nil, validate_shard_count: false)
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
       error!(current, :EXPECTED_CAP_AFTER_COLON) unless current.type == :VAR_ID
@@ -3056,7 +3055,7 @@ class Parser
       if allowed_values && !allowed_values.include?(normalized_value)
         error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok&.value || "capability", modifier: tok.value)
       end
-      apply_capability!(result, tok, normalized_value)
+      apply_capability!(result, tok, normalized_value, validate_shard_count: validate_shard_count)
     end
   end
 
@@ -3113,8 +3112,8 @@ class Parser
   end
 
   # Apply a single capability token to the result hash. Detects duplicates.
-  sig { params(result: T::Hash[Symbol, T.untyped], token: Lexer::Token, value: String).returns(T.untyped) }
-  def apply_capability!(result, token, value = token.value)
+  sig { params(result: T::Hash[Symbol, T.untyped], token: Lexer::Token, value: String, validate_shard_count: T::Boolean).returns(T.untyped) }
+  def apply_capability!(result, token, value = token.value, validate_shard_count: false)
     case value
     when "@multiowned"
       error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
@@ -3169,7 +3168,7 @@ class Parser
       consume(:CHAR, '(')
       count_tok = consume_number
       count = count_tok.value.to_i
-      error!(count_tok, :SHARDED_TOO_FEW, count: count) if count < 2
+      error!(count_tok, :SHARDED_TOO_FEW, count: count) if validate_shard_count && count < 2
       result[:shard_count] = count
       consume(:CHAR, ')')
     when "@observable"
@@ -3929,6 +3928,14 @@ class Parser
 
     _, names = parse_comma_seq(:CHAR, '<', '>') { T.must(consume(:TYPE_ID)).value }
     names
+  end
+
+  sig { returns(T::Boolean) }
+  def starts_function_requirement?
+    return true if match?(:KEYWORD, 'FN')
+    return false unless match?(:KEYWORD, 'PUB') || match?(:KEYWORD, 'PRIVATE')
+
+    peek.type == :KEYWORD && peek.value == 'FN'
   end
 
   sig { returns(T::Array[Symbol]) }

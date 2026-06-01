@@ -380,7 +380,7 @@ class Type
     @layout    = layout    if layout
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
-    @provenance = :heap if @sync && @sync != :raw && @sync != :symbol && @ownership == :affine
+    @provenance = :heap if sync_requires_heap_provenance?
     # `:indirect` layout is the explicit "heap-pinned cell with a stable
     # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
     # provenance even without an active sync, mirroring the @indirect
@@ -830,6 +830,26 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def shared_or_multiowned?
+    shared? || multiowned?
+  end
+
+  sig { returns(T::Boolean) }
+  def rc_map?
+    map? && shared_or_multiowned?
+  end
+
+  sig { returns(T::Boolean) }
+  def sync_requires_heap_provenance?
+    any_sync? && @ownership == :affine
+  end
+
+  sig { returns(T::Boolean) }
+  def atomic_pointer_wrapped?
+    atomic? && (shared_or_multiowned? || indirect?)
+  end
+
+  sig { returns(T::Boolean) }
   def map?
     @is_map
   end
@@ -839,6 +859,11 @@ class Type
   sig { returns(T::Boolean) }
   def numeric_map?
     !!(@is_map && @key_type_raw && @key_type_raw != :String)
+  end
+
+  sig { returns(T::Boolean) }
+  def plain_numeric_map?
+    numeric_map? && !sharded? && !striped?
   end
 
   sig { returns(Type) }
@@ -1009,6 +1034,11 @@ class Type
     pool? || sharded? || heap? || tense_observable?
   end
 
+  sig { returns(T::Boolean) }
+  def heap_return_storage?
+    heap? || dynamic?
+  end
+
   # True when this map type stores an allocator in its Zig struct initializer.
   # StringMaps/StripedMaps need .alloc = heapAlloc(); NumericMaps and
   # PartitionedMaps (shared-nothing sharded) don't have an alloc field.
@@ -1018,6 +1048,14 @@ class Type
     return false if numeric_map?
     return false if sharded? && !striped?
     true
+  end
+
+  # Capturing a plain StringHashMap into a BG/fiber context requires an
+  # explicit deinit pattern. Numeric maps, shared/locked/sharded map
+  # families, and resource-backed values have their own cleanup path.
+  sig { returns(T::Boolean) }
+  def captured_plain_string_map_needs_deinit?
+    map? && !numeric_map? && !sharded? && !striped? && !any_rc? && !any_sync?
   end
 
   # True when backing data is frame-allocated and must be promoted to heap
@@ -1129,6 +1167,53 @@ class Type
   sig { returns(T::Boolean) }
   def fixed_soa?
     fixed? && soa? && !collection?
+  end
+
+  sig { returns(T::Boolean) }
+  def soa_linear_collection?
+    soa? && (pool? || list_collection? || fixed_soa?)
+  end
+
+  sig { returns(T::Boolean) }
+  def list_requires_array_shape?
+    list_collection? && !array? && !promise_list? &&
+      !(tense? && tense_type&.array?)
+  end
+
+  sig { returns(T::Boolean) }
+  def observable_array_without_set?
+    !!(tense? && observable? && tense_type&.array? && !set_collection?)
+  end
+
+  sig { returns(T::Boolean) }
+  def soa_requires_fixed_array?
+    soa? && !collection? && (!array? || !fixed?)
+  end
+
+  sig { returns(T::Boolean) }
+  def soa_list_materialization?
+    (list_collection? || fixed_soa?) && soa?
+  end
+
+  sig { returns(T::Boolean) }
+  def dynamic_field_array?
+    array? && (dynamic? || list_collection?)
+  end
+
+  sig { returns(T::Boolean) }
+  def borrowed_array_argument?
+    non_string_array? && !pool?
+  end
+
+  sig { params(other: T.nilable(Type)).returns(T::Boolean) }
+  def string_comparable_with?(other)
+    string? && (other.nil? || other.string?)
+  end
+
+  sig { returns(T::Boolean) }
+  def plain_indirect_value?
+    !!(indirect? && !any_sync? && (@ownership.nil? || @ownership == :affine) &&
+      !fn_type? && !error_union? && !optional?)
   end
 
   # A sharded collection with sync capability = lock-striped (skew-safe).
@@ -1451,6 +1536,21 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def runtime_stream?
+    dynamic_stream? || bounded_stream? || open_stream? || inf_stream?
+  end
+
+  sig { params(has_limit: T::Boolean).returns(T::Boolean) }
+  def bounded_pipeline_stream_source?(has_limit)
+    dynamic_stream? || bounded_stream? || open_stream? || (inf_stream? && has_limit)
+  end
+
+  sig { returns(T::Boolean) }
+  def single_future?
+    future? && !stream? && !shared_promise? && !promise_list?
+  end
+
+  sig { returns(T::Boolean) }
   def split_open_stream?
     split? && open_stream?
   end
@@ -1542,7 +1642,7 @@ class Type
 
     # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc/Arc/Locked are also pointer-sized)
     # Generic instances (e.g. Id<T>) are intrinsic scalar types — always 1 slot.
-    return 1 if primitive? || heap? || dynamic? || any? || multiowned? || shared? || any_sync? || generic_instance?
+    return 1 if scalar_slot?
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
@@ -1562,6 +1662,12 @@ class Type
     end
 
     1 # Default
+  end
+
+  sig { returns(T::Boolean) }
+  def scalar_slot?
+    primitive? || heap? || dynamic? || any? || multiowned? || shared? ||
+      any_sync? || generic_instance?
   end
 
   sig { returns(T::Boolean) }
@@ -1868,9 +1974,7 @@ class Type
   # in-depth backstop rather than the load-bearing path.
   sig { params(schema_lookup: T.nilable(Proc)).returns(Symbol) }
   def cleanup_allocator(schema_lookup = nil)
-    return :heap if heap? || map? || any_rc? || any_sync? ||
-                     resource? || sharded? || striped? || link? ||
-                     tense_observable?
+    return :heap if heap_cleanup_allocator?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if Schemas.struct?(schema)
@@ -1880,6 +1984,19 @@ class Type
       end
     end
     :frame
+  end
+
+  sig { returns(T::Boolean) }
+  def heap_cleanup_allocator?
+    heap? || map? || any_rc? || any_sync? || resource? || sharded? ||
+      striped? || link? || tense_observable?
+  end
+
+  sig { returns(T.nilable(Type)) }
+  def plain_return_payload_type
+    return nil unless error_union?
+
+    payload_type
   end
 
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
@@ -2339,7 +2456,7 @@ class Type
 
     inner_zig = capability_inner_zig_type(is_param: is_param, is_field: is_field)
 
-    if atomic? && (shared? || multiowned? || indirect?)
+    if atomic_pointer_wrapped?
       return "*#{inner_zig}"
     end
 
@@ -2452,8 +2569,7 @@ class Type
     # @indirect is a heap-pinned cell boxed by a single HeapCreate, so its
     # Zig type must be exactly one pointer level around the bare pointee for
     # every type uniformly (the String/slice path below otherwise drops it).
-    if indirect? && !any_sync? && (@ownership.nil? || @ownership == :affine) &&
-       !fn_type? && !error_union? && !optional?
+    if plain_indirect_value?
       pointee = Type.new(self)
       pointee.layout = nil
       pointee.provenance = :stack if pointee.respond_to?(:provenance=)
@@ -2586,8 +2702,7 @@ module TypeHelper
     T.bind(self, SemanticAnnotator) rescue nil
     val = if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
       node.value
-    elsif node.is_a?(AST::UnaryOp) && node.op == :SUB &&
-          node.right.is_a?(AST::Literal) && (node.right.type == :INT64 || node.right.type == :PREFIXED_INT)
+    elsif AST.negative_integer_literal?(node)
       -node.right.value
     else
       return

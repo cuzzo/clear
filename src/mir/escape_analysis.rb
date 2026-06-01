@@ -376,7 +376,7 @@ module EscapeAnalysis
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
 
-    if t.collection? || (t.array? && !t.string?)
+    if t.collection_value?
       elem = t.element_type
       return false unless elem.is_a?(Type)
       return elem.ownership_bearing?(schema_lookup)
@@ -474,8 +474,7 @@ module EscapeAnalysis
   sig { params(node: T.untyped).returns(T.untyped) }
   private_class_method def self.unwrap_value(node)
     current = T.let(node, T.untyped)
-    while current.is_a?(AST::MoveNode) || current.is_a?(AST::CopyNode) || current.is_a?(AST::CloneNode) ||
-          current.is_a?(AST::ShareNode) || current.is_a?(AST::FreezeNode) || current.is_a?(AST::CapabilityWrap)
+    while AST.ownership_wrapper?(current)
       current = current.value
     end
     current

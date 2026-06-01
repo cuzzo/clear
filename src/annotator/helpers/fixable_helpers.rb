@@ -997,23 +997,26 @@ module FixableHelper
     decl = scope&.locals&.[](name)&.reg
     src = @source_code
     fix = nil
-    if decl && decl.respond_to?(:token) && decl.token && src
-      dline = decl.token.line
-      line_text = src.lines[dline - 1] || ''
-      # Search from the decl-name column so a prior decl's `: TypeName`
-      # on the same line is skipped.
-      ann_match = line_text.match(/:\s*([A-Za-z_][\w]*)/, decl.token.column - 1)
-      if ann_match && !line_text.include?('~')
-        type_col = ann_match.begin(1) + 1  # 1-based
-        fix = Fix.new(
-          description: "Prefix the declared type with `~` so '#{name}' becomes a tense (`~T`) source. " \
-                       "MATERIALIZED VIEW snapshots a tense aggregate at the WITH boundary.",
-          confidence: :interactive,
-          edits: [Edit.new(
-            span: Span.new(file: nil, line: dline, col: type_col, length: 0),
-            replacement: '~'
-          )]
-        )
+    if decl && src
+      token = decl.respond_to?(:token) ? decl.token : nil
+      if token
+        dline = token.line
+        line_text = src.lines[dline - 1] || ''
+        # Search from the decl-name column so a prior decl's `: TypeName`
+        # on the same line is skipped.
+        ann_match = line_text.match(/:\s*([A-Za-z_][\w]*)/, token.column - 1)
+        if ann_match && !line_text.include?('~')
+          type_col = ann_match.begin(1) + 1  # 1-based
+          fix = Fix.new(
+            description: "Prefix the declared type with `~` so '#{name}' becomes a tense (`~T`) source. " \
+                         "MATERIALIZED VIEW snapshots a tense aggregate at the WITH boundary.",
+            confidence: :interactive,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: dline, col: type_col, length: 0),
+              replacement: '~'
+            )]
+          )
+        end
       end
     end
     kw = { name: name, got: got }

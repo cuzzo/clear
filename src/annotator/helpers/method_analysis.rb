@@ -40,6 +40,7 @@ module MethodAnalysis
 
     scope_entry = list_arg.symbol
     ti = scope_entry&.type
+    return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
     val_type = val_arg.resolved_type
@@ -96,7 +97,7 @@ module MethodAnalysis
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
     zig = if (obj_type.sharded? || obj_type.striped?) && em.sharded_zig
       em.sharded_zig
-    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && em.numeric_zig
+    elsif obj_type.plain_numeric_map? && em.numeric_zig
       em.numeric_zig
     else
       em.zig
@@ -126,7 +127,7 @@ module MethodAnalysis
     node.mutates_receiver = true if em.mutates_receiver
 
     # Narrow Set element type on first insert (Any[] -> T[])
-    if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
+    if AST.any_set_insert_call?(node, tag_field) && obj_type.element_type&.resolved == :Any
       val_type = node.args[0].resolved_type
       new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
       new_type.provenance = obj_type.provenance

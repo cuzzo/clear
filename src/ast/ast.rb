@@ -402,6 +402,125 @@ module AST
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.collection_method_call?(node)
+    !!(node.is_a?(AST::MethodCall) &&
+      (node.pool_method || node.set_method || node.map_method)
+    )
+  end
+
+  sig { params(node: Object, tag_field: Symbol).returns(T::Boolean) }
+  def self.any_set_insert_call?(node, tag_field)
+    !!(tag_field == :set_method && node.is_a?(AST::MethodCall) &&
+      node.name == "insert" && node.args.length == 1)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.empty_auto_collection_literal_decl?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false unless node.type&.auto?
+    value = node.value
+    return false unless value.respond_to?(:type_object) && value.type_object
+
+    !!((value.is_a?(AST::ListLit) && value.items.empty? &&
+      !value.instance_variable_get(:@constructor_collection)) ||
+      (value.is_a?(AST::HashLit) && value.pairs.empty?))
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.negative_integer_literal?(node)
+    return false unless node.is_a?(AST::UnaryOp) && node.op == :SUB
+    lit = node.right
+    !!(lit.is_a?(AST::Literal) && (lit.type == :INT64 || lit.type == :PREFIXED_INT))
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.declaration_with_identifier_value?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false if node.is_a?(AST::BindExpr) && node.mode != :decl
+
+    node.value.is_a?(AST::Identifier)
+  end
+
+  sig { params(node: T.any(Object, AST::Locatable)).returns(T::Boolean) }
+  def self.declaration_with_heap_symbol?(node)
+    !!((node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) &&
+      node.symbol&.storage == :heap)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.type_declaration?(node)
+    node.is_a?(AST::StructDef) || node.is_a?(AST::ExternStructDecl) ||
+      node.is_a?(AST::EnumDef) || node.is_a?(AST::UnionDef)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.top_level_declaration?(node)
+    type_declaration?(node) || node.is_a?(AST::RequireNode) ||
+      node.is_a?(AST::ExternFnDecl)
+  end
+
+  sig { params(node: T.any(Object, AST::Locatable)).returns(T::Boolean) }
+  def self.statement_result_void?(node)
+    node.is_a?(AST::ReturnNode) || node.is_a?(AST::VarDecl) ||
+      node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::WhileLoop) || node.is_a?(AST::ForRange) ||
+      node.is_a?(AST::ForEach) || node.is_a?(AST::MatchStatement) ||
+      node.is_a?(AST::Assert) || node.is_a?(AST::Raise) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::BgBlock) ||
+      node.is_a?(AST::DoBlock) || node.is_a?(AST::PassStmt) ||
+      node.is_a?(AST::DieNode) || node.is_a?(AST::ThrowNode)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.ownership_transfer_stmt?(node)
+    node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
+      node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach) ||
+      node.is_a?(AST::IfStatement) || node.is_a?(AST::MatchStatement) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::DoBlock)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.ownership_wrapper?(node)
+    node.is_a?(AST::MoveNode) || node.is_a?(AST::CopyNode) ||
+      node.is_a?(AST::CloneNode) || node.is_a?(AST::ShareNode) ||
+      node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.scalar_literal_value?(node)
+    node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
+      node.is_a?(TrueClass) || node.is_a?(FalseClass)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.call_like_boundary?(node)
+    node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
+      node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::DoBlock)
+  end
+
+  sig { params(node: T.any(Object, AST::Locatable)).returns(T::Boolean) }
+  def self.inline_union_constructor_target?(node)
+    return false unless node.is_a?(AST::GetField)
+    target = node.target
+    !!(target.is_a?(AST::Identifier) && (target.name[0] =~ /[A-Z]/))
+  end
+
+  sig { params(node: T.any(Object, AST::Locatable)).returns(T::Boolean) }
+  def self.soa_placeholder_field?(node)
+    return false unless node.is_a?(AST::GetField)
+    target = node.target
+    !!(target.is_a?(AST::Identifier) && target.name == "_")
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.soa_placeholder_assignment?(node)
+    return false unless node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment)
+
+    soa_placeholder_field?(node.name)
+  end
+
   # Explicit ownership transfer marker stamped by annotation. This is a
   # predicate over the AST contract, not an ad hoc respond_to? check.
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -1230,6 +1349,12 @@ module AST
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
     end
+
+    sig { params(recursion_yield: T::Boolean, declared_runtime_return: T::Boolean).returns(T::Boolean) }
+    def runtime_stack_required?(recursion_yield, declared_runtime_return)
+      uses_runtime? || fn_value_ref == true || !thunk_plan.nil? ||
+        !mutual_thunk_plan.nil? || recursion_yield || declared_runtime_return
+    end
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
@@ -1904,9 +2029,15 @@ module AST
     def local? = sync == :local
     sig { returns(T::Boolean) }
     def multiowned? = ownership == :multiowned
-    sig { returns(T::Boolean) }
-    def write_locked? = sync == :write_locked
-  end
+	    sig { returns(T::Boolean) }
+	    def write_locked? = sync == :write_locked
+	    sig { returns(T::Boolean) }
+	    def capability? = !!(ownership || sync || layout)
+	    sig { returns(T::Boolean) }
+	    def locked_sync? = locked? || write_locked?
+	    sig { returns(T::Boolean) }
+	    def local_storage_wrap? = local? || (indirect? && !sync && !ownership)
+	  end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   # CopyNode -- explicit COPY expr (deep copy of value).
   #   deep_copy: true for unions with heap variants.

@@ -446,13 +446,19 @@ module MIRLoweringCapabilities
     source_zig = with_capability_source_zig(context.var_node)
     is_param = with_cap_is_param?(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    if is_param && (context.var_sync.nil? || context.var_sync == :local) &&
-       context.var_node.symbol && !context.var_node.symbol.mutable
+    if borrowed_const_param_alias?(context, is_param)
       aliased_value = with_match_unwrap_value(source_zig)
       "const #{safe_alias} = #{aliased_value};\n_ = &#{safe_alias};"
     else
       "const #{safe_alias} = #{source_zig};\n_ = &#{safe_alias};"
     end
+  end
+
+  sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
+  def borrowed_const_param_alias?(context, is_param)
+    sym = context.var_node.symbol
+    is_param && (context.var_sync.nil? || context.var_sync == :local) &&
+      sym && !sym.mutable
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }

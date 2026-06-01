@@ -72,9 +72,8 @@ module LSP
     sig { params(tok: T.untyped, source_text: T.untyped).returns(Integer) }
     def token_length(tok, source_text = nil)
       val = tok.respond_to?(:value) ? tok.value : nil
-      if source_text && tok.respond_to?(:line) && tok.line && tok.respond_to?(:column) && tok.column
-        line = source_text.lines[tok.line - 1]
-        if line
+      if source_text && tok.respond_to?(:line) && tok.respond_to?(:column)
+        if tok.line && tok.column && (line = source_text.lines[tok.line - 1])
           # Token columns are 1-based byte offsets; slice by bytes so
           # multi-byte chars earlier on the line don't shift the index.
           rest = line.byteslice(tok.column - 1, line.bytesize)

@@ -1265,6 +1265,13 @@ class MIRChecker
     node.allocs&.any_heap? == true
   end
 
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def stdlib_owned_fixed_return?(node)
+    return false unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+
+    stdlib_owned_return?(node) && node.stdlib_def.fixed_return?
+  end
+
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
@@ -1586,12 +1593,12 @@ class MIRChecker
         next
       end
 
-      if (expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::RawZig)) && stdlib_owned_return?(expr) &&
-         expr.stdlib_def.fixed_return?
-        ret = expr.stdlib_def.return_type
+      if stdlib_owned_fixed_return?(expr)
+        owned_expr = T.cast(expr, T.any(MIR::InlineZig, MIR::RawZig))
+        ret = owned_expr.stdlib_def.return_type
         unless ret.void?
-          label = expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
-          leaks << error(:HPT_LEAK, expr.reason,
+          label = owned_expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
+          leaks << error(:HPT_LEAK, owned_expr.reason,
             "#{label} with allocates:true result not bound to variable (leak)")
         end
       end

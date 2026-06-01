@@ -105,7 +105,7 @@ module GenericAnalysis
     # on the inner tense_type, not the outer tense wrapper. Accept those
     # by also checking tense_type.array?.
     inner_array = type_obj.tense? && type_obj.tense_type&.array?
-    if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list? && !inner_array
+    if type_obj.list_requires_array_shape?
       error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list')
     end
     if type_obj.pool? && !type_obj.array? && !inner_array
@@ -122,8 +122,7 @@ module GenericAnalysis
     # is not an observable backing at all. Reject explicitly: the
     # only observable shape over an array today is `@set:observable`
     # (DISTINCT terminal). Plain array observables are not supported.
-    if type_obj.tense? && type_obj.observable? && type_obj.tense_type&.array? &&
-       !type_obj.set_collection?
+    if type_obj.observable_array_without_set?
       error!(node, :OBSERVABLE_REQUIRES_SET)
     end
 
@@ -170,7 +169,7 @@ module GenericAnalysis
     end
 
     # @soa requires a fixed-size array (or collection, which handles its own SOA).
-    if type_obj.soa? && !type_obj.collection? && (!type_obj.array? || !type_obj.fixed?)
+    if type_obj.soa_requires_fixed_array?
       error!(node, :SOA_NEEDS_FIXED_ARRAY)
     end
 

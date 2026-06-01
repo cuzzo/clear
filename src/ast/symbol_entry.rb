@@ -170,6 +170,42 @@ class SymbolEntry
     self.class.write_locked_sync?(@sync)
   end
 
+  sig { returns(T::Boolean) }
+  def lock_sync?
+    locked? || write_locked?
+  end
+
+  sig { returns(T::Boolean) }
+  def sync_or_shared_storage?
+    lock_sync? || rc_stored? || local_storage?
+  end
+
+  sig { returns(T::Boolean) }
+  def boxed_capture_storage?
+    lock_sync? || local_storage?
+  end
+
+  sig { returns(T::Boolean) }
+  def affine_locked_capture?
+    lock_sync? && !rc_stored?
+  end
+
+  sig { returns(T::Boolean) }
+  def with_match_capability_family?
+    !@sync.nil? || rc_stored? || local_storage? || heap_storage?
+  end
+
+  sig { returns(T::Boolean) }
+  def plain_local_family?
+    @sync.nil? && (@storage.nil? || @storage == :stack || heap_storage?)
+  end
+
+  sig { params(live: T::Boolean).returns(T::Boolean) }
+  def capture_move_required?(live)
+    live && (ownership_kind == :resource || ownership_kind == :affine ||
+      (type.is_a?(Type) && type.needs_escape_promotion?))
+  end
+
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.locked_sync?(sync)
     sync_matches?(sync, :locked)

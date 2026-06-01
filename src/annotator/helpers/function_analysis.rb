@@ -470,24 +470,26 @@ module FunctionAnalysis
         match = true
       end
 
-      if !match && (expected == :Any || actual == :Any || expected == actual)
-        match = true
-
-      elsif !match && (expected_type_obj.respond_to?(:auto?) && expected_type_obj.auto?)
-        # Gradual-typing tolerance: param declared Auto. The
-        # AutoUnifier (annotator's Pass C) resolves it from the
-        # observed call-site arg types AFTER this body walk
-        # completes; coercing the call-site arg here would commit
-        # to a type the unifier hasn't picked yet. Treat as a
-        # match for now; mismatch (if the resolution disagrees
-        # with this arg's actual type) surfaces when the resolved
-        # decl gets re-validated downstream.
-        match = true
-
-      elsif !match && is_safe_autocast?(actual, expected)
-        arg_node.coerced_type = expected
-        check_prefixed_int_range!(arg_node, expected)
-        match = true
+      unless match
+        if expected == :Any || actual == :Any || expected == actual
+          match = true
+        elsif any_element_collection_param?(expected_type_obj, actual_type_obj)
+          match = true
+        elsif expected_type_obj.respond_to?(:auto?) && expected_type_obj.auto?
+          # Gradual-typing tolerance: param declared Auto. The
+          # AutoUnifier (annotator's Pass C) resolves it from the
+          # observed call-site arg types AFTER this body walk
+          # completes; coercing the call-site arg here would commit
+          # to a type the unifier hasn't picked yet. Treat as a
+          # match for now; mismatch (if the resolution disagrees
+          # with this arg's actual type) surfaces when the resolved
+          # decl gets re-validated downstream.
+          match = true
+        elsif is_safe_autocast?(actual, expected)
+          arg_node.coerced_type = expected
+          check_prefixed_int_range!(arg_node, expected)
+          match = true
+        end
       end
 
       unless match
@@ -530,6 +532,12 @@ module FunctionAnalysis
     return false if root&.token&.type == :TYPE_ID
     sym = root&.symbol
     !!(sym && (sym.is_param || sym.reg))
+  end
+
+  sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }
+  def any_element_collection_param?(expected_type, actual_type)
+    expected_elem = expected_type.element_type
+    !!((expected_type.collection? || expected_type.dynamic?) && expected_elem&.any? && actual_type.collection?)
   end
 
   sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }

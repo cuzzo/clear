@@ -317,9 +317,7 @@ module TestLowering
   sig { params(node: T.untyped, name_set: T::Hash[String, T.untyped], out: T::Set[String]).returns(T.untyped) }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
-    return if node.nil? || node.is_a?(Symbol) || node.is_a?(String) ||
-              node.is_a?(Integer) || node.is_a?(Float) ||
-              node.is_a?(TrueClass) || node.is_a?(FalseClass)
+    return if node.nil? || AST.scalar_literal_value?(node)
     if node.is_a?(Array)
       node.each { |n| collect_identifier_refs(n, name_set, out) }
       return

@@ -575,7 +575,7 @@ module MIRLoweringFunctions
                          @enum_schemas&.key?(bare_ret.resolved) ||
                          @union_schemas&.key?(bare_ret.resolved)
     returns_string = bare_ret.string?
-    heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
+    heap_carry_return = !!(node.respond_to?(:heap_carry_return) && node.heap_carry_return)
     has_frame_bindings = if node.cleanup_bindings
       node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
     else
@@ -589,13 +589,25 @@ module MIRLoweringFunctions
       ),
     ], T::Array[MIR::Node])
 
-    if has_frame_bindings && (returns_value_type || (returns_string && heap_carry_return))
+    if runtime_frame_save_required?(has_frame_bindings, returns_value_type, returns_string, heap_carry_return)
       out << MIR::FrameSave.new(@rt_name)
       out << MIR::FrameRestore.new(@rt_name)
     else
       out << MIR::Suppress.new("rt")
     end
     out
+  end
+
+  sig do
+    params(
+      has_frame_bindings: T::Boolean,
+      returns_value_type: T::Boolean,
+      returns_string: T::Boolean,
+      heap_carry_return: T::Boolean,
+    ).returns(T::Boolean)
+  end
+  def runtime_frame_save_required?(has_frame_bindings, returns_value_type, returns_string, heap_carry_return)
+    has_frame_bindings && (returns_value_type || (returns_string && heap_carry_return))
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
@@ -980,8 +992,7 @@ module MIRLoweringFunctions
                 (AST.moved?(a) &&
                  !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
-    if callee_param&.takes && moved_arg &&
-       ti.is_a?(Type) && ti.direct_indexable_collection? && !callee_param_type.collection?
+    if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
       sink_alloc = allocator_for_takes_param!(callee_param)
       return T.cast(T.unsafe(self).with_ownership_consumption(
         MIR::OwnedSlice.new(arg, sink_alloc),
@@ -997,15 +1008,25 @@ module MIRLoweringFunctions
       arg = hoist_alloc(placed, a, err_cleanup: true)
     end
 
-    if ti.is_a?(Type) && ti.non_string_array? && !ti.pool? &&
-       !a.is_a?(AST::MoveNode) &&
-       !callee_param_type.collection?
+    if borrowed_array_argument_required?(ti, a, callee_param_type)
       return MIR::ItemsAccess.new(arg, true)
     end
 
     return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
     return arg if arg_already_pointer_shaped?(a)
     MIR::AddressOf.new(arg)
+  end
+
+  sig { params(callee_param: T.nilable(AST::Param), moved_arg: T::Boolean, ti: Type, callee_param_type: Type).returns(T::Boolean) }
+  def owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
+    !!(callee_param&.takes && moved_arg && ti.direct_indexable_collection? &&
+      !callee_param_type.collection?)
+  end
+
+  sig { params(ti: Type, ast_arg: AST::Node, callee_param_type: Type).returns(T::Boolean) }
+  def borrowed_array_argument_required?(ti, ast_arg, callee_param_type)
+    ti.borrowed_array_argument? && !ast_arg.is_a?(AST::MoveNode) &&
+      !callee_param_type.collection?
   end
 
   sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[T.untyped]).returns(T.nilable(MIR::CallableContract)) }
@@ -1587,7 +1608,7 @@ module MIRLoweringFunctions
       # shared collections (e.g. map.contains?, map.count) get rewritten
       # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
       # resolve to the underlying MapRef.
-      if receiver_type && (receiver_type.shared? || receiver_type.multiowned?) && @target != :bc
+      if receiver_type&.rc_map? && @target != :bc
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
       elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
@@ -1851,7 +1872,7 @@ module MIRLoweringFunctions
   def lower_extern_arg(ast_arg)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(ast_arg)
-    if mir.is_a?(MIR::Cast) && mir.method == :as && mir.target_type == "[]const u8" && mir.expr.is_a?(MIR::Lit)
+    if MIR.const_u8_literal_cast?(mir)
       mir.expr
     else
       mir

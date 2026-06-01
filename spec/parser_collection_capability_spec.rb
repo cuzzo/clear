@@ -29,9 +29,9 @@ RSpec.describe "Parser collection capability chains" do
     expect(set.instance_variable_get(:@constructor_soa)).to be false
   end
 
-  it "uses the same shard-count validation for types and constructors" do
+  it "validates constructor shard counts while type annotations defer to semantic validation" do
     expect { parse_expr("List[]:sharded(1)") }.to raise_error(ParserError, /requires N >= 2/)
-    expect { parse_type("Int64[]@list:sharded(1)") }.to raise_error(ParserError, /requires N >= 2/)
+    expect(parse_type("Int64[]@list:sharded(1)").shard_count).to eq(1)
   end
 
   it "rejects unsupported constructor modifiers instead of silently ignoring them" do

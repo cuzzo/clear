@@ -68,6 +68,28 @@ module CapabilityHelper
 
   requires_ancestor { SemanticAnnotator }
 
+  class PredicateContext < T::Struct
+    const :kind, Symbol
+    const :with_node, T.nilable(AST::WithBlock)
+    const :fn_node, T.nilable(AST::FunctionDef)
+    const :pred_expr, AST::Locatable
+    const :guard_alias, T.nilable(String)
+    const :sibling_aliases, T::Array[String]
+    const :param_names, T::Array[String]
+    const :allowed_names, T::Array[String]
+    const :rejected_param_names, T::Set[String]
+    const :fn_name, T.nilable(String)
+  end
+
+  class PredicateCallSite < T::Struct
+    const :kind, Symbol
+    const :with_node, T.nilable(AST::WithBlock)
+    const :fn_node, T.nilable(AST::FunctionDef)
+    const :pred_expr, AST::Locatable
+    const :call, T.any(AST::FuncCall, AST::MethodCall)
+    const :callee, String
+  end
+
   # WITH can be applied to an Identifier or a GetField (`obj.field`).
   # For an Identifier, sync/ownership lives on the SymbolEntry. For a
   # GetField, it lives on the field's declared type (recorded on the
@@ -300,17 +322,18 @@ module CapabilityHelper
   sig { params(node: AST::Identifier).returns(NilClass) }
   def predicate_identifier_allowed!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.untyped)
+    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     ctx = @current_predicate_context
     return unless ctx
     return if %w[TRUE FALSE].include?(node.name)
 
-    case ctx[:kind]
+    case ctx.kind
     when :guard
-      own_alias = ctx[:alias]
+      own_alias = ctx.guard_alias
+      return unless own_alias
       return if node.name == own_alias
 
-      sibling_aliases = ctx[:sibling_aliases] || []
+      sibling_aliases = ctx.sibling_aliases
       if sibling_aliases.include?(node.name)
         error!(node, :WITH_GUARD_REFS_SIBLING_ALIAS, own_alias: own_alias, name: node.name, remediation: # Trailing helper text follows the main message. Kept as
           # a separate arg so the registered template stays
@@ -325,23 +348,23 @@ module CapabilityHelper
           category: :capability, cascade: true)
       end
     when :pre
-      params = ctx[:param_names] || []
+      params = ctx.param_names
       return if params.include?(node.name)
       emit_typo_suggestion!(
         node.token, node.name, params,
         "PRE clauses may only reference function parameters. " \
-        "Found '#{node.name}', which is not a parameter of '#{ctx[:fn_name]}'.",
-        "a parameter of '#{ctx[:fn_name]}'",
+        "Found '#{node.name}', which is not a parameter of '#{ctx.fn_name}'.",
+        "a parameter of '#{ctx.fn_name}'",
         category: :type, cascade: true)
     when :post
-      allowed = ctx[:allowed_names] || []
-      rejected = ctx[:rejected_param_names] || Set.new
+      allowed = ctx.allowed_names
+      rejected = ctx.rejected_param_names
       unless allowed.include?(node.name)
         return emit_typo_suggestion!(
           node.token, node.name, allowed,
           "DEBUG_POST clauses may only reference function parameters or 'result'. " \
-          "Found '#{node.name}', which is not in scope for '#{ctx[:fn_name]}'.",
-          "a parameter of '#{ctx[:fn_name]}' or 'result'",
+          "Found '#{node.name}', which is not in scope for '#{ctx.fn_name}'.",
+          "a parameter of '#{ctx.fn_name}' or 'result'",
           category: :type, cascade: true)
       end
       if rejected.include?(node.name)
@@ -350,34 +373,34 @@ module CapabilityHelper
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).void }
   def record_predicate_call_site!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.untyped)
-    @predicate_call_sites = T.let(@predicate_call_sites, T.untyped)
+    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
+    @predicate_call_sites = T.let(@predicate_call_sites, T.nilable(T::Array[PredicateCallSite]))
     ctx = @current_predicate_context
     return unless ctx
-    @predicate_call_sites << {
-      kind:       ctx[:kind],
-      with_node:  ctx[:with_node],
-      fn_node:    ctx[:fn_node],
-      pred_expr:  ctx[:pred_expr],
-      call:       node,
-      callee:     node.name,
-    }
+    T.must(@predicate_call_sites) << PredicateCallSite.new(
+      kind: ctx.kind,
+      with_node: ctx.with_node,
+      fn_node: ctx.fn_node,
+      pred_expr: ctx.pred_expr,
+      call: node,
+      callee: node.name,
+    )
   end
 
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { void }
   def validate_predicate_purity!
     T.bind(self, SemanticAnnotator) rescue nil
-    @predicate_call_sites = T.let(@predicate_call_sites, T.untyped)
-    (@predicate_call_sites || []).each do |site|
-      call = site[:call]
-      callee = site[:callee]
+    @predicate_call_sites = T.let(@predicate_call_sites, T.nilable(T::Array[PredicateCallSite]))
+    T.must(@predicate_call_sites).each do |site|
+      call = site.call
+      callee = site.callee
       reason = predicate_impurity_reason(call, callee)
       next unless reason
 
-      surface, hint = case site[:kind]
+      surface, hint = case site.kind
                       when :pre
                         ["PRE clauses",
                          "Move the impure work into the function body and validate the captured value there."]
@@ -392,7 +415,7 @@ module CapabilityHelper
     end
   end
 
-  sig { params(call: T.untyped, callee: String).returns(T.nilable(String)) }
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
     return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
@@ -417,10 +440,10 @@ module CapabilityHelper
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
 
-  sig { params(node: AST::WithBlock).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.untyped)
+    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     caps = node.capabilities || []
     guarded = caps.select { |cap| cap[:guard_expr] }
     return if guarded.empty?
@@ -444,10 +467,18 @@ module CapabilityHelper
       guarded.each do |gcap|
         own = gcap[:alias]
         siblings = aliases - [own]
-        @current_predicate_context = {
-          kind: :guard, with_node: node, pred_expr: gcap[:guard_expr],
-          alias: own, sibling_aliases: siblings,
-        }
+        @current_predicate_context = PredicateContext.new(
+          kind: :guard,
+          with_node: node,
+          fn_node: nil,
+          pred_expr: T.cast(gcap[:guard_expr], AST::Locatable),
+          guard_alias: own,
+          sibling_aliases: siblings,
+          param_names: [],
+          allowed_names: [],
+          rejected_param_names: Set.new,
+          fn_name: nil,
+        )
         visit(gcap[:guard_expr])
 
         guard_type = gcap[:guard_expr].full_type!(context: "WITH guard expression")
@@ -471,10 +502,10 @@ module CapabilityHelper
   # (`RETURNS !T`). The function-level `enforce_fallible_returns!` pass
   # catches the explicit-T case (since pre_clauses now flag the fn as
   # raising); the implicit-RETURNS case is caught here.
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def visit_pre_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.untyped)
+    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     pre_clauses = fn_node.respond_to?(:pre_clauses) ? (fn_node.pre_clauses || []) : []
     return if pre_clauses.empty?
 
@@ -508,10 +539,18 @@ module CapabilityHelper
     begin
       pre_clauses.each do |entry|
         expr = entry[:expr]
-        @current_predicate_context = {
-          kind: :pre, fn_node: fn_node, pred_expr: expr,
-          param_names: param_names, fn_name: fn_node.name,
-        }
+        @current_predicate_context = PredicateContext.new(
+          kind: :pre,
+          with_node: nil,
+          fn_node: fn_node,
+          pred_expr: T.cast(expr, AST::Locatable),
+          guard_alias: nil,
+          sibling_aliases: [],
+          param_names: param_names,
+          allowed_names: [],
+          rejected_param_names: Set.new,
+          fn_name: fn_node.name,
+        )
         visit(expr)
 
         pred_type = expr.full_type!(context: "PRE expression")
@@ -535,7 +574,7 @@ module CapabilityHelper
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Scope)) }
   def visit_post_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.untyped)
+    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     post_clauses = fn_node.respond_to?(:post_clauses) ? (fn_node.post_clauses || []) : []
     return if post_clauses.empty?
 
@@ -573,11 +612,18 @@ module CapabilityHelper
       begin
         post_clauses.each do |entry|
           expr = entry[:expr]
-          @current_predicate_context = {
-            kind: :post, fn_node: fn_node, pred_expr: expr,
-            allowed_names: allowed_names, rejected_param_names: rejected,
+          @current_predicate_context = PredicateContext.new(
+            kind: :post,
+            with_node: nil,
+            fn_node: fn_node,
+            pred_expr: T.cast(expr, AST::Locatable),
+            guard_alias: nil,
+            sibling_aliases: [],
+            param_names: [],
+            allowed_names: allowed_names,
+            rejected_param_names: rejected,
             fn_name: fn_node.name,
-          }
+          )
           visit(expr)
 
           pred_type = expr.full_type!(context: "DEBUG_POST expression")
@@ -1033,10 +1079,7 @@ module CapabilityHelper
       result.pointer_captures << name if t.needs_pointer_passing?
       result.string_captures << name if t.string?
       result.resource_captures << name if t.resource? || info.close_zig
-      if t.map? && !t.numeric_map? && !info.close_zig &&
-         !t.sharded? && !(t.respond_to?(:striped?) && t.striped?) &&
-         !t.shared? && !t.multiowned? &&
-         !(t.respond_to?(:any_sync?) && t.any_sync?)
+      if t.captured_plain_string_map_needs_deinit? && !info.close_zig
         result.resource_captures << name
         result.close_patterns[name] ||= "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())"
       end
@@ -1049,8 +1092,7 @@ module CapabilityHelper
     unless is_dashmap || info.atomic?
       result.has_shared = true if info.locked? || info.write_locked? || info.local?
       result.has_shared = true if info.rc_stored?
-      result.has_affine_locked = true if (info.locked? || info.write_locked?) &&
-        info.storage != :shared && info.storage != :multiowned
+      result.has_affine_locked = true if info.affine_locked_capture?
       if ti.is_a?(Type) && ti.sharded?
         result.has_sharded = true
         result.has_shared = true
@@ -1072,10 +1114,7 @@ module CapabilityHelper
     return unless ctx.mark_moves && (@capture_move_suppressed || 0).zero?
     return unless ctx.outer_scope.owned_names.include?(name)
     classify_ownership!(info) unless info.ownership_kind
-    ti = info.type
-    if @og.live?(name) &&
-       (info.ownership_kind == :resource || info.ownership_kind == :affine ||
-        (ti.is_a?(Type) && ti.needs_escape_promotion?))
+    if info.capture_move_required?(@og.live?(name))
       og_set_moved(name, at_token: node.token, action: :capture)
     end
   end

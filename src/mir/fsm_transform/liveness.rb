@@ -242,9 +242,7 @@ module FsmTransform
         node.each { |n| walk_idents(n, &block) }
         return
       end
-      return if node.is_a?(Symbol) || node.is_a?(String) ||
-                node.is_a?(Integer) || node.is_a?(Float) ||
-                node.is_a?(TrueClass) || node.is_a?(FalseClass)
+      return if AST.scalar_literal_value?(node)
       if node.is_a?(AST::Identifier)
         yield node.name
         return

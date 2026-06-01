@@ -136,14 +136,13 @@ class PipelineRewriter
                              AST.pipeline_terminal_fold?(terminal)
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
-    inf_with_limit = real_source.full_type!.inf_stream? &&
-                     stages.any? { |s| s.is_a?(AST::LimitOp) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.full_type!.dynamic_stream? ||
-        real_source.full_type!.open_stream? ||
-        real_source.full_type!.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
-       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
-      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
-      return node
+    source_type = real_source.full_type!
+    has_limit = stages.any? { |s| s.is_a?(AST::LimitOp) }
+    if is_range_fold_terminal && stages.all? { |s| AST.pipeline_fusible_stage?(s) }
+      if real_source.is_a?(AST::RangeLit) || source_type.bounded_pipeline_stream_source?(has_limit)
+        patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+        return node
+      end
     end
 
     # DISTINCT always bypasses to pipeline_host lower_distinct: it handles
@@ -159,10 +158,8 @@ class PipelineRewriter
 
     # INDEX on a finite or LIMIT-bounded stream source bypasses: the MIR lowering
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
-    # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.full_type!.dynamic_stream? || real_source.full_type!.open_stream? ||
-                       real_source.full_type!.bounded_stream? || inf_with_limit) &&
+                      source_type.bounded_pipeline_stream_source?(has_limit) &&
                       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])

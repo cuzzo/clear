@@ -204,9 +204,7 @@ module Hoist
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
     # Separate frames -- their bodies are walked independently.
-    return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
-              node.is_a?(AST::DoBlock)
+    return if AST.call_like_boundary?(node)
     blk.call(node) if matches.call(node)
     # A body-bearing control-flow node: walk only its condition/subject
     # expressions, never its statement bodies.
@@ -1061,9 +1059,10 @@ module MIRHoistLowering
       expr.target_var = name
       expr.allocs = expr.allocs.with_all(alloc) if alloc && expr.allocs
     else
-      if alloc && expr.respond_to?(:ownership_effect) && expr.ownership_effect.produces_owned &&
-         expr.respond_to?(:alloc=)
-        expr.alloc = alloc
+      if alloc && expr.respond_to?(:ownership_effect)
+        if expr.ownership_effect.produces_owned && expr.respond_to?(:alloc=)
+          expr.alloc = alloc
+        end
       end
       expr.ownership_source_exprs.each do |child|
         has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
