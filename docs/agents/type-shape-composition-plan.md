@@ -129,7 +129,44 @@ read old parallel ivars.
    - Full RSpec.
    - Branch-added coverage check for this branch.
    - Any existing fuzz/compile coverage shard that exercises type syntax if the
-     touched code affects parser-facing syntax.
+   touched code affects parser-facing syntax.
+
+## Tracking Items
+
+- [x] Add `TypeShape` as the only owner of structural facts.
+- [x] Move raw/canonical type identity into `TypeShape`.
+- [x] Move array shape into `TypeShape`: element raw type and capacity.
+- [x] Move map shape into `TypeShape`: key raw type, value raw type, and
+  numeric-map predicate.
+- [x] Move optional/error-union/tense wrapper shape into `TypeShape`.
+- [x] Move generic-instance shape into `TypeShape`.
+- [x] Delete direct `Type` shape ivars and copy-constructor `instance_variable_get`
+  reads.
+- [x] Make public `Type` shape readers delegate to `shape`.
+- [x] Remove shape-derived caches from `Type` unless they are clearly necessary
+  and owned behind `shape`.
+- [x] Regenerate Sorbet RBI if `Type#shape` or other accessors are exposed.
+  No RBI regeneration was needed for this repo layout.
+- [x] Run Sorbet, focused Type specs, full unit specs, Decomplex, and SlopCop.
+
+## Acceptance Criteria
+
+- `src/ast/type.rb` has no direct writes or reads of the old structural ivars:
+  `@raw`, `@name`, `@generic_args`, `@capacity`, `@is_array`,
+  `@element_type_raw`, `@is_map`, `@key_type_raw`, `@value_type_raw`,
+  `@is_optional`, `@wrapped_type_raw`, `@is_error_union`,
+  `@payload_type_raw`, `@is_tense`, `@tense_type_raw`, `@is_auto`,
+  `@is_generic_instance`, `@generic_base_raw`, `@generic_args_raw`,
+  `@generic_args_obj`, and `@resolved_cache`.
+- The only structural storage slot on `Type` is `@shape`.
+- `Type.new(other)` copies `other.shape`, not private ivars.
+- `parse_raw_input` is replaced by a complete shape parse/build path; no old
+  mutable shape dimensions remain as a fallback.
+- No new `T.untyped`, untyped hashes, or untyped arrays are introduced.
+- `bundle exec srb tc` passes.
+- Focused Type specs and full unit specs pass.
+- SlopCop and Decomplex are regenerated before and after, with the delta
+  recorded in the session report.
 
 ## Measurement Plan
 
@@ -139,7 +176,7 @@ Snapshot before the refactor:
 - SlopCop report.
 - NilKill report if shape changes affect typed evidence or nil proof.
 - `Src Type Guardrails`.
-- Full RSpec/coverage baseline.
+- Full `prspec`/coverage baseline.
 
 Measure after the refactor:
 
@@ -206,4 +243,3 @@ attacks the remaining source of `Type` state coupling. If successful, it should
 reduce derived-state staleness and neglected-update pressure in `Type`, make
 shape-dependent Zig rendering easier to audit, and make future work on a
 dedicated Zig renderer less risky.
-

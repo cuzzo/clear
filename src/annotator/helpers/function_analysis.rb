@@ -429,7 +429,8 @@ module FunctionAnalysis
         if expected_type_obj.accepts?(actual_type_obj)
           match = true
         elsif actual_type_obj.fn_type? &&
-              actual_type_obj.raw.reentrant && !expected_type_obj.raw.reentrant
+              T.must(actual_type_obj.function_signature).reentrant &&
+              !T.must(expected_type_obj.function_signature).reentrant
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
           error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)
         end

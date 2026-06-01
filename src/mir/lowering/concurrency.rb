@@ -1064,7 +1064,7 @@ module MIRLoweringConcurrency
       end
 
       promise_list_inner_str = emit_expr(promise_list_inner)
-      elem_zig = promise_type.tense_type.element_type.zig_type
+      elem_zig = T.must(promise_type.tense_type.element_type).zig_type
       @tmp_counter += 1
       promise_list_label = "__next_all_#{@tmp_counter}"
       results_var = "__next_results_#{@tmp_counter}"

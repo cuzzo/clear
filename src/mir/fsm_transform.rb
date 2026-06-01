@@ -174,7 +174,7 @@ module FsmTransform
     return nil unless node.var_name
     ct = Type.new(node.collection.full_type!(context: "FSM foreach collection"))
     desc = ct.fsm_foreach_descriptor
-    elem_zig = (desc && desc[:var_zig_type]) || begin
+    elem_zig = desc&.var_zig_type || begin
       elem_t = ct.element_type
       elem_t ? Type.new(elem_t).zig_type : "anyopaque"
     end

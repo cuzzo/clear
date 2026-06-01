@@ -154,13 +154,181 @@ class TypePlacement < T::Struct
   end
 end
 
+class TypeShape < T::Struct
+  extend T::Sig
+
+  ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
+
+  const :raw, Object
+  const :array, T::Boolean, default: false
+  const :map, T::Boolean, default: false
+  const :optional, T::Boolean, default: false
+  const :tense, T::Boolean, default: false
+  const :auto, T::Boolean, default: false
+  const :error_union, T::Boolean, default: false
+  const :generic_instance, T::Boolean, default: false
+  const :capacity, ArrayCapacity, default: nil
+  const :payload_type_raw, T.nilable(Symbol), default: nil
+  const :wrapped_type_raw, T.nilable(Symbol), default: nil
+  const :element_type_raw, T.nilable(Symbol), default: nil
+  const :key_type_raw, T.nilable(Symbol), default: nil
+  const :value_type_raw, T.nilable(Symbol), default: nil
+  const :generic_base_raw, T.nilable(Symbol), default: nil
+  const :generic_args_raw, T::Array[Symbol], default: []
+  const :tense_type_raw, T.nilable(Symbol), default: nil
+
+  sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
+  def self.from_core(core_str, auto: false)
+    raw_symbol = core_str.to_sym
+
+    if core_str.start_with?("~")
+      tense_inner = T.must(core_str[1..])
+      raise "Invalid type '#{core_str}': double tense (~~) is not allowed — ~T is already a promise" if tense_inner.start_with?("~")
+
+      return TypeShape.new(
+        raw: raw_symbol,
+        auto: auto,
+        tense: true,
+        tense_type_raw: tense_inner.to_sym
+      )
+    end
+
+    after_error_str = core_str
+    error_union = T.let(false, T::Boolean)
+    payload_type_raw = T.let(nil, T.nilable(Symbol))
+    if core_str.start_with?("!")
+      after_error_str = T.must(core_str[1..])
+      raise "Invalid type '#{core_str}': double error union (!!) is not allowed" if after_error_str.start_with?("!")
+      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed — use ~!T instead" if after_error_str.start_with?("~")
+      error_union = true
+      payload_type_raw = after_error_str.to_sym
+    end
+
+    shape_str = after_error_str
+    optional = T.let(false, T::Boolean)
+    wrapped_type_raw = T.let(nil, T.nilable(Symbol))
+    if after_error_str.start_with?("?")
+      shape_str = T.must(after_error_str[1..])
+      raise "Invalid type '#{after_error_str}': double optional (??) is not allowed" if shape_str.start_with?("?")
+      raise "Invalid type '#{after_error_str}': ?~T (optional of tense) is not allowed — use ~?T instead" if shape_str.start_with?("~")
+      optional = true
+      wrapped_type_raw = shape_str.to_sym
+    end
+
+    array = T.let(false, T::Boolean)
+    capacity = T.let(nil, ArrayCapacity)
+    element_type_raw = T.let(nil, T.nilable(Symbol))
+    if (match = shape_str.match(/^(.+)\[(\d+|INF|\?)?\]$/))
+      array = true
+      element_type_raw = T.must(match[1]).to_sym
+      capacity = case match[2]
+                 when nil then nil
+                 when "?" then :STREAM_OPEN
+                 when "INF" then :INF
+                 else T.must(match[2]).to_i
+                 end
+    end
+
+    map = T.let(false, T::Boolean)
+    key_type_raw = T.let(nil, T.nilable(Symbol))
+    value_type_raw = T.let(nil, T.nilable(Symbol))
+    if (map_match = shape_str.match(/^HashMap<(.+)>$/))
+      map = true
+      map_inner = T.must(map_match[1])
+      if map_inner.include?(",")
+        parts = T.let(map_inner.split(",", 2).map(&:strip), T::Array[String])
+        key_type_raw = T.must(parts[0]).to_sym
+        value_type_raw = T.must(parts[1]).to_sym
+      else
+        key_type_raw = :String
+        value_type_raw = map_inner.to_sym
+      end
+    end
+
+    generic_instance = T.let(false, T::Boolean)
+    generic_base_raw = T.let(nil, T.nilable(Symbol))
+    generic_args_raw = T.let([], T::Array[Symbol])
+    generic_match = shape_str.match(/^([A-Z]\w*)<(.+)>$/)
+    if !map && !array && generic_match
+      generic_instance = true
+      generic_base_raw = T.must(generic_match[1]).to_sym
+      generic_args_raw = T.must(generic_match[2]).split(",").map(&:strip).map(&:to_sym)
+    end
+
+    TypeShape.new(
+      raw: raw_symbol,
+      array: array,
+      map: map,
+      optional: optional,
+      tense: false,
+      auto: auto,
+      error_union: error_union,
+      generic_instance: generic_instance,
+      capacity: capacity,
+      payload_type_raw: payload_type_raw,
+      wrapped_type_raw: wrapped_type_raw,
+      element_type_raw: element_type_raw,
+      key_type_raw: key_type_raw,
+      value_type_raw: value_type_raw,
+      generic_base_raw: generic_base_raw,
+      generic_args_raw: generic_args_raw,
+      tense_type_raw: nil
+    )
+  end
+
+  sig { returns(TypeShape) }
+  def copy
+    with(generic_args_raw: generic_args_raw.dup)
+  end
+
+  sig { returns(T::Boolean) }
+  def fn_type?
+    raw.is_a?(FunctionSignature)
+  end
+
+  sig { returns(Symbol) }
+  def resolved
+    current_raw = raw
+    if current_raw.is_a?(FunctionSignature)
+      current_raw.return_type.to_sym
+    elsif current_raw.is_a?(Array)
+      item = current_raw[2]
+      return item.resolved if item.is_a?(Type)
+      return item if item.is_a?(Symbol)
+      return item.to_sym if item.is_a?(String)
+      :Any
+    elsif current_raw.is_a?(Symbol)
+      current_raw
+    elsif current_raw.is_a?(String)
+      current_raw.to_sym
+    else
+      :Any
+    end
+  end
+
+  sig { returns(T::Boolean) }
+  def numeric_map?
+    map && !key_type_raw.nil? && key_type_raw != :String
+  end
+end
+
+class TypeFsmForEachDescriptor < T::Struct
+  const :kind, Symbol
+  const :var_zig_type, String
+  const :init_method, T.nilable(String), default: nil
+  const :advance_method, T.nilable(String), default: nil
+  const :deref, T::Boolean, default: false
+  const :slice_suffix, String, default: ""
+end
+
 class Type
     extend T::Sig
 
   TypeInput = T.type_alias { T.any(Type, Symbol, String) }
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
 
-  attr_reader :raw, :name, :generic_args, :capacity
+  sig { returns(TypeShape) }
+  attr_reader :shape
   sig { returns(TypeCapabilities) }
   attr_reader :capabilities
   sig { returns(TypePlacement) }
@@ -232,7 +400,7 @@ class Type
     return "#{surface_name(T.must(t.element_type))}#{array_capacity_suffix(t.capacity)}" if t.array?
 
     if t.generic_instance?
-      args = T.cast(t.generic_args, T::Array[Type]).map { |arg| surface_name(arg) }
+      args = t.generic_args.map { |arg| surface_name(arg) }
       return "#{t.generic_base}<#{args.join(",")}>"
     end
 
@@ -337,7 +505,7 @@ class Type
   # @param target_type [Type, Symbol, String] The declared/expected type
   # @return [String, nil] Error message or nil if coercion is valid
   #
-  sig { params(source_type: Type, target_type: T.untyped).returns(T.nilable(String)) }
+  sig { params(source_type: Type, target_type: TypeInput).returns(T.nilable(String)) }
   def self.coerce_error(source_type, target_type)
     source = source_type
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
@@ -347,8 +515,8 @@ class Type
     # body walk, mutating the decl in place. Source-side Auto is
     # similarly tolerated: the source expression's resolved type
     # propagates once the unifier pins the slot it depends on.
-    return nil if target.respond_to?(:auto?) && target.auto?
-    return nil if source.respond_to?(:auto?) && source.auto?
+    return nil if target.auto?
+    return nil if source.auto?
 
     return nil if target.accepts?(source)
 
@@ -435,62 +603,23 @@ class Type
 
   public
 
-  sig { params(raw_input: T.untyped, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.nilable(Integer), observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
+  sig { params(raw_input: Object, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.nilable(Integer), observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
-    @raw                = T.let(nil, T.untyped)
-    @name               = T.let(nil, T.untyped)
-    @generic_args       = T.let(nil, T.untyped)
-    @capacity           = T.let(nil, T.untyped)
+    @shape              = T.let(TypeShape.new(raw: :Any), TypeShape)
     @capabilities       = T.let(TypeCapabilities.new, TypeCapabilities)
     @placement          = T.let(TypePlacement.new, TypePlacement)
-    @is_resource        = T.let(nil, T.untyped)
+    @is_resource        = T.let(nil, T.nilable(T::Boolean))
     @auto_token          = T.let(nil, T.untyped)
-    @payload_type_raw   = T.let(nil, T.untyped)
-    @wrapped_type_raw   = T.let(nil, T.untyped)
-    @element_type_raw   = T.let(nil, T.untyped)
-    @value_type_raw     = T.let(nil, T.untyped)
-    @generic_base_raw   = T.let(nil, T.untyped)
-    @generic_args_raw   = T.let(nil, T.untyped)
-    @generic_args_obj   = T.let(nil, T.untyped)
-    @resolved_cache     = T.let(nil, T.untyped)
-    @tense_type_raw     = T.let(nil, T.untyped)
     @zig_type_cache     = T.let(nil, T.untyped)
     @generic_payload_type_arg = T.let(false, T::Boolean)
-    @key_type_raw      = T.let(nil, T.nilable(Symbol))
-    @is_array          = T.let(false, T::Boolean)
-    @is_map            = T.let(false, T::Boolean)
-    @is_optional       = T.let(false, T::Boolean)
-    @is_tense          = T.let(false, T::Boolean)
-    @is_auto           = T.let(false, T::Boolean)
-    @is_error_union    = T.let(false, T::Boolean)
-    @is_generic_instance = T.let(false, T::Boolean)
     if raw_input.is_a?(Type)
-      # Copy constructor: preserve all parsed state from the source type
       other = raw_input
-      @raw                = other.instance_variable_get(:@raw)
+      @shape              = auto ? other.shape.with(auto: true) : other.shape.copy
       @capabilities       = other.capabilities.copy
-      @is_error_union     = other.instance_variable_get(:@is_error_union)
-      @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
-      @is_optional        = other.instance_variable_get(:@is_optional)
-      @wrapped_type_raw   = other.instance_variable_get(:@wrapped_type_raw)
-      @is_array              = other.instance_variable_get(:@is_array)
-      @element_type_raw      = other.instance_variable_get(:@element_type_raw)
-      @is_map                = other.instance_variable_get(:@is_map)
-      @key_type_raw          = other.instance_variable_get(:@key_type_raw)
-      @value_type_raw        = other.instance_variable_get(:@value_type_raw)
-      @capacity              = other.capacity
-      @resolved_cache        = other.instance_variable_get(:@resolved_cache)
-      @is_generic_instance   = other.instance_variable_get(:@is_generic_instance)
-      @generic_base_raw      = other.instance_variable_get(:@generic_base_raw)
-      @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
-      @is_tense              = other.instance_variable_get(:@is_tense)
-      @tense_type_raw        = other.instance_variable_get(:@tense_type_raw)
       @placement             = TypePlacement.new(provenance: other.provenance)
-      @is_auto               = other.instance_variable_get(:@is_auto)
       @generic_payload_type_arg = other.generic_payload_type_arg?
     else
-      @raw = raw_input
-      parse_raw_input
+      parse_raw_input(raw_input, auto: auto)
     end
 
     # Capability fields — set after parse/copy so they can override.
@@ -523,7 +652,6 @@ class Type
     # resolved one before the body-validation pass runs.
     # Only overwrite when explicitly requested so the copy-constructor
     # path (`Type.new(other_type)`) preserves auto-ness from `other`.
-    @is_auto = true if auto
   end
 
   # Stable enum of how a value's storage flows through escape paths.
@@ -1112,9 +1240,24 @@ class Type
     if fn_type?
       other_t = other.is_a?(Type) ? other : nil
       return false unless other_t&.fn_type?
-      return @raw == other_t.raw
+      return raw == other_t.raw
     end
-    resolved == other.to_sym || @raw == other
+    resolved == other.to_sym || raw == other
+  end
+
+  sig { returns(Object) }
+  def raw
+    shape.raw
+  end
+
+  sig { returns(NilClass) }
+  def name
+    nil
+  end
+
+  sig { returns(ArrayCapacity) }
+  def capacity
+    shape.capacity
   end
 
   sig { returns(String) }
@@ -1125,14 +1268,7 @@ class Type
   # Backward API: Deprecate
   sig { returns(Symbol) }
   def resolved
-    # Logic moved from Locatable#resolved_type
-    return @resolved_cache if @resolved_cache
-
-    ft = if @raw.is_a?(FunctionSignature); @raw.return_type
-         elsif @raw.is_a?(Array); @raw[2]
-         else; @raw; end
-
-    @resolved_cache = ft.to_sym
+    shape.resolved
   end
 
   # Backward API: Deprecate
@@ -1195,7 +1331,10 @@ class Type
     return false if !other_type.array? || !self.array?
     return false if self.base_type != other_type.base_type
     return false if !other_type.fixed? || !self.fixed?
-    return true if other_type.capacity > self.capacity
+    other_capacity = other_type.capacity
+    self_capacity = capacity
+    return false unless other_capacity.is_a?(Integer) && self_capacity.is_a?(Integer)
+    return true if other_capacity > self_capacity
   end
 
   # ----------------------------------------------
@@ -1265,7 +1404,7 @@ class Type
   # `Auto` slot waiting for the inference pass to fill it in.
   sig { returns(T::Boolean) }
   def auto?
-    !!@is_auto
+    shape.auto
   end
 
   # Source-position token for the `Auto` keyword, used by fix emission when
@@ -1276,12 +1415,12 @@ class Type
 
   sig { returns(T::Boolean) }
   def fn_type?
-    @raw.is_a?(FunctionSignature)
+    shape.fn_type?
   end
 
   sig { returns(T::Boolean) }
   def array?
-    !!@is_array
+    shape.array
   end
 
   sig { returns(T::Boolean) }
@@ -1505,14 +1644,14 @@ class Type
 
   sig { returns(T::Boolean) }
   def map?
-    @is_map
+    shape.map
   end
 
   # True when this is a numeric-keyed map (HashMap<Number,V> or HashMap<Int64,V>).
   # Backed by AutoHashMapUnmanaged — no key duplication, pure arena-allocated.
   sig { returns(T::Boolean) }
   def numeric_map?
-    !!(@is_map && @key_type_raw && @key_type_raw != :String)
+    shape.numeric_map?
   end
 
   sig { returns(T::Boolean) }
@@ -1522,7 +1661,7 @@ class Type
 
   sig { returns(Type) }
   def key_type
-    Type.new(@key_type_raw || :String)
+    Type.new(shape.key_type_raw || :String)
   end
 
   # True when this is an explicit @pool (generational pool) collection.
@@ -1619,29 +1758,29 @@ class Type
   #
   # Adding a new collection = adding one branch here. The splitter
   # never inspects the type directly.
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(TypeFsmForEachDescriptor)) }
   def fsm_foreach_descriptor
     if pool?
-      { kind: :pool_indexed, var_zig_type: element_type&.zig_type || "anyopaque" }
+      TypeFsmForEachDescriptor.new(kind: :pool_indexed, var_zig_type: element_type&.zig_type || "anyopaque")
     elsif map?
       # FOR k IN map iterates KEYS. keyIterator yields ?*K, so the
       # bound var dereferences (deref: true).
-      { kind: :iterator, init_method: "keyIterator", advance_method: "next",
-        deref: true, var_zig_type: key_type.zig_type }
+      TypeFsmForEachDescriptor.new(kind: :iterator, init_method: "keyIterator", advance_method: "next",
+        deref: true, var_zig_type: key_type.zig_type)
     elsif set_collection?
       # FOR v IN set: keyIterator yields ?*T, so the bound var is
       # the element type (after deref).
-      { kind: :iterator, init_method: "keyIterator", advance_method: "next",
-        deref: true, var_zig_type: element_type&.zig_type || "anyopaque" }
+      TypeFsmForEachDescriptor.new(kind: :iterator, init_method: "keyIterator", advance_method: "next",
+        deref: true, var_zig_type: element_type&.zig_type || "anyopaque")
     elsif list_collection?
-      { kind: :indexed_slice, slice_suffix: ".items",
-        var_zig_type: element_type&.zig_type || "anyopaque" }
+      TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
+        var_zig_type: element_type&.zig_type || "anyopaque")
     elsif array? && !dynamic?
-      { kind: :indexed_slice, slice_suffix: "",
-        var_zig_type: element_type&.zig_type || "anyopaque" }
+      TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: "",
+        var_zig_type: element_type&.zig_type || "anyopaque")
     elsif array? && dynamic?
-      { kind: :indexed_slice, slice_suffix: ".items",
-        var_zig_type: element_type&.zig_type || "anyopaque" }
+      TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
+        var_zig_type: element_type&.zig_type || "anyopaque")
     else nil
     end
   end
@@ -1771,25 +1910,27 @@ class Type
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
-  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Array[T.untyped]) }
+  ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(String)] }
+
+  sig { params(schema_lookup: T.nilable(T.proc.params(name: Symbol).returns(T.nilable(Object)))).returns(ResourceCloseResult) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
     return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
-    schema = schema_lookup.call(resolved) rescue nil
+    schema = T.let((schema_lookup.call(resolved) rescue nil), T.nilable(Object))
 
-    if Schemas.resource?(schema)
+    if schema.is_a?(Schemas::ResourceSchema)
       return [true, schema.close_zig]
     end
 
     # Struct with resource fields: compose close statements from fields.
-    if Schemas.struct?(schema)
-      closes = []
+    if schema.is_a?(Schemas::StructSchema)
+      closes = T.let([], T::Array[String])
       schema.fields.each do |fname, fdef|
         f_resolved = Type.new(fdef.type).resolved
-        f_schema = schema_lookup.call(f_resolved) rescue nil
-        if Schemas.resource?(f_schema)
+        f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), T.nilable(Object))
+        if f_schema.is_a?(Schemas::ResourceSchema)
           closes << f_schema.close_zig.gsub("{0}", "{0}.#{fname}")
         end
       end
@@ -1878,27 +2019,26 @@ class Type
     sharded? && any_sync?
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def value_type
-    return nil unless map?
-    @value_type_obj ||= T.let(Type.new(@value_type_raw || :Any), T.nilable(Type))
+    Type.new(shape.value_type_raw || :Any)
   end
 
   # Generic struct instance: Pair<Number>, Map<String, Number>
   sig { returns(T::Boolean) }
   def generic_instance?
-    !!@is_generic_instance
+    shape.generic_instance
   end
 
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
   sig { returns(Symbol) }
   def generic_base
-    @generic_base_raw
+    shape.generic_base_raw || resolved
   end
 
   sig { returns(T::Boolean) }
   def id_handle?
-    generic_instance? && @generic_base_raw == :Id
+    generic_instance? && shape.generic_base_raw == :Id
   end
 
   sig { returns(T.nilable(String)) }
@@ -1920,10 +2060,9 @@ class Type
   end
 
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[Type]) }
   def generic_args
-    return nil unless @is_generic_instance
-    @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
+    shape.generic_args_raw.map { |arg| Type.new(arg) }
   end
 
   sig { returns(T::Boolean) }
@@ -1933,25 +2072,25 @@ class Type
 
   sig { returns(T::Boolean) }
   def optional?
-    @is_optional
+    shape.optional
   end
 
   sig { returns(T.nilable(Type)) }
   def wrapped_type
     return nil unless optional?
-    @wrapped_type_obj ||= T.let(Type.new(@wrapped_type_raw || :Any), T.nilable(Type))
+    Type.new(shape.wrapped_type_raw || :Any)
   end
 
   # Error union types: !T (Zig-style error returns)
   sig { returns(T::Boolean) }
   def error_union?
-    @is_error_union
+    shape.error_union
   end
 
   sig { returns(T.nilable(Type)) }
   def payload_type
     return nil unless error_union?
-    @payload_type_obj ||= T.let(Type.new(@payload_type_raw || :Any), T.nilable(Type))
+    Type.new(shape.payload_type_raw || :Any)
   end
 
   sig { returns(Type) }
@@ -1978,7 +2117,7 @@ class Type
   # Tense (Promise) types: ~T — a background task that will produce T
   sig { returns(T::Boolean) }
   def tense?
-    !!@is_tense
+    shape.tense
   end
 
   # Observable accumulator: ~T@observable.
@@ -2155,10 +2294,9 @@ class Type
     tense?
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def tense_type
-    return nil unless future?
-    @tense_type_obj ||= T.let(Type.new(@tense_type_raw || :Void), T.nilable(Type))
+    Type.new(shape.tense_type_raw || :Void)
   end
 
   # Finite dynamic stream: ~T[].
@@ -2281,14 +2419,12 @@ class Type
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
-    @element_type_obj ||= T.let(begin
-      t = Type.new(@element_type_raw || :Any)
-      t.apply_capabilities!(
-        ownership: elem_ownership || TypeCapabilities::UNSET,
-        sync: elem_sync || TypeCapabilities::UNSET
-      )
-      t
-    end, T.nilable(Type))
+    t = Type.new(shape.element_type_raw || :Any)
+    t.apply_capabilities!(
+      ownership: elem_ownership || TypeCapabilities::UNSET,
+      sync: elem_sync || TypeCapabilities::UNSET
+    )
+    t
   end
 
   sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(Integer) }
@@ -2301,7 +2437,8 @@ class Type
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
-      return capacity * T.must(element_type).slot_size(resolver)
+      fixed_capacity = capacity
+      return fixed_capacity * T.must(element_type).slot_size(resolver) if fixed_capacity.is_a?(Integer)
     end
 
     # 3. Structs (The tricky part)
@@ -2772,9 +2909,9 @@ class Type
 
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
-  sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  sig { params(schema: T.nilable(Object), blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
   def schema_struct_any?(schema, &blk)
-    fields = Schemas.struct?(schema) ? schema.fields : {}
+    fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : {}
     fields.any? { |_, v|
       ft = v.is_a?(AST::StructField) ? v.type : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
@@ -2808,24 +2945,26 @@ class Type
     return true if other_type.any?
     return false unless other_type.fn_type?
     other_raw = other_type.raw
+    return false unless other_raw.is_a?(FunctionSignature)
+    self_raw = T.cast(raw, FunctionSignature)
 
-    self_params  = @raw.params
+    self_params  = self_raw.params
     other_params = other_raw.params
     return false unless self_params.length == other_params.length
 
-    # @raw / other_raw are FunctionSignature (fn_type? gate); their
+    # raw / other_raw are FunctionSignature (fn_type? gate); their
     # return_type is a non-nil Type by the FunctionSignature seam.
-    return false unless @raw.return_type.accepts?(other_raw.return_type)
+    return false unless self_raw.return_type.accepts?(other_raw.return_type)
 
     self_params.zip(other_params).each do |sp, op|
       sp_t = sp.type || Type.new(:Any)
-      op_t = op.type || Type.new(:Any)
+      op_t = T.must(op).type || Type.new(:Any)
       return false unless sp_t.accepts?(op_t)
     end
 
     # Reentrant constraint: a @reentrant function cannot be passed to a parameter
     # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
-    return false if other_raw.reentrant && !@raw.reentrant
+    return false if other_raw.reentrant && !self_raw.reentrant
 
     true
   end
@@ -2869,150 +3008,31 @@ class Type
     return true  if other_type.empty_list?
     return false unless T.must(element_type).accepts?(T.must(other_type.element_type))
     return true  if dynamic? && other_type.fixed?
-    return other_type.capacity <= capacity if fixed? && other_type.fixed?
+    if fixed? && other_type.fixed?
+      other_capacity = other_type.capacity
+      self_capacity = capacity
+      return other_capacity <= self_capacity if other_capacity.is_a?(Integer) && self_capacity.is_a?(Integer)
+      return false
+    end
     dynamic? && other_type.dynamic?
   end
 
-  sig { returns(T.nilable(Symbol)) }
-  def parse_raw_input
-    # FunctionSignature and Array raws are function signatures — no string parsing applies.
-    # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
-    if @raw.is_a?(FunctionSignature) || @raw.is_a?(Array)
+  sig { params(raw_input: Object, auto: T::Boolean).void }
+  def parse_raw_input(raw_input, auto: false)
+    if raw_input.is_a?(FunctionSignature) || raw_input.is_a?(Array)
+      @shape = TypeShape.new(raw: raw_input, auto: auto)
       apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
-      @is_error_union      = false; @payload_type_raw = nil
-      @is_optional         = false; @wrapped_type_raw  = nil
-      @is_array            = false; @capacity = nil; @element_type_raw = nil
-      @is_map              = false; @value_type_raw = nil
-      @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
       return
     end
 
-    raw_str = @raw.to_s
-
-    # Type alias: Number → Float64 (canonical internal name for f64).
-    # Both Number and Float64 are accepted; the type system uses :Float64 everywhere.
-    normalized_str = raw_str.gsub(/\bNumber\b/, 'Float64')
-
-    suffix = normalized_str.include?("<") ? TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil) : strip_capability_suffix(normalized_str)
-    core_str = suffix.base
-    @raw = core_str.to_sym
-
-    # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
-    # Parsed first so ~!T = "promise of failable T", ~?T = "promise of optional T".
-    # When tense, we bail early — tense_type handles its own inner parsing.
-    if core_str.start_with?("~")
-      tense_inner = T.must(core_str[1..])
-      raise "Invalid type '#{core_str}': double tense (~~) is not allowed — ~T is already a promise" if tense_inner.start_with?("~")
-      @is_tense       = true
-      @tense_type_raw = tense_inner.to_sym
-      @is_error_union = false; @payload_type_raw = nil
-      @is_optional    = false; @wrapped_type_raw  = nil
-      @is_array       = false; @capacity = nil; @element_type_raw = nil
-      @is_map              = false; @value_type_raw = nil
-      @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
-      apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
-      @resolved_cache = @raw.to_sym
-      return
-    else
-      @is_tense       = false
-      @tense_type_raw = nil
-    end
-
-    # A. Detect Error Union prefix: !Type (Zig-style error returns)
-    after_error_str = core_str
-    if core_str.start_with?("!")
-      after_error_str = T.must(core_str[1..])
-      raise "Invalid type '#{core_str}': double error union (!!) is not allowed" if after_error_str.start_with?("!")
-      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed — use ~!T instead" if after_error_str.start_with?("~")
-      @is_error_union = true
-      @payload_type_raw = after_error_str.to_sym
-    else
-      @is_error_union = false
-      @payload_type_raw = nil
-    end
-
-    # B. Detect Optional prefix: ?Type
-    shape_str = after_error_str
-    if after_error_str.start_with?("?")
-      shape_str = T.must(after_error_str[1..])
-      raise "Invalid type '#{after_error_str}': double optional (??) is not allowed" if shape_str.start_with?("?")
-      raise "Invalid type '#{after_error_str}': ?~T (optional of tense) is not allowed — use ~?T instead" if shape_str.start_with?("~")
-      @is_optional = true
-      @wrapped_type_raw = shape_str.to_sym
-    else
-      @is_optional = false
-      @wrapped_type_raw = nil
-    end
-
-    # C. Capability fields default — callers pass ownership:/sync:/location:/collection: as keyword args.
+    normalized_str = raw_input.to_s.gsub(/\bNumber\b/, 'Float64')
+    suffix = normalized_str.include?("<") ? TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil) : self.class.strip_capability_suffix_from(normalized_str)
+    @shape = TypeShape.from_core(suffix.base, auto: auto)
     apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
-
-    # D. Detect Array Structure
-    # Regex Breakdown:
-    #   ^       Start of string
-    #   (.+)    Capture Group 1: Base Type (e.g. "Float64")
-    #   \[      Literal opening bracket
-    #   (\d+)?  Capture Group 2: Optional Digits (Capacity).
-    #           If this is missing, it matches "[]", meaning Dynamic.
-    #   \]      Literal closing bracket
-    #   $       End of string
-    if match = shape_str.match(/^(.+)\[(\d+|INF|\?)?\]$/)
-      @is_array = true
-      @element_type_raw = T.must(match[1]).to_sym # Store "Float64"
-
-      # Capacity: nil = dynamic, :STREAM_OPEN = open stream [?], :INF = infinite [INF], Integer = fixed [N]
-      @capacity = case match[2]
-                  when nil    then nil
-                  when "?"    then :STREAM_OPEN
-                  when "INF"  then :INF
-                  else             match[2].to_i
-                  end
-    else
-      @is_array = false
-      @capacity = nil
-      @element_type_raw = nil
-    end
-
-    # E. Detect HashMap Structure: HashMap<ValueType> or HashMap<KeyType, ValueType>
-    # Two-arg form: HashMap<Number, V> or HashMap<Int64, V> → numeric-keyed AutoHashMap.
-    # One-arg form: HashMap<V> → String-keyed StringHashMap (original behaviour).
-    map_match = shape_str.match(/^HashMap<(.+)>$/)
-    if map_match
-      @is_map = true
-      map_inner = T.must(map_match[1])
-      if map_inner.include?(",")
-        parts = map_inner.split(",", 2).map(&:strip)
-        @key_type_raw   = T.must(parts[0]).to_sym
-        @value_type_raw = T.must(parts[1]).to_sym
-      else
-        @key_type_raw   = :String
-        @value_type_raw = map_inner.to_sym
-      end
-    else
-      @is_map = false
-      @key_type_raw   = nil
-      @value_type_raw = nil
-    end
-
-    # E2. Detect Generic Struct Instance: Pair<Number> or Map<String,Number>
-    # Only for non-HashMap types (HashMap is handled above).
-    generic_match = shape_str.match(/^([A-Z]\w*)<(.+)>$/)
-    if !@is_map && !@is_array && generic_match
-      @is_generic_instance = true
-      @generic_base_raw    = T.must(generic_match[1]).to_sym
-      @generic_args_raw    = T.must(generic_match[2]).split(',').map(&:strip).map(&:to_sym)
-    else
-      @is_generic_instance = false
-      @generic_base_raw    = nil
-      @generic_args_raw    = nil
-    end
-
-    # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
-    @resolved_cache = @raw.to_sym
   end
 
   sig { params(str: String).returns(TypeCapabilitySuffix) }
-  def strip_capability_suffix(str)
+  def self.strip_capability_suffix_from(str)
     return TypeCapabilitySuffix.new(base: str, ownership: nil, sync: nil) unless str.include?("@")
 
     base, *caps = str.gsub(/\s+/, "").split("@")
@@ -3037,13 +3057,18 @@ class Type
     TypeCapabilitySuffix.new(base: T.must(base), ownership: ownership, sync: sync)
   end
 
+  sig { params(str: String).returns(TypeCapabilitySuffix) }
+  def strip_capability_suffix(str)
+    self.class.strip_capability_suffix_from(str)
+  end
+
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   def tense_zig_type(is_param:, is_field:)
     if tense_observable? && !promise_list?
       return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
     end
     if promise_list?
-      elem_zig = tense_type.element_type.zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(tense_type.element_type).zig_type(is_param: is_param, is_field: is_field)
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
     end
     if bounded_stream?
@@ -3056,7 +3081,7 @@ class Type
              when :Int64 then "CheatLib.IntRange"
              when :Float64 then "CheatLib.Range"
              else
-               "CheatLib.Stream(#{inner_t.zig_type(is_param: is_param, is_field: is_field)})"
+              "CheatLib.Stream(#{T.must(inner_t).zig_type(is_param: is_param, is_field: is_field)})"
              end
     end
     if shared_promise?
@@ -3207,11 +3232,12 @@ class Type
 
     # 2c. Function type: FN(T, ...) -> R  =>  *const fn(*Runtime, T, ...) anyerror!R
     if fn_type?
-      param_types_zig = @raw.params.map do |p|
+      fn_raw = T.cast(raw, FunctionSignature)
+      param_types_zig = fn_raw.params.map do |p|
         t = p.type
         t.is_a?(Type) ? t.zig_type(is_param: true) : Type.new(t).zig_type(is_param: true)
       end
-      ret_zig = @raw.return_type.zig_type
+      ret_zig = fn_raw.return_type.zig_type
       all_params = ["*Runtime"] + param_types_zig
       ret_str = ZigType.new(ret_zig).anyerror_return_type
       return "*const fn(#{all_params.join(', ')}) #{ret_str}"
@@ -3297,8 +3323,8 @@ class Type
     #    Id<User>     -> u64        (compiler-intrinsic handle, type param is for CLEAR safety only)
     if generic_instance?
       return "u64" if id_handle?
-      args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
-      return "#{@generic_base_raw}(#{args_zig})"
+      args_zig = shape.generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
+      return "#{shape.generic_base_raw}(#{args_zig})"
     end
 
     # 6. Map primitives and builtins to Zig types; user types pass through.
@@ -3364,3 +3390,11 @@ end
 # FunctionSignature are runtime-lazy (method bodies), so deferring
 # this require is safe.
 require_relative "../annotator/helpers/function_signature"
+
+class Type
+  sig { returns(T.nilable(FunctionSignature)) }
+  def function_signature
+    current_raw = raw
+    current_raw if current_raw.is_a?(FunctionSignature)
+  end
+end

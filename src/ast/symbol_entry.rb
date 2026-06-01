@@ -122,7 +122,7 @@ class SymbolEntry
   # require ordering.
   sig { returns(T.nilable(FunctionSignature)) }
   def fn_signature
-    @type.fn_type? ? @type.raw : nil
+    @type.function_signature
   end
 
   # Backward-compat alias for `lifetime == :current_scope`.

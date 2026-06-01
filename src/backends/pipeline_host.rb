@@ -4314,7 +4314,7 @@ class PipelineHost
     elsif lhs_ti.open_stream?
       Type.new(lhs_ti.open_stream_element_type.resolved)
     else
-      Type.new(lhs_ti.tense_type.element_type.resolved)
+      Type.new(T.must(lhs_ti.tense_type.element_type).resolved)
     end
   end
 

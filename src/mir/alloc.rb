@@ -41,7 +41,7 @@ module AllocHelper
   # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
   # Returns [is_resource, resource_close_zig].
   # Delegates to Type#resolve_resource_close for type-specific logic.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(node: AST::Node, final_type: Type::TypeInput).returns(Type::ResourceCloseResult) }
   def resolve_resource_close(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     ti = node.full_type!

@@ -69,6 +69,7 @@ module NilKill
         next if typed_lookup_hash?(shape["code"])
         next if typed_struct_value_hash?(shape["code"], keys)
         next if homogeneous_lookup_hash?(shape["code"])
+        next if constant_key_lookup_hash?(keys)
 
         finding("hash_record_candidate", path, shape["line"],
           "added hash record literal may want a typed struct",
@@ -160,6 +161,10 @@ module NilKill
 
       kinds = values.map { |value| literal_kind(value) }
       kinds.all? && kinds.uniq.one?
+    end
+
+    def constant_key_lookup_hash?(keys)
+      keys.all? { |key| key.to_s.match?(/\A[A-Z]\w*\z/) }
     end
 
     def typed_lookup_hash?(code)

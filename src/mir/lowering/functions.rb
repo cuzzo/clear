@@ -2054,7 +2054,7 @@ module MIRLoweringFunctions
     # mir-lowering strict ivars
     @lambda_counter = T.let(@lambda_counter, T.untyped)
     sig = node.full_type!
-    sig = sig.raw if sig.is_a?(Type)
+    sig = T.must(sig.function_signature) if sig.is_a?(Type)
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"
 

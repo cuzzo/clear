@@ -488,7 +488,7 @@ module MIRLoweringExpressions
   def smooth_collect_type(type_info, collect_method)
     if collect_method == "materializeNext"
       elem_t = type_info.tense_type.element_type
-      Type.new("#{elem_t.resolved}[]", collection: :list)
+      Type.new("#{T.must(elem_t).resolved}[]", collection: :list)
     else
       type_info.tense_type ? Type.new(type_info.tense_type) : Type.new(type_info)
     end

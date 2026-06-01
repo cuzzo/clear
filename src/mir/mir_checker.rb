@@ -2372,7 +2372,7 @@ class MIRChecker
       node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
       return
     when MIR::WhileStmt
-      if node.capture && binder_capture_cleanup?(node.body, node.capture.to_s)
+      if node.capture && (binder_capture_cleanup?(node.body, node.capture.to_s) || block_expr_transfers_result?(node.cond))
         check_owned_expr_position_for_unhoisted(node.cond, "While capture")
       else
         check_expr_for_unhoisted(node.cond)
@@ -2391,6 +2391,13 @@ class MIRChecker
   def binder_capture_cleanup?(body, name)
     return false unless body.is_a?(Array)
     body.any? { |stmt| stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == name }
+  end
+
+  sig { params(expr: MIR::Emittable).returns(T::Boolean) }
+  def block_expr_transfers_result?(expr)
+    return false unless expr.is_a?(MIR::BlockExpr)
+
+    expr.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
   end
 
   sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }

@@ -483,10 +483,11 @@ module MIRLoweringCapabilities
     source_zig = with_capability_source_zig(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
     rt = context.resolved_type || Type.new(:Any)
-    inner_t = rt.future? && rt.tense_type ? rt.tense_type : rt
+    inner_t = rt.future? ? rt.tense_type : rt
+    wrapped_inner = inner_t.wrapped_type
     is_value_shape = inner_t.primitive? || inner_t.string? ||
-                     (inner_t.optional? && inner_t.wrapped_type &&
-                      (inner_t.wrapped_type.primitive? || inner_t.wrapped_type.string?))
+                     (inner_t.optional? && wrapped_inner &&
+                      (wrapped_inner.primitive? || wrapped_inner.string?))
     wants_release = !is_value_shape && (inner_t.collection_value? || !inner_t.primitive?)
     coop_yield = "if (CheatHeader.scheduler.scheduler_running) { CheatHeader.scheduler.active_scheduler.drainChannels(); CheatHeader.scheduler.active_scheduler.coopYield(); }"
     if wants_release
