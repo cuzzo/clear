@@ -136,7 +136,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
           MUTABLE xs: V[]@list = List[];
           xs.append(V{ IntV: 1 });
           vec: V = COPY V{ Vec: xs };
-          p: ~Int64 = BG { consumeVec(vec); };
+          p: ~Int64 = BG { consumeVec(COPY vec); };
           RETURN NEXT p;
       END
 

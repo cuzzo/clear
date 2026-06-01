@@ -1056,13 +1056,24 @@ module CapabilityHelper
     return if ctx.locals.include?(name) || %w[TRUE FALSE VOID _].include?(name)
     info = ctx.outer_scope.locals[name]
     resolved_sym = info || node.symbol
-    ctx.analysis.has_non_escaping_capture = true if resolved_sym&.borrowed_alias
+    ctx.analysis.has_non_escaping_capture = true if non_escaping_fiber_capture?(resolved_sym)
     if info
       record_capture_info!(ctx, name, info, node)
       record_capture_move!(ctx, name, info, node)
     elsif lookup_scope_for(name)
       ctx.analysis.has_outer_ref = true
     end
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def non_escaping_fiber_capture?(symbol)
+    return false unless symbol&.borrowed_alias
+
+    # WITH aliases unwrap a synchronized cell into a stack borrow and have no
+    # sync on the alias itself. Capturing those is a UAF. Capturing the
+    # synchronized cell handle is different: the fiber owns a safe handle to
+    # reacquire inside its own lifetime.
+    !symbol.locked? && !symbol.write_locked? && !symbol.local? && !symbol.atomic?
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
