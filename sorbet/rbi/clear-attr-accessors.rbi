@@ -2074,18 +2074,12 @@ class Type
   def auto_token=(value); end
   sig { returns(TypeCapabilities) }
   def capabilities; end
-  sig { returns(T.untyped) }
-  def capacity; end
-  sig { returns(T.untyped) }
-  def generic_args; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def is_resource=(value); end
-  sig { returns(T.untyped) }
-  def name; end
   sig { returns(TypePlacement) }
   def placement; end
-  sig { returns(T.untyped) }
-  def raw; end
+  sig { returns(TypeShape) }
+  def shape; end
 end
 
 class UnionDef
