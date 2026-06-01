@@ -101,13 +101,7 @@ END
 
 This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.  All dependencies (imports) *must* compile in STRICT mode.
 
-To support rapid prototyping, CLEAR has a sane policy for handling synchronization failures when compiling in non-STRICT mode (default).  You can also set your own policy to override the system defaults, or compile in STRICT mode where failure methods must be handled inline.
-
-Further, you can restrict the type of shared objects you allow, if you explicitly do not want your function to have certain effects, like `BLOCKING` or `LATENCY`.
-
-In this example, AtomicPtrs (`@shared:atomic`) do not support multi-object consistency, and are automatically dropped from the list of allowed synchronization strategies. In STRICT mode, the function signature would reflect that.
-
-See the [Capabilities Guide](docs/shared-capabilities.md) for more details.
+See the [Polymorphic Syncronization Guide](docs/polymorphic-synchronization.md) for more details.
 
 ### The Finite State Machine Advantage
 
