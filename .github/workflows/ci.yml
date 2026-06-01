@@ -608,7 +608,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
-        run: zig build test-hammer -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+        run: zig build test-hammer -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
 
   zig-loom-vopr:
     # Deterministic interleaving / simulation tests (`*-loom-test.zig`,
