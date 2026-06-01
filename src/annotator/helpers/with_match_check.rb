@@ -245,7 +245,7 @@ module WithMatchCheck
         next unless sym
         next if sym.with_match_capability_family?
         next unless sym.respond_to?(:mutable) && sym.mutable
-        sym.poly_borrow_target = true if sym.respond_to?(:poly_borrow_target=)
+        sym.mark_poly_borrow_target!
       end
     end
 

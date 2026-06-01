@@ -2816,14 +2816,13 @@ private
     current_fn_ctx.stack_vars_bytes += bytes
   end
 
-  sig { params(name: String).returns(T.nilable(T::Boolean)) }
+  sig { params(name: String).void }
   def mark_var_mutated(name)
     scope = lookup_scope_for(name)
     return unless scope
     entry = scope.locals[name]
     return unless entry
-    entry.mutated = true
-    entry.reg.var_mutated = true if entry.reg&.respond_to?(:var_mutated=)
+    entry.mark_mutated!(touch_declaration: true)
   end
 
   # Mark a binding as mutated INDIRECTLY (e.g. via a function call that
@@ -2836,14 +2835,13 @@ private
   # flag is what post-annotation passes (like
   # validate_with_guard_no_body_mutation!) read to detect any mutation,
   # direct or indirect.
-  sig { params(name: String).returns(T.nilable(T::Boolean)) }
+  sig { params(name: String).void }
   def mark_var_mutated_via_call(name)
     scope = lookup_scope_for(name)
     return unless scope
     entry = scope.locals[name]
     return unless entry
-    entry.mutated = true
-    entry.mutable_ref_target = true if entry.respond_to?(:mutable_ref_target=)
+    entry.mark_mutated_via_reference!
   end
 
   # Walk a chained access expression (GetField/GetIndex chain rooted at an
@@ -2937,7 +2935,8 @@ private
 
     validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
     stamp_type!(node, scope.resolve_type(var_name))
-    T.must(mark_var_mutated(var_name))
+    mark_var_mutated(var_name)
+    true
   end
 
   sig { params(index_node: AST::GetIndex, assignment_node: AST::Assignment).returns(NilClass) }
@@ -5776,7 +5775,7 @@ private
     sym = decl_node.symbol
     return unless sym
     init = decl_node.respond_to?(:value) ? decl_node.value : nil
-    sym.init_contents_heap = init_value_contents_heap?(init)
+    sym.mark_init_contents_heap! if init_value_contents_heap?(init)
   end
 
   sig { params(init: T.untyped).returns(T::Boolean) }

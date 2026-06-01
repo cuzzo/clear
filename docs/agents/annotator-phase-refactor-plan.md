@@ -268,7 +268,7 @@ Expected output:
   `DeferredWithValidation` fact consumed by the deferred-validation phase. This
   also fixed a real bug: deferred `:ATOMIC` validations were previously queued
   but never checked during flush.
-- [ ] `phase-binding-flow-model`: replace branch-local mutable `SymbolEntry`
+- [x] `phase-binding-flow-model`: replace branch-local mutable `SymbolEntry`
   copying with stable binding identity plus explicit flow state. This is the
   large remaining architectural item. Done means migrated flow facts have one
   owner and direct writes to the old `SymbolEntry` fact fields are deleted.
@@ -295,8 +295,7 @@ Expected output:
 
 Current priority order:
 
-1. `phase-binding-flow-model`
-2. `phase-expression-domains`
+1. `phase-expression-domains`
 
 The remaining items are the actual state-ownership work. They should only be
 implemented when the old fact owner can be deleted rather than preserved as a
