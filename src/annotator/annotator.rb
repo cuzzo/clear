@@ -8,6 +8,7 @@ require_relative "../ast/parser"
 require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
 require_relative "phases/declaration_index"
+require_relative "phases/signature_registry"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
@@ -507,7 +508,7 @@ private
     declarations.type_declarations.each { |stmt| visit(stmt) }
 
     # Function signatures are hoisted so functions can call later definitions.
-    declarations.function_declarations.each { |stmt| pre_register_function(stmt) }
+    declarations.function_declarations.each { |stmt| register_function_signature(stmt) }
     declarations.extern_function_declarations.each { |stmt| visit_ExternFnDecl(stmt) }
 
     # Union default methods are synthesized only after all function signatures
@@ -515,7 +516,7 @@ private
     @synthetic_fns = []
     declarations.union_method_declarations.each { |stmt| validate_union_methods!(stmt) }
     # Pre-register synthesized defaults so user bodies can call them.
-    @synthetic_fns.each { |fn| pre_register_function(fn) }
+    @synthetic_fns.each { |fn| register_function_signature(fn) }
 
     # Bridge legacy `@reentrant` and new `EFFECTS REENTRANT` after
     # @fn_nodes is populated and before function bodies are checked.
@@ -656,24 +657,7 @@ private
   # At call sites, no rt is injected and no try is emitted.
   sig { params(node: AST::ExternFnDecl).returns(Symbol) }
   def visit_ExternFnDecl(node)
-    signature = FunctionSignature.new(
-      params: node.params.map { |p| AST::Param.new(
-        name: p.name,
-        type: p.type,
-        required: p.default.nil?,
-        mutable: p.mutable || false,
-        comptime: p.comptime || false
-      )},
-      return_type: node.return_type || Type.new(:Any),
-      visibility: :pub,
-      extern: true,
-      module_alias: node.from_module,
-      extern_effects: node.effects || {},
-      fn_type_params: node.fn_type_params || [],
-      type_params: (node.fn_type_params || []).any? ? (node.fn_type_params || []) : nil,
-      owner_type: node.owner_type,
-      owner_type_params: node.owner_type_params || []
-    )
+    signature = Annotator::Phases::SignatureRegistry.extern_function_signature(node)
 
     if node.owner_type
       # EXTERN FN TypeName<T>.method(...) — register as method on the type
@@ -716,24 +700,11 @@ private
   end
 
   sig { params(node: AST::FunctionDef).returns(SymbolEntry) }
-  def pre_register_function(node)
-    signature = FunctionSignature.new(
-      params: node.params.map { |p| AST::Param.new(
-        name: p.name,
-        type: p.type,
-        required: p.default.nil?,
-        default: p.default,
-        mutable: p.mutable,
-        takes: p.takes || false,
-        sync: p.type&.any_sync? ? p.type.sync : nil
-      )},
-      return_type: node.return_type || Type.new(:Any),
-      return_lifetime: get_lifetime_path(node),
-      visibility: node.visibility,
-      reentrant: node.reentrant == :reentrant
+  def register_function_signature(node)
+    signature = Annotator::Phases::SignatureRegistry.function_signature(
+      node,
+      return_lifetime: get_lifetime_path(node)
     )
-    signature.requires = node.requires
-
     current_scope.declare(
       node.name,
       nil,        # Reg (Unused in Analyzer)
