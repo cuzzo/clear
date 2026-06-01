@@ -9,7 +9,7 @@ FN add_one() RETURNS Int64 ->
 END
 ```
 
-### 0. Lexer (`src/lexer.rb`)
+### 0. Lexer (`src/ast/lexer.rb`)
 
  * This takes text and parses it into valid CLEAR tokens.
  * If you're adding a new syntax feature, you likely need to start here.
@@ -40,7 +40,7 @@ END
 ]
 ```
 
-### 1. Parser (`src/parser.rb`)
+### 1. Parser (`src/ast/parser.rb`)
 
  * This parses tokens and transforms them into Abstract Syntax Tree (AST) nodes.
    * An AST node basically extracts all relevant data from the source text about a particular CLEAR construct (like a function, or while loop).
@@ -66,7 +66,7 @@ AST::Program(
           ))])])
 ```
 
-### 2. Annotation (`src/annotator.rb`)
+### 2. Annotation (`src/annoator/annotator.rb`)
 
  * In this pass, the tree is semantically decorated:
    * Names are resolved,
@@ -111,7 +111,7 @@ AST::FunctionDef(
 
   * At this stage, pipelines are fused together for efficiency other desugaring occurs, like string concatenation.
 
-### 4. MIR Pass / Control Flow (`src/control_flow.rb`)
+### 4. MIR Pass / Hoisting / Control Flow (`src/mir/*.rb`)
 
 An Abstract Syntax Tree is very difficult to work with to ensure sound Affine Ownership: ensure no use-after-free, no double-free, and no memory leaks.
 
@@ -139,7 +139,7 @@ needs cleanup? no
 moved guard? no
 ```
 
-### 5. MIR Lowering
+### 5. MIR Lowering (`src/mir/*.rb`)
 
  * In the pass, we take the CFG, and transform it into a MIR (a Mid-level Representation).
 
