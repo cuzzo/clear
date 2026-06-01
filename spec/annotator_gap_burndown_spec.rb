@@ -799,7 +799,7 @@ RSpec.describe "annotator branch gap burndown" do
     ].each_with_index do |sym, i|
       value = AST::Identifier.new(token, "ret#{i}")
       value.symbol = sym if sym
-      sym.non_escaping = true if i == 2
+      sym.mark_non_escaping! if i == 2
       tied_ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), value))
     end
 

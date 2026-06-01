@@ -1231,7 +1231,7 @@ private
           # makes the new binding a borrow into locked data; it must not
           # escape the enclosing WITH scope either.
           if (src_sym = AST.root_identifier(b.expr)&.symbol)
-            entry.non_escaping = true if src_sym.non_escaping
+            entry.mark_non_escaping! if src_sym.non_escaping
             entry.lifetime = SymbolEntry.tied_lifetime([src_sym]) if find_container_source(b.expr)
           end
           classify_ownership!(entry)
@@ -2692,7 +2692,7 @@ private
     # value out via `|> COLLECT` (joins + extracts scalar) or
     # `WITH MATERIALIZED VIEW` (deep-copy snapshot).
     if node_type.observable?
-      node.symbol.non_escaping = true
+      node.symbol.mark_non_escaping!
     end
     # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
     # cannot be reached from another thread, so suggest the shared form.
@@ -2755,8 +2755,8 @@ private
       node.mode = :decl
       finalize_decl_node!(node, false)
       if node.value.instance_variable_get(:@has_borrowed_fields)
-        node.symbol.non_escaping   = true
-        node.symbol.borrowed_alias = true
+        node.symbol.mark_non_escaping!
+        node.symbol.mark_borrowed_alias!
       end
       stamp_init_contents_heap!(node)
       stamp_bg_handle_lifetime!(node)

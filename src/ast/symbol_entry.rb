@@ -48,6 +48,11 @@ class Scope; end unless defined?(Scope)
 class SymbolEntry
     extend T::Sig
 
+  class BindingFlowFacts < T::Struct
+    prop :non_escaping, T::Boolean, default: false
+    prop :borrowed_alias, T::Boolean, default: false
+  end
+
   attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,
                 :mutated,        # set by mark_var_mutated when the binding
@@ -68,7 +73,6 @@ class SymbolEntry
                                    # auto-fix at the parameter when the body
                                    # mutates it without `MUTABLE`.
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
-                :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF
                 :sync_families,  # Set of families when bound by REQUIRES disjunction
                 :layout,         # nil | :indirect — heap-pinned cell with stable address
                 :mutable_ref_target, # This binding is passed to a MUTABLE parameter by reference.
@@ -111,6 +115,7 @@ class SymbolEntry
   sig { params(value: T.untyped).void }
   def lifetime=(value)
     @lifetime = normalize_lifetime(value)
+    @flow.non_escaping = @lifetime.length == 1 && @lifetime.first.equal?(self)
   end
 
   # A function binding is a Type whose @raw is its FunctionSignature
@@ -319,16 +324,31 @@ class SymbolEntry
 
   sig { returns(T::Boolean) }
   def non_escaping
-    @lifetime.length == 1 && @lifetime.first.equal?(self)
+    @flow.non_escaping
   end
 
-  sig { params(value: T::Boolean).void }
-  def non_escaping=(value)
-    if value
-      @lifetime = [self]
-    elsif non_escaping
-      @lifetime = []
-    end
+  sig { returns(T::Boolean) }
+  def borrowed_alias
+    @flow.borrowed_alias
+  end
+
+  sig { void }
+  def mark_non_escaping!
+    @flow.non_escaping = true
+    @lifetime = [self]
+  end
+
+  sig { void }
+  def clear_non_escaping!
+    return unless non_escaping
+    @flow.non_escaping = false
+    @lifetime = []
+  end
+
+  sig { void }
+  def mark_borrowed_alias!
+    @flow.borrowed_alias = true
+    mark_non_escaping!
   end
 
   sig { returns(T::Array[SymbolEntry]) }
@@ -363,7 +383,7 @@ class SymbolEntry
     @resource = resource
     @close_zig = close_zig
     @lifetime = T.let([], T::Array[SymbolEntry])
-    @borrowed_alias = T.let(false, T::Boolean)
+    @flow = T.let(BindingFlowFacts.new, BindingFlowFacts)
     @sync_families = T.let(nil, T.untyped)
     @mutable_ref_target = T.let(false, T::Boolean)
     @poly_borrow_target = T.let(false, T::Boolean)

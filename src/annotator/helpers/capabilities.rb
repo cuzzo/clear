@@ -830,7 +830,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].non_escaping = true
+      current_scope.locals[alias_name].mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -849,7 +849,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].non_escaping = true
+      current_scope.locals[alias_name].mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -877,8 +877,8 @@ module CapabilityHelper
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         record_capture_local!(alias_name)
         sym = current_scope.locals[alias_name]
-        sym.non_escaping  = true
-        sym.borrowed_alias = true  # RESTRICT alias: fiber capture is stack-UAF
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!  # RESTRICT alias: fiber capture is stack-UAF
         og_declare(alias_name, nil, resolved_type)
       end
     elsif cap[:capability] == :VIEW || cap[:capability] == :MATERIALIZED_VIEW
@@ -896,8 +896,8 @@ module CapabilityHelper
       record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
       if cap[:capability] == :VIEW
-        sym.non_escaping  = true
-        sym.borrowed_alias = true
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!
       end
       og_declare(alias_name, nil, bind_type_sym)
     elsif cap[:capability] == :SNAPSHOT
@@ -926,8 +926,8 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
       record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
-      sym.non_escaping  = true
-      sym.borrowed_alias = true
+      sym.mark_non_escaping!
+      sym.mark_borrowed_alias!
       og_declare(alias_name, nil, inner_type)
     elsif cap[:capability] == :BORROWED
       # BORROWED guarantees the aliased data is stable for the borrow duration.
@@ -953,8 +953,8 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.locals[alias_name]
-      sym.non_escaping  = true
-      sym.borrowed_alias = true  # BORROWED alias: fiber capture is stack-UAF
+      sym.mark_non_escaping!
+      sym.mark_borrowed_alias!  # BORROWED alias: fiber capture is stack-UAF
       og_declare(alias_name, nil, resolved_type)
       @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
     end

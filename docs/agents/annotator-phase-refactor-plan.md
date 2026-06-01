@@ -258,7 +258,7 @@ Expected output:
   already produced during the existing body walk. Done means at least one old
   deferred queue or ad hoc record payload is fully replaced, with no consumer
   reading both the old and new source for the same decision.
-- [ ] `phase-body-summary-call-facts`: replace the old parallel call/failure
+- [x] `phase-body-summary-call-facts`: replace the old parallel call/failure
   hashes with one typed per-function `FunctionBodySummary`. Done means the call
   graph, propagating callees, fn-pointer-call bit, and direct-failure seed have
   one owner, and whole-program/effect/lock/reentrance consumers read the typed
@@ -272,7 +272,7 @@ Expected output:
   copying with stable binding identity plus explicit flow state. This is the
   large remaining architectural item. Done means migrated flow facts have one
   owner and direct writes to the old `SymbolEntry` fact fields are deleted.
-- [ ] `phase-binding-flow-moved-state`: migrate move/borrow flow facts that are
+- [x] `phase-binding-flow-moved-state`: migrate move/borrow flow facts that are
   currently mutated directly on `SymbolEntry` into an explicit flow owner. Done
   means moved-state readers/writers no longer mutate a copied `SymbolEntry`
   field and branch scopes merge/fork the flow fact directly.
