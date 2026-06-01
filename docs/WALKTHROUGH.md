@@ -395,6 +395,8 @@ counter: ~Int64[INF] = BG STREAM {
 v1 = NEXT counter;                                  # OKAY: Returns Int64 (never NIL)
 ```
 
+> See [Tense Composition](tense-composition.md) for more details on `?` optional tense, and `!` fallible tense.
+
 ### Stream Capabilities: `@shared` vs `@split`
 
 Streams can also carry sharing capabilities:
@@ -419,7 +421,7 @@ ASSERT NEXT b == 20, "order is preserved for all subscribers";
 
 `CLONE` is mandatory for `@split` streams. Plain assignment moves the handle.
 
-This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [benchmarks/16_pubsub/bench.cht](benchmarks/16_pubsub/bench.cht). That benchmark still uses the older sharing path today, but it is the right benchmark to watch as `@split` becomes the native pub/sub primitive.
+This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [08_pubsub/bench.cht](../benchmarks/concurrent/08_pubsub/bench.cht).
 
 ## 11. Collections: Array, List, and Pool
 
