@@ -2267,3 +2267,8 @@ class ZigTranspiler
   def union_schemas; end
 end
 
+class ZigType
+  sig { returns(String) }
+  def source; end
+end
+
