@@ -76,4 +76,82 @@ RSpec.describe NilKill::StaticDiffAudit do
 
     expect(findings).not_to include(a_hash_including("kind" => "missing_sig", "line" => 7))
   end
+
+  it "accepts long multiline signatures on added methods" do
+    findings, = audit_for("src/static_diff_long_multiline_sig.rb", <<~RUBY, [17])
+      class StaticDiffLongMultilineSig
+        extend T::Sig
+
+        sig do
+          params(
+            a: String,
+            b: String,
+            c: String,
+            d: String,
+            e: String,
+            f: String,
+            g: String,
+            h: String
+          ).returns(String)
+        end
+        def signed(a:, b:, c:, d:, e:, f:, g:, h:)
+          [a, b, c, d, e, f, g, h].join
+        end
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "missing_sig", "line" => 17))
+  end
+
+  it "does not flag later writes to ivars initialized with concrete T.let types" do
+    findings, = audit_for("src/static_diff_typed_state.rb", <<~RUBY, [7])
+      class StaticDiffTypedState
+        extend T::Sig
+
+        def initialize
+          @cache = T.let({}, T::Hash[String, Integer])
+        end
+
+        def reset
+          @cache = {}
+        end
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "untyped_ivar", "line" => 7))
+  end
+
+  it "does not treat homogeneous lookup maps as hash records" do
+    findings, = audit_for("src/static_diff_lookup_map.rb", <<~RUBY, [5])
+      class StaticDiffLookupMap
+        extend T::Sig
+
+        NAMES = T.let({
+          one: "one",
+          two: "two",
+        }.freeze, T::Hash[Symbol, String])
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 5))
+  end
+
+  it "does not treat typed struct value maps as hash records" do
+    findings, = audit_for("src/static_diff_struct_map.rb", <<~RUBY, [10])
+      class StaticDiffStructMap
+        extend T::Sig
+
+        class Entry < T::Struct
+          const :name, String
+        end
+
+        ENTRIES = T.let({
+          one: Entry.new(name: "one"),
+          two: Entry.new(name: "two"),
+        }.freeze, T::Hash[Symbol, Entry])
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 10))
+  end
 end

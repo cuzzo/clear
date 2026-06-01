@@ -225,3 +225,81 @@ Final metrics from this pass:
 - Verification: `bundle exec srb tc`; focused capability/type/annotator/MIR
   specs (`566 examples, 0 failures`); full unit coverage suite (`5065
   examples, 0 failures`, line `94.14%`, branch `77.05%`).
+
+## Type Placement Protocol Burndown
+
+The capability composition pass exposed the next coupled-state protocol:
+Type storage placement. `Type` had both `@provenance` and `@location`, with
+`location` acting as a stale alias and `@location` written during parsing but
+not used for decisions. Callers also set `type.provenance = :heap/:frame/:borrow`
+directly, which made the intent ambiguous: heap pinning for sync wrappers,
+heap allocation for constructors, frame arena results, borrowed aliases, and
+stack-only bare data all looked like the same raw field write.
+
+Goal: make Type placement a typed composition object with named transitions.
+External code should say why placement changes, not which storage slot happens
+to hold the current representation.
+
+Acceptance criteria:
+
+- [x] `placement-inventory`: inventory all `@provenance`, `@location`,
+  `type.provenance =`, `type.location`, and `type.provenance == :borrow`
+  usage in `src/`.
+- [x] `placement-object`: introduce a typed `TypePlacement` object and remove
+  direct `@provenance` / `@location` storage from `Type`.
+- [x] `placement-transitions`: add named transitions for declarative intent:
+  stack value, heap allocation, frame allocation, rodata, borrowed reference,
+  sync-wrapper heap pinning, indirect heap pinning, collection heap pinning, and
+  copying placement from another Type.
+- [x] `placement-type-internals`: migrate `Type#initialize`,
+  `Type#parse_raw_input`, `Type#bare_data_type`,
+  `Type#error_union_payload_with_outer_capabilities`, schema borrowed fields,
+  and indirect Zig pointee handling to the named placement API.
+- [x] `placement-callers`: migrate Type placement writers in AST finalization,
+  scope overlays, annotator list/copy/type-annotation flows, generic/method
+  helpers, MIR hoist, capture classification, escape analysis, fiber context,
+  and allocation lowering.
+- [x] `placement-predicates`: replace external `provenance == :borrow` checks
+  with `borrowed_reference?`.
+- [x] `placement-metrics`: run Sorbet, focused specs, full coverage specs,
+  Decomplex, and SlopCop. Keep this only if metrics move in the right direction
+  or the remaining regression is clearly a report artifact with stronger
+  semantics.
+
+Known boundary: AST node `storage` and `SymbolEntry#storage` are separate
+protocols from Type placement. This pass may call into them where they overlay a
+Type, but it does not attempt to replace all AST node storage assignment.
+
+Final outcome:
+
+- Added `TypePlacement` as the backing object for `Type` placement and removed
+  direct `@provenance` / `@location` storage from `Type`.
+- Deleted the loose `provenance=` writer and migrated callers to named
+  transitions such as `mark_heap_allocated!`, `mark_frame_allocated!`,
+  `mark_borrowed_reference!`, `copy_placement_from!`, and
+  `apply_cleanup_placement!`.
+- Reified the observable terminal table into `ObservableTerminalSpec` and
+  `ObservablePublishSpec` while clearing the `Src Type Guardrails` findings
+  exposed by the branch diff.
+- Tightened `INT_TYPE_MAX`, `INT_TYPE_MIN`, `ZIG_TYPE_MAP`, and
+  `Scope#resolve_type` signatures uncovered by the guardrail/Sorbet pass.
+
+Final metrics from this pass:
+
+- Decomplex: Neglected Updates `1395 -> 1322` (-73), Missing Abstractions
+  `194 -> 193` (-1), Broken Protocols `1296 -> 1348` (+52), Convergence
+  `1399 -> 1409` (+10), False Simplicity `793 -> 805` (+12), Decision Pressure
+  `298 -> 299` (+1), Root-Cause Clusters `341 -> 343` (+2).
+- The main targeted state-write metric improved substantially, but the
+  observable-spec reification and new placement methods made Decomplex see more
+  protocols/classes. This is worth keeping because it removed raw placement
+  writes and replaced record-shaped observable hashes with typed structs; the
+  Broken Protocols increase is a detector cost of the new typed protocol surface,
+  not a dual path.
+- SlopCop: genuine gaps `1625 -> 1615` (-10), dark arms `4516 -> 4487` (-29),
+  files unchanged at `96`.
+- Verification: `bundle exec srb tc`; focused guardrail/type/observable/MIR/
+  placement specs (`335 examples, 0 failures`); full coverage suite (`5065
+  examples, 0 failures`, line `94.19%`, branch `77.14%`); `Src Type
+  Guardrails` clean with diff coverage for `src/**/*.rb` at line `98.9%`,
+  branch `84.2%`.

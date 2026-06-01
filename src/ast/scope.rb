@@ -141,15 +141,6 @@ class Scope
 
     base_type = entry.type
 
-    # Overlay storage-derived capabilities onto the type
-    case entry.storage
-    when :rodata
-      base_type.provenance = :rodata  # string literal: static data, never freed
-    when :frame
-      base_type.provenance = :frame   # large local var: arena pointer (*T in Zig)
-    when :heap
-      base_type.provenance = :heap
-    end
     value_sync = if entry.locked?
       :locked
     elsif entry.write_locked?
@@ -167,7 +158,7 @@ class Scope
     base_type
   end
 
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).returns(T.any(Type, Symbol)) }
   def resolve_type(name)
     entry = @locals[name]
     entry ? entry.type : :Any

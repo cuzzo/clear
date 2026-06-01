@@ -18,7 +18,7 @@ module AllocHelper
     return storage unless storage == :frame && (current_fn_ctx&.loop_depth || T.cast(T.unsafe(self).instance_variable_get(:@loop_depth), T.nilable(Integer))) .to_i > 0
     return storage unless node.value.is_a?(AST::StructLit)
 
-    node.full_type!.provenance = nil  # nil = stack, no allocation needed
+    node.full_type!.mark_stack_value!
     node.storage              = :stack
     node.value.storage      = :stack
     :stack

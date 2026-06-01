@@ -689,7 +689,7 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers escape heap return and argument-return dependency facts" do
     p = param("value", type: :String)
     heap_arg = id("arg", type: :String, storage: :heap)
-    heap_arg.full_type.provenance = :heap
+    heap_arg.full_type.mark_heap_allocated!
 
     expect(EscapeAnalysis.send(:heap_return_from_args?, [heap_arg], [p], Set["value"], Type.new(:String), nil)).to eq(true)
     expect(EscapeAnalysis.send(:heap_return_from_args?, [lit("x", type: :String)], [p], Set["missing"], Type.new(:String), nil)).to eq(true)

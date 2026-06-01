@@ -1043,15 +1043,6 @@ module AST
         storage = :link
       end
 
-      case storage
-      when :rodata
-        t.provenance = :rodata
-      when :frame
-        t.provenance = :frame
-      when :heap
-        t.provenance = :heap
-      # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
-      end
       t.apply_storage_capability!(storage, value_sync: value_sync)
 
       # Propagate additional capability fields from the value's type_object

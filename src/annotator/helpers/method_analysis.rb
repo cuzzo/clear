@@ -47,7 +47,7 @@ module MethodAnalysis
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.copy_collection_shape_from!(ti)
     new_type.copy_element_capabilities_from!(ti)
-    new_type.provenance = ti.provenance
+    new_type.copy_placement_from!(ti, preserve_existing: false)
     scope_entry.type = new_type
     stamp_type!(list_arg, new_type)
   end
@@ -154,7 +154,7 @@ module MethodAnalysis
 
     val_type = node.args[0].resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
-    new_type.provenance = obj_type.provenance
+    new_type.copy_placement_from!(obj_type, preserve_existing: false)
     new_type.copy_collection_shape_from!(obj_type)
     new_type.copy_element_capabilities_from!(obj_type)
     if node.object.is_a?(AST::Identifier)

@@ -310,7 +310,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     list_type = Type.new(:"Any[]", collection: :list)
     list_type.shard_count = 2
-    list_type.provenance = :heap
+    list_type.mark_heap_allocated!
     list_type.elem_ownership = :shared
     list_type.elem_sync = :locked
     sym = SymbolEntry.new(reg: "xs", type: list_type, mutable: true, storage: :heap)
@@ -336,7 +336,7 @@ RSpec.describe "annotator branch gap burndown" do
     emit = IntrinsicEmit.new(narrows_receiver_collection: true)
 
     list_type = Type.new(:"Any[]", collection: :list)
-    list_type.provenance = :heap
+    list_type.mark_heap_allocated!
     list_type.elem_ownership = :shared
     list_type.elem_sync = :locked
     sym = SymbolEntry.new(reg: "items", type: list_type, mutable: true, storage: :heap)

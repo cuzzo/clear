@@ -120,7 +120,7 @@ module BgCaptureClassifier
     base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
     return base unless sym
     base.apply_bg_capture_symbol!(storage: sym.storage, sync: sym.sync)
-    base.provenance = :borrow if sym.borrowed_alias
+    base.mark_borrowed_reference! if sym.borrowed_alias
     base
   end
 

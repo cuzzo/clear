@@ -407,7 +407,7 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
     t.apply_reference_ownership!(:affine)
-    t.provenance = nil if t.respond_to?(:provenance=)
+    t.mark_stack_value!
     t.mark_generic_payload_type_arg!
     t
   end
@@ -550,7 +550,7 @@ module GenericAnalysis
     end
     if coll_src
       node_type.copy_collection_shape_from!(coll_src)
-      node_type.provenance  = :heap if coll_src.pool? || coll_src.set_collection?
+      node_type.mark_heap_allocated! if coll_src.pool? || coll_src.set_collection?
     end
 
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.

@@ -66,6 +66,9 @@ module NilKill
         next unless added_line?(path, shape["line"])
         keys = Array(shape["keys"])
         next if keys.length < 2
+        next if typed_lookup_hash?(shape["code"])
+        next if typed_struct_value_hash?(shape["code"], keys)
+        next if homogeneous_lookup_hash?(shape["code"])
 
         finding("hash_record_candidate", path, shape["line"],
           "added hash record literal may want a typed struct",
@@ -86,8 +89,10 @@ module NilKill
 
     def audit_ivar_write(path, line_number, line)
       stripped = line.strip
-      return nil unless stripped.match?(/\A@[a-zA-Z_]\w*\s*=(?!=)/)
+      match = stripped.match(/\A(@[a-zA-Z_]\w*)\s*=(?!=)/)
+      return nil unless match
       return nil if stripped.include?("T.let(")
+      return nil if typed_ivar_initialized_before?(path, line_number, match[1])
 
       finding("untyped_ivar", path, line_number,
         "added instance variable assignment is not wrapped in T.let",
@@ -126,20 +131,60 @@ module NilKill
       return nil if idx.negative?
 
       if lines[idx].to_s.strip == "end"
-        scan_start = [idx - 12, 0].max
+        scan_start = [idx - 40, 0].max
         idx.downto(scan_start) do |sig_idx|
           return lines[sig_idx..idx].join("\n") if lines[sig_idx].to_s.strip.start_with?("sig do")
         end
         return nil
       end
 
-      scan_start = [idx - 8, 0].max
+      scan_start = [idx - 40, 0].max
       idx.downto(scan_start) do |sig_idx|
         stripped = lines[sig_idx].to_s.strip
         return lines[sig_idx..idx].join("\n") if stripped.start_with?("sig ") || stripped.start_with?("sig{")
         return nil unless stripped.start_with?("#") || stripped.empty? || stripped == "end"
       end
       nil
+    end
+
+    def typed_ivar_initialized_before?(path, line_number, ivar)
+      lines = SourceIndex.source_lines(File.join(root, path))
+      lines.first(line_number - 1).any? do |prior|
+        prior.strip.match?(/\A#{Regexp.escape(ivar)}\s*=\s*T\.let\(/)
+      end
+    end
+
+    def homogeneous_lookup_hash?(code)
+      values = code.to_s.scan(/:\s*([^,\n}]+)/).flatten.map(&:strip)
+      return false if values.length < 2
+
+      kinds = values.map { |value| literal_kind(value) }
+      kinds.all? && kinds.uniq.one?
+    end
+
+    def typed_lookup_hash?(code)
+      text = code.to_s
+      text.include?("T.let({") && text.include?("T::Hash[")
+    end
+
+    def typed_struct_value_hash?(code, keys)
+      text = code.to_s
+      keys.all? do |key|
+        text.match?(/^\s*#{Regexp.escape(key.to_s)}:\s+[A-Z]\w*(?:::\w+)*\.new\(/)
+      end
+    end
+
+    def literal_kind(value)
+      case value
+      when /\A"[^"]*"\z/, /\A'[^']*'\z/
+        :string
+      when /\A:[a-zA-Z_]\w*\z/
+        :symbol
+      when /\A-?\d+\z/
+        :integer
+      when /\A(?:true|false)\z/
+        :boolean
+      end
     end
 
     def finding(kind, path, line, message, detail, code)

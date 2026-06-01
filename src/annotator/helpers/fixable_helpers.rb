@@ -460,6 +460,8 @@ module FixableHelper
     order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
     order.find do |t|
       max = Type::INT_TYPE_MAX[t]
+      next false if max.nil?
+
       min = Type::INT_TYPE_MIN[t] || 0
       val >= min && val <= max
     end

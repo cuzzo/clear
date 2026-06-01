@@ -374,7 +374,7 @@ module EscapeAnalysis
     return false unless ti
     t = ti.value_payload_type
     return false unless t
-    return false if t.rodata? || t.provenance == :borrow
+    return false if t.rodata? || t.borrowed_reference?
 
     if t.collection_value?
       elem = t.element_type
@@ -706,7 +706,7 @@ module EscapeAnalysis
     return false unless ti
     t = ti.value_payload_type
     return false unless t
-    return false if t.rodata? || t.provenance == :borrow
+    return false if t.rodata? || t.borrowed_reference?
     t.ownership_bearing?(schema_lookup)
   rescue StandardError
     false
@@ -835,7 +835,7 @@ module EscapeAnalysis
     end
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
-    return false if ti.rodata? || ti.provenance == :borrow
+    return false if ti.rodata? || ti.borrowed_reference?
     top_heap_ptr || ti.ownership != :affine || ti.ownership_bearing?(schema_lookup)
   end
 
@@ -849,7 +849,7 @@ module EscapeAnalysis
   private_class_method def self.mark_heap_return!(fn, expr)
     ret = fn.return_type
     ret = ret.value_payload_type if ret.is_a?(Type)
-    ret.provenance = :heap if ret.respond_to?(:provenance=)
+    ret.mark_heap_allocated! if ret.is_a?(Type)
     fn.heap_carry_return = true if fn.respond_to?(:heap_carry_return=)
 
     names = T.let(Set.new, T::Set[String])

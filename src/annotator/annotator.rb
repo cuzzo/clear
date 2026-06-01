@@ -3827,7 +3827,7 @@ private
           soa: !!node.instance_variable_get(:@constructor_soa),
           shard_count: node.instance_variable_get(:@constructor_shard_count)
         )
-        t.provenance = :heap if coll == :pool || coll == :set
+        t.mark_heap_allocated! if coll == :pool || coll == :set
         stamp_type!(node, t)
         node.storage = (coll == :pool || coll == :set) ? :heap : :stack
         record_effect(EffectTracker::HEAP)
@@ -3861,7 +3861,7 @@ private
       stamp_type!(node, Type.new(:"#{base_type}[#{node.items.size}]"))
     else
       t = Type.new(:"#{base_type}[]", location: :heap)
-      t.provenance = :frame  # makeList uses frameAlloc for backing
+      t.mark_frame_allocated!  # makeList uses frameAlloc for backing
       stamp_type!(node, t)
     end
   end
@@ -3982,7 +3982,7 @@ private
       # String concat result is frame-allocated.
       node.storage = :frame
       ti = node.full_type!(context: "binary result")
-      ti.provenance = :frame if ti.is_a?(Type)
+      ti.mark_frame_allocated! if ti.is_a?(Type)
     end
   end
 
@@ -4255,7 +4255,7 @@ private
       ti.apply_reference_ownership!(:shared)
     end
     # @indirect forces heap location (same as @local, but different intent).
-    ti.provenance = :heap           if node.indirect?
+    ti.pin_heap_for_indirect!       if node.indirect?
 
     # Lock ranks induce a total order only if every declaration of a type
     # uses the same rank.
@@ -4397,7 +4397,7 @@ private
       # a string literal); override on the cloned Type so internal Type
       # predicates (needs_cleanup?, finalize_storage) see :heap. The
       # storage_override is the authoritative signal for Locatable readers.
-      ti.provenance = :heap if ti.is_a?(Type)
+      ti.mark_heap_allocated! if ti.is_a?(Type)
       node.storage = :heap
       current_fn_ctx.heap_count += 1 if current_fn_ctx
     end
@@ -6642,7 +6642,8 @@ private
     # Propagate provenance: prefer value's provenance, then computed alloc.
     val_ti = val.is_a?(AST::Locatable) ? val.full_type!(context: "cleanup value provenance") : nil
     val_ti = val_ti.is_a?(Type) ? val_ti : nil
-    ti.provenance ||= val_ti&.provenance || alloc
+    ti.apply_cleanup_placement!(value_type: val_ti, alloc: alloc)
+    alloc
   end
 
   sig { params(name: String, node: T.untyped, type_info: T.any(Type, Symbol, String)).returns(T.untyped) }

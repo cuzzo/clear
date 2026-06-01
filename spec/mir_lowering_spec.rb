@@ -993,7 +993,7 @@ RSpec.describe MIRLowering do
       value = make_id("next_point", full_type: :Point)
       node = AST::Assignment.new(tok, AST::GetIndex.new(tok, target, index), value)
       heap_string = Type.new(:String)
-      heap_string.provenance = :heap
+      heap_string.mark_heap_allocated!
       point_schema = Schemas::StructSchema.new(fields: { "name" => heap_string })
 
       result = lowering(struct_schemas: { Point: point_schema }).lower(node)

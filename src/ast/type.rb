@@ -107,6 +107,53 @@ class TypeCapabilities < T::Struct
   end
 end
 
+class TypePlacementUnset < T::Struct
+end
+
+class TypePlacement < T::Struct
+  extend T::Sig
+
+  UNSET = T.let(TypePlacementUnset.new.freeze, TypePlacementUnset)
+  MaybeSymbol = T.type_alias { T.any(TypePlacementUnset, Symbol, NilClass) }
+
+  const :provenance, T.nilable(Symbol), default: nil
+
+  sig { params(provenance: MaybeSymbol).returns(TypePlacement) }
+  def with(provenance: TypePlacement::UNSET)
+    TypePlacement.new(
+      provenance: provenance.is_a?(TypePlacementUnset) ? self.provenance : provenance
+    )
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def location
+    provenance
+  end
+
+  sig { returns(T::Boolean) }
+  def heap?
+    provenance == :heap
+  end
+
+  sig { returns(T::Boolean) }
+  def frame?
+    provenance == :frame
+  end
+
+  sig { returns(T::Boolean) }
+  def rodata?
+    provenance == :rodata
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def alloc
+    case provenance
+    when :heap then :heap
+    when :frame then :frame
+    end
+  end
+end
+
 class Type
     extend T::Sig
 
@@ -116,6 +163,8 @@ class Type
   attr_reader :raw, :name, :generic_args, :capacity
   sig { returns(TypeCapabilities) }
   attr_reader :capabilities
+  sig { returns(TypePlacement) }
+  attr_reader :placement
   attr_writer :is_resource      # set by annotator; read internally as @is_resource in #resource?
 
   # Unified provenance: where was this data allocated?
@@ -124,8 +173,6 @@ class Type
   #   :heap   — heap allocated, must be explicitly freed
   #   :borrow — borrowed reference, caller owns data, no cleanup needed
   #   nil     — stack (primitives, small structs); no allocation needed
-  attr_accessor :provenance
-
   # String type constants
   STRING_TYPE = :String
   HEAP_STRING_TYPE = :String
@@ -156,7 +203,19 @@ class Type
     local: "local",
   }.freeze, T::Hash[Symbol, String])
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  class ObservablePublishSpec < T::Struct
+    const :publish_method, String
+    const :expr, Symbol
+    const :gate, Symbol
+  end
+
+  class ObservableTerminalSpec < T::Struct
+    const :wrapper, T.proc.params(type_info: Type).returns(String)
+    const :ast_class, T.nilable(T::Class[T.anything]), default: nil
+    const :publish, T.nilable(ObservablePublishSpec), default: nil
+  end
+
+  sig { params(value: Object).returns(T::Boolean) }
   def self.indirect_type?(value)
     return false unless value.is_a?(Type)
 
@@ -382,8 +441,8 @@ class Type
     @name               = T.let(nil, T.untyped)
     @generic_args       = T.let(nil, T.untyped)
     @capacity           = T.let(nil, T.untyped)
-    @provenance         = T.let(nil, T.untyped)
     @capabilities       = T.let(TypeCapabilities.new, TypeCapabilities)
+    @placement          = T.let(TypePlacement.new, TypePlacement)
     @is_resource        = T.let(nil, T.untyped)
     @auto_token          = T.let(nil, T.untyped)
     @payload_type_raw   = T.let(nil, T.untyped)
@@ -397,7 +456,6 @@ class Type
     @tense_type_raw     = T.let(nil, T.untyped)
     @zig_type_cache     = T.let(nil, T.untyped)
     @generic_payload_type_arg = T.let(false, T::Boolean)
-    @location          = T.let(nil, T.nilable(Symbol))
     @key_type_raw      = T.let(nil, T.nilable(Symbol))
     @is_array          = T.let(false, T::Boolean)
     @is_map            = T.let(false, T::Boolean)
@@ -427,7 +485,7 @@ class Type
       @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
       @is_tense              = other.instance_variable_get(:@is_tense)
       @tense_type_raw        = other.instance_variable_get(:@tense_type_raw)
-      @provenance            = other.provenance
+      @placement             = TypePlacement.new(provenance: other.provenance)
       @is_auto               = other.instance_variable_get(:@is_auto)
       @generic_payload_type_arg = other.generic_payload_type_arg?
     else
@@ -436,7 +494,7 @@ class Type
     end
 
     # Capability fields — set after parse/copy so they can override.
-    @provenance = location if location && location != :stack
+    apply_declared_location!(location)
     apply_capabilities!(
       ownership: ownership || TypeCapabilities::UNSET,
       sync: sync || TypeCapabilities::UNSET,
@@ -448,16 +506,16 @@ class Type
     )
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
-    @provenance = T.let(:heap, T.nilable(Symbol)) if sync_requires_heap_provenance?
+    pin_heap_for_sync_wrapper! if sync_requires_heap_provenance?
     # `:indirect` layout is the explicit "heap-pinned cell with a stable
     # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
     # provenance even without an active sync, mirroring the @indirect
     # CapabilityWrap branch in the annotator (annotator.rb:3517).
-    @provenance = :heap if indirect?
+    pin_heap_for_indirect! if indirect?
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
-    @provenance = :rodata if symbol?
+    mark_rodata! if symbol?
     # Pool collection always lives on the heap (owns internal slot array).
-    @provenance = :heap if collection && pool?
+    pin_heap_for_collection! if collection && pool?
     # Gradual-typing placeholder. When set, this Type represents an
     # unresolved Auto slot — the inference pass (see
     # docs/agents/gradual-typing.md) walks every Auto Type, collects
@@ -727,6 +785,89 @@ class Type
     @zig_type_cache = nil
   end
 
+  sig { params(provenance: TypePlacement::MaybeSymbol).returns(TypePlacement) }
+  def apply_placement!(provenance: TypePlacement::UNSET)
+    @zig_type_cache = nil
+    @placement = @placement.with(provenance: provenance)
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def provenance
+    @placement.provenance
+  end
+
+  sig { params(location: T.nilable(Symbol)).returns(TypePlacement) }
+  def apply_declared_location!(location)
+    return placement unless location && location != :stack
+
+    apply_placement!(provenance: location)
+  end
+
+  sig { returns(TypePlacement) }
+  def mark_stack_value!
+    apply_placement!(provenance: nil)
+  end
+
+  sig { returns(TypePlacement) }
+  def mark_heap_allocated!
+    apply_placement!(provenance: :heap)
+  end
+
+  sig { returns(TypePlacement) }
+  def mark_frame_allocated!
+    apply_placement!(provenance: :frame)
+  end
+
+  sig { returns(TypePlacement) }
+  def mark_rodata!
+    apply_placement!(provenance: :rodata)
+  end
+
+  sig { returns(TypePlacement) }
+  def mark_borrowed_reference!
+    apply_placement!(provenance: :borrow)
+  end
+
+  sig { returns(TypePlacement) }
+  def pin_heap_for_sync_wrapper!
+    mark_heap_allocated!
+  end
+
+  sig { returns(TypePlacement) }
+  def pin_heap_for_indirect!
+    mark_heap_allocated!
+  end
+
+  sig { returns(TypePlacement) }
+  def pin_heap_for_collection!
+    mark_heap_allocated!
+  end
+
+  sig { returns(TypePlacement) }
+  def reset_to_bare_data_placement!
+    mark_stack_value!
+  end
+
+  sig { params(source: Type, preserve_existing: T::Boolean).returns(TypePlacement) }
+  def copy_placement_from!(source, preserve_existing: true)
+    return placement if preserve_existing && provenance
+
+    apply_placement!(provenance: source.provenance || TypePlacement::UNSET)
+  end
+
+  sig { params(value_type: T.nilable(Type), alloc: T.nilable(Symbol)).returns(TypePlacement) }
+  def apply_cleanup_placement!(value_type:, alloc:)
+    return placement if provenance
+
+    if value_type&.provenance
+      copy_placement_from!(value_type, preserve_existing: false)
+    elsif alloc
+      apply_placement!(provenance: alloc)
+    else
+      placement
+    end
+  end
+
   sig { void }
   def mark_generic_payload_type_arg!
     @generic_payload_type_arg = true
@@ -805,12 +946,22 @@ class Type
       apply_reference_ownership!(:shared)
     when :link
       apply_reference_ownership!(:link, link_source: link_source)
+    when :rodata
+      mark_rodata!
+      capabilities
+    when :frame
+      mark_frame_allocated!
+      capabilities
     when :heap
+      mark_heap_allocated!
       if value_sync == :locked || value_sync == :write_locked
         apply_capabilities!(sync: value_sync)
       else
         capabilities
       end
+    when :borrow
+      mark_borrowed_reference!
+      capabilities
     else
       capabilities
     end
@@ -1060,11 +1211,11 @@ class Type
     Byte: 255, UInt8: 255, UInt16: 65_535, UInt32: 4_294_967_295,
     UInt64: (2**64) - 1,
     Int8: 127, Int16: 32_767, Int32: 2_147_483_647, Int64: 9_223_372_036_854_775_807,
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, T::Hash[Symbol, Integer])
   INT_TYPE_MIN = T.let({
     Byte: 0, UInt8: 0, UInt16: 0, UInt32: 0, UInt64: 0,
     Int8: -128, Int16: -32_768, Int32: -2_147_483_648, Int64: -9_223_372_036_854_775_808,
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, T::Hash[Symbol, Integer])
 
   sig { returns(T::Boolean) }
   def numeric?
@@ -1178,33 +1329,34 @@ class Type
 
   sig { returns(T::Boolean) }
   def heap?
-    @provenance == :heap
+    placement.heap?
   end
 
   sig { returns(T::Boolean) }
   def frame?
-    @provenance == :frame
+    placement.frame?
   end
 
   sig { returns(T::Boolean) }
   def rodata?
-    @provenance == :rodata
+    placement.rodata?
+  end
+
+  sig { returns(T::Boolean) }
+  def borrowed_reference?
+    provenance == :borrow
   end
 
   # Returns the allocator symbol for this provenance (:heap or :frame), or nil.
   sig { returns(T.nilable(Symbol)) }
   def provenance_alloc
-    case @provenance
-    when :heap  then :heap
-    when :frame then :frame
-    else nil
-    end
+    placement.alloc
   end
 
   # location is provenance (kept as alias for backward-compat callers).
-  sig { void }
+  sig { returns(T.nilable(Symbol)) }
   def location
-    @provenance
+    placement.location
   end
 
   sig { returns(T::Boolean) }
@@ -1319,7 +1471,7 @@ class Type
     # HashMap is always heap; a plain struct has no forced provenance).
     # Reset; the outer wrap layer that consumes this bare form is
     # responsible for re-pinning.
-    bare.provenance = nil
+    bare.reset_to_bare_data_placement!
     bare.clear_zig_type_cache!
     bare
   end
@@ -1600,7 +1752,7 @@ class Type
     File:      "CheatLib.File",
     TCPServer: "i32",
     TCPClient: "i32",
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, T::Hash[Symbol, String])
 
   # True when this type is a resource (File, TCPClient, TCPServer, etc.)
   # Checks the explicit flag (set by annotator after resolve_resource_close)
@@ -1813,7 +1965,7 @@ class Type
   def error_union_payload_with_outer_capabilities
     payload = Type.new(T.must(payload_type))
     payload.merge_capabilities_from!(self)
-    payload.provenance = @provenance if @provenance && !payload.provenance
+    payload.copy_placement_from!(self)
     payload
   end
 
@@ -1887,73 +2039,73 @@ class Type
   # class references resolve at first-call time, after src/ast/ast.rb
   # has finished loading. type.rb is required from inside ast.rb, so
   # AST::SumOp is not yet defined while type.rb's class body evaluates.
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Hash[Symbol, ObservableTerminalSpec]) }
   def self.observable_terminals
     @observable_terminals ||= T.let({
-      sum: {
-        wrapper:   ->(t) { "ObservableSum(#{t.zig_type})" },
+      sum: ObservableTerminalSpec.new(
+        wrapper: ->(type_info) { "ObservableSum(#{type_info.zig_type})" },
         ast_class: AST::SumOp,
-        publish:   { method: "add", expr: :typed, gate: :always },
-      },
-      count: {
-        wrapper:   ->(_) { "ObservableCount()" },
+        publish: ObservablePublishSpec.new(publish_method: "add", expr: :typed, gate: :always),
+      ),
+      count: ObservableTerminalSpec.new(
+        wrapper: ->(_type_info) { "ObservableCount()" },
         ast_class: AST::CountOp,
-        publish:   { method: "inc", expr: :none, gate: :pred },
-      },
-      avg: {
+        publish: ObservablePublishSpec.new(publish_method: "inc", expr: :none, gate: :pred),
+      ),
+      avg: ObservableTerminalSpec.new(
         # AVG view is always f64.
-        wrapper:   ->(_) { "ObservableAvg(f64)" },
+        wrapper: ->(_type_info) { "ObservableAvg(f64)" },
         ast_class: AST::AverageOp,
-        publish:   { method: "add", expr: :f64, gate: :always },
-      },
-      max: {
-        wrapper:   ->(t) { "ObservableMax(#{t.zig_type})" },
+        publish: ObservablePublishSpec.new(publish_method: "add", expr: :f64, gate: :always),
+      ),
+      max: ObservableTerminalSpec.new(
+        wrapper: ->(type_info) { "ObservableMax(#{type_info.zig_type})" },
         ast_class: AST::MaxOp,
-        publish:   { method: "submit", expr: :typed, gate: :always },
-      },
-      min: {
-        wrapper:   ->(t) { "ObservableMin(#{t.zig_type})" },
+        publish: ObservablePublishSpec.new(publish_method: "submit", expr: :typed, gate: :always),
+      ),
+      min: ObservableTerminalSpec.new(
+        wrapper: ->(type_info) { "ObservableMin(#{type_info.zig_type})" },
         ast_class: AST::MinOp,
-        publish:   { method: "submit", expr: :typed, gate: :always },
-      },
-      any: {
-        wrapper:   ->(_) { "ObservableAny()" },
+        publish: ObservablePublishSpec.new(publish_method: "submit", expr: :typed, gate: :always),
+      ),
+      any: ObservableTerminalSpec.new(
+        wrapper: ->(_type_info) { "ObservableAny()" },
         ast_class: AST::AnyOp,
-        publish:   { method: "submit", expr: :pred, gate: :always },
-      },
-      all: {
-        wrapper:   ->(_) { "ObservableAll()" },
+        publish: ObservablePublishSpec.new(publish_method: "submit", expr: :pred, gate: :always),
+      ),
+      all: ObservableTerminalSpec.new(
+        wrapper: ->(_type_info) { "ObservableAll()" },
         ast_class: AST::AllOp,
-        publish:   { method: "submit", expr: :pred, gate: :always },
-      },
-      find: {
+        publish: ObservablePublishSpec.new(publish_method: "submit", expr: :pred, gate: :always),
+      ),
+      find: ObservableTerminalSpec.new(
         # FIND's tense_type is `?T`; AtomicFind stores the unwrapped T.
-        wrapper:   ->(t) { "ObservableFind(#{t.wrapped_type.zig_type})" },
+        wrapper: ->(type_info) { "ObservableFind(#{type_info.wrapped_type.zig_type})" },
         ast_class: AST::FindOp,
-        publish:   { method: "submit", expr: :item, gate: :pred },
-      },
-      reduce: {
+        publish: ObservablePublishSpec.new(publish_method: "submit", expr: :item, gate: :pred),
+      ),
+      reduce: ObservableTerminalSpec.new(
         # REDUCE has its own lower_range_reduce_observable helper because
         # the user-supplied reducer body references stage-context (`_`
         # and `acc`) which the default publish recipe can't express.
-        wrapper:   ->(t) { "ObservableReduce(#{t.zig_type})" },
-      },
-      distinct: {
+        wrapper: ->(type_info) { "ObservableReduce(#{type_info.zig_type})" },
+      ),
+      distinct: ObservableTerminalSpec.new(
         # DISTINCT's tense_type is `T[]@set` (dynamic) or `T[N]@set`
         # (bounded). Dynamic uses geometric-doubling StreamSet; bounded
         # uses fixed-capacity StreamSetBounded (no grow, no refcounted
         # snapshots, [N]T buffer never relocates). Has its own
         # lower_range_fold_observable_distinct helper.
-        wrapper:   ->(t) {
-          elem = t.element_type.zig_type
-          if t.fixed?
-            "ObservableStreamSetBounded(#{elem}, #{t.capacity})"
+        wrapper: ->(type_info) {
+          elem = type_info.element_type.zig_type
+          if type_info.fixed?
+            "ObservableStreamSetBounded(#{elem}, #{type_info.capacity})"
           else
             "ObservableStreamSet(#{elem})"
           end
         },
-      },
-    }.freeze, T.nilable(T::Hash[T.untyped, T.untyped]))
+      ),
+    }.freeze, T.nilable(T::Hash[Symbol, ObservableTerminalSpec]))
   end
 
   # Backwards-compat shim: pre-A3 callers indexed `OBSERVABLE_WRAPPERS[sym]`
@@ -1961,9 +2113,9 @@ class Type
   # (and the existing observable_wrapper_zig method) can continue to
   # work without rewriting. Lazy via class method for the same load-order
   # reason as observable_terminals.
-  sig { returns(T::Hash[Symbol, Proc]) }
+  sig { returns(T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)]) }
   def self.observable_wrappers
-    T.must(@observable_wrappers = T.let(observable_terminals.transform_values { |e| e[:wrapper] }.freeze, T.nilable(T::Hash[T.untyped, T.untyped])))
+    T.must(@observable_wrappers = T.let(observable_terminals.transform_values(&:wrapper).freeze, T.nilable(T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)])))
   end
   sig { params(tense_type: Type).returns(String) }
   def observable_wrapper_zig(tense_type)
@@ -2294,7 +2446,7 @@ class Type
     return false if seen.include?(key)
     seen.add(key)
 
-    return false if provenance == :borrow
+    return false if borrowed_reference?
     return wrapped_type&.recursive_cleanup_shape?(schema_lookup, seen) || false if optional?
     return true if string? || any_rc? || link? || collection? || indirect? || future?
 
@@ -2358,7 +2510,7 @@ class Type
   # Plus: RC, NumericMap, Pool, Set.
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_cleanup?(schema_lookup = nil)
-    return false if provenance == :borrow
+    return false if borrowed_reference?
     if optional?
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
@@ -2629,7 +2781,7 @@ class Type
       next false unless t
       if v.is_a?(AST::StructField) && v.borrowed
         t = Type.new(t)
-        t.provenance = :borrow
+        t.mark_borrowed_reference!
       end
       blk.call(t)
     }
@@ -2732,7 +2884,6 @@ class Type
       @is_array            = false; @capacity = nil; @element_type_raw = nil
       @is_map              = false; @value_type_raw = nil
       @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
-      @location            = :stack
       return
     end
 
@@ -2760,7 +2911,6 @@ class Type
       @is_map              = false; @value_type_raw = nil
       @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
       apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
-      @location       = :stack  # Promise handle lives on the stack; result_cell is heap
       @resolved_cache = @raw.to_sym
       return
     else
@@ -2856,11 +3006,6 @@ class Type
       @generic_base_raw    = nil
       @generic_args_raw    = nil
     end
-
-    # F. Default location: stack for all types.  Explicit frame/heap is set later by finalize_storage!
-    #    (Previously defaulted to :frame for non-primitives, but :frame is now a meaningful directive,
-    #    so we use :stack as the neutral default and let finalize_storage! upgrade when needed.)
-    @location = :stack
 
     # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
     @resolved_cache = @raw.to_sym
@@ -3056,7 +3201,7 @@ class Type
     if plain_indirect_value?
       pointee = Type.new(self)
       pointee.strip_layout!
-      pointee.provenance = :stack if pointee.respond_to?(:provenance=)
+      pointee.mark_stack_value!
       return "*#{pointee.zig_type(is_param: is_param, is_field: is_field)}"
     end
 
@@ -3199,7 +3344,7 @@ module TypeHelper
     end
     t = effective_type.respond_to?(:resolved) ? effective_type.resolved : effective_type&.to_sym
     max = Type::INT_TYPE_MAX[t]
-    return unless max  # Not a known integer type; let type checker handle the mismatch
+    return if max.nil?  # Not a known integer type; let type checker handle the mismatch
     min = Type::INT_TYPE_MIN[t] || 0
     if val < min || val > max
       if respond_to?(:emit_int_overflow_error!)

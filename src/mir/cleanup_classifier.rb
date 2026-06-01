@@ -979,7 +979,7 @@ module CleanupClassifier
       (field.is_a?(AST::StructField) && field.borrowed) ||
         borrowed.include?(k.to_s) ||
         (fval.respond_to?(:symbol) && fval.symbol&.borrow_provenance?) ||
-        (fval && Type.from_node!(fval, context: "struct literal borrowed field").provenance == :borrow)
+        (fval && Type.from_node!(fval, context: "struct literal borrowed field").borrowed_reference?)
     end
   end
 
@@ -1002,7 +1002,7 @@ module CleanupClassifier
         next false if fval.respond_to?(:symbol) && fval.symbol&.borrow_provenance?
         if fval
           fval_ti = Type.from_node!(fval, context: "struct cleanup field")
-          next false if fval_ti.rodata? || fval_ti.provenance == :borrow
+          next false if fval_ti.rodata? || fval_ti.borrowed_reference?
         end
       end
       elem_type_needs_cleanup?(t, schema_lookup)
@@ -1052,7 +1052,7 @@ module CleanupClassifier
 
   sig { params(et: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.elem_type_needs_cleanup?(et, schema_lookup)
-    return false if et.provenance == :borrow
+    return false if et.borrowed_reference?
     return true if et.string?
     return true if et.needs_cleanup?(schema_lookup)
     elem_schema = schema_lookup.call(et.resolved) rescue nil

@@ -1173,7 +1173,7 @@ module MIRHoistLowering
     return mir.zig_type if mir.zig_type
     ti = Type.from_node!(ast_node, context: "deep-copy zig type")
     bare = Type.new(ti)
-    bare.provenance = :stack if bare.respond_to?(:provenance=)
+    bare.mark_stack_value!
     bare.zig_type
   end
 

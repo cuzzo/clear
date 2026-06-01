@@ -91,12 +91,12 @@ class PipelineHost
     const :gate, Symbol
     const :transfers_item_on_success, T::Boolean
 
-    sig { params(raw: T::Hash[Symbol, T.untyped]).returns(PipelinePublishSpec) }
+    sig { params(raw: Type::ObservablePublishSpec).returns(PipelinePublishSpec) }
     def self.from(raw)
-      expr = T.cast(raw.fetch(:expr), Symbol)
-      gate = T.cast(raw.fetch(:gate), Symbol)
+      expr = raw.expr
+      gate = raw.gate
       PipelinePublishSpec.new(
-        publish_method: T.cast(raw.fetch(:method), String),
+        publish_method: raw.publish_method,
         expr: expr,
         gate: gate,
         transfers_item_on_success: expr == :item && gate == :pred,
@@ -3217,7 +3217,7 @@ class PipelineHost
   # truth). Adding a default-handled terminal means one entry there;
   # this projection picks up the :publish key automatically.
   PUBLISH_SPEC = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
-    h[sym] = PipelinePublishSpec.from(T.cast(entry[:publish], T::Hash[Symbol, T.untyped])) if entry[:publish]
+    h[sym] = PipelinePublishSpec.from(T.must(entry.publish)) if entry.publish
   }.freeze, T::Hash[Symbol, PipelinePublishSpec])
 
   # Single shared lowering for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND.
@@ -3440,8 +3440,8 @@ class PipelineHost
   # `:ast_class` (REDUCE / DISTINCT) are skipped — they have their own
   # lowering helpers and never hit the default fold-op dispatch.
   FOLD_OP_OBSERVABLE_TERMINAL = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
-    h[entry[:ast_class]] = sym if entry[:ast_class]
-  }.freeze, T::Hash[T.untyped, T.untyped])
+    h[T.must(entry.ast_class)] = sym if entry.ast_class
+  }.freeze, T::Hash[T::Class[T.anything], Symbol])
 
   # Emit a single fused accumulating while loop for range |> stages |> fold.
   # fold_op is one of CountOp, SumOp, AverageOp, AnyOp, AllOp, FindOp, MinOp, MaxOp.
