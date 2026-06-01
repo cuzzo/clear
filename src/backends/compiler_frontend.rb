@@ -46,19 +46,20 @@ class CompilerFrontend
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
 
+    ast = T.must(ast)
     PipelineRewriter.new(annotator).rewrite!(ast)
-    MIRPassState.for!(T.must(ast)).mark!(:pipeline_rewritten)
-    StringConcatRewriter.new.rewrite!(T.must(ast))
-    MIRPassState.for!(T.must(ast)).mark!(:string_concat_rewritten)
+    MIRPassState.for!(ast).mark!(:pipeline_rewritten)
+    StringConcatRewriter.new.rewrite!(ast)
+    MIRPassState.for!(ast).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
 
     # Hoist after all annotation-preserving rewrites so escape analysis
     # only ever sees symbol-bearing declarations, including synthetic
     # allocation expressions introduced by those rewrites.
-    Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)
+    Hoist.apply!(ast, schema_lookup: schema_lookup)
 
     fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
-    T.must(ast).statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
 
     # Synthesize a FunctionDef wrapper for every TEST THAT body so the
     # MIR pipeline (escape analysis, promotion, cleanup classification,
@@ -70,20 +71,20 @@ class CompilerFrontend
     # body array with the AST::TestThat so the inserted MIR nodes
     # appear at lower-time. The wrapper itself never reaches code
     # generation -- mir_lowering still walks the TestBlock directly.
-    synthesize_test_body_wrappers!(T.must(ast), fn_nodes)
+    synthesize_test_body_wrappers!(ast, fn_nodes)
 
     # AST→MIR boundary invariant: every evaluatable node must carry a
     # resolved type by now. A nil full_type here is a compiler bug
     # (annotator failed to stamp it), surfaced before MIR consumes it.
-    PreMirTypeCheck.verify!(T.must(ast))
+    PreMirTypeCheck.verify!(ast)
 
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir_pass.transform!(T.must(ast))
+    mir_pass.transform!(ast)
 
     struct_schemas = {}
     enum_schemas = {}
     union_schemas = {}
-    T.must(ast).statements.each do |stmt|
+    ast.statements.each do |stmt|
       case stmt
       when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
@@ -96,7 +97,7 @@ class CompilerFrontend
     end
 
     fn_sigs = {}
-    T.must(ast).statements.each do |stmt|
+    ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
     end

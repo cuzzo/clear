@@ -257,7 +257,7 @@ module FsmTransform
     # Does this stmt introduce a segment split? True for top-level
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
-    sig { params(stmt: T.anything).returns(T::Boolean) }
+    sig { params(stmt: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
     def stmt_introduces_split?(stmt)
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
@@ -265,6 +265,8 @@ module FsmTransform
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
       else
+        return false unless stmt.is_a?(Struct)
+
         AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
       end
     end

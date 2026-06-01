@@ -25,7 +25,7 @@ class PipelineRewriter
     @var_counter = T.let(0, Integer)
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite!(node)
     return node unless node
 
@@ -48,7 +48,7 @@ class PipelineRewriter
     "#{prefix}#{@var_counter}"
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite_children!(node)
     case node
     when AST::Program
@@ -94,6 +94,8 @@ class PipelineRewriter
       node.body.map! { |s| rewrite!(s) }
       node.result = rewrite!(node.result)
     end
+
+    node
   end
 
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
@@ -245,7 +247,7 @@ class PipelineRewriter
     node
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def is_fusible?(node)
     AST.pipeline_fusible_stage?(node)
   end
@@ -253,7 +255,7 @@ class PipelineRewriter
   # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
   # These are handled by MIR lowering (lower_binding_chain) which performs
   # correct $u -> loop_var substitution. PipelineRewriter must leave them alone.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def binding_source?(node)
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
     return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH

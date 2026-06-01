@@ -23,7 +23,7 @@ class StringConcatRewriter
 
   private
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(AST::Node)) }
   def rewrite_in_node!(node)
     return node unless node
     rewrite_children!(node)
@@ -41,7 +41,7 @@ class StringConcatRewriter
     node
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).void }
   def rewrite_children!(node)
     case node
     when AST::FunctionDef
@@ -74,7 +74,7 @@ class StringConcatRewriter
   end
 
   # Is this a string + operation?
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(T::Boolean)) }
   def string_concat?(node)
     return true if node.is_a?(AST::StringConcat)
     return false unless node.is_a?(AST::BinaryOp)
@@ -82,11 +82,11 @@ class StringConcatRewriter
   end
 
   # Flatten chained string + into a flat list of parts.
-  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(node: AST::Node).returns(T::Array[AST::Node]) }
   def collect_parts(node)
     if node.is_a?(AST::StringConcat)
       node.parts
-    elsif string_concat?(node)
+    elsif node.is_a?(AST::BinaryOp) && string_concat?(node)
       collect_parts(node.left) + collect_parts(node.right)
     else
       [node]

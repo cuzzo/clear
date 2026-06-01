@@ -23,13 +23,13 @@ require_relative "pass_state"
 module MIR
   extend T::Sig
 
-  sig { params(node: Object).returns(T::Boolean) }
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def self.const_u8_literal_cast?(node)
     node.is_a?(MIR::Cast) && node.method == :as &&
       node.target_type == "[]const u8" && node.expr.is_a?(MIR::Lit)
   end
 
-  sig { params(node: Object).returns(T::Boolean) }
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def self.expr_wrapper?(node)
     node.respond_to?(:expr) &&
       (node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr) || node.is_a?(MIR::TryCatch))

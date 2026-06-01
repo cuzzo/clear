@@ -474,8 +474,16 @@ module EscapeAnalysis
   sig { params(node: T.untyped).returns(T.untyped) }
   private_class_method def self.unwrap_value(node)
     current = T.let(node, T.untyped)
-    while AST.ownership_wrapper?(current)
-      current = current.value
+    while current.is_a?(AST::Locatable) && AST.ownership_wrapper?(current)
+      wrapper = T.cast(current, T.any(
+        AST::MoveNode,
+        AST::CopyNode,
+        AST::CloneNode,
+        AST::ShareNode,
+        AST::FreezeNode,
+        AST::CapabilityWrap,
+      ))
+      current = wrapper.value
     end
     current
   end

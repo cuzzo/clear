@@ -710,7 +710,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     result_alloc = escaping_value_alloc(inner_t)
     last_mir = T.cast(with_decl_alloc(result_alloc) { lower(step.expr) }, MIR::Node)
-    last_mir = T.cast(place_value_for_destination(last_mir, step.expr, result_alloc, inner_t), MIR::Node)
+    last_mir = place_value_for_destination(last_mir, step.expr, result_alloc, inner_t)
     last_mir = T.cast(hoist_alloc(last_mir, step.expr, err_cleanup: true), MIR::Node) if mir_allocates?(last_mir)
     last_pending = flush_pending
     body_mir.concat(last_pending)

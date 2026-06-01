@@ -438,13 +438,13 @@ class MIRLowering
     id
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(T.untyped) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(MIR::Node) }
   def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
     plan = destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
-    plan.place(self, T.cast(mir, MIR::Node), T.cast(ast_node, AST::Node))
+    plan.place(self, mir, ast_node)
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(DestinationPlacementPlan) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(DestinationPlacementPlan) }
   def destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
     return destination_keep_plan(dest_alloc) unless dest_alloc
 
@@ -472,18 +472,18 @@ class MIRLowering
     DestinationPlacementPlan.new(action: :keep, type_info: nil, dest_alloc: dest_alloc)
   end
 
-  sig { params(ast_node: T.untyped, dest_type: T.untyped).returns(Type) }
+  sig { params(ast_node: AST::Node, dest_type: T.untyped).returns(Type) }
   def destination_type(ast_node, dest_type)
     ti = dest_type || Type.from_node!(ast_node, context: "destination placement type")
     ti.is_a?(Type) ? ti : Type.new(ti)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def or_binary?(node)
     node.is_a?(AST::BinaryOp) && (node.op == :OR_RESCUE || node.op == :OR)
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(DestinationSourceFact) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(DestinationSourceFact) }
   def destination_source_fact(mir, ast_node)
     node = destination_source_node(ast_node)
     DestinationSourceFact.new(
@@ -493,31 +493,31 @@ class MIRLowering
     )
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def destination_source_node(node)
-    or_binary?(node) ? node.left : node
+    node.is_a?(AST::BinaryOp) && or_binary?(node) ? node.left : node
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def borrowed_destination_node?(node)
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def owner_transfer_node?(node)
     return true if AST.moved?(node)
-    return true if node.respond_to?(:indirect_field) && node.indirect_field == true
+    return true if node.is_a?(AST::GetField) && node.indirect_field == true
     return Type.indirect_type?(node.full_type!(context: "owner transfer source")) if node.is_a?(AST::GetField)
 
     false
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def cast_wrapped_or?(mir, ast_node)
     !!(mir.is_a?(MIR::Cast) && or_binary?(ast_node))
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped, ti: Type).returns(T::Boolean) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node, ti: Type).returns(T::Boolean) }
   def heap_indirect_destination?(mir, ast_node, ti)
     return false unless ti.indirect? && !ti.any_sync? && ti.ownership == :affine
     return false if mir.is_a?(MIR::HeapCreate)
@@ -526,7 +526,7 @@ class MIRLowering
     !Type.indirect_type?(source_t)
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped, ti: Type, mir_class: T.untyped).returns(T::Boolean) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node, ti: Type, mir_class: T.untyped).returns(T::Boolean) }
   def owned_or_destination?(mir, ast_node, ti, mir_class)
     or_binary?(ast_node) && ownership_bearing_type?(ti) && mir.is_a?(mir_class)
   end
@@ -667,7 +667,7 @@ class MIRLowering
     MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
   def place_or_branch_value_for_destination(mir, ast_node)
     placed = place_string_value_for_heap_destination(mir, ast_node)
     return placed unless mir_allocates?(placed)
@@ -675,7 +675,7 @@ class MIRLowering
     scoped_owning_branch_value(placed, ast_node)
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
   def place_string_value_for_heap_destination(mir, ast_node)
     return mir if heap_owned_result?(mir, ast_node)
 
@@ -695,7 +695,7 @@ class MIRLowering
     MIR::Call.new("std.meta.activeTag", [value], false, false, MIR::CallableContract.no_ownership(1))
   end
 
-  sig { params(expr: T.untyped, ast_node: T.untyped, context: String).returns(Type) }
+  sig { params(expr: MIR::Node, ast_node: AST::Node, context: String).returns(Type) }
   def alloc_mark_type_info(expr, ast_node, context)
     ti = Type.from_node!(ast_node, context: context)
     return ti unless expr.is_a?(MIR::DeepCopy) && expr.zig_type.to_s.start_with?("*")
@@ -718,7 +718,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::BlockExpr) }
   def scoped_owning_branch_value(mir, ast_node)
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     @tmp_counter = T.let(@tmp_counter, T.untyped)
@@ -733,7 +733,7 @@ class MIRLowering
     end
     materialized = MIR::BindingMaterialization.new(
       name: name,
-      expr: T.cast(mir, MIR::Node),
+      expr: mir,
       alloc: :heap,
       type_info: type_info,
       mutable: false,
@@ -751,7 +751,7 @@ class MIRLowering
     out
   end
 
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def heap_owned_result?(mir, ast_node)
     effect = mir.respond_to?(:ownership_effect) ? mir.ownership_effect : MIR::OwnershipEffect.none
     return true if effect.produces_owned && MIR::Placement.heap?(effect.alloc)
@@ -2267,7 +2267,7 @@ class MIRLowering
 
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
-  sig { params(mir_node: T.untyped, from_type: Type, to_type: T.untyped).returns(T.nilable(MIR::Cast)) }
+  sig { params(mir_node: MIR::Node, from_type: Type, to_type: T.untyped).returns(T.nilable(MIR::Cast)) }
   def mir_cast(mir_node, from_type, to_type)
     from = from_type.respond_to?(:resolved) ? from_type.resolved : from_type
     to   = to_type.respond_to?(:resolved) ? to_type.resolved : to_type
@@ -2946,14 +2946,14 @@ class MIRLowering
     transpile_type(ti.is_a?(Type) ? ti.resolved.to_s : ti.to_s)
   end
 
-  sig { params(ast_node: T.untyped, type_info: Type).returns(T::Boolean) }
+  sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
   def direct_slice_backed_expr?(ast_node, type_info)
     return true if type_info.fixed?
     return true if ast_node.is_a?(AST::GetField)
     ast_node.is_a?(AST::Identifier) ? current_function_param_name?(ast_node.name) : false
   end
 
-  sig { params(target: T.untyped, index: T.untyped, ast_node: T.untyped, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
+  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
   def direct_index_get(target, index, ast_node, type_info)
     ti = Type.new(type_info)
     # @list types defer to CheatLib.getAt (the registry fallback). The runtime
@@ -3013,7 +3013,7 @@ class MIRLowering
     out
   end
 
-  sig { params(mir_node: T.untyped).returns(T.untyped) }
+  sig { params(mir_node: MIR::Node).returns(MIR::Node) }
   def strip_try(mir_node)
     mir_node.respond_to?(:without_try) ? mir_node.without_try : mir_node
   end
@@ -3149,7 +3149,7 @@ class MIRLowering
     t.start_with?("*") ? t[1..] : t
   end
 
-  sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(T.untyped) }
+  sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node), sink_alloc: Symbol, sink_type: T.untyped).returns(MIR::Node) }
   def materialize_owned_sink_value(value, ast_node, sink_alloc, sink_type = nil)
     return value unless ast_node
     plan = owned_sink_plan(value, ast_node, sink_alloc, sink_type)
@@ -3170,7 +3170,7 @@ class MIRLowering
     end
   end
 
-  sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(OwnedSinkPlan) }
+  sig { params(value: MIR::Node, ast_node: AST::Node, sink_alloc: Symbol, sink_type: T.untyped).returns(OwnedSinkPlan) }
   def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
     ti = ast_node.is_a?(AST::CopyNode) ? T.unsafe(self).copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink materialization")
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
@@ -3212,7 +3212,7 @@ class MIRLowering
     OwnedSinkPlan.new(action: :dupe_union, target_alloc: sink_alloc, zig_type: bare_zig_type(ti), copy_mode: nil)
   end
 
-  sig { params(value: T.untyped, ast_node: T.untyped, _sink_alloc: Symbol, ti: Type).returns(OwnedSinkSourceFact) }
+  sig { params(value: MIR::Node, ast_node: AST::Node, _sink_alloc: Symbol, ti: Type).returns(OwnedSinkSourceFact) }
   def owned_sink_source_fact(value, ast_node, _sink_alloc, ti)
     source_node = owned_sink_source_node(ast_node)
     entry = owned_sink_source_entry(source_node)
@@ -3232,14 +3232,14 @@ class MIRLowering
     )
   end
 
-  sig { params(ast_node: T.untyped).returns(T.untyped) }
+  sig { params(ast_node: AST::Node).returns(AST::Node) }
   def owned_sink_source_node(ast_node)
     node = ast_node
     node = node.value if node.is_a?(AST::MoveNode)
     node
   end
 
-  sig { params(ast_node: T.untyped, source_node: T.untyped).returns(T::Boolean) }
+  sig { params(ast_node: AST::Node, source_node: AST::Node).returns(T::Boolean) }
   def explicit_owned_sink_transfer?(ast_node, source_node)
     return false if ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
     return true if ast_node.is_a?(AST::MoveNode)
@@ -3248,21 +3248,21 @@ class MIRLowering
     owner_transfer_node?(source_node)
   end
 
-  sig { params(source_node: T.untyped).returns(CleanupEntry) }
+  sig { params(source_node: AST::Node).returns(CleanupEntry) }
   def owned_sink_source_entry(source_node)
     return CleanupEntry::NONE unless source_node.is_a?(AST::Identifier)
 
     (@current_bindings && @current_bindings[source_node.name.to_s]) || CleanupEntry::NONE
   end
 
-  sig { params(source_node: T.untyped).returns(T::Boolean) }
+  sig { params(source_node: AST::Node).returns(T::Boolean) }
   def owned_parameter_source_node?(source_node)
     return false unless source_node.is_a?(AST::Identifier)
     symbol = source_node.symbol
     !!(symbol&.is_param && symbol&.takes)
   end
 
-  sig { params(value: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
+  sig { params(value: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def owned_sink_value?(value, ast_node)
     return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::Cast)
     return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::TryExpr)
@@ -3272,13 +3272,13 @@ class MIRLowering
     false
   end
 
-  sig { params(source_node: T.untyped).returns(T::Boolean) }
+  sig { params(source_node: AST::Node).returns(T::Boolean) }
   def existing_owned_source_node?(source_node)
     source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetField) ||
       source_node.is_a?(AST::GetIndex) || source_node.is_a?(AST::OptionalUnwrap)
   end
 
-  sig { params(ast_node: T.untyped, source_node: T.untyped, ti: Type).returns(T::Boolean) }
+  sig { params(ast_node: AST::Node, source_node: AST::Node, ti: Type).returns(T::Boolean) }
   def borrowed_union_sink_source?(ast_node, source_node, ti)
     return false if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
     return false unless source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetIndex)
@@ -3291,7 +3291,7 @@ class MIRLowering
   end
 
   # Check if a value node is an Rc/Arc identifier that needs retain (not moved, not unwrapped)
-  sig { params(value_node: T.untyped).returns(T::Boolean) }
+  sig { params(value_node: AST::Node).returns(T::Boolean) }
   def rc_retain_needed?(value_node)
     return false unless value_node.is_a?(AST::Identifier)
     ti = Type.from_node!(value_node, context: "rc retain")

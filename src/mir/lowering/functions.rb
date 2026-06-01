@@ -1752,9 +1752,11 @@ module MIRLoweringFunctions
       index = arg_fact.index
       next unless ownership_facts.takes?(index)
 
-      materialized_args[index] = T.cast(
-        materialize_owned_sink_value(materialized_args[index], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type),
-        MIR::Node,
+      materialized_args[index] = materialize_owned_sink_value(
+        T.must(materialized_args[index]),
+        arg_fact.ast_arg,
+        sink_alloc,
+        arg_fact.sink_type,
       )
     end
 
