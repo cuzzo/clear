@@ -114,6 +114,278 @@ class PipelineHost
     end
   end
 
+  PlaceholderMap = T.type_alias { T::Hash[String, String] }
+  SoaFieldSet = T.type_alias { T::Set[T.any(Symbol, String)] }
+
+  class PipelinePlaceholderContext < T::Struct
+    extend T::Sig
+
+    const :placeholder_name, T.nilable(String)
+    const :acc_placeholder, T.nilable(String)
+    const :join_param_map, T.nilable(PipelineHost::PlaceholderMap)
+    const :named_bindings, PipelineHost::PlaceholderMap
+    const :soa_each_mode, T::Boolean
+    const :soa_rewrite_active, T::Boolean
+    const :soa_needed_fields, PipelineHost::SoaFieldSet
+
+    sig { returns(T::Boolean) }
+    def active?
+      !!(placeholder_name || acc_placeholder || join_param_map ||
+         soa_each_mode || soa_rewrite_active || !named_bindings.empty?)
+    end
+  end
+
+  class PipelinePlaceholderRewriter
+    extend T::Sig
+
+    sig { params(context: PipelinePlaceholderContext).void }
+    def initialize(context)
+      @context = T.let(context, PipelinePlaceholderContext)
+    end
+
+    sig { params(node: AST::Node).returns(AST::Node) }
+    def substitute(node)
+      return node unless @context.active?
+      return soa_each_field(T.cast(node, AST::GetField)) if soa_each_field?(node)
+
+      case node
+      when AST::Identifier then substitute_identifier(node)
+      when AST::FuncCall then substitute_func_call(node)
+      when AST::MethodCall then substitute_method_call(node)
+      when AST::BinaryOp then substitute_binary_op(node)
+      when AST::GetField then substitute_get_field(node)
+      when AST::GetIndex then substitute_get_index(node)
+      when AST::BindExpr then substitute_bind_expr(node)
+      when AST::Assignment then substitute_assignment(node)
+      when AST::UnaryOp then substitute_unary_op(node)
+      when AST::WithBlock then substitute_with_block(node)
+      when AST::StructLit then substitute_struct_lit(node)
+      when AST::HashLit then substitute_hash_lit(node)
+      when AST::Assert then substitute_assert(node)
+      when AST::IfStatement then substitute_if_statement(node)
+      else node
+      end
+    end
+
+    private
+
+    sig { params(node: AST::Node).returns(T::Boolean) }
+    def soa_each_field?(node)
+      @context.soa_each_mode && node.is_a?(AST::GetField) &&
+        node.target.is_a?(AST::Identifier) && node.target.name == "_"
+    end
+
+    sig { params(node: AST::GetField).returns(AST::Identifier) }
+    def soa_each_field(node)
+      @context.soa_needed_fields << node.field
+      new_id = AST::Identifier.new(node.token, "__soa_#{node.field}[__soa_i]")
+      copy_type_info(node, new_id)
+      new_id
+    end
+
+    sig { params(node: AST::Identifier).returns(AST::Node) }
+    def substitute_identifier(node)
+      join_param_map = @context.join_param_map
+      replacement = if node.name == "_"
+        @context.placeholder_name
+      elsif node.name == "acc"
+        @context.acc_placeholder
+      elsif join_param_map && join_param_map[node.name]
+        join_param_map[node.name]
+      elsif !@context.named_bindings.empty?
+        @context.named_bindings[node.name]
+      end
+      return node unless replacement
+
+      new_id = AST::Identifier.new(node.token, replacement)
+      copy_type_info(node, new_id)
+      new_id
+    end
+
+    sig { params(node: AST::FuncCall).returns(AST::Node) }
+    def substitute_func_call(node)
+      new_args = node.args.map { |a| substitute(a) }
+      return node if new_args == node.args
+
+      new_call = AST::FuncCall.new(node.token, node.name, new_args)
+      copy_type_info(node, new_call)
+      copy_call_metadata(node, new_call)
+      new_call
+    end
+
+    sig { params(node: AST::MethodCall).returns(AST::Node) }
+    def substitute_method_call(node)
+      new_target = substitute(node.object)
+      new_args = node.args.map { |a| substitute(a) }
+      return node if new_target == node.object && new_args == node.args
+
+      new_mc = AST::MethodCall.new(node.token, new_target, node.name, new_args)
+      copy_type_info(node, new_mc)
+      copy_call_metadata(node, new_mc)
+      new_mc
+    end
+
+    sig { params(node: AST::BinaryOp).returns(AST::Node) }
+    def substitute_binary_op(node)
+      new_left = substitute(node.left)
+      new_right = substitute(node.right)
+      return node if new_left == node.left && new_right == node.right
+
+      new_bin = AST::BinaryOp.new(node.token, new_left, node.op, new_right)
+      copy_type_info(node, new_bin)
+      new_bin.string_concat = node.string_concat if node.respond_to?(:string_concat) && node.string_concat
+      new_bin
+    end
+
+    sig { params(node: AST::GetField).returns(AST::Node) }
+    def substitute_get_field(node)
+      if @context.soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+        @context.soa_needed_fields << node.field
+        soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
+        AST.stamp_synthetic_type!(soa_field, soa_field_slice_type(node), context: "synthetic AST type")
+        soa_idx = AST::Identifier.new(node.token, "__soa_i")
+        AST.stamp_synthetic_type!(soa_idx, :Int64, context: "synthetic AST type")
+        new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
+        copy_type_info(node, new_gi)
+        return new_gi
+      end
+
+      new_target = substitute(node.target)
+      return node if new_target == node.target
+
+      new_gf = AST::GetField.new(node.token, new_target, node.field)
+      copy_type_info(node, new_gf)
+      new_gf
+    end
+
+    sig { params(node: AST::GetIndex).returns(AST::Node) }
+    def substitute_get_index(node)
+      new_target = substitute(node.target)
+      new_index = substitute(node.index)
+      return node if new_target == node.target && new_index == node.index
+
+      new_ia = AST::GetIndex.new(node.token, new_target, new_index)
+      copy_type_info(node, new_ia)
+      new_ia
+    end
+
+    sig { params(node: AST::BindExpr).returns(AST::Node) }
+    def substitute_bind_expr(node)
+      new_name = substitute_assignment_target(node.name)
+      new_value = substitute(node.value)
+      return node if new_name == node.name && new_value == node.value
+
+      new_bind = AST::BindExpr.new(node.token, new_name, node.type, new_value)
+      new_bind.mode = node.mode
+      new_bind.reassign_cleanup = node.reassign_cleanup
+      copy_type_info(node, new_bind)
+      new_bind
+    end
+
+    sig { params(node: AST::Assignment).returns(AST::Node) }
+    def substitute_assignment(node)
+      new_name = substitute_assignment_target(node.name)
+      new_value = substitute(node.value)
+      return node if new_name == node.name && new_value == node.value
+
+      new_assign = AST::Assignment.new(node.token, new_name, new_value)
+      new_assign.auto_lock = node.auto_lock
+      new_assign.field_pre_cleanup = node.field_pre_cleanup
+      copy_type_info(node, new_assign)
+      new_assign
+    end
+
+    sig { params(node: T.any(AST::Node, String)).returns(T.any(AST::Node, String)) }
+    def substitute_assignment_target(node)
+      node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ? substitute(node) : node
+    end
+
+    sig { params(node: AST::UnaryOp).returns(AST::Node) }
+    def substitute_unary_op(node)
+      new_operand = substitute(node.right)
+      return node if new_operand == node.right
+
+      new_uo = AST::UnaryOp.new(node.token, node.op, new_operand)
+      copy_type_info(node, new_uo)
+      new_uo
+    end
+
+    sig { params(node: AST::WithBlock).returns(AST::Node) }
+    def substitute_with_block(node)
+      new_body = node.body.map { |stmt| substitute(stmt) }
+      return node if new_body == node.body
+
+      new_with = AST::WithBlock.new(node.token, node.capabilities, new_body, node.deferred_drops)
+      copy_type_info(node, new_with)
+      new_with
+    end
+
+    sig { params(node: AST::StructLit).returns(AST::Node) }
+    def substitute_struct_lit(node)
+      new_fields = node.fields.transform_values { |v| substitute(v) }
+      return node if new_fields == node.fields
+
+      new_sl = AST::StructLit.new(node.token, node.name, new_fields, node.storage, node.type_args)
+      copy_type_info(node, new_sl)
+      new_sl
+    end
+
+    sig { params(node: AST::HashLit).returns(AST::Node) }
+    def substitute_hash_lit(node)
+      new_pairs = node.pairs.transform_values { |v| substitute(v) }
+      return node if new_pairs == node.pairs
+
+      new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)
+      copy_type_info(node, new_hl)
+      new_hl
+    end
+
+    sig { params(node: AST::Assert).returns(AST::Node) }
+    def substitute_assert(node)
+      new_cond = substitute(node.condition)
+      return node if new_cond == node.condition
+
+      new_assert = AST::Assert.new(node.token, new_cond, node.message)
+      copy_type_info(node, new_assert)
+      new_assert
+    end
+
+    sig { params(node: AST::IfStatement).returns(AST::Node) }
+    def substitute_if_statement(node)
+      new_cond = substitute(node.condition)
+      new_then = node.then_branch.map { |stmt| substitute(stmt) }
+      new_else = node.else_branch&.map { |stmt| substitute(stmt) }
+      return node if new_cond == node.condition && new_then == node.then_branch && new_else == node.else_branch
+
+      new_if = AST::IfStatement.new(node.token, new_cond, new_then, new_else, node.then_drops, node.else_drops)
+      new_if.expr_mode = node.expr_mode if node.respond_to?(:expr_mode)
+      new_if.then_result_type = node.then_result_type if node.respond_to?(:then_result_type)
+      new_if.else_result_type = node.else_result_type if node.respond_to?(:else_result_type)
+      copy_type_info(node, new_if)
+      new_if
+    end
+
+    sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+    def copy_type_info(src, dst)
+      AST.stamp_synthetic_type!(dst, src.full_type!(context: "pipeline rewrite type copy"), context: "synthetic AST type")
+      dst.coerced_type = src.coerced_type if src.coerced_type
+      dst.storage = src.storage if src.storage
+      dst.var_used = src.var_used
+    end
+
+    sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+    def copy_call_metadata(src, dst)
+      dst.zig_pattern = src.zig_pattern
+      dst.matched_stdlib_def = src.matched_stdlib_def
+    end
+
+    sig { params(field_node: AST::GetField).returns(Type) }
+    def soa_field_slice_type(field_node)
+      field_type = field_node.full_type!(context: "SOA field slice")
+      Type.new(:"#{field_type.resolved}[]")
+    end
+  end
+
   sig { returns(T.untyped) }
   attr_reader :fn_sigs
 
@@ -125,7 +397,7 @@ class PipelineHost
     # Pipeline context state (managed by with_pipeline_context)
     @soa_rewrite_active = T.let(false, T::Boolean)
     @soa_each_mode = T.let(false, T::Boolean)
-    @soa_needed_fields = T.let(Set.new, T::Set[T.untyped])
+    @soa_needed_fields = T.let(Set.new, PipelineHost::SoaFieldSet)
     @mir_mode = T.let(false, T::Boolean)
     @each_idx_counter = T.let(nil, T.nilable(Integer))
     @sh_counter = T.let(nil, T.nilable(Integer))
@@ -134,15 +406,15 @@ class PipelineHost
     @pipe_temp_counter = T.let(0, Integer)
     @current_pipe_label = T.let(nil, T.nilable(String))
     @placeholder_name = T.let(nil, T.nilable(String))
-    @acc_placeholder = T.let(nil, T.untyped)
+    @acc_placeholder = T.let(nil, T.nilable(String))
     @shard_direct_map = T.let(nil, T.untyped)
     @shard_direct_idx = T.let(nil, T.untyped)
     @shard_direct_key = T.let(nil, T.untyped)
     @shard_direct_hash = T.let(nil, T.untyped)
     @do_rt_name = T.let(nil, T.nilable(String))
     # Named pipeline bindings: "$u" -> "__pipe_u" (persist across stages, cleared per-chain)
-    @named_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
-    @join_param_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @named_bindings = T.let({}, PipelineHost::PlaceholderMap)
+    @join_param_map = T.let(nil, T.nilable(PipelineHost::PlaceholderMap))
   end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
@@ -186,7 +458,7 @@ class PipelineHost
   # Delegate task_config_zig to MIRLowering (used by CONCURRENT pipeline operators)
   sig { params(stack_size: T.nilable(Symbol), computed_tier: T.untyped).returns(String) }
   def task_config_zig(stack_size, computed_tier = nil)
-    @lowering.send(:task_config_zig, stack_size, computed_tier)
+    @lowering.task_config_zig(stack_size, computed_tier)
   end
 
   # Route AST node -> Zig string, handling pipeline-specific nodes
@@ -203,12 +475,12 @@ class PipelineHost
 
     # Join param map: lambda param names -> Zig loop variables
     if node.is_a?(AST::Identifier) && @join_param_map && @join_param_map[node.name]
-      return @join_param_map[node.name]
+      return @join_param_map.fetch(node.name)
     end
 
     # Named pipeline binding: $u -> registered Zig var (e.g. "__pipe_u")
     if node.is_a?(AST::Identifier) && !@named_bindings.empty? && @named_bindings.key?(node.name)
-      return @named_bindings[node.name]
+      return @named_bindings.fetch(node.name)
     end
 
     # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
@@ -299,181 +571,17 @@ class PipelineHost
   # Recursively replace AST::Identifier("_") with the current placeholder name,
   # and join param names with their Zig loop variable names.
   # Returns the node (possibly modified) or a new synthetic Identifier.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def substitute_placeholders(node)
-    return node unless @placeholder_name || @acc_placeholder || @join_param_map ||
-                       @soa_each_mode || @soa_rewrite_active || !@named_bindings.empty?
-
-    # SOA EACH: _.field -> synthetic identifier __soa_field[__soa_i]
-    if @soa_each_mode && node.is_a?(AST::GetField) &&
-       node.target.is_a?(AST::Identifier) && node.target.name == "_"
-      @soa_needed_fields << node.field
-      new_id = AST::Identifier.new(node.token, "__soa_#{node.field}[__soa_i]")
-      copy_type_info(node, new_id)
-      return new_id
-    end
-
-    case node
-    when AST::Identifier
-      if node.name == "_" && @placeholder_name
-        new_id = AST::Identifier.new(node.token, @placeholder_name)
-        copy_type_info(node, new_id)
-        return new_id
-      elsif node.name == "acc" && @acc_placeholder
-        new_id = AST::Identifier.new(node.token, @acc_placeholder)
-        copy_type_info(node, new_id)
-        return new_id
-      elsif @join_param_map && @join_param_map[node.name]
-        new_id = AST::Identifier.new(node.token, @join_param_map[node.name])
-        copy_type_info(node, new_id)
-        return new_id
-      elsif !@named_bindings.empty? && (zig_var = @named_bindings[node.name])
-        new_id = AST::Identifier.new(node.token, zig_var)
-        copy_type_info(node, new_id)
-        return new_id
-      end
-    when AST::FuncCall
-      new_args = node.args.map { |a| substitute_placeholders(a) }
-      if new_args != node.args
-        new_call = AST::FuncCall.new(node.token, node.name, new_args)
-        copy_type_info(node, new_call)
-        copy_call_metadata(node, new_call)
-        return new_call
-      end
-    when AST::MethodCall
-      new_target = substitute_placeholders(node.object)
-      new_args = node.args.map { |a| substitute_placeholders(a) }
-      if new_target != node.object || new_args != node.args
-        new_mc = AST::MethodCall.new(node.token, new_target, node.name, new_args)
-        copy_type_info(node, new_mc)
-        copy_call_metadata(node, new_mc)
-        return new_mc
-      end
-    when AST::BinaryOp
-      new_left = substitute_placeholders(node.left)
-      new_right = substitute_placeholders(node.right)
-      if new_left != node.left || new_right != node.right
-        new_bin = AST::BinaryOp.new(node.token, new_left, node.op, new_right)
-        copy_type_info(node, new_bin)
-        new_bin.string_concat = node.string_concat if node.respond_to?(:string_concat) && node.string_concat
-        return new_bin
-      end
-    when AST::GetField
-      # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
-      if @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-        @soa_needed_fields << node.field
-        soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
-        AST.stamp_synthetic_type!(soa_field, soa_field_slice_type(node), context: "synthetic AST type")
-        soa_idx = AST::Identifier.new(node.token, "__soa_i")
-        AST.stamp_synthetic_type!(soa_idx, :Int64, context: "synthetic AST type")
-        new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
-        copy_type_info(node, new_gi)
-        return new_gi
-      end
-      new_target = substitute_placeholders(node.target)
-      if new_target != node.target
-        new_gf = AST::GetField.new(node.token, new_target, node.field)
-        copy_type_info(node, new_gf)
-        return new_gf
-      end
-    when AST::GetIndex
-      new_target = substitute_placeholders(node.target)
-      new_index = substitute_placeholders(node.index)
-      if new_target != node.target || new_index != node.index
-        new_ia = AST::GetIndex.new(node.token, new_target, new_index)
-        copy_type_info(node, new_ia)
-        return new_ia
-      end
-    when AST::BindExpr
-      new_name = node.name.is_a?(AST::GetField) || node.name.is_a?(AST::GetIndex) ? substitute_placeholders(node.name) : node.name
-      new_value = substitute_placeholders(node.value)
-      if new_name != node.name || new_value != node.value
-        new_bind = AST::BindExpr.new(node.token, new_name, node.type, new_value)
-        new_bind.mode = node.mode
-        new_bind.reassign_cleanup = node.reassign_cleanup
-        copy_type_info(node, new_bind)
-        return new_bind
-      end
-    when AST::Assignment
-      new_name = node.name.is_a?(AST::GetField) || node.name.is_a?(AST::GetIndex) ? substitute_placeholders(node.name) : node.name
-      new_value = substitute_placeholders(node.value)
-      if new_name != node.name || new_value != node.value
-        new_assign = AST::Assignment.new(node.token, new_name, new_value)
-        new_assign.auto_lock = node.auto_lock
-        new_assign.field_pre_cleanup = node.field_pre_cleanup
-        copy_type_info(node, new_assign)
-        return new_assign
-      end
-    when AST::UnaryOp
-      new_operand = substitute_placeholders(node.right)
-      if new_operand != node.right
-        new_uo = AST::UnaryOp.new(node.token, node.op, new_operand)
-        copy_type_info(node, new_uo)
-        return new_uo
-      end
-    when AST::WithBlock
-      new_body = node.body.map { |stmt| substitute_placeholders(stmt) }
-      if new_body != node.body
-        new_with = AST::WithBlock.new(node.token, node.capabilities, new_body, node.deferred_drops)
-        copy_type_info(node, new_with)
-        return new_with
-      end
-    when AST::StructLit
-      new_fields = node.fields.transform_values { |v| substitute_placeholders(v) }
-      if new_fields != node.fields
-        new_sl = AST::StructLit.new(node.token, node.name, new_fields, node.storage, node.type_args)
-        copy_type_info(node, new_sl)
-        return new_sl
-      end
-    when AST::HashLit
-      new_pairs = node.pairs.transform_values { |v| substitute_placeholders(v) }
-      if new_pairs != node.pairs
-        new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)
-        copy_type_info(node, new_hl)
-        return new_hl
-      end
-    when AST::Assert
-      new_cond = substitute_placeholders(node.condition)
-      if new_cond != node.condition
-        new_assert = AST::Assert.new(node.token, new_cond, node.message)
-        copy_type_info(node, new_assert)
-        return new_assert
-      end
-    when AST::IfStatement
-      new_cond = substitute_placeholders(node.condition)
-      new_then = node.then_branch.map { |stmt| substitute_placeholders(stmt) }
-      new_else = node.else_branch&.map { |stmt| substitute_placeholders(stmt) }
-      if new_cond != node.condition || new_then != node.then_branch || new_else != node.else_branch
-        new_if = AST::IfStatement.new(node.token, new_cond, new_then, new_else, node.then_drops, node.else_drops)
-        new_if.expr_mode = node.expr_mode if node.respond_to?(:expr_mode)
-        new_if.then_result_type = node.then_result_type if node.respond_to?(:then_result_type)
-        new_if.else_result_type = node.else_result_type if node.respond_to?(:else_result_type)
-        copy_type_info(node, new_if)
-        return new_if
-      end
-    end
-
-    node
-  end
-
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
-  def copy_type_info(src, dst)
-    AST.stamp_synthetic_type!(dst, src.full_type!(context: "pipeline rewrite type copy"), context: "synthetic AST type")
-    dst.coerced_type = src.coerced_type if src.coerced_type
-    dst.storage = src.storage if src.storage
-    dst.var_used = src.var_used
-  end
-
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
-  def copy_call_metadata(src, dst)
-    dst.zig_pattern = src.zig_pattern
-    dst.matched_stdlib_def = src.matched_stdlib_def
-  end
-
-  sig { params(field_node: AST::GetField).returns(Type) }
-  def soa_field_slice_type(field_node)
-    field_type = field_node.full_type!(context: "SOA field slice")
-    Type.new(:"#{field_type.resolved}[]")
+    PipelinePlaceholderRewriter.new(PipelinePlaceholderContext.new(
+      placeholder_name: @placeholder_name,
+      acc_placeholder: @acc_placeholder,
+      join_param_map: @join_param_map,
+      named_bindings: @named_bindings,
+      soa_each_mode: @soa_each_mode,
+      soa_rewrite_active: @soa_rewrite_active,
+      soa_needed_fields: @soa_needed_fields,
+    )).substitute(node)
   end
 
   public
@@ -555,10 +663,9 @@ class PipelineHost
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
     if source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
       alloc = source_mir.allocs.any_heap? ? :heap : :frame
-      @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
-      mark = MIR::AllocMark.new("pipe_src_list", alloc, list_node.full_type!)
-      mark.scope = MIR::Placement.alloc_scope(alloc)
-      source_prefix << mark
+      fact = @lowering.pipeline_alloc_mark_fact(source_mir, "pipe_src_list",
+        fallback_alloc: alloc, type_info: list_node.full_type!, known_allocating: true)
+      source_prefix << fact.mark if fact
       source_cleanup = MIR::Cleanup.new("pipe_src_list",
         CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: list_node.full_type!.zig_type))
     end
@@ -628,7 +735,7 @@ class PipelineHost
 
   sig { returns(T.nilable(Proc)) }
   def pipeline_schema_lookup
-    T.unsafe(@lowering).instance_variable_get(:@schema_lookup)
+    @lowering.mir_schema_lookup
   end
 
   sig { params(value: T.untyped, type_info: Type, alloc: Symbol).returns(T.untyped) }
@@ -648,8 +755,7 @@ class PipelineHost
            zig_type: String, alloc: Symbol).returns(T::Array[T.untyped])
   end
   def owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
-    mark = MIR::AllocMark.new(name, alloc, type_info)
-    mark.scope = MIR::Placement.heap?(alloc) ? :heap : :function
+    mark = MIR::AllocMark.new(name, alloc, type_info, MIR::Placement.heap?(alloc) ? :heap : :function)
     entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
     [
       mark,
@@ -692,19 +798,14 @@ class PipelineHost
   # try pipe_mat.append(rt.heapAlloc(), value_expr)
   sig { params(receiver: String, alloc: Symbol, value_expr: T.untyped).returns(T.untyped) }
   def append_owned_value_stmt(receiver, alloc, value_expr)
-    if @lowering.send(:mir_allocates?, value_expr)
+    if (fact = @lowering.pipeline_alloc_mark_fact(value_expr, "__pipe_item_#{@pipe_temp_counter + 1}",
+          fallback_alloc: alloc, ast_node: nil, context: "pipeline owned append item"))
       @pipe_temp_counter += 1
-      temp_name = "__pipe_item_#{@pipe_temp_counter}"
-      value_alloc = @lowering.send(:mir_owned_alloc, value_expr) || alloc
-      @lowering.send(:stamp_allocating_result_target!, value_expr, temp_name, alloc: value_alloc)
-      entry = CleanupEntry.build(:uniform, alloc: value_alloc, has_moved_guard: true,
+      temp_name = fact.mark.name
+      entry = CleanupEntry.build(:uniform, alloc: fact.alloc, has_moved_guard: true,
         zig_type: value_expr.respond_to?(:zig_type) && value_expr.zig_type ? value_expr.zig_type : "void")
-      mark_type = @lowering.send(:mir_alloc_mark_type_info, value_expr, nil,
-        context: "pipeline owned append item")
-      mark = MIR::AllocMark.new(temp_name, value_alloc, mark_type)
-      mark.scope = MIR::Placement.alloc_scope(value_alloc)
       return MIR::ScopeBlock.new([
-        mark,
+        fact.mark,
         MIR::Let.new(temp_name, value_expr, false, nil, nil),
         MIR::ErrCleanup.new(temp_name, entry),
         MIR::ExprStmt.new(
@@ -1931,21 +2032,15 @@ class PipelineHost
     end
     value_body = T.let([], T::Array[T.untyped])
     if value_ownership == :owned && item_owns
-      mark = MIR::AllocMark.new(item_var, alloc, item_type || Type.new(:Any))
-      mark.scope = MIR::Placement.alloc_scope(alloc)
+      mark = MIR::AllocMark.new(item_var, alloc, item_type || Type.new(:Any), MIR::Placement.alloc_scope(alloc))
       value_body << mark
-    elsif @lowering.send(:mir_allocates?, item_value)
+    elsif (fact = @lowering.pipeline_alloc_mark_fact(item_value, "__idx_item_#{@pipe_temp_counter + 1}",
+          fallback_alloc: alloc, ast_node: nil, context: "INDEX bucket item", include_cleanup: true))
       @pipe_temp_counter += 1
-      value_name = "__idx_item_#{@pipe_temp_counter}"
-      value_alloc = @lowering.send(:mir_owned_alloc, item_value) || alloc
-      @lowering.send(:stamp_allocating_result_target!, item_value, value_name, alloc: value_alloc)
-      mark_type = @lowering.send(:mir_alloc_mark_type_info, item_value, nil,
-        context: "INDEX bucket item")
-      mark = MIR::AllocMark.new(value_name, value_alloc, mark_type)
-      mark.scope = MIR::Placement.alloc_scope(value_alloc)
-      entry = T.unsafe(@lowering).hoist_cleanup_entry(item_value, nil)
-      value_body << mark
+      value_name = fact.mark.name
+      value_body << fact.mark
       value_body << MIR::Let.new(value_name, item_value, false, nil, nil)
+      entry = fact.cleanup_entry
       if entry
         entry[:has_moved_guard] = true
         value_body << MIR::ErrCleanup.new(value_name, entry)
@@ -1957,15 +2052,7 @@ class PipelineHost
       MIR::Ident.new("idx_key"),
       item_value,
       "u8", elem_zig_type, alloc)
-    if item_owns || @lowering.send(:mir_allocates?, item_value)
-      insert = T.cast(@lowering.send(:with_ownership_consumption,
-        insert,
-        @lowering.send(:mir_ident_names, item_value),
-        "MIR::IndexInsert",
-        :owned_sink,
-        target_alloc: alloc,
-        require_visible: false), MIR::IndexInsert)
-    end
+    insert = @lowering.pipeline_index_insert_with_ownership(insert, item_value, item_owns, target_alloc: alloc)
     body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       *value_body,
@@ -1978,8 +2065,7 @@ class PipelineHost
 
   sig { params(expr_mir: T.untyped, expr_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def index_key_cleanup_entry(expr_mir, expr_node)
-    return nil unless T.unsafe(@lowering).mir_owned_alloc(expr_mir)
-    T.unsafe(@lowering).hoist_cleanup_entry(expr_mir, expr_node)
+    @lowering.pipeline_owned_cleanup_entry(expr_mir, expr_node)
   end
 
   sig { params(range_chain: T::Hash[T.untyped, T.untyped], expr_node: T.untyped, elem_zig: String, elem_type: Type, alloc: Symbol, map_type: String, result_type: Type).returns(MIR::BlockExpr) }
@@ -2405,7 +2491,7 @@ class PipelineHost
     end
 
     helper = lhs_type.pool? ? :concurrentShardedPoolEachInPlace : :concurrentShardedListEachInPlace
-    call = @lowering.send(:emit_builtin, helper, [
+    call = @lowering.emit_builtin(helper, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(shard_count.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -3005,10 +3091,8 @@ class PipelineHost
       MIR::OwnershipOperandFact.owned_binding("__obs_wg", Type.new(:"CheatHeader.WaitGroup", layout: :indirect), "observable completion", :heap),
     ])
     wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap,
-      Type.new(:"CheatHeader.WaitGroup", layout: :indirect))
-    wg_alloc_mark.scope = :heap
-    acc_alloc_mark = MIR::AllocMark.new("__obs_acc", :heap, Type.new(obs_zig))
-    acc_alloc_mark.scope = :heap
+      Type.new(:"CheatHeader.WaitGroup", layout: :indirect), :heap)
+    acc_alloc_mark = MIR::AllocMark.new("__obs_acc", :heap, Type.new(obs_zig), :heap)
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],
       acc_alloc_mark,
@@ -3069,7 +3153,7 @@ class PipelineHost
     @lowering.instance_variable_set(:@rt_name, fiber_rt)
     body_zig = begin
       body_mir.filter_map { |m|
-        code = @lowering.send(:emit_expr, m)
+        code = @lowering.emit_expr(m)
         next nil if code.nil? || code.empty?
         code.strip.end_with?("}", ";") ? code : "#{code};"
       }.join("\n            ")
@@ -3086,7 +3170,7 @@ class PipelineHost
     # sides local avoids cross-scheduler stream waiter handoff on the
     # hot path and lets producer/consumer/main make cooperative progress
     # through the scheduler's normal yield points.
-    task_cfg = @lowering.send(:task_config_zig, nil, nil)
+    task_cfg = @lowering.task_config_zig(nil, nil)
 
     spawn_zig = <<~ZIG.chomp
       const #{ctx_type} = struct {
@@ -3259,7 +3343,7 @@ class PipelineHost
   def lower_range_reduce_observable(p, reduce_op, smooth_node, label, source_node)
     inner_zig = transpile_type(smooth_node.full_type!.tense_type)
     init_mir  = visit_mir(reduce_op.initial_value)
-    init_zig  = @lowering.send(:emit_expr, init_mir)
+    init_zig  = @lowering.emit_expr(init_mir)
 
     # Use a fid-prefixed sentinel for the `acc` substitution so
     # nothing in the user's reducer body can collide. Two REDUCE
@@ -3275,7 +3359,7 @@ class PipelineHost
     body_mir = with_pipeline_context(placeholder: p[:item_var], acc: curr_var) {
       visit_mir(reduce_op.expression)
     }
-    body_zig = @lowering.send(:emit_expr, body_mir)
+    body_zig = @lowering.emit_expr(body_mir)
 
     # Inline CAS-loop publish, wrapped as a labeled block expression so
     # ExprStmt's trailing `;` is well-formed (`(blk: { ... break :blk 0; });`).
@@ -3333,7 +3417,7 @@ class PipelineHost
     is_bounded   = set_type.fixed?
     cap          = set_type.capacity
 
-    submit_call = "_ = __obs_acc.inner.submit(#{@lowering.send(:emit_expr, key_expr_mir)})"
+    submit_call = "_ = __obs_acc.inner.submit(#{@lowering.emit_expr(key_expr_mir)})"
     submit_call = "#{submit_call} catch unreachable" unless is_bounded
     publish = [
       MIR::ExprStmt.new(MIR::InlineZig.new(submit_call, "obs_distinct_publish"), nil),
@@ -3851,7 +3935,7 @@ class PipelineHost
 
     key_mir, key_pending, body_mir = nil, [], nil
     begin
-      key_mir, key_pending = @lowering.send(:lower_head) {
+      key_mir, key_pending = @lowering.lower_head {
         with_pipeline_context(placeholder: idx_var) {
         visit_mir(ctx[:key_expr])
         }
@@ -3869,20 +3953,17 @@ class PipelineHost
       inner.concat(shard_loop_mark_pair("__sh#{id}_loop_mark", @do_rt_name || "rt", tag: "shard_loop"))
     end
     inner.concat(key_pending)
-    if @lowering.send(:mir_allocates?, key_mir) || (key_mir.is_a?(MIR::Call) && key_mir.owned_return?)
-      key_type = Type.from_node!(ctx[:key_expr], context: "SHARD key binding")
-      key_alloc = @lowering.send(:mir_owned_alloc, key_mir) || :heap
-      key_mark = MIR::AllocMark.new(key_var, key_alloc, key_type)
-      key_mark.scope = MIR::Placement.alloc_scope(key_alloc)
-      inner << key_mark
+    if (fact = @lowering.pipeline_alloc_mark_fact(key_mir, key_var,
+          fallback_alloc: :heap, type_info: Type.from_node!(ctx[:key_expr], context: "SHARD key binding"),
+          ast_node: ctx[:key_expr], accept_owned_call: true, include_cleanup: true))
+      inner << fact.mark
       inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
-      cleanup = @lowering.send(:hoist_cleanup_entry, key_mir, ctx[:key_expr])
-      inner << MIR::Cleanup.new(key_var, cleanup) if cleanup
+      inner << MIR::Cleanup.new(key_var, fact.cleanup_entry) if fact.cleanup_entry
     else
       inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
     end
     inner.concat(body_mir)
-    inner = @lowering.send(:append_ownership_transfers_for_mir_body, inner)
+    inner = @lowering.append_ownership_transfers_for_mir_body(inner)
 
     # BC: ForStmt over IterRange (the VM iterates Int64 directly so the idx_var
     # binds an Int64). No map ptr setup, channels, or ensureOwnership.
@@ -3905,16 +3986,16 @@ class PipelineHost
     key_zig = key_t.zig_type
     string_key = !map_t&.numeric_map?
 
-    start_zig = @lowering.send(:emit_expr, start_mir)
-    end_zig   = @lowering.send(:emit_expr, end_mir)
+    start_zig = @lowering.emit_expr(start_mir)
+    end_zig   = @lowering.emit_expr(end_mir)
     cap_mir = stream_concurrent_capacity_mir(conc_op, shard_count.to_s)
-    cap_zig = @lowering.send(:emit_expr, cap_mir)
+    cap_zig = @lowering.emit_expr(cap_mir)
     batch_mir = bounded_concurrent_batch_mir(conc_op)
-    batch_zig = @lowering.send(:emit_expr, batch_mir)
+    batch_zig = @lowering.emit_expr(batch_mir)
     task_cfg = task_config_zig(conc_op.options["size"]&.name&.downcase&.to_sym)
 
     key_mir = with_pipeline_context(placeholder: idx_var) { visit_mir(ctx[:key_expr]) }
-    key_zig_expr = @lowering.send(:emit_expr, key_mir)
+    key_zig_expr = @lowering.emit_expr(key_mir)
 
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
     shard_map_field = "__shard_map"
@@ -3947,7 +4028,7 @@ class PipelineHost
     @lowering.instance_variable_set(:@rt_name, "__rt")
     body_zig = begin
       body_mir.filter_map { |m|
-        code = @lowering.send(:emit_expr, m)
+        code = @lowering.emit_expr(m)
         next nil if code.nil? || code.empty?
         code.strip.end_with?("}", ";") ? code : "#{code};"
       }.join("\n                    ")
@@ -4001,7 +4082,7 @@ class PipelineHost
 
     code = <<~ZIG.chomp
       {
-          const #{map_ptr} = &#{@lowering.send(:emit_expr, visit_mir(map_node))};
+          const #{map_ptr} = &#{@lowering.emit_expr(visit_mir(map_node))};
           #{map_ptr}.ensureOwnership();
           const __sh#{id}_cap: usize = #{cap_zig};
           const __sh#{id}_batch: usize = @max(@as(usize, #{batch_zig}), 1);
@@ -4204,7 +4285,7 @@ class PipelineHost
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::InlineZig) }
   def bounded_concurrent_worker_count_for_call_mir(conc_op)
     raw = bounded_concurrent_worker_count_mir(conc_op)
-    raw_zig = @lowering.send(:emit_expr, raw)
+    raw_zig = @lowering.emit_expr(raw)
     MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_workers_usize")
   end
 
@@ -4221,7 +4302,7 @@ class PipelineHost
   def bounded_concurrent_batch_mir(conc_op)
     if (batch = conc_op.options["batch"])
       raw = visit_mir(batch)
-      raw_zig = @lowering.send(:emit_expr, raw)
+      raw_zig = @lowering.emit_expr(raw)
       MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_batch_usize")
     else
       MIR::Lit.new("1")
@@ -4385,7 +4466,7 @@ class PipelineHost
     setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
     source_move = bounded_stream_source_move(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentBoundedSelect, [
+    call = @lowering.emit_builtin(:concurrentBoundedSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
@@ -4416,7 +4497,7 @@ class PipelineHost
     setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
     source_move = bounded_stream_source_move(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentBoundedWhere, [
+    call = @lowering.emit_builtin(:concurrentBoundedWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -4446,7 +4527,7 @@ class PipelineHost
     setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
     source_move = bounded_stream_source_move(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentBoundedEach, [
+    call = @lowering.emit_builtin(:concurrentBoundedEach, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -4501,7 +4582,7 @@ class PipelineHost
   sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::InlineZig) }
   def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
     if (cap_node = conc_op.options&.[]("capacity"))
-      cap_zig = @lowering.send(:emit_expr, @lowering.lower(cap_node))
+      cap_zig = @lowering.emit_expr(@lowering.lower(cap_node))
       MIR::InlineZig.new("@intCast(#{cap_zig})", "stream_conc_capacity_user")
     else
       expr = "blk: { var c: usize = 4; while (c < #{n_workers_zig} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
@@ -4519,10 +4600,10 @@ class PipelineHost
     is_inf = lhs_ti.inf_stream? ? "true" : "false"
 
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @lowering.send(:emit_expr, n_workers_mir)
+    n_workers_zig = @lowering.emit_expr(n_workers_mir)
     cap_mir = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @lowering.send(:emit_builtin, :concurrentStreamSelect, [
+    call = @lowering.emit_builtin(:concurrentStreamSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -4555,10 +4636,10 @@ class PipelineHost
     is_inf = lhs_ti.inf_stream? ? "true" : "false"
 
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @lowering.send(:emit_expr, n_workers_mir)
+    n_workers_zig = @lowering.emit_expr(n_workers_mir)
     cap_mir = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @lowering.send(:emit_builtin, :concurrentStreamWhere, [
+    call = @lowering.emit_builtin(:concurrentStreamWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
@@ -4590,10 +4671,10 @@ class PipelineHost
     is_inf = lhs_ti.inf_stream? ? "true" : "false"
 
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @lowering.send(:emit_expr, n_workers_mir)
+    n_workers_zig = @lowering.emit_expr(n_workers_mir)
     cap_mir = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @lowering.send(:emit_builtin, :concurrentStreamEach, [
+    call = @lowering.emit_builtin(:concurrentStreamEach, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
@@ -4639,13 +4720,10 @@ class PipelineHost
     source_mir = visit_mir(lhs)
     source_prefix = T.let([], T::Array[T.untyped])
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
-    if @lowering.send(:mir_allocates?, source_mir)
-      owned_alloc = @lowering.send(:mir_owned_alloc, source_mir)
-      alloc = owned_alloc || :heap
-      @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
-      mark = MIR::AllocMark.new("pipe_src_list", alloc, lhs.full_type!)
-      mark.scope = MIR::Placement.alloc_scope(alloc)
-      source_prefix << mark
+    if (fact = @lowering.pipeline_alloc_mark_fact(source_mir, "pipe_src_list",
+          fallback_alloc: :heap, type_info: lhs.full_type!))
+      alloc = fact.alloc
+      source_prefix << fact.mark
       source_cleanup = MIR::Cleanup.new("pipe_src_list",
         CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: lhs_type.zig_type))
     end
@@ -4678,7 +4756,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListSelect, [
+    call = @lowering.emit_builtin(:concurrentListSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -4706,7 +4784,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListWhere, [
+    call = @lowering.emit_builtin(:concurrentListWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::AllocatorRef.new(pipeline_result_alloc),
@@ -4733,7 +4811,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListCount, [
+    call = @lowering.emit_builtin(:concurrentListCount, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Ident.new("rt"),
@@ -4778,7 +4856,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListReduce, [
+    call = @lowering.emit_builtin(:concurrentListReduce, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_zig),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
@@ -4807,7 +4885,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Void, :each)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListEach, [
+    call = @lowering.emit_builtin(:concurrentListEach, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Ident.new("rt"),
@@ -4870,7 +4948,7 @@ class PipelineHost
     cb = build_bounded_concurrent_callback_pointer(conc_op, item_t)
     setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
-    call = @lowering.send(:emit_builtin, :concurrentListEachInPlace, [
+    call = @lowering.emit_builtin(:concurrentListEachInPlace, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Ident.new("rt"),

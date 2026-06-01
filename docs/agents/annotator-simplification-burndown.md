@@ -19,6 +19,137 @@ evaluation for each item must say one of:
 Bug fixes override the metrics. If fixing a real bug worsens a simplification
 metric, keep the bug fix and record the tradeoff.
 
+## Current Architecture Review Queue
+
+- [x] `review-annotator-match-with-ownership`: implement the targeted cleanup
+  from `docs/agents/review_annotator_match_with_ownership.md`. Snapshot
+  Decomplex and SlopCop before/after. No compatibility path is allowed:
+  scoped state helpers must replace direct ambient-state mutation at the call
+  sites they cover, and any fact object must delete the old hash/inline branch
+  path in the same change.
+- [x] `review-capability-with-concurrency-lowering`: implement the targeted
+  cleanup from `docs/agents/review_capability_with_concurrency_lowering.md`.
+  Snapshot Decomplex and SlopCop before/after. Only keep plan/fact extraction
+  if it removes branch surface from lowering; do not add parallel plan objects
+  beside the old classification logic.
+
+## Architecture Review Closeout: PipelineHost Boundary
+
+Metric files:
+
+- `tmp/agent-metrics/decomplex-before-pipeline-complete.md`
+- `tmp/agent-metrics/decomplex-after-pipeline-complete.md`
+- `tmp/agent-metrics/slopcop-before-pipeline-complete.md`
+- `tmp/agent-metrics/slopcop-after-pipeline-complete.md`
+
+Attempt:
+
+- Tried to collapse `pipeline_alloc_mark_fact`,
+  `pipeline_owned_cleanup_entry`, and
+  `pipeline_index_insert_with_ownership` into one
+  `pipeline_materialize_value` operation.
+
+Result:
+
+- Validation stayed green, but the metrics moved the wrong way.
+- SlopCop genuine gaps regressed: `133 -> 148`.
+- Decomplex total candidates regressed: `1374 -> 1378`.
+- Broken Protocols regressed: `440 -> 455`.
+
+Evaluation: **Scrap**. The attempted collapse produced a broader protocol
+instead of deleting real protocol surface. The current typed public bridge
+operations are the better stopping point until there is a real semantic object
+that can delete call surface without reintroducing a compatibility path.
+
+Bug found while validating this branch:
+
+- The previous placeholder rewriter extraction typed assignment targets as
+  `AST::Node`, but `AST::BindExpr#name` can be a binding-name string in pipeline
+  rewrites. This caused SHARD and bounded stream pipeline lowering to fail at
+  runtime under Sorbet validation. Fixed by typing
+  `substitute_assignment_target` as `T.any(AST::Node, String)` and preserving
+  strings unchanged.
+
+## Architecture Review Closeout: Annotator Match and WITH Ownership
+
+Metric files:
+
+- `tmp/agent-metrics/decomplex-before-annotator-match-with.md`
+- `tmp/agent-metrics/decomplex-after-annotator-match-with.md`
+- `tmp/agent-metrics/slopcop-before-annotator-match-with.md`
+- `tmp/agent-metrics/slopcop-after-annotator-match-with.md`
+
+Implemented:
+
+- Replaced direct `@match_pattern_context` push/pop in
+  `visit_MatchStatement` with `with_match_pattern_context`.
+- Replaced direct held-lock state push/pop in `visit_WithBlock` with
+  `with_held_locks`.
+- Replaced direct snapshot transaction state push/pop in `visit_WithBlock`
+  with `with_snapshot_transaction_body`.
+- Kept the implementation strongly typed; no added untyped Sorbet escape
+  hatches.
+
+Metrics:
+
+- Decomplex total findings: `899 -> 896`.
+- Decomplex Broken Protocols: `340 -> 333`.
+- Decomplex False Simplicity: `289 -> 293`.
+- SlopCop genuine gaps: `117 -> 114`.
+
+Evaluation: **Worth it**. The gain is modest, but this removes fragile ambient
+state restoration from compiler-critical match/WITH paths and replaces it with
+single scoped ownership of the state. The small False Simplicity increase is
+from the scoped helper blocks; that is acceptable because the old direct
+mutation path was fully deleted and the real protocol/gap counts moved down.
+
+## Architecture Review Closeout: Capability/WITH/Concurrency Lowering
+
+Metric files:
+
+- `tmp/agent-metrics/decomplex-before-capability-concurrency.md`
+- `tmp/agent-metrics/decomplex-after-capability-concurrency.md`
+- `tmp/agent-metrics/slopcop-before-capability-concurrency.md`
+- `tmp/agent-metrics/slopcop-after-capability-concurrency.md`
+
+Implemented:
+
+- Replaced direct WITH alias/unwrap map push/pop in `lower_with_block` with
+  `with_capability_alias_maps`.
+- Replaced BG body pointer-capture and pending-hoist push/pop with
+  `with_bg_fiber_body_context`.
+- Replaced BG STREAM yield-context push/pop with `with_stream_body_context`.
+- Kept the implementation strongly typed; no added untyped Sorbet escape
+  hatches.
+
+Metrics:
+
+- Decomplex total findings: `834 -> 825`.
+- Decomplex Broken Protocols: `313 -> 301`.
+- Decomplex root-cause clusters: `64 -> 63`.
+- Decomplex False Simplicity: `293 -> 296`.
+- SlopCop genuine gaps: `121 -> 102`.
+
+Evaluation: **Worth it**. This produced a substantial SlopCop improvement and
+closed real protocol findings while also fixing a correctness risk: these
+lowering contexts now restore through `ensure` if nested lowering raises. The
+new scoped helpers show up as a small False Simplicity cost, but the old inline
+state mutation paths were deleted rather than kept beside the new path.
+
+## Additional Bug/Invariants Fixed
+
+- Fixed `MIRLoweringControlFlow#return_destination_type` to use the already
+  typed `current_function_return_type` directly instead of optional
+  `Type.from_node(...)`. This closes the architecture invariant that
+  post-annotation AST values use hard type contracts.
+
+Final full-source snapshot after all fixes:
+
+- Decomplex: total findings `5049`, Broken Protocols `1463`, root-cause
+  clusters `326`, site findings `9804`.
+- SlopCop: genuine gaps `1102`, type/nil guard gaps `1053`, diagnostic gaps
+  `835`.
+
 ## Baseline Snapshot
 
 Generated May 31, 2026 from the current working tree before this burndown.

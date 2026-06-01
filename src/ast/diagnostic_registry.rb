@@ -1852,7 +1852,7 @@ module DiagnosticRegistry
       template: "%{message}",
       summary:  "InlineZig op on a pointer-passed parameter must not use the frame allocator.",
       cause: "A pointer-passed parameter (MUTABLE collection / `*T` Zig type) carries a lifetime that extends past this function's mark/restore. A `:frame` allocation here would die when the function returns, leaving the caller with a dangling buffer pointer — a cross-frame use-after-free.",
-      fix_hint: "Lowering bug — `resolve_alloc_sym` for `:receiver_storage` should pick `:heap` when the receiver is a pointer-passed param. The matching escape promotion lives in escape_analysis.rb (Condition 9). If both look right, check that `@current_fn_collection_params` is populated for this function.",
+      fix_hint: "Lowering bug — `resolve_alloc_sym` for `:receiver_storage` should pick `:heap` when the receiver is a pointer-passed param. The matching escape promotion lives in escape_analysis.rb (Condition 9). If both look right, check that the MIR function context marks this as a collection parameter.",
     },
     INLINE_NO_CONTRACT: {
       severity: :error, category: :mir,

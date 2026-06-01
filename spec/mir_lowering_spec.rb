@@ -25,6 +25,35 @@ RSpec.describe MIRLowering do
     emitter.emit(mir_node)
   end
 
+  def install_function_context(low, **overrides)
+    defaults = {
+      bindings: {},
+      binding_types: {},
+      collection_params: Set.new,
+      mutable_scalar_params: Set.new,
+      param_names: Set.new,
+      takes_param_names: Set.new,
+      heap_carry_return_vars: Set.new,
+      returned_names: Set.new,
+      snapshot_types: Set.new,
+      fn_alloc_marked_names: {},
+      lowered_alloc_names: Set.new,
+      lowered_guarded_cleanup_names: Set.new,
+      decl_zig_name_map: {},
+      guarded_cleanup_names: {},
+      fn_name_rename_map: {},
+      has_rt: false,
+      tail_call: false,
+      zig_name: "test",
+      return_payload_zig: "void",
+      return_type: Type.new(:Void),
+      heap_carry_return: false,
+      has_catch: false,
+    }
+    low.send(:activate_function_context,
+      MIRLoweringFunctions::FunctionLoweringContext.new(**defaults.merge(overrides)))
+  end
+
   def make_lit(type, value, full_type: nil, storage: nil)
     node = AST::Literal.new(tok, type, value, storage)
     node.full_type = full_type || case type
@@ -551,7 +580,7 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       l = lowering
-      l.instance_variable_set(:@current_fn_param_names, ["items"])
+      install_function_context(l, param_names: Set["items"])
       result = l.lower(node)
       expect(result).to be_a(MIR::IndexGet)
       expect(emit(result)).to eq("items[@as(usize, @intCast(0))]")
@@ -586,7 +615,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Int64
       node.zig_pattern = "CheatLib.len({0})"
       l = lowering
-      l.instance_variable_set(:@current_fn_param_names, ["items"])
+      install_function_context(l, param_names: Set["items"])
       result = l.lower(node)
       expect(emit(result)).to eq("CheatLib.len(items)")
     end
@@ -1746,7 +1775,7 @@ RSpec.describe MIRLowering do
       node.compound_op = :ADD
       node.auto_atomic_op = :fetchAdd
       low = lowering
-      low.instance_variable_set(:@current_fn_mutable_scalar_params, Set["c"])
+      install_function_context(low, mutable_scalar_params: Set["c"])
 
       result = low.lower(node)
 
@@ -1773,7 +1802,7 @@ RSpec.describe MIRLowering do
       node = AST::WhileBindLoop.new(tok, cond, "node", tok, [AST::ContinueNode.new(tok)], nil)
       node.mark_per_iter = true
       low = lowering
-      low.instance_variable_set(:@current_fn_has_rt, true)
+      install_function_context(low, has_rt: true)
 
       result = low.lower(node)
 
@@ -1804,7 +1833,7 @@ RSpec.describe MIRLowering do
       coll = make_id("scores", full_type: :"HashMap<Int64>")
       node = AST::ForEach.new(tok, "name", coll, [AST::ContinueNode.new(tok)], nil, false)
       low = lowering
-      low.instance_variable_set(:@current_fn_has_rt, true)
+      install_function_context(low, has_rt: true)
 
       result = low.lower(node)
 
@@ -1833,7 +1862,7 @@ RSpec.describe MIRLowering do
       coll = make_id("items", full_type: :"Int64[]@list")
       node = AST::ForEach.new(tok, "item", coll, [AST::BreakNode.new(tok)], nil, false)
       low = lowering
-      low.instance_variable_set(:@current_fn_param_names, Set["items"])
+      install_function_context(low, param_names: Set["items"])
 
       result = low.lower(node)
 

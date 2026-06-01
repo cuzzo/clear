@@ -150,8 +150,26 @@ RSpec.describe "pipeline backend coverage" do
           [yield, []]
         end
 
-        def mir_allocates?(_node)
-          false
+        def pipeline_alloc_mark_fact(_value, _name, fallback_alloc:, type_info: nil, ast_node: nil,
+                                     context: "pipeline allocation", known_allocating: false,
+                                     accept_owned_call: false, include_cleanup: false)
+          nil
+        end
+
+        def pipeline_owned_cleanup_entry(_value, _ast_node)
+          nil
+        end
+
+        def pipeline_index_insert_with_ownership(insert, _value, _value_owns, target_alloc:)
+          insert
+        end
+
+        def emit_expr(node)
+          node.respond_to?(:value) ? node.value.to_s : node.name.to_s
+        end
+
+        def emit_builtin(name, args)
+          MIR::InlineZig.new("#{name}(#{args.map { |arg| emit_expr(arg) }.join(", ")})", "test_builtin")
         end
 
         def append_ownership_transfers_for_mir_body(body)
@@ -165,6 +183,7 @@ RSpec.describe "pipeline backend coverage" do
         def task_config_zig(_stack_size, _computed_tier = nil)
           ".{}"
         end
+
       end.new
     end
 

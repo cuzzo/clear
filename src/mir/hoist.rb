@@ -467,13 +467,17 @@ module MIRHoistLowering
     name = "__tmp_#{@tmp_counter}"
     ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
     alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, ti)
-    mark.scope = MIR::Placement.alloc_scope(alloc)
-    @pending_stmts << mark
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: T.cast(expr, MIR::Node),
+      alloc: alloc,
+      type_info: ti,
+      mutable: false
+    )
+    @pending_stmts.concat(materialized.statements)
     @lowered_alloc_names&.add(name)
     @lowered_alloc_names&.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
-    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
 
@@ -534,12 +538,6 @@ module MIRHoistLowering
     value.respond_to?(:expr?) && value.expr?
   end
 
-  sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
-  def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
-    return :heap if mir_allocates?(init)
-    Kernel.raise "Hoist cannot choose heap/frame from node storage; placement must be on the binding symbol"
-  end
-
   sig do
     params(
       expr: T.untyped,
@@ -556,26 +554,17 @@ module MIRHoistLowering
     end
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
-    @tmp_counter += 1
-    name = "__tmp_#{@tmp_counter}"
-    ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "MIR allocating hoist")
-    alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, ti)
-    mark.scope = MIR::Placement.alloc_scope(alloc)
-    @pending_stmts << mark
-    @lowered_alloc_names&.add(name)
-    stamp_allocating_result_target!(expr, name, alloc: alloc)
-    @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
-    entry = hoist_cleanup_entry(expr, ast_node)
-    if entry
-      effective_err_cleanup = err_cleanup
-      entry[:has_moved_guard] = true if effective_err_cleanup
-      cleanup = effective_err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
-      @pending_stmts << cleanup
-      (@guarded_cleanup_names ||= {})[name] = true if entry.has_moved_guard?
-      @lowered_guarded_cleanup_names&.add(name) if entry.has_moved_guard?
-    end
-    MIR::Ident.new(name)
+    plan = allocating_hoist_plan(
+      T.cast(expr, MIR::Node),
+      mutable: mutable,
+      transfer_on_success: err_cleanup == true,
+      type_info: T.unsafe(self).alloc_mark_type_info(expr, ast_node, "MIR allocating hoist"),
+      cleanup_entry: hoist_cleanup_entry(expr, ast_node)
+    )
+    stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
+    @pending_stmts.concat(plan.statements)
+    record_hoisted_allocation!(plan)
+    MIR::Ident.new(plan.name)
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped, context: String).returns(Type) }
@@ -681,28 +670,52 @@ module MIRHoistLowering
            type_info: T.nilable(Type), cleanup_entry: T.nilable(CleanupEntry)).returns([T::Array[T.untyped], MIR::Ident])
   end
   def hoist_normalized_alloc_expr(expr, transfer_on_success: false, type_info: nil, cleanup_entry: nil)
+    plan = allocating_hoist_plan(
+      T.cast(expr, MIR::Node),
+      mutable: false,
+      transfer_on_success: transfer_on_success,
+      type_info: type_info || mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"),
+      cleanup_entry: cleanup_entry || hoist_cleanup_entry(expr, nil)
+    )
+    stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
+    record_hoisted_allocation!(plan)
+    [plan.statements, MIR::Ident.new(plan.name)]
+  end
+
+  sig do
+    params(
+      expr: MIR::Node,
+      mutable: T::Boolean,
+      transfer_on_success: T::Boolean,
+      type_info: Type,
+      cleanup_entry: T.nilable(CleanupEntry)
+    ).returns(MIR::BindingMaterialization)
+  end
+  def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:)
     @tmp_counter += 1
-    name = "__tmp_#{@tmp_counter}"
-    alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, type_info || mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
-    mark.scope = MIR::Placement.alloc_scope(alloc)
-    stamp_allocating_result_target!(expr, name, alloc: alloc)
-    entry = cleanup_entry || hoist_cleanup_entry(expr, nil)
-    stmts = T.let([mark, MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped])
+    entry = cleanup_entry
     if entry
-      effective_transfer = transfer_on_success
-      if effective_transfer
-        entry[:has_moved_guard] = true
-        stmts << MIR::ErrCleanup.new(name, entry)
-        (@guarded_cleanup_names ||= {})[name] = true
-        @lowered_guarded_cleanup_names&.add(name)
-      else
-        entry[:has_moved_guard] = false
-        stmts << MIR::Cleanup.new(name, entry)
-      end
+      entry[:has_moved_guard] = transfer_on_success ? true : false
     end
-    @lowered_alloc_names&.add(name)
-    [stmts, MIR::Ident.new(name)]
+    MIR::BindingMaterialization.new(
+      name: "__tmp_#{@tmp_counter}",
+      expr: expr,
+      alloc: mir_owned_alloc(expr) || :heap,
+      type_info: type_info,
+      mutable: mutable,
+      cleanup_entry: entry,
+      cleanup_mode: transfer_on_success ? :err : :normal
+    )
+  end
+
+  sig { params(plan: MIR::BindingMaterialization).void }
+  def record_hoisted_allocation!(plan)
+    @lowered_alloc_names&.add(plan.name)
+    entry = plan.cleanup_entry
+    return unless entry&.has_moved_guard?
+
+    (@guarded_cleanup_names ||= {})[plan.name] = true
+    @lowered_guarded_cleanup_names&.add(plan.name)
   end
 
   sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }

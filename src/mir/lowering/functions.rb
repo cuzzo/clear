@@ -7,6 +7,12 @@ module MIRLoweringFunctions
 
   requires_ancestor { MIRLowering }
 
+  NameSet = T.type_alias { T::Set[String] }
+  CleanupBindingMap = T.type_alias { T::Hash[String, CleanupEntry] }
+  BindingTypeMap = T.type_alias { T::Hash[String, Type] }
+  BoolNameMap = T.type_alias { T::Hash[String, T::Boolean] }
+  DeclNameMap = T.type_alias { T::Hash[Integer, String] }
+
   class FunctionParamFact < T::Struct
     extend T::Sig
 
@@ -118,6 +124,13 @@ module MIRLoweringFunctions
     end
   end
 
+  class StdlibArgumentMaterialization < T::Struct
+    const :mir_args, T::Array[MIR::Node]
+    const :consumed_names, T::Array[String]
+    const :consumed_operands, T::Array[MIR::OwnershipOperandFact]
+    const :val_alloc_placeholder, T.nilable(Symbol)
+  end
+
   class FunctionEntryPlan < T::Struct
     const :prologue, T::Array[MIR::Node]
     const :takes_mir, T::Array[MIR::Node]
@@ -126,6 +139,31 @@ module MIRLoweringFunctions
   class CatchLoweringPlan < T::Struct
     const :code, String
     const :clause_bodies, T::Array[T::Array[MIR::Node]]
+  end
+
+  class FunctionLoweringContext < T::Struct
+    const :bindings, CleanupBindingMap
+    const :binding_types, BindingTypeMap
+    const :collection_params, NameSet
+    const :mutable_scalar_params, NameSet
+    const :param_names, NameSet
+    const :takes_param_names, NameSet
+    const :heap_carry_return_vars, T.nilable(NameSet)
+    const :returned_names, NameSet
+    const :snapshot_types, NameSet
+    const :fn_alloc_marked_names, BoolNameMap
+    const :lowered_alloc_names, NameSet
+    const :lowered_guarded_cleanup_names, NameSet
+    const :decl_zig_name_map, DeclNameMap
+    const :guarded_cleanup_names, BoolNameMap
+    const :fn_name_rename_map, T::Hash[String, String]
+    const :has_rt, T::Boolean
+    const :tail_call, T::Boolean
+    const :zig_name, String
+    const :return_payload_zig, String
+    const :return_type, Type
+    const :heap_carry_return, T::Boolean
+    const :has_catch, T::Boolean
   end
 
   sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
@@ -180,30 +218,10 @@ module MIRLoweringFunctions
   # Functions
   # ================================================================
 
-  sig { params(node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(node: AST::FunctionDef).returns(T.any(MIR::FnDef, T::Array[MIR::FnDef])) }
   def lower_function_def(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    @current_binding_types = T.let(@current_binding_types, T.untyped)
-    @current_fn_collection_params = T.let(@current_fn_collection_params, T.untyped)
-    @current_fn_has_catch = T.let(@current_fn_has_catch, T.untyped)
-    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
-    @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
-    @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
-    @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
-    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.nilable(T::Boolean))
-    @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.nilable(String))
-    @current_fn_return_type = T.let(@current_fn_return_type, T.nilable(Type))
-    @current_fn_returned_names = T.let(@current_fn_returned_names, T.untyped)
-    @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
-    @current_fn_tail_call = T.let(@current_fn_tail_call, T.nilable(T::Boolean))
-    @current_fn_zig_name = T.let(@current_fn_zig_name, T.nilable(String))
-    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
-    @fn_alloc_marked_names = T.let(@fn_alloc_marked_names, T.untyped)
-    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
-    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     @enum_schemas = T.let(@enum_schemas, T.untyped)
     @struct_schemas = T.let(@struct_schemas, T.untyped)
     @union_schemas = T.let(@union_schemas, T.untyped)
@@ -220,34 +238,6 @@ module MIRLoweringFunctions
       node.needs_rt = true if node.respond_to?(:needs_rt=)
     end
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
-    @current_fn_has_rt = fn_needs_rt
-    @current_fn_tail_call = node.tail_call
-    @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
-    @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
-    @current_fn_return_type = ret_type
-    @current_fn_returned_names = collect_fn_returned_names(node.body)
-    @current_fn_heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
-    @current_fn_heap_carry_return_vars = node.respond_to?(:heap_carry_return_vars) ? node.heap_carry_return_vars : nil
-
-    # Set current bindings so lower_var_decl can look up cleanup info.
-    @current_bindings = node.cleanup_bindings || {}
-    @current_binding_types = {}
-    # Per-function name disambiguation: when two variables share the same Zig
-    # name but have different allocators (different scopes), the MIR checker's
-    # flat name-keyed allocs dict would conflate them.  Track which names have
-    # had AllocMarks emitted and remap collisions to <name>_L<line>.
-    @fn_alloc_marked_names = {}   # safe_name => true (seen at least once)
-    @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
-    @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
-    @decl_zig_name_map    = {}    # node.object_id => disambiguated Zig name
-    @guarded_cleanup_names = {}   # safe Zig local name => true when a moved guard was emitted
-    # Name-keyed fallback used by AST-level markers (SuppressCleanup, Drop,
-    # ReassignCleanup) whose lowering doesn't have access to the decl's
-    # AST node. Populated by lower_var_decl in lowering order: whichever
-    # branch's decl was lowered most recently wins, which matches the
-    # lexical-scope assumption that SuppressCleanup for a binding appears
-    # between its decl and the next same-name decl.
-    @fn_name_rename_map   = {}    # original_name => disambiguated Zig name
 
     # Mutable scalar params: Zig params are const, need shadow vars.
     # Collections (MUTABLE @list / pool / etc.) are pointer-passed and
@@ -258,23 +248,8 @@ module MIRLoweringFunctions
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
     param_facts = function_param_facts(node.params)
-    mutable_scalar_params = param_facts.select(&:mutable_scalar).map(&:name).to_set
-    @current_fn_mutable_scalar_params = T.let(mutable_scalar_params, T.nilable(T::Set[T.untyped]))
-
-    # Collection params: already passed by pointer, skip & at recursive
-    # call sites. Includes `MUTABLE xs: T[]@list` -- those are passed
-    # by pointer too (see the call-site routing below). Without this,
-    # forwarding a `MUTABLE @list` param to another `MUTABLE @list`
-    # callee adds a second `&`, producing `**ArrayList` which Zig's
-    # one-level method auto-deref can't unwrap.
-    @current_fn_collection_params = param_facts.select(&:collection_param).map(&:name).to_set
-    @current_fn_collection_params.each do |name|
-      @current_bindings[name.to_s] ||= CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
-    end
-
-    # All param names: used to distinguish params (slices) from locals (ArrayLists)
-    @current_fn_param_names = node.params.map { |p| p.name }.to_set
-    @current_fn_takes_param_names = node.params.select { |p| p.takes }.map { |p| p.name }.to_set
+    context = function_lowering_context(node, final_type, ret_type, fn_needs_rt, param_facts)
+    activate_function_context(context)
 
     # Build param list
     params_mir = T.let(param_facts.map(&:to_mir_param), T::Array[MIR::Param])
@@ -289,7 +264,7 @@ module MIRLoweringFunctions
 
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
-    tied_shared_return = tied_shared_family_return_param(node, mutable_scalar_params)
+    tied_shared_return = tied_shared_family_return_param(node, context.mutable_scalar_params)
     return_type_str = if tied_shared_return
       tied_shared_return
     elsif fn_can_fail
@@ -321,7 +296,7 @@ module MIRLoweringFunctions
     # Determine used names for param suppression
     used_names = collect_identifier_names(node.body)
 
-    entry_plan = function_entry_plan(node, fn_needs_rt, mutable_scalar_params, used_names)
+    entry_plan = function_entry_plan(node, fn_needs_rt, context.mutable_scalar_params, used_names)
     prologue = entry_plan.prologue
     takes_mir = entry_plan.takes_mir
 
@@ -329,9 +304,7 @@ module MIRLoweringFunctions
 
     # Lower body (track snapshot types for catch blocks)
     catch_clauses = function_catch_clauses(node)
-    has_catch = catch_clauses.any?
-    @current_fn_has_catch = has_catch
-    @current_fn_snapshot_types = has_catch && node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
+    has_catch = context.has_catch
     # Trampoline bodies are synthesized directly while preserving the
     # normal function signature seen by callers.
     if node.thunk_plan
@@ -412,6 +385,75 @@ module MIRLoweringFunctions
                       append_ownership_transfers_for_mir_body(prologue + body_mir),
                       vis, false, comptime_params)
     end
+  end
+
+  sig {
+    params(
+      node: AST::FunctionDef,
+      final_type: String,
+      return_type_node: T.any(Type, Symbol, String),
+      fn_needs_rt: T::Boolean,
+      param_facts: T::Array[FunctionParamFact]
+    ).returns(FunctionLoweringContext)
+  }
+  def function_lowering_context(node, final_type, return_type_node, fn_needs_rt, param_facts)
+    T.bind(self, MIRLowering) rescue nil
+    mutable_scalar_params = T.let(Set.new, NameSet)
+    collection_params = T.let(Set.new, NameSet)
+    param_facts.each do |fact|
+      mutable_scalar_params << fact.name if fact.mutable_scalar
+      collection_params << fact.name if fact.collection_param
+    end
+    bindings = T.let((node.cleanup_bindings || {}).dup, CleanupBindingMap)
+    collection_params.each do |name|
+      bindings[name] ||= CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
+    end
+
+    has_catch = function_catch_clauses(node).any?
+    FunctionLoweringContext.new(
+      bindings: bindings,
+      binding_types: {},
+      collection_params: collection_params,
+      mutable_scalar_params: mutable_scalar_params,
+      param_names: node.params.map { |p| p.name.to_s }.to_set,
+      takes_param_names: node.params.select(&:takes).map { |p| p.name.to_s }.to_set,
+      heap_carry_return_vars: typed_name_set(node.heap_carry_return_vars),
+      returned_names: collect_fn_returned_names(node.body),
+      snapshot_types: has_catch ? typed_name_set(node.snapshot_types) : Set.new,
+      fn_alloc_marked_names: {},
+      lowered_alloc_names: Set.new,
+      lowered_guarded_cleanup_names: Set.new,
+      decl_zig_name_map: {},
+      guarded_cleanup_names: {},
+      fn_name_rename_map: {},
+      has_rt: fn_needs_rt,
+      tail_call: node.tail_call == true,
+      zig_name: T.must(zig_safe_name(node.name)),
+      return_payload_zig: final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""),
+      return_type: Type.from_node!(return_type_node, context: "function lowering return type"),
+      heap_carry_return: node.respond_to?(:heap_carry_return) && node.heap_carry_return == true,
+      has_catch: has_catch,
+    )
+  end
+
+  sig { params(context: FunctionLoweringContext).void }
+  def activate_function_context(context)
+    @current_function_context = T.let(context, T.nilable(FunctionLoweringContext))
+    @current_bindings = T.let(context.bindings, T.nilable(CleanupBindingMap))
+    @current_binding_types = T.let(context.binding_types, T.nilable(BindingTypeMap))
+    @decl_zig_name_map = T.let(context.decl_zig_name_map, T.nilable(DeclNameMap))
+    @fn_alloc_marked_names = T.let(context.fn_alloc_marked_names, T.nilable(BoolNameMap))
+    @lowered_alloc_names = T.let(context.lowered_alloc_names, T.nilable(NameSet))
+    @lowered_guarded_cleanup_names = T.let(context.lowered_guarded_cleanup_names, T.nilable(NameSet))
+    @fn_name_rename_map = T.let(context.fn_name_rename_map, T.nilable(T::Hash[String, String]))
+    @guarded_cleanup_names = T.let(context.guarded_cleanup_names, T.nilable(BoolNameMap))
+  end
+
+  sig { params(values: T.nilable(T::Enumerable[T.any(String, Symbol, Type)])).returns(NameSet) }
+  def typed_name_set(values)
+    names = T.let(Set.new, NameSet)
+    values&.each { |value| names << value.to_s }
+    names
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
@@ -651,21 +693,21 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     out = T.let([], T::Array[MIR::Node])
     node.params.select(&:takes).each do |p|
-      entry = @current_bindings[p.name.to_s] || CleanupEntry::NONE
+      entry = T.must(@current_bindings)[p.name.to_s] || CleanupEntry::NONE
       ti = p.type || Type.new(:Any)
       next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.alloc == :heap)
 
       drop_entry = entry.dup
       alloc = entry.present? ? entry.alloc : :heap
       scope = entry.present? ? entry.scope : :heap
-      mark = MIR::AllocMark.new(p.name.to_s, alloc, ti)
-      mark.scope = scope
-      out << mark
-      next unless entry.needs_cleanup?
-
-      build_drop_entry!(drop_entry, ti, nil)
-      (@guarded_cleanup_names ||= {})[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
-      out << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
+      mark = MIR::AllocMark.new(p.name.to_s, alloc, ti, scope)
+      if entry.needs_cleanup?
+        build_drop_entry!(drop_entry, ti, nil)
+        (@guarded_cleanup_names ||= {})[T.must(zig_safe_name(p.name.to_s))] = true if drop_entry.has_moved_guard?
+        out.concat(MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)).statements)
+      else
+        out.concat(MIR::MaterializationPacket.markers(mark).statements)
+      end
     end
     out
   end
@@ -917,6 +959,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return nil unless expr
     return :heap if expr.respond_to?(:symbol) && expr.symbol&.heap_storage? == true
+    sym_storage = expr.respond_to?(:symbol) ? expr.symbol&.storage : nil
+    return :frame if SymbolEntry.frame_storage_value?(sym_storage)
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return :heap if SymbolEntry.heap_storage_value?(storage)
     return :frame if SymbolEntry.frame_storage_value?(storage)
@@ -1080,7 +1124,7 @@ module MIRLoweringFunctions
       end
       root = moved_arg_root(arg)
       next unless root
-      entry = @current_bindings[root] || CleanupEntry::NONE
+      entry = T.must(@current_bindings)[root] || CleanupEntry::NONE
       next unless entry.present?
       consumed << transfer_binding_name(root)
       operands << MIR::OwnershipOperandFact.owned_binding(transfer_binding_name(root), arg_type, "call argument #{idx}", sink_alloc)
@@ -1260,11 +1304,9 @@ module MIRLoweringFunctions
   sig { params(a: T.untyped).returns(T::Boolean) }
   private def arg_already_pointer_shaped?(a)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
     @current_bg_pointer_captures = T.let(@current_bg_pointer_captures, T.untyped)
-    @current_fn_collection_params = T.let(@current_fn_collection_params, T.untyped)
     return false unless a.is_a?(AST::Identifier)
-    !!(@current_fn_collection_params&.include?(a.name) ||
+    !!(current_function_collection_param?(a.name) ||
        @current_bg_pointer_captures&.include?(a.name))
   end
 
@@ -1522,7 +1564,7 @@ module MIRLoweringFunctions
     MIR::IfOptional.new(inner_mir, snav_var, call_mir, MIR::Lit.new("null"))
   end
 
-  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.untyped) }
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(MIR::Node) }
   def lower_intrinsic(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1611,53 +1653,17 @@ module MIRLoweringFunctions
       alloc_placeholder = resolved
     end
 
-    if stdlib_facts.args.any?
-      sink_alloc = alloc_placeholder || pre_resolved_alloc || :heap
-      stdlib_facts.args.each do |arg_fact|
-        i = arg_fact.index
-        next unless ownership_facts.takes?(i)
-        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type)
-      end
-    end
-
-    # Intrinsic templates inline their arguments directly into Zig. Heap-owning
-    # argument expressions still need the same hoist/cleanup treatment as normal
-    # calls: borrowed sinks clean them after the call, TAKES sinks clean only on
-    # error because ownership transfers on success.
-    if stdlib_facts.args.any?
-      mir_args = mir_args.each_with_index.map do |arg_mir, i|
-        hoist_alloc(arg_mir, stdlib_facts.ast_arg(i), err_cleanup: ownership_facts.takes?(i))
-      end
-    end
-    consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
-    consumed_operands = ownership_facts.takes_any? ? [] : ownership_facts.consumed_operands.dup
-    if ownership_facts.takes_any?
-      @pending_stmts = T.let(@pending_stmts, T.untyped)
-      mir_args.each_with_index do |arg_mir, i|
-        next unless ownership_facts.takes?(i)
-
-        operands = ownership_operands_for_lowered_takes_arg(
-          mir_args[i],
-          stdlib_facts.ast_arg(i),
-          "stdlib argument #{i}",
-          sink_alloc,
-        )
-        consumed_operands.concat(operands)
-        operands.each do |operand|
-          next unless operand.kind == :owned_binding && operand.name
-
-          consumed_names << T.must(operand.name)
-        end
-      end
-      consumed_names.uniq!
-      if !consumed_names.empty? && val_alloc_placeholder.nil?
-        consumed_alloc = consumed_names.filter_map do |name|
-          mark = @pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
-          mark&.alloc || @current_bindings[name.to_s]&.alloc
-        end.uniq
-        val_alloc_placeholder = consumed_alloc.first if consumed_alloc.length == 1
-      end
-    end
+    arg_materialization = materialize_stdlib_arguments(
+      mir_args,
+      stdlib_facts,
+      ownership_facts,
+      alloc_placeholder || pre_resolved_alloc || :heap,
+      val_alloc_placeholder,
+    )
+    mir_args = arg_materialization.mir_args
+    consumed_names = arg_materialization.consumed_names
+    consumed_operands = arg_materialization.consumed_operands
+    val_alloc_placeholder = arg_materialization.val_alloc_placeholder
 
     # Emit all args to Zig strings
     args_zig = mir_args.map { |a| emit_expr(a) }
@@ -1723,6 +1729,74 @@ module MIRLoweringFunctions
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
+  end
+
+  sig do
+    params(
+      mir_args: T::Array[MIR::Node],
+      stdlib_facts: StdlibCallFacts,
+      ownership_facts: CallOwnershipFacts,
+      sink_alloc: Symbol,
+      val_alloc_placeholder: T.nilable(Symbol),
+    ).returns(StdlibArgumentMaterialization)
+  end
+  def materialize_stdlib_arguments(mir_args, stdlib_facts, ownership_facts, sink_alloc, val_alloc_placeholder)
+    T.bind(self, MIRLowering) rescue nil
+    materialized_args = mir_args.dup
+    stdlib_facts.args.each do |arg_fact|
+      index = arg_fact.index
+      next unless ownership_facts.takes?(index)
+
+      materialized_args[index] = T.cast(
+        materialize_owned_sink_value(materialized_args[index], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type),
+        MIR::Node,
+      )
+    end
+
+    materialized_args = materialized_args.each_with_index.map do |arg_mir, index|
+      T.cast(hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index)), MIR::Node)
+    end if stdlib_facts.args.any?
+
+    consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
+    consumed_operands = ownership_facts.takes_any? ? [] : ownership_facts.consumed_operands.dup
+    if ownership_facts.takes_any?
+      materialized_args.each_with_index do |arg_mir, index|
+        next unless ownership_facts.takes?(index)
+
+        operands = ownership_operands_for_lowered_takes_arg(
+          arg_mir,
+          stdlib_facts.ast_arg(index),
+          "stdlib argument #{index}",
+          sink_alloc,
+        )
+        consumed_operands.concat(operands)
+        operands.each do |operand|
+          consumed_names << T.must(operand.name) if operand.kind == :owned_binding && operand.name
+        end
+      end
+      consumed_names.uniq!
+      val_alloc_placeholder ||= stdlib_consumed_alloc(consumed_names)
+    end
+
+    StdlibArgumentMaterialization.new(
+      mir_args: materialized_args,
+      consumed_names: consumed_names,
+      consumed_operands: consumed_operands,
+      val_alloc_placeholder: val_alloc_placeholder,
+    )
+  end
+
+  sig { params(consumed_names: T::Array[String]).returns(T.nilable(Symbol)) }
+  def stdlib_consumed_alloc(consumed_names)
+    return nil if consumed_names.empty?
+
+    @pending_stmts = T.let(@pending_stmts, T.nilable(T::Array[MIR::Node]))
+    pending_stmts = @pending_stmts || []
+    allocs = consumed_names.filter_map do |name|
+      mark = T.cast(pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }, T.nilable(MIR::AllocMark))
+      mark&.alloc || T.must(@current_bindings)[name.to_s]&.alloc
+    end.uniq
+    allocs.length == 1 ? allocs.first : nil
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }

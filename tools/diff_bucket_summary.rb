@@ -7,6 +7,7 @@ require "rexml/document"
 require "set"
 
 ROOT = File.expand_path("..", __dir__)
+require_relative "../gems/nil-kill/lib/nil_kill"
 
 def sh(*args)
   IO.popen(args, chdir: ROOT, err: [:child, :out], &:read)
@@ -301,10 +302,49 @@ def print_markdown(base, rows)
   end
 end
 
+def type_guardrail_findings(adds_by_path)
+  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings
+end
+
+def print_type_guardrails_text(findings)
+  puts
+  puts "Src type guardrails:"
+  if findings.empty?
+    puts "  none"
+    return
+  end
+  findings.first(30).each do |finding|
+    puts "  #{finding.path}:#{finding.line} #{finding.kind} - #{finding.message}"
+    puts "    #{finding.detail}" unless finding.detail.empty?
+  end
+  puts "  ... #{findings.length - 30} more" if findings.length > 30
+end
+
+def print_type_guardrails_markdown(findings)
+  puts
+  puts "## Src Type Guardrails"
+  puts
+  if findings.empty?
+    puts "No added `src/**/*.rb` type guardrail findings."
+    return
+  end
+
+  puts "| path | rule | finding |"
+  puts "| --- | --- | --- |"
+  findings.first(30).each do |finding|
+    location = "`#{finding.path}:#{finding.line}`"
+    message = "#{finding.message}; #{finding.detail}".sub(/; \z/, "")
+    puts "| #{markdown_escape(location)} | `#{markdown_escape(finding.kind)}` | #{markdown_escape(message)} |"
+  end
+  puts
+  puts "_#{findings.length - 30} more findings omitted._" if findings.length > 30
+end
+
 options = parse_options(ARGV)
 base = options[:base] || default_base_ref
 stats = numstat(base)
 adds_by_path = added_lines(base)
+guardrail_findings = type_guardrail_findings(adds_by_path)
 
 bucket_order = [
   [:total, "total"],
@@ -346,7 +386,9 @@ end
 
 if options[:format] == "markdown"
   print_markdown(base, rows)
+  print_type_guardrails_markdown(guardrail_findings)
 else
   puts "Diff base: #{base}...HEAD"
   print_table(rows)
+  print_type_guardrails_text(guardrail_findings)
 end

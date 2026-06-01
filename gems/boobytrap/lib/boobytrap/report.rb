@@ -2,7 +2,9 @@
 
 require_relative "bugspots"
 require_relative "coverage_gap"
+require_relative "decomplex_risk"
 require_relative "hotspot"
+require_relative "method_gap"
 
 module Boobytrap
   # Single markdown report, structured like decomplex / nil-kill: TOC,
@@ -29,6 +31,23 @@ module Boobytrap
         end
       @have_cov = !gaps.empty?
       @ranked, @unmeasured = Hotspot.rank(scores, gaps)
+      @method_gaps =
+        if resultset && ::File.exist?(resultset)
+          method_files = filter_paths(
+            MethodGap.covered_files(resultset, root: @repo).to_h { |rel| [rel, true] }
+          ).keys
+          decomplex_scores = DecomplexRisk.score(
+            method_files.map { |rel| ::File.join(@repo, rel) },
+            root: @repo
+          )
+          filter_paths(MethodGap.from_resultset(
+            resultset,
+            root: @repo,
+            decomplex_scores: decomplex_scores
+          ).group_by(&:file)).values.flatten
+        else
+          []
+        end
     end
 
     def in_scope?(rel)
@@ -56,6 +75,8 @@ module Boobytrap
       o << "## Table of Contents\n"
       o << "- [Project Prioritization](#project-prioritization)\n"
       o << "- [Hotspots (#{@ranked.size})](#hotspots-#{@ranked.size})\n"
+      o << "- [Mostly Uncovered Methods (#{dark_method_count})]" \
+           "(#mostly-uncovered-methods-#{dark_method_count})\n"
       o << "- [Fixed But Unmeasured (#{@unmeasured.size})]" \
            "(#fixed-but-unmeasured-#{@unmeasured.size})\n"
       o << "- [Run Summary](#run-summary)\n\n"
@@ -95,6 +116,35 @@ module Boobytrap
         o << "\n"
       end
 
+      o << "## Mostly Uncovered Methods (#{dark_method_count})\n"
+      o << "_non-trivial methods (`>=5` executable lines) with very low line coverage; " \
+           "risk = missed lines x gap, plus Decomplex detector score, " \
+           "instance-state writes, and dark branches._\n\n"
+      if @method_gaps.empty?
+        o << "_No line-coverage method data available._\n\n"
+      elsif dark_method_count.zero?
+        o << "None.\n\n"
+      else
+        uncovered = @method_gaps.count { |m| m.covered_lines.zero? }
+        le10 = @method_gaps.count { |m| m.line_gap >= 0.90 }
+        le20 = dark_method_count
+        le50 = @method_gaps.count { |m| m.line_gap >= 0.50 }
+        o << "- Completely uncovered: #{uncovered}\n"
+        o << "- <=10% covered: #{le10}\n"
+        o << "- <=20% covered: #{le20}\n"
+        o << "- <=50% covered: #{le50}\n\n"
+        o << "| # | method | risk | covered | missed | decomplex | findings | writes | dark branches |\n"
+        o << "|---|--------|------|---------|--------|-----------|----------|--------|---------------|\n"
+        dark_methods.first(@top).each_with_index do |m, i|
+          o << "| #{i + 1} | `#{m.file}:#{m.first_line}` `#{m.name}` " \
+               "| #{m.risk.round(2)} | #{m.covered_lines}/#{m.executable_lines} " \
+               "| #{m.missed_lines} | #{m.decomplex_score} | #{m.decomplex_findings} | #{m.state_writes} " \
+               "| #{m.uncovered_branches} |\n"
+        end
+        o << "\n- ...(+#{dark_method_count - @top} more)\n" if dark_method_count > @top
+        o << "\n"
+      end
+
       o << "## Fixed But Unmeasured (#{@unmeasured.size})\n"
       o << "_files with recurring fixes but NO branch-coverage data -- " \
            "recurring-fix code the corpus does not measure at all; " \
@@ -118,9 +168,18 @@ module Boobytrap
            "#{@have_cov ? 'present' : 'ABSENT (fix-churn only)'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
-           "x SimpleCov branch gap; file granularity; zero deps " \
+           "x SimpleCov branch gap; method gaps use Decomplex detector scores " \
            "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
+    end
+
+    def dark_methods
+      @method_gaps.select { |m| m.line_gap >= 0.80 }
+                  .sort_by { |m| [-m.risk, -m.missed_lines, m.file, m.first_line] }
+    end
+
+    def dark_method_count
+      dark_methods.size
     end
   end
 end

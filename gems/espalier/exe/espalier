@@ -1,0 +1,254 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require_relative "../lib/espalier"
+
+options = {
+  format: :markdown,
+  output: nil,
+  decomplex: nil,
+  nil_kill: nil,
+  risk: nil,
+  manifest: nil
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: espalier [options] <files/directories...>"
+
+  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report], "Output format (markdown, yaml, report). Default: markdown") do |f|
+    options[:format] = f
+  end
+
+  opts.on("-o", "--output FILE", "Write output to path instead of stdout") do |o|
+    options[:output] = o
+  end
+
+  opts.on("--decomplex FILE", "Path to decomplex run report or JSON data") do |d|
+    options[:decomplex] = d
+  end
+
+  opts.on("--nil-kill FILE", "Path to nil-kill signature mapping") do |n|
+    options[:nil_kill] = n
+  end
+
+  opts.on("--risk FILE", "Path to boobytrap/slopcop churn & coverage report") do |r|
+    options[:risk] = r
+  end
+
+  opts.on("--manifest FILE", "Read an existing Espalier architecture YAML manifest") do |m|
+    options[:manifest] = m
+  end
+end.parse!
+
+if options[:manifest]
+  unless File.exist?(options[:manifest])
+    puts "Error: Manifest not found: #{options[:manifest]}"
+    exit 1
+  end
+
+  manifest = YAML.load_file(options[:manifest])
+  output_contents = if options[:format] == :report
+                      Espalier::Reporter.new(manifest).to_markdown
+                    elsif options[:format] == :yaml
+                      Espalier::Formatter.to_yaml(manifest)
+                    else
+                      Espalier::Formatter.to_markdown(manifest)
+                    end
+
+  if options[:output]
+    File.write(options[:output], output_contents)
+  else
+    puts output_contents
+  end
+  exit 0
+end
+
+if ARGV.empty?
+  puts "Error: No files or directories provided."
+  exit 1
+end
+
+# Resolve input files
+targets = []
+ARGV.each do |arg|
+  if File.directory?(arg)
+    targets.concat(Dir.glob(File.join(arg, "**/*.rb")))
+  elsif File.file?(arg)
+    targets << arg
+  end
+end
+
+targets.uniq!
+
+if targets.empty?
+  puts "No Ruby files found."
+  exit 0
+end
+
+# Mock external metadata loader helpers for CLI
+decomplex_data = {}
+if options[:decomplex] && File.exist?(options[:decomplex])
+  # Simplistic line parser mapping methods to simulated metrics or simple hashes
+  File.readlines(options[:decomplex]).each do |line|
+    if line =~ /([\w:]+##\w+).*deviance.*?([\d\.]+)/
+      decomplex_data[$1] = { deviance: $2.to_f }
+    end
+  end
+end
+
+nil_kill_data = {}
+ivars_types = {} # class_name => { ivar_name => type }
+ivars_param_transit = {} # class_name => { ivar_name => array_of_params }
+ivars_protocols = {} # class_name => { ivar_name => array_of_methods }
+
+if options[:nil_kill] && File.exist?(options[:nil_kill])
+  if options[:nil_kill].end_with?(".json")
+    require "json"
+    begin
+      data = JSON.parse(File.read(options[:nil_kill]))
+      if data["methods"]
+        data["methods"].each do |m_entry|
+          key_parts = m_entry["key"]
+          next unless key_parts && key_parts.size >= 3
+          
+          class_name = key_parts[0]
+          method_name = key_parts[1]
+          kind = key_parts[2] # "class" or "instance"
+          
+          # Map class methods to self.method_name style
+          full_method_name = kind == "class" ? "self.#{method_name}" : method_name
+          agg_key = "#{class_name}##{full_method_name}"
+          
+          # Extract the signature
+          if m_entry["source"] && m_entry["source"]["sig"]
+            nil_kill_data[agg_key] = m_entry["source"]["sig"]
+          end
+        end
+      end
+      
+      # Now let's extract dynamic ivar types!
+      if data["facts"] && data["facts"]["ivar_runtime"]
+        data["facts"]["ivar_runtime"].each do |entry|
+          c_name = entry["class"]
+          i_name = entry["name"]
+          classes = entry["classes"] || []
+          next unless c_name && i_name
+          next if classes.empty?
+          
+          type_str = if classes.size == 1
+                       classes.first
+                     elsif classes.include?("NilClass")
+                       non_nil = classes - ["NilClass"]
+                       if non_nil.size == 1
+                         "T.nilable(#{non_nil.first})"
+                       else
+                         "T.nilable(T.any(#{non_nil.join(', ')}))"
+                       end
+                     else
+                       "T.any(#{classes.join(', ')})"
+                     end
+          
+          ivars_types[c_name] ||= {}
+          ivars_types[c_name][i_name] = type_str
+        end
+      end
+
+      # Pull inter-procedural data transit (param origins)
+      if data["facts"] && data["facts"]["ivar_param_origins"]
+        data["facts"]["ivar_param_origins"].each do |composite_key, params|
+          parts = composite_key.split("\u0000")
+          next unless parts.size == 2
+          c_name, i_name = parts
+          ivars_param_transit[c_name] ||= {}
+          ivars_param_transit[c_name][i_name] = params
+        end
+      end
+
+      # Pull dynamic method protocol lists calling on state ivars
+      if data["facts"] && data["facts"]["ivar_protocols"]
+        data["facts"]["ivar_protocols"].each do |composite_key, methods|
+          parts = composite_key.split("\u0000")
+          next unless parts.size == 2
+          c_name, i_name = parts
+          ivars_protocols[c_name] ||= {}
+          ivars_protocols[c_name][i_name] = methods
+        end
+      end
+    rescue => e
+      puts "Warning: Failed to parse nil-kill JSON: #{e.message}"
+    end
+  else
+    File.readlines(options[:nil_kill]).each do |line|
+      if line =~ /#\s+signature:\s+([\w:]+##\w+)\s+(.+)/
+        nil_kill_data[$1] = $2.strip
+      end
+    end
+  end
+end
+
+risk_data = {}
+if options[:risk] && File.exist?(options[:risk])
+  # Simplistic parse mapping files to mock metrics
+  File.readlines(options[:risk]).each do |line|
+    if line =~ /file:\s*(\S+)\s*churn:\s*([\d\.]+)/
+      risk_data[$1] = { churn: $2.to_f }
+    end
+  end
+end
+
+# Extract Static Skeletons
+modules = []
+targets.each do |file|
+  extractor = Espalier::AstExtractor.new(file)
+  modules.concat(extractor.extract)
+end
+
+# Synthesize Aggregated Architecture
+aggregator = Espalier::Aggregator.new(
+  decomplex_data: decomplex_data,
+  nil_kill_data: nil_kill_data,
+  risk_data: risk_data
+)
+
+# Merge back dynamically inferred ivar_types, param transits, and protocols from nil-kill into modules
+modules.each do |mod|
+  c_name = mod[:name]
+  mod[:ivar_types] ||= {}
+  mod[:ivar_properties] ||= {}
+
+  if ivars_types[c_name]
+    ivars_types[c_name].each do |i_name, type_str|
+      mod[:ivar_types][i_name] = type_str
+    end
+  end
+
+  # Map additional properties: transit origins and protocols calls
+  mod[:states].each do |state_var|
+    props = []
+    if transit = ivars_param_transit[c_name]&.[](state_var)
+      props << "loaded from param: #{transit.join(', ')}"
+    end
+    if protos = ivars_protocols[c_name]&.[](state_var)
+      props << "protocol interfaces: #{protos.join(', ')}"
+    end
+    mod[:ivar_properties][state_var] = props unless props.empty?
+  end
+end
+
+manifest = aggregator.aggregate(modules)
+
+# Format & Outflow
+output_contents = if options[:format] == :yaml
+                    Espalier::Formatter.to_yaml(manifest)
+                  elsif options[:format] == :report
+                    Espalier::Reporter.new(manifest).to_markdown
+                  else
+                    Espalier::Formatter.to_markdown(manifest)
+                  end
+
+if options[:output]
+  File.write(options[:output], output_contents)
+else
+  puts output_contents
+end

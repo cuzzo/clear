@@ -197,13 +197,18 @@ module MIRLoweringVariables
       ), MIR::Let)
     end
 
-    nodes = build_var_decl_nodes(node, facts, safe_name, init, let_node)
+    nodes = var_decl_materialization_plan(
+      node,
+      facts,
+      safe_name,
+      T.cast(init, MIR::Node),
+      let_node
+    ).statements
 
     owner_marks = field_owner_move_marks(node)
-    return nodes if owner_marks.empty?
-    return nodes + owner_marks if nodes.is_a?(Array)
+    nodes.concat(owner_marks)
 
-    [nodes, *owner_marks]
+    nodes.size == 1 ? nodes.first : nodes
   end
 
   sig { params(init: T.untyped, facts: VarDeclFacts, ast_value: T.untyped).returns(T.untyped) }
@@ -243,8 +248,7 @@ module MIRLoweringVariables
     empty_optional_init = optional_nil_initializer?(ft, node.value)
     binding_entry = CleanupEntry::NONE if empty_optional_init
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
-    @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    heap_return_var = !empty_optional_init && @current_fn_heap_carry_return_vars&.include?(node.name.to_s) == true
+    heap_return_var = !empty_optional_init && current_function_heap_carry_return_var?(node.name.to_s)
     heap_return_binding_allocates = (heap_return_var && escaping_value_alloc(ft) == :heap) == true
     placement = binding_placement_fact(node, ft, binding_entry, heap_return_var, heap_return_binding_allocates)
 
@@ -413,89 +417,131 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: T.untyped, let_node: MIR::Let).returns(T.untyped) }
-  def build_var_decl_nodes(node, facts, safe_name, init, let_node)
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def var_decl_materialization_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
-    ft = facts.ft
-    binding_entry = facts.binding_entry
-    has_mir_drop = facts.has_mir_drop
-    heap_return_var = facts.heap_return_var
-    decl_alloc = facts.decl_alloc
-    actually_mutated = facts.actually_mutated
-    generic_id = facts.generic_id
-    # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
-    # Replaces old Drop sibling nodes inserted by MIRPass.
-    if has_mir_drop
-      # has_mir_drop implies binding_entry.needs_cleanup?, so the entry is
-      # always present (NONE.needs_cleanup? is false). The cleanup recipe is
-      # inherited from the classifier, never synthesized here (INV-14).
-      drop_entry = binding_entry
-      build_drop_entry!(drop_entry, node.full_type!, node)
-      drop_entry = drop_entry.with_moved_guard if ft.bounded_stream?
-      # One allocator per binding: AllocMark, Cleanup, and the init
-      # expression all read the classifier's definitive placement.
-      init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
-      node_alloc = decl_alloc == :heap ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || decl_alloc)
-      drop_entry = drop_entry.with_alloc(node_alloc)
-      @current_bindings[node.name.to_s] = drop_entry if @current_bindings
-      mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
-      mir_alloc = node_alloc
-      cleanup = MIR::Cleanup.new(safe_name, drop_entry)
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, drop_entry)
-      [alloc_mark, let_node, cleanup]
-    elsif owned_return_call_init?(init) && !generic_id
-      mir_alloc = mir_owned_alloc(init) || decl_alloc
-      cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
-      build_drop_entry!(cleanup_entry, node.full_type!, node)
-      cleanup_entry[:has_moved_guard] = true
-      mark_guarded_cleanup_name!(safe_name)
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-    elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !generic_id
-      mir_alloc = mir_owned_alloc(init) || decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      [alloc_mark, let_node]
-    elsif init.is_a?(MIR::InlineZig) && init.has_alloc_metadata? && init.target_var == safe_name &&
-          !generic_id
-      mir_alloc = init.allocs.any_heap? ? :heap : :frame
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      [alloc_mark, let_node]
-    elsif binding_entry.present? && !binding_entry.needs_cleanup? && actually_mutated && ownership_bearing_type?(ft) &&
-          (!ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
-      mir_alloc = mir_owned_alloc(init) || binding_entry.alloc || decl_alloc
-      cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
-      build_drop_entry!(cleanup_entry, node.full_type!, node)
-      mark_guarded_cleanup_name!(safe_name)
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-    elsif binding_entry.present? && !binding_entry.needs_cleanup?
-      return let_node unless mir_allocates?(init) ||
-                             (binding_entry.alloc == :heap && binding_entry.kind != :none)
+    return classified_cleanup_var_decl_plan(node, facts, safe_name, init, let_node) if facts.has_mir_drop
+    return owned_return_call_var_decl_plan(node, facts, safe_name, init, let_node) if owned_return_call_init?(init) && !facts.generic_id
+    return transfer_only_var_decl_plan(node, facts, safe_name, init, let_node) if transfer_only_var_decl?(facts, init)
+    return inline_alloc_var_decl_plan(node, facts, safe_name, T.cast(init, MIR::InlineZig), let_node) if inline_alloc_var_decl?(safe_name, init, facts)
+    return mutated_owned_var_decl_plan(node, facts, safe_name, init, let_node) if mutated_owned_var_decl?(facts, init)
+    return binding_metadata_var_decl_plan(node, facts, safe_name, init, let_node) if facts.binding_entry.present? && !facts.binding_entry.needs_cleanup?
+    return allocating_init_var_decl_plan(node, facts, safe_name, init, let_node) if mir_allocates?(init) && !facts.generic_id
 
-      mir_alloc = mir_owned_alloc(init) || decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      if ownership_bearing_type?(ft)
-        cleanup_entry = moved_guard_cleanup_entry(ft, mir_alloc, node)
-        mark_guarded_cleanup_name!(safe_name)
-        return [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-      end
-      [alloc_mark, let_node]
-    elsif mir_allocates?(init) && !generic_id
-      mir_alloc = mir_owned_alloc(init) || decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      cleanup_required = type_requires_alloc_cleanup?(ft, mir_alloc)
-      unless cleanup_required
-        next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
-        next_nodes
-      else
-        cleanup_entry = T.must(hoist_cleanup_entry(init, node))
-        build_drop_entry!(cleanup_entry, node.full_type!, node)
-        mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
-        [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-      end
-    else
+    MIR::MaterializationPacket.value_only(let_node)
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def classified_cleanup_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    drop_entry = facts.binding_entry
+    build_drop_entry!(drop_entry, node.full_type!, node)
+    drop_entry = drop_entry.with_moved_guard if facts.ft.bounded_stream?
+    init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    node_alloc = facts.decl_alloc == :heap ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || facts.decl_alloc)
+    drop_entry = drop_entry.with_alloc(node_alloc)
+    @current_bindings[node.name.to_s] = drop_entry if @current_bindings
+    mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
+    MIR::MaterializationPacket.owned(
+      var_decl_alloc_mark(safe_name, node_alloc, node.full_type!, drop_entry),
+      let_node,
+      MIR::Cleanup.new(safe_name, drop_entry)
+    )
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def owned_return_call_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
+    cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
+    build_drop_entry!(cleanup_entry, node.full_type!, node)
+    cleanup_entry[:has_moved_guard] = true
+    mark_guarded_cleanup_name!(safe_name)
+    MIR::MaterializationPacket.owned(
+      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      let_node,
+      MIR::Cleanup.new(safe_name, cleanup_entry)
+    )
+  end
+
+  sig { params(facts: VarDeclFacts, init: MIR::Node).returns(T::Boolean) }
+  def transfer_only_var_decl?(facts, init)
+    !facts.heap_return_var && owned_return_transfer_binding?(facts.binding_entry, init) && !facts.generic_id
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def transfer_only_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
+    MIR::MaterializationPacket.owned(
+      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
       let_node
-    end
+    )
+  end
+
+  sig { params(safe_name: String, init: MIR::Node, facts: VarDeclFacts).returns(T::Boolean) }
+  def inline_alloc_var_decl?(safe_name, init, facts)
+    (init.is_a?(MIR::InlineZig) && init.has_alloc_metadata? && init.target_var == safe_name && !facts.generic_id) == true
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::InlineZig, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def inline_alloc_var_decl_plan(node, facts, safe_name, init, let_node)
+    mir_alloc = init.allocs.any_heap? ? :heap : :frame
+    MIR::MaterializationPacket.owned(
+      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      let_node
+    )
+  end
+
+  sig { params(facts: VarDeclFacts, init: MIR::Node).returns(T::Boolean) }
+  def mutated_owned_var_decl?(facts, init)
+    T.bind(self, MIRLowering) rescue nil
+    facts.binding_entry.present? && !facts.binding_entry.needs_cleanup? && facts.actually_mutated &&
+      ownership_bearing_type?(facts.ft) &&
+      (!facts.ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def mutated_owned_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    mir_alloc = mir_owned_alloc(init) || facts.binding_entry.alloc || facts.decl_alloc
+    cleanup_entry = CleanupEntry.build(facts.ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
+    build_drop_entry!(cleanup_entry, node.full_type!, node)
+    mark_guarded_cleanup_name!(safe_name)
+    MIR::MaterializationPacket.owned(
+      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      let_node,
+      MIR::Cleanup.new(safe_name, cleanup_entry)
+    )
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def binding_metadata_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    binding_entry = facts.binding_entry
+    return MIR::MaterializationPacket.value_only(let_node) unless mir_allocates?(init) ||
+                                                               (MIR::Placement.heap?(binding_entry.alloc) && binding_entry.kind != :none)
+
+    mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
+    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
+    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless ownership_bearing_type?(facts.ft)
+
+    cleanup_entry = moved_guard_cleanup_entry(facts.ft, mir_alloc, node)
+    mark_guarded_cleanup_name!(safe_name)
+    MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
+  def allocating_init_var_decl_plan(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
+    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry)
+    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless type_requires_alloc_cleanup?(facts.ft, mir_alloc)
+
+    cleanup_entry = T.must(hoist_cleanup_entry(init, node))
+    build_drop_entry!(cleanup_entry, node.full_type!, node)
+    mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
+    MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
   end
 
   sig { params(name: String).void }
@@ -524,8 +570,8 @@ module MIRLoweringVariables
 
   sig { params(name: String, alloc: Symbol, type_info: T.untyped, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
   def var_decl_alloc_mark(name, alloc, type_info, binding_entry)
-    mark = MIR::AllocMark.new(name, alloc, type_info)
-    mark.scope = alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+    mark = MIR::AllocMark.new(name, alloc, type_info,
+      alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration))
     mark
   end
 
@@ -723,8 +769,7 @@ module MIRLoweringVariables
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
       binding_entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
-      @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-      heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
+      heap_return_var = current_function_heap_carry_return_var?(node.name.to_s)
       assign_alloc = if heap_return_var
         :heap
       else
@@ -775,8 +820,6 @@ module MIRLoweringVariables
   sig { params(node: AST::BindExpr).returns(MIR::ExprStmt) }
   def lower_atomic_assignment(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
     @do_capture_map = T.let(@do_capture_map, T.untyped)
     @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     op_name = node.auto_atomic_op.to_s
@@ -785,7 +828,7 @@ module MIRLoweringVariables
     safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
     # A bare write to a mutable scalar atomic param may not create the usual
     # shadow variable, so resolve through param mangling explicitly.
-    if @current_fn_mutable_scalar_params&.include?(target_name)
+    if current_function_mutable_scalar_param?(target_name)
       safe = "_m_#{target_name}"
     end
     mapped = @do_capture_map && @do_capture_map[target_name]

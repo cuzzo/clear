@@ -1668,7 +1668,7 @@ class MIRChecker
   #
   # Independently re-derives "is this param pointer-passed?" from the
   # MIR-level Zig type (prefix `*`) so the check is decoupled from
-  # mir_lowering's `@current_fn_collection_params` set. Defense in depth:
+  # mir_lowering's function-context collection-param set. Defense in depth:
   # if lowering's `resolve_alloc_sym` or escape_analysis's Condition 9
   # ever regresses, this catches the resulting bad MIR before codegen.
   sig { params(inline_nodes: T::Array[T.untyped], fn_def: MIR::FnDef).returns(T.nilable(T::Array[T.untyped])) }

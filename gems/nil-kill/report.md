@@ -1,17 +1,17 @@
 # Nil Kill Report
 
 - Target dirs: src
-- Methods indexed: 3578
-- Runtime-observed methods: 1576
-- Missing sigs: 194
-- Existing sigs: 3384
-- Existing/candidate `T.let` sites: 1250
+- Methods indexed: 3645
+- Runtime-observed methods: 1554
+- Missing sigs: 147
+- Existing sigs: 3498
+- Existing/candidate `T.let` sites: 1201
 - Sorbet errors captured: 0
 
 ## Project Prioritization
-- [Nil Source Fixes (274)](#nil-source-fixes-274): 235 action item(s), 274 `T.nilable` slot(s); top source affects 6 slot(s), 720 source calls
-- [Union / `T.any` Candidates (809)](#union-tany-candidates-809): 734 action item(s), 809 union slot(s); top source affects 4 slot(s), 93049 source calls
-- [Hash Record Struct Candidates (Shapes + Pressure)](#hash-record-struct-candidates-shapes-pressure): 226 struct candidate(s), 372 pressure record(s); top candidate BodyRecord has pressure 38; 59 pressure record(s) without a literal shape cluster
+- [Nil Source Fixes (282)](#nil-source-fixes-282): 245 action item(s), 282 `T.nilable` slot(s); top source affects 5 slot(s), 3422 source calls
+- [Union / `T.any` Candidates (830)](#union-tany-candidates-830): 752 action item(s), 830 union slot(s); top source affects 4 slot(s), 93383 source calls
+- [Hash Record Struct Candidates (Shapes + Pressure)](#hash-record-struct-candidates-shapes-pressure): 225 struct candidate(s), 369 pressure record(s); top candidate BodyRecord has pressure 38; 59 pressure record(s) without a literal shape cluster
 
 ## Hygiene Overview
 
@@ -19,10 +19,10 @@
 
 | Slot category | Total | Strong | Weak | Untyped | Nilable |
 |---|---|---|---|---|---|
-| Param inputs | 4065 | 2718 (66.9%) | 54 (1.3%) | 1293 (31.8%) | 348 (8.6%) |
-| Returns | 2345 | 1985 (84.6%) | 20 (0.9%) | 340 (14.5%) | 459 (19.6%) |
-| Struct/class fields & ivars | 1867 | 660 (35.4%) | 23 (1.2%) | 1184 (63.4%) | 142 (7.6%) |
-| Arrays/Sets/Hashmaps | 1713 | 863 (50.4%) | 850 (49.6%) | 0 (0.0%) | 319 (18.6%) |
+| Param inputs | 4212 | 2853 (67.7%) | 67 (1.6%) | 1292 (30.7%) | 359 (8.5%) |
+| Returns | 2437 | 2099 (86.1%) | 23 (0.9%) | 315 (12.9%) | 488 (20.0%) |
+| Struct/class fields & ivars | 1831 | 702 (38.3%) | 30 (1.6%) | 1099 (60.0%) | 180 (9.8%) |
+| Arrays/Sets/Hashmaps | 1706 | 894 (52.4%) | 812 (47.6%) | 0 (0.0%) | 311 (18.2%) |
 
 Total = Strong + Weak + Untyped. Nilable is a cross-cut sub-count (a `T.nilable(String)` slot is Strong and Nilable, not a fourth bucket). Collection-typed slots (`T::Array[...]` etc.) are counted only in the Arrays/Sets/Hashmaps row, so the four categories are mutually exclusive. The Param/Returns/Struct Untyped columns equal the per-row denominators in the Untyped Cause Breakdown below.
 
@@ -30,10 +30,10 @@ Total = Strong + Weak + Untyped. Nilable is a cross-cut sub-count (a `T.nilable(
 
 | Slot category | Refused/Pending | PropagationGap | WeakEvidence | Heterogeneous | NoEvidence |
 |---|---|---|---|---|---|
-| Param inputs (1293 untyped) | 398 (30.8%) | 185 (14.3%) | 211 (16.3%) | 352 (27.2%) | 147 (11.4%) |
-| Returns (340 untyped) | 144 (42.4%) | 11 (3.2%) | 95 (27.9%) | 77 (22.6%) | 13 (3.8%) |
-| Struct/class fields & ivars (1184 untyped) | 861 (72.7%) | 85 (7.2%) | 15 (1.3%) | 48 (4.1%) | 175 (14.8%) |
-| Arrays/Sets/Hashmaps (747 untyped) | 161 (21.6%) | 36 (4.8%) | 82 (11.0%) | 260 (34.8%) | 208 (27.8%) |
+| Param inputs (1292 untyped) | 428 (33.1%) | 175 (13.5%) | 226 (17.5%) | 352 (27.2%) | 111 (8.6%) |
+| Returns (315 untyped) | 129 (41.0%) | 11 (3.5%) | 93 (29.5%) | 74 (23.5%) | 8 (2.5%) |
+| Struct/class fields & ivars (1099 untyped) | 777 (70.7%) | 91 (8.3%) | 12 (1.1%) | 48 (4.4%) | 171 (15.6%) |
+| Arrays/Sets/Hashmaps (706 untyped) | 137 (19.4%) | 36 (5.1%) | 81 (11.5%) | 263 (37.3%) | 189 (26.8%) |
 
 - **Refused/Pending**: type IS determinable from local evidence (single observed runtime type, void/unused, boolean pair) -- untyped only because the fix is unapplied or conservatively refused
 - **PropagationGap**: type is determinable elsewhere but needs cross-method/whole-program flow (forwarded return, ivar-from-param capture, callee untyped-but-resolvable, coherent collection needing the typed-collection rewrite)
@@ -45,45 +45,45 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 
 ### Union Decomplexity
 - Each entry is a canonical origin contract (an accessor like `.type_info`, a hash key like `[:type]`, an ivar, a call) and the TOTAL `is_a?(Type)` guards that collapse if that one contract is given a concrete type. Guards are aggregated across every method that reads the contract. Producer types come from runtime evidence for that contract; `unattributed` = no runtime trace yet for it.
-- 32 guards collapse | `.type` (accessor) across 25 method(s) -> via @type assignments (runtime) {Symbol, Type, NilClass, T.nilable(Type), T::Hash[`T.untyped`, `T.untyped`]}: tighten that contract
+- 32 guards collapse | `.type` (accessor) across 25 method(s) -> via @type assignments (runtime) {Symbol, Type, NilClass, T.nilable(Type)}: tighten that contract
   - methods: `CapabilityHelper#record_capture_info!`, `EscapeAnalysis#propagate_caller_sync!`, `MIRLoweringFunctions#lower_lambda`, `SemanticAnnotator#visit_GetField`, `AutoUnifier#stamp_map_pairs!`, `CapabilityHelper#record_capture_move!`, +19 more
-  - guards at: src/annotator/helpers/capabilities.rb:1048, src/annotator/helpers/capabilities.rb:1054, src/mir/escape_analysis.rb:184, src/mir/escape_analysis.rb:202, src/mir/lowering/functions.rb:1982
+  - guards at: src/annotator/helpers/capabilities.rb:1048, src/annotator/helpers/capabilities.rb:1054, src/mir/escape_analysis.rb:184, src/mir/escape_analysis.rb:202, src/mir/lowering/functions.rb:2016
 - 30 guards collapse | `full_type!()` (call) across 19 method(s) -> producers unattributed (no runtime trace for this contract yet)
-  - methods: `FunctionAnalysis#verify_function_signature!`, `CapabilityHelper#declare_capability_scope!`, `CapabilityHelper#validate_capability`, `SemanticAnnotator#handle_assign_move`, `SemanticAnnotator#move_if_not_copyable!`, `SemanticAnnotator#move_if_takes_ownership!`, +13 more
-  - guards at: src/annotator/helpers/function_analysis.rb:355, src/annotator/helpers/function_analysis.rb:356, src/annotator/helpers/function_analysis.rb:445, src/annotator/helpers/capabilities.rb:777, src/annotator/helpers/capabilities.rb:796
-- 18 guards collapse | `.return_type` (accessor) across 14 method(s) -> via @return_type assignments (runtime) {T.nilable(Type), Type, Symbol}: tighten that contract
-  - methods: `EffectTracker#compute_can_fail!`, `ReentranceBridge#emit_mutual_thunk_unsupported!`, `ReentranceBridge#validate_not_logical_return!`, `CapabilityHelper#visit_post_clauses!`, `EffectTracker#compute_needs_rt!`, `EffectTracker#compute_stack_tiers!`, +8 more
+  - methods: `FunctionAnalysis#verify_function_signature!`, `CapabilityHelper#declare_capability_scope!`, `CapabilityHelper#validate_capability`, `SemanticAnnotator#move_if_not_copyable!`, `SemanticAnnotator#move_if_takes_ownership!`, `SemanticAnnotator#reject_borrowed_index_assignment_move!`, +13 more
+  - guards at: src/annotator/helpers/function_analysis.rb:354, src/annotator/helpers/function_analysis.rb:355, src/annotator/helpers/function_analysis.rb:444, src/annotator/helpers/capabilities.rb:777, src/annotator/helpers/capabilities.rb:796
+- 17 guards collapse | `.return_type` (accessor) across 13 method(s) -> via @return_type assignments (runtime) {T.nilable(Type), Type, Symbol}: tighten that contract
+  - methods: `EffectTracker#compute_can_fail!`, `ReentranceBridge#emit_mutual_thunk_unsupported!`, `ReentranceBridge#validate_not_logical_return!`, `CapabilityHelper#visit_post_clauses!`, `EffectTracker#compute_needs_rt!`, `EffectTracker#compute_stack_tiers!`, +7 more
   - guards at: src/annotator/helpers/effects.rb:452, src/annotator/helpers/effects.rb:531, src/annotator/helpers/effects.rb:532, src/annotator/helpers/reentrance.rb:452, src/annotator/helpers/reentrance.rb:490
 - 7 guards collapse | `` (hash-key) across 5 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLoweringExpressions#lower_struct_lit`, `SemanticAnnotator#visit_MatchStatement`, `MIRLoweringConcurrency#capture_ownership_mirror_nodes`, `SemanticAnnotator#visit_StructLit`, `UnionAnalysis#validate_union_fields!`
-  - guards at: src/mir/lowering/expressions.rb:1226, src/mir/lowering/expressions.rb:1236, src/annotator/annotator.rb:1623, src/annotator/annotator.rb:1668, src/mir/lowering/concurrency.rb:69
+  - guards at: src/mir/lowering/expressions.rb:1220, src/mir/lowering/expressions.rb:1230, src/annotator/annotator.rb:1695, src/annotator/annotator.rb:1740, src/mir/lowering/concurrency.rb:108
 - 5 guards collapse | `.element_type` (accessor) across 5 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `EscapeAnalysis#aggregate_owner_requires_heap?`, `FunctionReturn#resolve`, `Hoist#composite_element_store?`, `MIRLoweringControlFlow#for_each_loop_stmt`, `MIRLoweringExpressions#copy_source_type_info`
-  - guards at: src/mir/escape_analysis.rb:381, src/annotator/helpers/function_return.rb:83, src/mir/hoist.rb:282, src/mir/lowering/control_flow.rb:450, src/mir/lowering/expressions.rb:1747
+  - guards at: src/mir/escape_analysis.rb:381, src/annotator/helpers/function_return.rb:83, src/mir/hoist.rb:282, src/mir/lowering/control_flow.rb:439, src/mir/lowering/expressions.rb:1742
 - 4 guards collapse | `param `val` (AST#type=)` (param) across 1 method(s) -> always `Type`: collapse, all 4 die
   - methods: `AST#type=`
-  - guards at: src/ast/ast.rb:87, src/ast/ast.rb:116, src/ast/ast.rb:1306
+  - guards at: src/ast/ast.rb:87, src/ast/ast.rb:116, src/ast/ast.rb:1305
 - 4 guards collapse | `:type` (hash-key) across 1 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `AST#initialize`
-  - guards at: src/ast/ast.rb:76, src/ast/ast.rb:105, src/ast/ast.rb:1301
+  - guards at: src/ast/ast.rb:76, src/ast/ast.rb:105, src/ast/ast.rb:1300
 - 4 guards collapse | `.full_type!` (accessor) across 4 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `FsmLowering#lower_step_stmts`, `MIRLoweringControlFlow#for_each_plan`, `MIRLoweringExpressions#lower_share`, `MIRLoweringFunctions#lower_lambda`
-  - guards at: src/mir/fsm_lowering.rb:138, src/mir/lowering/control_flow.rb:290, src/mir/lowering/expressions.rb:1830, src/mir/lowering/functions.rb:1975
+  - guards at: src/mir/fsm_lowering.rb:138, src/mir/lowering/control_flow.rb:281, src/mir/lowering/expressions.rb:1825, src/mir/lowering/functions.rb:2009
 - 3 guards collapse | `:resolved_type` (hash-key) across 2 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLoweringCapabilities#lower_with_block`, `MIRLoweringCapabilities#lower_polymorphic_universal`
-  - guards at: src/mir/lowering/capabilities.rb:353, src/mir/lowering/capabilities.rb:411, src/mir/lowering/capabilities.rb:811
+  - guards at: src/mir/lowering/capabilities.rb:351, src/mir/lowering/capabilities.rb:409, src/mir/lowering/capabilities.rb:825
 - 3 guards collapse | `from_node!()` (call) across 2 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLoweringFunctions#cross_boundary_arg`, `FsmTransform::RecursiveSplitter#emit_for_each_fragment`
-  - guards at: src/mir/lowering/functions.rb:956, src/mir/lowering/functions.rb:972, src/mir/fsm_transform/recursive_splitter.rb:486
+  - guards at: src/mir/lowering/functions.rb:992, src/mir/lowering/functions.rb:1008, src/mir/fsm_transform/recursive_splitter.rb:486
 - 2 guards collapse | `param `b` (AutoUnifier#types_equal?)` (param) across 1 method(s) -> always `AutoConstraintCollector::ObservedType`: collapse, all 2 die
   - methods: `AutoUnifier#types_equal?`
   - guards at: src/annotator/helpers/auto_inference.rb:601, src/annotator/helpers/auto_inference.rb:603
 - 2 guards collapse | `.resolved_type` (accessor) across 1 method(s) -> always `Type`: collapse, all 2 die
   - methods: `MIRLoweringControlFlow#match_lowering_facts`
-  - guards at: src/mir/lowering/control_flow.rb:657, src/mir/lowering/control_flow.rb:660
-- 2 guards collapse | `param `expected_type` (SemanticAnnotator#ensure_owned_value!)` (param) across 1 method(s) -> 50.0% `Type` + 1 outlier producer(s)
+  - guards at: src/mir/lowering/control_flow.rb:644, src/mir/lowering/control_flow.rb:647
+- 2 guards collapse | `param `expected_type` (SemanticAnnotator#ensure_owned_value!)` (param) across 1 method(s) -> 66.7% `Type` + 1 outlier producer(s)
   - methods: `SemanticAnnotator#ensure_owned_value!`
-  - guards at: src/annotator/annotator.rb:4223, src/annotator/annotator.rb:4227
+  - guards at: src/annotator/annotator.rb:4305, src/annotator/annotator.rb:4309
   - outlier producer `T.nilable(Type)` at src/annotator/helpers/union.rb:197 `expected_fields[fname]`
 - 2 guards collapse | `param `a` (AutoUnifier#types_equal?)` (param) across 1 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `AutoUnifier#types_equal?`
@@ -96,16 +96,16 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - guards at: src/mir/fsm_transform/recursive_splitter.rb:489, src/mir/fsm_transform/recursive_splitter.rb:502
 - 2 guards collapse | `param `ti` (MIRLowering#bare_zig_type)` (param) across 1 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLowering#bare_zig_type`
-  - guards at: src/mir/mir_lowering.rb:2855, src/mir/mir_lowering.rb:2992
+  - guards at: src/mir/mir_lowering.rb:2915, src/mir/mir_lowering.rb:3112
 - 2 guards collapse | `param `type` (MIRLoweringExpressions#generic_type_arg_zig)` (param) across 1 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLoweringExpressions#generic_type_arg_zig`
-  - guards at: src/mir/lowering/expressions.rb:1946, src/mir/lowering/expressions.rb:1949
+  - guards at: src/mir/lowering/expressions.rb:1941, src/mir/lowering/expressions.rb:1944
 - 2 guards collapse | `let()` (call) across 1 method(s) -> producers unattributed (no runtime trace for this contract yet)
   - methods: `MIRLoweringFunctions#call_owned_return_from_args?`
-  - guards at: src/mir/lowering/functions.rb:1473, src/mir/lowering/functions.rb:1474
+  - guards at: src/mir/lowering/functions.rb:1507, src/mir/lowering/functions.rb:1508
 - 2 guards collapse | `.type_info` (accessor) across 2 method(s) -> via @type_info assignments (runtime) {Type, NilClass, String}: tighten that contract
   - methods: `MIRChecker#verify_alloc_marks_typed!`, `MIRLoweringExpressions#index_access_value`
-  - guards at: src/mir/mir_checker.rb:349, src/mir/lowering/expressions.rb:1038
+  - guards at: src/mir/mir_checker.rb:349, src/mir/lowering/expressions.rb:1032
 - 1 guards collapse | `param `val` (SymbolEntry#type=)` (param) across 1 method(s) -> always `Type`: collapse, all 1 die
   - methods: `SymbolEntry#type=`
   - guards at: src/ast/symbol_entry.rb:105
@@ -132,15 +132,15 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - guards at: src/annotator/helpers/auto_inference.rb:963
 - 1 guards collapse | `param `type` (SemanticAnnotator#type_display)` (param) across 1 method(s) -> always `Type`: collapse, all 1 die
   - methods: `SemanticAnnotator#type_display`
-  - guards at: src/annotator/annotator.rb:2261
+  - guards at: src/annotator/annotator.rb:2341
 - 1 guards collapse | `param `from_type` (Type#safe_autocast?)` (param) across 1 method(s) -> always `Symbol`: collapse, all 1 die
   - methods: `Type#safe_autocast?`
   - guards at: src/ast/type.rb:218
 
 ### Node-Union Alias Candidates
 - Heterogeneous param slots whose every observed class is in ONE namespace. Each namespace below collapses to a single `T.type_alias` (e.g. `AstNode = T.type_alias { T.any(AST::...) }`); applying it types every listed param at once. `classes` = distinct node types observed at that slot (small = a precise sub-union; large = the full node grab-bag).
-- 277 of 346 Heterogeneous params (80%) collapse to 4 alias(es).
-- `AstNode` (AST::*): 187 param slot(s)
+- 276 of 347 Heterogeneous params (80%) collapse to 4 alias(es).
+- `AstNode` (AST::*): 185 param slot(s)
   - src/backends/string_concat_rewriter.rb:27 `StringConcatRewriter#rewrite_in_node!` param `node` (84 node types)
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` param `node` (84 node types)
   - src/backends/string_concat_rewriter.rb:78 `StringConcatRewriter#string_concat?` param `node` (84 node types)
@@ -150,7 +150,7 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/ast.rb:654 `AST#_expr_each_concurrent_capture` param `node` (82 node types)
   - src/mir/mir_pass.rb:546 `MIRPass#walk_consumed` param `node` (74 node types)
   - src/ast/ast.rb:489 `AST#expression_children` param `node` (71 node types)
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit` param `node` (67 node types)
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit` param `node` (67 node types)
   - src/mir/control_flow.rb:37 `MIRControlFlowExpr#walk_expr_node` param `node` (66 node types)
   - src/backends/pipeline_rewriter.rb:29 `PipelineRewriter#rewrite!` param `node` (59 node types)
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` param `node` (59 node types)
@@ -158,19 +158,19 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/cleanup_classifier.rb:348 `CleanupClassifier#ownership_transfer_payload?` param `node` (31 node types)
   - src/mir/escape_analysis.rb:709 `EscapeAnalysis#borrow_return_expr?` param `expr` (31 node types)
   - src/mir/escape_analysis.rb:910 `EscapeAnalysis#call_result_is_heap?` param `value` (31 node types)
-  - src/mir/mir_lowering.rb:344 `MIRLowering#place_value_for_destination` param `ast_node` (31 node types)
-  - src/mir/mir_lowering.rb:372 `MIRLowering#destination_placement_plan` param `ast_node` (31 node types)
+  - src/mir/mir_lowering.rb:408 `MIRLowering#place_value_for_destination` param `ast_node` (31 node types)
+  - src/mir/mir_lowering.rb:436 `MIRLowering#destination_placement_plan` param `ast_node` (31 node types)
   - src/mir/mir_pass.rb:231 `MIRPass#ast_node_lowers_through_runtime?` param `node` (31 node types)
-  - src/annotator/annotator.rb:3025 `SemanticAnnotator#track_union_alias` param `value_node` (30 node types)
+  - src/annotator/annotator.rb:3107 `SemanticAnnotator#track_union_alias` param `value_node` (30 node types)
   - src/ast/ast.rb:427 `AST#body_slots` param `node` (30 node types)
   - src/mir/control_flow.rb:1572 `BorrowChecker#check_binding_moves` param `expr` (30 node types)
   - src/mir/control_flow.rb:1597 `BorrowChecker#collect_moved_names` param `node` (30 node types)
   - src/mir/control_flow.rb:813 `OwnershipDataflow#collect_binding_moves` param `node` (30 node types)
   - src/mir/control_flow.rb:822 `OwnershipDataflow#collect_ownership_transfers` param `node` (30 node types)
-  - src/mir/mir_lowering.rb:400 `MIRLowering#destination_type` param `ast_node` (30 node types)
-  - src/mir/mir_lowering.rb:406 `MIRLowering#or_binary?` param `node` (30 node types)
-  - src/mir/mir_lowering.rb:440 `MIRLowering#cast_wrapped_or?` param `ast_node` (30 node types)
-  - src/mir/mir_lowering.rb:454 `MIRLowering#owned_or_destination?` param `ast_node` (30 node types)
+  - src/mir/mir_lowering.rb:464 `MIRLowering#destination_type` param `ast_node` (30 node types)
+  - src/mir/mir_lowering.rb:470 `MIRLowering#or_binary?` param `node` (30 node types)
+  - src/mir/mir_lowering.rb:504 `MIRLowering#cast_wrapped_or?` param `ast_node` (30 node types)
+  - src/mir/mir_lowering.rb:518 `MIRLowering#owned_or_destination?` param `ast_node` (30 node types)
   - src/mir/mir_pass.rb:451 `MIRPass#recurse_branches!` param `stmt` (30 node types)
   - src/mir/mir_pass.rb:493 `MIRPass#mark_consumed_cleanup_guards!` param `stmt` (30 node types)
   - src/mir/mir_pass.rb:652 `MIRPass#stamp_reassign_cleanup!` param `stmt` (30 node types)
@@ -178,11 +178,11 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/mir_pass.rb:711 `MIRPass#stamp_while_bind_cleanup!` param `stmt` (30 node types)
   - src/mir/mir_pass.rb:726 `MIRPass#stamp_if_bind_cleanup!` param `stmt` (30 node types)
   - src/mir/control_flow.rb:929 `OwnershipDataflow#collect_share_transfers_in` param `node` (29 node types)
-  - src/mir/mir_lowering.rb:411 `MIRLowering#destination_source_fact` param `ast_node` (29 node types)
-  - src/mir/mir_lowering.rb:421 `MIRLowering#destination_source_node` param `node` (29 node types)
+  - src/mir/mir_lowering.rb:475 `MIRLowering#destination_source_fact` param `ast_node` (29 node types)
+  - src/mir/mir_lowering.rb:485 `MIRLowering#destination_source_node` param `node` (29 node types)
   - src/mir/mir_pass.rb:508 `MIRPass#collect_consumed_names` param `stmt` (29 node types)
   - src/mir/escape_analysis.rb:627 `EscapeAnalysis#heap_binding_carries_sources?` param `value` (27 node types)
-  - src/mir/mir_lowering.rb:445 `MIRLowering#heap_indirect_destination?` param `ast_node` (27 node types)
+  - src/mir/mir_lowering.rb:509 `MIRLowering#heap_indirect_destination?` param `ast_node` (27 node types)
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads` param `stmt` (26 node types)
   - src/mir/control_flow.rb:1307 `LoopFrameAnalysis#walk_stmt!` param `stmt` (26 node types)
   - src/mir/control_flow.rb:1491 `BorrowChecker#check_stmt` param `stmt` (26 node types)
@@ -192,49 +192,47 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/hoist.rb:192 `Hoist#each_call` param `node` (26 node types)
   - src/mir/cleanup_classifier.rb:736 `CleanupClassifier#contains_call?` param `node` (23 node types)
   - src/mir/fsm_transform.rb:150 `FsmTransform#local_entry_for_node` param `node` (23 node types)
-  - src/annotator/helpers/function_analysis.rb:958 `FunctionAnalysis#return_is_borrow?` param `node` (21 node types)
-  - src/annotator/helpers/function_analysis.rb:537 `FunctionAnalysis#atomic_cell_to_bare_value_param?` param `arg_node` (20 node types)
-  - src/annotator/helpers/function_analysis.rb:552 `FunctionAnalysis#atomic_cell_to_atomic_param?` param `arg_node` (20 node types)
-  - src/annotator/helpers/function_analysis.rb:596 `FunctionAnalysis#verify_param_lifetime!` param `arg_node` (20 node types)
-  - src/mir/lowering/control_flow.rb:1141 `MIRLoweringControlFlow#call_union_return_needs_hoist?` param `ast_node` (20 node types)
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` param `node` (19 node types)
+  - src/annotator/helpers/function_analysis.rb:957 `FunctionAnalysis#return_is_borrow?` param `node` (21 node types)
+  - src/annotator/helpers/function_analysis.rb:536 `FunctionAnalysis#atomic_cell_to_bare_value_param?` param `arg_node` (20 node types)
+  - src/annotator/helpers/function_analysis.rb:551 `FunctionAnalysis#atomic_cell_to_atomic_param?` param `arg_node` (20 node types)
+  - src/annotator/helpers/function_analysis.rb:595 `FunctionAnalysis#verify_param_lifetime!` param `arg_node` (20 node types)
+  - src/mir/lowering/control_flow.rb:1123 `MIRLoweringControlFlow#call_union_return_needs_hoist?` param `ast_node` (20 node types)
   - src/mir/control_flow.rb:895 `OwnershipDataflow#collect_explicit_in` param `node` (19 node types)
   - src/mir/hoist.rb:1100 `MIRHoistLowering#hoist_cleanup_entry` param `ast_node` (19 node types)
-  - src/mir/lowering/control_flow.rb:1107 `MIRLoweringControlFlow#collect_returned_binding_names` param `expr` (19 node types)
-  - src/mir/mir_lowering.rb:3018 `MIRLowering#owned_sink_plan` param `ast_node` (19 node types)
-  - src/mir/mir_lowering.rb:3061 `MIRLowering#owned_sink_source_fact` param `ast_node` (19 node types)
-  - src/mir/mir_lowering.rb:3081 `MIRLowering#owned_sink_source_node` param `ast_node` (19 node types)
-  - src/mir/mir_lowering.rb:3088 `MIRLowering#explicit_owned_sink_transfer?` param `ast_node` (19 node types)
-  - src/mir/mir_lowering.rb:3111 `MIRLowering#owned_sink_value?` param `ast_node` (19 node types)
-  - src/mir/mir_lowering.rb:3127 `MIRLowering#borrowed_union_sink_source?` param `ast_node` (19 node types)
+  - src/mir/lowering/control_flow.rb:1089 `MIRLoweringControlFlow#collect_returned_binding_names` param `expr` (19 node types)
+  - src/mir/mir_lowering.rb:3138 `MIRLowering#owned_sink_plan` param `ast_node` (19 node types)
+  - src/mir/mir_lowering.rb:3181 `MIRLowering#owned_sink_source_fact` param `ast_node` (19 node types)
+  - src/mir/mir_lowering.rb:3201 `MIRLowering#owned_sink_source_node` param `ast_node` (19 node types)
+  - src/mir/mir_lowering.rb:3208 `MIRLowering#explicit_owned_sink_transfer?` param `ast_node` (19 node types)
+  - src/mir/mir_lowering.rb:3231 `MIRLowering#owned_sink_value?` param `ast_node` (19 node types)
+  - src/mir/mir_lowering.rb:3247 `MIRLowering#borrowed_union_sink_source?` param `ast_node` (19 node types)
   - src/ast/parser.rb:1962 `Parser#parse_suffixes` param `lhs` (18 node types)
-  - src/mir/mir_lowering.rb:3088 `MIRLowering#explicit_owned_sink_transfer?` param `source_node` (18 node types)
-  - src/mir/mir_lowering.rb:3097 `MIRLowering#owned_sink_source_entry` param `source_node` (18 node types)
-  - src/mir/mir_lowering.rb:3104 `MIRLowering#owned_parameter_source_node?` param `source_node` (18 node types)
-  - src/mir/mir_lowering.rb:3121 `MIRLowering#existing_owned_source_node?` param `source_node` (18 node types)
-  - src/mir/mir_lowering.rb:3127 `MIRLowering#borrowed_union_sink_source?` param `source_node` (18 node types)
-  - src/mir/mir_lowering.rb:617 `MIRLowering#alloc_mark_type_info` param `ast_node` (18 node types)
+  - src/mir/mir_lowering.rb:3208 `MIRLowering#explicit_owned_sink_transfer?` param `source_node` (18 node types)
+  - src/mir/mir_lowering.rb:3217 `MIRLowering#owned_sink_source_entry` param `source_node` (18 node types)
+  - src/mir/mir_lowering.rb:3224 `MIRLowering#owned_parameter_source_node?` param `source_node` (18 node types)
+  - src/mir/mir_lowering.rb:3241 `MIRLowering#existing_owned_source_node?` param `source_node` (18 node types)
+  - src/mir/mir_lowering.rb:3247 `MIRLowering#borrowed_union_sink_source?` param `source_node` (18 node types)
+  - src/mir/mir_lowering.rb:678 `MIRLowering#alloc_mark_type_info` param `ast_node` (18 node types)
   - src/mir/control_flow.rb:909 `OwnershipDataflow#collect_explicit_moves` param `node` (17 node types)
   - src/mir/escape_analysis.rb:801 `EscapeAnalysis#borrowed_return?` param `expr` (17 node types)
   - src/mir/escape_analysis.rb:836 `EscapeAnalysis#owning_return_type` param `expr` (17 node types)
   - src/mir/escape_analysis.rb:563 `EscapeAnalysis#ownership_bearing_transfer_expr?` param `arg` (16 node types)
-  - src/mir/mir_lowering.rb:2147 `MIRLowering#root_receiver_node` param `node` (16 node types)
-  - src/annotator/annotator.rb:6599 `SemanticAnnotator#move_if_takes_ownership!` param `node` (15 node types)
-  - src/annotator/helpers/function_analysis.rb:525 `FunctionAnalysis#borrowed_takes_argument?` param `node` (15 node types)
+  - src/mir/mir_lowering.rb:2212 `MIRLowering#root_receiver_node` param `node` (16 node types)
+  - src/annotator/annotator.rb:6694 `SemanticAnnotator#move_if_takes_ownership!` param `node` (15 node types)
+  - src/annotator/helpers/function_analysis.rb:524 `FunctionAnalysis#borrowed_takes_argument?` param `node` (15 node types)
   - src/mir/escape_analysis.rb:577 `EscapeAnalysis#heap_owned_transfer_source?` param `arg` (15 node types)
   - src/mir/escape_analysis.rb:676 `EscapeAnalysis#ownership_transferring_expr?` param `expr` (15 node types)
   - src/mir/escape_analysis.rb:717 `EscapeAnalysis#expr_has_heap_identifier?` param `expr` (15 node types)
-  - src/mir/mir_lowering.rb:811 `MIRLowering#stack_fixed_array_coercion?` param `node` (15 node types)
+  - src/mir/mir_lowering.rb:871 `MIRLowering#stack_fixed_array_coercion?` param `node` (15 node types)
   - src/ast/parser.rb:1795 `Parser#parse_binary_op` param `lhs` (14 node types)
   - src/mir/cleanup_classifier.rb:184 `CleanupClassifier#mark_iteration_values_function!` param `expr` (14 node types)
   - src/mir/escape_analysis.rb:440 `EscapeAnalysis#mark_expr_roots_heap!` param `expr` (14 node types)
-  - src/mir/hoist.rb:250 `Hoist#hoist_concats_within!` param `node` (14 node types)
-  - src/mir/lowering/functions.rb:1092 `MIRLoweringFunctions#borrowed_ownership_operand?` param `arg` (14 node types)
-  - src/mir/mir_lowering.rb:1866 `MIRLowering#moved_arg_root` param `arg` (14 node types)
+  - src/mir/lowering/functions.rb:1128 `MIRLoweringFunctions#borrowed_ownership_operand?` param `arg` (14 node types)
+  - src/mir/mir_lowering.rb:1931 `MIRLowering#moved_arg_root` param `arg` (14 node types)
   - src/mir/fsm_transform/recursive_splitter.rb:355 `FsmTransform::RecursiveSplitter#stmt_unsupported_suspend?` param `stmt` (13 node types)
-  - src/mir/lowering/control_flow.rb:1158 `MIRLoweringControlFlow#universal_poly_arg_needs_addr?` param `arg_node` (13 node types)
+  - src/mir/lowering/control_flow.rb:1140 `MIRLoweringControlFlow#universal_poly_arg_needs_addr?` param `arg_node` (13 node types)
   - src/mir/fsm_transform/segments.rb:342 `FsmTransform::Segments#suspend_for` param `v` (12 node types)
-  - src/annotator/annotator.rb:5961 `SemanticAnnotator#lifetime_sources_for_value` param `val_node` (11 node types)
+  - src/annotator/annotator.rb:6056 `SemanticAnnotator#lifetime_sources_for_value` param `val_node` (11 node types)
   - src/backends/pipeline_rewriter.rb:405 `PipelineRewriter#build_init` param `terminal` (11 node types)
   - src/backends/pipeline_rewriter.rb:501 `PipelineRewriter#build_recursive_body` param `terminal` (11 node types)
   - src/backends/pipeline_rewriter.rb:599 `PipelineRewriter#build_terminal_action` param `terminal` (11 node types)
@@ -245,25 +243,26 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/backends/pipeline_rewriter.rb:801 `PipelineRewriter#replace_placeholder` param `node` (10 node types)
   - src/mir/escape_analysis.rb:729 `EscapeAnalysis#expr_has_owned_inline_value?` param `expr` (10 node types)
   - src/mir/lowering/expressions.rb:402 `MIRLoweringExpressions#unit_variant_access` param `node` (10 node types)
-  - src/annotator/annotator.rb:5695 `SemanticAnnotator#finalize_scope` param `node` (9 node types)
+  - src/annotator/annotator.rb:5790 `SemanticAnnotator#finalize_scope` param `node` (9 node types)
   - src/backends/pipeline_rewriter.rb:729 `PipelineRewriter#build_final_result` param `terminal` (9 node types)
   - src/mir/escape_analysis.rb:286 `EscapeAnalysis#apply_escape_sink!` param `node` (9 node types)
   - src/mir/escape_analysis.rb:547 `EscapeAnalysis#mark_receiver_for_owned_sink!` param `receiver` (9 node types)
   - src/mir/escape_analysis.rb:587 `EscapeAnalysis#mark_receiver_scope_escapes!` param `receiver` (9 node types)
   - src/mir/escape_analysis.rb:766 `EscapeAnalysis#receiver_is_param?` param `receiver` (9 node types)
-  - src/mir/lowering/expressions.rb:931 `MIRLoweringExpressions#comptime_number_literal?` param `node` (9 node types)
-  - src/mir/lowering/expressions.rb:938 `MIRLoweringExpressions#float_coercion?` param `node` (9 node types)
-  - src/mir/mir_lowering.rb:1728 `MIRLowering#borrowed_ownership_ast?` param `node` (9 node types)
-  - src/mir/mir_lowering.rb:1744 `MIRLowering#ownership_root_name` param `node` (9 node types)
+  - src/mir/fsm_transform/segments.rb:274 `FsmTransform::Segments#stmt_unsupported?` param `stmt` (9 node types)
+  - src/mir/lowering/expressions.rb:925 `MIRLoweringExpressions#comptime_number_literal?` param `node` (9 node types)
+  - src/mir/lowering/expressions.rb:932 `MIRLoweringExpressions#float_coercion?` param `node` (9 node types)
+  - src/mir/mir_lowering.rb:1793 `MIRLowering#borrowed_ownership_ast?` param `node` (9 node types)
+  - src/mir/mir_lowering.rb:1809 `MIRLowering#ownership_root_name` param `node` (9 node types)
   - src/ast/source_error.rb:81 `ErrorHelper#note!` param `node_or_token` (8 node types)
-  - src/backends/pipeline_host.rb:254 `PipelineHost#visit_mir` param `node` (8 node types)
-  - src/backends/pipeline_host.rb:2605 `PipelineHost#lower_binding_fold` param `fold` (8 node types)
-  - src/backends/pipeline_host.rb:3153 `PipelineHost#lower_range_fold_observable_default` param `fold_op` (8 node types)
-  - src/backends/pipeline_host.rb:931 `PipelineHost#build_soa_scalar_fold_block` param `fold_node` (8 node types)
+  - src/backends/pipeline_host.rb:1037 `PipelineHost#build_soa_scalar_fold_block` param `fold_node` (8 node types)
+  - src/backends/pipeline_host.rb:2696 `PipelineHost#lower_binding_fold` param `fold` (8 node types)
+  - src/backends/pipeline_host.rb:3242 `PipelineHost#lower_range_fold_observable_default` param `fold_op` (8 node types)
+  - src/backends/pipeline_host.rb:526 `PipelineHost#visit_mir` param `node` (8 node types)
   - src/backends/string_concat_rewriter.rb:86 `StringConcatRewriter#collect_parts` param `node` (8 node types)
   - src/mir/cleanup_classifier.rb:159 `CleanupClassifier#value_extends_loop?` param `value` (8 node types)
   - src/mir/fsm_transform.rb:219 `FsmTransform#suspend_value?` param `value` (8 node types)
-  - src/mir/lowering/expressions.rb:1643 `MIRLoweringExpressions#type_info_for` param `ast_node` (8 node types)
+  - src/mir/lowering/expressions.rb:1637 `MIRLoweringExpressions#type_info_for` param `ast_node` (8 node types)
   - src/annotator/helpers/pipe_analysis.rb:1326 `PipeAnalysis#sharded_get_index_access` param `node` (7 node types)
   - src/ast/parser.rb:2074 `Parser#extract_paren_bindings` param `node` (7 node types)
   - src/mir/cleanup_classifier.rb:164 `CleanupClassifier#promote_entry_to_heap_cleanup!` param `value` (7 node types)
@@ -271,23 +270,23 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/fsm_lowering.rb:243 `FsmLowering#fsm_result_transfer_facts` param `ast_node` (7 node types)
   - src/mir/fsm_lowering.rb:290 `FsmLowering#fsm_ast_result_consumed_roots` param `node` (7 node types)
   - src/mir/hoist.rb:174 `Hoist#moved_arg?` param `node` (7 node types)
-  - src/mir/mir_lowering.rb:2040 `MIRLowering#alloc_for_node` param `node` (7 node types)
-  - src/backends/pipeline_host.rb:4834 `PipelineHost#assignment_targets_placeholder?` param `node` (6 node types)
+  - src/mir/mir_lowering.rb:2105 `MIRLowering#alloc_for_node` param `node` (7 node types)
+  - src/backends/pipeline_host.rb:4917 `PipelineHost#assignment_targets_placeholder?` param `node` (6 node types)
   - src/backends/pipeline_rewriter.rb:260 `PipelineRewriter#binding_source?` param `node` (6 node types)
-  - src/mir/lowering/expressions.rb:718 `MIRLoweringExpressions#or_fallback_access_path?` param `ast_node` (6 node types)
-  - src/mir/lowering/variables.rb:602 `MIRLoweringVariables#list_collection_copy?` param `rhs` (6 node types)
+  - src/mir/lowering/expressions.rb:712 `MIRLoweringExpressions#or_fallback_access_path?` param `ast_node` (6 node types)
+  - src/mir/lowering/variables.rb:613 `MIRLoweringVariables#list_collection_copy?` param `rhs` (6 node types)
   - src/tools/migration_suggester_helpers.rb:106 `MigrationSuggesterHelpers#classify_uses!` param `node` (6 node types)
-  - src/backends/pipeline_host.rb:280 `PipelineHost#ast_node_uses_placeholder?` param `node` (5 node types)
+  - src/backends/pipeline_host.rb:552 `PipelineHost#ast_node_uses_placeholder?` param `node` (5 node types)
   - src/mir/cleanup_classifier.rb:525 `CleanupClassifier#capture_expr_owns_result?` param `expr` (5 node types)
   - src/mir/fsm_transform/recursive_splitter.rb:368 `FsmTransform::RecursiveSplitter#emit_pivot` param `stmt` (5 node types)
-  - src/mir/lowering/concurrency.rb:283 `MIRLoweringConcurrency#do_branch_stmt_nodes` param `expr` (5 node types)
+  - src/mir/lowering/concurrency.rb:322 `MIRLoweringConcurrency#do_branch_stmt_nodes` param `expr` (5 node types)
   - src/mir/thunk_transform/recursive_splitter.rb:214 `ThunkTransform::RecursiveSplitter#match_base_case` param `stmt` (5 node types)
   - src/mir/thunk_transform/recursive_splitter.rb:257 `ThunkTransform::RecursiveSplitter#direct_self_call` param `node` (5 node types)
-  - src/annotator/annotator.rb:6537 `SemanticAnnotator#og_declare` param `node` (4 node types)
+  - src/annotator/annotator.rb:6632 `SemanticAnnotator#og_declare` param `node` (4 node types)
+  - src/annotator/helpers/capabilities.rb:116 `CapabilityHelper#validate_capability` param `var_node` (4 node types)
   - src/annotator/helpers/pipe_analysis.rb:1165 `PipeAnalysis#collect_sharded_names` param `node` (4 node types)
-  - src/ast/parser.rb:3953 `Parser#deep_clone_node` param `node` (4 node types)
-  - src/ast/scope.rb:25 `Scope#declare` param `reg` (4 node types)
-  - src/backends/pipeline_host.rb:195 `PipelineHost#visit` param `node` (4 node types)
+  - src/ast/parser.rb:3976 `Parser#deep_clone_node` param `node` (4 node types)
+  - src/backends/pipeline_host.rb:467 `PipelineHost#visit` param `node` (4 node types)
   - src/backends/pipeline_rewriter.rb:303 `PipelineRewriter#fuse_pipeline` param `source` (4 node types)
   - src/mir/cleanup_classifier.rb:598 `CleanupClassifier#classify_binding` param `node` (4 node types)
   - src/mir/cleanup_classifier.rb:657 `CleanupClassifier#binding_container_borrow?` param `node` (4 node types)
@@ -298,7 +297,6 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/cleanup_classifier.rb:748 `CleanupClassifier#classify_collection` param `node` (4 node types)
   - src/mir/cleanup_classifier.rb:785 `CleanupClassifier#classify_array_struct_strings` param `node` (4 node types)
   - src/mir/cleanup_classifier.rb:842 `CleanupClassifier#classify_optional` param `node` (4 node types)
-  - src/mir/cleanup_classifier.rb:889 `CleanupClassifier#classify_owned_string` param `node` (4 node types)
   - src/mir/cleanup_classifier.rb:908 `CleanupClassifier#classify_heap_storage` param `node` (4 node types)
   - src/mir/cleanup_classifier.rb:946 `CleanupClassifier#classify_heap_composite` param `node` (4 node types)
   - src/mir/control_flow.rb:1317 `LoopFrameAnalysis#process_loop!` param `loop_node` (4 node types)
@@ -306,108 +304,109 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/control_flow.rb:1397 `LoopFrameAnalysis#key_allocates_frame?` param `expr` (4 node types)
   - src/mir/control_flow.rb:711 `OwnershipDataflow#make_owner_entry` param `node` (4 node types)
   - src/mir/thunk_transform/emit.rb:133 `ThunkTransform::Emit#render_expr` param `ast_expr` (4 node types)
-  - src/annotator/annotator.rb:5426 `SemanticAnnotator#handle_assign_move` param `node` (3 node types)
-  - src/annotator/annotator.rb:5504 `SemanticAnnotator#handle_assign_borrow` param `node` (3 node types)
-  - src/annotator/annotator.rb:5575 `SemanticAnnotator#verify_unrestricted!` param `node` (3 node types)
-  - src/annotator/annotator.rb:5614 `SemanticAnnotator#promote_to_expr_if!` param `parent_node` (3 node types)
-  - src/annotator/annotator.rb:5792 `SemanticAnnotator#mark_chain_needs_mut_ref!` param `node` (3 node types)
+  - src/annotator/annotator.rb:5499 `SemanticAnnotator#handle_assign_move` param `node` (3 node types)
+  - src/annotator/annotator.rb:5599 `SemanticAnnotator#handle_assign_borrow` param `node` (3 node types)
+  - src/annotator/annotator.rb:5670 `SemanticAnnotator#verify_unrestricted!` param `node` (3 node types)
+  - src/annotator/annotator.rb:5709 `SemanticAnnotator#promote_to_expr_if!` param `parent_node` (3 node types)
+  - src/annotator/annotator.rb:5887 `SemanticAnnotator#mark_chain_needs_mut_ref!` param `node` (3 node types)
   - src/annotator/helpers/capabilities.rb:995 `CapabilityHelper#record_capture_site!` param `node` (3 node types)
   - src/annotator/helpers/generic_analysis.rb:34 `GenericAnalysis#validate_type_param_list!` param `node` (3 node types)
-  - src/mir/lowering/functions.rb:1388 `MIRLoweringFunctions#call_owned_return?` param `node` (3 node types)
-  - src/annotator/annotator.rb:2058 `SemanticAnnotator#resolve_error_registration!` param `node` (2 node types)
-  - src/annotator/annotator.rb:2671 `SemanticAnnotator#finalize_decl_node!` param `node` (2 node types)
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` param `node` (2 node types)
-  - src/annotator/annotator.rb:5653 `SemanticAnnotator#promote_to_expr_match!` param `parent_node` (2 node types)
-  - src/annotator/annotator.rb:6003 `SemanticAnnotator#stamp_bg_handle_lifetime!` param `decl_node` (2 node types)
-  - src/annotator/annotator.rb:6014 `SemanticAnnotator#stamp_init_contents_heap!` param `decl_node` (2 node types)
+  - src/mir/lowering/functions.rb:1422 `MIRLoweringFunctions#call_owned_return?` param `node` (3 node types)
+  - src/annotator/annotator.rb:2138 `SemanticAnnotator#resolve_error_registration!` param `node` (2 node types)
+  - src/annotator/annotator.rb:2753 `SemanticAnnotator#finalize_decl_node!` param `node` (2 node types)
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` param `node` (2 node types)
+  - src/annotator/annotator.rb:5748 `SemanticAnnotator#promote_to_expr_match!` param `parent_node` (2 node types)
+  - src/annotator/annotator.rb:6098 `SemanticAnnotator#stamp_bg_handle_lifetime!` param `decl_node` (2 node types)
+  - src/annotator/annotator.rb:6109 `SemanticAnnotator#stamp_init_contents_heap!` param `decl_node` (2 node types)
   - src/annotator/helpers/capabilities.rb:354 `CapabilityHelper#record_predicate_call_site!` param `node` (2 node types)
   - src/annotator/helpers/effects.rb:1145 `EffectTracker#validate_tight_body!` param `loop_node` (2 node types)
   - src/annotator/helpers/function_analysis.rb:14 `FunctionAnalysis#analyze_routine` param `node` (2 node types)
   - src/annotator/helpers/function_analysis.rb:92 `FunctionAnalysis#resolve_call` param `node` (2 node types)
   - src/annotator/helpers/test_annotation.rb:75 `TestAnnotation#visit_test_lets` param `node` (2 node types)
   - src/annotator/helpers/test_annotation.rb:96 `TestAnnotation#visit_test_hook_bodies` param `node` (2 node types)
-  - src/mir/lowering/functions.rb:1156 `MIRLoweringFunctions#matched_call_signature` param `node` (2 node types)
-  - src/mir/lowering/functions.rb:1899 `MIRLoweringFunctions#build_extern_trampoline_common` param `ast_node` (2 node types)
-- `MirNode` (MIR::*): 83 param slot(s)
-  - src/mir/mir_lowering.rb:1501 `MIRLowering#ownership_consumption_for_node` param `node` (102 node types)
-  - src/mir/mir_lowering.rb:1302 `MIRLowering#ownership_fact_source` param `node` (100 node types)
-  - src/mir/mir_lowering.rb:1210 `MIRLowering#ownership_fact_target` param `expr` (97 node types)
+  - src/mir/lowering/functions.rb:1192 `MIRLoweringFunctions#matched_call_signature` param `node` (2 node types)
+  - src/mir/lowering/functions.rb:1933 `MIRLoweringFunctions#build_extern_trampoline_common` param `ast_node` (2 node types)
+- `MirNode` (MIR::*): 84 param slot(s)
+  - src/mir/mir_lowering.rb:1566 `MIRLowering#ownership_consumption_for_node` param `node` (102 node types)
+  - src/mir/mir_lowering.rb:1362 `MIRLowering#ownership_fact_source` param `node` (100 node types)
+  - src/mir/mir_lowering.rb:1270 `MIRLowering#ownership_fact_target` param `expr` (97 node types)
   - src/mir/hoist.rb:734 `MIRHoistLowering#normalize_allocating_mir_stmt!` param `stmt` (64 node types)
   - src/mir/hoist.rb:832 `MIRHoistLowering#normalize_nested_mir_bodies!` param `node` (63 node types)
   - src/mir/mir_checker.rb:2344 `MIRChecker#check_stmt_for_unhoisted` param `node` (63 node types)
   - src/mir/mir_checker.rb:455 `MIRChecker#check_linear_stmt!` param `stmt` (63 node types)
-  - src/mir/mir_lowering.rb:1002 `MIRLowering#guarded_names_in_surface` param `root` (63 node types)
-  - src/mir/mir_lowering.rb:1062 `MIRLowering#finalize_ownership_for_mir_node!` param `node` (63 node types)
-  - src/mir/mir_lowering.rb:1082 `MIRLowering#append_move_guard_for_transfer_mark!` param `node` (63 node types)
-  - src/mir/mir_lowering.rb:1127 `MIRLowering#append_implicit_alloc_fact!` param `node` (63 node types)
-  - src/mir/mir_lowering.rb:1138 `MIRLowering#append_block_result_transfer!` param `node` (63 node types)
-  - src/mir/mir_lowering.rb:1461 `MIRLowering#ownership_transfer_operands_for_node` param `node` (62 node types)
+  - src/mir/mir_lowering.rb:1062 `MIRLowering#guarded_names_in_surface` param `root` (63 node types)
+  - src/mir/mir_lowering.rb:1122 `MIRLowering#finalize_ownership_for_mir_node!` param `node` (63 node types)
+  - src/mir/mir_lowering.rb:1142 `MIRLowering#append_move_guard_for_transfer_mark!` param `node` (63 node types)
+  - src/mir/mir_lowering.rb:1187 `MIRLowering#append_implicit_alloc_fact!` param `node` (63 node types)
+  - src/mir/mir_lowering.rb:1198 `MIRLowering#append_block_result_transfer!` param `node` (63 node types)
+  - src/mir/mir_lowering.rb:1526 `MIRLowering#ownership_transfer_operands_for_node` param `node` (62 node types)
   - src/mir/mir_checker.rb:2429 `MIRChecker#allocating_expr?` param `expr` (58 node types)
   - src/mir/hoist.rb:509 `MIRHoistLowering#each_mir_expr_child` param `node` (52 node types)
   - src/mir/mir_checker.rb:2390 `MIRChecker#check_owned_expr_position_for_unhoisted` param `expr` (44 node types)
-  - src/mir/mir_lowering.rb:2902 `MIRLowering#emit_expr` param `node` (41 node types)
+  - src/mir/mir_lowering.rb:2962 `MIRLowering#emit_expr` param `node` (41 node types)
   - src/mir/hoist.rb:716 `MIRHoistLowering#consumes_owned_children?` param `node` (40 node types)
-  - src/mir/mir_lowering.rb:1919 `MIRLowering#stamp_source_line!` param `node` (40 node types)
-  - src/mir/mir_lowering.rb:985 `MIRLowering#register_body_visible_names!` param `root` (40 node types)
+  - src/mir/mir_lowering.rb:1045 `MIRLowering#register_body_visible_names!` param `root` (40 node types)
+  - src/mir/mir_lowering.rb:1984 `MIRLowering#stamp_source_line!` param `node` (40 node types)
   - src/mir/hoist.rb:910 `MIRHoistLowering#normalize_allocating_used_expr` param `expr` (38 node types)
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` param `init` (36 node types)
-  - src/mir/lowering/variables.rb:387 `MIRLoweringVariables#var_decl_suppression` param `init` (36 node types)
-  - src/mir/lowering/variables.rb:404 `MIRLoweringVariables#stamp_var_decl_init_target!` param `init` (36 node types)
-  - src/mir/lowering/variables.rb:417 `MIRLoweringVariables#build_var_decl_nodes` param `init` (36 node types)
-  - src/mir/mir_lowering.rb:372 `MIRLowering#destination_placement_plan` param `mir` (35 node types)
-  - src/mir/mir_lowering.rb:440 `MIRLowering#cast_wrapped_or?` param `mir` (35 node types)
-  - src/mir/mir_lowering.rb:454 `MIRLowering#owned_or_destination?` param `mir` (35 node types)
-  - src/mir/mir_lowering.rb:411 `MIRLowering#destination_source_fact` param `mir` (34 node types)
+  - src/mir/lowering/variables.rb:386 `MIRLoweringVariables#var_decl_suppression` param `init` (36 node types)
+  - src/mir/lowering/variables.rb:403 `MIRLoweringVariables#stamp_var_decl_init_target!` param `init` (36 node types)
+  - src/mir/lowering/variables.rb:416 `MIRLoweringVariables#build_var_decl_nodes` param `init` (36 node types)
+  - src/mir/mir_lowering.rb:436 `MIRLowering#destination_placement_plan` param `mir` (35 node types)
+  - src/mir/mir_lowering.rb:504 `MIRLowering#cast_wrapped_or?` param `mir` (35 node types)
+  - src/mir/mir_lowering.rb:518 `MIRLowering#owned_or_destination?` param `mir` (35 node types)
+  - src/mir/mir_lowering.rb:475 `MIRLowering#destination_source_fact` param `mir` (34 node types)
   - src/mir/hoist.rb:967 `MIRHoistLowering#replace_mir_expr_child!` param `old_child` (33 node types)
-  - src/mir/lowering/variables.rb:639 `MIRLoweringVariables#owned_return_transfer_binding?` param `init` (32 node types)
-  - src/mir/mir_lowering.rb:445 `MIRLowering#heap_indirect_destination?` param `mir` (32 node types)
+  - src/mir/lowering/variables.rb:650 `MIRLoweringVariables#owned_return_transfer_binding?` param `init` (32 node types)
+  - src/mir/mir_lowering.rb:509 `MIRLowering#heap_indirect_destination?` param `mir` (32 node types)
   - src/mir/hoist.rb:959 `MIRHoistLowering#mir_consumes_owned_operands?` param `expr` (31 node types)
   - src/mir/hoist.rb:967 `MIRHoistLowering#replace_mir_expr_child!` param `new_child` (31 node types)
-  - src/mir/mir_lowering.rb:2997 `MIRLowering#materialize_owned_sink_value` param `value` (21 node types)
-  - src/mir/mir_lowering.rb:3018 `MIRLowering#owned_sink_plan` param `value` (21 node types)
-  - src/mir/mir_lowering.rb:3061 `MIRLowering#owned_sink_source_fact` param `value` (21 node types)
-  - src/mir/lowering/control_flow.rb:891 `MIRLoweringControlFlow#heap_carry_return_value` param `value` (20 node types)
-  - src/mir/lowering/control_flow.rb:904 `MIRLoweringControlFlow#heap_carry_recursive_param_value` param `value` (20 node types)
-  - src/mir/lowering/control_flow.rb:916 `MIRLoweringControlFlow#tail_call_return?` param `value` (20 node types)
-  - src/mir/mir_lowering.rb:2174 `MIRLowering#mir_cast` param `mir_node` (20 node types)
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value` param `value` (19 node types)
+  - src/mir/hoist.rb:1100 `MIRHoistLowering#hoist_cleanup_entry` param `mir` (22 node types)
+  - src/mir/mir_lowering.rb:3117 `MIRLowering#materialize_owned_sink_value` param `value` (21 node types)
+  - src/mir/mir_lowering.rb:3138 `MIRLowering#owned_sink_plan` param `value` (21 node types)
+  - src/mir/mir_lowering.rb:3181 `MIRLowering#owned_sink_source_fact` param `value` (21 node types)
+  - src/mir/lowering/control_flow.rb:873 `MIRLoweringControlFlow#heap_carry_return_value` param `value` (20 node types)
+  - src/mir/lowering/control_flow.rb:886 `MIRLoweringControlFlow#heap_carry_recursive_param_value` param `value` (20 node types)
+  - src/mir/lowering/control_flow.rb:898 `MIRLoweringControlFlow#tail_call_return?` param `value` (20 node types)
+  - src/mir/mir_lowering.rb:2239 `MIRLowering#mir_cast` param `mir_node` (20 node types)
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value` param `value` (19 node types)
   - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` param `expr` (18 node types)
-  - src/mir/mir_lowering.rb:1626 `MIRLowering#ownership_operands_for_value` param `value_mir` (18 node types)
-  - src/mir/lowering/control_flow.rb:921 `MIRLoweringControlFlow#return_with_transfer_marks` param `value` (17 node types)
-  - src/mir/mir_lowering.rb:617 `MIRLowering#alloc_mark_type_info` param `expr` (17 node types)
-  - src/mir/mir_lowering.rb:1215 `MIRLowering#ownership_transfer_only_target` param `expr` (15 node types)
-  - src/mir/mir_lowering.rb:1707 `MIRLowering#non_consuming_owned_value_expr?` param `value_mir` (14 node types)
+  - src/mir/mir_lowering.rb:1691 `MIRLowering#ownership_operands_for_value` param `value_mir` (18 node types)
+  - src/mir/lowering/control_flow.rb:904 `MIRLoweringControlFlow#return_with_transfer_marks` param `value` (17 node types)
+  - src/mir/mir_lowering.rb:678 `MIRLowering#alloc_mark_type_info` param `expr` (17 node types)
+  - src/mir/mir_lowering.rb:1275 `MIRLowering#ownership_transfer_only_target` param `expr` (15 node types)
+  - src/mir/mir_lowering.rb:1772 `MIRLowering#non_consuming_owned_value_expr?` param `value_mir` (14 node types)
+  - src/mir/mir.rb:1885 `MIR#initialize` param `source` (13 node types)
   - src/mir/hoist.rb:582 `MIRHoistLowering#mir_alloc_mark_type_info` param `mir` (12 node types)
   - src/mir/hoist.rb:816 `MIRHoistLowering#normalize_used_expr_attr!` param `stmt` (12 node types)
-  - src/mir/mir.rb:1885 `MIR#initialize` param `source` (12 node types)
   - src/mir/mir.rb:2003 `MIR#initialize` param `source` (12 node types)
-  - src/mir/mir_lowering.rb:1632 `MIRLowering#ownership_operands_for_lowered_takes_arg` param `value_mir` (12 node types)
+  - src/mir/mir_lowering.rb:1697 `MIRLowering#ownership_operands_for_lowered_takes_arg` param `value_mir` (12 node types)
   - src/mir/fsm_lowering.rb:361 `FsmLowering#wrap_step_as_stmt` param `mir` (11 node types)
   - src/mir/fsm_lowering.rb:212 `FsmLowering#coerce_fsm_result_value` param `value` (10 node types)
   - src/mir/fsm_lowering.rb:243 `FsmLowering#fsm_result_transfer_facts` param `result_mir` (10 node types)
-  - src/mir/mir_lowering.rb:2926 `MIRLowering#strip_try` param `mir_node` (10 node types)
+  - src/mir/mir_lowering.rb:2986 `MIRLowering#strip_try` param `mir_node` (10 node types)
   - src/mir/hoist.rb:949 `MIRHoistLowering#normalized_alloc_wrapper_alias?` param `expr` (9 node types)
-  - src/mir/lowering/concurrency.rb:99 `MIRLoweringConcurrency#capture_ownership_mirror_node?` param `node` (9 node types)
+  - src/mir/lowering/concurrency.rb:138 `MIRLoweringConcurrency#capture_ownership_mirror_node?` param `node` (9 node types)
   - src/mir/lowering/control_flow.rb:94 `MIRLoweringControlFlow#loop_condition_expr` param `cond` (9 node types)
   - src/mir/mir_checker.rb:1241 `MIRChecker#value_constructor_expr?` param `node` (9 node types)
-  - src/mir/lowering/expressions.rb:1191 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value` param `val` (8 node types)
+  - src/mir/lowering/expressions.rb:1185 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value` param `val` (8 node types)
   - src/mir/mir_emitter.rb:378 `MIREmitter#emit_flow_stmt` param `stmt` (8 node types)
   - src/mir/mir.rb:3448 `MIR#initialize` param `value` (7 node types)
   - src/mir/hoist.rb:1018 `MIRHoistLowering#refresh_ownership_consumption_for_replaced_child!` param `old_child` (6 node types)
   - src/mir/mir_checker.rb:1603 `MIRChecker#ownership_effect_label` param `node` (6 node types)
   - src/mir/mir_checker.rb:2103 `MIRChecker#ownership_fact_covers_node?` param `node` (6 node types)
-  - src/mir/lowering/concurrency.rb:283 `MIRLoweringConcurrency#do_branch_stmt_nodes` param `mir` (5 node types)
-  - src/mir/lowering/expressions.rb:703 `MIRLoweringExpressions#materialize_or_fallback_value` param `value` (5 node types)
+  - src/mir/lowering/concurrency.rb:322 `MIRLoweringConcurrency#do_branch_stmt_nodes` param `mir` (5 node types)
+  - src/mir/lowering/expressions.rb:697 `MIRLoweringExpressions#materialize_or_fallback_value` param `value` (5 node types)
   - src/mir/mir.rb:1863 `MIR#initialize` param `init` (5 node types)
-  - src/mir/mir_lowering.rb:2914 `MIRLowering#try_catch_with_provenance` param `catch_body` (5 node types)
-  - src/mir/mir_lowering.rb:531 `MIRLowering#place_owned_alloc_mismatch_for_destination` param `mir` (5 node types)
-  - src/backends/pipeline_host.rb:689 `PipelineHost#append_owned_value_stmt` param `value_expr` (4 node types)
+  - src/mir/mir_lowering.rb:2974 `MIRLowering#try_catch_with_provenance` param `catch_body` (5 node types)
+  - src/mir/mir_lowering.rb:593 `MIRLowering#place_owned_alloc_mismatch_for_destination` param `mir` (5 node types)
+  - src/backends/pipeline_host.rb:800 `PipelineHost#append_owned_value_stmt` param `value_expr` (4 node types)
   - src/mir/hoist.rb:1166 `MIRHoistLowering#typed_cleanup_entry_for_mir_result` param `mir` (4 node types)
   - src/mir/mir.rb:2061 `MIR#initialize` param `inner` (4 node types)
   - src/mir/mir.rb:3464 `MIR#initialize` param `key` (4 node types)
   - src/mir/mir_checker.rb:2163 `MIRChecker#ownership_node_name` param `node` (4 node types)
   - src/mir/lowering/variables.rb:118 `MIRLoweringVariables#compose_capability_wrap` param `inner_mir` (3 node types)
-  - src/backends/pipeline_host.rb:724 `PipelineHost#mat_append` param `value_expr` (2 node types)
+  - src/backends/pipeline_host.rb:830 `PipelineHost#mat_append` param `value_expr` (2 node types)
   - src/mir/hoist.rb:447 `MIRHoistLowering#with_pending` param `node` (2 node types)
   - src/mir/mir_emitter.rb:225 `MIREmitter#sharded_map_template` param `node` (2 node types)
   - src/mir/mir_emitter.rb:232 `MIREmitter#sharded_map_substitute_common` param `node` (2 node types)
@@ -427,69 +426,49 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 
 |  | unseen | arg untraced | only nil | discarded return | collection no elements | struct unobserved | Total |
 |---|---|---|---|---|---|---|---|
-| Params | 63 | 65 | 19 | 0 | 0 | 0 | 147 |
-| Returns | 6 | 0 | 0 | 7 | 0 | 0 | 13 |
-| Struct/ivar | 0 | 0 | 0 | 0 | 0 | 38 | 38 |
-| Collections | 0 | 0 | 0 | 0 | 208 | 0 | 208 |
-| **Total** | 69 | 65 | 19 | 7 | 208 | 38 | 406 |
+| Params | 28 | 65 | 18 | 0 | 0 | 0 | 111 |
+| Returns | 3 | 0 | 0 | 5 | 0 | 0 | 8 |
+| Struct/ivar | 0 | 0 | 0 | 0 | 0 | 30 | 30 |
+| Collections | 0 | 0 | 0 | 0 | 189 | 0 | 189 |
+| **Total** | 31 | 65 | 18 | 5 | 189 | 30 | 338 |
 - `unseen`: Not reached by the collect workload (a superset of every suite) and no runtime record -- genuinely dead/unreachable, or a real missing test. Investigate or delete.
 - `arg untraced`: Block / kwarg / splat arg -- the tracer types only positional named args (these are ~always Proc; low value)
 - `only nil`: Only ever nil at runtime -- likely unused / optional-dead; verify it is reachable with a real value
 - `discarded return`: Return value never consumed -- likely should be `sig { ... .void }`
 - `collection no elements`: Collection never observed holding an element -- only-empty, or built/consumed off any instrumented path
 - `struct unobserved`: Struct/class field never observed assigned during collect -- the tracer signal for fields is struct_field_runtime/ivar_runtime, not line coverage, so the method-oriented coverage split does not apply. Either the class is never constructed by the workload, or the field is always left at its default.
-- 69 unseen
-  - src/annotator/annotator.rb:3877 `SemanticAnnotator#visit_Placeholder` param `node`
-  - src/annotator/annotator.rb:4393 `SemanticAnnotator#visit_Give` param `node`
-  - src/annotator/annotator.rb:5940 `SemanticAnnotator#lifetime_violation_for_store` param `dest_depth`
-  - src/annotator/annotator.rb:5940 `SemanticAnnotator#lifetime_violation_for_store` param `val_node`
-  - src/annotator/annotator.rb:6302 `SemanticAnnotator#contains_self_call?` param `fn_name`
-  - src/annotator/helpers/fixable_helpers.rb:1224 `FixableHelper#build_decl_cap_replace_fix` param `name`
-  - src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!` param `node`
-  - src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!` param `tok`
-  - src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!` return
-  - src/annotator/helpers/fixable_helpers.rb:935 `FixableHelper#emit_with_read_needs_write_lock!` param `var_node`
-  - src/annotator/helpers/fixable_helpers.rb:935 `FixableHelper#emit_with_read_needs_write_lock!` return
+- 31 unseen
+  - src/annotator/annotator.rb:3959 `SemanticAnnotator#visit_Placeholder` param `node`
+  - src/annotator/annotator.rb:4475 `SemanticAnnotator#visit_Give` param `node`
   - src/annotator/helpers/intrinsic_registry.rb:187 `IntrinsicRegistry#convert_registry` param `reg`
   - src/annotator/helpers/intrinsic_registry.rb:187 `IntrinsicRegistry#convert_registry` param `registries`
-  - src/annotator/helpers/pipe_analysis.rb:1174 `PipeAnalysis#pre_scan_node_for_sharded` param `node`
-  - src/annotator/helpers/pipe_analysis.rb:1283 `PipeAnalysis#walk_for_sharded_getindex` param `nodes`
-  - src/annotator/helpers/pipe_analysis.rb:1283 `PipeAnalysis#walk_for_sharded_getindex` param `results`
   - src/annotator/helpers/test_annotation.rb:113 `TestAnnotation#visit_AssertRaises` param `node`
-  - src/ast/ast.rb:1453 `AST#params=` param `val`
-  - src/ast/ast.rb:1975 `AST#params=` param `val`
+  - src/ast/ast.rb:1452 `AST#params=` param `val`
+  - src/ast/ast.rb:1974 `AST#params=` param `val`
   - src/ast/ast.rb:759 `AST::Locatable#collection_return=` param `val`
-  - src/backends/pipeline_host.rb:2911 `PipelineHost#bc_for_iter_range` param `range_lit`
-  - src/backends/pipeline_host.rb:3802 `PipelineHost#extract_concurrent_error_policy_for_bc` param `expr`
-  - src/backends/pipeline_host.rb:3888 `PipelineHost#lower_shard_concurrent_each_zig` param `end_mir`
-  - src/backends/pipeline_host.rb:4115 `PipelineHost#lower_bc_concurrent_select_prune` param `inner_expr`
-  - src/backends/pipeline_host.rb:4143 `PipelineHost#lower_bc_concurrent_where_prune` param `inner_expr`
+  - src/backends/pipeline_host.rb:3002 `PipelineHost#bc_for_iter_range` param `range_lit`
+  - src/backends/pipeline_host.rb:3891 `PipelineHost#extract_concurrent_error_policy_for_bc` param `expr`
+  - src/backends/pipeline_host.rb:3974 `PipelineHost#lower_shard_concurrent_each_zig` param `end_mir`
+  - src/backends/pipeline_host.rb:4201 `PipelineHost#lower_bc_concurrent_select_prune` param `inner_expr`
+  - src/backends/pipeline_host.rb:4229 `PipelineHost#lower_bc_concurrent_where_prune` param `inner_expr`
   - src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!` param `new_source`
   - src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!` return
   - src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks` param `node`
   - src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks` return
-  - src/mir/cleanup_classifier.rb:800 `CleanupClassifier#container_alloc_from` param `node`
-  - src/mir/cleanup_classifier.rb:967 `CleanupClassifier#struct_lit_borrows_cleanup_fields?` param `node`
-  - src/mir/cleanup_classifier.rb:967 `CleanupClassifier#struct_lit_borrows_cleanup_fields?` param `schema`
   - src/mir/control_flow.rb:562 `OwnershipDataflow#declares_name?` param `stmt`
-  - src/mir/control_flow.rb:569 `OwnershipDataflow#stmt_moves_name?` param `stmt`
   - src/mir/control_flow.rb:924 `OwnershipDataflow#collect_map_store_moves` param `node`
   - src/mir/fsm_lowering.rb:238 `FsmLowering#fsm_result_transfer_marks` param `ast_node`
   - src/mir/fsm_lowering.rb:238 `FsmLowering#fsm_result_transfer_marks` param `result_mir`
-  - src/mir/fsm_transform/recursive_splitter.rb:393 `FsmTransform::RecursiveSplitter#emit_suspend` param `builder`
-  - src/mir/fsm_transform/recursive_splitter.rb:393 `FsmTransform::RecursiveSplitter#emit_suspend` param `susp_tail`
-  - src/mir/fsm_transform/segments.rb:274 `FsmTransform::Segments#stmt_unsupported?` param `stmt`
-  - src/mir/fsm_transform/segments.rb:301 `FsmTransform::Segments#contains_suspend_anywhere?` param `stmts`
-  - src/mir/fsm_transform/segments.rb:363 `FsmTransform::Segments#suspending_call?` param `expr`
-  - src/mir/hoist.rb:464 `MIRHoistLowering#hoist_lazy_alloc_result` param `ast_node`
-  - src/mir/hoist.rb:464 `MIRHoistLowering#hoist_lazy_alloc_result` param `expr`
   - src/mir/hoist.rb:538 `MIRHoistLowering#pick_node_alloc` param `ft`
   - src/mir/hoist.rb:538 `MIRHoistLowering#pick_node_alloc` param `init`
   - src/mir/hoist.rb:538 `MIRHoistLowering#pick_node_alloc` param `node`
-  - src/mir/lowering/expressions.rb:1159 `MIRLoweringExpressions#generic_subst_source` param `type_obj`
-  - src/mir/lowering/functions.rb:1456 `MIRLoweringFunctions#call_owned_return_from_args?` param `node`
-  - src/mir/lowering/functions.rb:1456 `MIRLoweringFunctions#call_owned_return_from_args?` param `sig_obj`
-  - ... +19 more
+  - src/mir/mir_checker.rb:1571 `MIRChecker#walk_mir_expr` param `expr`
+  - src/mir/mir_emitter.rb:1471 `MIREmitter#emit_has_field` param `node`
+  - src/mir/mir_lowering.rb:1852 `MIRLowering#bg_stream_boundary_stmt?` param `stmt`
+  - src/mir/mir_lowering.rb:1859 `MIRLowering#collect_stdlib_consumed_roots` param `stmt`
+  - src/mir/mir_lowering.rb:1868 `MIRLowering#walk_ast_calls` param `node`
+  - src/mir/mir_lowering.rb:1948 `MIRLowering#stdlib_call_ownership_facts` param `call`
+  - src/mir/ownership_graph.rb:37 `OwnershipGraph#full_type=` return
 - 65 arg untraced
   - src/annotator/helpers/auto_inference.rb:741 `ShapeEvidenceCollector#walk_for_shape_decls` param `block`
   - src/annotator/helpers/auto_inference.rb:903 `OperatorEvidenceCollector#walk_for_local_decls` param `block`
@@ -501,19 +480,19 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/annotator/helpers/pipe_analysis.rb:117 `PipeAnalysis#mark_observable_terminal!` param `type_kwargs`
   - src/annotator/helpers/pipe_analysis.rb:1822 `PipeAnalysis#with_soa_tracking` param `blk`
   - src/annotator/helpers/pipe_analysis.rb:98 `PipeAnalysis#lift_to_observable_if_terminal!` param `type_kwargs`
-  - src/ast/ast.rb:1133 `AST#initialize` param `args`
-  - src/ast/ast.rb:1269 `AST#initialize` param `kw`
-  - src/ast/ast.rb:1298 `AST#initialize` param `args`
-  - src/ast/ast.rb:1336 `AST#initialize` param `args`
-  - src/ast/ast.rb:1447 `AST#initialize` param `args`
+  - src/ast/ast.rb:1132 `AST#initialize` param `args`
+  - src/ast/ast.rb:1268 `AST#initialize` param `kw`
+  - src/ast/ast.rb:1297 `AST#initialize` param `args`
+  - src/ast/ast.rb:1335 `AST#initialize` param `args`
+  - src/ast/ast.rb:1446 `AST#initialize` param `args`
   - src/ast/ast.rb:147 `AST#initialize` param `kw`
-  - src/ast/ast.rb:1477 `AST#initialize` param `args`
-  - src/ast/ast.rb:1606 `AST#initialize` param `args`
-  - src/ast/ast.rb:1753 `AST#initialize` param `kw`
-  - src/ast/ast.rb:1945 `AST#initialize` param `args`
-  - src/ast/ast.rb:1969 `AST#initialize` param `args`
+  - src/ast/ast.rb:1476 `AST#initialize` param `args`
+  - src/ast/ast.rb:1605 `AST#initialize` param `args`
+  - src/ast/ast.rb:1752 `AST#initialize` param `kw`
+  - src/ast/ast.rb:1944 `AST#initialize` param `args`
+  - src/ast/ast.rb:1968 `AST#initialize` param `args`
   - src/ast/ast.rb:206 `AST#initialize` param `kw`
-  - src/ast/ast.rb:2104 `AST#initialize` param `args`
+  - src/ast/ast.rb:2103 `AST#initialize` param `args`
   - src/ast/ast.rb:259 `AST#initialize` param `kw`
   - src/ast/ast.rb:336 `AST#walk_body` param `visitor`
   - src/ast/ast.rb:349 `AST#each_locatable` param `visitor`
@@ -525,7 +504,7 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/ast.rb:639 `AST#each_capture_analysis` param `block`
   - src/ast/ast.rb:654 `AST#_expr_each_concurrent_capture` param `block`
   - src/ast/ast.rb:73 `AST#initialize` param `kw`
-  - src/ast/ast.rb:887 `AST::Locatable#finalize_storage!` param `schema_lookup`
+  - src/ast/ast.rb:886 `AST::Locatable#finalize_storage!` param `schema_lookup`
   - src/ast/ast.rb:97 `AST#initialize` param `kw`
   - src/ast/diagnostic_registry.rb:2798 `DiagnosticRegistry#format` param `kwargs`
   - src/ast/parser.rb:26 `Parser#stmt` param `block`
@@ -537,67 +516,61 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/type.rb:1520 `Type#copyable?` param `lookup_block`
   - src/ast/type.rb:1552 `Type#bg_capture_is_value_copy?` param `lookup_block`
   - src/ast/type.rb:1579 `Type#implicitly_copyable?` param `lookup_block`
-  - src/backends/pipeline_host.rb:160 `PipelineHost#with_optional_named_binding` param `blk`
-  - src/backends/pipeline_host.rb:168 `PipelineHost#with_named_binding` param `blk`
-  - src/backends/pipeline_host.rb:182 `PipelineHost#with_fiber_capture_map` param `blk`
+  - src/backends/pipeline_host.rb:432 `PipelineHost#with_optional_named_binding` param `blk`
+  - src/backends/pipeline_host.rb:440 `PipelineHost#with_named_binding` param `blk`
+  - src/backends/pipeline_host.rb:454 `PipelineHost#with_fiber_capture_map` param `blk`
   - src/lsp/document_store.rb:82 `LSP::DocumentStore#each` param `block`
   - ... +15 more
-- 19 only nil
-  - src/annotator/annotator.rb:4309 `SemanticAnnotator#infer_element_type` param `node`
-  - src/annotator/annotator.rb:4317 `SemanticAnnotator#infer_optional_element_type` param `node`
-  - src/annotator/annotator.rb:4327 `SemanticAnnotator#infer_to_list` param `node`
-  - src/annotator/annotator.rb:6548 `SemanticAnnotator#og_set_moved` param `consumer_param_type`
-  - src/annotator/annotator.rb:6573 `SemanticAnnotator#move_if_not_copyable!` param `consumer_param_type`
+- 18 only nil
+  - src/annotator/annotator.rb:4391 `SemanticAnnotator#infer_element_type` param `node`
+  - src/annotator/annotator.rb:4399 `SemanticAnnotator#infer_optional_element_type` param `node`
+  - src/annotator/annotator.rb:4409 `SemanticAnnotator#infer_to_list` param `node`
+  - src/annotator/annotator.rb:6643 `SemanticAnnotator#og_set_moved` param `consumer_param_type`
+  - src/annotator/annotator.rb:6668 `SemanticAnnotator#move_if_not_copyable!` param `consumer_param_type`
   - src/ast/schemas.rb:52 `Schemas::ResourceSchema#initialize` param `type_params`
   - src/ast/schemas.rb:88 `Schemas::InlineStructVariant#initialize` param `deinit_entries`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` param `shard_hash`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` param `shard_idx`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` param `shard_key`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` param `shard_map`
-  - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` param `soa`
-  - src/backends/pipeline_host.rb:188 `PipelineHost#task_config_zig` param `computed_tier`
   - src/mir/control_flow.rb:1072 `UseAfterMoveChecker#check` param `can_fail_fns`
   - src/mir/mir.rb:1065 `MIR#validate_ownership_contract!` param `value`
   - src/mir/mir.rb:3464 `MIR#initialize` param `shard_idx`
   - src/mir/mir.rb:3464 `MIR#initialize` param `shard_key`
+  - src/mir/mir_checker.rb:1484 `MIRChecker#format_fsm_error` param `source`
   - src/mir/mir_checker.rb:210 `MIRChecker#initialize` param `fn_name`
   - src/tools/migration_suggester_helpers.rb:170 `MigrationSuggesterHelpers#rhs_uses_alias_only_for_field_get?` param `field_name`
-- 7 discarded return
-  - src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` return
+- 5 discarded return
   - src/annotator/helpers/fixable_helpers.rb:848 `FixableHelper#emit_with_guard_all_bindings_need_as!` return
-  - src/annotator/helpers/fixable_helpers.rb:883 `FixableHelper#emit_with_guard_mutable_mutated!` return
   - src/annotator/helpers/fixable_helpers.rb:993 `FixableHelper#emit_with_materialized_needs_tense!` return
   - src/ast/parser.rb:586 `Parser#emit_consume_error_with_fix` return
   - src/ast/parser.rb:605 `Parser#emit_syntax_insert_end_of_line!` return
   - src/ast/parser.rb:628 `Parser#emit_syntax_insert_before_token!` return
-- 208 collection no elements
-  - src/annotator/annotator.rb:1131 `T.let` ``
-  - src/annotator/annotator.rb:122 `T.let` ``
-  - src/annotator/annotator.rb:123 `T.let` ``
-  - src/annotator/annotator.rb:129 `T.let` ``
-  - src/annotator/annotator.rb:130 `T.let` ``
-  - src/annotator/annotator.rb:131 `T.let` ``
-  - src/annotator/annotator.rb:134 `T.let` ``
-  - src/annotator/annotator.rb:138 `T.let` ``
-  - src/annotator/annotator.rb:1386 `SemanticAnnotator#annotate_struct_pattern!` return
-  - src/annotator/annotator.rb:139 `T.let` ``
-  - src/annotator/annotator.rb:140 `T.let` ``
-  - src/annotator/annotator.rb:141 `T.let` ``
-  - src/annotator/annotator.rb:152 `T.let` ``
-  - src/annotator/annotator.rb:153 `T.let` ``
-  - src/annotator/annotator.rb:159 `T.let` ``
-  - src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params` param `explicit`
-  - src/annotator/annotator.rb:305 `SemanticAnnotator#flush_deferred_with_validations!` return
-  - src/annotator/annotator.rb:4162 `SemanticAnnotator#visit_MoveNode` return
-  - src/annotator/annotator.rb:6326 `T.let` ``
-  - src/annotator/annotator.rb:6546 `SemanticAnnotator#og_move` return
-  - src/annotator/annotator.rb:6548 `SemanticAnnotator#og_set_moved` return
+- 189 collection no elements
+  - src/annotator/annotator.rb:1202 `T.let` ``
+  - src/annotator/annotator.rb:1458 `SemanticAnnotator#annotate_struct_pattern!` return
+  - src/annotator/annotator.rb:193 `T.let` ``
+  - src/annotator/annotator.rb:194 `T.let` ``
+  - src/annotator/annotator.rb:200 `T.let` ``
+  - src/annotator/annotator.rb:201 `T.let` ``
+  - src/annotator/annotator.rb:202 `T.let` ``
+  - src/annotator/annotator.rb:205 `T.let` ``
+  - src/annotator/annotator.rb:209 `T.let` ``
+  - src/annotator/annotator.rb:210 `T.let` ``
+  - src/annotator/annotator.rb:223 `T.let` ``
+  - src/annotator/annotator.rb:224 `T.let` ``
+  - src/annotator/annotator.rb:226 `T.let` ``
+  - src/annotator/annotator.rb:230 `T.let` ``
+  - src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params` param `explicit`
+  - src/annotator/annotator.rb:376 `SemanticAnnotator#flush_deferred_with_validations!` return
+  - src/annotator/annotator.rb:4244 `SemanticAnnotator#visit_MoveNode` return
+  - src/annotator/annotator.rb:6421 `T.let` ``
+  - src/annotator/annotator.rb:6641 `SemanticAnnotator#og_move` return
+  - src/annotator/annotator.rb:6643 `SemanticAnnotator#og_set_moved` return
   - src/annotator/helpers/capabilities.rb:120 `T.let` ``
   - src/annotator/helpers/capabilities.rb:20 `T.let` ``
-  - src/annotator/helpers/function_context.rb:47 `T.let` ``
   - src/annotator/helpers/function_signature.rb:164 `FunctionSignature#initialize` param `owner_type_params`
   - src/annotator/helpers/generic_analysis.rb:289 `T.let` ``
-  - src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` param `types_with_self`
   - src/annotator/helpers/lock_helper.rb:44 `T.let` ``
   - src/annotator/helpers/lock_helper.rb:45 `T.let` ``
   - src/annotator/helpers/lock_helper.rb:46 `T.let` ``
@@ -605,43 +578,42 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/annotator/helpers/lock_helper.rb:53 `T.let` ``
   - src/annotator/helpers/lock_helper.rb:54 `T.let` ``
   - src/annotator/helpers/pipe_analysis.rb:1229 `T.let` ``
-  - src/ast/ast.rb:1110 `AST::Program.statements`
-  - src/ast/ast.rb:1146 `AST#params=` param `val`
-  - src/ast/ast.rb:1286 `AST::StructDef.type_params`
-  - src/ast/ast.rb:1369 `AST#lazy_fields` return
-  - src/ast/ast.rb:1545 `AST::MethodCall.args`
-  - src/ast/ast.rb:2098 `AST::MatchStatement.cases`
+  - src/ast/ast.rb:1109 `AST::Program.statements`
+  - src/ast/ast.rb:1145 `AST#params=` param `val`
+  - src/ast/ast.rb:1285 `AST::StructDef.type_params`
+  - src/ast/ast.rb:1368 `AST#lazy_fields` return
+  - src/ast/ast.rb:1544 `AST::MethodCall.args`
+  - src/ast/ast.rb:2097 `AST::MatchStatement.cases`
   - src/ast/ast.rb:22 `T.let` ``
-  - src/ast/ast.rb:2246 `T.let` ``
-  - src/ast/ast.rb:2259 `T.let` ``
-  - src/ast/ast.rb:2278 `T.let` ``
+  - src/ast/ast.rb:2245 `T.let` ``
+  - src/ast/ast.rb:2258 `T.let` ``
   - src/ast/ast.rb:350 `T.let` ``
   - src/ast/ast.rb:558 `AST#_expr_each_bg_block_recursive` return
   - src/ast/diagnostic_registry.rb:2798 `DiagnosticRegistry#format` param `args`
   - src/ast/parser.rb:360 `T.let` ``
-  - src/ast/parser.rb:3684 `T.let` ``
-  - src/ast/parser.rb:3697 `T.let` ``
-  - ... +158 more
-- 38 struct unobserved
-  - `AST::CatchClause` (src/ast/ast.rb:1747): 4 field(s) -- filter_messages, filter_types, kinds, types
+  - src/ast/parser.rb:3707 `T.let` ``
+  - src/ast/parser.rb:3720 `T.let` ``
+  - src/ast/parser.rb:66 `T.let` ``
+  - src/ast/scope.rb:17 `T.let` ``
+  - src/ast/scope.rb:18 `T.let` ``
+  - src/ast/scope.rb:19 `T.let` ``
+  - ... +139 more
+- 30 struct unobserved
+  - `AST::CatchClause` (src/ast/ast.rb:1746): 4 field(s) -- filter_messages, filter_types, kinds, types
   - `OwnershipGraph::Node` (src/mir/ownership_graph.rb:21): 4 field(s) -- move_action, move_col, move_consumer_param_type, move_line
   - `AST::Binding` (src/ast/ast.rb:201): 3 field(s) -- capture, symbol, unwrapped_type
-  - `MIR::DiscardOwned` (src/mir/mir.rb:1000): 3 field(s) -- cleanup_entry, expr, zig_type
-  - `MIR::RawBc` (src/mir/mir.rb:3398): 3 field(s) -- args, stdlib_def, template
-  - `AST::Cast` (src/ast/ast.rb:1582): 2 field(s) -- target, value
-  - `AST::MatchStatement` (src/ast/ast.rb:2098): 2 field(s) -- exhaustive, takes
-  - `AST::Param` (src/ast/ast.rb:67): 2 field(s) -- symbol, type
+  - `AST::Param` (src/ast/ast.rb:67): 3 field(s) -- default, symbol, type
+  - `AST::Cast` (src/ast/ast.rb:1581): 2 field(s) -- target, value
   - `MIR::FsmTailCondSkip` (src/mir/mir.rb:1618): 2 field(s) -- cond_zig, skip_step
   - `MIR::HasField` (src/mir/mir.rb:3134): 2 field(s) -- expr, field
   - `MIR::OwnedBorrow` (src/mir/mir.rb:2409): 2 field(s) -- name, source
   - `MIR::TryOrPanic` (src/mir/mir.rb:916): 2 field(s) -- expr, panic_msg
   - `AST::Capture` (src/ast/ast.rb:91): 1 field(s) -- storage
   - `AST::MatchCase` (src/ast/ast.rb:141): 1 field(s) -- indirect_payload_as
-  - `AST::Require` (src/ast/ast.rb:1595): 1 field(s) -- path
-  - `AST::StructDef` (src/ast/ast.rb:1286): 1 field(s) -- field_decls
+  - `AST::Require` (src/ast/ast.rb:1594): 1 field(s) -- path
+  - `AST::StructDef` (src/ast/ast.rb:1285): 1 field(s) -- field_decls
   - `FsmOps::IntCast` (src/mir/fsm_ops.rb:110): 1 field(s) -- expr
   - `MIR::Let` (src/mir/mir.rb:675): 1 field(s) -- alias_safe
-  - `MIR::UnionPayloadGet` (src/mir/mir.rb:2666): 1 field(s) -- subject
 
 ### Signature Slot Evidence
 - primary reason: the single strongest current explanation for why this weak/untyped signature slot has not been safely strengthened
@@ -649,161 +621,157 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - candidate action: an existing nil-kill action that could rewrite this slot, if one exists
 
 #### Param Slot Evidence
-- blocked: unknown callsite expression: 444 slot(s); weak 0, untyped 444; evidence 6873
-  - src/annotator/annotator.rb:279 `SemanticAnnotator#program_has_auto?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/annotator/annotator.rb:178 node; src/annotator/annotator.rb:287 c; src/annotator/an ...; evidence 129
-  - src/mir/mir_lowering.rb:1515 `MIRLowering#ownership_contract_for_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/hoist.rb:960 expr; src/mir/mir_lowering.rb:1485 surface_node; protocol hint m ...; evidence 106
-  - src/mir/mir_lowering.rb:1501 `MIRLowering#ownership_consumption_for_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/mir_lowering.rb:1464 surface_node; protocol hint strong direct protocol #e ...; evidence 103
+- blocked: unknown callsite expression: 431 slot(s); weak 0, untyped 431; evidence 6891
+  - src/annotator/annotator.rb:350 `SemanticAnnotator#program_has_auto?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/annotator/annotator.rb:249 node; src/annotator/annotator.rb:358 c; src/annotator/an ...; evidence 129
+  - src/mir/mir_lowering.rb:1580 `MIRLowering#ownership_contract_for_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/hoist.rb:960 expr; src/mir/mir_lowering.rb:1550 surface_node; protocol hint m ...; evidence 106
+  - src/mir/mir_lowering.rb:1566 `MIRLowering#ownership_consumption_for_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/mir_lowering.rb:1529 surface_node; protocol hint strong direct protocol #e ...; evidence 103
   - src/ast/ast.rb:401 `AST#call?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/cleanup_classifier.rb:526 expr; src/mir/cleanup_classifier.rb:739 cur; src/mir/control_flow.rb:574 stmt; protocol hin ...; evidence 102
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/backends/pipeline_rewriter.rb:39 node; src/backends/string_concat_rew ...; evidence 86
   - src/backends/string_concat_rewriter.rb:78 `StringConcatRewriter#string_concat?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/backends/string_concat_rewriter.rb:31 node; src/backends/string_concat_r ...; evidence 86
   - src/mir/escape_analysis.rb:1013 `EscapeAnalysis#symbol_for_binding_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/escape_analysis.rb:271 node; src/mir/escape_analysis.rb:759 node; protocol  ...; evidence 85
   - src/mir/escape_analysis.rb:36 `EscapeAnalysis::EscapeSink#matches?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; src/mir/escape_analysis.rb:281 node; protocol hint direct protocol: none observed; evidence 84
-- candidate: runtime-only param observation: 398 slot(s); weak 0, untyped 398; evidence 3205
-  - src/ast/schemas.rb:97 Schemas::InlineStructVariant#== other; `T.untyped`; single observed type; narrow candidate; untyped instance variable; src/annotator/annotator.rb:315 :write_locked; src/annotator/annotator.rb:514 :package; src/annotator/ ...; evidence 1693
-  - src/mir/fsm_transform/recursive_splitter.rb:153 `FsmTransform::RecursiveSplitter#split` body; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/annotator/annotator.rb:379 '::'; src/annotator/annotator.rb:767 nod ...; evidence 51
-  - src/mir/thunk_transform/recursive_splitter.rb:88 `ThunkTransform::RecursiveSplitter#split` body; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/annotator/annotator.rb:379 '::'; src/annotator/annotator.rb:767  ...; evidence 51
-  - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` placeholder; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/backends/pipeline_host.rb:264 placeholder; src/backends/pipeline_hos ...; evidence 40
-  - src/mir/fiber_ctx_builder.rb:124 `FiberCtxBuilder#build` analysis; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/backends/pipeline_host.rb:558 :uniform; src/backends/pipeline_host.rb:648 :uniform; src/backen ...; evidence 33
-  - src/ast/source_error.rb:121 `ErrorHelper#fixable!` raise_in_collector; `T.untyped`; boolean pair; T::Boolean candidate; untyped literal/static expression; src/annotator/annotator.rb:2733 false; src/annotator/annotator.rb:5842 true; src/annotato ...; evidence 25
+- candidate: runtime-only param observation: 428 slot(s); weak 0, untyped 428; evidence 3340
+  - src/ast/schemas.rb:97 Schemas::InlineStructVariant#== other; `T.untyped`; single observed type; narrow candidate; untyped instance variable; src/annotator/annotator.rb:118 true; src/annotator/annotator.rb:142 :EXCLUSIVE; src/annotator/annotat ...; evidence 1724
+  - src/mir/fsm_transform/recursive_splitter.rb:153 `FsmTransform::RecursiveSplitter#split` body; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/annotator/annotator.rb:450 '::'; src/annotator/annotator.rb:838 nod ...; evidence 51
+  - src/mir/fsm_transform/segments.rb:154 `FsmTransform::Segments#split` body; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/annotator/annotator.rb:450 '::'; src/annotator/annotator.rb:838 node.body; src/annotat ...; evidence 51
+  - src/mir/thunk_transform/recursive_splitter.rb:88 `ThunkTransform::RecursiveSplitter#split` body; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/annotator/annotator.rb:450 '::'; src/annotator/annotator.rb:838  ...; evidence 51
+  - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` placeholder; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/backends/pipeline_host.rb:536 placeholder; src/backends/pipeline_hos ...; evidence 40
+  - src/mir/fiber_ctx_builder.rb:124 `FiberCtxBuilder#build` analysis; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/backends/pipeline_host.rb:670 :uniform; src/backends/pipeline_host.rb:759 :uniform; src/backen ...; evidence 33
+  - src/ast/source_error.rb:121 `ErrorHelper#fixable!` raise_in_collector; `T.untyped`; boolean pair; T::Boolean candidate; untyped literal/static expression; src/annotator/annotator.rb:2815 false; src/annotator/annotator.rb:5937 true; src/annotato ...; evidence 25
   - src/mir/fsm_transform.rb:204 `FsmTransform#contains_suspend_anywhere?` stmts; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/mir/fsm_transform.rb:198 body; src/mir/fsm_transform.rb:210 body; src/mir/fsm_trans ...; evidence 22
-  - src/mir/fsm_transform/recursive_splitter.rb:276 `FsmTransform::RecursiveSplitter#contains_suspend_anywhere?` stmts; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; src/mir/fsm_transform.rb:198 body; src/mir/fsm_tr ...; evidence 22
-- blocked: forwarded return argument: 252 slot(s); weak 0, untyped 252; evidence 8514
-  - src/mir/mir.rb:3291 MIR#[]= value; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:270 true; src/annotator/annotator.rb:588 signature; src/annotator/annotator.rb:718 node; protocol hi ...; evidence 503
-  - src/mir/mir.rb:1044 MIR#[]= value; `T.untyped`; nil only observed; untyped forwarded return; src/annotator/annotator.rb:270 true; src/annotator/annotator.rb:588 signature; src/annotator/annotator.rb:718 node; evidence 501
-  - src/ast/source_error.rb:31 `ErrorHelper#error!` node_or_token; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:192 n; src/annotator/annotator.rb:313 d[:node]; src/annotator/annotator.rb ...; evidence 471
-  - src/mir/mir_lowering.rb:678 `MIRLowering#lower` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/backends/pipeline_host.rb:247 substituted; src/backends/pipeline_host.rb:256 substituted; src/backends/pip ...; evidence 253
-  - src/mir/mir_emitter.rb:46 `MIREmitter#emit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/backends/importer.rb:229 item; src/backends/importer.rb:230 item; src/backends/pipeline_host.rb:248 mir_node;  ...; evidence 244
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:175 node; src/annotator/annotator.rb:398 stmt; src/annotator/annotator.rb: ...; evidence 204
-  - src/backends/pipeline_host.rb:195 `PipelineHost#visit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:175 node; src/annotator/annotator.rb:398 stmt; src/annotator/annotator.rb:43 ...; evidence 141
-  - src/ast/type.rb:1855 `Type#from_node!` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:4292 node.value; src/annotator/annotator.rb:6028 fval; src/backends/pipeline_host.rb:1886 sm ...; evidence 124
-- weak declared type: array element evidence needed: 226 slot(s); weak 226, untyped 0; evidence 1166
+- blocked: forwarded return argument: 245 slot(s); weak 0, untyped 245; evidence 8441
+  - src/mir/mir.rb:3291 MIR#[]= value; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:341 true; src/annotator/annotator.rb:659 signature; src/annotator/annotator.rb:789 node; protocol hi ...; evidence 503
+  - src/mir/mir.rb:1044 MIR#[]= value; `T.untyped`; nil only observed; untyped forwarded return; src/annotator/annotator.rb:341 true; src/annotator/annotator.rb:659 signature; src/annotator/annotator.rb:789 node; evidence 501
+  - src/ast/source_error.rb:31 `ErrorHelper#error!` node_or_token; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:171 node; src/annotator/annotator.rb:263 n; src/annotator/annotator.rb:384 ...; evidence 471
+  - src/mir/mir_lowering.rb:738 `MIRLowering#lower` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/backends/pipeline_host.rb:519 substituted; src/backends/pipeline_host.rb:528 substituted; src/backends/pip ...; evidence 253
+  - src/mir/mir_emitter.rb:46 `MIREmitter#emit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/backends/importer.rb:229 item; src/backends/importer.rb:230 item; src/backends/pipeline_host.rb:520 mir_node;  ...; evidence 246
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:246 node; src/annotator/annotator.rb:469 stmt; src/annotator/annotator.rb: ...; evidence 204
+  - src/backends/pipeline_host.rb:467 `PipelineHost#visit` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:246 node; src/annotator/annotator.rb:469 stmt; src/annotator/annotator.rb:50 ...; evidence 141
+  - src/ast/type.rb:1855 `Type#from_node!` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; src/annotator/annotator.rb:4374 node.value; src/annotator/annotator.rb:6123 fval; src/backends/pipeline_host.rb:1992 sm ...; evidence 125
+- weak declared type: array element evidence needed: 226 slot(s); weak 226, untyped 0; evidence 1155
   - src/mir/mir.rb:289 `MIR::Emittable#compact_child_exprs` values; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/mir/mir.rb:679 [init]; src/mir/mir.rb:695 [target, value]; src/mir/mir.rb:70 ...; evidence 71
   - src/mir/fsm_ops.rb:179 `FsmOps::DSL#call` args; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/helpers/capabilities.rb:44 errs.first; src/annotator/helpers/effects.rb:1224 absor ...; evidence 44
-  - src/mir/fsm_transform/recursive_splitter.rb:125 `FsmTransform::RecursiveSplitter::Builder#push` stmts; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/annotator.rb:683 FunctionCo ...; evidence 42
-  - src/mir/mir_lowering.rb:821 `MIRLowering#lower_body` stmts; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:266 substituted; src/mir/lowering/capabilit ...; evidence 34
+  - src/mir/fsm_transform/recursive_splitter.rb:125 `FsmTransform::RecursiveSplitter::Builder#push` stmts; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/annotator.rb:754 FunctionCo ...; evidence 42
+  - src/mir/mir_lowering.rb:2897 `MIRLowering#emit_builtin` args; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped struct/array/collection value; src/backends/pipeline_host.rb:2494 [ MIR::Ident.new(item_t.zig_type), ...; evidence 39
+  - src/mir/mir_lowering.rb:881 `MIRLowering#lower_body` stmts; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:538 substituted; src/mir/lowering/capabilit ...; evidence 34
   - src/ast/parser.rb:42 `Parser#primary` pattern; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped struct/array/collection value; src/ast/parser.rb:201 ['CAST', '(', :expression, 'AS', :type_annotation,  ...; evidence 31
   - src/mir/mir.rb:298 `MIR::Emittable#body_slot` body; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped forwarded return; src/mir/mir.rb:593 body; src/mir/mir.rb:662 body; src/mir/mir.rb:717 then_body; evidence 31
-  - src/ast/ast.rb:336 `AST#walk_body` body; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/annotator.rb:874 stmts; src/annotator/helpers/with_match_check.rb:57 fn.body; src/annotat ...; evidence 27
-  - src/mir/escape_analysis.rb:435 `EscapeAnalysis#walk_body` body; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/annotator.rb:874 stmts; src/annotator/helpers/with_match_check.rb: ...; evidence 27
-- blocked: no static callsite evidence: 136 slot(s); weak 0, untyped 136; evidence 165
-  - src/mir/lowering/control_flow.rb:1141 `MIRLoweringControlFlow#call_union_return_needs_hoist?` expr; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none ...; evidence 24
-  - src/mir/lowering/control_flow.rb:1141 `MIRLoweringControlFlow#call_union_return_needs_hoist?` ast_node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint strong direct pro ...; evidence 21
-  - src/mir/mir.rb:1885 `MIR#initialize` source; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; evidence 12
+  - src/ast/ast.rb:336 `AST#walk_body` body; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; src/annotator/annotator.rb:945 stmts; src/annotator/helpers/with_match_check.rb:57 fn.body; src/annotat ...; evidence 27
+- blocked: no static callsite evidence: 127 slot(s); weak 0, untyped 127; evidence 179
+  - src/mir/lowering/control_flow.rb:1123 `MIRLoweringControlFlow#call_union_return_needs_hoist?` expr; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none ...; evidence 24
+  - src/mir/lowering/control_flow.rb:1123 `MIRLoweringControlFlow#call_union_return_needs_hoist?` ast_node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint strong direct pro ...; evidence 21
+  - src/mir/mir.rb:1885 `MIR#initialize` source; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; evidence 13
   - src/mir/mir.rb:2003 `MIR#initialize` source; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; evidence 12
-  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; analysis gaps: captured in @reg ...; evidence 7
+  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; analysis gaps: captured in @reg ...; evidence 8
+  - src/ast/type.rb:230 `Type#initialize` raw_input; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; analysis gaps: aliases seen other at src ...; evidence 7
   - src/mir/mir.rb:3448 `MIR#initialize` value; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; evidence 7
-  - src/ast/type.rb:230 `Type#initialize` raw_input; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; analysis gaps: aliases seen other at src ...; evidence 6
   - src/mir/mir.rb:1863 `MIR#initialize` init; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; no static callsite origin; protocol hint direct protocol: none observed; evidence 5
-- weak declared type: hash key/value evidence needed: 80 slot(s); weak 80, untyped 0; evidence 236
-  - src/backends/pipeline_host.rb:48 `PipelineHost#bounded_callback_context_stmts` cb; T::Hash[`T.untyped`, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/backends/pipeline_host.rb:2415 cb ...; evidence 14
+- weak declared type: hash key/value evidence needed: 77 slot(s); weak 77, untyped 0; evidence 229
+  - src/backends/pipeline_host.rb:48 `PipelineHost#bounded_callback_context_stmts` cb; T::Hash[`T.untyped`, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/backends/pipeline_host.rb:2506 cb ...; evidence 14
   - src/mir/control_flow.rb:700 `OwnershipDataflow#mark_moved!` state; T::Hash[String, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/mir/control_flow.rb:736 state; src/mir/control_flow. ...; evidence 12
-  - src/backends/pipeline_host.rb:105 `PipelineHost::PipelinePublishSpec#from` raw; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:3146 T.cast(entry[:publish ...; evidence 11
-  - src/mir/cleanup_entry.rb:60 `CleanupEntry#from` h; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:3146 T.cast(entry[:publish], T::Hash[Symbol, `T.untyped`] ...; evidence 11
-  - src/annotator/helpers/generic_analysis.rb:350 `GenericAnalysis#apply_type_subst` subst; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/annotator/annotator.rb:1462 uni ...; evidence 10
+  - src/backends/pipeline_host.rb:105 `PipelineHost::PipelinePublishSpec#from` raw; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:3235 T.cast(entry[:publish ...; evidence 11
+  - src/mir/cleanup_entry.rb:60 `CleanupEntry#from` h; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped forwarded return; src/backends/pipeline_host.rb:3235 T.cast(entry[:publish], T::Hash[Symbol, `T.untyped`] ...; evidence 11
+  - src/annotator/helpers/generic_analysis.rb:350 `GenericAnalysis#apply_type_subst` subst; T::Hash[Symbol, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/annotator/annotator.rb:1534 uni ...; evidence 10
   - src/annotator/helpers/pipe_analysis.rb:50 `PipeAnalysis#concurrent_parallel_enabled?` options; T::Hash[String, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped forwarded return; src/annotator/helpers/pipe_analysis.rb:16 ...; evidence 5
   - src/mir/test_lowering.rb:318 `TestLowering#collect_identifier_refs` name_set; T::Hash[String, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/mir/test_lowering.rb:294 let_ast_map; src ...; evidence 5
-  - src/backends/pipeline_host.rb:2955 `PipelineHost#lower_range_fold_observable` p; T::Hash[`T.untyped`, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/backends/pipeline_host.rb:3205 p; s ...; evidence 4
-- blocked: collection/hash argument evidence: 40 slot(s); weak 0, untyped 40; evidence 1047
-  - src/mir/mir_lowering.rb:1317 `MIRLowering#ownership_contract_source_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_lowering.rb:1269 expr; src/mir/mir_lowering.rb:1295 node; s ...; evidence 103
-  - src/mir/mir_lowering.rb:1294 `MIRLowering#ownership_contract_consumes_unwrapped` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_lowering.rb:1286 expr; protocol hint direct protocol ...; evidence 98
+  - src/backends/pipeline_host.rb:3046 `PipelineHost#lower_range_fold_observable` p; T::Hash[`T.untyped`, `T.untyped`]; weak declared type: hash key/value evidence needed; untyped struct/array/collection value; src/backends/pipeline_host.rb:3294 p; s ...; evidence 4
+- weak declared type: union: 51 slot(s); weak 51, untyped 0; evidence 6406
+  - src/mir/mir.rb:455 MIR::InlineAllocMetadata#[] key; T.any(Symbol, String); weak declared type: union; untyped instance variable; src/annotator/annotator.rb:121 Symbol; src/annotator/annotator.rb:122 String; src/annotator/annotator.rb:123 Sy ...; evidence 5144
+  - src/mir/mir.rb:1044 MIR#[]= key; T.any(Symbol, Integer); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:341 slot.decl_node.object_id; src/annotator/annotator.rb:659 node.name; src/annotator/annotator.rb:789  ...; evidence 500
+  - src/mir/mir.rb:3291 MIR#[]= key; T.any(Symbol, Integer); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:341 slot.decl_node.object_id; src/annotator/annotator.rb:659 node.name; src/annotator/annotator.rb:789  ...; evidence 500
+  - src/mir/mir.rb:450 `MIR::InlineAllocMetadata#key?` key; T.any(Symbol, String); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:1472 f.name; src/annotator/annotator.rb:1490 f.name; src/annotator/annotator.rb:174 ...; evidence 111
+  - src/annotator/annotator.rb:6632 `SemanticAnnotator#og_declare` type_info; T.any(Type, Symbol, String); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:1440 unwrapped; src/annotator/annotator.rb:1495 field_type; ...; evidence 17
+  - src/ast/ast.rb:115 `AST#type=` val; T.nilable(T.any(Type, Symbol, String)); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2729 target_t; src/annotator/helpers/auto_inference.rb:623 Type.new(:"#{element_sym}[] ...; evidence 9
+  - src/ast/ast.rb:1276 `AST#type=` val; T.any(Type, Symbol); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2729 target_t; src/annotator/helpers/auto_inference.rb:623 Type.new(:"#{element_sym}[]"); src/annotator/ ...; evidence 9
+  - src/ast/ast.rb:1304 `AST#type=` val; T.nilable(T.any(Type, Symbol, String)); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2729 target_t; src/annotator/helpers/auto_inference.rb:623 Type.new(:"#{element_sym}[ ...; evidence 9
+- blocked: collection/hash argument evidence: 40 slot(s); weak 0, untyped 40; evidence 1070
+  - src/mir/mir_lowering.rb:1377 `MIRLowering#ownership_contract_source_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_lowering.rb:1329 expr; src/mir/mir_lowering.rb:1355 node; s ...; evidence 103
+  - src/mir/mir_lowering.rb:1354 `MIRLowering#ownership_contract_consumes_unwrapped` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_lowering.rb:1346 expr; protocol hint direct protocol ...; evidence 98
   - src/mir/mir_checker.rb:900 `MIRChecker#collect_linear_expr_ident_names` expr; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_checker.rb:882 node; src/mir/mir_checker.rb:895 expr; src/mir ...; evidence 82
   - src/mir/mir_checker.rb:860 `MIRChecker#check_nested_linear_expr_bodies!` expr; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_checker.rb:855 expr; src/mir/mir_checker.rb:868 sub; protoco ...; evidence 80
   - src/mir/control_flow.rb:32 `MIRControlFlowExpr#children` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/control_flow.rb:40 node; src/mir/control_flow.rb:288 node; protocol hint direct  ...; evidence 73
   - src/mir/control_flow.rb:278 `FunctionCFG#stmt_can_fail?` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/control_flow.rb:259 stmt; src/mir/control_flow.rb:288 child; protocol hint stron ...; evidence 67
   - src/mir/mir_checker.rb:2405 `MIRChecker#check_expr_sources_for_unhoisted` expr; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_checker.rb:2392 expr; src/mir/mir_checker.rb:2401 expr; src ...; evidence 61
   - src/mir/mir_checker.rb:1563 `MIRChecker#walk_mir_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; src/mir/mir_checker.rb:877 expr; src/mir/mir_checker.rb:1572 expr; protocol hint direct pr ...; evidence 56
-- weak declared type: union: 37 slot(s); weak 37, untyped 0; evidence 6342
-  - src/mir/mir.rb:455 MIR::InlineAllocMetadata#[] key; T.any(Symbol, String); weak declared type: union; untyped instance variable; src/annotator/annotator.rb:122 `T.untyped`; src/annotator/annotator.rb:123 `T.untyped`; src/annotator/annotator.rb: ...; evidence 5137
-  - src/mir/mir.rb:1044 MIR#[]= key; T.any(Symbol, Integer); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:270 slot.decl_node.object_id; src/annotator/annotator.rb:588 node.name; src/annotator/annotator.rb:718  ...; evidence 500
-  - src/mir/mir.rb:3291 MIR#[]= key; T.any(Symbol, Integer); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:270 slot.decl_node.object_id; src/annotator/annotator.rb:588 node.name; src/annotator/annotator.rb:718  ...; evidence 500
-  - src/mir/mir.rb:450 `MIR::InlineAllocMetadata#key?` key; T.any(Symbol, String); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:1400 f.name; src/annotator/annotator.rb:1418 f.name; src/annotator/annotator.rb:167 ...; evidence 109
-  - src/annotator/annotator.rb:6537 `SemanticAnnotator#og_declare` type_info; T.any(Type, Symbol, String); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:1368 unwrapped; src/annotator/annotator.rb:1423 field_type; ...; evidence 17
-  - src/ast/ast.rb:115 `AST#type=` val; T.nilable(T.any(Type, Symbol, String)); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2647 target_t; src/annotator/helpers/auto_inference.rb:623 Type.new(:"#{element_sym}[] ...; evidence 9
-  - src/ast/ast.rb:1277 `AST#type=` val; T.any(Type, Symbol); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2647 target_t; src/annotator/helpers/auto_inference.rb:623 Type.new(:"#{element_sym}[]"); src/annotator/ ...; evidence 9
-  - src/ast/symbol_entry.rb:104 `SymbolEntry#type=` val; T.any(Symbol, String, Type, FunctionSignature, NilClass); weak declared type: union; untyped forwarded return; src/annotator/annotator.rb:2647 target_t; src/annotator/helpers/auto_inference ...; evidence 9
-- blocked: runtime union policy: 19 slot(s); weak 0, untyped 19; evidence 7580
-  - src/mir/ownership_graph.rb:299 OwnershipGraph#[] path; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/annotator/annotator.rb:122 `T.untyped`; src/annotator/annotator.rb:123 `T.untyped`; src/annotator/annotato ...; evidence 5140
-  - src/ast/type.rb:386 Type#== other; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/annotator/annotator.rb:315 :write_locked; src/annotator/annotator.rb:514 :package; src/annotator/annotator.rb:523 @source_ ...; evidence 1694
-  - src/ast/source_error.rb:31 `ErrorHelper#error!` code_or_message; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/annotator/annotator.rb:192 :EFFECT_INFERENCE_VIOLATION; src/annotator/annotator.rb:313 ...; evidence 408
-  - src/ast/scope.rb:25 `Scope#declare` reg; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/annotator/annotator.rb:325 nil; src/annotator/annotator.rb:329 nil; src/annotator/annotator.rb:547 nil; protoc ...; evidence 66
-  - src/ast/type.rb:1842 `Type#from_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/ast/type.rb:1630 et; src/ast/type.rb:1639 ft || :Any; src/ast/type.rb:1642 vt || :Any; protocol hint medium direct  ...; evidence 55
+- blocked: runtime union policy: 19 slot(s); weak 0, untyped 19; evidence 7618
+  - src/mir/ownership_graph.rb:299 OwnershipGraph#[] path; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/annotator/annotator.rb:121 Symbol; src/annotator/annotator.rb:122 String; src/annotator/annotator.rb:1 ...; evidence 5147
+  - src/ast/type.rb:386 Type#== other; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/annotator/annotator.rb:118 true; src/annotator/annotator.rb:142 :EXCLUSIVE; src/annotator/annotator.rb:142 :write_locked_r ...; evidence 1725
+  - src/ast/source_error.rb:31 `ErrorHelper#error!` code_or_message; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/annotator/annotator.rb:171 :WITH_SNAPSHOT_BODY_NOT_PURE; src/annotator/annotator.rb:26 ...; evidence 408
+  - src/ast/scope.rb:25 `Scope#declare` reg; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/annotator/annotator.rb:396 nil; src/annotator/annotator.rb:400 nil; src/annotator/annotator.rb:618 nil; protoc ...; evidence 67
+  - src/ast/type.rb:1842 `Type#from_node` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped instance variable; src/ast/type.rb:1630 et; src/ast/type.rb:1639 ft || :Any; src/ast/type.rb:1642 vt || :Any; protocol hint medium direct  ...; evidence 54
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/annotator/helpers/effects.rb:1149 s; src/annotator/helpers/effects.rb: ...; evidence 51
   - src/mir/cleanup_classifier.rb:335 `CleanupClassifier#moved_payload_alloc` node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/mir/cleanup_classifier.rb:295 node.respond_to?(:value) ? node.value : n ...; evidence 32
-  - src/mir/hoist.rb:1100 `MIRHoistLowering#hoist_cleanup_entry` ast_node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/backends/pipeline_host.rb:1941 nil; src/backends/pipeline_host.rb:1977 expr_node ...; evidence 32
-- weak declared type: collection element evidence needed: 18 slot(s); weak 18, untyped 0; evidence 41
-  - src/mir/mir_checker.rb:1828 `MIRChecker#verify_callable_contract!` transfers; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/mir/mir_checker.rb:1817 transfers; src/mir/mir ...; evidence 4
-  - src/annotator/helpers/fixable_helpers.rb:1427 `FixableHelper#build_auto_op_evidence_block` ops; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/annotator/helpers/fixable_he ...; evidence 3
-  - src/annotator/helpers/with_match_check.rb:353 `WithMatchCheck#expand_snapshotted` family_set; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped forwarded return; src/annotator/annotator.rb:4992 fams; src/annot ...; evidence 3
-  - src/mir/mir_checker.rb:1870 `MIRChecker#verify_ownership_contract_operands!` transfers; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/mir/mir_checker.rb:1859 transfers; s ...; evidence 3
-  - src/annotator/annotator.rb:1101 `SemanticAnnotator#collect_pipe_input_types` types; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/annotator/annotator.rb:845 snap_types; candidate ac ...; evidence 2
-  - src/annotator/annotator.rb:6426 `SemanticAnnotator#find_mutual_max_depth_callee` call_names; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/annotator/annotator.rb:6376 cal ...; evidence 2
-  - src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` types_with_self; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/annotator/helpers/lock_helper.rb:37 ...; evidence 2
-  - src/annotator/helpers/pipe_analysis.rb:1165 `PipeAnalysis#collect_sharded_names` names; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/annotator/helpers/pipe_analysis.rb:1544 sharded ...; evidence 2
+  - src/mir/hoist.rb:1100 `MIRHoistLowering#hoist_cleanup_entry` ast_node; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; src/mir/hoist.rb:569 ast_node; src/mir/hoist.rb:690 nil; src/mir/hoist.rb:918 nil; p ...; evidence 32
 - weak declared type: nested `T.untyped`: 18 slot(s); weak 18, untyped 0; evidence 32
   - src/mir/mir.rb:298 `MIR::Emittable#body_slot` writer; `T.proc`.params(body: T::Array[`T.untyped`]).void; weak declared type: nested `T.untyped`; untyped unknown expression; src/mir/mir.rb:593 ->(new_body) { self.body = new_body }; src/mir/mir.rb:66 ...; evidence 30
   - src/ast/ast.rb:21 `AST::BodySlot#initialize` writer; `T.proc`.params(body: T::Array[`T.untyped`]).void; weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 1
   - src/mir/mir.rb:245 `MIR::BodySlot#initialize` writer; `T.proc`.params(body: T::Array[`T.untyped`]).void; weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 1
   - src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context` blk; `T.proc`.returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 0
-  - src/ast/parser.rb:3938 `Parser#parse_comma_seq` blk; `T.proc`.returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 0
+  - src/ast/parser.rb:3961 `Parser#parse_comma_seq` blk; `T.proc`.returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 0
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` blk; `T.proc`.returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 0
-  - src/backends/pipeline_host.rb:546 `PipelineHost#lower_pipeline_block` blk; `T.proc`.params(items_ident: String, label: String).returns(T::Array[`T.untyped`]); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite or ...; evidence 0
+  - src/backends/pipeline_host.rb:659 `PipelineHost#lower_pipeline_block` blk; `T.proc`.params(items_ident: String, label: String).returns(T::Array[`T.untyped`]); weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite or ...; evidence 0
   - src/mir/control_flow.rb:1622 `BorrowChecker#walk_for_was_moved` blk; `T.proc`.params(node: `T.untyped`).void; weak declared type: nested `T.untyped`; untyped unknown expression; no static callsite origin; evidence 0
-- nil only observed: 2 slot(s); weak 0, untyped 2; evidence 11
-  - src/mir/hoist.rb:582 `MIRHoistLowering#mir_alloc_mark_type_info` ast_node; `T.untyped`; nil only observed; untyped literal/static expression; src/mir/hoist.rb:612 nil; src/mir/hoist.rb:631 nil; src/mir/hoist.rb:687 nil; evidence 7
-  - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` acc; `T.untyped`; nil only observed; untyped literal/static expression; src/backends/pipeline_host.rb:1506 "acc"; src/backends/pipeline_host.rb:3270 curr_var; src/b ...; evidence 4
+- weak declared type: collection element evidence needed: 7 slot(s); weak 7, untyped 0; evidence 16
+  - src/annotator/helpers/fixable_helpers.rb:1427 `FixableHelper#build_auto_op_evidence_block` ops; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/annotator/helpers/fixable_he ...; evidence 3
+  - src/annotator/helpers/with_match_check.rb:353 `WithMatchCheck#expand_snapshotted` family_set; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped forwarded return; src/annotator/annotator.rb:5065 fams; src/annot ...; evidence 3
+  - src/annotator/annotator.rb:1172 `SemanticAnnotator#collect_pipe_input_types` types; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/annotator/annotator.rb:916 snap_types; candidate ac ...; evidence 2
+  - src/annotator/annotator.rb:6521 `SemanticAnnotator#find_mutual_max_depth_callee` call_names; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/annotator/annotator.rb:6471 cal ...; evidence 2
+  - src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` types_with_self; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/annotator/helpers/lock_helper.rb:37 ...; evidence 2
+  - src/annotator/helpers/test_annotation.rb:163 `TestAnnotation#validate_strict_io!` stubbed_fns; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; src/annotator/helpers/test_annota ...; evidence 2
+  - src/mir/fsm_lowering.rb:489 `FsmLowering#emit_fsm_lock_error_arm_split` pointer_captures; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; src/mir/fsm_transform/emit.rb:1010 pointer_captur ...; evidence 2
 - candidate: static callsite backflow: 1 slot(s); weak 0, untyped 1; evidence 4
   - src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!` node; `T.untyped`; slot not observed: method was not hit; untyped unknown expression; src/backends/pipeline_rewriter.rb:126 node; src/backends/pipeline_rewriter.rb:145 ...; evidence 4
-- slot not observed: method was not hit: 1 slot(s); weak 0, untyped 1; evidence 1
-  - src/annotator/helpers/fixable_helpers.rb:1224 `FixableHelper#build_decl_cap_replace_fix` old_sigil; `T.untyped`; slot not observed: method was not hit; untyped literal/static expression; src/annotator/helpers/fixable_helpers.rb:939 '@locked'; evidence 1
+- nil only observed: 1 slot(s); weak 0, untyped 1; evidence 8
+  - src/mir/hoist.rb:582 `MIRHoistLowering#mir_alloc_mark_type_info` ast_node; `T.untyped`; nil only observed; untyped literal/static expression; src/mir/hoist.rb:612 nil; src/mir/hoist.rb:631 nil; src/mir/hoist.rb:687 nil; evidence 8
 
 #### Return Slot Evidence
-- weak declared type: array element evidence needed: 216 slot(s); weak 216, untyped 0; evidence 679
+- weak declared type: array element evidence needed: 213 slot(s); weak 213, untyped 0; evidence 671
   - src/annotator/helpers/capabilities.rb:116 `CapabilityHelper#validate_capability` return; T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]); weak declared type: array element evidence needed; untyped forwarded return; call_untyped @deferred_w ...; evidence 24
   - src/ast/ast.rb:489 `AST#expression_children` return; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; static []; static []; typed_call [node.value].compact; evidence 18
-  - src/mir/fsm_transform/segments.rb:199 `FsmTransform::Segments#split_while_loop_next` return; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped struct/array/collection value; nil nil; nil nil; nil nil; evidence 12
-  - src/backends/pipeline_host.rb:2605 `PipelineHost#lower_binding_fold` return; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped struct/array/collection value; static [init, bc_wrap_stages(stages, placeh ...; evidence 10
+  - src/mir/fsm_transform/segments.rb:199 `FsmTransform::Segments#split_while_loop_next` return; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped struct/array/collection value; nil nil; nil nil; nil nil;  ...; evidence 14
+  - src/backends/pipeline_host.rb:2696 `PipelineHost#lower_binding_fold` return; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped struct/array/collection value; static [init, bc_wrap_stages(stages, placeh ...; evidence 10
   - src/annotator/helpers/auto_inference.rb:788 `ShapeEvidenceCollector#record_method_call` return; T.nilable(T::Array[`T.untyped`]); weak declared type: array element evidence needed; untyped forwarded return; nil return; nil return; call_untyped  ...; evidence 9
   - src/backends/pipeline_rewriter.rb:405 `PipelineRewriter#build_init` return; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped struct/array/collection value; static [decl]; static [sum_decl, cnt_decl]; static [dec ...; evidence 9
   - src/backends/pipeline_rewriter.rb:501 `PipelineRewriter#build_recursive_body` return; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped forwarded return; typed_call build_terminal_action(terminal, current_val, re ...; evidence 9
   - src/mir/hoist.rb:88 `Hoist#child_bodies` return; T::Array[`T.untyped`]; weak declared type: array element evidence needed; untyped struct/array/collection value; static [stmt.body]; static [stmt.do_branch]; typed_call [stmt.then_branch, stmt.el ...; evidence 9
-- blocked: forwarded return chain: 112 slot(s); weak 0, untyped 112; evidence 1692
+- blocked: forwarded return chain: 107 slot(s); weak 0, untyped 107; evidence 1708
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; typed_call node.body.map!.with_index { |s, _| rewrite_in_node!(s) }; unkn ...; evidence 82
   - src/annotator/helpers/effects.rb:815 `EffectTracker#scan_suspend_points` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; typed_call node.each { |n| scan_suspend_points(n, fn_node, points) }; call_untyped  ...; evidence 78
-  - src/mir/mir_lowering.rb:678 `MIRLowering#lower` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; call_untyped apply_lowered_coercion(mir, node); evidence 77
+  - src/mir/mir_lowering.rb:738 `MIRLowering#lower` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; call_untyped apply_lowered_coercion(mir, node); evidence 77
   - src/ast/parser.rb:1931 `Parser#parse_unary` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; static AST::UnaryOp.new(op_token, AST::OP_TO_OP_CODE[v], right); static AST::CallSiteOverride.new(sigil_tok, `T.m` ...; evidence 63
   - src/ast/parser.rb:2503 `Parser#parse_primary` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; call_untyped instance_exec(&rule); call_untyped parse_unary(); call_untyped parse_suffixes(lit); evidence 63
   - src/backends/pipeline_rewriter.rb:29 `PipelineRewriter#rewrite!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; unknown node; call_untyped rewrite_pipeline(node); unknown node; evidence 63
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; typed_call node.statements.map! { |s| rewrite!(s) }; call_untyped node.body.map! { ...; evidence 60
-  - src/mir/mir_lowering.rb:344 `MIRLowering#place_value_for_destination` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; unknown mir; call_untyped place_indirect_value_for_heap_destination(mir, T.must(plan.t ...; evidence 54
-- candidate: runtime-only return observation: 97 slot(s); weak 0, untyped 97; evidence 307
-  - src/mir/lowering/expressions.rb:1697 `MIRLoweringExpressions#lower_copy` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; static MIR::RcRetain.new(source, rc_payload_zig_type(ti), func); static MIR ...; evidence 11
+  - src/mir/mir_lowering.rb:408 `MIRLowering#place_value_for_destination` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped forwarded return; unknown mir; call_untyped place_indirect_value_for_heap_destination(mir, T.must(plan.t ...; evidence 54
+- candidate: runtime-only return observation: 83 slot(s); weak 0, untyped 83; evidence 269
+  - src/mir/lowering/expressions.rb:1691 `MIRLoweringExpressions#lower_copy` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; static MIR::RcRetain.new(source, rc_payload_zig_type(ti), func); static MIR ...; evidence 11
   - src/ast/type.rb:878 `Type#fsm_foreach_descriptor` return; `T.untyped`; single observed type; narrow candidate; untyped struct/array/collection value; static { kind: :pool_indexed, var_zig_type: element_type&.zig_type || "anyopaque" }; static {  ...; evidence 8
   - src/annotator/helpers/intrinsic_registry.rb:105 `IntrinsicRegistry#to_return_def` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; typed_call_inferred FunctionReturn.fixed(Type.new(:Void)); typed_c ...; evidence 7
   - src/annotator/helpers/intrinsic_registry.rb:228 `IntrinsicRegistry#fs` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; nil nil; unknown x; typed_call convert_entry(name, x, registries); candidate  ...; evidence 6
-  - src/mir/fsm_transform/emit.rb:479 `FsmTransform::Emit#build_recursive` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; nil nil; nil nil; nil nil; candidate action fix_sig_return (review); evidence 6
+  - src/mir/fsm_transform/emit.rb:498 `FsmTransform::Emit#build_recursive` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; nil nil; nil nil; nil nil; candidate action fix_sig_return (review); evidence 6
   - src/mir/fsm_transform/recursive_splitter.rb:202 `FsmTransform::RecursiveSplitter#emit_stmts` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; static after_idx; typed_call builder.push(stmts, Segmen ...; evidence 6
   - src/annotator/helpers/intrinsic_registry.rb:63 `IntrinsicRegistry#nested_emit` return; `T.untyped`; single observed type; narrow candidate; untyped literal/static expression; nil nil; static IntrinsicEmit.new(registry: name || :unknown); static ...; evidence 5
   - src/ast/source_error.rb:121 `ErrorHelper#fixable!` return; `T.untyped`; single observed type; narrow candidate; untyped forwarded return; nil return; call_untyped $stderr.puts "#{tag} #{message}#{loc}"; typed_call raise err_class.new(token, mes ...; evidence 5
-- weak declared type: hash key/value evidence needed: 80 slot(s); weak 80, untyped 0; evidence 261
+- weak declared type: hash key/value evidence needed: 78 slot(s); weak 78, untyped 0; evidence 256
   - src/mir/thunk_transform/recursive_splitter.rb:214 `ThunkTransform::RecursiveSplitter#match_base_case` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; ...; evidence 9
-  - src/backends/pipeline_host.rb:2458 `PipelineHost#unwrap_binding_unnest_chain` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; nil nil; nil nil; nil n ...; evidence 8
+  - src/backends/pipeline_host.rb:2549 `PipelineHost#unwrap_binding_unnest_chain` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; nil nil; nil nil; nil n ...; evidence 8
   - src/mir/fsm_lowering.rb:489 `FsmLowering#emit_fsm_lock_error_arm_split` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; nil nil; nil nil; static { bo ...; evidence 8
   - src/mir/fsm_transform.rb:150 `FsmTransform#local_entry_for_node` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; nil nil; typed_call local_entry(node ...; evidence 8
   - src/mir/thunk_transform/recursive_splitter.rb:168 `ThunkTransform::RecursiveSplitter#match_mutual_base_case` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection ...; evidence 8
-  - src/ast/parser.rb:3578 `Parser#parse_lock_action` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; static { action: :raise, token: previous }; static  ...; evidence 7
-  - src/backends/pipeline_host.rb:2431 `PipelineHost#unwrap_range_chain` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; static { source: node, stages: [ ...; evidence 7
+  - src/ast/parser.rb:3601 `Parser#parse_lock_action` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; static { action: :raise, token: previous }; static  ...; evidence 7
+  - src/backends/pipeline_host.rb:2522 `PipelineHost#unwrap_range_chain` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collection value; static { source: node, stages: [ ...; evidence 7
   - src/mir/thunk_transform/recursive_splitter.rb:237 `ThunkTransform::RecursiveSplitter#match_recursive_combine` return; T.nilable(T::Hash[`T.untyped`, `T.untyped`]); weak declared type: hash key/value evidence needed; untyped struct/array/collectio ...; evidence 7
-- blocked: unknown return expression: 46 slot(s); weak 0, untyped 46; evidence 699
+- blocked: unknown return expression: 44 slot(s); weak 0, untyped 44; evidence 658
   - src/backends/string_concat_rewriter.rb:27 `StringConcatRewriter#rewrite_in_node!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; unknown node; unknown concat; unknown node; evidence 88
-  - src/mir/mir_lowering.rb:802 `MIRLowering#apply_lowered_coercion` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown mir; unknown mir; unknown mir; evidence 80
+  - src/mir/mir_lowering.rb:862 `MIRLowering#apply_lowered_coercion` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown mir; unknown mir; unknown mir; evidence 80
   - src/ast/parser.rb:1759 `Parser#parse_expression` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; unknown lhs; evidence 61
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown init; unknown init; unknown init; evidence 41
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; unknown node; unknown new_id; unknown new_id; evidence 40
   - src/mir/escape_analysis.rb:475 `EscapeAnalysis#unwrap_value` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped unknown expression; unknown current; evidence 37
-  - src/mir/mir_lowering.rb:421 `MIRLowering#destination_source_node` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; typed_call node.left; unknown node; evidence 31
-  - src/mir/mir_lowering.rb:2997 `MIRLowering#materialize_owned_sink_value` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown value; unknown value; static MIR::DupeSlice.new(value, plan.target_ ...; evidence 29
-- blocked: runtime union policy: 30 slot(s); weak 0, untyped 30; evidence 201
-  - src/ast/parser.rb:3006 `Parser#parse_concurrent_inner_op` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static AST::SelectOp.new(previous, expr); static AST::WhereOp.new(previous, expr); typed_ ...; evidence 17
+  - src/mir/mir_lowering.rb:485 `MIRLowering#destination_source_node` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; typed_call node.left; unknown node; evidence 31
+  - src/mir/mir_lowering.rb:3117 `MIRLowering#materialize_owned_sink_value` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown value; unknown value; static MIR::DupeSlice.new(value, plan.target_ ...; evidence 29
+  - src/mir/lowering/control_flow.rb:886 `MIRLoweringControlFlow#heap_carry_recursive_param_value` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; unknown value; unknown value; unknown value; evidence 26
+- blocked: runtime union policy: 33 slot(s); weak 0, untyped 33; evidence 213
+  - src/ast/parser.rb:2975 `Parser#parse_concurrent_inner_op` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static AST::SelectOp.new(previous, expr); static AST::WhereOp.new(previous, expr); typed_ ...; evidence 17
   - src/mir/fsm_ops.rb:394 `FsmOps::Lowerer#lower_stmt` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static MIR::Set.new(state_ref(op.field), lower_expr(op.value), false); static MIR::Let.new(op.n ...; evidence 15
   - src/mir/capture_strategy.rb:143 `CaptureStrategy#classify` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static MoveInto.new(zig_t, name, name); static FreshHeapCopy.new(zig_t, name, alloc_sym) ...; evidence 14
   - src/mir/lowering/expressions.rb:169 `MIRLoweringExpressions#lower_identifier` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static MIR::FnRef.new(zig_safe_name(node.name)); static `MIR::Ident.ne` ...; evidence 13
@@ -811,42 +779,40 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/parser.rb:971 `Parser#parse_visibility_decl` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; typed_call parse_function_def(visibility); typed_call parse_function_def(visibility, is_method ...; evidence 10
   - src/mir/test_lowering.rb:365 `TestLowering#stub_intercept_for` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; nil nil; static MIR::Ident.new(stub_info[:var]); static MIR::BlockExpr.new(label, su ...; evidence 10
   - src/ast/parser.rb:1795 `Parser#parse_binary_op` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped literal/static expression; static AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs); static AST::BinaryOp.new(op_token, lhs, :O ...; evidence 8
-- candidate: void return: 27 slot(s); weak 0, untyped 27; evidence 119
+- candidate: void return: 23 slot(s); weak 0, untyped 23; evidence 115
   - src/mir/control_flow.rb:732 `OwnershipDataflow#transfer_stmt` return; `T.untyped`; void candidate; return value appears unused; untyped struct/array/collection value; assignment state[stmt.name.to_s] = make_owner_entry(stmt); assignment state[s ...; evidence 16
-  - src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; nil return; nil return; typed_call_inferred error!(node, :ENUM_FIELD_ACCESS, enum: ty ...; evidence 10
-  - src/annotator/annotator.rb:3838 `SemanticAnnotator#visit_BinaryOp` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; call_untyped visit_Smooth(node); typed_call visit_BindVar(node); typed_call visit_OrR ...; evidence 10
+  - src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; nil return; nil return; typed_call_inferred error!(node, :ENUM_FIELD_ACCESS, enum: ty ...; evidence 10
+  - src/annotator/annotator.rb:3920 `SemanticAnnotator#visit_BinaryOp` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; call_untyped visit_Smooth(node); typed_call visit_BindVar(node); typed_call visit_OrR ...; evidence 10
   - src/ast/ast.rb:590 `AST#each_bg_block_in_stmt` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; unknown yield stmt; typed_call _expr_each_bg_block_shallow(stmt.value, &block); nil implicit else; candid ...; evidence 10
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; nil return; nil return; nil return; candidate action fix_sig_return (review ...; evidence 9
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; nil return; nil return; nil return; candidate action fix_sig_return (review ...; evidence 9
   - src/ast/scope.rb:203 `Scope#mark_read` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; nil return; nil entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }; call_untyped entry.reg&.ta ...; evidence 8
-  - src/annotator/annotator.rb:3488 `SemanticAnnotator#visit_UnaryOp` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; call_untyped stamp_type!(node, :Bool); call_untyped stamp_type!(node, node.right.full_ ...; evidence 5
+  - src/annotator/annotator.rb:3570 `SemanticAnnotator#visit_UnaryOp` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; call_untyped stamp_type!(node, :Bool); call_untyped stamp_type!(node, node.right.full_ ...; evidence 5
   - src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves` return; `T.untyped`; void candidate; return value appears unused; untyped forwarded return; call_untyped blk.call; candidate action fix_sig_return (review); evidence 5
-- blocked: collection/field return evidence: 19 slot(s); weak 0, untyped 19; evidence 244
-  - src/mir/mir_lowering.rb:1317 `MIRLowering#ownership_contract_source_node` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static current; evidence 98
+- weak declared type: union: 20 slot(s); weak 20, untyped 0; evidence 56
+  - src/backends/pipeline_host.rb:2262 `PipelineHost#lower_each` return; T.nilable(T.any(MIR::ForStmt, MIR::ScopeBlock)); weak declared type: union; untyped literal/static expression; typed_call lower_sharded_each(site, each_op); static MIR::Scop ...; evidence 10
+  - src/mir/lowering/capabilities.rb:869 `MIRLoweringCapabilities#guard_fail_flow_body` return; T.nilable(T.any(T::Array[`T.untyped`], T::Array[`T.untyped`])); weak declared type: union; untyped forwarded return; static []; static []; static [MIR::Re ...; evidence 8
+  - src/annotator/annotator.rb:3774 `SemanticAnnotator#visit_ListLit` return; T.nilable(T.any(Symbol, Type)); weak declared type: union; untyped forwarded return; nil return; nil return; nil return; evidence 5
+  - src/mir/control_flow.rb:658 `OwnershipDataflow#join_entry` return; T.any(OwnershipDataflow::OwnerEntry, Symbol); weak declared type: union; untyped literal/static expression; static T.must(b); static a; static OwnerEntry.new(state: joined_sta ...; evidence 5
+  - src/mir/lowering/concurrency.rb:704 `MIRLoweringConcurrency#lower_bg_stream_block` return; T.any(MIR::BgBlock, MIR::BlockExpr, MIR::InlineBc, MIR::StreamSpawn); weak declared type: union; untyped literal/static expression; unknown spawn; stat ...; evidence 4
+  - src/mir/lowering/functions.rb:215 `MIRLoweringFunctions#lower_function_def` return; T.any(MIR::FnDef, T::Array[MIR::FnDef]); weak declared type: union; untyped struct/array/collection value; static [build_post_inner_fn(node, params_mir, retur ...; evidence 3
+  - src/backends/pipeline_host.rb:299 `PipelineHost::PipelinePlaceholderRewriter#substitute_assignment_target` return; T.any(AST::Node, String); weak declared type: union; untyped literal/static expression; typed_call substitute(node); static nod ...; evidence 2
+  - src/backends/pipeline_rewriter.rb:729 `PipelineRewriter#build_final_result` return; T.any(AST::BinaryOp, AST::Identifier); weak declared type: union; untyped unknown expression; unknown div; unknown res; evidence 2
+- blocked: collection/field return evidence: 17 slot(s); weak 0, untyped 17; evidence 234
+  - src/mir/mir_lowering.rb:1377 `MIRLowering#ownership_contract_source_node` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static current; evidence 98
   - src/mir/mir_checker.rb:1246 `MIRChecker#ownership_source_expr` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static current; evidence 28
   - src/mir/hoist.rb:150 `Hoist#hoist_escape_value!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static value; typed_call make_temp!(value, hoists, ctr, expected_type: expected_type); static  ...; evidence 20
-  - src/mir/lowering/variables.rb:417 `MIRLoweringVariables#build_var_decl_nodes` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static let_node; static [alloc_mark, let_node, MIR::Cleanup.new(s ...; evidence 14
-  - src/mir/mir_lowering.rb:597 `MIRLowering#place_string_value_for_heap_destination` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static mir; static MIR::DupeSlice.new(mir, :heap); evidence 10
+  - src/mir/lowering/variables.rb:416 `MIRLoweringVariables#build_var_decl_nodes` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static let_node; static [alloc_mark, let_node, MIR::Cleanup.new(s ...; evidence 13
+  - src/mir/mir_lowering.rb:658 `MIRLowering#place_string_value_for_heap_destination` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; static mir; static MIR::DupeSlice.new(mir, :heap); evidence 10
   - src/mir/test_lowering.rb:318 `TestLowering#collect_identifier_refs` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; nil return; nil return; typed_call node.each_pair { |_, v| collect_identifi ...; evidence 10
   - src/annotator/helpers/generic_analysis.rb:319 `GenericAnalysis#extract_type_bindings!` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; unknown subst[p_res] = actual_binding; typed_call param_ ...; evidence 7
-  - src/mir/mir_lowering.rb:2303 `MIRLowering#lower_union_def` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; typed_call helper_structs + [generic_fn]; unknown generic_fn; typed_call helper_stru ...; evidence 7
-- weak declared type: union: 17 slot(s); weak 17, untyped 0; evidence 50
-  - src/backends/pipeline_host.rb:2171 `PipelineHost#lower_each` return; T.nilable(T.any(MIR::ForStmt, MIR::ScopeBlock)); weak declared type: union; untyped literal/static expression; typed_call lower_sharded_each(site, each_op); static MIR::Scop ...; evidence 10
-  - src/mir/lowering/capabilities.rb:855 `MIRLoweringCapabilities#guard_fail_flow_body` return; T.nilable(T.any(T::Array[`T.untyped`], T::Array[`T.untyped`])); weak declared type: union; untyped forwarded return; static []; static []; static [MIR::Re ...; evidence 8
-  - src/annotator/annotator.rb:3692 `SemanticAnnotator#visit_ListLit` return; T.nilable(T.any(Symbol, Type)); weak declared type: union; untyped forwarded return; nil return; nil return; nil return; evidence 5
-  - src/mir/control_flow.rb:658 `OwnershipDataflow#join_entry` return; T.any(OwnershipDataflow::OwnerEntry, Symbol); weak declared type: union; untyped literal/static expression; static T.must(b); static a; static OwnerEntry.new(state: joined_sta ...; evidence 5
-  - src/mir/lowering/concurrency.rb:672 `MIRLoweringConcurrency#lower_bg_stream_block` return; T.any(MIR::BgBlock, MIR::BlockExpr, MIR::InlineBc, MIR::StreamSpawn); weak declared type: union; untyped literal/static expression; unknown spawn; stat ...; evidence 4
-  - src/backends/pipeline_rewriter.rb:729 `PipelineRewriter#build_final_result` return; T.any(AST::BinaryOp, AST::Identifier); weak declared type: union; untyped unknown expression; unknown div; unknown res; evidence 2
-  - src/mir/control_flow.rb:700 `OwnershipDataflow#mark_moved!` return; T.any(OwnershipDataflow::OwnerEntry, Symbol); weak declared type: union; untyped unknown expression; assignment state[name] = OwnerEntry.new(state: MOVED, allocator: existing ...; evidence 2
-  - src/mir/lowering/expressions.rb:1533 `MIRLoweringExpressions#lower_assert` return; T.any(MIR::AssertStmt, MIR::InlineBc, MIR::InlineZig); weak declared type: union; untyped literal/static expression; unknown eq_lowering; static MIR::AssertStm ...; evidence 2
-- weak declared type: collection element evidence needed: 13 slot(s); weak 13, untyped 0; evidence 35
-  - src/annotator/helpers/with_match_check.rb:392 `WithMatchCheck#warn_polymorphic_unhandled_errors!` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped struct/array/collection value; nil return; ...; evidence 4
-  - src/mir/ownership_graph.rb:101 `OwnershipGraph#transfer` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped literal/static expression; nil return; typed_call invalidate(from, source); candida ...; evidence 4
-  - src/annotator/annotator.rb:6546 `SemanticAnnotator#og_move` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped forwarded return; call_untyped @og.transfer(from, to, at_token: at_token, action ...; evidence 3
+  - src/mir/mir_lowering.rb:2368 `MIRLowering#lower_union_def` return; `T.untyped`; runtime union; kept `T.untyped` by policy; untyped struct/array/collection value; typed_call helper_structs + [generic_fn]; unknown generic_fn; typed_call helper_stru ...; evidence 7
+- weak declared type: collection element evidence needed: 6 slot(s); weak 6, untyped 0; evidence 15
+  - src/annotator/annotator.rb:6641 `SemanticAnnotator#og_move` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped unknown expression; typed_call_inferred @og.transfer(from, to, at_token: at_toke ...; evidence 3
   - src/annotator/helpers/with_match_check.rb:353 `WithMatchCheck#expand_snapshotted` return; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; static family_set; static out; candida ...; evidence 3
-  - src/mir/concurrency_checks.rb:237 `ConcurrencyChecks#collect_held_params` return; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; static `Set.new`; static out; candidate action n ...; evidence 3
   - src/mir/ownership_graph.rb:119 `OwnershipGraph#mark_moved` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped literal/static expression; nil return; typed_call invalidate(path, source); evidence 3
-  - src/mir/ownership_graph.rb:314 `OwnershipGraph#invalidate` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped forwarded return; nil return; call_untyped @children[path].each do |child| invali ...; evidence 3
-  - src/annotator/annotator.rb:385 `SemanticAnnotator#outer_scope_vars` return; T::Set[`T.untyped`]; weak declared type: collection element evidence needed; untyped struct/array/collection value; typed_call @scope_stack.flat_map { |s| s.locals.keys ...; evidence 2
+  - src/annotator/annotator.rb:4244 `SemanticAnnotator#visit_MoveNode` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped literal/static expression; typed_call og_set_moved(node.value.name, at_to ...; evidence 2
+  - src/annotator/annotator.rb:6643 `SemanticAnnotator#og_set_moved` return; T.nilable(T::Set[`T.untyped`]); weak declared type: collection element evidence needed; untyped forwarded return; call_untyped @og.mark_moved(name, at_token: at_token, act ...; evidence 2
+  - src/mir/control_flow.rb:726 `OwnershipDataflow#resource_captures` return; T::Enumerable[`T.untyped`]; weak declared type: collection element evidence needed; untyped unknown expression; unknown node.capture_analysis&.resource_captures || []; evidence 2
 - nil only observed: 5 slot(s); weak 0, untyped 5; evidence 12
   - src/ast/ast.rb:607 `AST#_expr_each_bg_block_shallow` return; `T.untyped`; nil only observed; untyped literal/static expression; nil return; nil nil; candidate action fix_sig_return (review); evidence 3
   - src/mir/control_flow.rb:37 `MIRControlFlowExpr#walk_expr_node` return; `T.untyped`; nil only observed; untyped literal/static expression; nil return; nil nil; candidate action fix_sig_return (review); evidence 3
@@ -855,13 +821,12 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/control_flow.rb:929 `OwnershipDataflow#collect_share_transfers_in` return; `T.untyped`; nil only observed; untyped literal/static expression; typed_call walk_expr_node(node) do |n| collect_share_transfer(n, step) if n.is_a?(AST::ShareNo ...; evidence 2
 - weak declared type: nested `T.untyped`: 4 slot(s); weak 4, untyped 0; evidence 17
   - src/mir/hoist.rb:910 `MIRHoistLowering#normalize_allocating_used_expr` return; [T::Array[`T.untyped`], `T.untyped`]; weak declared type: nested `T.untyped`; untyped struct/array/collection value; static [prefix, expr]; static [prefix, expr]; static ...; evidence 8
-  - src/mir/mir_lowering.rb:954 `MIRLowering#materialize_statement_discard` return; [`T.untyped`, T::Boolean]; weak declared type: nested `T.untyped`; untyped struct/array/collection value; static [mir, false]; static [mir, false]; static [mir, false ...; evidence 5
+  - src/mir/mir_lowering.rb:1014 `MIRLowering#materialize_statement_discard` return; [`T.untyped`, T::Boolean]; weak declared type: nested `T.untyped`; untyped struct/array/collection value; static [mir, false]; static [mir, false]; static [mir, fals ...; evidence 5
   - src/mir/hoist.rb:709 `MIRHoistLowering#hoist_normalized_value_expr` return; [T::Array[`T.untyped`], MIR::Ident]; weak declared type: nested `T.untyped`; untyped struct/array/collection value; static [T.let([MIR::Let.new(name, expr, false, nil, ni ...; evidence 2
-  - src/mir/mir_lowering.rb:322 `MIRLowering#mir_schema_lookup` return; `T.proc`.params(name: `T.untyped`).returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; ivar_typed @schema_lookup; candidate action fix_sig_retur ...; evidence 2
-- blocked: instance variable return: 3 slot(s); weak 0, untyped 3; evidence 7
+  - src/mir/mir_lowering.rb:386 `MIRLowering#mir_schema_lookup` return; `T.proc`.params(name: `T.untyped`).returns(`T.untyped`); weak declared type: nested `T.untyped`; untyped unknown expression; ivar_typed @schema_lookup; candidate action fix_sig_retur ...; evidence 2
+- blocked: instance variable return: 2 slot(s); weak 0, untyped 2; evidence 6
   - src/annotator/helpers/function_signature.rb:244 `FunctionSignature#heap_carry_return` return; `T.untyped`; slot not observed: method was not hit; untyped instance variable; ivar_read @heap_carry_return; candidate action fix_sig_return (review); evidence 3
   - src/annotator/helpers/function_signature.rb:252 `FunctionSignature#heap_carry_return_vars` return; `T.untyped`; slot not observed: method was not hit; untyped instance variable; ivar_read @heap_carry_return_vars; candidate action fix_sig_return ...; evidence 3
-  - src/ast/type.rb:634 `Type#location` return; `T.untyped`; slot not observed: method was not hit; untyped instance variable; ivar_read @provenance; candidate action fix_sig_return (high); evidence 1
 - slot not observed: method hit but return was not captured: 1 slot(s); weak 0, untyped 1; evidence 1
   - src/ast/source_error.rb:31 `ErrorHelper#error!` return; `T.untyped`; slot not observed: method hit but return was not captured; untyped literal/static expression; typed_call raise err_class.new(token, message, T.cast(T.unsafe(self).instance_var ...; evidence 1
 
@@ -872,71 +837,65 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - return source kind: the kind of expression that produces the return value
 - fixability: the report's estimate of whether the return is already addressed, directly fixable, cascading, or needs more evidence
 - row percent: share of all return slots; strength percents: share within that row
-- Return slots indexed: 3384
-- Return slot strength: strong 2714 (80.2%); weak 330 (9.8%); untyped 340 (10.0%); nilable 635 (18.8%)
+- Return slots indexed: 3498
+- Return slot strength: strong 2862 (81.8%); weak 321 (9.2%); untyped 315 (9.0%); nilable 664 (19.0%)
 
 #### Control Shape
 
-- branchless: total 1918 (56.7%) of all returns; strong 1656 (86.3%); weak 148 (7.7%); untyped 114 (5.9%); nilable 216 (11.3%) within row
-- branching: total 1466 (43.3%) of all returns; strong 1058 (72.2%); weak 182 (12.4%); untyped 226 (15.4%); nilable 419 (28.6%) within row
+- branchless: total 1966 (56.2%) of all returns; strong 1717 (87.3%); weak 145 (7.4%); untyped 104 (5.3%); nilable 223 (11.3%) within row
+- branching: total 1532 (43.8%) of all returns; strong 1145 (74.7%); weak 176 (11.5%); untyped 211 (13.8%); nilable 441 (28.8%) within row
 
 #### Return Syntax
 
-- implicit: total 2353 (69.5%) of all returns; strong 1955 (83.1%); weak 205 (8.7%); untyped 193 (8.2%); nilable 306 (13.0%) within row
-- mixed: total 1026 (30.3%) of all returns; strong 757 (73.8%); weak 125 (12.2%); untyped 144 (14.0%); nilable 328 (32.0%) within row
+- implicit: total 2409 (68.9%) of all returns; strong 2032 (84.4%); weak 203 (8.4%); untyped 174 (7.2%); nilable 316 (13.1%) within row
+- mixed: total 1084 (31.0%) of all returns; strong 828 (76.4%); weak 118 (10.9%); untyped 138 (12.7%); nilable 347 (32.0%) within row
 - explicit: total 5 (0.1%) of all returns; strong 2 (40.0%); weak 0 (0.0%); untyped 3 (60.0%); nilable 1 (20.0%) within row
 
 #### Return Value Usage
 
-- used as value: total 2106 (62.2%) of all returns; strong 1607 (76.3%); weak 216 (10.3%); untyped 283 (13.4%); nilable 412 (19.6%) within row
-- ambiguous method name: total 594 (17.6%) of all returns; strong 527 (88.7%); weak 38 (6.4%); untyped 29 (4.9%); nilable 66 (11.1%) within row
-- declared void: total 382 (11.3%) of all returns; strong 382 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
-- unused statement-only: total 170 (5.0%) of all returns; strong 86 (50.6%); weak 67 (39.4%); untyped 17 (10.0%); nilable 107 (62.9%) within row
-- no static callsites found: total 123 (3.6%) of all returns; strong 104 (84.6%); weak 9 (7.3%); untyped 10 (8.1%); nilable 47 (38.2%) within row
-- unused via return-forwarding: total 6 (0.2%) of all returns; strong 5 (83.3%); weak 0 (0.0%); untyped 1 (16.7%); nilable 3 (50.0%) within row
+- used as value: total 2185 (62.5%) of all returns; strong 1710 (78.3%); weak 209 (9.6%); untyped 266 (12.2%); nilable 431 (19.7%) within row
+- ambiguous method name: total 606 (17.3%) of all returns; strong 542 (89.4%); weak 38 (6.3%); untyped 26 (4.3%); nilable 68 (11.2%) within row
+- declared void: total 402 (11.5%) of all returns; strong 402 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
+- unused statement-only: total 176 (5.0%) of all returns; strong 95 (54.0%); weak 65 (36.9%); untyped 16 (9.1%); nilable 114 (64.8%) within row
+- no static callsites found: total 119 (3.4%) of all returns; strong 105 (88.2%); weak 9 (7.6%); untyped 5 (4.2%); nilable 48 (40.3%) within row
+- unused via return-forwarding: total 7 (0.2%) of all returns; strong 5 (71.4%); weak 0 (0.0%); untyped 2 (28.6%); nilable 3 (42.9%) within row
 - declared noreturn: total 3 (0.1%) of all returns; strong 3 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
 
 #### Return Source Kind
 
-- collection lookup: total 1123 (33.2%) of all returns; strong 774 (68.9%); weak 246 (21.9%); untyped 103 (9.2%); nilable 202 (18.0%) within row
-- literal/static: total 818 (24.2%) of all returns; strong 772 (94.4%); weak 21 (2.6%); untyped 25 (3.1%); nilable 134 (16.4%) within row
-- implicit/direct forwarded return: total 397 (11.7%) of all returns; strong 281 (70.8%); weak 24 (6.0%); untyped 92 (23.2%); nilable 87 (21.9%) within row
-- Ruby stdlib call: total 348 (10.3%) of all returns; strong 345 (99.1%); weak 0 (0.0%); untyped 3 (0.9%); nilable 32 (9.2%) within row
-- unknown source: total 257 (7.6%) of all returns; strong 220 (85.6%); weak 14 (5.4%); untyped 23 (8.9%); nilable 32 (12.5%) within row
-- mixed sources: total 221 (6.5%) of all returns; strong 180 (81.4%); weak 3 (1.4%); untyped 38 (17.2%); nilable 63 (28.5%) within row
-- mixed/direct forwarded return: total 179 (5.3%) of all returns; strong 108 (60.3%); weak 22 (12.3%); untyped 49 (27.4%); nilable 69 (38.5%) within row
-- mutation/setter assignment: total 28 (0.8%) of all returns; strong 27 (96.4%); weak 0 (0.0%); untyped 1 (3.6%); nilable 15 (53.6%) within row
-- struct/class field or instance variable: total 10 (0.3%) of all returns; strong 7 (70.0%); weak 0 (0.0%); untyped 3 (30.0%); nilable 1 (10.0%) within row
+- collection lookup: total 1135 (32.4%) of all returns; strong 800 (70.5%); weak 238 (21.0%); untyped 97 (8.5%); nilable 206 (18.1%) within row
+- literal/static: total 880 (25.2%) of all returns; strong 823 (93.5%); weak 21 (2.4%); untyped 36 (4.1%); nilable 139 (15.8%) within row
+- implicit/direct forwarded return: total 380 (10.9%) of all returns; strong 287 (75.5%); weak 24 (6.3%); untyped 69 (18.2%); nilable 89 (23.4%) within row
+- Ruby stdlib call: total 379 (10.8%) of all returns; strong 376 (99.2%); weak 0 (0.0%); untyped 3 (0.8%); nilable 42 (11.1%) within row
+- unknown source: total 264 (7.5%) of all returns; strong 228 (86.4%); weak 15 (5.7%); untyped 21 (8.0%); nilable 33 (12.5%) within row
+- mixed sources: total 230 (6.6%) of all returns; strong 193 (83.9%); weak 3 (1.3%); untyped 34 (14.8%); nilable 69 (30.0%) within row
+- mixed/direct forwarded return: total 189 (5.4%) of all returns; strong 120 (63.5%); weak 20 (10.6%); untyped 49 (25.9%); nilable 71 (37.6%) within row
+- mutation/setter assignment: total 29 (0.8%) of all returns; strong 28 (96.6%); weak 0 (0.0%); untyped 1 (3.4%); nilable 14 (48.3%) within row
+- struct/class field or instance variable: total 9 (0.3%) of all returns; strong 7 (77.8%); weak 0 (0.0%); untyped 2 (22.2%); nilable 1 (11.1%) within row
 - explicit/direct forwarded return: total 3 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 3 (100.0%); nilable 0 (0.0%) within row
 
 #### Fixability
 
-- addressed: strong: total 2329 (68.8%) of all returns; strong 2329 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 503 (21.6%) within row
-- addressed: void: total 382 (11.3%) of all returns; strong 382 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
-- addressed: weak: total 330 (9.8%) of all returns; strong 0 (0.0%); weak 330 (100.0%); untyped 0 (0.0%); nilable 132 (40.0%) within row
+- addressed: strong: total 2457 (70.2%) of all returns; strong 2457 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 537 (21.9%) within row
+- addressed: void: total 402 (11.5%) of all returns; strong 402 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
+- addressed: weak: total 321 (9.2%) of all returns; strong 0 (0.0%); weak 321 (100.0%); untyped 0 (0.0%); nilable 127 (39.6%) within row
 - cascade: forwarded return: total 45 (1.3%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 45 (100.0%); nilable 0 (0.0%) within row
-- needs collection/field evidence: total 31 (0.9%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 31 (100.0%); nilable 0 (0.0%) within row
-- review action: void from runtime_void: total 26 (0.8%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 26 (100.0%); nilable 0 (0.0%) within row
-- manual review: total 19 (0.6%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 19 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(T::Boolean) from review: total 11 (0.3%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 11 (100.0%); nilable 0 (0.0%) within row
-- review action: Type from review: total 11 (0.3%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 11 (100.0%); nilable 0 (0.0%) within row
+- needs collection/field evidence: total 30 (0.9%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 30 (100.0%); nilable 0 (0.0%) within row
+- review action: void from runtime_void: total 27 (0.8%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 27 (100.0%); nilable 0 (0.0%) within row
+- manual review: total 18 (0.5%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 18 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: T.nilable(T::Boolean): total 10 (0.3%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 10 (100.0%); nilable 0 (0.0%) within row
+- review action: Type from review: total 9 (0.3%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 9 (100.0%); nilable 0 (0.0%) within row
 - review action: Array from review: total 8 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 8 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(FunctionSignature) from review: total 7 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 7 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Boolean from review: total 7 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 7 (100.0%); nilable 0 (0.0%) within row
+- review action: Integer from review: total 6 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 6 (100.0%); nilable 0 (0.0%) within row
 - review action: String from review: total 6 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 6 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(FunctionSignature) from review: total 6 (0.2%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 6 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: void: total 5 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 5 (100.0%); nilable 0 (0.0%) within row
-- review action: Integer from review: total 5 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 5 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(Symbol, Type) from review: total 5 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 5 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(String) from review: total 4 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 4 (100.0%); nilable 0 (0.0%) within row
 - addressed: noreturn: total 3 (0.1%) of all returns; strong 3 (100.0%); weak 0 (0.0%); untyped 0 (0.0%); nilable 0 (0.0%) within row
 - review action: T.any(Array, MIR::Let) from review: total 3 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 3 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::BlockExpr, MIR::StructInit) from review: total 3 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 3 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(Array) from review: total 3 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 3 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: MIR::WhileStmt: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: String: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: T.nilable(MIR::FsmLoweringResult): total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - auto-fixable: T.nilable(String): total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- review action: FunctionSignature from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: Hash from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::IfBind, AST::IfStatement) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(Array, MIR::ReturnStmt) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
@@ -945,28 +904,22 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: T.any(MIR::BlockExpr, MIR::IfStmt, MIR::ScopeBlock) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::ForStmt, MIR::ScopeBlock, MIR::WhileStmt) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::IndexGet, MIR::InlineBc, MIR::InlineZig) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(String) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(Symbol) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(SymbolEntry) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Array, Hash)) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Array, Hash, Set)) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(FsmTransform::Segments::IoSuspend, FsmTransform::Segments::NextSuspend)) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(T.any(String, Symbol)) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(Type) from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Array[`T.untyped`] from static_return_origin: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Array[T::Hash[Symbol, `T.untyped`]] from review: total 2 (0.1%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 2 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: AST::Identifier: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: FunctionSignature: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: MIR::ForStmt: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: MIR::IfBindStmt: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: T.any(MIR::InlineBc, MIR::InlineZig): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: T.nilable(IntrinsicEmit): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: T.nilable(Type): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- auto-fixable: Type: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: String: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: T.nilable(FunctionSignature): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: T.nilable(SymbolEntry): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: T.nilable(T.any(LSP::Analyzer::Result, String)): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- auto-fixable: T.nilable(T.any(String, Symbol)): total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - missing action: no singular static/RBI candidate: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: FunctionReturn from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: IntrinsicEmit from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: Lexer::Token from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: MIR::BlockExpr from static_return_origin: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: MIR::CapWrap from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: MIR::DeepCopy from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: MIR::ExprStmt from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
@@ -974,6 +927,7 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: MIR::HeapCreate from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: MIR::TryCatch from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: Module from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: Symbol from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::BatchWindowOp, AST::WindowOp) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::BgBlock, AST::BgStreamBlock) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::BinaryOp, AST::GetField, AST::Identifier) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
@@ -986,22 +940,23 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: T.any(AST::ForEach, AST::ForRange, AST::WhileLoop) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::GetField, AST::Identifier, AST::Literal) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(AST::WhileBindLoop, AST::WhileLoop) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: T.any(Array, MIR::FnDef) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(Array, MIR::FnDef, MIR::UnionTypeDef) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(FalseClass, Lexer::Token, TrueClass) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(IO, StringIO) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(Lexer::Token, Symbol, TrueClass) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::BinOp, MIR::FieldGet, MIR::Ident) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::BlockExpr, MIR::CapWrap, MIR::ContainerInit) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.any(MIR::BlockExpr, MIR::Ident) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::BlockExpr, MIR::InlineZig, MIR::MethodCall) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::BlockExpr, MIR::ScopeBlock) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.any(MIR::BlockExpr, String) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::Call, MIR::InlineZig) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::Call, MIR::Lit) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::CapWrap, MIR::RcRetain, MIR::SharePromote) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::Cast, MIR::Ident) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::Cast, MIR::Lit) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::DeepCopy, MIR::Ident) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: T.any(MIR::DupeSlice, MIR::TryExpr) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.any(MIR::DupeSlice, MIR::TryCatch, MIR::TryExpr) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::ExprStmt, MIR::ScopeBlock) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::FnDef, MIR::StructDef) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.any(MIR::FnRef, MIR::Ident, MIR::MethodCall) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
@@ -1018,9 +973,9 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: T.any(MIR::SnapshotMultiTxn, MIR::SnapshotTransaction) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(AST::Identifier) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(FunctionContext) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(Integer) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(MIR::SuspendDescriptor) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(Set) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(SymbolEntry) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(AST::Assignment, AST::BindExpr)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Array, CapabilityHelper::CaptureAnalysis)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Array, Module, Set)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
@@ -1030,17 +985,17 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: T.nilable(T.any(FunctionSignature, Symbol)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(IO, StringIO, Thread)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Integer, Symbol, Type)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(T.any(LSP::Analyzer::Result, String)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(LSP::Analyzer::SyntheticFinding, StubFinding)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(MIR::BlockExpr, MIR::Call, MIR::Ident)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: T.nilable(T.any(MIR::BlockExpr, String)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Module, Symbol, Type)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Schemas::InlineStructVariant, Symbol)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Schemas::InlineStructVariant, Type)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(T.any(String, Symbol)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Symbol, SymbolEntry, Type)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T.nilable(T.any(Symbol, Type)) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(T::Boolean) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
+- review action: T.nilable(Type) from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: `T.noreturn` from noreturn_body: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- review action: `T.noreturn` from static_return_origin: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Array[Integer] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Array[String] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Array[T::Array[`T.untyped`]] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
@@ -1052,199 +1007,199 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - review action: T::Hash[Symbol, T::Hash[Symbol, T::Hash[Symbol, Integer]]] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Hash[Symbol, T::Hash[T.any(String, Symbol), `T.untyped`]] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
 - review action: T::Set[String] from review: total 1 (0.0%) of all returns; strong 0 (0.0%); weak 0 (0.0%); untyped 1 (100.0%); nilable 0 (0.0%) within row
-- Easily addressable/addressed returns: 3044 (99.3%)
+- Easily addressable/addressed returns: 3183 (99.5%)
 
 #### Top Return Hygiene Actions
 
-- src/annotator/helpers/intrinsic_registry.rb:187 `IntrinsicRegistry#convert_registry`: auto-fixable: void; no static callsites found; collection lookup
-- src/annotator/helpers/pipe_analysis.rb:1283 `PipeAnalysis#walk_for_sharded_getindex`: auto-fixable: void; no static callsites found; implicit/direct forwarded return
-- src/ast/type.rb:634 `Type#location`: auto-fixable: void; no static callsites found; struct/class field or instance variable
-- src/mir/hoist.rb:452 `MIRHoistLowering#descend`: auto-fixable: void; no static callsites found; implicit/direct forwarded return
-- src/mir/hoist.rb:464 `MIRHoistLowering#hoist_lazy_alloc_result`: auto-fixable: void; no static callsites found; mixed sources
-- src/annotator/annotator.rb:3095 `SemanticAnnotator#chain_root_name`: auto-fixable: T.nilable(String); used as value; mixed sources
-- src/annotator/annotator.rb:6216 `SemanticAnnotator#root_variable_name`: auto-fixable: T.nilable(String); used as value; mixed sources
-- src/annotator/helpers/intrinsic_registry.rb:36 `IntrinsicRegistry#build_emit`: auto-fixable: T.nilable(IntrinsicEmit); used as value; literal/static
-- src/annotator/helpers/intrinsic_registry.rb:81 `IntrinsicRegistry#to_return_type`: auto-fixable: Type; used as value; literal/static
-- src/annotator/helpers/intrinsic_registry.rb:129 `IntrinsicRegistry#convert_entry`: auto-fixable: FunctionSignature; used as value; literal/static
-- src/backends/pipeline_host.rb:3818 `PipelineHost#lower_shard_concurrent_each`: auto-fixable: MIR::ForStmt; used as value; literal/static
-- src/mir/fsm_lowering.rb:376 `FsmLowering#emit_step_stmts`: auto-fixable: String; used as value; implicit/direct forwarded return
-- src/mir/fsm_transform.rb:58 `FsmTransform#transform`: auto-fixable: T.nilable(MIR::FsmLoweringResult); used as value; mixed sources
-- src/mir/fsm_transform/emit.rb:100 `FsmTransform::Emit#build_fsm_unified`: auto-fixable: T.nilable(MIR::FsmLoweringResult); used as value; literal/static
-- src/mir/fsm_transform/segments.rb:59 `FsmTransform::Segments#result_type`: auto-fixable: T.nilable(Type); ambiguous method name; mixed sources
-- src/mir/hoist.rb:294 `Hoist#make_temp!`: auto-fixable: AST::Identifier; used as value; literal/static
-- src/mir/lowering/control_flow.rb:142 `MIRLoweringControlFlow#lower_if_bind`: auto-fixable: MIR::IfBindStmt; used as value; literal/static
-- src/mir/lowering/control_flow.rb:213 `MIRLoweringControlFlow#lower_while`: auto-fixable: MIR::WhileStmt; used as value; literal/static
-- src/mir/lowering/control_flow.rb:235 `MIRLoweringControlFlow#lower_while_bind`: auto-fixable: MIR::WhileStmt; used as value; literal/static
-- src/mir/lowering/expressions.rb:1075 `MIRLoweringExpressions#lower_builtin_index_get`: auto-fixable: T.any(MIR::InlineBc, MIR::InlineZig); used as value; collection lookup
+- src/ast/ast.rb:710 `AST::Locatable#zig_pattern=`: auto-fixable: T.nilable(T.any(String, Symbol)); unused statement-only; literal/static
+- src/ast/ast.rb:722 `AST::Locatable#matched_signature`: auto-fixable: T.nilable(FunctionSignature); used as value; literal/static
+- src/ast/ast.rb:732 `AST::Locatable#mutates_receiver`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:737 `AST::Locatable#was_moved`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:742 `AST::Locatable#container_borrow`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:744 `AST::Locatable#container_borrow=`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:747 `AST::Locatable#needs_mut_ref`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:752 `AST::Locatable#needs_heap_create`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:767 `AST::Locatable#resource_close_zig`: auto-fixable: T.nilable(String); ambiguous method name; literal/static
+- src/ast/ast.rb:769 `AST::Locatable#resource_close_zig=`: auto-fixable: T.nilable(String); unused statement-only; literal/static
+- src/ast/ast.rb:772 `AST::Locatable#can_fail`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:787 `AST::Locatable#var_used`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:789 `AST::Locatable#var_used=`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:792 `AST::Locatable#var_mutated`: auto-fixable: T.nilable(T::Boolean); used as value; literal/static
+- src/ast/ast.rb:799 `AST::Locatable#symbol=`: auto-fixable: T.nilable(SymbolEntry); ambiguous method name; literal/static
+- src/lsp/document_store.rb:27 `LSP::DocumentStore#cached_findings`: auto-fixable: T.nilable(T.any(LSP::Analyzer::Result, String)); used as value; literal/static
+- src/tools/pprof.rb:183 `Pprof::Profile#encode`: auto-fixable: String; used as value; literal/static
+- src/annotator/annotator.rb:445 `SemanticAnnotator#visit`: cascade: forwarded return; ambiguous method name; mixed/direct forwarded return
+- src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`: cascade: forwarded return; used as value; mixed/direct forwarded return
+- src/ast/parser.rb:499 `Parser#run_action`: cascade: forwarded return; used as value; explicit/direct forwarded return
 
 
-## Review Actions (3036)
+## Review Actions (3074)
 
-### Nil Source Fixes (274)
-- src/backends/pipeline_generator.rb:28: affects 6 of 274 nil source fixes; source calls 720
-  - src/backends/pipeline_generator.rb:28 acc; top source src/backends/pipeline_generator.rb:28; source calls 120
-  - src/backends/pipeline_generator.rb:28 shard_hash; top source src/backends/pipeline_generator.rb:28; source calls 120
-  - src/backends/pipeline_generator.rb:28 shard_idx; top source src/backends/pipeline_generator.rb:28; source calls 120
-  - src/backends/pipeline_generator.rb:28 shard_key; top source src/backends/pipeline_generator.rb:28; source calls 120
-  - src/backends/pipeline_generator.rb:28 shard_map; top source src/backends/pipeline_generator.rb:28; source calls 120
-  - src/backends/pipeline_generator.rb:28 soa; top source src/backends/pipeline_generator.rb:28; source calls 120
-- src/tools/doctor.rb:33: affects 5 of 274 nil source fixes; source calls 135
-  - src/tools/doctor.rb:33 focus; candidate Regexp; top source src/tools/doctor.rb:33; source calls 36
-  - src/tools/doctor.rb:33 ignore; candidate Regexp; top source src/tools/doctor.rb:33; source calls 35
-  - src/tools/doctor.rb:33 peek; candidate Regexp; top source src/tools/doctor.rb:33; source calls 33
-  - src/tools/doctor.rb:33 diff; candidate String; auto-default ""; top source src/tools/doctor.rb:33; source calls 30
-  - src/tools/doctor.rb:33 profile_dir; candidate String; auto-default ""; top source src/tools/doctor.rb:33; source calls 1
-- src/mir/mir.rb:531: affects 4 of 274 nil source fixes; source calls 22448
-  - src/mir/mir.rb:531 key_alloc; top source src/mir/mir.rb:531; source calls 6653
-  - src/mir/mir.rb:531 shard_alloc; top source src/mir/mir.rb:531; source calls 6653
-  - src/mir/mir.rb:531 val_alloc; candidate Symbol; top source src/mir/mir.rb:531; source calls 6222
-  - src/mir/mir.rb:531 alloc; candidate Symbol; top source src/mir/mir.rb:531; source calls 2920
-- src/mir/mir.rb:3448: affects 4 of 274 nil source fixes; source calls 2514
-  - src/mir/mir.rb:3448 shard_idx; candidate MIR::Ident; top source src/mir/mir.rb:3448; source calls 641
-  - src/mir/mir.rb:3448 shard_key; candidate MIR::Ident; top source src/mir/mir.rb:3448; source calls 641
-  - src/mir/mir.rb:3448 key_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3448; source calls 616
-  - src/mir/mir.rb:3448 val_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3448; source calls 616
-- src/mir/mir.rb:3464: affects 4 of 274 nil source fixes; source calls 1530
-  - src/mir/mir.rb:3464 shard_idx; top source src/mir/mir.rb:3464; source calls 395
-  - src/mir/mir.rb:3464 shard_key; top source src/mir/mir.rb:3464; source calls 395
-  - src/mir/mir.rb:3464 key_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3464; source calls 370
-  - src/mir/mir.rb:3464 val_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3464; source calls 370
-- src/ast/schemas.rb:52: affects 3 of 274 nil source fixes; source calls 56927
-  - src/ast/schemas.rb:52 type_params; top source src/ast/schemas.rb:52; source calls 18981
-  - src/ast/schemas.rb:52 as_type; candidate String; auto-default ""; top source src/ast/schemas.rb:52; source calls 18974
-  - src/ast/schemas.rb:52 extern_module; candidate String; auto-default ""; top source src/ast/schemas.rb:52; source calls 18972
-- src/annotator/helpers/function_signature.rb:120: affects 3 of 274 nil source fixes; source calls 7678
-  - src/annotator/helpers/function_signature.rb:120 return_alloc; top source src/annotator/helpers/function_signature.rb:120; source calls 3265
-  - src/annotator/helpers/function_signature.rb:120 can_fail; candidate T::Boolean; top source src/annotator/helpers/function_signature.rb:120; source calls 3017
-  - src/annotator/helpers/function_signature.rb:120 borrows; candidate T.any(Array, Symbol); top source src/annotator/helpers/function_signature.rb:120; source calls 1396
-- src/annotator/helpers/auto_inference.rb:25: affects 3 of 274 nil source fixes; source calls 446
-  - src/annotator/helpers/auto_inference.rb:25 index; candidate Integer; top source src/annotator/helpers/auto_inference.rb:25; source calls 179
-  - src/annotator/helpers/auto_inference.rb:25 decl_id; candidate Integer; top source src/annotator/helpers/auto_inference.rb:25; source calls 155
-  - src/annotator/helpers/auto_inference.rb:25 fn_name; candidate String; auto-default ""; top source src/annotator/helpers/auto_inference.rb:25; source calls 112
-- src/tools/doctor.rb:1203: affects 3 of 274 nil source fixes; source calls 65
-  - src/tools/doctor.rb:1203 llc_miss_rate; top source src/tools/doctor.rb:1203; source calls 24
-  - src/tools/doctor.rb:1203 resolved; top source src/tools/doctor.rb:1203; source calls 24
-  - src/tools/doctor.rb:1203 sites; candidate Array; auto-default []; top source src/tools/doctor.rb:1203; source calls 17
-- src/annotator/helpers/auto_inference.rb:432: affects 3 of 274 nil source fixes; source calls 29
-  - src/annotator/helpers/auto_inference.rb:432 key; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 11
-  - src/annotator/helpers/auto_inference.rb:432 value; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 11
-  - src/annotator/helpers/auto_inference.rb:432 list; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 7
-- src/annotator/helpers/function_signature.rb:164: affects 2 of 274 nil source fixes; source calls 160036
-  - src/annotator/helpers/function_signature.rb:164 owner_type_params; candidate Array; auto-default []; top source src/annotator/helpers/function_signature.rb:164; source calls 122572
-  - src/annotator/helpers/function_signature.rb:164 return_lifetime; candidate T.any(Array, String, Symbol); top source src/annotator/helpers/function_signature.rb:164; source calls 37464
-- src/mir/mir.rb:3274: affects 2 of 274 nil source fixes; source calls 32689
-  - src/mir/mir.rb:3274 allocs; candidate T.any(Hash, MIR::InlineAllocMetadata); top source src/mir/mir.rb:3274; source calls 16415
-  - src/mir/mir.rb:3274 stdlib_def; top source src/mir/mir.rb:3274; source calls 16274
-- src/mir/mir_lowering.rb:880: affects 2 of 274 nil source fixes; source calls 24776
-  - src/mir/mir_lowering.rb:880 col; candidate Integer; top source src/mir/mir_lowering.rb:880; source calls 12388
-  - src/mir/mir_lowering.rb:880 line; candidate Integer; top source src/mir/mir_lowering.rb:880; source calls 12388
-- src/mir/control_flow.rb:123: affects 2 of 274 nil source fixes; source calls 24638
-  - src/mir/control_flow.rb:123 break_target; candidate BasicBlock; top source src/mir/control_flow.rb:123; source calls 12319
-  - src/mir/control_flow.rb:123 continue_target; candidate BasicBlock; top source src/mir/control_flow.rb:123; source calls 12319
-- src/mir/mir.rb:2626: affects 2 of 274 nil source fixes; source calls 4808
-  - src/mir/mir.rb:2626 owned_result_alloc; candidate Symbol; top source src/mir/mir.rb:2626; source calls 4719
+### Nil Source Fixes (282)
+- src/backends/pipeline_generator.rb:28: affects 5 of 282 nil source fixes; source calls 3422
+  - src/backends/pipeline_generator.rb:28 shard_hash; top source src/backends/pipeline_generator.rb:28; source calls 690
+  - src/backends/pipeline_generator.rb:28 shard_idx; top source src/backends/pipeline_generator.rb:28; source calls 690
+  - src/backends/pipeline_generator.rb:28 shard_key; top source src/backends/pipeline_generator.rb:28; source calls 690
+  - src/backends/pipeline_generator.rb:28 shard_map; top source src/backends/pipeline_generator.rb:28; source calls 690
+  - src/backends/pipeline_generator.rb:28 acc; candidate String; auto-default ""; top source src/backends/pipeline_generator.rb:28; source calls 662
+- src/mir/mir.rb:531: affects 4 of 282 nil source fixes; source calls 22611
+  - src/mir/mir.rb:531 key_alloc; top source src/mir/mir.rb:531; source calls 6700
+  - src/mir/mir.rb:531 shard_alloc; top source src/mir/mir.rb:531; source calls 6700
+  - src/mir/mir.rb:531 val_alloc; candidate Symbol; top source src/mir/mir.rb:531; source calls 6269
+  - src/mir/mir.rb:531 alloc; candidate Symbol; top source src/mir/mir.rb:531; source calls 2942
+- src/mir/mir.rb:3448: affects 4 of 282 nil source fixes; source calls 2466
+  - src/mir/mir.rb:3448 shard_idx; candidate MIR::Ident; top source src/mir/mir.rb:3448; source calls 629
+  - src/mir/mir.rb:3448 shard_key; candidate MIR::Ident; top source src/mir/mir.rb:3448; source calls 629
+  - src/mir/mir.rb:3448 key_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3448; source calls 604
+  - src/mir/mir.rb:3448 val_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3448; source calls 604
+- src/mir/mir.rb:3464: affects 4 of 282 nil source fixes; source calls 1504
+  - src/mir/mir.rb:3464 shard_idx; top source src/mir/mir.rb:3464; source calls 389
+  - src/mir/mir.rb:3464 shard_key; top source src/mir/mir.rb:3464; source calls 389
+  - src/mir/mir.rb:3464 key_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3464; source calls 363
+  - src/mir/mir.rb:3464 val_zig; candidate String; auto-default ""; top source src/mir/mir.rb:3464; source calls 363
+- src/ast/schemas.rb:52: affects 3 of 282 nil source fixes; source calls 57809
+  - src/ast/schemas.rb:52 type_params; top source src/ast/schemas.rb:52; source calls 19275
+  - src/ast/schemas.rb:52 as_type; candidate String; auto-default ""; top source src/ast/schemas.rb:52; source calls 19268
+  - src/ast/schemas.rb:52 extern_module; candidate String; auto-default ""; top source src/ast/schemas.rb:52; source calls 19266
+- src/annotator/helpers/function_signature.rb:120: affects 3 of 282 nil source fixes; source calls 7688
+  - src/annotator/helpers/function_signature.rb:120 return_alloc; top source src/annotator/helpers/function_signature.rb:120; source calls 3269
+  - src/annotator/helpers/function_signature.rb:120 can_fail; candidate T::Boolean; top source src/annotator/helpers/function_signature.rb:120; source calls 3021
+  - src/annotator/helpers/function_signature.rb:120 borrows; candidate T.any(Array, Symbol); top source src/annotator/helpers/function_signature.rb:120; source calls 1398
+- src/annotator/helpers/auto_inference.rb:25: affects 3 of 282 nil source fixes; source calls 492
+  - src/annotator/helpers/auto_inference.rb:25 index; candidate Integer; top source src/annotator/helpers/auto_inference.rb:25; source calls 200
+  - src/annotator/helpers/auto_inference.rb:25 decl_id; candidate Integer; top source src/annotator/helpers/auto_inference.rb:25; source calls 163
+  - src/annotator/helpers/auto_inference.rb:25 fn_name; candidate String; auto-default ""; top source src/annotator/helpers/auto_inference.rb:25; source calls 129
+- src/tools/doctor.rb:1217: affects 3 of 282 nil source fixes; source calls 65
+  - src/tools/doctor.rb:1217 llc_miss_rate; top source src/tools/doctor.rb:1217; source calls 24
+  - src/tools/doctor.rb:1217 resolved; top source src/tools/doctor.rb:1217; source calls 24
+  - src/tools/doctor.rb:1217 sites; candidate Array; auto-default []; top source src/tools/doctor.rb:1217; source calls 17
+- src/annotator/helpers/auto_inference.rb:432: affects 3 of 282 nil source fixes; source calls 37
+  - src/annotator/helpers/auto_inference.rb:432 key; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 13
+  - src/annotator/helpers/auto_inference.rb:432 value; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 13
+  - src/annotator/helpers/auto_inference.rb:432 list; candidate AutoConstraintCollector::Slot; top source src/annotator/helpers/auto_inference.rb:432; source calls 11
+- src/ast/symbol_entry.rb:312: affects 2 of 282 nil source fixes; source calls 531816
+  - src/ast/symbol_entry.rb:312 reg; top source src/ast/symbol_entry.rb:312; source calls 531812
+  - src/ast/symbol_entry.rb:312 mutable; candidate T.any(FalseClass, Lexer::Token, TrueClass); top source src/ast/symbol_entry.rb:312; source calls 4
+- src/ast/scope.rb:25: affects 2 of 282 nil source fixes; source calls 531773
+  - src/ast/scope.rb:25 reg; top source src/ast/scope.rb:25; source calls 531769
+  - src/ast/scope.rb:25 is_mutable; candidate T.any(FalseClass, Lexer::Token, TrueClass); top source src/ast/scope.rb:25; source calls 4
+- src/annotator/helpers/function_signature.rb:164: affects 2 of 282 nil source fixes; source calls 161471
+  - src/annotator/helpers/function_signature.rb:164 owner_type_params; candidate Array; auto-default []; top source src/annotator/helpers/function_signature.rb:164; source calls 122787
+  - src/annotator/helpers/function_signature.rb:164 return_lifetime; candidate T.any(Array, String, Symbol); top source src/annotator/helpers/function_signature.rb:164; source calls 38684
+- src/mir/mir.rb:3274: affects 2 of 282 nil source fixes; source calls 32835
+  - src/mir/mir.rb:3274 allocs; candidate T.any(Hash, MIR::InlineAllocMetadata); top source src/mir/mir.rb:3274; source calls 16489
+  - src/mir/mir.rb:3274 stdlib_def; top source src/mir/mir.rb:3274; source calls 16346
+- src/mir/control_flow.rb:123: affects 2 of 282 nil source fixes; source calls 24696
+  - src/mir/control_flow.rb:123 break_target; candidate BasicBlock; top source src/mir/control_flow.rb:123; source calls 12348
+  - src/mir/control_flow.rb:123 continue_target; candidate BasicBlock; top source src/mir/control_flow.rb:123; source calls 12348
+- src/mir/mir_lowering.rb:940: affects 2 of 282 nil source fixes; source calls 24586
+  - src/mir/mir_lowering.rb:940 col; candidate Integer; top source src/mir/mir_lowering.rb:940; source calls 12293
+  - src/mir/mir_lowering.rb:940 line; candidate Integer; top source src/mir/mir_lowering.rb:940; source calls 12293
+- src/mir/mir.rb:2626: affects 2 of 282 nil source fixes; source calls 4826
+  - src/mir/mir.rb:2626 owned_result_alloc; candidate Symbol; top source src/mir/mir.rb:2626; source calls 4737
   - src/mir/mir.rb:2626 callable_contract; candidate MIR::CallableContract; top source src/mir/mir.rb:2626; source calls 89
-- src/mir/mir_lowering.rb:2129: affects 2 of 274 nil source fixes; source calls 3721
-  - src/mir/mir_lowering.rb:2129 target_node; candidate T.any(AST::GetField, AST::Identifier); top source src/mir/mir_lowering.rb:2129; source calls 3719
-  - src/mir/mir_lowering.rb:2129 node; candidate T.any(AST::Assignment, AST::FuncCall, AST::MethodCall); top source src/mir/mir_lowering.rb:2129; source calls 2
-- src/mir/lowering/control_flow.rb:163: affects 2 of 274 nil source fixes; source calls 1977
+- src/mir/mir_lowering.rb:2194: affects 2 of 282 nil source fixes; source calls 3765
+  - src/mir/mir_lowering.rb:2194 target_node; candidate T.any(AST::GetField, AST::Identifier); top source src/mir/mir_lowering.rb:2194; source calls 3763
+  - src/mir/mir_lowering.rb:2194 node; candidate T.any(AST::Assignment, AST::FuncCall, AST::MethodCall); top source src/mir/mir_lowering.rb:2194; source calls 2
+- src/mir/lowering/control_flow.rb:163: affects 2 of 282 nil source fixes; source calls 1986
   - src/mir/lowering/control_flow.rb:163 tight; candidate T::Boolean; top source src/mir/lowering/control_flow.rb:163; source calls 1008
-  - src/mir/lowering/control_flow.rb:163 mark_per_iter; candidate T::Boolean; top source src/mir/lowering/control_flow.rb:163; source calls 969
-- src/mir/mir_lowering.rb:2997: affects 2 of 274 nil source fixes; source calls 815
-  - src/mir/mir_lowering.rb:2997 sink_type; candidate Type; top source src/mir/mir_lowering.rb:2997; source calls 814
-  - src/mir/mir_lowering.rb:2997 ast_node; top source src/mir/mir_lowering.rb:2997; source calls 1
-- src/lsp/hover.rb:91: affects 2 of 274 nil source fixes; source calls 11
-  - src/lsp/hover.rb:91 entry; candidate Hash; auto-default {}; top source src/lsp/hover.rb:91; source calls 6
-  - src/lsp/hover.rb:91 example; candidate Hash; auto-default {}; top source src/lsp/hover.rb:91; source calls 5
-- src/mir/lowering/functions.rb:1245: affects 2 of 274 nil source fixes; source calls 4
-  - src/mir/lowering/functions.rb:1245 callee_param; candidate AST::Param; top source src/mir/lowering/functions.rb:1245; source calls 2
-  - src/mir/lowering/functions.rb:1245 callee_sig; candidate FunctionSignature; top source src/mir/lowering/functions.rb:1245; source calls 2
-- ... 215 more source group(s)
+  - src/mir/lowering/control_flow.rb:163 mark_per_iter; candidate T::Boolean; top source src/mir/lowering/control_flow.rb:163; source calls 978
+- src/mir/mir_lowering.rb:3117: affects 2 of 282 nil source fixes; source calls 805
+  - src/mir/mir_lowering.rb:3117 sink_type; candidate Type; top source src/mir/mir_lowering.rb:3117; source calls 804
+  - src/mir/mir_lowering.rb:3117 ast_node; top source src/mir/mir_lowering.rb:3117; source calls 1
+- src/mir/mir_lowering.rb:3025: affects 2 of 282 nil source fixes; source calls 425
+  - src/mir/mir_lowering.rb:3025 ast_node; candidate T.any(AST::BinaryOp, AST::FuncCall, AST::GetIndex); top source src/mir/mir_lowering.rb:3025; source calls 273
+  - src/mir/mir_lowering.rb:3025 type_info; candidate Type; top source src/mir/mir_lowering.rb:3025; source calls 152
+- ... 225 more source group(s)
 
-### Union / `T.any` Candidates (809)
-- src/mir/hoist.rb:552: affects 4 of 809 union candidates; source calls 93049
-  - src/mir/hoist.rb:552 mutable; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 36797
-  - src/mir/hoist.rb:552 transfer_on_success; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 33179
-  - src/mir/hoist.rb:552 err_cleanup; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 23072
+### Union / `T.any` Candidates (830)
+- src/mir/hoist.rb:552: affects 4 of 830 union candidates; source calls 93383
+  - src/mir/hoist.rb:552 mutable; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 36908
+  - src/mir/hoist.rb:552 transfer_on_success; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 33269
+  - src/mir/hoist.rb:552 err_cleanup; observed FalseClass, TrueClass; src/mir/hoist.rb:552; source calls 23205
   - src/mir/hoist.rb:552 expr; observed MIR::ArrayInit, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::CapWrap, MIR::Cast, MIR::ConcatStr, ...; src/mir/hoist.rb:552; source calls 1
-- src/ast/symbol_entry.rb:312: affects 3 of 809 union candidates; source calls 1045458
-  - src/ast/symbol_entry.rb:312 mutable; observed FalseClass, Lexer::Token, TrueClass; src/ast/symbol_entry.rb:312; source calls 539420
-  - src/ast/symbol_entry.rb:312 type; observed FunctionSignature, String, Symbol, Type; src/ast/symbol_entry.rb:312; source calls 505980
-  - src/ast/symbol_entry.rb:312 reg; observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, String, Symbol; src/ast/symbol_entry.rb:312; source calls 58
-- src/mir/thunk_transform/emit.rb:266: affects 3 of 809 union candidates; source calls 29
+- src/ast/symbol_entry.rb:312: affects 3 of 830 union candidates; source calls 1061841
+  - src/ast/symbol_entry.rb:312 mutable; observed FalseClass, Lexer::Token, TrueClass; src/ast/symbol_entry.rb:312; source calls 547703
+  - src/ast/symbol_entry.rb:312 type; observed FunctionSignature, String, Symbol, Type; src/ast/symbol_entry.rb:312; source calls 514031
+  - src/ast/symbol_entry.rb:312 reg; observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct, String, Symbol; src/ast/symbol_entry.rb:312; source calls 107
+- src/ast/scope.rb:25: affects 3 of 830 union candidates; source calls 1059387
+  - src/ast/scope.rb:25 is_mutable; observed FalseClass, Lexer::Token, TrueClass; src/ast/scope.rb:25; source calls 545451
+  - src/ast/scope.rb:25 type; observed FunctionSignature, String, Symbol, Type; src/ast/scope.rb:25; source calls 513935
+  - src/ast/scope.rb:25 reg; observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct; src/ast/scope.rb:25; source calls 1
+- src/mir/thunk_transform/emit.rb:266: affects 3 of 830 union candidates; source calls 29
   - src/mir/thunk_transform/emit.rb:266 lowering; observed FakeThunkLowering, MIRLowering; src/mir/thunk_transform/emit.rb:266; source calls 21
   - src/mir/thunk_transform/emit.rb:266 _mtp; observed OpenStruct, ThunkTransform::RecursiveSplitter::MutualThunkPlan; src/mir/thunk_transform/emit.rb:266; source calls 4
   - src/mir/thunk_transform/emit.rb:266 cf; observed AST::FunctionDef, OpenStruct; src/mir/thunk_transform/emit.rb:266; source calls 4
-- src/mir/hoist.rb:967: affects 3 of 809 union candidates; source calls 0
+- src/mir/hoist.rb:967: affects 3 of 830 union candidates; source calls 0
   - src/mir/hoist.rb:967 new_child; observed MIR::AddressOf, MIR::AllocatorRef, MIR::ArrayInit, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::Cast, MIR::DeepCopy, ...; no source callsite
   - src/mir/hoist.rb:967 old_child; observed MIR::AddressOf, MIR::AllocatorRef, MIR::ArrayInit, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::Cast, MIR::ConcatStr, ...; no source callsite
   - src/mir/hoist.rb:967 parent; observed MIR::AddressOf, MIR::ArrayInit, MIR::AssertStmt, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::CapWrap, ...; no source callsite
-- src/mir/lowering/variables.rb:1022: affects 3 of 809 union candidates; source calls 0
-  - src/mir/lowering/variables.rb:1022 idx; observed MIR::FieldGet, MIR::Ident, MIR::Lit; no source callsite
-  - src/mir/lowering/variables.rb:1022 target; observed MIR::Ident, MIR::IndexGet; no source callsite
-  - src/mir/lowering/variables.rb:1022 target_node; observed AST::GetIndex, AST::Identifier; no source callsite
-- src/mir/lowering/variables.rb:962: affects 3 of 809 union candidates; source calls 0
-  - src/mir/lowering/variables.rb:962 idx; observed MIR::Call, MIR::ConcatStr, MIR::DeepCopy, MIR::Ident, MIR::InlineZig, MIR::Lit; no source callsite
-  - src/mir/lowering/variables.rb:962 target; observed MIR::FieldGet, MIR::Ident; no source callsite
-  - src/mir/lowering/variables.rb:962 target_node; observed AST::GetField, AST::Identifier; no source callsite
-- src/mir/mir.rb:3448: affects 3 of 809 union candidates; source calls 0
+- src/mir/lowering/variables.rb:1030: affects 3 of 830 union candidates; source calls 0
+  - src/mir/lowering/variables.rb:1030 idx; observed MIR::FieldGet, MIR::Ident, MIR::Lit; no source callsite
+  - src/mir/lowering/variables.rb:1030 target; observed MIR::Ident, MIR::IndexGet; no source callsite
+  - src/mir/lowering/variables.rb:1030 target_node; observed AST::GetIndex, AST::Identifier; no source callsite
+- src/mir/lowering/variables.rb:970: affects 3 of 830 union candidates; source calls 0
+  - src/mir/lowering/variables.rb:970 idx; observed MIR::Call, MIR::ConcatStr, MIR::DeepCopy, MIR::Ident, MIR::InlineZig, MIR::Lit; no source callsite
+  - src/mir/lowering/variables.rb:970 target; observed MIR::FieldGet, MIR::Ident; no source callsite
+  - src/mir/lowering/variables.rb:970 target_node; observed AST::GetField, AST::Identifier; no source callsite
+- src/mir/mir.rb:3448: affects 3 of 830 union candidates; source calls 0
   - src/mir/mir.rb:3448 key; observed MIR::Ident, MIR::InlineZig, MIR::Lit; no source callsite
   - src/mir/mir.rb:3448 target; observed MIR::Deref, MIR::FieldGet, MIR::Ident; no source callsite
   - src/mir/mir.rb:3448 value; observed MIR::BinOp, MIR::Cast, MIR::FieldGet, MIR::Ident, MIR::InlineZig, MIR::Lit, MIR::StructInit; no source callsite
-- src/mir/mir_lowering.rb:1611: affects 3 of 809 union candidates; source calls 0
-  - src/mir/mir_lowering.rb:1611 ast_value; observed AST::BinaryOp, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier, AST::ListLit, AST::Literal, ...; no source callsite
-  - src/mir/mir_lowering.rb:1611 node; observed MIR::HeapCreate, MIR::Let, MIR::ReassignWithCleanup, MIR::Set, MIR::ShardedMapPut; no source callsite
-  - src/mir/mir_lowering.rb:1611 value_mir; observed MIR::ArrayInit, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::Cast, MIR::DeepCopy, MIR::DupeSlice, MIR::FieldGet, ...; no source callsite
-- src/mir/mir_lowering.rb:2866: affects 3 of 809 union candidates; source calls 0
-  - src/mir/mir_lowering.rb:2866 ast_node; observed AST::GetField, AST::GetIndex, AST::Identifier; no source callsite
-  - src/mir/mir_lowering.rb:2866 index; observed MIR::FieldGet, MIR::Ident, MIR::InlineZig, MIR::Lit; no source callsite
-  - src/mir/mir_lowering.rb:2866 target; observed MIR::FieldGet, MIR::Ident, MIR::InlineZig; no source callsite
-- src/mir/mir_lowering.rb:2914: affects 3 of 809 union candidates; source calls 0
-  - src/mir/mir_lowering.rb:2914 catch_body; observed MIR::BlockExpr, MIR::Ident, MIR::Lit, MIR::ScopeBlock, MIR::UnaryOp; no source callsite
-  - src/mir/mir_lowering.rb:2914 fallback; observed MIR::BlockExpr, MIR::Lit, MIR::UnaryOp; no source callsite
-  - src/mir/mir_lowering.rb:2914 left; observed MIR::Call, MIR::Ident, MIR::InlineZig; no source callsite
-- src/ast/scope.rb:25: affects 2 of 809 union candidates; source calls 1043115
-  - src/ast/scope.rb:25 is_mutable; observed FalseClass, Lexer::Token, TrueClass; src/ast/scope.rb:25; source calls 537214
-  - src/ast/scope.rb:25 type; observed FunctionSignature, String, Symbol, Type; src/ast/scope.rb:25; source calls 505901
-- src/tools/lint_fix_rewriter.rb:62: affects 2 of 809 union candidates; source calls 681484
-  - src/tools/lint_fix_rewriter.rb:62 in_bg; observed FalseClass, TrueClass; src/tools/lint_fix_rewriter.rb:62; source calls 526308
-  - src/tools/lint_fix_rewriter.rb:62 node; observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, AST::BatchWindowOp, AST::BenchmarkStmt, AST::BgBlock, ...; src/tools/lint_fix_rewriter.rb:62; source calls 155176
-- src/ast/type.rb:2499: affects 2 of 809 union candidates; source calls 93034
-  - src/ast/type.rb:2499 source_type; observed Symbol, Type; src/ast/type.rb:2499; source calls 52026
-  - src/ast/type.rb:2499 target_type; observed Symbol, Type; src/ast/type.rb:2499; source calls 41008
-- src/mir/lowering/variables.rb:57: affects 2 of 809 union candidates; source calls 23033
-  - src/mir/lowering/variables.rb:57 heap_return_binding_allocates; observed FalseClass, TrueClass; src/mir/lowering/variables.rb:57; source calls 11517
-  - src/mir/lowering/variables.rb:57 heap_return_var; observed FalseClass, TrueClass; src/mir/lowering/variables.rb:57; source calls 11516
-- src/annotator/helpers/function_analysis.rb:14: affects 2 of 809 union candidates; source calls 20461
-  - src/annotator/helpers/function_analysis.rb:14 body; observed AST::BinaryOp, AST::Identifier, AST::Literal, Array; src/annotator/helpers/function_analysis.rb:14; source calls 10268
-  - src/annotator/helpers/function_analysis.rb:14 declared_return; observed Symbol, Type; src/annotator/helpers/function_analysis.rb:14; source calls 10193
-- src/mir/lowering/expressions.rb:837: affects 2 of 809 union candidates; source calls 7795
-  - src/mir/lowering/expressions.rb:837 is_rc_unwrapped; observed FalseClass, TrueClass; src/mir/lowering/expressions.rb:837; source calls 4256
-  - src/mir/lowering/expressions.rb:837 is_locked_unwrapped; observed FalseClass, TrueClass; src/mir/lowering/expressions.rb:837; source calls 3539
-- src/mir/lowering/functions.rb:1204: affects 2 of 809 union candidates; source calls 4554
-  - src/mir/lowering/functions.rb:1204 owned_return; observed FalseClass, TrueClass; src/mir/lowering/functions.rb:1204; source calls 2412
-  - src/mir/lowering/functions.rb:1204 can_fail; observed FalseClass, TrueClass; src/mir/lowering/functions.rb:1204; source calls 2142
-- src/annotator/helpers/function_signature.rb:120: affects 2 of 809 union candidates; source calls 3714
-  - src/annotator/helpers/function_signature.rb:120 allocates; observed FalseClass, TrueClass; src/annotator/helpers/function_signature.rb:120; source calls 1869
-  - src/annotator/helpers/function_signature.rb:120 borrows; observed Array, Symbol; src/annotator/helpers/function_signature.rb:120; source calls 1845
-- src/mir/thunk_transform/recursive_splitter.rb:194: affects 2 of 809 union candidates; source calls 1955
+- src/mir/mir_lowering.rb:1676: affects 3 of 830 union candidates; source calls 0
+  - src/mir/mir_lowering.rb:1676 ast_value; observed AST::BinaryOp, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier, AST::ListLit, AST::Literal, ...; no source callsite
+  - src/mir/mir_lowering.rb:1676 node; observed MIR::HeapCreate, MIR::Let, MIR::ReassignWithCleanup, MIR::Set, MIR::ShardedMapPut; no source callsite
+  - src/mir/mir_lowering.rb:1676 value_mir; observed MIR::ArrayInit, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::Cast, MIR::DeepCopy, MIR::DupeSlice, MIR::FieldGet, ...; no source callsite
+- src/mir/mir_lowering.rb:2926: affects 3 of 830 union candidates; source calls 0
+  - src/mir/mir_lowering.rb:2926 ast_node; observed AST::GetField, AST::GetIndex, AST::Identifier; no source callsite
+  - src/mir/mir_lowering.rb:2926 index; observed MIR::FieldGet, MIR::Ident, MIR::InlineZig, MIR::Lit; no source callsite
+  - src/mir/mir_lowering.rb:2926 target; observed MIR::FieldGet, MIR::Ident, MIR::InlineZig; no source callsite
+- src/mir/mir_lowering.rb:2974: affects 3 of 830 union candidates; source calls 0
+  - src/mir/mir_lowering.rb:2974 catch_body; observed MIR::BlockExpr, MIR::Ident, MIR::Lit, MIR::ScopeBlock, MIR::UnaryOp; no source callsite
+  - src/mir/mir_lowering.rb:2974 fallback; observed MIR::BlockExpr, MIR::Lit, MIR::UnaryOp; no source callsite
+  - src/mir/mir_lowering.rb:2974 left; observed MIR::Call, MIR::Ident, MIR::InlineZig; no source callsite
+- src/tools/lint_fix_rewriter.rb:68: affects 2 of 830 union candidates; source calls 681484
+  - src/tools/lint_fix_rewriter.rb:68 in_bg; observed FalseClass, TrueClass; src/tools/lint_fix_rewriter.rb:68; source calls 526308
+  - src/tools/lint_fix_rewriter.rb:68 node; observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, AST::BatchWindowOp, AST::BenchmarkStmt, AST::BgBlock, ...; src/tools/lint_fix_rewriter.rb:68; source calls 155176
+- src/ast/type.rb:2499: affects 2 of 830 union candidates; source calls 101627
+  - src/ast/type.rb:2499 source_type; observed Symbol, Type; src/ast/type.rb:2499; source calls 56823
+  - src/ast/type.rb:2499 target_type; observed Symbol, Type; src/ast/type.rb:2499; source calls 44804
+- src/mir/lowering/variables.rb:57: affects 2 of 830 union candidates; source calls 23343
+  - src/mir/lowering/variables.rb:57 heap_return_binding_allocates; observed FalseClass, TrueClass; src/mir/lowering/variables.rb:57; source calls 11672
+  - src/mir/lowering/variables.rb:57 heap_return_var; observed FalseClass, TrueClass; src/mir/lowering/variables.rb:57; source calls 11671
+- src/annotator/helpers/function_analysis.rb:14: affects 2 of 830 union candidates; source calls 20611
+  - src/annotator/helpers/function_analysis.rb:14 body; observed AST::BinaryOp, AST::Identifier, AST::Literal, Array; src/annotator/helpers/function_analysis.rb:14; source calls 10343
+  - src/annotator/helpers/function_analysis.rb:14 declared_return; observed Symbol, Type; src/annotator/helpers/function_analysis.rb:14; source calls 10268
+- src/mir/lowering/expressions.rb:831: affects 2 of 830 union candidates; source calls 8025
+  - src/mir/lowering/expressions.rb:831 is_rc_unwrapped; observed FalseClass, TrueClass; src/mir/lowering/expressions.rb:831; source calls 4374
+  - src/mir/lowering/expressions.rb:831 is_locked_unwrapped; observed FalseClass, TrueClass; src/mir/lowering/expressions.rb:831; source calls 3651
+- src/mir/lowering/functions.rb:1240: affects 2 of 830 union candidates; source calls 4493
+  - src/mir/lowering/functions.rb:1240 owned_return; observed FalseClass, TrueClass; src/mir/lowering/functions.rb:1240; source calls 2384
+  - src/mir/lowering/functions.rb:1240 can_fail; observed FalseClass, TrueClass; src/mir/lowering/functions.rb:1240; source calls 2109
+- src/annotator/helpers/function_signature.rb:120: affects 2 of 830 union candidates; source calls 3718
+  - src/annotator/helpers/function_signature.rb:120 allocates; observed FalseClass, TrueClass; src/annotator/helpers/function_signature.rb:120; source calls 1871
+  - src/annotator/helpers/function_signature.rb:120 borrows; observed Array, Symbol; src/annotator/helpers/function_signature.rb:120; source calls 1847
+- src/mir/lowering/control_flow.rb:163: affects 2 of 830 union candidates; source calls 1957
+  - src/mir/lowering/control_flow.rb:163 tight; observed FalseClass, TrueClass; src/mir/lowering/control_flow.rb:163; source calls 992
+  - src/mir/lowering/control_flow.rb:163 mark_per_iter; observed FalseClass, TrueClass; src/mir/lowering/control_flow.rb:163; source calls 965
+- src/mir/thunk_transform/recursive_splitter.rb:194: affects 2 of 830 union candidates; source calls 1955
   - src/mir/thunk_transform/recursive_splitter.rb:194 names_set; observed Array, Set; src/mir/thunk_transform/recursive_splitter.rb:194; source calls 1455
   - src/mir/thunk_transform/recursive_splitter.rb:194 node; observed AST::BinaryOp, AST::FuncCall, AST::Identifier, AST::Literal, Array, FalseClass, Integer, Lexer::Token, ...; src/mir/thunk_transform/recursive_splitter.rb:194; source calls 500
-- src/mir/lowering/control_flow.rb:163: affects 2 of 809 union candidates; source calls 1937
-  - src/mir/lowering/control_flow.rb:163 tight; observed FalseClass, TrueClass; src/mir/lowering/control_flow.rb:163; source calls 977
-  - src/mir/lowering/control_flow.rb:163 mark_per_iter; observed FalseClass, TrueClass; src/mir/lowering/control_flow.rb:163; source calls 960
-- ... 714 more source group(s)
+- ... 732 more source group(s)
 
-### Missing Sigs Needing Manual Review (138)
+### Missing Sigs Needing Manual Review (147)
 - src/annotator/annotator.rb:69 add_sig: add missing sig
-- src/annotator/annotator.rb:1479 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- src/annotator/annotator.rb:113 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- src/annotator/annotator.rb:134 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- src/annotator/annotator.rb:162 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- src/annotator/annotator.rb:1551 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
 - src/annotator/helpers/auto_inference.rb:25 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
-- src/annotator/helpers/auto_inference.rb:432 add_sig: add missing sig
+- src/annotator/helpers/auto_inference.rb:432 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
 - src/annotator/helpers/function_return.rb:77 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
 - src/annotator/helpers/function_signature.rb:120 add_sig: add missing sig
-- src/backends/pipeline_host.rb:645 add_sig: add missing sig
-- src/backends/pipeline_host.rb:1759 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
-- src/backends/pipeline_host.rb:1919 add_sig: add missing sig
+- src/backends/pipeline_host.rb:757 add_sig: add missing sig
+- src/backends/pipeline_host.rb:1865 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- src/backends/pipeline_host.rb:2025 add_sig: add missing sig
 - src/mir/cleanup_entry.rb:35 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
 - src/mir/control_flow.rb:123 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
 - src/mir/control_flow.rb:513 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
@@ -1252,11 +1207,8 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - src/mir/hoist.rb:226 add_sig: add missing sig
 - src/mir/hoist.rb:552 add_sig: add missing sig
 - src/mir/hoist.rb:683 add_sig: add missing sig
-- src/mir/lowering/concurrency.rb:647 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
-- src/mir/lowering/expressions.rb:837 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
-- src/mir/lowering/functions.rb:528 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
-- src/mir/lowering/functions.rb:947 add_sig: add missing sig
-- ... 118 more
+- src/mir/lowering/capabilities.rb:486 add_sig: [downgraded from high by sorbet pre-validate] add missing sig
+- ... 127 more
 
 ### Other Review Actions (1815)
 - src/backends/pipeline_rewriter.rb:774 fix_sig_param: static callsites prove param node is AST::BinaryOp; 4 static callsite(s) agree
@@ -1267,204 +1219,132 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `AST::Param#name` as String (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `AST::Param#mutable` as T.any(FalseClass, Lexer::Token, TrueClass) (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `AST::Param#takes` as T.any(FalseClass, Lexer::Token, TrueClass) (struct field RBI)
-- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipDataflow::DataflowStep#state` as Hash (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipDataflow::DataflowStep#consumed` as Set (struct field RBI)
+- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipDataflow::DataflowStep#state` as Hash (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `AST::FuncCall#name` as String (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#kind` as Symbol (struct field RBI)
-- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#line` as Integer (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#path` as String (struct field RBI)
-- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#scope_depth` as Integer (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#state` as Symbol (struct field RBI)
+- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#line` as Integer (struct field RBI)
+- sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#scope_depth` as Integer (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `OwnershipGraph::Node#type_info` as Type (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `BinaryOpResult#type` as Type (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `AST::MethodCall#name` as String (struct field RBI)
 - sorbet/rbi/ast-struct-fields.rbi:1 add_struct_field_sig: type `MIR::MoveMark#name` as String (struct field RBI)
 - ... 1795 more
-## High-Confidence Actions (160)
-- src/annotator/helpers/reentrance.rb:742 narrow_generic_return: narrow generic return from T.nilable(T::Hash[`T.untyped`, `T.untyped`]) to T.nilable(T::Hash[String, Symbol])
-  - method: `ReentranceBridge#validate_requires_clauses!`
-  - current: sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Hash[`T.untyped`, `T.untyped`])) }
-  - evidence: observed T.nilable(T::Hash[String, Symbol])
-- src/annotator/helpers/capabilities.rb:25 narrow_generic_return: narrow generic return from T::Array[`T.untyped`] to T::Array[String]
-  - method: `Capabilities#errors_for`
-  - current: sig { params(type: Type).returns(T::Array[`T.untyped`]) }
-  - evidence: observed T::Array[String]
+## High-Confidence Actions (24)
+- src/ast/ast.rb:769 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(String)
+  - method: `AST::Locatable#resource_close_zig=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change return to T.nilable(String)
+  - evidence: static candidate T.nilable(String)
+- src/ast/ast.rb:799 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(SymbolEntry)
+  - method: `AST::Locatable#symbol=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change return to T.nilable(SymbolEntry)
+  - evidence: static candidate T.nilable(SymbolEntry)
+- src/ast/ast.rb:742 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#container_borrow`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:789 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#var_used=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:787 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#var_used`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:744 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#container_borrow=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:710 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T.any(String, Symbol))
+  - method: `AST::Locatable#zig_pattern=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T.any(String, Symbol))
+  - evidence: static candidate T.nilable(T.any(String, Symbol))
+- src/ast/ast.rb:792 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#var_mutated`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
 - src/backends/importer.rb:35 narrow_generic_param: narrow generic param pkg_paths from T::Hash[`T.untyped`, `T.untyped`] to T::Hash[String, String]
   - method: `ModuleImporter#initialize`
   - current: sig { params(base_dir: String, pkg_paths: T::Hash[`T.untyped`, `T.untyped`], use_mir: T::Boolean, stdlib_root: String).void }
   - evidence: observed T::Hash[String, String]
-- src/mir/pre_mir_type_check.rb:28 add_sig: add missing sig
-  - method: `PreMirTypeCheck#verify!`
-  - proposed: sig { params(program: AST::Program).returns(NilClass) }
-- src/annotator/helpers/intrinsic_registry.rb:129 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest FunctionSignature
-  - method: `IntrinsicRegistry#convert_entry`
-  - current: sig { params(_name: `T.untyped`, h: `T.untyped`, registries: `T.untyped`).returns(`T.untyped`) }
-  - proposed: change return to FunctionSignature
-  - evidence: static candidate FunctionSignature
-- src/annotator/helpers/intrinsic_registry.rb:81 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest Type
-  - method: `IntrinsicRegistry#to_return_type`
-  - current: sig { params(rdef: `T.untyped`).returns(`T.untyped`) }
-  - proposed: change return to Type
-  - evidence: static candidate Type
-- src/annotator/helpers/intrinsic_registry.rb:36 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(IntrinsicEmit)
-  - method: `IntrinsicRegistry#build_emit`
-  - current: sig { params(h: `T.untyped`, registries: `T.untyped`).returns(`T.untyped`) }
-  - proposed: change return to T.nilable(IntrinsicEmit)
-  - evidence: static candidate T.nilable(IntrinsicEmit)
-- src/annotator/annotator.rb:3095 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(String)
-  - method: `SemanticAnnotator#chain_root_name`
-  - current: sig { params(node: `T.untyped`).returns(`T.untyped`) }
+- src/ast/ast.rb:737 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#was_moved`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:767 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(String)
+  - method: `AST::Locatable#resource_close_zig`
+  - current: sig { returns(`T.untyped`) }
   - proposed: change return to T.nilable(String)
   - evidence: static candidate T.nilable(String)
-- src/mir/ownership_graph.rb:101 narrow_generic_return: narrow generic return from T.nilable(T::Set[`T.untyped`]) to T.nilable(T::Set[String])
-  - method: `OwnershipGraph#transfer`
-  - current: sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[`T.untyped`])) }
-  - evidence: observed T.nilable(T::Set[String])
-- src/mir/ownership_graph.rb:314 narrow_generic_return: narrow generic return from T.nilable(T::Set[`T.untyped`]) to T.nilable(T::Set[String])
-  - method: `OwnershipGraph#invalidate`
-  - current: sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(T::Set[`T.untyped`])) }
-  - evidence: observed T.nilable(T::Set[String])
-- src/mir/lowering/functions.rb:625 narrow_generic_param: narrow generic param mutable_scalar_params from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRLoweringFunctions#unused_param_suppressions`
-  - current: sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[`T.untyped`], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
-  - evidence: observed T::Set[String]
-- src/mir/lowering/functions.rb:636 narrow_generic_param: narrow generic param mutable_scalar_params from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRLoweringFunctions#mutable_scalar_param_shadows`
-  - current: sig { params(mutable_scalar_params: T::Set[`T.untyped`], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
-  - evidence: observed T::Set[String]
-- src/backends/transpiler.rb:65 narrow_generic_param: narrow generic param pkg_paths from T::Hash[`T.untyped`, `T.untyped`] to T::Hash[String, String]
-  - method: `ZigTranspiler#transpile`
-  - current: sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[`T.untyped`, `T.untyped`], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[`T.untyped`, `T.untyped`]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  - evidence: observed T::Hash[String, String]
-- src/backends/transpiler.rb:75 narrow_generic_param: narrow generic param pkg_paths from T::Hash[`T.untyped`, `T.untyped`] to T::Hash[String, String]
-  - method: `ZigTranspiler#transpile_mir`
-  - current: sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[`T.untyped`, `T.untyped`], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[`T.untyped`, `T.untyped`]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  - evidence: observed T::Hash[String, String]
-- src/mir/mir_checker.rb:966 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_err_cleanup_transfers!`
-  - current: sig { params(err_cleanups: T::Hash[String, T::Array[`T.untyped`]], transfers: T::Set[`T.untyped`]).returns(T.nilable(T::Array[`T.untyped`])) }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1715 narrow_generic_param: narrow generic param errdefer_destroy_names from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_alloc_cleanup_match!`
-  - current: sig { params(allocs: T::Hash[String, T::Array[`T.untyped`]], cleanups: T::Hash[String, T::Array[`T.untyped`]], errdefer_destroy_names: T::Set[`T.untyped`], transfers: T::Set[`T.untyped`]).returns(T::Hash[String, T::Array[`T.untyped`]]) }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1715 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_alloc_cleanup_match!`
-  - current: sig { params(allocs: T::Hash[String, T::Array[`T.untyped`]], cleanups: T::Hash[String, T::Array[`T.untyped`]], errdefer_destroy_names: T::Set[`T.untyped`], transfers: T::Set[`T.untyped`]).returns(T::Hash[String, T::Array[`T.untyped`]]) }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1813 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_call_contracts!`
-  - current: sig { params(body: T::Array[`T.untyped`], transfers: T::Set[`T.untyped`], allocs: T::Hash[String, T::Array[`T.untyped`]]).void }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1828 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_callable_contract!`
-  - current: sig { params(contract: `T.untyped`, label: String, node_kind: String, transfers: T::Set[`T.untyped`], allocs: T::Hash[String, T::Array[`T.untyped`]]).void }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1870 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_ownership_contract_operands!`
-  - current: sig { params(contract: MIR::OwnershipContract, label: String, transfers: T::Set[`T.untyped`], require_operands: T::Boolean).void }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:358 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_structural_ownership_contracts!`
-  - current: sig { params(nodes: T::Array[`T.untyped`], transfers: T::Set[`T.untyped`], allocs: T::Hash[String, T::Array[`T.untyped`]]).void }
-  - evidence: observed T::Set[String]
-- src/mir/mir_checker.rb:1915 narrow_generic_param: narrow generic param transfers from T::Set[`T.untyped`] to T::Set[String]
-  - method: `MIRChecker#verify_explicit_ownership_contracts!`
-  - current: sig { params(zig_nodes: T::Array[`T.untyped`], transfers: T::Set[`T.untyped`], allocs: T::Hash[String, T::Array[`T.untyped`]]).returns(T.nilable(T::Array[`T.untyped`])) }
-  - evidence: observed T::Set[String]
-- src/mir/concurrency_checks.rb:143 narrow_generic_return: narrow generic return from T::Set[`T.untyped`] to T::Set[String]
-  - method: `ConcurrencyChecks#lock_holding_names`
-  - current: sig { params(with_block: `T.untyped`).returns(T::Set[`T.untyped`]) }
-  - evidence: observed T::Set[String]
-- src/mir/concurrency_checks.rb:237 narrow_generic_return: narrow generic return from T::Set[`T.untyped`] to T::Set[String]
-  - method: `ConcurrencyChecks#collect_held_params`
-  - current: sig { params(with_block: `T.untyped`, fn: `T.untyped`).returns(T::Set[`T.untyped`]) }
-  - evidence: observed T::Set[String]
-- src/annotator/helpers/fixable_helpers.rb:139 narrow_generic_param: narrow generic param candidates from T::Array[`T.untyped`] to T::Array[String]
-  - method: `FixableHelper#emit_typo_suggestion!`
-  - current: sig { params(token: `T.untyped`, name: String, candidates: T::Array[`T.untyped`], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
-  - evidence: observed T::Array[String]
-- src/annotator/helpers/with_match_check.rb:392 narrow_generic_return: narrow generic return from T.nilable(T::Set[`T.untyped`]) to T.nilable(T::Set[String])
-  - method: `WithMatchCheck#warn_polymorphic_unhandled_errors!`
-  - current: sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[T::Hash[Symbol, `T.untyped`]], warn_handler: Proc).returns(T.nilable(T::Set[`T.untyped`])) }
-  - evidence: observed T.nilable(T::Set[String])
-- src/tools/lint_fix_rewriter.rb:36 add_sig: add missing sig
-  - method: `LintFixRewriter#rewrite`
-  - proposed: sig { params(source: String).returns(String) }
-- src/tools/lint_fix_rewriter.rb:124 add_sig: add missing sig
-  - method: `LintFixRewriter#annotate`
-  - proposed: sig { params(source: String).returns(Array) }
-- src/annotator/annotator.rb:385 narrow_generic_return: narrow generic return from T::Set[`T.untyped`] to T::Set[String]
-  - method: `SemanticAnnotator#outer_scope_vars`
-  - current: sig { returns(T::Set[`T.untyped`]) }
-  - evidence: observed T::Set[String]
-- src/tools/predicate_rewriter.rb:34 add_sig: add missing sig
-  - method: `PredicateRewriter#rewrite`
-  - proposed: sig { params(source: String).returns(String) }
-- src/tools/predicate_rewriter.rb:137 add_sig: add missing sig
-  - method: `PredicateRewriter#match_nil_compare`
-  - proposed: sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
-- src/tools/predicate_rewriter.rb:172 add_sig: add missing sig
-  - method: `PredicateRewriter#match_length_compare`
-  - proposed: sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
-- src/tools/lint_fix_rewriter.rb:56 add_sig: add missing sig
-  - method: `LintFixRewriter#collect_bg_referenced_names`
-  - proposed: sig { params(ast: AST::Program).returns(Set) }
-- src/tools/lint_fix_rewriter.rb:76 add_sig: add missing sig
-  - method: `LintFixRewriter#collect_mutation_sensitive_names`
-  - proposed: sig { params(ast: AST::Program).returns(Set) }
-- src/tools/lint_fix_rewriter.rb:143 add_sig: add missing sig
-  - method: `LintFixRewriter#mutable_unused_edits`
-  - proposed: sig { params(findings: Array, bg_names: Set, mutation_sensitive_names: Set).returns(Array) }
-- src/tools/lint_fix_rewriter.rb:179 add_sig: add missing sig
-  - method: `LintFixRewriter#redundant_type_annotation_edits`
-  - proposed: sig { params(ast: AST::Program, source: String).returns(Array) }
-- src/annotator/annotator.rb:1456 narrow_generic_return: narrow generic return from T::Array[`T.untyped`] to T::Array[String]
+- src/ast/ast.rb:722 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(FunctionSignature)
+  - method: `AST::Locatable#matched_signature`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(FunctionSignature)
+  - evidence: static candidate T.nilable(FunctionSignature)
+- src/ast/ast.rb:772 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#can_fail`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:732 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#mutates_receiver`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/mir/lowering/expressions.rb:1112 narrow_generic_param: narrow generic param subst from T::Hash[Symbol, `T.untyped`] to T::Hash[Symbol, Symbol]
+  - method: `MIRLoweringExpressions#substitute_mir_type`
+  - current: sig { params(raw_type: `T.untyped`, subst: T::Hash[Symbol, `T.untyped`]).returns(`T.untyped`) }
+  - evidence: observed T::Hash[Symbol, Symbol]
+- src/ast/ast.rb:752 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#needs_heap_create`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/ast/ast.rb:747 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T::Boolean)
+  - method: `AST::Locatable#needs_mut_ref`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T::Boolean)
+  - evidence: static candidate T.nilable(T::Boolean)
+- src/annotator/helpers/lock_helper.rb:381 narrow_generic_param: narrow generic param types_with_self from T::Set[`T.untyped`] to T::Set[Symbol]
+  - method: `LockHelper#verify_handler_reachability!`
+  - current: sig { params(site: T::Hash[Symbol, `T.untyped`], types_in_cycle: T::Set[Symbol], types_with_self: T::Set[`T.untyped`]).returns(T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]])) }
+  - evidence: observed T::Set[Symbol]
+- src/annotator/annotator.rb:1528 narrow_generic_return: narrow generic return from T::Array[`T.untyped`] to T::Array[String]
   - method: `SemanticAnnotator#match_variant_names`
   - current: sig { params(arm: `T.untyped`).returns(T::Array[`T.untyped`]) }
   - evidence: observed T::Array[String]
-- src/annotator/helpers/pipe_analysis.rb:1165 narrow_generic_param: narrow generic param names from T::Set[`T.untyped`] to T::Set[String]
-  - method: `PipeAnalysis#collect_sharded_names`
-  - current: sig { params(node: `T.untyped`, names: T::Set[`T.untyped`]).returns(T.nilable(T::Array[Symbol])) }
-  - evidence: observed T::Set[String]
-- src/mir/bg_capture_classifier.rb:66 narrow_generic_return: narrow generic return from T.nilable(T::Hash[`T.untyped`, `T.untyped`]) to T.nilable(T::Hash[String, Symbol])
-  - method: `BgCaptureClassifier#classify_one!`
-  - current: sig { params(a: CapabilityHelper::CaptureAnalysis, live_param_syms: T::Hash[String, SymbolEntry], schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Hash[`T.untyped`, `T.untyped`])) }
-  - evidence: observed T.nilable(T::Hash[String, Symbol])
-- src/tools/doctor.rb:33 add_sig: add missing sig
-  - method: `Doctor#run`
-  - proposed: sig { params(profile_dir: T.nilable(String), cumulative: T::Boolean, focus: T.nilable(Regexp), ignore: T.nilable(Regexp), peek: T.nilable(Regexp), diff: T.nilable(String), by: Symbol).returns(NilClass) }
-- src/tools/doctor.rb:82 add_sig: add missing sig
-  - method: `Doctor#sort_key`
-  - proposed: sig { returns(Symbol) }
-- src/tools/doctor.rb:27 add_sig: add missing sig
-  - method: `Doctor#saturation_warning`
-  - proposed: sig { params(file: String).returns(T.nilable(String)) }
-- src/tools/doctor.rb:75 add_sig: add missing sig
-  - method: `Doctor#cumulative?`
-  - proposed: sig { returns(T::Boolean) }
-- src/tools/doctor.rb:297 add_sig: add missing sig
-  - method: `Doctor#section_cpu`
-  - proposed: sig { params(profile_dir: String, perf_data: String).returns(NilClass) }
-- src/tools/doctor.rb:372 add_sig: add missing sig
-  - method: `Doctor#section_channels`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- src/tools/doctor.rb:419 add_sig: add missing sig
-  - method: `Doctor#section_fibers`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- src/tools/doctor.rb:644 add_sig: add missing sig
-  - method: `Doctor#section_locks`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- src/tools/doctor.rb:893 add_sig: add missing sig
-  - method: `Doctor#section_mvcc`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- src/tools/doctor.rb:1085 add_sig: add missing sig
-  - method: `Doctor#section_atomic_escape`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- src/tools/doctor.rb:1129 add_sig: add missing sig
-  - method: `Doctor#section_syscalls`
-  - proposed: sig { params(profile_dir: String).returns(NilClass) }
-- ... 110 more
+- src/lsp/document_store.rb:27 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest T.nilable(T.any(LSP::Analyzer::Result, String))
+  - method: `LSP::DocumentStore#cached_findings`
+  - current: sig { returns(`T.untyped`) }
+  - proposed: change return to T.nilable(T.any(LSP::Analyzer::Result, String))
+  - evidence: static candidate T.nilable(T.any(LSP::Analyzer::Result, String))
+- src/tools/pprof.rb:183 fix_sig_return: existing sig return is `T.untyped`; static return origins suggest String
+  - method: `Pprof::Profile#encode`
+  - current: sig { params(location_ids: Array, values: Array, labels: Hash).returns(`T.untyped`) }
+  - proposed: change return to String
+  - evidence: static candidate String
+- src/annotator/helpers/capabilities.rb:760 narrow_tlet: narrow existing `T.let` to T.any(OwnershipGraph, `T.untyped`)
+  - proposed: change `T.let` type to T.any(OwnershipGraph, `T.untyped`)
+  - evidence: observed T.any(OwnershipGraph, `T.untyped`)
+- src/ast/ast.rb:717 narrow_tlet: narrow existing `T.let` to T.nilable(FunctionSignature)
+  - proposed: change `T.let` type to T.nilable(FunctionSignature)
+  - evidence: observed T.nilable(FunctionSignature)
+- src/ast/ast.rb:724 narrow_tlet: narrow existing `T.let` to T.nilable(FunctionSignature)
+  - method: `AST::Locatable#matched_signature=`
+  - current: sig { params(val: `T.untyped`).returns(`T.untyped`) }
+  - proposed: change `T.let` type to T.nilable(FunctionSignature)
+  - evidence: observed T.nilable(FunctionSignature)
 
 ## Gap Actions (0)
 - none
@@ -1475,222 +1355,219 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - unknown expression cause: parser/indexer reason the report could not classify the expression more precisely
 
 ### Param `T.untyped` Buckets
-- runtime union; kept `T.untyped` by policy: 718
-  - 3 slots: src/annotator/helpers/function_analysis.rb:14 `FunctionAnalysis#analyze_routine` node; 10337 call(s); observed AST::FunctionDef, AST::LambdaLit; direct protocol: none observed; analysis gaps: forwarded to declare_and_verify_params sl ...
-  - 3 slots: src/ast/scope.rb:25 `Scope#declare` reg; 547806 call(s); observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, NilClass; direct protocol: none observed
-  - 3 slots: src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg; 550028 call(s); observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, NilClass, String, Symbol; direct protocol: none observed; analysis gaps: captured in @reg ...
-  - 3 slots: src/mir/hoist.rb:967 `MIRHoistLowering#replace_mir_expr_child!` parent; 1069676 call(s); observed MIR::AddressOf, MIR::ArrayInit, MIR::AssertStmt, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::CapWrap, ...; medium direct  ...
-  - 3 slots: src/mir/mir.rb:3448 `MIR#initialize` target; 642 call(s); observed MIR::Deref, MIR::FieldGet, MIR::Ident; direct protocol: none observed
-  - 3 slots: src/mir/mir_lowering.rb:2866 `MIRLowering#direct_index_get` target; 1690 call(s); observed MIR::FieldGet, MIR::Ident, MIR::InlineZig; direct protocol: none observed; analysis gaps: forwarded to new slot 0 at src/mir/mir_lowering.rb:2 ...
-  - 3 slots: src/mir/mir_lowering.rb:2914 `MIRLowering#try_catch_with_provenance` left; 380 call(s); observed MIR::Call, MIR::Ident, MIR::InlineZig; direct protocol: none observed; analysis gaps: forwarded to strip_try slot 0 at src/mir/mir_lower ...
+- runtime union; kept `T.untyped` by policy: 736
+  - 3 slots: src/annotator/helpers/function_analysis.rb:14 `FunctionAnalysis#analyze_routine` node; 10416 call(s); observed AST::FunctionDef, AST::LambdaLit; direct protocol: none observed; analysis gaps: forwarded to declare_and_verify_params sl ...
+  - 3 slots: src/ast/scope.rb:25 `Scope#declare` reg; 556146 call(s); observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, NilClass, OpenStruct; direct protocol: none observed
+  - 3 slots: src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg; 558456 call(s); observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, NilClass, OpenStruct, String, Symbol; direct protocol: none observed; analysis gaps: capt ...
+  - 3 slots: src/mir/hoist.rb:967 `MIRHoistLowering#replace_mir_expr_child!` parent; 1178660 call(s); observed MIR::AddressOf, MIR::ArrayInit, MIR::AssertStmt, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::Call, MIR::CapWrap, ...; medium direct  ...
+  - 3 slots: src/mir/mir.rb:3448 `MIR#initialize` target; 630 call(s); observed MIR::Deref, MIR::FieldGet, MIR::Ident; direct protocol: none observed
+  - 3 slots: src/mir/mir_lowering.rb:2926 `MIRLowering#direct_index_get` target; 1684 call(s); observed MIR::FieldGet, MIR::Ident, MIR::InlineZig; direct protocol: none observed; analysis gaps: forwarded to new slot 0 at src/mir/mir_lowering.rb:2 ...
+  - 3 slots: src/mir/mir_lowering.rb:2974 `MIRLowering#try_catch_with_provenance` left; 428 call(s); observed MIR::Call, MIR::Ident, MIR::InlineZig; direct protocol: none observed; analysis gaps: forwarded to strip_try slot 0 at src/mir/mir_lower ...
   - 3 slots: src/mir/thunk_transform/emit.rb:266 `ThunkTransform::Emit#build_mutual_arm` cf; 25 call(s); observed AST::FunctionDef, OpenStruct; strong direct protocol #mutual_thunk_plan, #name; analysis gaps: forwarded to find_cycle_member slot 0 ...
-- single observed type; narrow candidate: 390
-  - 8 slots: src/mir/mir.rb:3448 `MIR#initialize` shard_idx; 642 call(s); observed MIR::Ident, NilClass
+- single observed type; narrow candidate: 420
+  - 8 slots: src/mir/mir.rb:3448 `MIR#initialize` shard_idx; 630 call(s); observed MIR::Ident, NilClass
   - 7 slots: src/mir/fsm_transform/recursive_splitter.rb:525 `FsmTransform::RecursiveSplitter#emit_for_each_iterator` for_stmt; 2 call(s); observed AST::ForEach
-  - 6 slots: src/ast/schemas.rb:52 `Schemas::ResourceSchema#initialize` close_zig; 18981 call(s); observed String
+  - 6 slots: src/ast/schemas.rb:52 `Schemas::ResourceSchema#initialize` close_zig; 19275 call(s); observed String
   - 6 slots: src/mir/fsm_transform/recursive_splitter.rb:573 `FsmTransform::RecursiveSplitter#emit_for_each_indexed` for_stmt; 1 call(s); observed AST::ForEach
-  - 6 slots: src/mir/mir.rb:3464 `MIR#initialize` map_kind; 395 call(s); observed Symbol
-  - 5 slots: src/mir/fsm_transform/emit.rb:1091 `FsmTransform::Emit#build_segment_descriptor` seg; 2604 call(s); observed FsmTransform::Segments::Segment
-  - 5 slots: src/mir/fsm_transform/emit.rb:956 `FsmTransform::Emit#expand_lock_segment` spec; 230 call(s); observed Hash
+  - 6 slots: src/mir/mir.rb:3464 `MIR#initialize` map_kind; 389 call(s); observed Symbol
+  - 5 slots: src/mir/fsm_transform/emit.rb:1110 `FsmTransform::Emit#build_segment_descriptor` seg; 2581 call(s); observed FsmTransform::Segments::Segment
+  - 5 slots: src/mir/fsm_transform/emit.rb:975 `FsmTransform::Emit#expand_lock_segment` spec; 230 call(s); observed Hash
   - 5 slots: src/mir/fsm_transform/recursive_splitter.rb:606 `FsmTransform::RecursiveSplitter#emit_for_each_pool` for_stmt; 1 call(s); observed AST::ForEach
-- slot not observed: method was not hit: 120
+- slot not observed: method was not hit: 67
   - 3 slots: src/mir/hoist.rb:538 `MIRHoistLowering#pick_node_alloc` node; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/annotator.rb:5940 `SemanticAnnotator#lifetime_violation_for_store` val_node; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/annotator.rb:6302 `SemanticAnnotator#contains_self_call?` node; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/helpers/fixable_helpers.rb:1224 `FixableHelper#build_decl_cap_replace_fix` name; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!` node; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/helpers/fixable_helpers.rb:935 `FixableHelper#emit_with_read_needs_write_lock!` name; 0 call(s); observed no observed runtime type
   - 2 slots: src/annotator/helpers/intrinsic_registry.rb:187 `IntrinsicRegistry#convert_registry` reg; 0 call(s); observed no observed runtime type
-  - 2 slots: src/annotator/helpers/pipe_analysis.rb:1283 `PipeAnalysis#walk_for_sharded_getindex` nodes; 0 call(s); observed no observed runtime type
-- slot not observed: source index did not model this param shape: 33
+  - 2 slots: src/backends/pipeline_host.rb:3846 `PipelineHost#lower_concurrent_bc` lhs; 0 call(s); observed no observed runtime type
+  - 2 slots: src/backends/pipeline_host.rb:4201 `PipelineHost#lower_bc_concurrent_select_prune` lhs; 0 call(s); observed no observed runtime type
+  - 2 slots: src/backends/pipeline_host.rb:4229 `PipelineHost#lower_bc_concurrent_where_prune` lhs; 0 call(s); observed no observed runtime type
+  - 2 slots: src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!` node; 0 call(s); observed no observed runtime type
+  - 2 slots: src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks` node; 0 call(s); observed no observed runtime type
+  - 2 slots: src/mir/fsm_lowering.rb:238 `FsmLowering#fsm_result_transfer_marks` result_mir; 0 call(s); observed no observed runtime type
+- slot not observed: source index did not model this param shape: 37
   - 1 slot: src/annotator/helpers/auto_inference.rb:741 `ShapeEvidenceCollector#walk_for_shape_decls` block; 1570 call(s); observed no observed runtime type
   - 1 slot: src/annotator/helpers/auto_inference.rb:903 `OperatorEvidenceCollector#walk_for_local_decls` block; 1409 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/capabilities.rb:41 `Capabilities#validate!` error_handler; 23768 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` kw; 12 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:740 `FixableHelper#emit_match_partial_fix!` kwargs; 12 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/pipe_analysis.rb:1822 `PipeAnalysis#with_soa_tracking` blk; 120 call(s); observed no observed runtime type
-  - 1 slot: src/ast/ast.rb:336 `AST#walk_body` visitor; 493932 call(s); observed no observed runtime type
-  - 1 slot: src/ast/ast.rb:349 `AST#each_locatable` visitor; 125588 call(s); observed no observed runtime type
+  - 1 slot: src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves` blk; 2492 call(s); observed no observed runtime type
+  - 1 slot: src/annotator/helpers/capabilities.rb:41 `Capabilities#validate!` error_handler; 24341 call(s); observed no observed runtime type
+  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` kw; 21 call(s); observed no observed runtime type
+  - 1 slot: src/annotator/helpers/fixable_helpers.rb:740 `FixableHelper#emit_match_partial_fix!` kwargs; 14 call(s); observed no observed runtime type
+  - 1 slot: src/annotator/helpers/pipe_analysis.rb:1822 `PipeAnalysis#with_soa_tracking` blk; 1358 call(s); observed no observed runtime type
+  - 1 slot: src/ast/ast.rb:336 `AST#walk_body` visitor; 495142 call(s); observed no observed runtime type
 - nil only observed: 24
-  - 6 slots: src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` acc; 120 call(s); observed NilClass
-  - 2 slots: src/mir/mir.rb:3464 `MIR#initialize` shard_idx; 395 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:4309 `SemanticAnnotator#infer_element_type` node; 8 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:4317 `SemanticAnnotator#infer_optional_element_type` node; 190 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:4327 `SemanticAnnotator#infer_to_list` node; 3 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:6548 `SemanticAnnotator#og_set_moved` consumer_param_type; 341 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:6573 `SemanticAnnotator#move_if_not_copyable!` consumer_param_type; 12410 call(s); observed NilClass
-  - 1 slot: src/ast/schemas.rb:52 `Schemas::ResourceSchema#initialize` type_params; 18981 call(s); observed NilClass
+  - 4 slots: src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context` shard_map; 690 call(s); observed NilClass
+  - 2 slots: src/mir/mir.rb:3464 `MIR#initialize` shard_idx; 389 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:4391 `SemanticAnnotator#infer_element_type` node; 8 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:4399 `SemanticAnnotator#infer_optional_element_type` node; 208 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:4409 `SemanticAnnotator#infer_to_list` node; 3 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:6643 `SemanticAnnotator#og_set_moved` consumer_param_type; 313 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:6668 `SemanticAnnotator#move_if_not_copyable!` consumer_param_type; 12660 call(s); observed NilClass
+  - 1 slot: src/ast/schemas.rb:52 `Schemas::ResourceSchema#initialize` type_params; 19275 call(s); observed NilClass
 - boolean pair; T::Boolean candidate: 8
-  - 2 slots: src/mir/lowering/control_flow.rb:163 `MIRLoweringControlFlow#prepend_loop_mark` mark_per_iter; 2080 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:739 `AST::Locatable#was_moved=` val; 19466 call(s); observed FalseClass, TrueClass
-  - 1 slot: src/ast/ast.rb:744 `AST::Locatable#container_borrow=` val; 19347 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:789 `AST::Locatable#var_used=` val; 64293 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/diagnostic_examples.rb:154 `DiagnosticExamples#extract_first_heredoc_in_it` expecting_raise; 2952 call(s); observed FalseClass, TrueClass
-  - 1 slot: src/ast/source_error.rb:121 `ErrorHelper#fixable!` raise_in_collector; 1321 call(s); observed FalseClass, TrueClass
-  - 1 slot: src/mir/lowering/control_flow.rb:208 `MIRLoweringControlFlow#finalize_loop_frame_alloc_scopes!` mark_per_iter; 2080 call(s); observed FalseClass, NilClass, TrueClass
+  - 2 slots: src/mir/lowering/control_flow.rb:163 `MIRLoweringControlFlow#prepend_loop_mark` mark_per_iter; 2101 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:739 `AST::Locatable#was_moved=` val; 22062 call(s); observed FalseClass, TrueClass
+  - 1 slot: src/ast/ast.rb:744 `AST::Locatable#container_borrow=` val; 20932 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:789 `AST::Locatable#var_used=` val; 70073 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/diagnostic_examples.rb:154 `DiagnosticExamples#extract_first_heredoc_in_it` expecting_raise; 1640 call(s); observed FalseClass, TrueClass
+  - 1 slot: src/ast/source_error.rb:121 `ErrorHelper#fixable!` raise_in_collector; 1313 call(s); observed FalseClass, TrueClass
+  - 1 slot: src/mir/lowering/control_flow.rb:206 `MIRLoweringControlFlow#finalize_loop_frame_alloc_scopes!` mark_per_iter; 2101 call(s); observed FalseClass, NilClass, TrueClass
 
 ### Return `T.untyped` Buckets
-- runtime union; kept `T.untyped` by policy: 175
-  - 1 slot: src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload` return; 2120 call(s); observed NilClass, Schemas::InlineStructVariant, Symbol
-  - 1 slot: src/annotator/annotator.rb:374 `SemanticAnnotator#visit` return; 348203 call(s); observed Array, FalseClass, FunctionContext, FunctionSignature, Hash, Integer, Module, NilClass, ...
-  - 1 slot: src/annotator/annotator.rb:5387 `SemanticAnnotator#get_root_object` return; 84 call(s); observed AST::CopyNode, AST::Identifier, AST::StructLit
-  - 1 slot: src/annotator/annotator.rb:5528 `SemanticAnnotator#resolve_borrow_source` return; 3923 call(s); observed AST::BinaryOp, AST::FuncCall, AST::GetIndex, AST::Identifier, AST::Literal, NilClass
+- runtime union; kept `T.untyped` by policy: 174
+  - 1 slot: src/annotator/annotator.rb:1533 `SemanticAnnotator#normalized_match_payload` return; 2161 call(s); observed NilClass, Schemas::InlineStructVariant, Symbol
+  - 1 slot: src/annotator/annotator.rb:445 `SemanticAnnotator#visit` return; 365769 call(s); observed Array, FalseClass, FunctionContext, FunctionSignature, Hash, Integer, Module, NilClass, ...
+  - 1 slot: src/annotator/annotator.rb:5460 `SemanticAnnotator#get_root_object` return; 86 call(s); observed AST::CopyNode, AST::Identifier, AST::StructLit
+  - 1 slot: src/annotator/annotator.rb:5623 `SemanticAnnotator#resolve_borrow_source` return; 3988 call(s); observed AST::BinaryOp, AST::FuncCall, AST::GetIndex, AST::Identifier, AST::Literal, NilClass
   - 1 slot: src/annotator/helpers/auto_inference.rb:741 `ShapeEvidenceCollector#walk_for_shape_decls` return; 1570 call(s); observed AST::Assert, AST::Assignment, AST::BinaryOp, AST::FuncCall, AST::GetIndex, AST::HashLit, AST::Identifier, AST::Li ...
   - 1 slot: src/annotator/helpers/auto_inference.rb:762 `ShapeEvidenceCollector#walk` return; 776 call(s); observed AST::BindExpr, AST::HashLit, AST::Identifier, AST::ListLit, AST::Literal, AST::ReturnNode, AST::VarDecl, Array, ...
   - 1 slot: src/annotator/helpers/auto_inference.rb:903 `OperatorEvidenceCollector#walk_for_local_decls` return; 1409 call(s); observed AST::Assert, AST::Assignment, AST::BinaryOp, AST::FuncCall, AST::GetIndex, AST::HashLit, AST::Identifier, AST: ...
   - 1 slot: src/annotator/helpers/auto_inference.rb:926 `OperatorEvidenceCollector#walk_binops` return; 1307 call(s); observed AST::Assert, AST::Assignment, AST::BindExpr, AST::FuncCall, AST::GetIndex, AST::HashLit, AST::Identifier, AST::ListLit, ...
-- single observed type; narrow candidate: 91
-  - 1 slot: src/annotator/annotator.rb:1009 `SemanticAnnotator#synthesize_clause_from_policy` return; 63 call(s); observed Hash
-  - 1 slot: src/annotator/annotator.rb:1448 `SemanticAnnotator#match_variant_name` return; 9259 call(s); observed NilClass, String
-  - 1 slot: src/annotator/annotator.rb:3095 `SemanticAnnotator#chain_root_name` return; 5122 call(s); observed String
-  - 1 slot: src/annotator/annotator.rb:5976 `SemanticAnnotator#dest_scope_depth_for_target` return; 2 call(s); observed Integer
-  - 1 slot: src/annotator/annotator.rb:60 `SemanticAnnotator#current_fn_ctx` return; 522131 call(s); observed FunctionContext, NilClass
-  - 1 slot: src/annotator/annotator.rb:6216 `SemanticAnnotator#root_variable_name` return; 1913 call(s); observed String
-  - 1 slot: src/annotator/annotator.rb:6426 `SemanticAnnotator#find_mutual_max_depth_callee` return; 1 call(s); observed String
-  - 1 slot: src/annotator/helpers/function_analysis.rb:1004 `FunctionAnalysis#find_matching_intrinsic` return; 25777 call(s); observed FunctionSignature, NilClass
-- void candidate; return value appears unused: 27
-  - 1 slot: src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` return; 11271 call(s); observed Module, NilClass, Symbol, Type
-  - 1 slot: src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField` return; 14431 call(s); observed NilClass, Symbol, Type
-  - 1 slot: src/annotator/annotator.rb:3488 `SemanticAnnotator#visit_UnaryOp` return; 812 call(s); observed Symbol, Type
-  - 1 slot: src/annotator/annotator.rb:3795 `SemanticAnnotator#visit_Literal` return; 64669 call(s); observed Type
-  - 1 slot: src/annotator/annotator.rb:3838 `SemanticAnnotator#visit_BinaryOp` return; 38355 call(s); observed Integer, NilClass, Symbol, Type
-  - 1 slot: src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program` return; 6290 call(s); observed Symbol, Type
-  - 1 slot: src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context` return; 0 call(s); observed Array, NilClass
-  - 1 slot: src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves` return; 0 call(s); observed NilClass, Symbol, SymbolEntry, Type
-- nil only observed: 18
-  - 1 slot: src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params` return; 20470 call(s); observed NilClass
-  - 1 slot: src/annotator/annotator.rb:6537 `SemanticAnnotator#og_declare` return; 34823 call(s); observed NilClass
+- single observed type; narrow candidate: 77
+  - 1 slot: src/annotator/annotator.rb:1080 `SemanticAnnotator#synthesize_clause_from_policy` return; 63 call(s); observed Hash
+  - 1 slot: src/annotator/annotator.rb:1520 `SemanticAnnotator#match_variant_name` return; 10059 call(s); observed NilClass, String
+  - 1 slot: src/annotator/annotator.rb:60 `SemanticAnnotator#current_fn_ctx` return; 535802 call(s); observed FunctionContext, NilClass
+  - 1 slot: src/annotator/annotator.rb:6071 `SemanticAnnotator#dest_scope_depth_for_target` return; 2 call(s); observed Integer
+  - 1 slot: src/annotator/annotator.rb:6521 `SemanticAnnotator#find_mutual_max_depth_callee` return; 1 call(s); observed String
+  - 1 slot: src/annotator/helpers/fixable_helpers.rb:935 `FixableHelper#emit_with_read_needs_write_lock!` return; 1 call(s); observed Symbol
+  - 1 slot: src/annotator/helpers/function_analysis.rb:1003 `FunctionAnalysis#find_matching_intrinsic` return; 27755 call(s); observed FunctionSignature, NilClass
+  - 1 slot: src/annotator/helpers/intrinsic_registry.rb:105 `IntrinsicRegistry#to_return_def` return; 71910 call(s); observed FunctionReturn
+- void candidate; return value appears unused: 23
+  - 1 slot: src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` return; 12517 call(s); observed Module, NilClass, Symbol, Type
+  - 1 slot: src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField` return; 15430 call(s); observed NilClass, Symbol, Type
+  - 1 slot: src/annotator/annotator.rb:3570 `SemanticAnnotator#visit_UnaryOp` return; 840 call(s); observed Symbol, Type
+  - 1 slot: src/annotator/annotator.rb:3877 `SemanticAnnotator#visit_Literal` return; 67682 call(s); observed Type
+  - 1 slot: src/annotator/annotator.rb:3920 `SemanticAnnotator#visit_BinaryOp` return; 40182 call(s); observed Integer, NilClass, Symbol, Type
+  - 1 slot: src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program` return; 6341 call(s); observed Symbol, Type
+  - 1 slot: src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context` return; 18797 call(s); observed Array, NilClass
+  - 1 slot: src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves` return; 2492 call(s); observed NilClass, Symbol, SymbolEntry, Type
+- nil only observed: 21
+  - 1 slot: src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params` return; 20623 call(s); observed NilClass
+  - 1 slot: src/annotator/annotator.rb:6632 `SemanticAnnotator#og_declare` return; 35479 call(s); observed NilClass
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:1033 `FixableHelper#emit_with_restrict_immutable_error!` return; 10 call(s); observed NilClass
+  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` return; 21 call(s); observed NilClass
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:1458 `FixableHelper#emit_auto_resolved_finding!` return; 18 call(s); observed NilClass
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1482 `FixableHelper#emit_auto_shape_resolved_finding!` return; 7 call(s); observed NilClass
+  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1482 `FixableHelper#emit_auto_shape_resolved_finding!` return; 8 call(s); observed NilClass
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:1524 `FixableHelper#emit_auto_ambiguity_finding!` return; 4 call(s); observed NilClass
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:1556 `FixableHelper#emit_auto_unresolved_finding!` return; 9 call(s); observed NilClass
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:740 `FixableHelper#emit_match_partial_fix!` return; 12 call(s); observed NilClass
-- slot not observed: method was not hit: 14
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!` return; 0 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:935 `FixableHelper#emit_with_read_needs_write_lock!` return; 0 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/function_signature.rb:244 `FunctionSignature#heap_carry_return` return; 0 call(s); observed NilClass, TrueClass
-  - 1 slot: src/annotator/helpers/function_signature.rb:252 `FunctionSignature#heap_carry_return_vars` return; 0 call(s); observed NilClass, Set
-  - 1 slot: src/ast/ast.rb:1453 `AST#params=` return; 0 call(s); observed no observed runtime type
-  - 1 slot: src/ast/ast.rb:1975 `AST#params=` return; 0 call(s); observed no observed runtime type
-  - 1 slot: src/ast/type.rb:634 `Type#location` return; 0 call(s); observed no observed runtime type
-  - 1 slot: src/backends/pipeline_host.rb:168 `PipelineHost#with_named_binding` return; 0 call(s); observed MIR::BlockExpr, NilClass, String
-- slot not observed: method hit but return was not captured: 9
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` return; 12 call(s); observed no observed runtime type
+- slot not observed: method hit but return was not captured: 7
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:848 `FixableHelper#emit_with_guard_all_bindings_need_as!` return; 2 call(s); observed no observed runtime type
-  - 1 slot: src/annotator/helpers/fixable_helpers.rb:883 `FixableHelper#emit_with_guard_mutable_mutated!` return; 8 call(s); observed no observed runtime type
   - 1 slot: src/annotator/helpers/fixable_helpers.rb:993 `FixableHelper#emit_with_materialized_needs_tense!` return; 3 call(s); observed no observed runtime type
   - 1 slot: src/ast/parser.rb:586 `Parser#emit_consume_error_with_fix` return; 105 call(s); observed no observed runtime type
   - 1 slot: src/ast/parser.rb:605 `Parser#emit_syntax_insert_end_of_line!` return; 12 call(s); observed no observed runtime type
   - 1 slot: src/ast/parser.rb:628 `Parser#emit_syntax_insert_before_token!` return; 4 call(s); observed no observed runtime type
   - 1 slot: src/ast/source_error.rb:31 `ErrorHelper#error!` return; 1075 call(s); observed no observed runtime type
+  - 1 slot: src/mir/mir.rb:1044 MIR#[]= return; 1 call(s); observed no observed runtime type
+- slot not observed: method was not hit: 7
+  - 1 slot: src/annotator/helpers/function_signature.rb:244 `FunctionSignature#heap_carry_return` return; 0 call(s); observed NilClass, TrueClass
+  - 1 slot: src/annotator/helpers/function_signature.rb:252 `FunctionSignature#heap_carry_return_vars` return; 0 call(s); observed NilClass, Set
+  - 1 slot: src/ast/ast.rb:1452 `AST#params=` return; 0 call(s); observed no observed runtime type
+  - 1 slot: src/ast/ast.rb:1974 `AST#params=` return; 0 call(s); observed no observed runtime type
+  - 1 slot: src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!` return; 0 call(s); observed no observed runtime type
+  - 1 slot: src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks` return; 0 call(s); observed no observed runtime type
+  - 1 slot: src/mir/ownership_graph.rb:37 `OwnershipGraph#full_type=` return; 0 call(s); observed no observed runtime type
 - boolean pair; T::Boolean candidate: 6
-  - 1 slot: src/ast/ast.rb:737 `AST::Locatable#was_moved` return; 177196 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:739 `AST::Locatable#was_moved=` return; 19466 call(s); observed FalseClass, TrueClass
-  - 1 slot: src/ast/ast.rb:742 `AST::Locatable#container_borrow` return; 127402 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:744 `AST::Locatable#container_borrow=` return; 19347 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:787 `AST::Locatable#var_used` return; 23170 call(s); observed FalseClass, NilClass, TrueClass
-  - 1 slot: src/ast/ast.rb:789 `AST::Locatable#var_used=` return; 64293 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:737 `AST::Locatable#was_moved` return; 178790 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:739 `AST::Locatable#was_moved=` return; 22062 call(s); observed FalseClass, TrueClass
+  - 1 slot: src/ast/ast.rb:742 `AST::Locatable#container_borrow` return; 129406 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:744 `AST::Locatable#container_borrow=` return; 20932 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:787 `AST::Locatable#var_used` return; 23364 call(s); observed FalseClass, NilClass, TrueClass
+  - 1 slot: src/ast/ast.rb:789 `AST::Locatable#var_used=` return; 70073 call(s); observed FalseClass, NilClass, TrueClass
 
 ### Param `T.untyped` Source Categories
-- untyped unknown expression: 834
-  - src/annotator/annotator.rb:279 `SemanticAnnotator#program_has_auto?` node; src/annotator/annotator.rb:178 node; src/annotator/annotator.rb:287 c; src/annotator/annotator.rb:289 v
-  - src/annotator/annotator.rb:1456 `SemanticAnnotator#match_variant_names` arm; src/annotator/annotator.rb:1483 arm; src/annotator/annotator.rb:1727 c; src/annotator/annotator.rb:1765 c
-  - src/annotator/annotator.rb:1493 `SemanticAnnotator#literal_type_substitution!` schema; src/annotator/annotator.rb:3556 schema; src/annotator/annotator.rb:3628 schema
-  - src/annotator/annotator.rb:2058 `SemanticAnnotator#resolve_error_registration!` node; src/annotator/annotator.rb:878 n; src/annotator/annotator.rb:881 n; src/annotator/annotator.rb:2041 node
-  - src/annotator/annotator.rb:2507 `SemanticAnnotator#visit_IntrinsicFunc` node; src/annotator/annotator.rb:2480 node; src/annotator/helpers/function_analysis.rb:114 node
-  - src/annotator/annotator.rb:2614 `SemanticAnnotator#promote_pipe_to_observable_dest!` node; src/annotator/annotator.rb:2679 node
-  - src/annotator/annotator.rb:2671 `SemanticAnnotator#finalize_decl_node!` node; src/annotator/annotator.rb:2598 node; src/annotator/annotator.rb:2880 node
-  - src/annotator/annotator.rb:3054 `SemanticAnnotator#accumulate_stack_bytes` node; src/annotator/annotator.rb:2855 node
-- untyped forwarded return: 352
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit` node; src/annotator/annotator.rb:175 node; src/annotator/annotator.rb:398 stmt; src/annotator/annotator.rb:436 stmt
-  - src/annotator/annotator.rb:1448 `SemanticAnnotator#match_variant_name` pattern; src/annotator/annotator.rb:1457 pattern; src/annotator/annotator.rb:1606 c.value; src/annotator/annotator.rb:1659 c.value
-  - src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload` payload; src/annotator/annotator.rb:1482 schema.variants[variant_name]; src/annotator/annotator.rb:1484 schema.variants[extra_name]
-  - src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params` type; src/annotator/annotator.rb:2278 type; src/annotator/annotator.rb:2291 arg; src/annotator/annotator.rb:2293 type.payload_type
-  - src/annotator/annotator.rb:3025 `SemanticAnnotator#track_union_alias` value_node; src/annotator/annotator.rb:2856 node.value
-  - src/annotator/annotator.rb:3095 `SemanticAnnotator#chain_root_name` node; src/annotator/annotator.rb:2368 node.object; src/annotator/annotator.rb:2568 node.object; src/annotator/annotator.rb:3201 index_node.target
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` target_type; src/annotator/annotator.rb:2896 scope.resolve_type(node.name); src/annotator/annotator.rb:3179 scope.resolve_type(var_name); src/annotator/annotator.rb: ...
-  - src/annotator/annotator.rb:4045 `SemanticAnnotator#coerce_empty_collection_fallback!` rhs; src/annotator/annotator.rb:4014 node.right; src/annotator/annotator.rb:4026 node.right
-- untyped struct/array/collection value: 66
+- untyped unknown expression: 839
+  - src/annotator/annotator.rb:350 `SemanticAnnotator#program_has_auto?` node; src/annotator/annotator.rb:249 node; src/annotator/annotator.rb:358 c; src/annotator/annotator.rb:360 v
+  - src/annotator/annotator.rb:1528 `SemanticAnnotator#match_variant_names` arm; src/annotator/annotator.rb:1555 arm; src/annotator/annotator.rb:1799 c; src/annotator/annotator.rb:1837 c
+  - src/annotator/annotator.rb:1565 `SemanticAnnotator#literal_type_substitution!` schema; src/annotator/annotator.rb:3638 schema; src/annotator/annotator.rb:3710 schema
+  - src/annotator/annotator.rb:2138 `SemanticAnnotator#resolve_error_registration!` node; src/annotator/annotator.rb:949 n; src/annotator/annotator.rb:952 n; src/annotator/annotator.rb:2121 node
+  - src/annotator/annotator.rb:2588 `SemanticAnnotator#visit_IntrinsicFunc` node; src/annotator/annotator.rb:2561 node; src/annotator/helpers/function_analysis.rb:114 node
+  - src/annotator/annotator.rb:2696 `SemanticAnnotator#promote_pipe_to_observable_dest!` node; src/annotator/annotator.rb:2761 node
+  - src/annotator/annotator.rb:2753 `SemanticAnnotator#finalize_decl_node!` node; src/annotator/annotator.rb:2680 node; src/annotator/annotator.rb:2962 node
+  - src/annotator/annotator.rb:3136 `SemanticAnnotator#accumulate_stack_bytes` node; src/annotator/annotator.rb:2937 node
+- untyped forwarded return: 345
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit` node; src/annotator/annotator.rb:246 node; src/annotator/annotator.rb:469 stmt; src/annotator/annotator.rb:507 stmt
+  - src/annotator/annotator.rb:1520 `SemanticAnnotator#match_variant_name` pattern; src/annotator/annotator.rb:1529 pattern; src/annotator/annotator.rb:1678 c.value; src/annotator/annotator.rb:1731 c.value
+  - src/annotator/annotator.rb:1533 `SemanticAnnotator#normalized_match_payload` payload; src/annotator/annotator.rb:1554 schema.variants[variant_name]; src/annotator/annotator.rb:1556 schema.variants[extra_name]
+  - src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params` type; src/annotator/annotator.rb:2358 type; src/annotator/annotator.rb:2371 arg; src/annotator/annotator.rb:2373 type.payload_type
+  - src/annotator/annotator.rb:3107 `SemanticAnnotator#track_union_alias` value_node; src/annotator/annotator.rb:2938 node.value
+  - src/annotator/annotator.rb:3177 `SemanticAnnotator#chain_root_name` node; src/annotator/annotator.rb:2449 node.object; src/annotator/annotator.rb:2650 node.object; src/annotator/annotator.rb:3283 index_node.target
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` target_type; src/annotator/annotator.rb:2978 scope.resolve_type(node.name); src/annotator/annotator.rb:3261 scope.resolve_type(var_name); src/annotator/annotator.rb: ...
+  - src/annotator/annotator.rb:4127 `SemanticAnnotator#coerce_empty_collection_fallback!` rhs; src/annotator/annotator.rb:4096 node.right; src/annotator/annotator.rb:4108 node.right
+- untyped struct/array/collection value: 67
   - src/annotator/helpers/fixable_helpers.rb:59 `FixableHelper#closest_name` candidates; src/annotator/helpers/fixable_helpers.rb:103 candidates; src/annotator/helpers/fixable_helpers.rb:142 candidates; src/annotator/helpers/fixable_helpers.rb:21 ...
   - src/annotator/helpers/fixable_helpers.rb:848 `FixableHelper#emit_with_guard_all_bindings_need_as!` missing_caps; src/annotator/helpers/capabilities.rb:438 missing_alias
   - src/annotator/helpers/fixable_helpers.rb:883 `FixableHelper#emit_with_guard_mutable_mutated!` names; src/annotator/helpers/capabilities.rb:614 mutated
-  - src/annotator/helpers/intrinsic_registry.rb:240 `IntrinsicRegistry#sig` reg; src/annotator/annotator.rb:2320 static_methods; src/annotator/helpers/method_analysis.rb:61 registry; src/backends/pipeline_rewriter.rb:232 STD_LIB
+  - src/annotator/helpers/intrinsic_registry.rb:240 `IntrinsicRegistry#sig` reg; src/annotator/annotator.rb:2400 static_methods; src/annotator/helpers/method_analysis.rb:61 registry; src/backends/pipeline_rewriter.rb:232 STD_LIB
   - src/annotator/helpers/pipe_analysis.rb:1273 `PipeAnalysis#walk_for_sharded_access` results; src/annotator/helpers/pipe_analysis.rb:1230 sharded_accesses
   - src/annotator/helpers/pipe_analysis.rb:1799 `PipeAnalysis#check_soa_opportunity!` item_type; src/annotator/helpers/pipe_analysis.rb:1826 item_type
   - src/annotator/helpers/pipe_analysis.rb:1822 `PipeAnalysis#with_soa_tracking` item_type; src/annotator/helpers/pipe_analysis.rb:304 item_type; src/annotator/helpers/pipe_analysis.rb:846 item_type; src/annotator/helpers/pipe_analysis.rb:1025 it ...
   - src/ast/diagnostic_examples.rb:81 `DiagnosticExamples#scan_file` out; src/ast/diagnostic_examples.rb:73 out
 - untyped literal/static expression: 31
-  - src/annotator/annotator.rb:6537 `SemanticAnnotator#og_declare` node; src/annotator/annotator.rb:1368 nil; src/annotator/annotator.rb:1423 nil; src/annotator/annotator.rb:1621 nil
+  - src/annotator/annotator.rb:6632 `SemanticAnnotator#og_declare` node; src/annotator/annotator.rb:1440 nil; src/annotator/annotator.rb:1495 nil; src/annotator/annotator.rb:1693 nil
   - src/annotator/helpers/capabilities.rb:914 `CapabilityHelper#capability_alias_type` type; src/annotator/helpers/capabilities.rb:826 cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type; src/annotator ...
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!` node; src/annotator/helpers/effects.rb:1149 s; src/annotator/helpers/effects.rb:1161 n; src/annotator/helpers/effects.rb:1174 a
   - src/annotator/helpers/fixable_helpers.rb:1224 `FixableHelper#build_decl_cap_replace_fix` old_sigil; src/annotator/helpers/fixable_helpers.rb:939 '@locked'
-  - src/annotator/helpers/function_analysis.rb:14 `FunctionAnalysis#analyze_routine` declared_return; src/annotator/annotator.rb:666 :Any; src/annotator/annotator.rb:721 declared_return
-  - src/ast/ast.rb:729 `AST::Locatable#stdlib_allocates=` val; src/annotator/annotator.rb:2360 true; src/annotator/annotator.rb:2554 true; src/annotator/helpers/method_analysis.rb:125 true
-  - src/ast/ast.rb:734 `AST::Locatable#mutates_receiver=` val; src/annotator/annotator.rb:2361 true; src/annotator/annotator.rb:2555 true; src/annotator/helpers/method_analysis.rb:126 true
-  - src/ast/ast.rb:739 `AST::Locatable#was_moved=` val; src/annotator/annotator.rb:1549 true; src/annotator/annotator.rb:2158 true; src/annotator/annotator.rb:4190 true
+  - src/annotator/helpers/function_analysis.rb:14 `FunctionAnalysis#analyze_routine` declared_return; src/annotator/annotator.rb:737 :Any; src/annotator/annotator.rb:792 declared_return
+  - src/ast/ast.rb:729 `AST::Locatable#stdlib_allocates=` val; src/annotator/annotator.rb:2441 true; src/annotator/annotator.rb:2636 true; src/annotator/helpers/method_analysis.rb:125 true
+  - src/ast/ast.rb:734 `AST::Locatable#mutates_receiver=` val; src/annotator/annotator.rb:2442 true; src/annotator/annotator.rb:2637 true; src/annotator/helpers/method_analysis.rb:126 true
+  - src/ast/ast.rb:739 `AST::Locatable#was_moved=` val; src/annotator/annotator.rb:1621 true; src/annotator/annotator.rb:2238 true; src/annotator/annotator.rb:4272 true
 - untyped instance variable: 10
   - src/annotator/helpers/function_signature.rb:247 `FunctionSignature#heap_carry_return=` val; src/annotator/helpers/function_signature.rb:158 fn.heap_carry_return; src/annotator/helpers/function_signature.rb:275 @heap_carry_return; src/mir/esca ...
   - src/annotator/helpers/function_signature.rb:255 `FunctionSignature#heap_carry_return_vars=` val; src/annotator/helpers/function_signature.rb:159 fn.heap_carry_return_vars; src/annotator/helpers/function_signature.rb:276 @heap_carry_return_var ...
-  - src/ast/ast.rb:774 `AST::Locatable#can_fail=` val; src/annotator/annotator.rb:494 fn.can_fail; src/annotator/annotator.rb:2362 true; src/annotator/annotator.rb:2556 true
-  - src/ast/schemas.rb:97 Schemas::InlineStructVariant#== other; src/annotator/annotator.rb:315 :write_locked; src/annotator/annotator.rb:514 :package; src/annotator/annotator.rb:523 @source_dir
-  - src/ast/type.rb:386 Type#== other; src/annotator/annotator.rb:315 :write_locked; src/annotator/annotator.rb:514 :package; src/annotator/annotator.rb:523 @source_dir
+  - src/ast/ast.rb:774 `AST::Locatable#can_fail=` val; src/annotator/annotator.rb:565 fn.can_fail; src/annotator/annotator.rb:2443 true; src/annotator/annotator.rb:2638 true
+  - src/ast/schemas.rb:97 Schemas::InlineStructVariant#== other; src/annotator/annotator.rb:118 true; src/annotator/annotator.rb:142 :EXCLUSIVE; src/annotator/annotator.rb:142 :write_locked_read
+  - src/ast/type.rb:386 Type#== other; src/annotator/annotator.rb:118 true; src/annotator/annotator.rb:142 :EXCLUSIVE; src/annotator/annotator.rb:142 :write_locked_read
   - src/ast/type.rb:1842 `Type#from_node` node; src/ast/type.rb:1630 et; src/ast/type.rb:1639 ft || :Any; src/ast/type.rb:1642 vt || :Any
   - src/lsp/rpc.rb:32 `LSP::RPC#read_message` io; src/lsp/server.rb:54 @stdin
   - src/lsp/rpc.rb:53 `LSP::RPC#write_message` io; src/lsp/server.rb:129 @stdout
 
 ### Return `T.untyped` Source Categories
-- untyped forwarded return: 177
+- untyped forwarded return: 156
   - src/annotator/annotator.rb:60 `SemanticAnnotator#current_fn_ctx`
   - src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context`
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit`
-  - src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`
-  - src/annotator/annotator.rb:1009 `SemanticAnnotator#synthesize_clause_from_policy`
-  - src/annotator/annotator.rb:1448 `SemanticAnnotator#match_variant_name`
-  - src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params`
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type`
-- untyped literal/static expression: 104
-  - src/annotator/annotator.rb:3095 `SemanticAnnotator#chain_root_name`
-  - src/annotator/annotator.rb:6216 `SemanticAnnotator#root_variable_name`
-  - src/annotator/annotator.rb:6426 `SemanticAnnotator#find_mutual_max_depth_callee`
-  - src/annotator/helpers/intrinsic_registry.rb:36 `IntrinsicRegistry#build_emit`
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit`
+  - src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`
+  - src/annotator/annotator.rb:1080 `SemanticAnnotator#synthesize_clause_from_policy`
+  - src/annotator/annotator.rb:1520 `SemanticAnnotator#match_variant_name`
+  - src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params`
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type`
+- untyped literal/static expression: 108
+  - src/annotator/annotator.rb:6521 `SemanticAnnotator#find_mutual_max_depth_callee`
   - src/annotator/helpers/intrinsic_registry.rb:63 `IntrinsicRegistry#nested_emit`
-  - src/annotator/helpers/intrinsic_registry.rb:81 `IntrinsicRegistry#to_return_type`
   - src/annotator/helpers/intrinsic_registry.rb:105 `IntrinsicRegistry#to_return_def`
-  - src/annotator/helpers/intrinsic_registry.rb:129 `IntrinsicRegistry#convert_entry`
-- untyped struct/array/collection value: 28
-  - src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload`
+  - src/annotator/helpers/intrinsic_registry.rb:228 `IntrinsicRegistry#fs`
+  - src/annotator/helpers/pipe_analysis.rb:1273 `PipeAnalysis#walk_for_sharded_access`
+  - src/ast/ast.rb:607 `AST#_expr_each_bg_block_shallow`
+  - src/ast/ast.rb:708 `AST::Locatable#zig_pattern`
+  - src/ast/ast.rb:710 `AST::Locatable#zig_pattern=`
+- untyped struct/array/collection value: 26
+  - src/annotator/annotator.rb:1533 `SemanticAnnotator#normalized_match_payload`
   - src/annotator/helpers/generic_analysis.rb:319 `GenericAnalysis#extract_type_bindings!`
   - src/annotator/helpers/intrinsic_registry.rb:150 `IntrinsicRegistry#normalize_lifetime`
   - src/annotator/helpers/pipe_analysis.rb:130 `PipeAnalysis#finite_stream_element_type`
-  - src/ast/ast.rb:1453 `AST#params=`
-  - src/ast/ast.rb:1975 `AST#params=`
-  - src/ast/parser.rb:3938 `Parser#parse_comma_seq`
+  - src/ast/ast.rb:1452 `AST#params=`
+  - src/ast/ast.rb:1974 `AST#params=`
+  - src/ast/parser.rb:3961 `Parser#parse_comma_seq`
   - src/ast/type.rb:878 `Type#fsm_foreach_descriptor`
-- untyped unknown expression: 28
-  - src/annotator/annotator.rb:5387 `SemanticAnnotator#get_root_object`
-  - src/annotator/helpers/function_analysis.rb:1004 `FunctionAnalysis#find_matching_intrinsic`
+- untyped unknown expression: 23
+  - src/annotator/annotator.rb:5460 `SemanticAnnotator#get_root_object`
+  - src/annotator/helpers/function_analysis.rb:1003 `FunctionAnalysis#find_matching_intrinsic`
   - src/annotator/helpers/intrinsic_registry.rb:199 `IntrinsicRegistry#sigs`
   - src/annotator/helpers/intrinsic_registry.rb:215 `IntrinsicRegistry#registries`
   - src/ast/ast.rb:715 `AST::Locatable#matched_stdlib_def=`
-  - src/ast/ast.rb:1305 `AST#type=`
-  - src/ast/ast.rb:1343 `AST#type=`
   - src/ast/diagnostic_examples.rb:58 `DiagnosticExamples#all`
-- untyped instance variable: 3
+  - src/ast/parser.rb:1759 `Parser#parse_expression`
+  - src/ast/parser.rb:1962 `Parser#parse_suffixes`
+- untyped instance variable: 2
   - src/annotator/helpers/function_signature.rb:244 `FunctionSignature#heap_carry_return`
   - src/annotator/helpers/function_signature.rb:252 `FunctionSignature#heap_carry_return_vars`
-  - src/ast/type.rb:634 `Type#location`
 
 ### Param Unknown Expression Causes
 - unknown operation unresolved constant MIR::Node: 21
-  - src/mir/fsm_transform/emit.rb:345 [](0) MIR::Node
-  - src/mir/fsm_transform/emit.rb:348 [](0) MIR::Node
-  - src/mir/lowering/functions.rb:122 [](0) MIR::Node
-  - src/mir/lowering/functions.rb:123 [](0) MIR::Node
+  - src/mir/fsm_transform/emit.rb:364 [](0) MIR::Node
+  - src/mir/fsm_transform/emit.rb:367 [](0) MIR::Node
   - src/mir/lowering/functions.rb:128 [](0) MIR::Node
-  - src/mir/lowering/functions.rb:530 [](0) MIR::Node
-  - src/mir/lowering/functions.rb:541 [](0) MIR::Node
-  - src/mir/lowering/functions.rb:564 [](0) MIR::Node
+  - src/mir/lowering/functions.rb:129 [](0) MIR::Node
+  - src/mir/lowering/functions.rb:134 [](0) MIR::Node
+  - src/mir/lowering/functions.rb:565 [](0) MIR::Node
+  - src/mir/lowering/functions.rb:576 [](0) MIR::Node
+  - src/mir/lowering/functions.rb:599 [](0) MIR::Node
 - unknown operation unresolved constant AST::Param: 16
   - src/annotator/helpers/function_analysis.rb:70 [](0) AST::Param
   - src/annotator/helpers/function_signature.rb:31 [](0) AST::Param
@@ -1701,50 +1578,50 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/escape_analysis.rb:520 [](0) AST::Param
   - src/mir/escape_analysis.rb:533 [](0) AST::Param
 - unknown operation unresolved constant MIR::OwnershipOperandFact: 12
-  - src/mir/lowering/functions.rb:45 [](0) MIR::OwnershipOperandFact
-  - src/mir/lowering/functions.rb:62 [](0) MIR::OwnershipOperandFact
-  - src/mir/lowering/functions.rb:999 [](0) MIR::OwnershipOperandFact
-  - src/mir/lowering/functions.rb:1066 [](0) MIR::OwnershipOperandFact
-  - src/mir/lowering/functions.rb:1220 [](0) MIR::OwnershipOperandFact
-  - src/mir/lowering/variables.rb:1049 [](0) MIR::OwnershipOperandFact
-  - src/mir/mir_lowering.rb:1590 [](0) MIR::OwnershipOperandFact
-  - src/mir/mir_lowering.rb:1625 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/functions.rb:51 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/functions.rb:68 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/functions.rb:1035 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/functions.rb:1102 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/functions.rb:1256 [](0) MIR::OwnershipOperandFact
+  - src/mir/lowering/variables.rb:1057 [](0) MIR::OwnershipOperandFact
+  - src/mir/mir_lowering.rb:1655 [](0) MIR::OwnershipOperandFact
+  - src/mir/mir_lowering.rb:1690 [](0) MIR::OwnershipOperandFact
 - unknown operation SelfNode: 10
-  - src/annotator/annotator.rb:767 split(2) self
-  - src/annotator/annotator.rb:2357 resolve(2) self
-  - src/annotator/annotator.rb:2548 resolve(2) self
-  - src/annotator/annotator.rb:3307 resolve(2) self
+  - src/annotator/annotator.rb:838 split(2) self
+  - src/annotator/annotator.rb:2438 resolve(2) self
+  - src/annotator/annotator.rb:2630 resolve(2) self
+  - src/annotator/annotator.rb:3389 resolve(2) self
   - src/annotator/helpers/method_analysis.rb:90 resolve(2) self
   - src/annotator/helpers/reentrance.rb:129 split(2) self
   - src/annotator/helpers/reentrance.rb:385 split_mutual(3) self
-  - src/mir/lowering/concurrency.rb:549 transform(2) self
+  - src/mir/lowering/concurrency.rb:583 transform(2) self
+- unknown operation unresolved constant FsmStructureSource: 10
+  - src/mir/fsm_transform/emit.rb:284 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:294 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:299 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:301 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:312 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:321 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:326 [](0) FsmStructureSource
+  - src/mir/fsm_transform/emit.rb:342 [](0) FsmStructureSource
 - unknown operation unresolved constant MIR::Stmt: 9
   - src/mir/fsm_lowering.rb:46 [](0) MIR::Stmt
   - src/mir/fsm_lowering.rb:237 [](0) MIR::Stmt
-  - src/mir/lowering/concurrency.rb:59 [](0) MIR::Stmt
+  - src/mir/lowering/concurrency.rb:98 [](0) MIR::Stmt
   - src/mir/lowering/control_flow.rb:70 [](0) MIR::Stmt
-  - src/mir/lowering/variables.rb:607 [](0) MIR::Stmt
-  - src/mir/lowering/variables.rb:856 [](0) MIR::Stmt
-  - src/mir/mir_lowering.rb:522 [](0) MIR::Stmt
-  - src/mir/mir_lowering.rb:650 [](0) MIR::Stmt
-- unknown operation unresolved constant FsmStructureSource: 9
-  - src/mir/fsm_transform/emit.rb:280 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:285 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:287 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:298 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:307 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:312 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:323 [](0) FsmStructureSource
-  - src/mir/fsm_transform/emit.rb:338 [](0) FsmStructureSource
+  - src/mir/lowering/variables.rb:618 [](0) MIR::Stmt
+  - src/mir/lowering/variables.rb:864 [](0) MIR::Stmt
+  - src/mir/mir_lowering.rb:584 [](0) MIR::Stmt
+  - src/mir/mir_lowering.rb:710 [](0) MIR::Stmt
 - unknown expression with multiple unknown types: 8
-  - src/annotator/annotator.rb:2754 check_prefixed_int_range!(1) node.value.coerced_type || final_type
+  - src/annotator/annotator.rb:2836 check_prefixed_int_range!(1) node.value.coerced_type || final_type
   - src/annotator/helpers/capabilities.rb:645 []=(1) case when syn == :locked then :EXCLUSIVE when syn == :write_locked then :write_locked_read when syn == :versioned then :SNAPSHOT # Atomic bindings get a non-blocking ATOMIC capability. The #  ...
   - src/annotator/helpers/lock_helper.rb:423 error!(0) sel[:token] || node
   - src/annotator/helpers/lock_helper.rb:455 error!(0) anchor || @current_fn_node || @program_node
   - src/annotator/helpers/pipe_analysis.rb:1322 sharded_unsynced_entry?(0) node.symbol || lookup_scope_for(node.name)&.locals&.[](node.name)
   - src/mir/fsm_transform/suspend_resolvers.rb:35 resolve_next(susp_idx) susp_idx || (seg.index + 1)
-  - src/mir/lowering/variables.rb:1190 placement_for_node(0) root_receiver_node(node.name) || node.name
-  - src/mir/lowering/variables.rb:1288 placement_for_node(0) root_receiver_node(node.name) || node.name
+  - src/mir/lowering/variables.rb:1198 placement_for_node(0) root_receiver_node(node.name) || node.name
+  - src/mir/lowering/variables.rb:1296 placement_for_node(0) root_receiver_node(node.name) || node.name
 - unknown operation unresolved constant STD_LIB: 8
   - src/backends/pipeline_rewriter.rb:232 sig(0) STD_LIB
   - src/backends/pipeline_rewriter.rb:690 sig(0) STD_LIB
@@ -1754,28 +1631,29 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/backends/pipeline_rewriter.rb:715 sig(0) STD_LIB
   - src/backends/pipeline_rewriter.rb:721 sig(0) STD_LIB
   - src/backends/pipeline_rewriter.rb:722 sig(0) STD_LIB
-- unknown operation unresolved constant AST::Node: 7
-  - src/mir/local_binding_facts.rb:11 [](0) AST::Node
-  - src/mir/local_binding_facts.rb:12 [](0) AST::Node
-  - src/mir/local_binding_facts.rb:22 [](0) AST::Node
-  - src/mir/local_binding_facts.rb:23 [](0) AST::Node
-  - src/mir/lowering/functions.rb:503 [](0) AST::Node
-  - src/mir/lowering/functions.rb:879 [](0) AST::Node
-  - src/mir/lowering/functions.rb:890 [](0) AST::Node
-- unknown operation unresolved constant SymbolEntry: 6
-  - src/annotator/annotator.rb:5960 [](0) SymbolEntry
-  - src/annotator/annotator.rb:5962 [](0) SymbolEntry
-  - src/annotator/annotator.rb:6090 [](0) SymbolEntry
-  - src/annotator/annotator.rb:6102 [](0) SymbolEntry
-  - src/annotator/annotator.rb:6112 [](0) SymbolEntry
-  - src/annotator/annotator.rb:6130 [](0) SymbolEntry
-- unknown operation unresolved constant AST::Capability: 6
+- unknown operation unresolved constant AST::Capability: 7
+  - src/annotator/annotator.rb:129 [](0) AST::Capability
   - src/annotator/helpers/capabilities.rb:632 [](0) AST::Capability
   - src/annotator/helpers/lock_helper.rb:82 [](0) AST::Capability
   - src/annotator/helpers/lock_helper.rb:100 [](0) AST::Capability
   - src/annotator/helpers/lock_helper.rb:100 [](0) AST::Capability
   - src/annotator/helpers/lock_helper.rb:129 [](0) AST::Capability
   - src/annotator/helpers/lock_helper.rb:129 [](0) AST::Capability
+- unknown operation unresolved constant AST::Node: 7
+  - src/mir/local_binding_facts.rb:11 [](0) AST::Node
+  - src/mir/local_binding_facts.rb:12 [](0) AST::Node
+  - src/mir/local_binding_facts.rb:22 [](0) AST::Node
+  - src/mir/local_binding_facts.rb:23 [](0) AST::Node
+  - src/mir/lowering/functions.rb:538 [](0) AST::Node
+  - src/mir/lowering/functions.rb:913 [](0) AST::Node
+  - src/mir/lowering/functions.rb:924 [](0) AST::Node
+- unknown operation unresolved constant SymbolEntry: 6
+  - src/annotator/annotator.rb:6055 [](0) SymbolEntry
+  - src/annotator/annotator.rb:6057 [](0) SymbolEntry
+  - src/annotator/annotator.rb:6185 [](0) SymbolEntry
+  - src/annotator/annotator.rb:6197 [](0) SymbolEntry
+  - src/annotator/annotator.rb:6207 [](0) SymbolEntry
+  - src/annotator/annotator.rb:6225 [](0) SymbolEntry
 - unknown operation unresolved constant LifetimeSource: 6
   - src/annotator/helpers/function_context.rb:26 [](0) LifetimeSource
   - src/annotator/helpers/function_context.rb:34 [](0) LifetimeSource
@@ -1784,17 +1662,17 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/annotator/helpers/function_signature.rb:172 [](0) LifetimeSource
   - src/annotator/helpers/function_signature.rb:287 [](0) LifetimeSource
 - unknown operation unresolved constant MIR::Param: 6
-  - src/backends/pipeline_host.rb:4279 [](0) MIR::Param
-  - src/backends/pipeline_host.rb:4925 [](0) MIR::Param
-  - src/mir/lowering/functions.rb:280 [](0) MIR::Param
-  - src/mir/lowering/functions.rb:684 [](0) MIR::Param
-  - src/mir/lowering/functions.rb:695 [](0) MIR::Param
-  - src/mir/lowering/functions.rb:1987 [](0) MIR::Param
+  - src/backends/pipeline_host.rb:4365 [](0) MIR::Param
+  - src/backends/pipeline_host.rb:5008 [](0) MIR::Param
+  - src/mir/lowering/functions.rb:248 [](0) MIR::Param
+  - src/mir/lowering/functions.rb:718 [](0) MIR::Param
+  - src/mir/lowering/functions.rb:729 [](0) MIR::Param
+  - src/mir/lowering/functions.rb:2021 [](0) MIR::Param
 - unknown operation RegularExpressionNode: 4
   - src/annotator/helpers/fixable_helpers.rb:815 [](0) /\A\s*/
   - src/ast/diagnostic_examples.rb:187 [](0) /\A( *)/
   - src/lsp/diagnostics.rb:162 split(0) /(%\{[^}]+\})/
-  - src/tools/doctor.rb:443 split(0) /\t/
+  - src/tools/doctor.rb:452 split(0) /\t/
 - unknown operation unresolved constant Node: 4
   - src/mir/mir.rb:351 [](0) Node
   - src/mir/mir.rb:353 [](0) Node
@@ -1817,11 +1695,11 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/control_flow.rb:590 ==(0) MOVED
   - src/mir/control_flow.rb:705 []=(1) MOVED
 - unknown operation unresolved constant MIR::CatchReassign: 3
-  - src/mir/lowering/functions.rb:875 [](0) MIR::CatchReassign
-  - src/mir/lowering/functions.rb:878 [](0) MIR::CatchReassign
-  - src/mir/lowering/functions.rb:890 [](0) MIR::CatchReassign
+  - src/mir/lowering/functions.rb:909 [](0) MIR::CatchReassign
+  - src/mir/lowering/functions.rb:912 [](0) MIR::CatchReassign
+  - src/mir/lowering/functions.rb:924 [](0) MIR::CatchReassign
 - unknown operation unresolved constant Type: 2
-  - src/annotator/annotator.rb:162 [](0) Type
+  - src/annotator/annotator.rb:233 [](0) Type
   - src/annotator/helpers/generic_analysis.rb:72 [](0) Type
 - unknown operation unresolved constant T::Boolean: 2
   - src/annotator/helpers/effects.rb:1209 [](0) T::Boolean
@@ -1839,8 +1717,8 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/type.rb:1106 [](0) @sync
   - src/ast/type.rb:1111 [](0) @sync
 - unknown operation unresolved constant ALLOC_REF_DEF: 2
-  - src/backends/pipeline_host.rb:2998 stdlib_def=(0) ALLOC_REF_DEF
-  - src/backends/pipeline_host.rb:3114 stdlib_def=(0) ALLOC_REF_DEF
+  - src/backends/pipeline_host.rb:3089 stdlib_def=(0) ALLOC_REF_DEF
+  - src/backends/pipeline_host.rb:3203 stdlib_def=(0) ALLOC_REF_DEF
 - unknown operation unresolved constant MAYBE_MOVED: 2
   - src/mir/control_flow.rb:586 ==(0) MAYBE_MOVED
   - src/mir/control_flow.rb:587 ==(0) MAYBE_MOVED
@@ -1853,21 +1731,20 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - unknown operation unresolved constant MIR::Emittable: 2
   - src/mir/hoist.rb:860 [](0) MIR::Emittable
   - src/mir/mir_checker.rb:2420 [](0) MIR::Emittable
-- unknown instance variable @current_expected_type: 2
-  - src/mir/lowering/concurrency.rb:684 from_node(0) @current_expected_type
-  - src/mir/lowering/literals.rb:262 from_node(0) @current_expected_type
 - unknown operation unresolved constant MIR::Let: 2
   - src/mir/mir_checker.rb:1268 [](0) MIR::Let
   - src/mir/mir_checker.rb:1294 [](0) MIR::Let
 - unknown local variable node: 2
-  - src/mir/mir_lowering.rb:2138 placement_for_node(0) root || receiver || node
-  - src/mir/mir_lowering.rb:2140 placement_for_node(0) target_node || node
+  - src/mir/mir_lowering.rb:2203 placement_for_node(0) root || receiver || node
+  - src/mir/mir_lowering.rb:2205 placement_for_node(0) target_node || node
+- unknown operation unresolved constant HeldLockTypeEntry: 1
+  - src/annotator/annotator.rb:136 [](0) HeldLockTypeEntry
 - unknown operation unresolved constant Type::STRING_TYPE: 1
-  - src/annotator/annotator.rb:329 declare(2) Type::STRING_TYPE
+  - src/annotator/annotator.rb:400 declare(2) Type::STRING_TYPE
 - unknown operation unresolved constant OwnershipGraph::Edge: 1
-  - src/annotator/annotator.rb:3024 [](0) OwnershipGraph::Edge
+  - src/annotator/annotator.rb:3106 [](0) OwnershipGraph::Edge
 - unknown operation unresolved constant AST::Identifier: 1
-  - src/annotator/annotator.rb:6070 [](0) AST::Identifier
+  - src/annotator/annotator.rb:6165 [](0) AST::Identifier
 - unknown operation unresolved constant SUSPENDS: 1
   - src/annotator/helpers/effects.rb:140 ==(0) SUSPENDS
 - unknown operation unresolved constant SUSPENDS_LOOP: 1
@@ -1899,7 +1776,7 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - unknown instance variable @observable_terminal: 1
   - src/ast/type.rb:1338 [](0) @observable_terminal
 - unknown operation unresolved constant ALLOCATING_DEF: 1
-  - src/backends/pipeline_host.rb:2984 stdlib_def=(0) ALLOCATING_DEF
+  - src/backends/pipeline_host.rb:3075 stdlib_def=(0) ALLOCATING_DEF
 - unknown global variable $0: 1
   - src/backends/transpiler.rb:279 ==(0) $0
 - unknown instance variable @stdin: 1
@@ -1913,77 +1790,66 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - unknown local variable base_type: 1
   - src/mir/cleanup_classifier.rb:834 []=(1) Type.new(base_type).zig_type rescue base_type
 - unknown local variable name: 1
-  - src/mir/fsm_transform/liveness.rb:106 [](0) :"#{name}__type"
+  - src/mir/fsm_transform/liveness.rb:108 [](0) :"#{name}__type"
 - unknown operation unresolved constant FsmTransform::Segments::Segment: 1
   - src/mir/fsm_transform/recursive_splitter.rb:132 [](0) FsmTransform::Segments::Segment
 - unknown operation unresolved constant FiberCtxBuilder::CaptureSpec: 1
-  - src/mir/lowering/concurrency.rb:79 [](0) FiberCtxBuilder::CaptureSpec
+  - src/mir/lowering/concurrency.rb:118 [](0) FiberCtxBuilder::CaptureSpec
 - unknown operation unresolved constant MIR::ExecutionBoundaryFact: 1
-  - src/mir/lowering/concurrency.rb:181 [](0) MIR::ExecutionBoundaryFact
-- unknown instance variable @current_fn_zig_name: 1
-  - src/mir/lowering/control_flow.rb:917 ==(0) @current_fn_zig_name
-- unknown instance variable @current_fn_return_type: 1
-  - src/mir/lowering/control_flow.rb:1013 from_node(0) @current_fn_return_type
-- unknown instance variable @current_fn_return_payload_zig: 1
-  - src/mir/lowering/control_flow.rb:1035 ==(0) @current_fn_return_payload_zig
+  - src/mir/lowering/concurrency.rb:220 [](0) MIR::ExecutionBoundaryFact
 - unknown operation unresolved constant POOL_METHODS: 1
-  - src/mir/lowering/expressions.rb:1040 sig(0) POOL_METHODS
+  - src/mir/lowering/expressions.rb:1034 sig(0) POOL_METHODS
+- unknown operation unresolved constant MIR::FnDef: 1
+  - src/mir/lowering/functions.rb:214 [](0) MIR::FnDef
 - unknown operation unresolved constant AST::CatchClause: 1
-  - src/mir/lowering/functions.rb:509 [](0) AST::CatchClause
+  - src/mir/lowering/functions.rb:544 [](0) AST::CatchClause
 - unknown operation unresolved constant MIR::Orelse: 1
-  - src/mir/mir_lowering.rb:378 owned_or_destination?(3) MIR::Orelse
+  - src/mir/mir_lowering.rb:442 owned_or_destination?(3) MIR::Orelse
 - unknown operation unresolved constant MIR::TryCatch: 1
-  - src/mir/mir_lowering.rb:379 owned_or_destination?(3) MIR::TryCatch
+  - src/mir/mir_lowering.rb:443 owned_or_destination?(3) MIR::TryCatch
 - unknown operation unresolved constant MIR::OwnedStore: 1
-  - src/mir/mir_lowering.rb:1232 [](0) MIR::OwnedStore
+  - src/mir/mir_lowering.rb:1292 [](0) MIR::OwnedStore
 - unknown operation unresolved constant MIR::OwnedTransfer: 1
-  - src/mir/mir_lowering.rb:1240 [](0) MIR::OwnedTransfer
+  - src/mir/mir_lowering.rb:1300 [](0) MIR::OwnedTransfer
 - unknown operation unresolved constant BUILTIN_OPS: 1
-  - src/mir/mir_lowering.rb:2838 sig(0) BUILTIN_OPS
+  - src/mir/mir_lowering.rb:2898 sig(0) BUILTIN_OPS
 
 ### Return Unknown Expression Causes
 - unknown local variable value: 25
   - src/annotator/helpers/intrinsic_registry.rb:150 `IntrinsicRegistry#normalize_lifetime` value
-  - src/backends/pipeline_host.rb:630 `PipelineHost#borrowed_pipeline_value` value
+  - src/backends/pipeline_host.rb:742 `PipelineHost#borrowed_pipeline_value` value
   - src/mir/fsm_lowering.rb:212 `FsmLowering#coerce_fsm_result_value` value
   - src/mir/fsm_lowering.rb:212 `FsmLowering#coerce_fsm_result_value` value
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value` value
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value` value
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value` value
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value` value
-- unknown local variable node: 12
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value` value
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value` value
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value` value
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value` value
+- unknown local variable node: 11
   - src/ast/parser.rb:2551 `Parser#parse_lit` node
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` node
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` node
   - src/backends/pipeline_rewriter.rb:29 `PipelineRewriter#rewrite!` node
   - src/backends/pipeline_rewriter.rb:29 `PipelineRewriter#rewrite!` node
   - src/backends/pipeline_rewriter.rb:783 `PipelineRewriter#replace_named_placeholder` node
   - src/backends/pipeline_rewriter.rb:801 `PipelineRewriter#replace_placeholder` node
   - src/backends/string_concat_rewriter.rb:27 `StringConcatRewriter#rewrite_in_node!` node
+  - src/backends/string_concat_rewriter.rb:27 `StringConcatRewriter#rewrite_in_node!` node
+  - src/mir/hoist.rb:447 `MIRHoistLowering#with_pending` node
 - unknown local variable result: 9
   - src/ast/parser.rb:683 `Parser#parse_statement` result
-  - src/ast/parser.rb:3869 `Parser#parse_bg_body_stmt` result
-  - src/mir/fsm_transform/emit.rb:1091 `FsmTransform::Emit#build_segment_descriptor` result
+  - src/ast/parser.rb:3892 `Parser#parse_bg_body_stmt` result
+  - src/mir/fsm_transform/emit.rb:1110 `FsmTransform::Emit#build_segment_descriptor` result
   - src/mir/hoist.rb:401 `MIRHoistLowering#lower_scoped` result
-  - src/mir/lowering/control_flow.rb:526 `MIRLoweringControlFlow#lower_match` result
-  - src/mir/lowering/expressions.rb:1386 `MIRLoweringExpressions#wrap_indirect_field_hoists` result
-  - src/mir/lowering/variables.rb:666 `MIRLoweringVariables#lower_bind_expr` result
-  - src/mir/lowering/variables.rb:666 `MIRLoweringVariables#lower_bind_expr` result
+  - src/mir/lowering/control_flow.rb:513 `MIRLoweringControlFlow#lower_match` result
+  - src/mir/lowering/expressions.rb:1380 `MIRLoweringExpressions#wrap_indirect_field_hoists` result
+  - src/mir/lowering/variables.rb:677 `MIRLoweringVariables#lower_bind_expr` result
+  - src/mir/lowering/variables.rb:677 `MIRLoweringVariables#lower_bind_expr` result
 - unknown local variable mir: 7
   - src/mir/fsm_lowering.rb:361 `FsmLowering#wrap_step_as_stmt` mir
-  - src/mir/lowering/functions.rb:1793 `MIRLoweringFunctions#lower_extern_arg` mir
-  - src/mir/mir_lowering.rb:344 `MIRLowering#place_value_for_destination` mir
-  - src/mir/mir_lowering.rb:576 `MIRLowering#place_owned_branch_value_for_destination` mir
-  - src/mir/mir_lowering.rb:802 `MIRLowering#apply_lowered_coercion` mir
-  - src/mir/mir_lowering.rb:802 `MIRLowering#apply_lowered_coercion` mir
-  - src/mir/mir_lowering.rb:802 `MIRLowering#apply_lowered_coercion` mir
-- unknown local variable expr: 6
-  - src/ast/parser.rb:683 `Parser#parse_statement` expr
-  - src/ast/parser.rb:3869 `Parser#parse_bg_body_stmt` expr
-  - src/mir/hoist.rb:464 `MIRHoistLowering#hoist_lazy_alloc_result` expr
-  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
-  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
-  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
+  - src/mir/lowering/functions.rb:1827 `MIRLoweringFunctions#lower_extern_arg` mir
+  - src/mir/mir_lowering.rb:408 `MIRLowering#place_value_for_destination` mir
+  - src/mir/mir_lowering.rb:637 `MIRLowering#place_owned_branch_value_for_destination` mir
+  - src/mir/mir_lowering.rb:862 `MIRLowering#apply_lowered_coercion` mir
+  - src/mir/mir_lowering.rb:862 `MIRLowering#apply_lowered_coercion` mir
+  - src/mir/mir_lowering.rb:862 `MIRLowering#apply_lowered_coercion` mir
 - unknown forwarded return rewrite!: 6
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` node.value = rewrite!(node.value)
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` node.value = rewrite!(node.value)
@@ -1992,23 +1858,18 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` node.right = rewrite!(node.right)
   - src/backends/pipeline_rewriter.rb:52 `PipelineRewriter#rewrite_children!` node.result = rewrite!(node.result)
 - unknown local variable left: 6
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-  - src/mir/lowering/expressions.rb:596 `MIRLoweringExpressions#lower_or_rescue` left
-- unknown local variable new_id: 5
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_id
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_id
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_id
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_id
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_id
-- unknown expression with multiple unknown types: 4
-  - src/annotator/helpers/function_analysis.rb:1004 `FunctionAnalysis#find_matching_intrinsic` matched && IntrinsicRegistry.fs(matched)
-  - src/ast/ast.rb:654 `AST#_expr_each_concurrent_capture` yield node.capture_analysis
-  - src/ast/type.rb:1116 `Type#generic_args` @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
-  - src/mir/lowering/expressions.rb:685 `MIRLoweringExpressions#or_fallback_expected_type` @current_expected_type || node.full_type!(context: "OR fallback expected type")
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+  - src/mir/lowering/expressions.rb:590 `MIRLoweringExpressions#lower_or_rescue` left
+- unknown local variable expr: 5
+  - src/ast/parser.rb:683 `Parser#parse_statement` expr
+  - src/ast/parser.rb:3892 `Parser#parse_bg_body_stmt` expr
+  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
+  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
+  - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed` expr
 - unknown operation InstanceVariableOrWriteNode: 4
   - src/annotator/helpers/intrinsic_registry.rb:215 `IntrinsicRegistry#registries` @registries ||= %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS INDEX_OPS BUILTIN_OPS].each_with_object({}) do |c, h| h[c] = Object.const_get(c) if `Object.const_de` ...
   - src/ast/diagnostic_examples.rb:58 `DiagnosticExamples#all` @all ||= load!
@@ -2016,8 +1877,8 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/type.rb:1355 `Type#tense_type` @tense_type_obj ||= T.let(Type.new(@tense_type_raw || :Void), T.nilable(Type))
 - unknown local variable call: 4
   - src/backends/pipeline_rewriter.rb:100 `PipelineRewriter#rewrite_pipeline` call
-  - src/mir/lowering/concurrency.rb:923 `MIRLoweringConcurrency#lower_next_expr` call
-  - src/mir/lowering/concurrency.rb:923 `MIRLoweringConcurrency#lower_next_expr` call
+  - src/mir/lowering/concurrency.rb:944 `MIRLoweringConcurrency#lower_next_expr` call
+  - src/mir/lowering/concurrency.rb:944 `MIRLoweringConcurrency#lower_next_expr` call
   - src/mir/lowering/expressions.rb:430 `MIRLoweringExpressions#lower_smooth` call
 - unknown forwarded return rewrite_in_node!: 4
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` node.value = rewrite_in_node!(node.value)
@@ -2025,15 +1886,19 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` node.value = rewrite_in_node!(node.value)
   - src/backends/string_concat_rewriter.rb:45 `StringConcatRewriter#rewrite_children!` node.right = rewrite_in_node!(node.right)
 - unknown local variable replacement: 4
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` replacement
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` replacement
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` replacement
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` replacement
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` replacement
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` replacement
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` replacement
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` replacement
 - unknown local variable init: 4
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` init
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` init
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` init
   - src/mir/lowering/variables.rb:210 `MIRLoweringVariables#ensure_cleanup_binding_owns_string_init` init
+- unknown expression with multiple unknown types: 3
+  - src/annotator/helpers/function_analysis.rb:1003 `FunctionAnalysis#find_matching_intrinsic` matched && IntrinsicRegistry.fs(matched)
+  - src/ast/ast.rb:654 `AST#_expr_each_concurrent_capture` yield node.capture_analysis
+  - src/ast/type.rb:1116 `Type#generic_args` @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
 - unknown local variable out: 3
   - src/mir/lowering/expressions.rb:430 `MIRLoweringExpressions#lower_smooth` out
   - src/mir/thunk_transform/emit.rb:186 `ThunkTransform::Emit#qualify_params` out
@@ -2048,37 +1913,34 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/backends/pipeline_rewriter.rb:783 `PipelineRewriter#replace_named_placeholder` new_node
   - src/backends/pipeline_rewriter.rb:801 `PipelineRewriter#replace_placeholder` new_node
 - unknown local variable block: 2
-  - src/mir/lowering/concurrency.rb:923 `MIRLoweringConcurrency#lower_next_expr` block
+  - src/mir/lowering/concurrency.rb:944 `MIRLoweringConcurrency#lower_next_expr` block
   - src/mir/lowering/literals.rb:52 `MIRLoweringLiterals#lower_list_lit` block
 - unknown local variable loop_stmt: 2
-  - src/mir/lowering/control_flow.rb:264 `MIRLoweringControlFlow#lower_for_each` loop_stmt
-  - src/mir/lowering/control_flow.rb:330 `MIRLoweringControlFlow#for_each_loop_stmt` loop_stmt
+  - src/mir/lowering/control_flow.rb:258 `MIRLoweringControlFlow#lower_for_each` loop_stmt
+  - src/mir/lowering/control_flow.rb:320 `MIRLoweringControlFlow#for_each_loop_stmt` loop_stmt
 - unknown local variable cmp_node: 2
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op` cmp_node
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op` cmp_node
 - unknown local variable raw_type: 2
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` raw_type
-  - src/mir/lowering/expressions.rb:1118 `MIRLoweringExpressions#substitute_mir_type` raw_type
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` raw_type
+  - src/mir/lowering/expressions.rb:1112 `MIRLoweringExpressions#substitute_mir_type` raw_type
 - unknown local variable val: 2
-  - src/mir/lowering/expressions.rb:1191 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value` val
+  - src/mir/lowering/expressions.rb:1185 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value` val
   - src/mir/ownership_graph.rb:37 `OwnershipGraph#full_type=` self.type_info = val
 - unknown local variable intercept: 2
-  - src/mir/lowering/functions.rb:1272 `MIRLoweringFunctions#lower_func_call` intercept
-  - src/mir/lowering/functions.rb:1332 `MIRLoweringFunctions#lower_method_call` intercept
-- unknown local variable next_nodes: 2
-  - src/mir/lowering/variables.rb:417 `MIRLoweringVariables#build_var_decl_nodes` next_nodes
-  - src/mir/lowering/variables.rb:417 `MIRLoweringVariables#build_var_decl_nodes` next_nodes
+  - src/mir/lowering/functions.rb:1306 `MIRLoweringFunctions#lower_func_call` intercept
+  - src/mir/lowering/functions.rb:1366 `MIRLoweringFunctions#lower_method_call` intercept
 - unknown operation ForwardingSuperNode: 2
   - src/mir/mir.rb:1044 MIR#[]= super
   - src/mir/mir.rb:3291 MIR#[]= super
 - unknown local variable payload: 1
-  - src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload` payload
+  - src/annotator/annotator.rb:1533 `SemanticAnnotator#normalized_match_payload` payload
 - unknown local variable target_type: 1
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` node.value.coerced_type = target_type
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` node.value.coerced_type = target_type
 - unknown local variable curr: 1
-  - src/annotator/annotator.rb:5387 `SemanticAnnotator#get_root_object` curr
+  - src/annotator/annotator.rb:5460 `SemanticAnnotator#get_root_object` curr
 - unknown local variable name: 1
-  - src/annotator/annotator.rb:6426 `SemanticAnnotator#find_mutual_max_depth_callee` name
+  - src/annotator/annotator.rb:6521 `SemanticAnnotator#find_mutual_max_depth_callee` name
 - unknown local variable actual_binding: 1
   - src/annotator/helpers/generic_analysis.rb:319 `GenericAnalysis#extract_type_bindings!` subst[p_res] = actual_binding
 - unknown struct/array/collection value Hash: 1
@@ -2099,36 +1961,8 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/ast/scope.rb:296 `ScopeHelper#lookup_type_schema` schema
 - unknown forwarded return capacity: 1
   - src/ast/type.rb:1456 `Type#stream_capacity` optional_stream_shape_type&.capacity || tense_type.capacity
-- unknown local variable new_call: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_call
-- unknown local variable new_mc: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_mc
-- unknown local variable new_bin: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_bin
-- unknown local variable new_gi: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_gi
-- unknown local variable new_gf: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_gf
-- unknown local variable new_ia: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_ia
-- unknown local variable new_bind: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_bind
-- unknown local variable new_assign: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_assign
-- unknown local variable new_uo: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_uo
-- unknown local variable new_with: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_with
-- unknown local variable new_sl: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_sl
-- unknown local variable new_hl: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_hl
-- unknown local variable new_assert: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_assert
-- unknown local variable new_if: 1
-  - src/backends/pipeline_host.rb:303 `PipelineHost#substitute_placeholders` new_if
 - unknown local variable expr_mir: 1
-  - src/backends/pipeline_host.rb:2725 `PipelineHost#numeric_fold_expr_typed` expr_mir
+  - src/backends/pipeline_host.rb:2816 `PipelineHost#numeric_fold_expr_typed` expr_mir
 - unknown local variable op: 1
   - src/backends/pipeline_rewriter.rb:100 `PipelineRewriter#rewrite_pipeline` op
 - unknown local variable wrapper: 1
@@ -2144,29 +1978,27 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
 - unknown local variable current: 1
   - src/mir/escape_analysis.rb:475 `EscapeAnalysis#unwrap_value` current
 - unknown local variable tail: 1
-  - src/mir/fsm_transform/emit.rb:392 `FsmTransform::Emit#build_dispatch_tail` tail
+  - src/mir/fsm_transform/emit.rb:411 `FsmTransform::Emit#build_dispatch_tail` tail
 - unknown local variable pivot_entry: 1
   - src/mir/fsm_transform/recursive_splitter.rb:202 `FsmTransform::RecursiveSplitter#emit_stmts` pivot_entry
 - unknown local variable stream_yield: 1
-  - src/mir/lowering/concurrency.rb:837 `MIRLoweringConcurrency#lower_yield` stream_yield
+  - src/mir/lowering/concurrency.rb:858 `MIRLoweringConcurrency#lower_yield` stream_yield
 - unknown local variable iz: 1
-  - src/mir/lowering/concurrency.rb:923 `MIRLoweringConcurrency#lower_next_expr` iz
+  - src/mir/lowering/concurrency.rb:944 `MIRLoweringConcurrency#lower_next_expr` iz
 - unknown local variable cond: 1
   - src/mir/lowering/control_flow.rb:94 `MIRLoweringControlFlow#loop_condition_expr` cond
 - unknown local variable lowered: 1
   - src/mir/lowering/control_flow.rb:110 `MIRLoweringControlFlow#lower_control_condition` lowered
 - unknown local variable success: 1
-  - src/mir/lowering/expressions.rb:685 `MIRLoweringExpressions#or_fallback_expected_type` success
+  - src/mir/lowering/expressions.rb:679 `MIRLoweringExpressions#or_fallback_expected_type` success
 - unknown local variable eu_success: 1
-  - src/mir/lowering/expressions.rb:685 `MIRLoweringExpressions#or_fallback_expected_type` eu_success
-- unknown forwarded return direct_index_get: 1
-  - src/mir/lowering/expressions.rb:1069 `MIRLoweringExpressions#lower_direct_or_builtin_index_get` direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
+  - src/mir/lowering/expressions.rb:679 `MIRLoweringExpressions#or_fallback_expected_type` eu_success
 - unknown local variable items: 1
-  - src/mir/lowering/functions.rb:149 `MIRLoweringFunctions#lower_extern_struct` items
+  - src/mir/lowering/functions.rb:180 `MIRLoweringFunctions#lower_extern_struct` items
 - unknown local variable boundary_arg: 1
-  - src/mir/lowering/functions.rb:1168 `MIRLoweringFunctions#lower_call_arg_from_facts` boundary_arg
+  - src/mir/lowering/functions.rb:1204 `MIRLoweringFunctions#lower_call_arg_from_facts` boundary_arg
 - unknown local variable len_expr: 1
-  - src/mir/lowering/functions.rb:1526 `MIRLoweringFunctions#lower_intrinsic` len_expr
+  - src/mir/lowering/functions.rb:1560 `MIRLoweringFunctions#lower_intrinsic` len_expr
 - unknown local variable inner: 1
   - src/mir/lowering/literals.rb:167 `MIRLoweringLiterals#lower_hash_lit` inner
 - unknown local variable wrapped: 1
@@ -2175,342 +2007,339 @@ Actionable by more nil-kill work: PropagationGap (and the policy half of WeakEvi
   - src/mir/lowering/variables.rb:118 `MIRLoweringVariables#compose_capability_wrap` inner_mir
 - unknown local variable nodes: 1
   - src/mir/lowering/variables.rb:142 `MIRLoweringVariables#lower_var_decl` nodes
+- unknown local variable next_nodes: 1
+  - src/mir/lowering/variables.rb:416 `MIRLoweringVariables#build_var_decl_nodes` next_nodes
 - unknown local variable set: 1
-  - src/mir/lowering/variables.rb:1211 `MIRLoweringVariables#lower_auto_lock_assignment` set
+  - src/mir/lowering/variables.rb:1219 `MIRLoweringVariables#lower_auto_lock_assignment` set
 - unknown forwarded return fs: 1
   - src/mir/mir.rb:3479 `MIR::StdlibDefFsCoercion#stdlib_def=` super(IntrinsicRegistry.fs(v))
 - unknown local variable out_block: 1
-  - src/mir/mir_lowering.rb:480 `MIRLowering#place_owned_try_catch_for_destination` out_block
+  - src/mir/mir_lowering.rb:544 `MIRLowering#place_owned_try_catch_for_destination` out_block
 - unknown local variable placed: 1
-  - src/mir/mir_lowering.rb:589 `MIRLowering#place_or_branch_value_for_destination` placed
+  - src/mir/mir_lowering.rb:650 `MIRLowering#place_or_branch_value_for_destination` placed
 - unknown local variable root: 1
-  - src/mir/mir_lowering.rb:2147 `MIRLowering#root_receiver_node` root
+  - src/mir/mir_lowering.rb:2212 `MIRLowering#root_receiver_node` root
 - unknown local variable generic_fn: 1
-  - src/mir/mir_lowering.rb:2303 `MIRLowering#lower_union_def` generic_fn
+  - src/mir/mir_lowering.rb:2368 `MIRLowering#lower_union_def` generic_fn
 - unknown local variable union_node: 1
-  - src/mir/mir_lowering.rb:2303 `MIRLowering#lower_union_def` union_node
+  - src/mir/mir_lowering.rb:2368 `MIRLowering#lower_union_def` union_node
 - unknown local variable raw: 1
-  - src/mir/mir_lowering.rb:2513 `MIRLowering#lower_require` raw
+  - src/mir/mir_lowering.rb:2578 `MIRLowering#lower_require` raw
 - unknown local variable mir_node: 1
-  - src/mir/mir_lowering.rb:2926 `MIRLowering#strip_try` mir_node
+  - src/mir/mir_lowering.rb:2986 `MIRLowering#strip_try` mir_node
 - unknown local variable t: 1
-  - src/mir/mir_lowering.rb:2991 `MIRLowering#bare_zig_type` t
+  - src/mir/mir_lowering.rb:3111 `MIRLowering#bare_zig_type` t
 
 ## Nilability Pressure By Root Callsite
 - pressure: how many review actions are attributed to the same source location
 - root callsite: the caller/source location where nil entered one or more typed slots
-- src/mir/mir.rb:531 priority 10.70; affects `T.nilable` in 4 signature slot(s), 22448 observed call(s)
+- src/mir/mir.rb:531 priority 10.71; affects `T.nilable` in 4 signature slot(s), 22611 observed call(s)
   - src/mir/mir.rb:531 alloc (candidate Symbol)
   - src/mir/mir.rb:531 key_alloc
   - src/mir/mir.rb:531 val_alloc (candidate Symbol)
   - src/mir/mir.rb:531 shard_alloc
-- src/ast/schemas.rb:52 priority 9.97; affects `T.nilable` in 3 signature slot(s), 56927 observed call(s)
-  - src/ast/schemas.rb:52 type_params
-  - src/ast/schemas.rb:52 extern_module (candidate String; default "")
-  - src/ast/schemas.rb:52 as_type (candidate String; default "")
-- src/backends/pipeline_generator.rb:28 priority 9.45; affects `T.nilable` in 6 signature slot(s), 720 observed call(s)
-  - src/backends/pipeline_generator.rb:28 acc
-  - src/backends/pipeline_generator.rb:28 soa
+- src/backends/pipeline_generator.rb:28 priority 10.14; affects `T.nilable` in 5 signature slot(s), 3422 observed call(s)
+  - src/backends/pipeline_generator.rb:28 acc (candidate String; default "")
   - src/backends/pipeline_generator.rb:28 shard_map
   - src/backends/pipeline_generator.rb:28 shard_idx
   - src/backends/pipeline_generator.rb:28 shard_key
-- src/mir/mir.rb:3448 priority 8.80; affects `T.nilable` in 4 signature slot(s), 2514 observed call(s)
+  - src/backends/pipeline_generator.rb:28 shard_hash
+- src/ast/schemas.rb:52 priority 9.98; affects `T.nilable` in 3 signature slot(s), 57809 observed call(s)
+  - src/ast/schemas.rb:52 type_params
+  - src/ast/schemas.rb:52 extern_module (candidate String; default "")
+  - src/ast/schemas.rb:52 as_type (candidate String; default "")
+- src/ast/symbol_entry.rb:312 priority 9.51; affects `T.nilable` in 2 signature slot(s), 531816 observed call(s)
+  - src/ast/symbol_entry.rb:312 reg
+  - src/ast/symbol_entry.rb:312 mutable (candidate T.any(FalseClass, Lexer::Token, TrueClass))
+- src/ast/scope.rb:25 priority 9.51; affects `T.nilable` in 2 signature slot(s), 531773 observed call(s)
+  - src/ast/scope.rb:25 reg
+  - src/ast/scope.rb:25 is_mutable (candidate T.any(FalseClass, Lexer::Token, TrueClass))
+- src/mir/mir.rb:3448 priority 8.78; affects `T.nilable` in 4 signature slot(s), 2466 observed call(s)
   - src/mir/mir.rb:3448 shard_idx (candidate MIR::Ident)
   - src/mir/mir.rb:3448 shard_key (candidate MIR::Ident)
   - src/mir/mir.rb:3448 key_zig (candidate String; default "")
   - src/mir/mir.rb:3448 val_zig (candidate String; default "")
-- src/annotator/helpers/function_signature.rb:120 priority 8.46; affects `T.nilable` in 3 signature slot(s), 7678 observed call(s)
+- src/annotator/helpers/function_signature.rb:120 priority 8.46; affects `T.nilable` in 3 signature slot(s), 7688 observed call(s)
   - src/annotator/helpers/function_signature.rb:120 borrows (candidate T.any(Array, Symbol))
   - src/annotator/helpers/function_signature.rb:120 can_fail (candidate T::Boolean)
   - src/annotator/helpers/function_signature.rb:120 return_alloc
-- src/mir/mir.rb:3464 priority 8.37; affects `T.nilable` in 4 signature slot(s), 1530 observed call(s)
+- src/mir/mir.rb:3464 priority 8.36; affects `T.nilable` in 4 signature slot(s), 1504 observed call(s)
   - src/mir/mir.rb:3464 shard_idx
   - src/mir/mir.rb:3464 shard_key
   - src/mir/mir.rb:3464 key_zig (candidate String; default "")
   - src/mir/mir.rb:3464 val_zig (candidate String; default "")
-- src/mir/mir.rb:3274 priority 7.80; affects `T.nilable` in 2 signature slot(s), 32689 observed call(s)
+- src/mir/mir.rb:3274 priority 7.80; affects `T.nilable` in 2 signature slot(s), 32835 observed call(s)
   - src/mir/mir.rb:3274 stdlib_def
   - src/mir/mir.rb:3274 allocs (candidate T.any(Hash, MIR::InlineAllocMetadata))
-- src/mir/mir_lowering.rb:880 priority 7.63; affects `T.nilable` in 2 signature slot(s), 24776 observed call(s)
-  - src/mir/mir_lowering.rb:880 line (candidate Integer)
-  - src/mir/mir_lowering.rb:880 col (candidate Integer)
-- src/mir/control_flow.rb:123 priority 7.62; affects `T.nilable` in 2 signature slot(s), 24638 observed call(s)
+- src/mir/control_flow.rb:123 priority 7.63; affects `T.nilable` in 2 signature slot(s), 24696 observed call(s)
   - src/mir/control_flow.rb:123 break_target (candidate BasicBlock)
   - src/mir/control_flow.rb:123 continue_target (candidate BasicBlock)
-- src/mir/mir_lowering.rb:1210 priority 7.33; affects `T.nilable` in 1 signature slot(s), 2160698 observed call(s)
-  - src/mir/mir_lowering.rb:1210 type_info (candidate String; default "")
-- src/mir/mir_lowering.rb:1268 priority 7.33; affects `T.nilable` in 1 signature slot(s), 2160698 observed call(s)
-  - src/mir/mir_lowering.rb:1268 type_info (candidate String; default "")
-- src/tools/doctor.rb:33 priority 7.01; affects `T.nilable` in 5 signature slot(s), 135 observed call(s)
-  - src/tools/doctor.rb:33 profile_dir (candidate String; default "")
-  - src/tools/doctor.rb:33 focus (candidate Regexp)
-  - src/tools/doctor.rb:33 ignore (candidate Regexp)
-  - src/tools/doctor.rb:33 peek (candidate Regexp)
-  - src/tools/doctor.rb:33 diff (candidate String; default "")
-- src/mir/hoist.rb:521 priority 6.77; affects `T.nilable` in 1 signature slot(s), 582761 observed call(s)
+- src/mir/mir_lowering.rb:940 priority 7.62; affects `T.nilable` in 2 signature slot(s), 24586 observed call(s)
+  - src/mir/mir_lowering.rb:940 line (candidate Integer)
+  - src/mir/mir_lowering.rb:940 col (candidate Integer)
+- src/mir/mir_lowering.rb:1270 priority 7.36; affects `T.nilable` in 1 signature slot(s), 2276549 observed call(s)
+  - src/mir/mir_lowering.rb:1270 type_info (candidate String; default "")
+- src/mir/mir_lowering.rb:1328 priority 7.36; affects `T.nilable` in 1 signature slot(s), 2276549 observed call(s)
+  - src/mir/mir_lowering.rb:1328 type_info (candidate String; default "")
+- src/mir/hoist.rb:521 priority 6.79; affects `T.nilable` in 1 signature slot(s), 618038 observed call(s)
   - src/mir/hoist.rb:521 value
-- src/mir/hoist.rb:533 priority 6.77; affects `T.nilable` in 1 signature slot(s), 582761 observed call(s)
+- src/mir/hoist.rb:533 priority 6.79; affects `T.nilable` in 1 signature slot(s), 618038 observed call(s)
   - src/mir/hoist.rb:533 value
-- src/ast/symbol_entry.rb:312 priority 6.72; affects `T.nilable` in 1 signature slot(s), 524021 observed call(s)
-  - src/ast/symbol_entry.rb:312 reg
-- src/ast/scope.rb:25 priority 6.72; affects `T.nilable` in 1 signature slot(s), 524003 observed call(s)
-  - src/ast/scope.rb:25 reg
-- src/mir/mir.rb:2626 priority 6.62; affects `T.nilable` in 2 signature slot(s), 4808 observed call(s)
+- src/mir/mir.rb:2626 priority 6.62; affects `T.nilable` in 2 signature slot(s), 4826 observed call(s)
   - src/mir/mir.rb:2626 callable_contract (candidate MIR::CallableContract)
   - src/mir/mir.rb:2626 owned_result_alloc (candidate Symbol)
-- src/mir/mir_lowering.rb:2129 priority 6.46; affects `T.nilable` in 2 signature slot(s), 3721 observed call(s)
-  - src/mir/mir_lowering.rb:2129 target_node (candidate T.any(AST::GetField, AST::Identifier))
-  - src/mir/mir_lowering.rb:2129 node (candidate T.any(AST::Assignment, AST::FuncCall, AST::MethodCall))
-- src/annotator/helpers/auto_inference.rb:25 priority 6.32; affects `T.nilable` in 3 signature slot(s), 446 observed call(s)
+- src/mir/mir_lowering.rb:2194 priority 6.47; affects `T.nilable` in 2 signature slot(s), 3765 observed call(s)
+  - src/mir/mir_lowering.rb:2194 target_node (candidate T.any(AST::GetField, AST::Identifier))
+  - src/mir/mir_lowering.rb:2194 node (candidate T.any(AST::Assignment, AST::FuncCall, AST::MethodCall))
+- src/annotator/helpers/auto_inference.rb:25 priority 6.40; affects `T.nilable` in 3 signature slot(s), 492 observed call(s)
   - src/annotator/helpers/auto_inference.rb:25 fn_name (candidate String; default "")
   - src/annotator/helpers/auto_inference.rb:25 index (candidate Integer)
   - src/annotator/helpers/auto_inference.rb:25 decl_id (candidate Integer)
-- src/mir/lowering/control_flow.rb:163 priority 6.08; affects `T.nilable` in 2 signature slot(s), 1977 observed call(s)
+- src/mir/lowering/control_flow.rb:163 priority 6.08; affects `T.nilable` in 2 signature slot(s), 1986 observed call(s)
   - src/mir/lowering/control_flow.rb:163 mark_per_iter (candidate T::Boolean)
   - src/mir/lowering/control_flow.rb:163 tight (candidate T::Boolean)
-- src/annotator/annotator.rb:279 priority 5.96; affects `T.nilable` in 1 signature slot(s), 91266 observed call(s)
-  - src/annotator/annotator.rb:279 node
-- src/annotator/helpers/intrinsic_registry.rb:150 priority 5.80; affects `T.nilable` in 1 signature slot(s), 62376 observed call(s)
+- src/annotator/annotator.rb:350 priority 5.96; affects `T.nilable` in 1 signature slot(s), 91518 observed call(s)
+  - src/annotator/annotator.rb:350 node
+- src/annotator/helpers/intrinsic_registry.rb:150 priority 5.79; affects `T.nilable` in 1 signature slot(s), 61122 observed call(s)
   - src/annotator/helpers/intrinsic_registry.rb:150 value (candidate String; default "")
-- src/mir/pre_mir_type_check.rb:66 priority 5.68; affects `T.nilable` in 1 signature slot(s), 47817 observed call(s)
-  - src/mir/pre_mir_type_check.rb:66 node
-- src/tools/lint_fix_rewriter.rb:199 priority 5.62; affects `T.nilable` in 1 signature slot(s), 42132 observed call(s)
-  - src/tools/lint_fix_rewriter.rb:199 n
-- src/annotator/helpers/function_signature.rb:164 priority 5.57; affects `T.nilable` in 1 signature slot(s), 37464 observed call(s)
+- src/mir/pre_mir_type_check.rb:71 priority 5.68; affects `T.nilable` in 1 signature slot(s), 48017 observed call(s)
+  - src/mir/pre_mir_type_check.rb:71 node
+- src/tools/lint_fix_rewriter.rb:213 priority 5.62; affects `T.nilable` in 1 signature slot(s), 42132 observed call(s)
+  - src/tools/lint_fix_rewriter.rb:213 n
+- src/annotator/helpers/function_signature.rb:164 priority 5.59; affects `T.nilable` in 1 signature slot(s), 38684 observed call(s)
   - src/annotator/helpers/function_signature.rb:164 return_lifetime (candidate T.any(Array, String, Symbol))
-- src/annotator/helpers/function_signature.rb:26 priority 5.57; affects `T.nilable` in 1 signature slot(s), 37464 observed call(s)
+- src/annotator/helpers/function_signature.rb:26 priority 5.59; affects `T.nilable` in 1 signature slot(s), 38684 observed call(s)
   - src/annotator/helpers/function_signature.rb:26 val (candidate T.any(Array, String, Symbol))
-- src/annotator/helpers/function_signature.rb:288 priority 5.57; affects `T.nilable` in 1 signature slot(s), 37464 observed call(s)
+- src/annotator/helpers/function_signature.rb:288 priority 5.59; affects `T.nilable` in 1 signature slot(s), 38684 observed call(s)
   - src/annotator/helpers/function_signature.rb:288 val (candidate T.any(Array, String, Symbol))
-- src/mir/mir_lowering.rb:2997 priority 5.53; affects `T.nilable` in 2 signature slot(s), 815 observed call(s)
-  - src/mir/mir_lowering.rb:2997 ast_node
-  - src/mir/mir_lowering.rb:2997 sink_type (candidate Type)
-- src/mir/hoist.rb:203 priority 5.52; affects `T.nilable` in 1 signature slot(s), 33292 observed call(s)
+- src/mir/mir_lowering.rb:3117 priority 5.52; affects `T.nilable` in 2 signature slot(s), 805 observed call(s)
+  - src/mir/mir_lowering.rb:3117 ast_node
+  - src/mir/mir_lowering.rb:3117 sink_type (candidate Type)
+- src/mir/hoist.rb:203 priority 5.52; affects `T.nilable` in 1 signature slot(s), 33352 observed call(s)
   - src/mir/hoist.rb:203 node
-- src/mir/hoist.rb:226 priority 5.52; affects `T.nilable` in 1 signature slot(s), 33292 observed call(s)
+- src/mir/hoist.rb:226 priority 5.52; affects `T.nilable` in 1 signature slot(s), 33352 observed call(s)
   - src/mir/hoist.rb:226 child
-- src/annotator/helpers/intrinsic_registry.rb:158 priority 5.50; affects `T.nilable` in 1 signature slot(s), 31654 observed call(s)
+- src/annotator/helpers/intrinsic_registry.rb:158 priority 5.49; affects `T.nilable` in 1 signature slot(s), 30724 observed call(s)
   - src/annotator/helpers/intrinsic_registry.rb:158 spec (candidate T.any(Array, Symbol))
-- src/tools/predicate_rewriter.rb:113 priority 5.48; affects `T.nilable` in 1 signature slot(s), 29998 observed call(s)
-  - src/tools/predicate_rewriter.rb:113 n
+- src/ast/ast.rb:769 priority 5.48; affects `T.nilable` in 1 signature slot(s), 30007 observed call(s)
+  - src/ast/ast.rb:769 val (candidate String; default "")
+- src/tools/predicate_rewriter.rb:118 priority 5.48; affects `T.nilable` in 1 signature slot(s), 29998 observed call(s)
+  - src/tools/predicate_rewriter.rb:118 n
 - src/tools/method_rewriter.rb:140 priority 5.48; affects `T.nilable` in 1 signature slot(s), 29886 observed call(s)
   - src/tools/method_rewriter.rb:140 node
-- src/annotator/helpers/intrinsic_registry.rb:105 priority 5.47; affects `T.nilable` in 1 signature slot(s), 29770 observed call(s)
-  - src/annotator/helpers/intrinsic_registry.rb:105 v (candidate T.any(Hash, Symbol))
-- src/tools/predicate_rewriter.rb:98 priority 5.47; affects `T.nilable` in 1 signature slot(s), 29670 observed call(s)
-  - src/tools/predicate_rewriter.rb:98 node
-- src/ast/ast.rb:769 priority 5.47; affects `T.nilable` in 1 signature slot(s), 29368 observed call(s)
-  - src/ast/ast.rb:769 val (candidate String; default "")
-- src/ast/type.rb:1822 priority 5.46; affects `T.nilable` in 1 signature slot(s), 28956 observed call(s)
+- src/tools/predicate_rewriter.rb:103 priority 5.47; affects `T.nilable` in 1 signature slot(s), 29670 observed call(s)
+  - src/tools/predicate_rewriter.rb:103 node
+- src/annotator/helpers/intrinsic_registry.rb:105 priority 5.47; affects `T.nilable` in 1 signature slot(s), 29294 observed call(s)
+  - src/annotator/helpers/intrinsic_registry.rb:105 v (candidate T.any(Hash, Symbol, Type))
+- src/ast/type.rb:1822 priority 5.46; affects `T.nilable` in 1 signature slot(s), 28631 observed call(s)
   - src/ast/type.rb:1822 vt (candidate T.any(Schemas::InlineStructVariant, Type))
-- src/annotator/helpers/function_signature.rb:247 priority 5.36; affects `T.nilable` in 1 signature slot(s), 23048 observed call(s)
+- src/annotator/helpers/function_signature.rb:247 priority 5.37; affects `T.nilable` in 1 signature slot(s), 23504 observed call(s)
   - src/annotator/helpers/function_signature.rb:247 val (candidate T::Boolean)
-- src/annotator/helpers/function_signature.rb:255 priority 5.36; affects `T.nilable` in 1 signature slot(s), 23048 observed call(s)
+- src/annotator/helpers/function_signature.rb:255 priority 5.37; affects `T.nilable` in 1 signature slot(s), 23504 observed call(s)
   - src/annotator/helpers/function_signature.rb:255 val (candidate Set)
-- src/tools/lint_fix_rewriter.rb:62 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
-  - src/tools/lint_fix_rewriter.rb:62 node
-- src/tools/lint_fix_rewriter.rb:82 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
-  - src/tools/lint_fix_rewriter.rb:82 node
-- src/tools/lint_fix_rewriter.rb:185 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
-  - src/tools/lint_fix_rewriter.rb:185 node
-- src/annotator/helpers/effects.rb:815 priority 5.32; affects `T.nilable` in 1 signature slot(s), 20913 observed call(s)
+- src/tools/lint_fix_rewriter.rb:68 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
+  - src/tools/lint_fix_rewriter.rb:68 node
+- src/tools/lint_fix_rewriter.rb:89 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
+  - src/tools/lint_fix_rewriter.rb:89 node
+- src/tools/lint_fix_rewriter.rb:199 priority 5.32; affects `T.nilable` in 1 signature slot(s), 21065 observed call(s)
+  - src/tools/lint_fix_rewriter.rb:199 node
+- src/annotator/helpers/effects.rb:815 priority 5.32; affects `T.nilable` in 1 signature slot(s), 20986 observed call(s)
   - src/annotator/helpers/effects.rb:815 node
 - src/tools/method_rewriter.rb:65 priority 5.24; affects `T.nilable` in 1 signature slot(s), 17405 observed call(s)
   - src/tools/method_rewriter.rb:65 node
-- src/mir/mir.rb:416 priority 5.22; affects `T.nilable` in 1 signature slot(s), 16415 observed call(s)
+- src/mir/mir.rb:416 priority 5.22; affects `T.nilable` in 1 signature slot(s), 16489 observed call(s)
   - src/mir/mir.rb:416 value (candidate T.any(Hash, MIR::InlineAllocMetadata))
-- src/annotator/helpers/intrinsic_registry.rb:228 priority 5.21; affects `T.nilable` in 1 signature slot(s), 16345 observed call(s)
+- src/annotator/helpers/intrinsic_registry.rb:228 priority 5.22; affects `T.nilable` in 1 signature slot(s), 16465 observed call(s)
   - src/annotator/helpers/intrinsic_registry.rb:228 x
-- src/mir/mir.rb:3479 priority 5.21; affects `T.nilable` in 1 signature slot(s), 16345 observed call(s)
-  - src/mir/mir.rb:3479 v
-- src/annotator/helpers/function_return.rb:77 priority 5.19; affects `T.nilable` in 1 signature slot(s), 15405 observed call(s)
+- src/annotator/helpers/function_return.rb:77 priority 5.22; affects `T.nilable` in 1 signature slot(s), 16432 observed call(s)
   - src/annotator/helpers/function_return.rb:77 receiver (candidate Type)
-- src/ast/ast.rb:857 priority 5.18; affects `T.nilable` in 1 signature slot(s), 15246 observed call(s)
-  - src/ast/ast.rb:857 declared_type (candidate T.any(Symbol, Type))
-- src/annotator/annotator.rb:6271 priority 5.17; affects `T.nilable` in 1 signature slot(s), 14648 observed call(s)
-  - src/annotator/annotator.rb:6271 node
+- src/mir/mir.rb:3479 priority 5.22; affects `T.nilable` in 1 signature slot(s), 16418 observed call(s)
+  - src/mir/mir.rb:3479 v
+- src/ast/ast.rb:856 priority 5.20; affects `T.nilable` in 1 signature slot(s), 15721 observed call(s)
+  - src/ast/ast.rb:856 declared_type (candidate T.any(Symbol, Type))
+- src/annotator/annotator.rb:6366 priority 5.16; affects `T.nilable` in 1 signature slot(s), 14550 observed call(s)
+  - src/annotator/annotator.rb:6366 node
+- src/mir/mir_lowering.rb:3025 priority 5.13; affects `T.nilable` in 2 signature slot(s), 425 observed call(s)
+  - src/mir/mir_lowering.rb:3025 type_info (candidate Type)
+  - src/mir/mir_lowering.rb:3025 ast_node (candidate T.any(AST::BinaryOp, AST::FuncCall, AST::GetIndex))
 
 ## Union Pressure Downgraded To `T.untyped`
 - downgrade: a slot observed with multiple runtime types was kept as `T.untyped` instead of emitted as `T.any(...)`
 - why it happens: `T.any(...)` is risky when the runtime sample may not include every type that can reach the slot
 Changing these to T.any(...) can be dangerous unless you are certain the runtime sample includes every type that can reach the slot. Static analysis can separately look for other types that could be passed without breaking the function.
-- src/ast/symbol_entry.rb:312 priority 12.20; affects `T.any` in 3 signature slot(s), 1099435 observed call(s)
-  - src/ast/symbol_entry.rb:312 reg (observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, String, ...)
+- src/ast/symbol_entry.rb:312 priority 12.21; affects `T.any` in 3 signature slot(s), 1116341 observed call(s)
+  - src/ast/symbol_entry.rb:312 reg (observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct, ...)
   - src/ast/symbol_entry.rb:312 type (observed FunctionSignature, String, Symbol, Type)
   - src/ast/symbol_entry.rb:312 mutable (observed FalseClass, Lexer::Token, TrueClass)
-- src/ast/scope.rb:25 priority 9.96; affects `T.any` in 2 signature slot(s), 1094925 observed call(s)
+- src/ast/scope.rb:25 priority 12.20; affects `T.any` in 3 signature slot(s), 1111606 observed call(s)
+  - src/ast/scope.rb:25 reg (observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct)
   - src/ast/scope.rb:25 type (observed FunctionSignature, String, Symbol, Type)
   - src/ast/scope.rb:25 is_mutable (observed FalseClass, Lexer::Token, TrueClass)
-- src/ast/type.rb:2499 priority 8.62; affects `T.any` in 2 signature slot(s), 124386 observed call(s)
+- src/ast/type.rb:2499 priority 8.67; affects `T.any` in 2 signature slot(s), 134452 observed call(s)
   - src/ast/type.rb:2499 source_type (observed Symbol, Type)
   - src/ast/type.rb:2499 target_type (observed Symbol, Type)
-- src/annotator/helpers/function_analysis.rb:14 priority 7.52; affects `T.any` in 2 signature slot(s), 20605 observed call(s)
+- src/annotator/helpers/function_analysis.rb:14 priority 7.52; affects `T.any` in 2 signature slot(s), 20759 observed call(s)
   - src/annotator/helpers/function_analysis.rb:14 body (observed AST::BinaryOp, AST::Identifier, AST::Literal, Array)
   - src/annotator/helpers/function_analysis.rb:14 declared_return (observed Symbol, Type)
-- src/mir/hoist.rb:521 priority 7.47; affects `T.any` in 1 signature slot(s), 2957102 observed call(s)
+- src/mir/hoist.rb:521 priority 7.49; affects `T.any` in 1 signature slot(s), 3123597 observed call(s)
   - src/mir/hoist.rb:521 value (observed AST::BinaryOp, Array, FalseClass, FunctionSignature, Hash, ...)
-- src/mir/hoist.rb:533 priority 7.47; affects `T.any` in 1 signature slot(s), 2957102 observed call(s)
+- src/mir/hoist.rb:533 priority 7.49; affects `T.any` in 1 signature slot(s), 3123597 observed call(s)
   - src/mir/hoist.rb:533 value (observed AST::BinaryOp, Array, FalseClass, FunctionSignature, Hash, ...)
-- src/ast/type.rb:230 priority 7.35; affects `T.any` in 1 signature slot(s), 2226625 observed call(s)
-  - src/ast/type.rb:230 raw_input (observed FunctionSignature, Schemas::InlineStructVariant, String, Symbol, Type)
-- src/annotator/annotator.rb:279 priority 7.23; affects `T.any` in 1 signature slot(s), 1708952 observed call(s)
-  - src/annotator/annotator.rb:279 node (observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, ...)
-- src/ast/lexer.rb:299 priority 7.19; affects `T.any` in 1 signature slot(s), 1554778 observed call(s)
+- src/ast/type.rb:230 priority 7.36; affects `T.any` in 1 signature slot(s), 2275718 observed call(s)
+  - src/ast/type.rb:230 raw_input (observed Array, FunctionSignature, Schemas::InlineStructVariant, String, Symbol, ...)
+- src/annotator/annotator.rb:350 priority 7.23; affects `T.any` in 1 signature slot(s), 1712845 observed call(s)
+  - src/annotator/annotator.rb:350 node (observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, ...)
+- src/ast/lexer.rb:299 priority 7.19; affects `T.any` in 1 signature slot(s), 1555155 observed call(s)
   - src/ast/lexer.rb:299 val (observed Float, Integer, String)
-- src/annotator/helpers/effects.rb:815 priority 6.67; affects `T.any` in 1 signature slot(s), 466763 observed call(s)
+- src/annotator/helpers/effects.rb:815 priority 6.67; affects `T.any` in 1 signature slot(s), 469139 observed call(s)
   - src/annotator/helpers/effects.rb:815 node (observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, ...)
-- src/ast/type.rb:386 priority 6.64; affects `T.any` in 1 signature slot(s), 434376 observed call(s)
+- src/ast/type.rb:386 priority 6.66; affects `T.any` in 1 signature slot(s), 460855 observed call(s)
   - src/ast/type.rb:386 other (observed Symbol, Type)
-- src/ast/ast.rb:804 priority 6.58; affects `T.any` in 1 signature slot(s), 379736 observed call(s)
+- src/ast/ast.rb:804 priority 6.60; affects `T.any` in 1 signature slot(s), 398658 observed call(s)
   - src/ast/ast.rb:804 val (observed FunctionSignature, String, Symbol, Type)
-- src/annotator/annotator.rb:6271 priority 6.48; affects `T.any` in 1 signature slot(s), 300611 observed call(s)
-  - src/annotator/annotator.rb:6271 node (observed AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding, ...)
-- src/annotator/annotator.rb:6287 priority 6.37; affects `T.any` in 1 signature slot(s), 233198 observed call(s)
-  - src/annotator/annotator.rb:6287 node (observed AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding, ...)
+- src/annotator/annotator.rb:6366 priority 6.48; affects `T.any` in 1 signature slot(s), 298812 observed call(s)
+  - src/annotator/annotator.rb:6366 node (observed AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding, ...)
+- src/annotator/annotator.rb:6382 priority 6.37; affects `T.any` in 1 signature slot(s), 233198 observed call(s)
+  - src/annotator/annotator.rb:6382 node (observed AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding, ...)
 - src/mir/thunk_transform/recursive_splitter.rb:194 priority 6.23; affects `T.any` in 2 signature slot(s), 2527 observed call(s)
   - src/mir/thunk_transform/recursive_splitter.rb:194 node (observed AST::BinaryOp, AST::FuncCall, AST::Identifier, AST::Literal, Array, ...)
   - src/mir/thunk_transform/recursive_splitter.rb:194 names_set (observed Array, Set)
-- src/annotator/helpers/function_signature.rb:85 priority 6.16; affects `T.any` in 1 signature slot(s), 144455 observed call(s)
+- src/annotator/helpers/function_signature.rb:85 priority 6.16; affects `T.any` in 1 signature slot(s), 145854 observed call(s)
   - src/annotator/helpers/function_signature.rb:85 x (observed FunctionSignature, Type)
-- src/annotator/helpers/function_signature.rb:42 priority 6.14; affects `T.any` in 1 signature slot(s), 137823 observed call(s)
-  - src/annotator/helpers/function_signature.rb:42 val (observed Symbol, Type)
-- src/mir/lowering/control_flow.rb:163 priority 6.14; affects `T.any` in 2 signature slot(s), 2183 observed call(s)
+- src/mir/lowering/control_flow.rb:163 priority 6.15; affects `T.any` in 2 signature slot(s), 2216 observed call(s)
   - src/mir/lowering/control_flow.rb:163 mark_per_iter (observed FalseClass, TrueClass)
   - src/mir/lowering/control_flow.rb:163 tight (observed FalseClass, TrueClass)
-- src/ast/type.rb:2494 priority 6.10; affects `T.any` in 1 signature slot(s), 124501 observed call(s)
+- src/ast/type.rb:2494 priority 6.13; affects `T.any` in 1 signature slot(s), 134569 observed call(s)
   - src/ast/type.rb:2494 input (observed Symbol, Type)
-- src/ast/ast.rb:349 priority 6.02; affects `T.any` in 1 signature slot(s), 104661 observed call(s)
-  - src/ast/ast.rb:349 root (observed AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BlockExpr, AST::CapabilityWrap, ...)
-- src/annotator/helpers/effects.rb:1153 priority 5.96; affects `T.any` in 1 signature slot(s), 90617 observed call(s)
+- src/annotator/helpers/effects.rb:1153 priority 6.06; affects `T.any` in 1 signature slot(s), 115213 observed call(s)
   - src/annotator/helpers/effects.rb:1153 node (observed AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::Binding, AST::BreakNode, ...)
-- src/annotator/helpers/function_signature.rb:164 priority 5.93; affects `T.any` in 1 signature slot(s), 85191 observed call(s)
+- src/ast/ast.rb:349 priority 6.02; affects `T.any` in 1 signature slot(s), 105785 observed call(s)
+  - src/ast/ast.rb:349 root (observed AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BlockExpr, AST::CapabilityWrap, ...)
+- src/annotator/helpers/function_signature.rb:164 priority 5.93; affects `T.any` in 1 signature slot(s), 84186 observed call(s)
   - src/annotator/helpers/function_signature.rb:164 return_lifetime (observed Array, String, Symbol)
-- src/annotator/helpers/function_signature.rb:26 priority 5.93; affects `T.any` in 1 signature slot(s), 85191 observed call(s)
+- src/annotator/helpers/function_signature.rb:26 priority 5.93; affects `T.any` in 1 signature slot(s), 84186 observed call(s)
   - src/annotator/helpers/function_signature.rb:26 val (observed Array, String, Symbol)
-- src/annotator/helpers/function_signature.rb:288 priority 5.93; affects `T.any` in 1 signature slot(s), 85191 observed call(s)
+- src/annotator/helpers/function_signature.rb:288 priority 5.93; affects `T.any` in 1 signature slot(s), 84186 observed call(s)
   - src/annotator/helpers/function_signature.rb:288 val (observed Array, String, Symbol)
-- src/ast/type.rb:1842 priority 5.90; affects `T.any` in 1 signature slot(s), 80142 observed call(s)
+- src/annotator/annotator.rb:6198 priority 5.90; affects `T.any` in 1 signature slot(s), 79170 observed call(s)
+  - src/annotator/annotator.rb:6198 v (observed AST::BgBlock, AST::BinaryOp, AST::Capture, AST::CopyNode, AST::FuncCall, ...)
+- src/ast/type.rb:1842 priority 5.88; affects `T.any` in 1 signature slot(s), 75824 observed call(s)
   - src/ast/type.rb:1842 node (observed AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BlockExpr, AST::CapabilityWrap, ...)
-- src/annotator/annotator.rb:6103 priority 5.90; affects `T.any` in 1 signature slot(s), 78630 observed call(s)
-  - src/annotator/annotator.rb:6103 v (observed AST::BgBlock, AST::BinaryOp, AST::Capture, AST::CopyNode, AST::FuncCall, ...)
-- src/annotator/helpers/intrinsic_registry.rb:129 priority 5.80; affects `T.any` in 1 signature slot(s), 62724 observed call(s)
-  - src/annotator/helpers/intrinsic_registry.rb:129 _name (observed String, Symbol)
-- src/ast/ast.rb:789 priority 5.79; affects `T.any` in 1 signature slot(s), 61934 observed call(s)
+- src/ast/ast.rb:789 priority 5.83; affects `T.any` in 1 signature slot(s), 67711 observed call(s)
   - src/ast/ast.rb:789 val (observed FalseClass, TrueClass)
-- src/annotator/helpers/intrinsic_registry.rb:228 priority 5.78; affects `T.any` in 1 signature slot(s), 60327 observed call(s)
+- src/annotator/helpers/intrinsic_registry.rb:228 priority 5.80; affects `T.any` in 1 signature slot(s), 63608 observed call(s)
   - src/annotator/helpers/intrinsic_registry.rb:228 x (observed FunctionSignature, Hash, RSpec::Mocks::Double, `T.untyped`)
-- src/ast/source_error.rb:31 priority 5.70; affects `T.any` in 2 signature slot(s), 1077 observed call(s)
+- src/annotator/helpers/intrinsic_registry.rb:129 priority 5.79; affects `T.any` in 1 signature slot(s), 61403 observed call(s)
+  - src/annotator/helpers/intrinsic_registry.rb:129 _name (observed String, Symbol)
+- src/ast/source_error.rb:31 priority 5.70; affects `T.any` in 2 signature slot(s), 1078 observed call(s)
   - src/ast/source_error.rb:31 node_or_token (observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, ...)
   - src/ast/source_error.rb:31 code_or_message (observed String, Symbol)
-- src/backends/zig_type_mapper.rb:38 priority 5.65; affects `T.any` in 1 signature slot(s), 44681 observed call(s)
-  - src/backends/zig_type_mapper.rb:38 type (observed String, Symbol, Type)
-- src/ast/type.rb:2507 priority 5.64; affects `T.any` in 1 signature slot(s), 43682 observed call(s)
+- src/ast/type.rb:2507 priority 5.66; affects `T.any` in 1 signature slot(s), 45453 observed call(s)
   - src/ast/type.rb:2507 effective_type (observed FunctionSignature, Symbol, Type)
-- src/annotator/helpers/intrinsic_registry.rb:105 priority 5.63; affects `T.any` in 1 signature slot(s), 42312 observed call(s)
-  - src/annotator/helpers/intrinsic_registry.rb:105 v (observed Hash, Symbol)
-- src/annotator/annotator.rb:5801 priority 5.50; affects `T.any` in 1 signature slot(s), 31566 observed call(s)
-  - src/annotator/annotator.rb:5801 node (observed AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, ...)
-- src/annotator/helpers/intrinsic_registry.rb:158 priority 5.49; affects `T.any` in 1 signature slot(s), 31070 observed call(s)
+- src/backends/zig_type_mapper.rb:38 priority 5.65; affects `T.any` in 1 signature slot(s), 45098 observed call(s)
+  - src/backends/zig_type_mapper.rb:38 type (observed String, Symbol, Type)
+- src/annotator/helpers/intrinsic_registry.rb:105 priority 5.63; affects `T.any` in 1 signature slot(s), 42616 observed call(s)
+  - src/annotator/helpers/intrinsic_registry.rb:105 v (observed Hash, Symbol, Type)
+- src/annotator/annotator.rb:5896 priority 5.52; affects `T.any` in 1 signature slot(s), 33058 observed call(s)
+  - src/annotator/annotator.rb:5896 node (observed AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, ...)
+- src/annotator/helpers/intrinsic_registry.rb:158 priority 5.49; affects `T.any` in 1 signature slot(s), 30679 observed call(s)
   - src/annotator/helpers/intrinsic_registry.rb:158 spec (observed Array, Symbol)
-- src/ast/ast.rb:832 priority 5.40; affects `T.any` in 1 signature slot(s), 25284 observed call(s)
-  - src/ast/ast.rb:832 val (observed Symbol, Type)
-- src/mir/alloc.rb:29 priority 5.38; affects `T.any` in 1 signature slot(s), 23768 observed call(s)
+- src/ast/ast.rb:831 priority 5.43; affects `T.any` in 1 signature slot(s), 26839 observed call(s)
+  - src/ast/ast.rb:831 val (observed Symbol, Type)
+- src/mir/alloc.rb:29 priority 5.39; affects `T.any` in 1 signature slot(s), 24341 observed call(s)
   - src/mir/alloc.rb:29 final_type (observed Symbol, Type)
-- src/mir/alloc.rb:45 priority 5.38; affects `T.any` in 1 signature slot(s), 23768 observed call(s)
+- src/mir/alloc.rb:45 priority 5.39; affects `T.any` in 1 signature slot(s), 24341 observed call(s)
   - src/mir/alloc.rb:45 final_type (observed Symbol, Type)
-- src/annotator/helpers/capabilities.rb:1128 priority 5.38; affects `T.any` in 1 signature slot(s), 23768 observed call(s)
+- src/annotator/helpers/capabilities.rb:1128 priority 5.39; affects `T.any` in 1 signature slot(s), 24341 observed call(s)
   - src/annotator/helpers/capabilities.rb:1128 final_type (observed Symbol, Type)
-- src/ast/type.rb:1822 priority 5.37; affects `T.any` in 1 signature slot(s), 23213 observed call(s)
+- src/ast/type.rb:1822 priority 5.36; affects `T.any` in 1 signature slot(s), 23001 observed call(s)
   - src/ast/type.rb:1822 vt (observed Schemas::InlineStructVariant, Type)
-- src/mir/ownership_graph.rb:299 priority 5.32; affects `T.any` in 1 signature slot(s), 20789 observed call(s)
+- src/mir/ownership_graph.rb:299 priority 5.35; affects `T.any` in 1 signature slot(s), 22319 observed call(s)
   - src/mir/ownership_graph.rb:299 path (observed AST::GetField, AST::GetIndex, String)
-- src/ast/ast.rb:739 priority 5.29; affects `T.any` in 1 signature slot(s), 19466 observed call(s)
+- src/ast/ast.rb:739 priority 5.34; affects `T.any` in 1 signature slot(s), 22062 observed call(s)
   - src/ast/ast.rb:739 val (observed FalseClass, TrueClass)
-- src/mir/mir.rb:3479 priority 5.25; affects `T.any` in 1 signature slot(s), 17644 observed call(s)
-  - src/mir/mir.rb:3479 v (observed FunctionSignature, Hash, RSpec::Mocks::Double, `T.untyped`)
-- src/ast/ast.rb:710 priority 5.23; affects `T.any` in 1 signature slot(s), 16919 observed call(s)
+- src/ast/ast.rb:710 priority 5.26; affects `T.any` in 1 signature slot(s), 18052 observed call(s)
   - src/ast/ast.rb:710 val (observed String, Symbol)
-- src/ast/ast.rb:715 priority 5.23; affects `T.any` in 1 signature slot(s), 16912 observed call(s)
+- src/ast/ast.rb:715 priority 5.26; affects `T.any` in 1 signature slot(s), 18052 observed call(s)
   - src/ast/ast.rb:715 val (observed FunctionSignature, Hash)
-- src/mir/mir.rb:3274 priority 5.19; affects `T.any` in 2 signature slot(s), 467 observed call(s)
+- src/mir/mir.rb:3479 priority 5.25; affects `T.any` in 1 signature slot(s), 17807 observed call(s)
+  - src/mir/mir.rb:3479 v (observed FunctionSignature, Hash, RSpec::Mocks::Double, `T.untyped`)
+- src/mir/mir.rb:3274 priority 5.23; affects `T.any` in 2 signature slot(s), 500 observed call(s)
   - src/mir/mir.rb:3274 stdlib_def (observed FunctionSignature, Hash, RSpec::Mocks::Double, `T.untyped`)
   - src/mir/mir.rb:3274 allocs (observed Hash, MIR::InlineAllocMetadata)
-- src/annotator/helpers/function_analysis.rb:278 priority 5.13; affects `T.any` in 1 signature slot(s), 13602 observed call(s)
-  - src/annotator/helpers/function_analysis.rb:278 node (observed AST::FuncCall, `T.untyped`)
-- src/annotator/helpers/function_analysis.rb:582 priority 5.13; affects `T.any` in 1 signature slot(s), 13580 observed call(s)
-  - src/annotator/helpers/function_analysis.rb:582 node (observed AST::FuncCall, `T.untyped`)
-- src/ast/ast.rb:744 priority 5.13; affects `T.any` in 1 signature slot(s), 13523 observed call(s)
+- src/ast/ast.rb:744 priority 5.18; affects `T.any` in 1 signature slot(s), 15028 observed call(s)
   - src/ast/ast.rb:744 val (observed FalseClass, TrueClass)
-- src/ast/ast.rb:857 priority 5.11; affects `T.any` in 1 signature slot(s), 12770 observed call(s)
-  - src/ast/ast.rb:857 declared_type (observed Symbol, Type)
+- src/annotator/helpers/function_analysis.rb:277 priority 5.16; affects `T.any` in 1 signature slot(s), 14609 observed call(s)
+  - src/annotator/helpers/function_analysis.rb:277 node (observed AST::FuncCall, `T.untyped`)
+- src/annotator/helpers/function_analysis.rb:581 priority 5.16; affects `T.any` in 1 signature slot(s), 14587 observed call(s)
+  - src/annotator/helpers/function_analysis.rb:581 node (observed AST::FuncCall, `T.untyped`)
+- src/ast/ast.rb:856 priority 5.15; affects `T.any` in 1 signature slot(s), 14154 observed call(s)
+  - src/ast/ast.rb:856 declared_type (observed Symbol, Type)
+- src/annotator/annotator.rb:3351 priority 5.10; affects `T.any` in 1 signature slot(s), 12517 observed call(s)
+  - src/annotator/annotator.rb:3351 target_type (observed Symbol, Type)
 
 ## `T.any` Downgrades By Signature
 - signature downgrade: an individual param or return slot where union evidence exists but the report kept the current `T.untyped` signature
 - src/mir/fsm_ops.rb:141 value: observed FsmOps::AllocExpr, FsmOps::CallExpr; kept as `T.untyped`
 - src/mir/fsm_ops.rb:177 expr: observed FsmOps::ArgRef, FsmOps::CallExpr; kept as `T.untyped`
-- src/ast/type.rb:230 raw_input: observed FunctionSignature, Schemas::InlineStructVariant, String, Symbol, Type; kept as `T.untyped`
+- src/ast/type.rb:230 raw_input: observed Array, FunctionSignature, Schemas::InlineStructVariant, String, Symbol, Type; kept as `T.untyped`
 - src/annotator/helpers/function_signature.rb:120 allocates: observed FalseClass, TrueClass; kept as `T.untyped`
 - src/annotator/helpers/function_signature.rb:120 borrows: observed Array, Symbol; kept as `T.untyped`
 - src/annotator/helpers/function_signature.rb:164 return_lifetime: observed Array, String, Symbol; kept as `T.untyped`
-- src/annotator/helpers/function_signature.rb:42 val: observed Symbol, Type; kept as `T.untyped`
 - src/annotator/helpers/function_signature.rb:26 val: observed Array, String, Symbol; kept as `T.untyped`
 - src/annotator/helpers/function_signature.rb:288 val: observed Array, String, Symbol; kept as `T.untyped`
 - src/ast/lexer.rb:299 val: observed Float, Integer, String; kept as `T.untyped`
 - src/ast/parser.rb:1962 lhs: observed AST::BinaryOp, AST::CapabilityWrap, AST::CloneNode, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::ListLit, AST::Literal, AST::MethodCall, AST::NextExpr, AST::RangeLit, AST::StaticCall, AST::StructLit, AST::UnaryOp, AST::UnionVariantLit; kept as `T.untyped`
-- src/ast/scope.rb:25 reg: observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl; kept as `T.untyped`
+- src/ast/scope.rb:25 reg: observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct; kept as `T.untyped`
 - src/ast/scope.rb:25 type: observed FunctionSignature, String, Symbol, Type; kept as `T.untyped`
 - src/ast/scope.rb:25 is_mutable: observed FalseClass, Lexer::Token, TrueClass; kept as `T.untyped`
-- src/ast/symbol_entry.rb:312 reg: observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, String, Symbol; kept as `T.untyped`
+- src/ast/symbol_entry.rb:312 reg: observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct, String, Symbol; kept as `T.untyped`
 - src/ast/symbol_entry.rb:312 type: observed FunctionSignature, String, Symbol, Type; kept as `T.untyped`
 - src/ast/symbol_entry.rb:312 mutable: observed FalseClass, Lexer::Token, TrueClass; kept as `T.untyped`
 - src/ast/scope.rb:123 schema: observed Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema; kept as `T.untyped`
-- src/annotator/annotator.rb:374 node: observed AST::Assert, AST::Assignment, AST::BenchmarkStmt, AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::CallSiteOverride, AST::CapabilityWrap, AST::Cast, AST::CloneNode, AST::ContinueNode, AST::CopyNode, AST::DoBlock, AST::EnumDef, AST::ExternStructDecl, AST::ForEach, AST::ForRange, AST::FreezeNode, AST::FuncCall, AST::FunctionDef, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::IfBind, AST::IfStatement, AST::LambdaLit, AST::LinkNode, AST::ListLit, AST::Literal, AST::MatchStatement, AST::MethodCall, AST::MoveNode, AST::NextExpr, AST::OptionalUnwrap, AST::OrBreak, AST::OrExit, AST::OrPass, AST::OrPrune, AST::OrRaise, AST::PassStmt, AST::ProfileStmt, AST::Program, AST::Raise, AST::RangeLit, AST::ResolveNode, AST::ReturnNode, AST::ShareNode, AST::Slice, AST::SmashStmt, AST::StaticCall, AST::StructDef, AST::StructLit, AST::StubDecl, AST::SyncPolicyDecl, AST::TestBlock, AST::ThenChain, AST::UnaryOp, AST::UnionDef, AST::UnionVariantLit, AST::VarDecl, AST::WhileBindLoop, AST::WhileLoop, AST::WithBlock, AST::YieldExpr; kept as `T.untyped`
-- src/annotator/annotator.rb:69 node: observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, AST::BatchWindowOp, AST::BenchmarkStmt, AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::CapabilityWrap, AST::Cast, AST::CloneNode, AST::CollectOp, AST::ConcurrentOp, AST::ContinueNode, AST::CopyNode, AST::CountOp, AST::DefaultLit, AST::DistinctOp, AST::DoBlock, AST::EachOp, AST::EnumDef, AST::ExternFnDecl, AST::ExternStructDecl, AST::FindOp, AST::ForEach, AST::ForRange, AST::FreezeNode, AST::FuncCall, AST::FunctionDef, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::IfBind, AST::IfStatement, AST::IndexOp, AST::JoinOp, AST::LambdaLit, AST::LimitOp, AST::LinkNode, AST::ListLit, AST::Literal, AST::MatchStatement, AST::MaxOp, AST::MethodCall, AST::MinOp, AST::MoveNode, AST::NextExpr, AST::OptionalUnwrap, AST::OrBreak, AST::OrExit, AST::OrPass, AST::OrPrune, AST::OrRaise, AST::OrderByOp, AST::PassStmt, AST::ProfileStmt, AST::Program, AST::Raise, AST::RangeLit, AST::RecoverOp, AST::ReduceOp, AST::RequireNode, AST::ResolveNode, AST::ReturnNode, AST::SelectOp, AST::ShardOp, AST::ShareNode, AST::SkipOp, AST::Slice, AST::SmashStmt, AST::StaticCall, AST::StructDef, AST::StructLit, AST::StructPattern, AST::StubDecl, AST::SumOp, AST::TakeWhileOp, AST::TapOp, AST::TestBlock, AST::TestThat, AST::ThenChain, AST::UnaryOp, AST::UnionDef, AST::UnionVariantLit, AST::UnnestOp, AST::WhenBlock, AST::WhereOp, AST::WhileBindLoop, AST::WhileLoop, AST::WindowOp, AST::WithBlock, AST::YieldExpr; kept as `T.untyped`
+- src/annotator/annotator.rb:445 node: observed AST::Assert, AST::Assignment, AST::BenchmarkStmt, AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::CallSiteOverride, AST::CapabilityWrap, AST::Cast, AST::CloneNode, AST::ContinueNode, AST::CopyNode, AST::DoBlock, AST::EnumDef, AST::ExternStructDecl, AST::ForEach, AST::ForRange, AST::FreezeNode, AST::FuncCall, AST::FunctionDef, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::IfBind, AST::IfStatement, AST::LambdaLit, AST::LinkNode, AST::ListLit, AST::Literal, AST::MatchStatement, AST::MethodCall, AST::MoveNode, AST::NextExpr, AST::OptionalUnwrap, AST::OrBreak, AST::OrExit, AST::OrPass, AST::OrPrune, AST::OrRaise, AST::PassStmt, AST::ProfileStmt, AST::Program, AST::Raise, AST::RangeLit, AST::ResolveNode, AST::ReturnNode, AST::ShareNode, AST::Slice, AST::SmashStmt, AST::StaticCall, AST::StructDef, AST::StructLit, AST::StubDecl, AST::SyncPolicyDecl, AST::TestBlock, AST::ThenChain, AST::UnaryOp, AST::UnionDef, AST::UnionVariantLit, AST::VarDecl, AST::WhileBindLoop, AST::WhileLoop, AST::WithBlock, AST::YieldExpr; kept as `T.untyped`
+- src/annotator/annotator.rb:69 node: observed AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp, AST::BatchWindowOp, AST::BenchmarkStmt, AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BindExpr, AST::BlockExpr, AST::BreakNode, AST::CapabilityWrap, AST::Cast, AST::CloneNode, AST::CollectOp, AST::ConcurrentOp, AST::ContinueNode, AST::Copy, AST::CopyNode, AST::CountOp, AST::DefaultLit, AST::DistinctOp, AST::DoBlock, AST::EachOp, AST::EnumDef, AST::ExternFnDecl, AST::ExternStructDecl, AST::FindOp, AST::ForEach, AST::ForRange, AST::FreezeNode, AST::FuncCall, AST::FunctionDef, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::IfBind, AST::IfStatement, AST::IndexOp, AST::JoinOp, AST::LambdaLit, AST::LimitOp, AST::LinkNode, AST::ListLit, AST::Literal, AST::MatchStatement, AST::MaxOp, AST::MethodCall, AST::MinOp, AST::MoveNode, AST::NextExpr, AST::OptionalUnwrap, AST::OrBreak, AST::OrExit, AST::OrPass, AST::OrPrune, AST::OrRaise, AST::OrderByOp, AST::PassStmt, AST::Placeholder, AST::ProfileStmt, AST::Program, AST::Raise, AST::RangeLit, AST::RecoverOp, AST::ReduceOp, AST::RequireNode, AST::ResolveNode, AST::ReturnNode, AST::SelectOp, AST::ShardOp, AST::ShareNode, AST::SkipOp, AST::Slice, AST::SmashStmt, AST::StaticCall, AST::StructDef, AST::StructLit, AST::StructPattern, AST::StubDecl, AST::SumOp, AST::TakeWhileOp, AST::TapOp, AST::TestBlock, AST::TestThat, AST::ThenChain, AST::UnaryOp, AST::UnionDef, AST::UnionVariantLit, AST::UnnestOp, AST::WhenBlock, AST::WhereOp, AST::WhileBindLoop, AST::WhileLoop, AST::WindowOp, AST::WithBlock, AST::YieldExpr; kept as `T.untyped`
 - src/annotator/annotator.rb:69 value: observed FunctionSignature, String, Symbol, Type; kept as `T.untyped`
 - src/ast/ast.rb:804 val: observed FunctionSignature, String, Symbol, Type; kept as `T.untyped`
 - src/annotator/helpers/function_analysis.rb:14 node: observed AST::FunctionDef, AST::LambdaLit; kept as `T.untyped`
 - src/annotator/helpers/function_analysis.rb:14 body: observed AST::BinaryOp, AST::Identifier, AST::Literal, Array; kept as `T.untyped`
 - src/annotator/helpers/function_analysis.rb:14 declared_return: observed Symbol, Type; kept as `T.untyped`
-- src/annotator/helpers/function_analysis.rb:812 node: observed AST::FunctionDef, AST::LambdaLit; kept as `T.untyped`
-- src/annotator/helpers/function_analysis.rb:721 node: observed AST::FunctionDef, AST::LambdaLit, `T.untyped`; kept as `T.untyped`
-- src/annotator/helpers/function_analysis.rb:851 node: observed AST::FunctionDef, AST::LambdaLit; kept as `T.untyped`
-- src/annotator/annotator.rb:2671 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:5575 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:5801 node: observed AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier, AST::LambdaLit, AST::LinkNode, AST::Literal, AST::MethodCall, AST::MoveNode, AST::NextExpr, AST::RangeLit, AST::ShareNode, AST::StructLit, AST::UnaryOp, AST::UnionVariantLit, String; kept as `T.untyped`
-- src/annotator/annotator.rb:5426 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:5504 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/helpers/function_analysis.rb:811 node: observed AST::FunctionDef, AST::LambdaLit; kept as `T.untyped`
+- src/annotator/helpers/function_analysis.rb:720 node: observed AST::FunctionDef, AST::LambdaLit, `T.untyped`; kept as `T.untyped`
+- src/annotator/helpers/function_analysis.rb:850 node: observed AST::FunctionDef, AST::LambdaLit; kept as `T.untyped`
+- src/annotator/annotator.rb:2753 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:5670 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:5896 node: observed AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier, AST::LambdaLit, AST::LinkNode, AST::Literal, AST::MethodCall, AST::MoveNode, AST::NextExpr, AST::RangeLit, AST::ShareNode, AST::StructLit, AST::UnaryOp, AST::UnionVariantLit, String; kept as `T.untyped`
+- src/annotator/annotator.rb:5499 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:5513 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:5568 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:5599 node: observed AST::Assignment, AST::BindExpr, AST::VarDecl; kept as `T.untyped`
 - src/annotator/helpers/generic_analysis.rb:496 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:2614 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/ast/ast.rb:857 declared_type: observed Symbol, Type; kept as `T.untyped`
+- src/annotator/annotator.rb:2696 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/ast/ast.rb:856 declared_type: observed Symbol, Type; kept as `T.untyped`
 - src/ast/type.rb:2507 node: observed AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CloneNode, AST::CopyNode, AST::FreezeNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::HashLit, AST::Identifier, AST::IfStatement, AST::LambdaLit, AST::LinkNode, AST::ListLit, AST::Literal, AST::MatchStatement, AST::MethodCall, AST::MoveNode, AST::NextExpr, AST::RangeLit, AST::ResolveNode, AST::ShareNode, AST::Slice, AST::StaticCall, AST::StructLit, AST::UnaryOp, AST::UnionVariantLit; kept as `T.untyped`
 - src/ast/type.rb:2507 effective_type: observed FunctionSignature, Symbol, Type; kept as `T.untyped`
 - src/mir/alloc.rb:29 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
 - src/mir/alloc.rb:29 final_type: observed Symbol, Type; kept as `T.untyped`
 - src/mir/alloc.rb:16 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
 - src/annotator/helpers/generic_analysis.rb:582 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:6501 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
+- src/annotator/annotator.rb:6596 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
 - src/ast/schemas.rb:181 s: observed Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema; kept as `T.untyped`
 - src/ast/schemas.rb:184 s: observed Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema; kept as `T.untyped`
 - src/mir/alloc.rb:45 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
 - src/mir/alloc.rb:45 final_type: observed Symbol, Type; kept as `T.untyped`
 - src/ast/schemas.rb:190 s: observed Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema; kept as `T.untyped`
 - src/annotator/helpers/capabilities.rb:41 node: observed AST::BindExpr, AST::VarDecl; kept as `T.untyped`
-- src/annotator/annotator.rb:6537 node: observed AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl; kept as `T.untyped`
 
 ## Return Origin Pressure
 - origin: the expression or forwarded callee that currently determines a method's return type
 - pressure: how many untyped returns could be improved by fixing the same origin
 - cascading return fix: a return annotation that can unlock other forwarded-return annotations after it becomes typed
-- blocked: 232
-- weak: 73
-- strong: 35
+- blocked: 206
+- weak: 72
+- strong: 37
 
 Top root return blockers:
-- untyped callee let; affects 29 return(s); 29 source occurrence(s)
-  - src/ast/ast.rb:708 `AST::Locatable#zig_pattern`
-  - src/ast/ast.rb:710 `AST::Locatable#zig_pattern=`
-  - src/ast/ast.rb:713 `AST::Locatable#matched_stdlib_def`
-  - src/ast/ast.rb:722 `AST::Locatable#matched_signature`
 - untyped callee fixable!; affects 16 return(s); 16 source occurrence(s)
   - src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!`
   - src/annotator/helpers/fixable_helpers.rb:740 `FixableHelper#emit_match_partial_fix!`
@@ -2521,26 +2350,31 @@ Top root return blockers:
   - src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context`
   - src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context`
+- untyped callee let; affects 10 return(s); 10 source occurrence(s)
+  - src/ast/ast.rb:724 `AST::Locatable#matched_signature=`
+  - src/ast/ast.rb:729 `AST::Locatable#stdlib_allocates=`
+  - src/ast/ast.rb:734 `AST::Locatable#mutates_receiver=`
+  - src/ast/ast.rb:739 `AST::Locatable#was_moved=`
 - untyped callee each; affects 8 return(s); 13 source occurrence(s); suggestion review as receiver-returning iterator; callers probably want explicit return value
   - src/annotator/helpers/auto_inference.rb:762 `ShapeEvidenceCollector#walk`
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`
 - untyped callee []; affects 8 return(s); 9 source occurrence(s); suggestion review as nilable lookup or replace with fetch/typed accessor
-  - src/annotator/annotator.rb:5528 `SemanticAnnotator#resolve_borrow_source`
-  - src/annotator/annotator.rb:5528 `SemanticAnnotator#resolve_borrow_source`
+  - src/annotator/annotator.rb:5623 `SemanticAnnotator#resolve_borrow_source`
+  - src/annotator/annotator.rb:5623 `SemanticAnnotator#resolve_borrow_source`
   - src/annotator/helpers/intrinsic_registry.rb:240 `IntrinsicRegistry#sig`
   - src/ast/parser.rb:113 `Parser#peek_at`
 - untyped callee stamp_type!; affects 5 return(s); 8 source occurrence(s)
-  - src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`
-  - src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`
-  - src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField`
-  - src/annotator/annotator.rb:3488 `SemanticAnnotator#visit_UnaryOp`
+  - src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`
+  - src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`
+  - src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField`
+  - src/annotator/annotator.rb:3570 `SemanticAnnotator#visit_UnaryOp`
 - untyped callee hoist_alloc; affects 5 return(s); 6 source occurrence(s)
   - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed`
   - src/mir/lowering/control_flow.rb:110 `MIRLoweringControlFlow#lower_control_condition`
-  - src/mir/lowering/expressions.rb:703 `MIRLoweringExpressions#materialize_or_fallback_value`
-  - src/mir/lowering/expressions.rb:703 `MIRLoweringExpressions#materialize_or_fallback_value`
+  - src/mir/lowering/expressions.rb:697 `MIRLoweringExpressions#materialize_or_fallback_value`
+  - src/mir/lowering/expressions.rb:697 `MIRLoweringExpressions#materialize_or_fallback_value`
 - untyped callee parse_suffixes; affects 5 return(s); 5 source occurrence(s)
   - src/ast/parser.rb:465 `Parser#parse_literal`
   - src/ast/parser.rb:1977 `Parser#parse_var_id`
@@ -2550,28 +2384,24 @@ Top root return blockers:
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`
   - src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks`
   - src/mir/fsm_ops.rb:575 `FsmOps#walk`
-  - src/mir/fsm_transform/liveness.rb:237 `FsmTransform::Liveness#walk_idents`
+  - src/mir/fsm_transform/liveness.rb:239 `FsmTransform::Liveness#walk_idents`
 - untyped callee cast; affects 3 return(s); 5 source occurrence(s)
-  - src/mir/lowering/expressions.rb:1191 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value`
-  - src/mir/lowering/expressions.rb:1827 `MIRLoweringExpressions#lower_share`
-  - src/mir/lowering/expressions.rb:1827 `MIRLoweringExpressions#lower_share`
+  - src/mir/lowering/expressions.rb:1185 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value`
+  - src/mir/lowering/expressions.rb:1822 `MIRLoweringExpressions#lower_share`
+  - src/mir/lowering/expressions.rb:1822 `MIRLoweringExpressions#lower_share`
   - src/mir/lowering/literals.rb:52 `MIRLoweringLiterals#lower_list_lit`
 - untyped callee send; affects 3 return(s); 3 source occurrence(s)
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit`
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit`
   - src/ast/parser.rb:499 `Parser#run_action`
   - src/mir/thunk_transform/emit.rb:133 `ThunkTransform::Emit#render_expr`
 - untyped callee instance_exec; affects 3 return(s); 3 source occurrence(s)
   - src/ast/parser.rb:683 `Parser#parse_statement`
   - src/ast/parser.rb:2503 `Parser#parse_primary`
-  - src/ast/parser.rb:3869 `Parser#parse_bg_body_stmt`
-- untyped callee lower; affects 3 return(s); 3 source occurrence(s)
-  - src/backends/pipeline_host.rb:254 `PipelineHost#visit_mir`
-  - src/mir/hoist.rb:452 `MIRHoistLowering#descend`
-  - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
+  - src/ast/parser.rb:3892 `Parser#parse_bg_body_stmt`
 - untyped callee first; affects 3 return(s); 3 source occurrence(s)
   - src/lsp/hover.rb:63 `LSP::Hover#find_overlapping`
   - src/mir/fsm_transform/recursive_splitter.rb:691 `FsmTransform::RecursiveSplitter#emit_with_fragment`
-  - src/mir/lowering/functions.rb:149 `MIRLoweringFunctions#lower_extern_struct`
+  - src/mir/lowering/functions.rb:180 `MIRLoweringFunctions#lower_extern_struct`
 - untyped callee check_reads_in_expr; affects 2 return(s); 15 source occurrence(s)
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
@@ -2588,61 +2418,58 @@ Top root return blockers:
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
 - untyped callee place_string_value_for_heap_destination; affects 2 return(s); 5 source occurrence(s)
-  - src/mir/mir_lowering.rb:344 `MIRLowering#place_value_for_destination`
-  - src/mir/mir_lowering.rb:344 `MIRLowering#place_value_for_destination`
-  - src/mir/mir_lowering.rb:551 `MIRLowering#place_string_or_for_heap_destination`
-  - src/mir/mir_lowering.rb:551 `MIRLowering#place_string_or_for_heap_destination`
+  - src/mir/mir_lowering.rb:408 `MIRLowering#place_value_for_destination`
+  - src/mir/mir_lowering.rb:408 `MIRLowering#place_value_for_destination`
+  - src/mir/mir_lowering.rb:612 `MIRLowering#place_string_or_for_heap_destination`
+  - src/mir/mir_lowering.rb:612 `MIRLowering#place_string_or_for_heap_destination`
 - untyped callee parse_primary; affects 2 return(s); 3 source occurrence(s)
   - src/ast/parser.rb:1838 `Parser#parse_or_rescue`
   - src/ast/parser.rb:1838 `Parser#parse_or_rescue`
   - src/ast/parser.rb:1931 `Parser#parse_unary`
 - untyped callee name; affects 2 return(s); 2 source occurrence(s)
-  - src/annotator/annotator.rb:1448 `SemanticAnnotator#match_variant_name`
-  - src/mir/concurrency_checks.rb:249 `ConcurrencyChecks#cap_var_name`
+  - src/annotator/annotator.rb:1520 `SemanticAnnotator#match_variant_name`
+  - src/mir/concurrency_checks.rb:251 `ConcurrencyChecks#cap_var_name`
 - untyped callee emit_typo_suggestion!; affects 2 return(s); 2 source occurrence(s)
-  - src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField`
-  - src/ast/parser.rb:3131 `Parser#apply_capability!`
+  - src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField`
+  - src/ast/parser.rb:3154 `Parser#apply_capability!`
 - untyped callee loop; affects 2 return(s); 2 source occurrence(s)
   - src/ast/lexer.rb:170 `Lexer#read_interpolated_string`
   - src/lsp/server.rb:51 `LSP::Server#run`
+- untyped callee lower; affects 2 return(s); 2 source occurrence(s)
+  - src/backends/pipeline_host.rb:526 `PipelineHost#visit_mir`
+  - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
 - untyped callee rewrite_pipeline; affects 2 return(s); 2 source occurrence(s); suggestion void candidate: return is only forwarded into other returns, never used as a value
   - src/backends/pipeline_rewriter.rb:29 `PipelineRewriter#rewrite!`
   - src/backends/pipeline_rewriter.rb:100 `PipelineRewriter#rewrite_pipeline`
 - untyped callee walk_body; affects 2 return(s); 2 source occurrence(s)
   - src/mir/cleanup_classifier.rb:574 `CleanupClassifier#each_capture_binding`
-  - src/mir/concurrency_checks.rb:192 `ConcurrencyChecks#walk_with_blocks`
+  - src/mir/concurrency_checks.rb:194 `ConcurrencyChecks#walk_with_blocks`
 - untyped callee with_ownership_consumption; affects 2 return(s); 2 source occurrence(s)
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value`
-  - src/mir/mir_lowering.rb:459 `MIRLowering#place_indirect_value_for_heap_destination`
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value`
+  - src/mir/mir_lowering.rb:523 `MIRLowering#place_indirect_value_for_heap_destination`
 - untyped callee wrap_indirect_field_hoists; affects 2 return(s); 2 source occurrence(s); suggestion void candidate: return is only forwarded into other returns, never used as a value
-  - src/mir/lowering/expressions.rb:1206 `MIRLoweringExpressions#lower_struct_lit`
-  - src/mir/lowering/expressions.rb:1296 `MIRLoweringExpressions#lower_union_variant_lit`
+  - src/mir/lowering/expressions.rb:1200 `MIRLoweringExpressions#lower_struct_lit`
+  - src/mir/lowering/expressions.rb:1290 `MIRLoweringExpressions#lower_union_variant_lit`
 - untyped callee lower_intrinsic; affects 2 return(s); 2 source occurrence(s)
-  - src/mir/lowering/functions.rb:1272 `MIRLoweringFunctions#lower_func_call`
-  - src/mir/lowering/functions.rb:1332 `MIRLoweringFunctions#lower_method_call`
+  - src/mir/lowering/functions.rb:1306 `MIRLoweringFunctions#lower_func_call`
+  - src/mir/lowering/functions.rb:1366 `MIRLoweringFunctions#lower_method_call`
 - untyped callee finalize_call_result; affects 2 return(s); 2 source occurrence(s)
-  - src/mir/lowering/functions.rb:1272 `MIRLoweringFunctions#lower_func_call`
-  - src/mir/lowering/functions.rb:1332 `MIRLoweringFunctions#lower_method_call`
+  - src/mir/lowering/functions.rb:1306 `MIRLoweringFunctions#lower_func_call`
+  - src/mir/lowering/functions.rb:1366 `MIRLoweringFunctions#lower_method_call`
 - untyped callee walk_consumed; affects 1 return(s); 7 source occurrence(s)
   - src/mir/mir_pass.rb:546 `MIRPass#walk_consumed`
   - src/mir/mir_pass.rb:546 `MIRPass#walk_consumed`
   - src/mir/mir_pass.rb:546 `MIRPass#walk_consumed`
   - src/mir/mir_pass.rb:546 `MIRPass#walk_consumed`
 - untyped callee with_optional_named_binding; affects 1 return(s); 6 source occurrence(s); suggestion void candidate: return is only forwarded into other returns, never used as a value
-  - src/backends/pipeline_host.rb:3632 `PipelineHost#lower_concurrent`
-  - src/backends/pipeline_host.rb:3632 `PipelineHost#lower_concurrent`
-  - src/backends/pipeline_host.rb:3632 `PipelineHost#lower_concurrent`
-  - src/backends/pipeline_host.rb:3632 `PipelineHost#lower_concurrent`
+  - src/backends/pipeline_host.rb:3721 `PipelineHost#lower_concurrent`
+  - src/backends/pipeline_host.rb:3721 `PipelineHost#lower_concurrent`
+  - src/backends/pipeline_host.rb:3721 `PipelineHost#lower_concurrent`
+  - src/backends/pipeline_host.rb:3721 `PipelineHost#lower_concurrent`
 
 Top cascading return fixes:
-- nil return at src/annotator/helpers/intrinsic_registry.rb:37; may unlock 1 return(s) (1 direct, 0 cascading), 1 possible param flow(s)
-  - src/annotator/helpers/intrinsic_registry.rb:36 `IntrinsicRegistry#build_emit`
 - nil return at src/annotator/helpers/intrinsic_registry.rb:64; may unlock 1 return(s) (1 direct, 0 cascading), 1 possible param flow(s)
   - src/annotator/helpers/intrinsic_registry.rb:63 `IntrinsicRegistry#nested_emit`
-- nil return at src/annotator/annotator.rb:3100; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
-  - src/annotator/annotator.rb:3095 `SemanticAnnotator#chain_root_name`
-- nil return at src/annotator/annotator.rb:6228; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
-  - src/annotator/annotator.rb:6216 `SemanticAnnotator#root_variable_name`
 - unknown expression at src/ast/ast.rb:718; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
   - src/ast/ast.rb:715 `AST::Locatable#matched_stdlib_def=`
 - nil return at src/ast/fixable_error.rb:141; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
@@ -2657,25 +2484,16 @@ Top cascading return fixes:
   - src/ast/type.rb:1445 `Type#stream_element_type`
 - unknown expression at src/backends/pipeline_rewriter.rb:779; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
   - src/backends/pipeline_rewriter.rb:774 `PipelineRewriter#patch_chain_source!`
-- nil return at src/mir/fsm_transform/emit.rb:102; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
-  - src/mir/fsm_transform/emit.rb:100 `FsmTransform::Emit#build_fsm_unified`
-- nil return at src/mir/fsm_transform/segments.rb:60; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
-  - src/mir/fsm_transform/segments.rb:59 `FsmTransform::Segments#result_type`
 - nil return at src/mir/fsm_transform/segments.rb:346; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
   - src/mir/fsm_transform/segments.rb:342 `FsmTransform::Segments#suspend_for`
-- nil return at src/mir/mir_lowering.rb:2601; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
-  - src/mir/mir_lowering.rb:2594 `MIRLowering#merge_module_schemas!`
+- nil return at src/mir/mir_lowering.rb:2666; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
+  - src/mir/mir_lowering.rb:2659 `MIRLowering#merge_module_schemas!`
 - unknown expression at src/mir/ownership_graph.rb:37; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
   - src/mir/ownership_graph.rb:37 `OwnershipGraph#full_type=`
 - nil return at src/mir/test_lowering.rb:369; may unlock 1 return(s) (1 direct, 0 cascading), 0 possible param flow(s)
   - src/mir/test_lowering.rb:365 `TestLowering#stub_intercept_for`
 
 Forwarded return blocker pressure:
-- let: unresolved forwarded callee; affects 29 return(s), 0 possible param flow(s)
-  - src/ast/ast.rb:708 `AST::Locatable#zig_pattern`
-  - src/ast/ast.rb:710 `AST::Locatable#zig_pattern=`
-  - src/ast/ast.rb:713 `AST::Locatable#matched_stdlib_def`
-  - src/ast/ast.rb:722 `AST::Locatable#matched_signature`
 - fixable!: callee return still untyped; affects 16 return(s), 0 possible param flow(s)
   - src/annotator/helpers/fixable_helpers.rb:528 `FixableHelper#emit_overflow_suffix_fix!`
   - src/annotator/helpers/fixable_helpers.rb:740 `FixableHelper#emit_match_partial_fix!`
@@ -2686,9 +2504,14 @@ Forwarded return blocker pressure:
   - src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context`
   - src/annotator/helpers/capabilities.rb:1084 `CapabilityHelper#without_capture_moves`
   - src/backends/pipeline_generator.rb:28 `PipelineGenerator#with_pipeline_context`
-- []: ambiguous method name; affects 8 return(s), 2573 possible param flow(s)
-  - src/annotator/annotator.rb:5528 `SemanticAnnotator#resolve_borrow_source`
-  - src/annotator/annotator.rb:5528 `SemanticAnnotator#resolve_borrow_source`
+- let: unresolved forwarded callee; affects 10 return(s), 0 possible param flow(s)
+  - src/ast/ast.rb:724 `AST::Locatable#matched_signature=`
+  - src/ast/ast.rb:729 `AST::Locatable#stdlib_allocates=`
+  - src/ast/ast.rb:734 `AST::Locatable#mutates_receiver=`
+  - src/ast/ast.rb:739 `AST::Locatable#was_moved=`
+- []: ambiguous method name; affects 8 return(s), 2567 possible param flow(s)
+  - src/annotator/annotator.rb:5623 `SemanticAnnotator#resolve_borrow_source`
+  - src/annotator/annotator.rb:5623 `SemanticAnnotator#resolve_borrow_source`
   - src/annotator/helpers/intrinsic_registry.rb:240 `IntrinsicRegistry#sig`
   - src/ast/parser.rb:113 `Parser#peek_at`
 - each: ambiguous method name; affects 8 return(s), 0 possible param flow(s)
@@ -2699,66 +2522,65 @@ Forwarded return blocker pressure:
 - hoist_alloc: static candidate MIR::Ident; affects 5 return(s), 3 possible param flow(s)
   - src/mir/hoist.rb:1064 `MIRHoistLowering#copy_container_borrow_if_needed`
   - src/mir/lowering/control_flow.rb:110 `MIRLoweringControlFlow#lower_control_condition`
-  - src/mir/lowering/expressions.rb:703 `MIRLoweringExpressions#materialize_or_fallback_value`
-  - src/mir/lowering/expressions.rb:703 `MIRLoweringExpressions#materialize_or_fallback_value`
+  - src/mir/lowering/expressions.rb:697 `MIRLoweringExpressions#materialize_or_fallback_value`
+  - src/mir/lowering/expressions.rb:697 `MIRLoweringExpressions#materialize_or_fallback_value`
 - parse_suffixes: callee return still untyped; affects 5 return(s), 0 possible param flow(s)
   - src/ast/parser.rb:465 `Parser#parse_literal`
   - src/ast/parser.rb:1977 `Parser#parse_var_id`
   - src/ast/parser.rb:2503 `Parser#parse_primary`
   - src/ast/parser.rb:2551 `Parser#parse_lit`
 - stamp_type!: callee return still untyped; affects 5 return(s), 0 possible param flow(s)
-  - src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`
-  - src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`
-  - src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField`
-  - src/annotator/annotator.rb:3488 `SemanticAnnotator#visit_UnaryOp`
+  - src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`
+  - src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`
+  - src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField`
+  - src/annotator/annotator.rb:3570 `SemanticAnnotator#visit_UnaryOp`
 - each_pair: unresolved forwarded callee; affects 4 return(s), 0 possible param flow(s)
   - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!`
   - src/backends/transpiler.rb:48 `ZigTranspiler#collect_bg_blocks`
   - src/mir/fsm_ops.rb:575 `FsmOps#walk`
-  - src/mir/fsm_transform/liveness.rb:237 `FsmTransform::Liveness#walk_idents`
-- lower: callee return still untyped; affects 3 return(s), 55 possible param flow(s)
-  - src/backends/pipeline_host.rb:254 `PipelineHost#visit_mir`
-  - src/mir/hoist.rb:452 `MIRHoistLowering#descend`
-  - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
-- cast: unresolved forwarded callee; affects 3 return(s), 18 possible param flow(s)
-  - src/mir/lowering/expressions.rb:1191 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value`
-  - src/mir/lowering/expressions.rb:1827 `MIRLoweringExpressions#lower_share`
-  - src/mir/lowering/expressions.rb:1827 `MIRLoweringExpressions#lower_share`
+  - src/mir/fsm_transform/liveness.rb:239 `FsmTransform::Liveness#walk_idents`
+- cast: unresolved forwarded callee; affects 3 return(s), 22 possible param flow(s)
+  - src/mir/lowering/expressions.rb:1185 `MIRLoweringExpressions#aggregate_dynamic_slice_field_value`
+  - src/mir/lowering/expressions.rb:1822 `MIRLoweringExpressions#lower_share`
+  - src/mir/lowering/expressions.rb:1822 `MIRLoweringExpressions#lower_share`
   - src/mir/lowering/literals.rb:52 `MIRLoweringLiterals#lower_list_lit`
 - first: unresolved forwarded callee; affects 3 return(s), 15 possible param flow(s)
   - src/lsp/hover.rb:63 `LSP::Hover#find_overlapping`
   - src/mir/fsm_transform/recursive_splitter.rb:691 `FsmTransform::RecursiveSplitter#emit_with_fragment`
-  - src/mir/lowering/functions.rb:149 `MIRLoweringFunctions#lower_extern_struct`
-- send: unresolved forwarded callee; affects 3 return(s), 3 possible param flow(s)
-  - src/annotator/annotator.rb:374 `SemanticAnnotator#visit`
+  - src/mir/lowering/functions.rb:180 `MIRLoweringFunctions#lower_extern_struct`
+- send: unresolved forwarded callee; affects 3 return(s), 1 possible param flow(s)
+  - src/annotator/annotator.rb:445 `SemanticAnnotator#visit`
   - src/ast/parser.rb:499 `Parser#run_action`
   - src/mir/thunk_transform/emit.rb:133 `ThunkTransform::Emit#render_expr`
 - instance_exec: unresolved forwarded callee; affects 3 return(s), 0 possible param flow(s)
   - src/ast/parser.rb:683 `Parser#parse_statement`
   - src/ast/parser.rb:2503 `Parser#parse_primary`
-  - src/ast/parser.rb:3869 `Parser#parse_bg_body_stmt`
-- name: ambiguous method name; affects 2 return(s), 420 possible param flow(s)
-  - src/annotator/annotator.rb:1448 `SemanticAnnotator#match_variant_name`
-  - src/mir/concurrency_checks.rb:249 `ConcurrencyChecks#cap_var_name`
+  - src/ast/parser.rb:3892 `Parser#parse_bg_body_stmt`
+- name: ambiguous method name; affects 2 return(s), 422 possible param flow(s)
+  - src/annotator/annotator.rb:1520 `SemanticAnnotator#match_variant_name`
+  - src/mir/concurrency_checks.rb:251 `ConcurrencyChecks#cap_var_name`
+- lower: callee return still untyped; affects 2 return(s), 55 possible param flow(s)
+  - src/backends/pipeline_host.rb:526 `PipelineHost#visit_mir`
+  - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
+- with_ownership_consumption: callee return still untyped; affects 2 return(s), 13 possible param flow(s)
+  - src/mir/lowering/control_flow.rb:855 `MIRLoweringControlFlow#return_payload_pointer_value`
+  - src/mir/mir_lowering.rb:523 `MIRLowering#place_indirect_value_for_heap_destination`
 - emit_builtin: typed signature T.any(MIR::InlineBc, MIR::InlineZig); affects 2 return(s), 12 possible param flow(s)
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
   - src/mir/lowering/expressions.rb:249 `MIRLoweringExpressions#lower_binary_op`
-- with_ownership_consumption: callee return still untyped; affects 2 return(s), 12 possible param flow(s)
-  - src/mir/lowering/control_flow.rb:874 `MIRLoweringControlFlow#return_payload_pointer_value`
-  - src/mir/mir_lowering.rb:459 `MIRLowering#place_indirect_value_for_heap_destination`
 - check_reads_in_expr: callee return still untyped; affects 2 return(s), 0 possible param flow(s)
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
   - src/mir/control_flow.rb:1083 `UseAfterMoveChecker#check_stmt_reads`
 - emit_typo_suggestion!: typed signature NilClass; affects 2 return(s), 0 possible param flow(s)
-  - src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField`
-  - src/ast/parser.rb:3131 `Parser#apply_capability!`
+  - src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField`
+  - src/ast/parser.rb:3154 `Parser#apply_capability!`
 - finalize_call_result: callee return still untyped; affects 2 return(s), 0 possible param flow(s)
-  - src/mir/lowering/functions.rb:1272 `MIRLoweringFunctions#lower_func_call`
-  - src/mir/lowering/functions.rb:1332 `MIRLoweringFunctions#lower_method_call`
+  - src/mir/lowering/functions.rb:1306 `MIRLoweringFunctions#lower_func_call`
+  - src/mir/lowering/functions.rb:1366 `MIRLoweringFunctions#lower_method_call`
 
 High-impact root return actions:
 - untyped callee each: review as receiver-returning iterator; callers probably want explicit return value; may unblock 8 return(s)
@@ -2775,173 +2597,173 @@ High-impact root return actions:
 - untyped callee place_owned_try_catch_for_destination: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
 - untyped callee place_string_or_for_heap_destination: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
 - untyped callee emit_type_mismatch_assign_error!: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
-- untyped callee emit_type_mismatch_assign_error! at src/annotator/annotator.rb:3275: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
+- untyped callee emit_type_mismatch_assign_error! at src/annotator/annotator.rb:3357: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
 - untyped callee visit_Smooth: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
-- untyped callee visit_Smooth at src/annotator/annotator.rb:3841: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
-- untyped callee [] at src/annotator/annotator.rb:5541: review as nilable lookup or replace with fetch/typed accessor; may unblock 1 return(s)
-- untyped callee [] at src/annotator/annotator.rb:5571: review as nilable lookup or replace with fetch/typed accessor; may unblock 1 return(s)
+- untyped callee visit_Smooth at src/annotator/annotator.rb:3923: void candidate: return is only forwarded into other returns, never used as a value; may unblock 1 return(s)
+- untyped callee [] at src/annotator/annotator.rb:5636: review as nilable lookup or replace with fetch/typed accessor; may unblock 1 return(s)
+- untyped callee [] at src/annotator/annotator.rb:5666: review as nilable lookup or replace with fetch/typed accessor; may unblock 1 return(s)
 - untyped callee each at src/annotator/helpers/auto_inference.rb:768: review as receiver-returning iterator; callers probably want explicit return value; may unblock 1 return(s)
 
 Blocked return examples:
 - src/annotator/annotator.rb:60 `SemanticAnnotator#current_fn_ctx`: untyped callee last at src/annotator/annotator.rb:61
 - src/annotator/annotator.rb:90 `SemanticAnnotator#with_conditional_context`: untyped callee call at src/annotator/annotator.rb:94
-- src/annotator/annotator.rb:374 `SemanticAnnotator#visit`: untyped callee send at src/annotator/annotator.rb:380
-- src/annotator/annotator.rb:390 `SemanticAnnotator#visit_Program`: untyped callee stamp_type! at src/annotator/annotator.rb:501
-- src/annotator/annotator.rb:1009 `SemanticAnnotator#synthesize_clause_from_policy`: untyped callee find at src/annotator/annotator.rb:1012
-- src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload`: unknown return expression LocalVariableReadNode at src/annotator/annotator.rb:1465
-- src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params`: untyped callee collect_implicit_type_params at src/annotator/annotator.rb:2295
-- src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type`: untyped callee emit_type_mismatch_assign_error! at src/annotator/annotator.rb:3275
-- src/annotator/annotator.rb:3343 `SemanticAnnotator#visit_GetField`: untyped callee stamp_type! at src/annotator/annotator.rb:3442
-- src/annotator/annotator.rb:3488 `SemanticAnnotator#visit_UnaryOp`: untyped callee stamp_type! at src/annotator/annotator.rb:3493
-- src/annotator/annotator.rb:3795 `SemanticAnnotator#visit_Literal`: untyped callee stamp_type! at src/annotator/annotator.rb:3827
-- src/annotator/annotator.rb:3838 `SemanticAnnotator#visit_BinaryOp`: untyped callee visit_Smooth at src/annotator/annotator.rb:3841
+- src/annotator/annotator.rb:445 `SemanticAnnotator#visit`: untyped callee send at src/annotator/annotator.rb:451
+- src/annotator/annotator.rb:461 `SemanticAnnotator#visit_Program`: untyped callee stamp_type! at src/annotator/annotator.rb:572
+- src/annotator/annotator.rb:1080 `SemanticAnnotator#synthesize_clause_from_policy`: untyped callee find at src/annotator/annotator.rb:1083
+- src/annotator/annotator.rb:1533 `SemanticAnnotator#normalized_match_payload`: unknown return expression LocalVariableReadNode at src/annotator/annotator.rb:1537
+- src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params`: untyped callee collect_implicit_type_params at src/annotator/annotator.rb:2375
+- src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type`: untyped callee emit_type_mismatch_assign_error! at src/annotator/annotator.rb:3357
+- src/annotator/annotator.rb:3425 `SemanticAnnotator#visit_GetField`: untyped callee stamp_type! at src/annotator/annotator.rb:3524
+- src/annotator/annotator.rb:3570 `SemanticAnnotator#visit_UnaryOp`: untyped callee stamp_type! at src/annotator/annotator.rb:3575
+- src/annotator/annotator.rb:3877 `SemanticAnnotator#visit_Literal`: untyped callee stamp_type! at src/annotator/annotator.rb:3909
+- src/annotator/annotator.rb:3920 `SemanticAnnotator#visit_BinaryOp`: untyped callee visit_Smooth at src/annotator/annotator.rb:3923
 
 ## Input Param Origin Backflow
 - origin: the caller-side expression passed into a parameter slot
 - backflow: tracing weak or untyped parameter pressure backward from the callee slot to the caller expression that supplied it
 - return-to-param flow: a method return value that is later passed into another method's parameter
-- Origins indexed: 63043
-- static: 24947
-- local: 14980
-- untyped_return: 9892
-- unknown: 7563
-- typed_return: 5661
+- Origins indexed: 63590
+- static: 25269
+- local: 15040
+- untyped_return: 9799
+- unknown: 7739
+- typed_return: 5743
 
 Return-to-param flows:
-- untyped: 3324 flow(s); src/annotator/annotator.rb:56 -> returns(0); src/annotator/annotator.rb:59 -> returns(0); src/annotator/annotator.rb:89 -> returns(0); src/annotator/annotator.rb:89 -> returns(0)
-- []: 2614 flow(s); src/annotator/annotator.rb:122 -> let(1); src/annotator/annotator.rb:123 -> let(1); src/annotator/annotator.rb:129 -> let(1); src/annotator/annotator.rb:130 -> let(1)
-- new: 1628 flow(s); src/annotator/annotator.rb:157 -> let(0); src/annotator/annotator.rb:332 -> declare_type(1); src/annotator/annotator.rb:342 -> declare_type(1); src/annotator/annotator.rb:354 -> declare_type(1)
-- nilable: 1361 flow(s); src/annotator/annotator.rb:112 -> returns(0); src/annotator/annotator.rb:115 -> params(importer); src/annotator/annotator.rb:115 -> params(compiler); src/annotator/annotator.rb:115 -> params(source_dir)
-- name: 422 flow(s); src/annotator/annotator.rb:316 -> error!(name); src/annotator/annotator.rb:565 -> new(name); src/annotator/annotator.rb:588 -> []=(0); src/annotator/annotator.rb:592 -> declare(0)
-- value: 351 flow(s); src/annotator/annotator.rb:1083 -> cast(0); src/annotator/annotator.rb:1085 -> error!(name); src/annotator/annotator.rb:1087 -> cast(0); src/annotator/annotator.rb:1091 -> visit(0)
-- to_s: 330 flow(s); src/annotator/annotator.rb:1106 -> <<(0); src/annotator/annotator.rb:1368 -> og_declare(0); src/annotator/annotator.rb:1799 -> record_capture_local!(0); src/annotator/annotator.rb:1845 -> record_capture_local!(0)
-- body: 220 flow(s); src/annotator/annotator.rb:666 -> analyze_routine(1); src/annotator/annotator.rb:721 -> analyze_routine(1); src/annotator/annotator.rb:724 -> scan_for_calls(0); src/annotator/annotator.rb:767 -> split(0)
-- must: 187 flow(s); src/annotator/annotator.rb:670 -> build_lambda_signature(1); src/annotator/annotator.rb:3169 -> fixable!(message); src/annotator/annotator.rb:3214 -> stamp_type!(1); src/annotator/helpers/auto_inference.rb:247 -> record_return(1)
-- length: 155 flow(s); src/annotator/annotator.rb:1500 -> !=(0); src/annotator/annotator.rb:1501 -> error!(expected); src/annotator/annotator.rb:1501 -> error!(got); src/annotator/annotator.rb:2330 -> +(0)
-- left: 129 flow(s); src/annotator/annotator.rb:3847 -> visit(0); src/annotator/annotator.rb:3890 -> visit(0); src/annotator/annotator.rb:3931 -> visit(0); src/annotator/helpers/auto_inference.rb:931 -> walk_binops(0)
-- full_type!: 120 flow(s); src/annotator/annotator.rb:492 -> unwrap(0); src/annotator/annotator.rb:501 -> stamp_type!(1); src/annotator/annotator.rb:1297 -> stamp_type!(1); src/annotator/annotator.rb:1443 -> stamp_type!(1)
-- resolved: 117 flow(s); src/annotator/annotator.rb:243 -> stamp_map_pairs!(0); src/annotator/annotator.rb:250 -> emit_auto_shape_resolved_findings!(0); src/annotator/annotator.rb:1196 -> new(0); src/annotator/annotator.rb:1541 -> []=(1)
-- freeze: 105 flow(s); src/annotator/annotator.rb:6070 -> let(0); src/annotator/annotator.rb:6144 -> let(0); src/annotator/annotator.rb:6150 -> let(0); src/annotator/helpers/capabilities.rb:20 -> let(0)
-- token: 104 flow(s); src/annotator/annotator.rb:878 -> resolve_error_registration!(3); src/annotator/annotator.rb:881 -> resolve_error_registration!(3); src/annotator/annotator.rb:1055 -> emit_registry_mismatch!(0); src/annotator/annotator.rb:1065 -> emit_registry_mismatch!(0)
-- +: 103 flow(s); src/annotator/annotator.rb:2328 -> anchor_at(1); src/annotator/annotator.rb:2352 -> error!(index); src/annotator/annotator.rb:3742 -> error!(index); src/annotator/annotator.rb:6469 -> new(col)
-- no_ownership: 97 flow(s); src/backends/pipeline_host.rb:35 -> new(4); src/backends/pipeline_host.rb:36 -> new(4); src/backends/pipeline_host.rb:675 -> new(4); src/backends/pipeline_host.rb:706 -> new(4)
+- untyped: 3165 flow(s); src/annotator/annotator.rb:56 -> returns(0); src/annotator/annotator.rb:59 -> returns(0); src/annotator/annotator.rb:89 -> returns(0); src/annotator/annotator.rb:89 -> returns(0)
+- []: 2608 flow(s); src/annotator/annotator.rb:126 -> params(expanded_capabilities); src/annotator/annotator.rb:136 -> let(1); src/annotator/annotator.rb:144 -> cap_var_name(0); src/annotator/annotator.rb:170 -> display(0)
+- new: 1631 flow(s); src/annotator/annotator.rb:228 -> let(0); src/annotator/annotator.rb:403 -> declare_type(1); src/annotator/annotator.rb:413 -> declare_type(1); src/annotator/annotator.rb:425 -> declare_type(1)
+- nilable: 1431 flow(s); src/annotator/annotator.rb:121 -> [](1); src/annotator/annotator.rb:183 -> returns(0); src/annotator/annotator.rb:186 -> params(importer); src/annotator/annotator.rb:186 -> params(compiler)
+- name: 424 flow(s); src/annotator/annotator.rb:387 -> error!(name); src/annotator/annotator.rb:636 -> new(name); src/annotator/annotator.rb:659 -> []=(0); src/annotator/annotator.rb:663 -> declare(0)
+- value: 353 flow(s); src/annotator/annotator.rb:1154 -> cast(0); src/annotator/annotator.rb:1156 -> error!(name); src/annotator/annotator.rb:1158 -> cast(0); src/annotator/annotator.rb:1162 -> visit(0)
+- to_s: 330 flow(s); src/annotator/annotator.rb:1177 -> <<(0); src/annotator/annotator.rb:1440 -> og_declare(0); src/annotator/annotator.rb:1871 -> record_capture_local!(0); src/annotator/annotator.rb:1917 -> record_capture_local!(0)
+- body: 220 flow(s); src/annotator/annotator.rb:737 -> analyze_routine(1); src/annotator/annotator.rb:792 -> analyze_routine(1); src/annotator/annotator.rb:795 -> scan_for_calls(0); src/annotator/annotator.rb:838 -> split(0)
+- must: 189 flow(s); src/annotator/annotator.rb:741 -> build_lambda_signature(1); src/annotator/annotator.rb:3251 -> fixable!(message); src/annotator/annotator.rb:3296 -> stamp_type!(1); src/annotator/helpers/auto_inference.rb:247 -> record_return(1)
+- length: 155 flow(s); src/annotator/annotator.rb:1572 -> !=(0); src/annotator/annotator.rb:1573 -> error!(expected); src/annotator/annotator.rb:1573 -> error!(got); src/annotator/annotator.rb:2410 -> +(0)
+- left: 129 flow(s); src/annotator/annotator.rb:3929 -> visit(0); src/annotator/annotator.rb:3972 -> visit(0); src/annotator/annotator.rb:4013 -> visit(0); src/annotator/helpers/auto_inference.rb:931 -> walk_binops(0)
+- full_type!: 120 flow(s); src/annotator/annotator.rb:563 -> unwrap(0); src/annotator/annotator.rb:572 -> stamp_type!(1); src/annotator/annotator.rb:1368 -> stamp_type!(1); src/annotator/annotator.rb:1515 -> stamp_type!(1)
+- resolved: 117 flow(s); src/annotator/annotator.rb:314 -> stamp_map_pairs!(0); src/annotator/annotator.rb:321 -> emit_auto_shape_resolved_findings!(0); src/annotator/annotator.rb:1267 -> new(0); src/annotator/annotator.rb:1613 -> []=(1)
+- freeze: 105 flow(s); src/annotator/annotator.rb:6165 -> let(0); src/annotator/annotator.rb:6239 -> let(0); src/annotator/annotator.rb:6245 -> let(0); src/annotator/helpers/capabilities.rb:20 -> let(0)
+- +: 104 flow(s); src/annotator/annotator.rb:2408 -> anchor_at(1); src/annotator/annotator.rb:2432 -> error!(index); src/annotator/annotator.rb:3824 -> error!(index); src/annotator/annotator.rb:6564 -> new(col)
+- token: 101 flow(s); src/annotator/annotator.rb:949 -> resolve_error_registration!(3); src/annotator/annotator.rb:952 -> resolve_error_registration!(3); src/annotator/annotator.rb:1126 -> emit_registry_mismatch!(0); src/annotator/annotator.rb:1136 -> emit_registry_mismatch!(0)
+- any: 98 flow(s); src/annotator/annotator.rb:123 -> [](1); src/annotator/annotator.rb:3178 -> let(1); src/annotator/annotator.rb:3716 -> nilable(0); src/annotator/annotator.rb:3773 -> nilable(0)
+- no_ownership: 97 flow(s); src/backends/pipeline_host.rb:35 -> new(4); src/backends/pipeline_host.rb:36 -> new(4); src/backends/pipeline_host.rb:786 -> new(4); src/backends/pipeline_host.rb:812 -> new(4)
 - expression: 88 flow(s); src/annotator/helpers/pipe_analysis.rb:305 -> visit(0); src/annotator/helpers/pipe_analysis.rb:357 -> visit(0); src/annotator/helpers/pipe_analysis.rb:385 -> visit(0); src/annotator/helpers/pipe_analysis.rb:463 -> visit(0)
-- error: 86 flow(s); src/annotator/annotator.rb:3856 -> error!(message); src/mir/mir_checker.rb:333 -> <<(0); src/mir/mir_checker.rb:339 -> <<(0); src/mir/mir_checker.rb:351 -> <<(0)
-- expr: 80 flow(s); src/annotator/annotator.rb:1332 -> visit(0); src/annotator/annotator.rb:1335 -> error!(0); src/annotator/annotator.rb:1363 -> root_identifier(0); src/annotator/annotator.rb:1365 -> find_container_source(0)
+- error: 86 flow(s); src/annotator/annotator.rb:3938 -> error!(message); src/mir/mir_checker.rb:333 -> <<(0); src/mir/mir_checker.rb:339 -> <<(0); src/mir/mir_checker.rb:351 -> <<(0)
 
 ## Foreign Scalar Inputs Into Object-Typed Params
 This ranks caller origins where `String`/`Symbol` values flow into params that also receive object instances. It skips `src/tools` origins unless `NIL_KILL_FOREIGN_INCLUDE_TOOLS=1`.
-- src/mir/hoist.rb:521 `def each_mir_expr_in_value(value, &blk)`; 2194061 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/hoist.rb:521 `MIRHoistLowering#each_mir_expr_in_value` value: String, Symbol into AST::BinaryOp, Array, FunctionSignature, Hash, MIR::AddressOf (2194061); trace src/mir/hoist.rb:521
-- src/mir/hoist.rb:533 `def mir_expr_child?(value)`; 2194061 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/hoist.rb:533 `MIRHoistLowering#mir_expr_child?` value: String, Symbol into AST::BinaryOp, Array, FunctionSignature, Hash, MIR::AddressOf (2194061); trace src/mir/hoist.rb:533
-- src/ast/type.rb:230 `def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observab`; 2006743 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:230 `Type#initialize` raw_input: String, Symbol into FunctionSignature, Schemas::InlineStructVariant, Type (2006743); trace src/ast/type.rb:230
-- src/annotator/annotator.rb:279 `def program_has_auto?(node)`; 840998 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:279 `SemanticAnnotator#program_has_auto?` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (840998); trace src/annotator/annotator.rb:279
-- src/mir/hoist.rb:203 `def each_call_like(node, matches, &blk)`; 719747 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/hoist.rb:203 `Hoist#each_call_like` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (719747); trace src/mir/hoist.rb:203
-- src/mir/hoist.rb:226 `def each_call_like_child(child, matches, &blk)`; 719683 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/hoist.rb:226 `Hoist#each_call_like_child` child: String, Symbol into AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock (719683); trace src/mir/hoist.rb:226
-- src/ast/symbol_entry.rb:312 `def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,`; 506151 foreign scalar call(s), affects 2 slot(s)
-  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` type: String, Symbol into FunctionSignature, Type (506085); trace src/ast/symbol_entry.rb:312
-  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg: String, Symbol into AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl (66); trace src/ast/symbol_entry.rb:312
-- src/ast/scope.rb:25 `def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, la`; 506006 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/scope.rb:25 `Scope#declare` type: String, Symbol into FunctionSignature, Type (506006); trace src/ast/scope.rb:25
-- src/mir/pre_mir_type_check.rb:66 `def walk(node, violations, seen)`; 489372 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/pre_mir_type_check.rb:66 `PreMirTypeCheck#walk` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (489372); trace src/mir/pre_mir_type_check.rb:66
-- src/ast/type.rb:386 `def ==(other)`; 317526 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:386 Type#== other: Symbol into Type (317526); trace src/ast/type.rb:386
-- src/annotator/helpers/effects.rb:815 `def scan_suspend_points(node, fn_node, points)`; 237693 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/effects.rb:815 `EffectTracker#scan_suspend_points` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (237693); trace src/annotator/helpers/effects.rb:815
-- src/annotator/annotator.rb:6271 `def collect_self_calls(node, fn_name, out = [])`; 161439 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:6271 `SemanticAnnotator#collect_self_calls` node: String, Symbol into AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding (161439); trace src/annotator/annotator.rb:6271
-- src/annotator/annotator.rb:6287 `def collect_returns(node, out = [])`; 125185 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:6287 `SemanticAnnotator#collect_returns` node: String, Symbol into AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding (125185); trace src/annotator/annotator.rb:6287
-- src/ast/type.rb:2499 `def is_safe_autocast?(source_type, target_type)`; 93034 foreign scalar call(s), affects 2 slot(s)
-  - src/ast/type.rb:2499 `TypeHelper#is_safe_autocast?` source_type: Symbol into Type (52026); trace src/ast/type.rb:2499
-  - src/ast/type.rb:2499 `TypeHelper#is_safe_autocast?` target_type: Symbol into Type (41008); trace src/ast/type.rb:2499
-- src/ast/type.rb:2494 `def to_type(input)`; 93034 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:2494 `TypeHelper#to_type` input: Symbol into Type (93034); trace src/ast/type.rb:2494
-- src/ast/ast.rb:804 `def full_type=(val)`; 74425 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/ast.rb:804 `AST::Locatable#full_type=` val: String, Symbol into FunctionSignature, Type (74425); trace src/ast/ast.rb:804
-- src/annotator/annotator.rb:69 `def stamp_type!(node, value)`; 73923 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:69 `SemanticAnnotator#stamp_type!` value: String, Symbol into FunctionSignature, Type (73923); trace src/annotator/annotator.rb:69
-- src/annotator/helpers/effects.rb:1153 `def validate_tight_node!(node, loop_node)`; 50186 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!` node: String, Symbol into AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::Binding, AST::BreakNode (50186); trace src/annotator/helpers/effects.rb:1153
-- src/annotator/annotator.rb:6103 `def collect_bg_sources_walk(v)`; 42395 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:6103 `SemanticAnnotator#collect_bg_sources_walk` v: String, Symbol into AST::BgBlock, AST::BinaryOp, AST::Capture, AST::CopyNode, AST::FuncCall (42395); trace src/annotator/annotator.rb:6103
-- src/annotator/helpers/intrinsic_registry.rb:105 `def to_return_def(v)`; 42074 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/intrinsic_registry.rb:105 `IntrinsicRegistry#to_return_def` v: Symbol into Hash (42074); trace src/annotator/helpers/intrinsic_registry.rb:105
-- src/annotator/annotator.rb:5801 `def get_path_to_root(node)`; 31566 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:5801 `SemanticAnnotator#get_path_to_root` node: String into AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode (31566); trace src/annotator/annotator.rb:5801
-- src/mir/ownership_graph.rb:299 `def [](path)`; 20789 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/ownership_graph.rb:299 OwnershipGraph#[] path: String into AST::GetField, AST::GetIndex (20789); trace src/mir/ownership_graph.rb:299
-- src/ast/type.rb:2507 `def check_prefixed_int_range!(node, effective_type)`; 18506 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:2507 `TypeHelper#check_prefixed_int_range!` effective_type: Symbol into FunctionSignature, Type (18506); trace src/ast/type.rb:2507
-- src/mir/alloc.rb:29 `def finalize_decl_storage!(node, final_type)`; 15214 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/alloc.rb:29 `AllocHelper#finalize_decl_storage!` final_type: Symbol into Type (15214); trace src/mir/alloc.rb:29
-- src/mir/alloc.rb:45 `def resolve_resource_close(node, final_type)`; 15214 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/alloc.rb:45 `AllocHelper#resolve_resource_close` final_type: Symbol into Type (15214); trace src/mir/alloc.rb:45
-- src/annotator/helpers/capabilities.rb:1128 `def record_capability_binding(var_name, node, final_type, storage)`; 15214 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/capabilities.rb:1128 `CapabilityAudit#record_capability_binding` final_type: Symbol into Type (15214); trace src/annotator/helpers/capabilities.rb:1128
-- src/ast/type.rb:1842 `def self.from_node(node)`; 7316 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:1842 `Type#from_node` node: Symbol into AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BlockExpr, AST::CapabilityWrap (7316); trace src/ast/type.rb:1842
-- src/backends/zig_type_mapper.rb:38 `def transpile_type(type, is_param: false, is_field: false)`; 6517 foreign scalar call(s), affects 1 slot(s)
-  - src/backends/zig_type_mapper.rb:38 `ZigTypeMapper#transpile_type` type: String, Symbol into Type (6517); trace src/backends/zig_type_mapper.rb:38
-- src/mir/fsm_transform/liveness.rb:237 `def walk_idents(node, &block)`; 6019 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/fsm_transform/liveness.rb:237 `FsmTransform::Liveness#walk_idents` node: String, Symbol into AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr (6019); trace src/mir/fsm_transform/liveness.rb:237
-- src/ast/ast.rb:857 `def coerce!(declared_type)`; 4224 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/ast.rb:857 `AST::Locatable#coerce!` declared_type: Symbol into Type (4224); trace src/ast/ast.rb:857
-- src/annotator/annotator.rb:3269 `def validate_assignment_type(node, target_type, value_type)`; 3529 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:3269 `SemanticAnnotator#validate_assignment_type` target_type: Symbol into Type (3529); trace src/annotator/annotator.rb:3269
-- src/mir/mir_emitter.rb:46 `def emit(node)`; 1878 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/mir_emitter.rb:46 `MIREmitter#emit` node: String into MIR::AddressOf, MIR::AllocMark, MIR::AllocSlice, MIR::AllocatorRef, MIR::ArrayInit (1878); trace src/mir/mir_emitter.rb:46
-- src/annotator/helpers/intrinsic_registry.rb:158 `def params_from_arg_spec(spec, h)`; 1861 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/intrinsic_registry.rb:158 `IntrinsicRegistry#params_from_arg_spec` spec: Symbol into Array (1861); trace src/annotator/helpers/intrinsic_registry.rb:158
-- src/annotator/helpers/function_signature.rb:120 `def self.intrinsic_contract(return_type: Type.new(:Void), allocates: false, borrows: nil,`; 1845 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/helpers/function_signature.rb:120 `FunctionSignature#intrinsic_contract` borrows: Symbol into Array (1845); trace src/annotator/helpers/function_signature.rb:120
+- src/mir/hoist.rb:521 `def each_mir_expr_in_value(value, &blk)`; 2328260 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/hoist.rb:521 `MIRHoistLowering#each_mir_expr_in_value` value: String, Symbol into AST::BinaryOp, Array, FunctionSignature, Hash, MIR::AddressOf (2328260); trace src/mir/hoist.rb:521
+- src/mir/hoist.rb:533 `def mir_expr_child?(value)`; 2328260 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/hoist.rb:533 `MIRHoistLowering#mir_expr_child?` value: String, Symbol into AST::BinaryOp, Array, FunctionSignature, Hash, MIR::AddressOf (2328260); trace src/mir/hoist.rb:533
+- src/ast/type.rb:230 `def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observab`; 2053259 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:230 `Type#initialize` raw_input: String, Symbol into Array, FunctionSignature, Schemas::InlineStructVariant, Type (2053259); trace src/ast/type.rb:230
+- src/annotator/annotator.rb:350 `def program_has_auto?(node)`; 842699 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:350 `SemanticAnnotator#program_has_auto?` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (842699); trace src/annotator/annotator.rb:350
+- src/mir/hoist.rb:203 `def each_call_like(node, matches, &blk)`; 721557 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/hoist.rb:203 `Hoist#each_call_like` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (721557); trace src/mir/hoist.rb:203
+- src/mir/hoist.rb:226 `def each_call_like_child(child, matches, &blk)`; 721493 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/hoist.rb:226 `Hoist#each_call_like_child` child: String, Symbol into AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock (721493); trace src/mir/hoist.rb:226
+- src/ast/symbol_entry.rb:312 `def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,`; 514251 foreign scalar call(s), affects 2 slot(s)
+  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` type: String, Symbol into FunctionSignature, Type (514136); trace src/ast/symbol_entry.rb:312
+  - src/ast/symbol_entry.rb:312 `SymbolEntry#initialize` reg: String, Symbol into AST::BindExpr, AST::LetBinding, AST::StubDecl, AST::VarDecl, OpenStruct (115); trace src/ast/symbol_entry.rb:312
+- src/ast/scope.rb:25 `def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, la`; 514040 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/scope.rb:25 `Scope#declare` type: String, Symbol into FunctionSignature, Type (514040); trace src/ast/scope.rb:25
+- src/mir/pre_mir_type_check.rb:71 `def walk(node, violations, seen)`; 491016 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/pre_mir_type_check.rb:71 `PreMirTypeCheck#walk` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (491016); trace src/mir/pre_mir_type_check.rb:71
+- src/ast/type.rb:386 `def ==(other)`; 335445 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:386 Type#== other: Symbol into Type (335445); trace src/ast/type.rb:386
+- src/annotator/helpers/effects.rb:815 `def scan_suspend_points(node, fn_node, points)`; 239028 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/effects.rb:815 `EffectTracker#scan_suspend_points` node: String, Symbol into AST::AllOp, AST::AnyOp, AST::Assert, AST::Assignment, AST::AverageOp (239028); trace src/annotator/helpers/effects.rb:815
+- src/annotator/annotator.rb:6366 `def collect_self_calls(node, fn_name, out = [])`; 160414 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:6366 `SemanticAnnotator#collect_self_calls` node: String, Symbol into AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding (160414); trace src/annotator/annotator.rb:6366
+- src/annotator/annotator.rb:6382 `def collect_returns(node, out = [])`; 125185 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:6382 `SemanticAnnotator#collect_returns` node: String, Symbol into AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::Binding (125185); trace src/annotator/annotator.rb:6382
+- src/ast/type.rb:2499 `def is_safe_autocast?(source_type, target_type)`; 101627 foreign scalar call(s), affects 2 slot(s)
+  - src/ast/type.rb:2499 `TypeHelper#is_safe_autocast?` source_type: Symbol into Type (56823); trace src/ast/type.rb:2499
+  - src/ast/type.rb:2499 `TypeHelper#is_safe_autocast?` target_type: Symbol into Type (44804); trace src/ast/type.rb:2499
+- src/ast/type.rb:2494 `def to_type(input)`; 101627 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:2494 `TypeHelper#to_type` input: Symbol into Type (101627); trace src/ast/type.rb:2494
+- src/ast/ast.rb:804 `def full_type=(val)`; 77781 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/ast.rb:804 `AST::Locatable#full_type=` val: String, Symbol into FunctionSignature, Type (77781); trace src/ast/ast.rb:804
+- src/annotator/annotator.rb:69 `def stamp_type!(node, value)`; 77242 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:69 `SemanticAnnotator#stamp_type!` value: String, Symbol into FunctionSignature, Type (77242); trace src/annotator/annotator.rb:69
+- src/annotator/helpers/effects.rb:1153 `def validate_tight_node!(node, loop_node)`; 63889 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/effects.rb:1153 `EffectTracker#validate_tight_node!` node: String, Symbol into AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::Binding, AST::BreakNode (63889); trace src/annotator/helpers/effects.rb:1153
+- src/annotator/annotator.rb:6198 `def collect_bg_sources_walk(v)`; 42653 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:6198 `SemanticAnnotator#collect_bg_sources_walk` v: String, Symbol into AST::BgBlock, AST::BinaryOp, AST::Capture, AST::CopyNode, AST::FuncCall (42653); trace src/annotator/annotator.rb:6198
+- src/annotator/helpers/intrinsic_registry.rb:105 `def to_return_def(v)`; 42424 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/intrinsic_registry.rb:105 `IntrinsicRegistry#to_return_def` v: Symbol into Hash, Type (42424); trace src/annotator/helpers/intrinsic_registry.rb:105
+- src/annotator/annotator.rb:5896 `def get_path_to_root(node)`; 33058 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:5896 `SemanticAnnotator#get_path_to_root` node: String into AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode (33058); trace src/annotator/annotator.rb:5896
+- src/mir/ownership_graph.rb:299 `def [](path)`; 22319 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/ownership_graph.rb:299 OwnershipGraph#[] path: String into AST::GetField, AST::GetIndex (22319); trace src/mir/ownership_graph.rb:299
+- src/ast/type.rb:2507 `def check_prefixed_int_range!(node, effective_type)`; 19042 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:2507 `TypeHelper#check_prefixed_int_range!` effective_type: Symbol into FunctionSignature, Type (19042); trace src/ast/type.rb:2507
+- src/mir/alloc.rb:29 `def finalize_decl_storage!(node, final_type)`; 15686 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/alloc.rb:29 `AllocHelper#finalize_decl_storage!` final_type: Symbol into Type (15686); trace src/mir/alloc.rb:29
+- src/mir/alloc.rb:45 `def resolve_resource_close(node, final_type)`; 15686 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/alloc.rb:45 `AllocHelper#resolve_resource_close` final_type: Symbol into Type (15686); trace src/mir/alloc.rb:45
+- src/annotator/helpers/capabilities.rb:1128 `def record_capability_binding(var_name, node, final_type, storage)`; 15686 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/capabilities.rb:1128 `CapabilityAudit#record_capability_binding` final_type: Symbol into Type (15686); trace src/annotator/helpers/capabilities.rb:1128
+- src/ast/type.rb:1842 `def self.from_node(node)`; 7157 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:1842 `Type#from_node` node: Symbol into AST::BgBlock, AST::BgStreamBlock, AST::BinaryOp, AST::BlockExpr, AST::CapabilityWrap (7157); trace src/ast/type.rb:1842
+- src/backends/zig_type_mapper.rb:38 `def transpile_type(type, is_param: false, is_field: false)`; 6607 foreign scalar call(s), affects 1 slot(s)
+  - src/backends/zig_type_mapper.rb:38 `ZigTypeMapper#transpile_type` type: String, Symbol into Type (6607); trace src/backends/zig_type_mapper.rb:38
+- src/mir/fsm_transform/liveness.rb:239 `def walk_idents(node, &block)`; 5986 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/fsm_transform/liveness.rb:239 `FsmTransform::Liveness#walk_idents` node: String, Symbol into AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr (5986); trace src/mir/fsm_transform/liveness.rb:239
+- src/ast/ast.rb:856 `def coerce!(declared_type)`; 5510 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/ast.rb:856 `AST::Locatable#coerce!` declared_type: Symbol into Type (5510); trace src/ast/ast.rb:856
+- src/annotator/annotator.rb:3351 `def validate_assignment_type(node, target_type, value_type)`; 3857 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:3351 `SemanticAnnotator#validate_assignment_type` target_type: Symbol into Type (3857); trace src/annotator/annotator.rb:3351
+- src/mir/mir_emitter.rb:46 `def emit(node)`; 1869 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/mir_emitter.rb:46 `MIREmitter#emit` node: String into MIR::AddressOf, MIR::AllocMark, MIR::AllocSlice, MIR::AllocatorRef, MIR::ArrayInit (1869); trace src/mir/mir_emitter.rb:46
+- src/annotator/helpers/function_signature.rb:120 `def self.intrinsic_contract(return_type: Type.new(:Void), allocates: false, borrows: nil,`; 1847 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/function_signature.rb:120 `FunctionSignature#intrinsic_contract` borrows: Symbol into Array (1847); trace src/annotator/helpers/function_signature.rb:120
+- src/annotator/helpers/intrinsic_registry.rb:158 `def params_from_arg_spec(spec, h)`; 1836 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/intrinsic_registry.rb:158 `IntrinsicRegistry#params_from_arg_spec` spec: Symbol into Array (1836); trace src/annotator/helpers/intrinsic_registry.rb:158
 - src/annotator/helpers/auto_inference.rb:215 `def walk(node, current_fn:)`; 1761 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/auto_inference.rb:215 `AutoConstraintCollector#walk` node: String, Symbol into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::FuncCall (1761); trace src/annotator/helpers/auto_inference.rb:215
+- src/annotator/helpers/pipe_analysis.rb:1822 `def with_soa_tracking(node, item_type, &blk)`; 1271 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/helpers/pipe_analysis.rb:1822 `PipeAnalysis#with_soa_tracking` item_type: Symbol into Type (1271); trace src/annotator/helpers/pipe_analysis.rb:1822
 - src/annotator/helpers/pipe_analysis.rb:1799 `def check_soa_opportunity!(node, item_type)`; 1266 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/pipe_analysis.rb:1799 `PipeAnalysis#check_soa_opportunity!` item_type: Symbol into Type (1266); trace src/annotator/helpers/pipe_analysis.rb:1799
-- src/ast/ast.rb:558 `def self._expr_each_bg_block_recursive(expr, &block)`; 1160 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/ast.rb:558 `AST#_expr_each_bg_block_recursive` expr: Symbol into AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock (1160); trace src/ast/ast.rb:558
+- src/ast/ast.rb:558 `def self._expr_each_bg_block_recursive(expr, &block)`; 1180 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/ast.rb:558 `AST#_expr_each_bg_block_recursive` expr: Symbol into AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock (1180); trace src/ast/ast.rb:558
+- src/ast/ast.rb:831 `def coerced_type=(val)`; 1142 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/ast.rb:831 `AST::Locatable#coerced_type=` val: Symbol into Type (1142); trace src/ast/ast.rb:831
 - src/mir/thunk_transform/recursive_splitter.rb:266 `def contains_self_call?(node, fn_name)`; 1071 foreign scalar call(s), affects 1 slot(s)
   - src/mir/thunk_transform/recursive_splitter.rb:266 `ThunkTransform::RecursiveSplitter#contains_self_call?` node: String, Symbol into AST::BinaryOp, AST::FuncCall, AST::GetField, AST::Identifier, AST::Literal (1071); trace src/mir/thunk_transform/recursive_splitter.rb:266
-- src/ast/ast.rb:832 `def coerced_type=(val)`; 886 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/ast.rb:832 `AST::Locatable#coerced_type=` val: Symbol into Type (886); trace src/ast/ast.rb:832
-- src/ast/type.rb:132 `def self.coerce_error(source_type, target_type)`; 657 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/type.rb:132 `Type#coerce_error` target_type: Symbol into Type (657); trace src/ast/type.rb:132
+- src/ast/type.rb:132 `def self.coerce_error(source_type, target_type)`; 913 foreign scalar call(s), affects 1 slot(s)
+  - src/ast/type.rb:132 `Type#coerce_error` target_type: Symbol into Type (913); trace src/ast/type.rb:132
 - src/annotator/helpers/auto_inference.rb:741 `def walk_for_shape_decls(node, &block)`; 564 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/auto_inference.rb:741 `ShapeEvidenceCollector#walk_for_shape_decls` node: String, Symbol into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::FuncCall (564); trace src/annotator/helpers/auto_inference.rb:741
 - src/mir/thunk_transform/recursive_splitter.rb:194 `def contains_any_call?(node, names_set)`; 546 foreign scalar call(s), affects 1 slot(s)
   - src/mir/thunk_transform/recursive_splitter.rb:194 `ThunkTransform::RecursiveSplitter#contains_any_call?` node: String, Symbol into AST::BinaryOp, AST::FuncCall, AST::Identifier, AST::Literal, Array (546); trace src/mir/thunk_transform/recursive_splitter.rb:194
 - src/annotator/helpers/auto_inference.rb:903 `def walk_for_local_decls(node, &block)`; 512 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/auto_inference.rb:903 `OperatorEvidenceCollector#walk_for_local_decls` node: String, Symbol into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::FuncCall (512); trace src/annotator/helpers/auto_inference.rb:903
-- src/mir/fsm_transform/liveness.rb:195 `def collect_defs(stmt, into)`; 488 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/fsm_transform/liveness.rb:195 `FsmTransform::Liveness#collect_defs` stmt: String into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::ForRange (488); trace src/mir/fsm_transform/liveness.rb:195
-- src/mir/fsm_transform/liveness.rb:227 `def collect_uses(stmt, into)`; 488 foreign scalar call(s), affects 1 slot(s)
-  - src/mir/fsm_transform/liveness.rb:227 `FsmTransform::Liveness#collect_uses` stmt: String into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::ForRange (488); trace src/mir/fsm_transform/liveness.rb:227
-- src/annotator/annotator.rb:6638 `def og_set_live(name)  = (@og[name]&.state = :live)`; 463 foreign scalar call(s), affects 1 slot(s)
-  - src/annotator/annotator.rb:6638 `SemanticAnnotator#og_set_live` name: String into AST::GetField, AST::GetIndex (463); trace src/annotator/annotator.rb:6638
+- src/mir/fsm_transform/liveness.rb:197 `def collect_defs(stmt, into)`; 488 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/fsm_transform/liveness.rb:197 `FsmTransform::Liveness#collect_defs` stmt: String into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::ForRange (488); trace src/mir/fsm_transform/liveness.rb:197
+- src/mir/fsm_transform/liveness.rb:229 `def collect_uses(stmt, into)`; 488 foreign scalar call(s), affects 1 slot(s)
+  - src/mir/fsm_transform/liveness.rb:229 `FsmTransform::Liveness#collect_uses` stmt: String into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::ForRange (488); trace src/mir/fsm_transform/liveness.rb:229
 - src/annotator/helpers/auto_inference.rb:926 `def walk_binops(node, name_to_slot, fn)`; 462 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/auto_inference.rb:926 `OperatorEvidenceCollector#walk_binops` node: String, Symbol into AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::FuncCall (462); trace src/annotator/helpers/auto_inference.rb:926
+- src/annotator/annotator.rb:6733 `def og_set_live(name)  = (@og[name]&.state = :live)`; 454 foreign scalar call(s), affects 1 slot(s)
+  - src/annotator/annotator.rb:6733 `SemanticAnnotator#og_set_live` name: String into AST::GetField, AST::GetIndex (454); trace src/annotator/annotator.rb:6733
 - src/mir/test_lowering.rb:318 `def collect_identifier_refs(node, name_set, out)`; 285 foreign scalar call(s), affects 1 slot(s)
   - src/mir/test_lowering.rb:318 `TestLowering#collect_identifier_refs` node: String, Symbol into AST::Assert, AST::BinaryOp, AST::Identifier, AST::Literal, Lexer::Token (285); trace src/mir/test_lowering.rb:318
 - src/annotator/helpers/auto_inference.rb:762 `def walk(node, name_map)`; 277 foreign scalar call(s), affects 1 slot(s)
   - src/annotator/helpers/auto_inference.rb:762 `ShapeEvidenceCollector#walk` node: String, Symbol into AST::Assignment, AST::BindExpr, AST::HashLit, AST::Identifier, AST::ListLit (277); trace src/annotator/helpers/auto_inference.rb:762
-- src/ast/ast.rb:607 `def self._expr_each_bg_block_shallow(expr, &block)`; 233 foreign scalar call(s), affects 1 slot(s)
-  - src/ast/ast.rb:607 `AST#_expr_each_bg_block_shallow` expr: Symbol into AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock (233); trace src/ast/ast.rb:607
 
 ## Type Normalizer Sites
-- Sites matching `is_a?(Type)` plus `Type.new(...)`: 234
+- Sites matching `is_a?(Type)` plus `Type.new(...)`: 233
 - src/annotator/annotator.rb: 48
-  - line 291 `SemanticAnnotator#program_has_auto?`: node.type.is_a?(Type)
-  - line 292 `SemanticAnnotator#program_has_auto?`: node.return_type.is_a?(Type)
-  - line 1151 `SemanticAnnotator#visit_StructDef`: f.type.is_a?(Type)
-  - line 1194 `SemanticAnnotator#visit_UnionDef`: ftype.is_a?(Type)
-  - line 1421 `SemanticAnnotator#annotate_struct_pattern!`: field_type.is_a?(Type)
+  - line 362 `SemanticAnnotator#program_has_auto?`: node.type.is_a?(Type)
+  - line 363 `SemanticAnnotator#program_has_auto?`: node.return_type.is_a?(Type)
+  - line 1222 `SemanticAnnotator#visit_StructDef`: f.type.is_a?(Type)
+  - line 1265 `SemanticAnnotator#visit_UnionDef`: ftype.is_a?(Type)
+  - line 1493 `SemanticAnnotator#annotate_struct_pattern!`: field_type.is_a?(Type)
   - ... 43 more
 - src/ast/type.rb: 19
   - line 67 `Type#indirect_type?`: value.is_a?(Type)
@@ -2972,18 +2794,18 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - line 406 `GenericAnalysis#generic_shared_family_param?`: type.is_a?(Type)
   - ... 8 more
 - src/mir/lowering/functions.rb: 13
-  - line 211 `MIRLoweringFunctions#lower_function_def`: ret_type.is_a?(Type)
-  - line 956 `MIRLoweringFunctions#cross_boundary_arg`: ti.is_a?(Type)
-  - line 972 `MIRLoweringFunctions#cross_boundary_arg`: ti.is_a?(Type)
-  - line 1172 `MIRLoweringFunctions#lower_call_arg_from_facts`: facts.callee_param_type.is_a?(Type)
-  - line 1255 `MIRLoweringFunctions#wants_ptr?`: ti.is_a?(Type)
+  - line 222 `MIRLoweringFunctions#lower_function_def`: ret_type.is_a?(Type)
+  - line 992 `MIRLoweringFunctions#cross_boundary_arg`: ti.is_a?(Type)
+  - line 1008 `MIRLoweringFunctions#cross_boundary_arg`: ti.is_a?(Type)
+  - line 1208 `MIRLoweringFunctions#lower_call_arg_from_facts`: facts.callee_param_type.is_a?(Type)
+  - line 1291 `MIRLoweringFunctions#wants_ptr?`: ti.is_a?(Type)
   - ... 8 more
 - src/mir/lowering/expressions.rb: 12
-  - line 1038 `MIRLoweringExpressions#index_access_value`: ti.is_a?(Type)
-  - line 1120 `MIRLoweringExpressions#substitute_mir_type`: raw_type.is_a?(Type)
-  - line 1160 `MIRLoweringExpressions#generic_subst_source`: type_obj.is_a?(Type)
-  - line 1186 `MIRLoweringExpressions#aggregate_field_wants_dynamic_slice?`: ft.is_a?(Type)
-  - line 1226 `MIRLoweringExpressions#lower_struct_lit`: ft.is_a?(Type)
+  - line 1032 `MIRLoweringExpressions#index_access_value`: ti.is_a?(Type)
+  - line 1114 `MIRLoweringExpressions#substitute_mir_type`: raw_type.is_a?(Type)
+  - line 1154 `MIRLoweringExpressions#generic_subst_source`: type_obj.is_a?(Type)
+  - line 1180 `MIRLoweringExpressions#aggregate_field_wants_dynamic_slice?`: ft.is_a?(Type)
+  - line 1220 `MIRLoweringExpressions#lower_struct_lit`: ft.is_a?(Type)
   - ... 7 more
 - src/annotator/helpers/auto_inference.rb: 11
   - line 206 `AutoConstraintCollector#auto?`: t.is_a?(Type)
@@ -2992,13 +2814,13 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - line 601 `AutoUnifier#types_equal?`: a.is_a?(Type)
   - line 601 `AutoUnifier#types_equal?`: b.is_a?(Type)
   - ... 6 more
-- src/annotator/helpers/function_analysis.rb: 10
-  - line 182 `FunctionAnalysis#resolve_call`: rt.is_a?(Type)
+- src/annotator/helpers/function_analysis.rb: 9
+  - line 354 `FunctionAnalysis#verify_function_signature!`: arg_ti.is_a?(Type)
   - line 355 `FunctionAnalysis#verify_function_signature!`: arg_ti.is_a?(Type)
-  - line 356 `FunctionAnalysis#verify_function_signature!`: arg_ti.is_a?(Type)
-  - line 412 `FunctionAnalysis#verify_function_signature!`: expected_raw.is_a?(Type)
-  - line 427 `FunctionAnalysis#verify_function_signature!`: expected.is_a?(Type)
-  - ... 5 more
+  - line 411 `FunctionAnalysis#verify_function_signature!`: expected_raw.is_a?(Type)
+  - line 426 `FunctionAnalysis#verify_function_signature!`: expected.is_a?(Type)
+  - line 444 `FunctionAnalysis#verify_function_signature!`: arg_ti.is_a?(Type)
+  - ... 4 more
 - src/mir/escape_analysis.rb: 8
   - line 184 `EscapeAnalysis#propagate_caller_sync!`: t.is_a?(Type)
   - line 202 `EscapeAnalysis#propagate_caller_sync!`: t.is_a?(Type)
@@ -3021,11 +2843,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - line 995 `CleanupClassifier#classify_struct_cleanup_fields`: ft.is_a?(Type)
   - ... 2 more
 - src/mir/mir_lowering.rb: 7
-  - line 402 `MIRLowering#destination_type`: ti.is_a?(Type)
-  - line 2179 `MIRLowering#mir_cast`: from_type.is_a?(Type)
-  - line 2180 `MIRLowering#mir_cast`: to_type.is_a?(Type)
-  - line 2444 `MIRLowering#lower_cast`: node.target.is_a?(Type)
-  - line 2855 `MIRLowering#bare_zig_type`: ti.is_a?(Type)
+  - line 466 `MIRLowering#destination_type`: ti.is_a?(Type)
+  - line 2244 `MIRLowering#mir_cast`: from_type.is_a?(Type)
+  - line 2245 `MIRLowering#mir_cast`: to_type.is_a?(Type)
+  - line 2509 `MIRLowering#lower_cast`: node.target.is_a?(Type)
+  - line 2915 `MIRLowering#bare_zig_type`: ti.is_a?(Type)
   - ... 2 more
 - src/annotator/helpers/pipe_analysis.rb: 6
   - line 764 `PipeAnalysis#analyze_pipe_to_identifier`: sig.is_a?(Type)
@@ -3040,14 +2862,14 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - line 452 `ReentranceBridge#emit_mutual_thunk_unsupported!`: rt.is_a?(Type)
   - line 490 `ReentranceBridge#emit_mutual_thunk_unsupported!`: rt.is_a?(Type)
 - src/mir/lowering/control_flow.rb: 4
-  - line 290 `MIRLoweringControlFlow#for_each_plan`: coll_type.is_a?(Type)
-  - line 450 `MIRLoweringControlFlow#for_each_loop_stmt`: elem.is_a?(Type)
-  - line 657 `MIRLoweringControlFlow#match_lowering_facts`: expr_type.is_a?(Type)
-  - line 660 `MIRLoweringControlFlow#match_lowering_facts`: expr_type.is_a?(Type)
+  - line 281 `MIRLoweringControlFlow#for_each_plan`: coll_type.is_a?(Type)
+  - line 439 `MIRLoweringControlFlow#for_each_loop_stmt`: elem.is_a?(Type)
+  - line 644 `MIRLoweringControlFlow#match_lowering_facts`: expr_type.is_a?(Type)
+  - line 647 `MIRLoweringControlFlow#match_lowering_facts`: expr_type.is_a?(Type)
 - src/ast/parser.rb: 3
   - line 926 `Parser#synthesize_default_for_type`: type.is_a?(Type)
   - line 2496 `Parser#reject_auto_in_aggregate_field!`: type.is_a?(Type)
-  - line 2957 `Parser#type_annotation_source`: type.is_a?(Type)
+  - line 2926 `Parser#type_annotation_source`: type.is_a?(Type)
 - src/mir/fiber_ctx_builder.rb: 3
   - line 152 `FiberCtxBuilder#build`: _type_obj.is_a?(Type)
   - line 217 `FiberCtxBuilder#needs_move_capture_cleanup?`: type_obj.is_a?(Type)
@@ -3057,27 +2879,27 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - line 489 `FsmTransform::RecursiveSplitter#emit_for_each_fragment`: ct.is_a?(Type)
   - line 502 `FsmTransform::RecursiveSplitter#emit_for_each_fragment`: ct.is_a?(Type)
 - src/mir/lowering/capabilities.rb: 3
-  - line 353 `MIRLoweringCapabilities#lower_with_block`: resolved.is_a?(Type)
-  - line 411 `MIRLoweringCapabilities#lower_with_block`: resolved.is_a?(Type)
-  - line 811 `MIRLoweringCapabilities#lower_polymorphic_universal`: resolved.is_a?(Type)
+  - line 351 `MIRLoweringCapabilities#lower_with_block`: resolved.is_a?(Type)
+  - line 409 `MIRLoweringCapabilities#lower_with_block`: resolved.is_a?(Type)
+  - line 825 `MIRLoweringCapabilities#lower_polymorphic_universal`: resolved.is_a?(Type)
 
 ## Struct Shape Report
 - Struct declarations: 338
-- Runtime-observed struct field slots: 703
-- Static constructor field observations: 7280
+- Runtime-observed struct field slots: 701
+- Static constructor field observations: 7276
 
 ### Struct Field Slot Breakdown
-- missing field type with candidate: 69
-  - `CapabilityHelper::CaptureContext.analysis` -> CapabilityHelper::CaptureAnalysis (runtime 2745)
-  - `CapabilityHelper::CaptureContext.outer_scope` -> Scope (runtime 2745)
-  - `CapabilityHelper::CaptureContext.locals` -> Set (runtime 2745)
-  - `CapabilityHelper::CaptureContext.mark_moves` -> T::Boolean (runtime 2745)
-  - `AST::Param.name` -> String (runtime 91117)
-  - `AST::Param.mutable` -> T.any(FalseClass, Lexer::Token, TrueClass) (runtime 82983)
-  - `AST::Param.takes` -> T.any(FalseClass, Lexer::Token, TrueClass) (runtime 82848)
-  - `AST::Param.comptime` -> T::Boolean (runtime 10081)
-  - ... 61 more
-- missing field type with no candidate: 53
+- missing field type with candidate: 72
+  - `CapabilityHelper::CaptureContext.analysis` -> CapabilityHelper::CaptureAnalysis (runtime 2736)
+  - `CapabilityHelper::CaptureContext.outer_scope` -> Scope (runtime 2736)
+  - `CapabilityHelper::CaptureContext.locals` -> Set (runtime 2736)
+  - `CapabilityHelper::CaptureContext.mark_moves` -> T::Boolean (runtime 2736)
+  - `AST::Param.name` -> String (runtime 93803)
+  - `AST::Param.mutable` -> T.any(FalseClass, Lexer::Token, TrueClass) (runtime 85459)
+  - `AST::Param.takes` -> T.any(FalseClass, Lexer::Token, TrueClass) (runtime 85324)
+  - `AST::Param.comptime` -> T::Boolean (runtime 10094)
+  - ... 64 more
+- missing field type with no candidate: 50
   - `CapabilityHelper::CaptureContext.is_parallel`
   - `AST::Param.type`
   - `AST::Param.default`
@@ -3086,28 +2908,28 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - `AST::Param.sync`
   - `AST::Param.symbol`
   - `AST::Capture.default`
-  - ... 45 more
-- untyped with runtime candidate: 300
-  - `CapabilityHelper::CaptureAnalysis.has_local` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_rc` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_shared` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_sharded` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_affine_locked` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_outer_ref` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.has_non_escaping_capture` current `T.untyped` -> T::Boolean (runtime 2751)
-  - `CapabilityHelper::CaptureAnalysis.captures` current `T.untyped` -> Hash (runtime 2751)
-  - ... 292 more
-- untyped with static candidate: 16
+  - ... 42 more
+- untyped with runtime candidate: 297
+  - `CapabilityHelper::CaptureAnalysis.has_local` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_rc` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_shared` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_sharded` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_affine_locked` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_outer_ref` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.has_non_escaping_capture` current `T.untyped` -> T::Boolean (runtime 2742)
+  - `CapabilityHelper::CaptureAnalysis.captures` current `T.untyped` -> Hash (runtime 2742)
+  - ... 289 more
+- untyped with static candidate: 20
   - `AST::BinaryOp.op` current `T.untyped` -> T.any(String, Symbol) (static)
+  - `AST::StructLit.type_args` current `T.untyped` -> T::Array[String] (static)
   - `AST::IfBind.bindings` current `T.untyped` -> T::Array[AST::Binding] (static)
   - `AST::GetField.field` current `T.untyped` -> T.any(String, T::Hash[`T.untyped`, `T.untyped`]) (static)
+  - `AST::Assert.condition` current `T.untyped` -> T.any(AST::Identifier, AST::Node) (static)
   - `AST::Assert.message` current `T.untyped` -> String (static)
   - `AST::CatchBlock.catch_clauses` current `T.untyped` -> T::Array[AST::CatchClause] (static)
   - `AST::StructPattern.fields` current `T.untyped` -> T::Array[AST::PatternField] (static)
-  - `MIR::SuppressCleanup.name` current `T.untyped` -> String (static)
-  - `CompilerFrontend::Result.struct_schemas` current `T.untyped` -> T::Hash[Symbol, Schemas::StructSchema] (static)
-  - ... 8 more
-- untyped with no candidate: 299
+  - ... 12 more
+- untyped with no candidate: 298
   - `CapabilityHelper::CaptureAnalysis.strategies` current `T.untyped`
   - `CapabilityHelper::CaptureAnalysis.move_mark_names` current `T.untyped`
   - `CapabilityHelper::CaptureAnalysis.alloc_mark_entries` current `T.untyped`
@@ -3116,16 +2938,16 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - `AST::FunctionDef.name` current `T.untyped`
   - `AST::FunctionDef.return_type` current `T.untyped`
   - `AST::FunctionDef.return_lifetime` current `T.untyped`
-  - ... 291 more
+  - ... 290 more
 - weak collection or union type: 48
-  - `Capabilities::Conflict.set_a` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 1435)
-  - `Capabilities::Conflict.set_b` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 1435)
+  - `Capabilities::Conflict.set_a` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 1437)
+  - `Capabilities::Conflict.set_b` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 1437)
   - `AST::Program.statements` current T::Array[`T.untyped`]
-  - `AST::FunctionDef.params` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 17716)
+  - `AST::FunctionDef.params` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 17810)
   - `AST::FunctionDef.captures` current T.nilable(T::Array[`T.untyped`])
   - `AST::FunctionDef.body` current T::Array[`T.untyped`]
   - `AST::StructDef.type_params` current T::Array[`T.untyped`]
-  - `AST::ListLit.items` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 5499)
+  - `AST::ListLit.items` current T::Array[`T.untyped`] -> T.any(Array, T::Array[`T.untyped`]) (runtime 5504)
   - ... 40 more
 - typed but nilable: 21
   - `AST::Cast.token` current T.nilable(Token)
@@ -3134,14 +2956,14 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - `AST::OrderByOp.token` current T.nilable(Token) -> Lexer::Token (runtime 31)
   - `AST::LimitOp.token` current T.nilable(Token) -> Lexer::Token (runtime 244)
   - `AST::UnnestOp.token` current T.nilable(Token) -> Lexer::Token (runtime 147)
-  - `AST::DistinctOp.token` current T.nilable(Token) -> Lexer::Token (runtime 189)
+  - `AST::DistinctOp.token` current T.nilable(Token) -> Lexer::Token (runtime 191)
   - `AST::SkipOp.token` current T.nilable(Token) -> Lexer::Token (runtime 95)
   - ... 13 more
 - strongly typed: 315
   - `Capabilities::Conflict.message` current String -> String (static)
   - `FixableHelper::AnchorToken.line` current Integer -> Integer (static)
   - `FixableHelper::AnchorToken.column` current Integer -> Integer (static)
-  - `AST::Program.token` current Lexer::Token -> T.any(Lexer::Token, T::Array[`T.untyped`]) (runtime 9924)
+  - `AST::Program.token` current Lexer::Token -> T.any(Lexer::Token, T::Array[`T.untyped`]) (runtime 10004)
   - `AST::RequireNode.token` current Token
   - `AST::RequireNode.kind` current Symbol -> Symbol (static)
   - `AST::FunctionDef.token` current Token
@@ -3149,60 +2971,60 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - ... 307 more
 
 ### Struct Field Type Candidates
-- `OwnershipDataflow::OwnerEntry.allocator`; Symbol; runtime; 388881 call(s)
-- `OwnershipDataflow::OwnerEntry.needs_cleanup`; T::Boolean; runtime; 388881 call(s)
-- `OwnershipDataflow::OwnerEntry.state`; Symbol; runtime; 388881 call(s)
-- `AST::Param.name`; String; runtime; 91117 call(s)
-- `AST::Param.mutable`; T.any(FalseClass, Lexer::Token, TrueClass); runtime; 82983 call(s)
-- `AST::Param.takes`; T.any(FalseClass, Lexer::Token, TrueClass); runtime; 82848 call(s)
-- `OwnershipDataflow::DataflowStep.state`; Hash; runtime; 65724 call(s)
-- `OwnershipDataflow::DataflowStep.consumed`; Set; runtime; 65723 call(s)
-- `AST::FuncCall.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 37599 call(s)
-- `AST::FuncCall.name`; String; runtime; 37599 call(s)
-- `OwnershipGraph::Node.kind`; Symbol; runtime; 35528 call(s)
-- `OwnershipGraph::Node.line`; Integer; runtime; 35528 call(s)
-- `OwnershipGraph::Node.path`; String; runtime; 35528 call(s)
-- `OwnershipGraph::Node.scope_depth`; Integer; runtime; 35528 call(s)
-- `OwnershipGraph::Node.state`; Symbol; runtime; 35528 call(s)
-- `OwnershipGraph::Node.type_info`; Type; runtime; 35528 call(s)
-- `BinaryOpResult.type`; Type; runtime; 32548 call(s)
-- `AST::MethodCall.name`; String; runtime; 32150 call(s)
-- `MIR::TransferMark.name`; String; runtime; 24974 call(s)
-- `MIR::TransferMark.target`; Symbol; runtime; 24974 call(s)
-- `MIR::MoveMark.name`; String; runtime; 23875 call(s)
-- `AST::StructField.type`; T.any(Symbol, Type); runtime; 21140 call(s)
-- `AST::FunctionDef.params`; T.any(Array, T::Array[`T.untyped`]); runtime; 17716 call(s)
-- `AST::StructLit.fields`; T.any(Hash, T::Hash[`T.untyped`, `T.untyped`]); runtime; 14138 call(s)
-- `MIR::OwnedStore.alloc`; Symbol; runtime; 11926 call(s)
-- `MIR::OwnedStore.target`; String; runtime; 11926 call(s)
-- `AST::Param.comptime`; T::Boolean; runtime; 10081 call(s)
-- `AST::Program.token`; T.any(Lexer::Token, T::Array[`T.untyped`]); runtime; 9924 call(s)
-- `MIR::Call.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 9526 call(s)
-- `MIR::Call.callee`; String; runtime; 9526 call(s)
-- `FsmOps::CallExpr.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 8621 call(s)
-- `FsmTransform::Segments::Segment.stmts`; T.any(Array, T::Array[`T.untyped`]); runtime; 8112 call(s)
-- `AST::MatchCase.kind`; Symbol; runtime; 7952 call(s)
-- `AST::StructField.borrowed`; T::Boolean; runtime; 7779 call(s)
-- `FsmOps::AssignField.value`; T.any(FsmOps::AllocExpr, FsmOps::CallExpr); runtime; 7185 call(s)
-- `FsmOps::StateFieldDecl.init_zig`; String; runtime; 7182 call(s)
-- `FsmOps::StateFieldDecl.name`; String; runtime; 7182 call(s)
-- `FsmOps::StateFieldDecl.zig_type`; String; runtime; 7182 call(s)
-- `AST::ListLit.items`; T.any(Array, T::Array[`T.untyped`]); runtime; 5499 call(s)
-- `MIR::FnDef.params`; T.any(Array, T::Array[MIR::Param], T::Array[`T.untyped`]); runtime; 4786 call(s)
-- `MIR::MethodCall.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 4768 call(s)
-- `AST::Capability.capability`; Symbol; runtime; 4468 call(s)
-- `AST::Capability.var_node`; T.any(AST::FuncCall, AST::GetField, AST::Identifier); runtime; 4468 call(s)
-- `AST::Capability.alias_mutable`; T::Boolean; runtime; 4447 call(s)
-- `FsmOps::StmtCall.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 4310 call(s)
-- `AST::WithBlock.capabilities`; T.any(Array, T::Array[AST::Capability], T::Array[`T.untyped`]); runtime; 4150 call(s)
-- `BinaryOpResult.storage`; Symbol; runtime; 4124 call(s)
-- `CaptureStrategy::CaptureSiteInfo.copied_names`; Set; runtime; 3687 call(s)
-- `CaptureStrategy::CaptureSiteInfo.moved_names`; Set; runtime; 3687 call(s)
-- `MIR::FsmStateArm.index`; Integer; runtime; 3608 call(s)
+- `OwnershipDataflow::OwnerEntry.allocator`; Symbol; runtime; 422456 call(s)
+- `OwnershipDataflow::OwnerEntry.needs_cleanup`; T::Boolean; runtime; 422456 call(s)
+- `OwnershipDataflow::OwnerEntry.state`; Symbol; runtime; 422456 call(s)
+- `AST::Param.name`; String; runtime; 93803 call(s)
+- `AST::Param.mutable`; T.any(FalseClass, Lexer::Token, TrueClass); runtime; 85459 call(s)
+- `AST::Param.takes`; T.any(FalseClass, Lexer::Token, TrueClass); runtime; 85324 call(s)
+- `OwnershipDataflow::DataflowStep.consumed`; Set; runtime; 66634 call(s)
+- `OwnershipDataflow::DataflowStep.state`; Hash; runtime; 66634 call(s)
+- `AST::FuncCall.args`; T.any(Array, T::Array[AST::Node], T::Array[`T.untyped`]); runtime; 37569 call(s)
+- `AST::FuncCall.name`; String; runtime; 37569 call(s)
+- `OwnershipGraph::Node.kind`; Symbol; runtime; 36199 call(s)
+- `OwnershipGraph::Node.path`; String; runtime; 36199 call(s)
+- `OwnershipGraph::Node.state`; Symbol; runtime; 36199 call(s)
+- `OwnershipGraph::Node.line`; Integer; runtime; 36198 call(s)
+- `OwnershipGraph::Node.scope_depth`; Integer; runtime; 36198 call(s)
+- `OwnershipGraph::Node.type_info`; Type; runtime; 36198 call(s)
+- `BinaryOpResult.type`; Type; runtime; 34254 call(s)
+- `AST::MethodCall.name`; String; runtime; 32139 call(s)
+- `MIR::TransferMark.name`; String; runtime; 24797 call(s)
+- `MIR::TransferMark.target`; Symbol; runtime; 24797 call(s)
+- `MIR::MoveMark.name`; String; runtime; 23691 call(s)
+- `AST::StructField.type`; T.any(Symbol, Type); runtime; 21352 call(s)
+- `AST::FunctionDef.params`; T.any(Array, T::Array[`T.untyped`]); runtime; 17810 call(s)
+- `AST::StructLit.fields`; T.any(Hash, T::Hash[`T.untyped`, `T.untyped`]); runtime; 14129 call(s)
+- `MIR::OwnedStore.alloc`; Symbol; runtime; 11974 call(s)
+- `MIR::OwnedStore.target`; String; runtime; 11974 call(s)
+- `AST::Param.comptime`; T::Boolean; runtime; 10094 call(s)
+- `AST::Program.token`; T.any(Lexer::Token, T::Array[`T.untyped`]); runtime; 10004 call(s)
+- `MIR::Call.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 9554 call(s)
+- `MIR::Call.callee`; String; runtime; 9554 call(s)
+- `FsmOps::CallExpr.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 8633 call(s)
+- `MIR::AllocMark.scope`; T.any(Symbol, `T.untyped`); runtime; 8124 call(s)
+- `FsmTransform::Segments::Segment.stmts`; T.any(Array, T::Array[`T.untyped`]); runtime; 8069 call(s)
+- `AST::MatchCase.kind`; Symbol; runtime; 7966 call(s)
+- `AST::StructField.borrowed`; T::Boolean; runtime; 7787 call(s)
+- `FsmOps::AssignField.value`; T.any(FsmOps::AllocExpr, FsmOps::CallExpr); runtime; 7195 call(s)
+- `FsmOps::StateFieldDecl.init_zig`; String; runtime; 7192 call(s)
+- `FsmOps::StateFieldDecl.name`; String; runtime; 7192 call(s)
+- `FsmOps::StateFieldDecl.zig_type`; String; runtime; 7192 call(s)
+- `AST::ListLit.items`; T.any(Array, T::Array[`T.untyped`]); runtime; 5504 call(s)
+- `MIR::FnDef.params`; T.any(Array, T::Array[MIR::Param], T::Array[`T.untyped`]); runtime; 4856 call(s)
+- `MIR::MethodCall.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 4786 call(s)
+- `AST::Capability.capability`; Symbol; runtime; 4473 call(s)
+- `AST::Capability.var_node`; T.any(AST::FuncCall, AST::GetField, AST::Identifier); runtime; 4473 call(s)
+- `AST::Capability.alias_mutable`; T::Boolean; runtime; 4443 call(s)
+- `FsmOps::StmtCall.args`; T.any(Array, T::Array[`T.untyped`]); runtime; 4316 call(s)
+- `BinaryOpResult.storage`; Symbol; runtime; 4176 call(s)
+- `AST::WithBlock.capabilities`; T.any(Array, T::Array[AST::Capability], T::Array[`T.untyped`]); runtime; 4158 call(s)
+- `CaptureStrategy::CaptureSiteInfo.copied_names`; Set; runtime; 3679 call(s)
+- `CaptureStrategy::CaptureSiteInfo.moved_names`; Set; runtime; 3679 call(s)
 
 ## Collection Type Report
-- Array signature slots: 974 total, 380 strong, 594 weak, 162 nilable
-- Hash signature slots: 289 total, 110 strong, 179 weak, 64 nilable
+- Array signature slots: 986 total, 387 strong, 599 weak, 162 nilable
+- Hash signature slots: 299 total, 117 strong, 182 weak, 68 nilable
 
 ### Hash Record Struct Candidates (Shapes + Pressure)
 - literal shape: a statically observed hash literal instantiation site in this candidate cluster
@@ -3212,10 +3034,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - read keys: body(11), cond(3), parallel(3), capture_analysis(2), pinned(2), can_smash(1), stack_size(1)
   - accounts for: return 0, param 17, ivar 0, collection 21
   - related pressure records: local hash record branch at src/mir/lowering/concurrency.rb (18); local hash record arm at src/mir/mir.rb (12); local hash record branch at src/annotator/annotator.rb (12); local hash record arm at src/mir/mir_checker.rb (11); local hash record arm at src/annotator/helpers/effects.rb (10)
-  - src/annotator/annotator.rb:5105 branch[:parallel]; receiver branch
-  - src/annotator/annotator.rb:5106 branch[:body]; receiver branch
-  - src/annotator/annotator.rb:5110 branch[:parallel]; receiver branch
-  - src/annotator/annotator.rb:5120 branch[:pinned]; receiver branch
+  - src/annotator/annotator.rb:5178 branch[:parallel]; receiver branch
+  - src/annotator/annotator.rb:5179 branch[:body]; receiver branch
+  - src/annotator/annotator.rb:5183 branch[:parallel]; receiver branch
+  - src/annotator/annotator.rb:5193 branch[:pinned]; receiver branch
   - suggested struct:
     class BodyRecord < T::Struct
       const :body, T::Array[`T.untyped`]
@@ -3228,11 +3050,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: action, retries, selectors, token
   - read keys: action(4), retries(4), bubble_types(3), matched_types(3), body(2), message(2), selectors(2), value(1)
   - accounts for: return 0, param 11, ivar 0, collection 21
-  - related pressure records: hash record return [] at src/annotator/helpers/lock_helper.rb:109 (2); hash record param clause at src/annotator/annotator.rb:5049 (1); hash record return lock_error_clause at src/annotator/helpers/lock_helper.rb:384 (1); hash record return must at src/ast/parser.rb:3532 (1); local hash record clause at src/annotator/helpers/with_match_check.rb (1)
-  - src/annotator/annotator.rb:1013 h[:selectors]; receiver h
+  - related pressure records: hash record return [] at src/annotator/helpers/lock_helper.rb:109 (2); hash record param clause at src/annotator/annotator.rb:5122 (1); hash record return lock_error_clause at src/annotator/helpers/lock_helper.rb:384 (1); hash record return must at src/ast/parser.rb:3555 (1); local hash record clause at src/annotator/helpers/with_match_check.rb (1)
+  - src/annotator/annotator.rb:1084 h[:selectors]; receiver h
   - src/annotator/helpers/with_match_check.rb:419 clause[:selectors]; receiver clause
   - src/mir/fsm_lowering.rb:464 with_node.lock_error_clause[:retries]; receiver with_node.lock_error_clause
-  - src/mir/lowering/capabilities.rb:524 clause[:action]; receiver clause
+  - src/mir/lowering/capabilities.rb:540 clause[:action]; receiver clause
   - suggested struct:
     class SelectorsRecord < T::Struct
       const :form, Symbol
@@ -3251,10 +3073,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - read keys: guard_var(9), held_var(5), alias_name(4), lock_expr(4), method(4), i(3), addr_expr(2)
   - accounts for: return 0, param 0, ivar 0, collection 28
   - related pressure records: local hash record e at src/mir/lowering/capabilities.rb (9)
-  - src/mir/lowering/capabilities.rb:1157 e[:guard_var]; receiver e
-  - src/mir/lowering/capabilities.rb:1157 e[:lock_expr]; receiver e
-  - src/mir/lowering/capabilities.rb:1157 e[:method]; receiver e
-  - src/mir/lowering/capabilities.rb:1160 e[:addr_expr]; receiver e
+  - src/mir/lowering/capabilities.rb:1171 e[:guard_var]; receiver e
+  - src/mir/lowering/capabilities.rb:1171 e[:lock_expr]; receiver e
+  - src/mir/lowering/capabilities.rb:1171 e[:method]; receiver e
+  - src/mir/lowering/capabilities.rb:1174 e[:addr_expr]; receiver e
   - suggested struct:
     class AddrExprRecord < T::Struct
       const :addr_expr, String
@@ -3288,10 +3110,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - read keys: addrs(2), allocs(2), bytes(2), free_bytes(1), frees(1)
   - accounts for: return 0, param 10, ivar 0, collection 8
   - related pressure records: local hash record s at src/tools/doctor.rb (61); local hash record v at src/tools/doctor.rb (8); local hash record vals at src/tools/doctor.rb (4); local hash record s at src/tools/pprof_converter.rb (3)
-  - src/tools/pprof_converter.rb:141 s[:addrs]; receiver s
-  - src/tools/pprof_converter.rb:145 s[:allocs]; receiver s
-  - src/tools/pprof_converter.rb:146 s[:bytes]; receiver s
-  - src/tools/pprof_converter.rb:147 s[:allocs]; receiver s
+  - src/tools/pprof_converter.rb:145 s[:addrs]; receiver s
+  - src/tools/pprof_converter.rb:149 s[:allocs]; receiver s
+  - src/tools/pprof_converter.rb:150 s[:bytes]; receiver s
+  - src/tools/pprof_converter.rb:151 s[:allocs]; receiver s
   - suggested struct:
     class AddrsRecord < T::Struct
       const :addrs, `T.untyped`
@@ -3305,11 +3127,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: binding, expr
   - read keys: binding(5), expr(5)
   - accounts for: return 0, param 7, ivar 0, collection 10
-  - related pressure records: hash record return pop at src/mir/fsm_lowering.rb:128 (17); hash record return pop at src/mir/lowering/concurrency.rb:403 (13); local hash record step at src/mir/lowering/concurrency.rb (12); local hash record step at src/annotator/annotator.rb (6); hash record param step at src/mir/fsm_lowering.rb:335 (5)
-  - src/annotator/annotator.rb:5272 step[:expr]; receiver step
-  - src/annotator/annotator.rb:5273 step[:expr]; receiver step
-  - src/annotator/annotator.rb:5275 step[:binding]; receiver step
-  - src/annotator/annotator.rb:5281 step[:binding]; receiver step
+  - related pressure records: hash record return pop at src/mir/fsm_lowering.rb:128 (17); hash record return pop at src/mir/lowering/concurrency.rb:442 (13); local hash record step at src/mir/lowering/concurrency.rb (12); local hash record step at src/annotator/annotator.rb (6); hash record param step at src/mir/fsm_lowering.rb:335 (5)
+  - src/annotator/annotator.rb:5345 step[:expr]; receiver step
+  - src/annotator/annotator.rb:5346 step[:expr]; receiver step
+  - src/annotator/annotator.rb:5348 step[:binding]; receiver step
+  - src/annotator/annotator.rb:5354 step[:binding]; receiver step
   - suggested struct:
     class BindingRecord < T::Struct
       const :binding, T.nilable(String)
@@ -3321,10 +3143,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - read keys: bytes(6), allocs(5)
   - accounts for: return 0, param 3, ivar 0, collection 11
   - related pressure records: local hash record s at src/tools/doctor.rb (61); local hash record v at src/tools/doctor.rb (8); local hash record vals at src/tools/doctor.rb (4)
-  - src/tools/doctor.rb:1323 self_total[:bytes]; receiver self_total
-  - src/tools/doctor.rb:1331 self_total[:bytes]; receiver self_total
-  - src/tools/doctor.rb:1331 self_total[:allocs]; receiver self_total
-  - src/tools/doctor.rb:1456 b[:bytes]; receiver b
+  - src/tools/doctor.rb:1337 self_total[:bytes]; receiver self_total
+  - src/tools/doctor.rb:1345 self_total[:bytes]; receiver self_total
+  - src/tools/doctor.rb:1345 self_total[:allocs]; receiver self_total
+  - src/tools/doctor.rb:1470 b[:bytes]; receiver b
   - suggested struct:
     class AllocsRecord < T::Struct
       prop :addr, `T.untyped`
@@ -3357,11 +3179,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: arena, can_smash, can_smash_token, parallel, pinned, stack_size, stack_size_token
   - read keys: arena(1), can_smash(1), can_smash_token(1), parallel(1), pinned(1), stack_size(1), stack_size_token(1)
   - accounts for: return 0, param 7, ivar 0, collection 7
-  - related pressure records: local hash record T.must(prefix) at src/ast/parser.rb (7); hash record return [] at src/ast/parser.rb:3804 (6); hash record return [] at src/ast/parser.rb:3730 (5); hash record param options at src/annotator/helpers/pipe_analysis.rb:50 (1)
-  - src/ast/parser.rb:3848 T.must(prefix)[:stack_size]; receiver T.must(prefix)
-  - src/ast/parser.rb:3848 T.must(prefix)[:pinned]; receiver T.must(prefix)
-  - src/ast/parser.rb:3848 T.must(prefix)[:parallel]; receiver T.must(prefix)
-  - src/ast/parser.rb:3848 T.must(prefix)[:arena]; receiver T.must(prefix)
+  - related pressure records: local hash record T.must(prefix) at src/ast/parser.rb (7); hash record return [] at src/ast/parser.rb:3827 (6); hash record return [] at src/ast/parser.rb:3753 (5); hash record param options at src/annotator/helpers/pipe_analysis.rb:50 (1)
+  - src/ast/parser.rb:3871 T.must(prefix)[:stack_size]; receiver T.must(prefix)
+  - src/ast/parser.rb:3871 T.must(prefix)[:pinned]; receiver T.must(prefix)
+  - src/ast/parser.rb:3871 T.must(prefix)[:parallel]; receiver T.must(prefix)
+  - src/ast/parser.rb:3871 T.must(prefix)[:arena]; receiver T.must(prefix)
   - suggested struct:
     class ArenaRecord < T::Struct
       const :arena, T::Boolean
@@ -3378,10 +3200,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - read keys: contended(2), read_contended(2), read_total_wait_ns(2), total_wait_ns(2)
   - accounts for: return 0, param 4, ivar 0, collection 8
   - related pressure records: local hash record l at src/tools/pprof_converter.rb (26); local hash record l at src/tools/doctor.rb (20); local hash record r at src/tools/doctor.rb (20)
-  - src/tools/doctor.rb:1527 b[:contended]; receiver b
-  - src/tools/doctor.rb:1527 b[:read_contended]; receiver b
-  - src/tools/doctor.rb:1528 a[:contended]; receiver a
-  - src/tools/doctor.rb:1528 a[:read_contended]; receiver a
+  - src/tools/doctor.rb:1541 b[:contended]; receiver b
+  - src/tools/doctor.rb:1541 b[:read_contended]; receiver b
+  - src/tools/doctor.rb:1542 a[:contended]; receiver a
+  - src/tools/doctor.rb:1542 a[:read_contended]; receiver a
   - suggested struct:
     class ContendedRecord < T::Struct
       prop :acquires, T.nilable(Integer)
@@ -3433,11 +3255,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - optional keys: addr, caller_trace, multi_commits, struct_size, trace, traces, update_failures
   - read keys: retries(4), commits(2)
   - accounts for: return 0, param 2, ivar 0, collection 6
-  - related pressure records: local hash record c at src/tools/pprof_converter.rb (34); hash record return first at src/tools/doctor.rb:923 (1)
-  - src/tools/doctor.rb:1595 a[:commits]; receiver a
-  - src/tools/doctor.rb:1595 b[:commits]; receiver b
-  - src/tools/doctor.rb:1596 a[:retries]; receiver a
-  - src/tools/doctor.rb:1596 b[:retries]; receiver b
+  - related pressure records: local hash record c at src/tools/pprof_converter.rb (34); hash record return first at src/tools/doctor.rb:934 (1)
+  - src/tools/doctor.rb:1609 a[:commits]; receiver a
+  - src/tools/doctor.rb:1609 b[:commits]; receiver b
+  - src/tools/doctor.rb:1610 a[:retries]; receiver a
+  - src/tools/doctor.rb:1610 b[:retries]; receiver b
   - suggested struct:
     class CommitsRecord < T::Struct
       prop :addr, T.nilable(String)
@@ -3456,11 +3278,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - optional keys: arena, can_smash, can_smash_token, parallel, stack_size, stack_size_token
   - read keys: can_smash(1), parallel(1), pinned(1), stack_size(1)
   - accounts for: return 0, param 4, ivar 0, collection 4
-  - related pressure records: local hash record T.must(prefix) at src/ast/parser.rb (7); hash record return [] at src/ast/parser.rb:3804 (6); hash record return [] at src/ast/parser.rb:3730 (5); hash record param options at src/annotator/helpers/pipe_analysis.rb:50 (1)
-  - src/ast/parser.rb:3774 T.must(prefix)[:pinned]; receiver T.must(prefix)
-  - src/ast/parser.rb:3774 T.must(prefix)[:parallel]; receiver T.must(prefix)
-  - src/ast/parser.rb:3774 T.must(prefix)[:stack_size]; receiver T.must(prefix)
-  - src/ast/parser.rb:3774 T.must(prefix)[:can_smash]; receiver T.must(prefix)
+  - related pressure records: local hash record T.must(prefix) at src/ast/parser.rb (7); hash record return [] at src/ast/parser.rb:3827 (6); hash record return [] at src/ast/parser.rb:3753 (5); hash record param options at src/annotator/helpers/pipe_analysis.rb:50 (1)
+  - src/ast/parser.rb:3797 T.must(prefix)[:pinned]; receiver T.must(prefix)
+  - src/ast/parser.rb:3797 T.must(prefix)[:parallel]; receiver T.must(prefix)
+  - src/ast/parser.rb:3797 T.must(prefix)[:stack_size]; receiver T.must(prefix)
+  - src/ast/parser.rb:3797 T.must(prefix)[:can_smash]; receiver T.must(prefix)
   - suggested struct:
     class PinnedRecord < T::Struct
       prop :arena, T.nilable(T::Boolean)
@@ -3520,11 +3342,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: layout, lock_rank, ownership, sync
   - read keys: lock_rank(3), layout(1), ownership(1), sync(1)
   - accounts for: return 0, param 1, ivar 0, collection 6
-  - related pressure records: hash record param v at src/annotator/helpers/intrinsic_registry.rb:105 (6); hash record return [] at src/annotator/helpers/function_analysis.rb:1017 (5)
-  - src/ast/parser.rb:3644 dims[:ownership]; receiver dims
-  - src/ast/parser.rb:3644 dims[:sync]; receiver dims
-  - src/ast/parser.rb:3644 dims[:layout]; receiver dims
-  - src/ast/parser.rb:3644 dims[:lock_rank]; receiver dims
+  - related pressure records: hash record param v at src/annotator/helpers/intrinsic_registry.rb:105 (6); hash record return [] at src/annotator/helpers/function_analysis.rb:1016 (5)
+  - src/ast/parser.rb:3667 dims[:ownership]; receiver dims
+  - src/ast/parser.rb:3667 dims[:sync]; receiver dims
+  - src/ast/parser.rb:3667 dims[:layout]; receiver dims
+  - src/ast/parser.rb:3667 dims[:lock_rank]; receiver dims
   - suggested struct:
     class LayoutRecord < T::Struct
       const :layout, NilClass
@@ -3548,7 +3370,7 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: ctx_def, ctx_let, ctx_name, ctx_var, id, post_ctx_stmts, pre_ctx_stmts
   - read keys: ctx_def(1), ctx_let(1), post_ctx_stmts(1), pre_ctx_stmts(1)
   - accounts for: return 0, param 2, ivar 0, collection 4
-  - related pressure records: hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4379 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4410 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4440 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4512 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4548 (7)
+  - related pressure records: hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4465 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4496 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4526 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4598 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4634 (7)
   - src/backends/pipeline_host.rb:50 cb[:ctx_def]; receiver cb
   - src/backends/pipeline_host.rb:51 cb[:pre_ctx_stmts]; receiver cb
   - src/backends/pipeline_host.rb:52 cb[:ctx_let]; receiver cb
@@ -3581,7 +3403,7 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: capture, expr
   - read keys: expr(3), capture(2)
   - accounts for: return 0, param 0, ivar 0, collection 5
-  - related pressure records: hash record return pop at src/mir/fsm_lowering.rb:128 (17); hash record return pop at src/mir/lowering/concurrency.rb:403 (13); hash record return [] at src/mir/mir_emitter.rb:678 (7); local hash record step at src/annotator/annotator.rb (6); hash record param step at src/mir/fsm_lowering.rb:335 (5)
+  - related pressure records: hash record return pop at src/mir/fsm_lowering.rb:128 (17); hash record return pop at src/mir/lowering/concurrency.rb:442 (13); hash record return [] at src/mir/mir_emitter.rb:678 (7); local hash record step at src/annotator/annotator.rb (6); hash record param step at src/mir/fsm_lowering.rb:335 (5)
   - src/mir/hoist.rb:758 binding[:expr]; receiver binding
   - src/mir/hoist.rb:759 binding[:capture]; receiver binding
   - src/mir/mir.rb:732 binding[:expr]; receiver binding
@@ -3595,11 +3417,11 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: dispatch, exits, form, id, max_lifetime_ns, runs, scheds, spawns, total_lifetime_ns
   - read keys: runs(3), dispatch(1), scheds(1)
   - accounts for: return 0, param 1, ivar 0, collection 4
-  - related pressure records: local hash record site at src/tools/doctor.rb (10); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4379 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4410 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4440 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4512 (7)
-  - src/tools/doctor.rb:519 site[:runs]; receiver site
-  - src/tools/doctor.rb:519 site[:runs]; receiver site
-  - src/tools/doctor.rb:522 site[:dispatch]; receiver site
-  - src/tools/doctor.rb:573 site[:scheds]; receiver site
+  - related pressure records: local hash record site at src/tools/doctor.rb (10); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4465 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4496 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4526 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4598 (7)
+  - src/tools/doctor.rb:528 site[:runs]; receiver site
+  - src/tools/doctor.rb:528 site[:runs]; receiver site
+  - src/tools/doctor.rb:531 site[:dispatch]; receiver site
+  - src/tools/doctor.rb:582 site[:scheds]; receiver site
   - suggested struct:
     class DispatchRecord < T::Struct
       const :dispatch, T.nilable(String)
@@ -3616,9 +3438,9 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: elem_zig, initial_capture, item_used, item_var, next_method, outer_stmts, range_let, source_name, stage_stmts
   - read keys: item_var(2)
   - accounts for: return 0, param 3, ivar 0, collection 2
-  - related pressure records: hash record param p at src/backends/pipeline_host.rb:2955 (35); hash record param p at src/backends/pipeline_host.rb:3219 (6); hash record param p at src/backends/pipeline_host.rb:3319 (4); hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:2843 (3); hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3377 (3)
-  - src/backends/pipeline_host.rb:3156 p[:item_var]; receiver p
-  - src/backends/pipeline_host.rb:3270 p[:item_var]; receiver p
+  - related pressure records: hash record param p at src/backends/pipeline_host.rb:3046 (35); hash record param p at src/backends/pipeline_host.rb:3308 (6); hash record param p at src/backends/pipeline_host.rb:3408 (4); hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:2934 (3); hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3466 (3)
+  - src/backends/pipeline_host.rb:3245 p[:item_var]; receiver p
+  - src/backends/pipeline_host.rb:3359 p[:item_var]; receiver p
   - suggested struct:
     class ElemZigRecord < T::Struct
       const :elem_zig, String
@@ -3650,8 +3472,8 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: filename_idx, id, name_idx, start_line, system_name_idx
   - read keys: id(1)
   - accounts for: return 2, param 1, ivar 0, collection 1
-  - related pressure records: hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4379 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4410 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4440 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4512 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4548 (7)
-  - src/tools/pprof.rb:148 f[:id]; receiver f
+  - related pressure records: hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4465 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4496 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4526 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4598 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4634 (7)
+  - src/tools/pprof.rb:154 f[:id]; receiver f
   - suggested struct:
     class FilenameIdxRecord < T::Struct
       const :filename_idx, Integer
@@ -3664,10 +3486,10 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: idx, runs
   - read keys: runs(3), idx(1)
   - accounts for: return 0, param 0, ivar 0, collection 4
-  - src/tools/doctor.rb:498 r[:runs]; receiver r
-  - src/tools/doctor.rb:500 r[:runs]; receiver r
-  - src/tools/doctor.rb:502 r[:idx]; receiver r
-  - src/tools/doctor.rb:502 r[:runs]; receiver r
+  - src/tools/doctor.rb:507 r[:runs]; receiver r
+  - src/tools/doctor.rb:509 r[:runs]; receiver r
+  - src/tools/doctor.rb:511 r[:idx]; receiver r
+  - src/tools/doctor.rb:511 r[:runs]; receiver r
   - suggested struct:
     class IdxRecord < T::Struct
       const :idx, Integer
@@ -3678,9 +3500,9 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - optional keys: captured_bg, captured_parallel, column, fn, line, mutated, ownership, sharded, storage
   - read keys: sync(1), var(1)
   - accounts for: return 0, param 1, ivar 0, collection 2
-  - related pressure records: local hash record info at src/annotator/helpers/capabilities.rb (9); hash record param v at src/annotator/helpers/intrinsic_registry.rb:105 (6); hash record return [] at src/annotator/helpers/function_analysis.rb:1017 (5); hash record param info at src/annotator/helpers/fixable_helpers.rb:552 (4); hash record param token at src/mir/control_flow.rb:1251 (1)
-  - src/mir/lowering/variables.rb:1278 node.auto_lock[:var]; receiver node.auto_lock
-  - src/mir/lowering/variables.rb:1282 node.auto_lock[:sync]; receiver node.auto_lock
+  - related pressure records: local hash record info at src/annotator/helpers/capabilities.rb (9); hash record param v at src/annotator/helpers/intrinsic_registry.rb:105 (6); hash record return [] at src/annotator/helpers/function_analysis.rb:1016 (5); hash record param info at src/annotator/helpers/fixable_helpers.rb:552 (4); hash record param token at src/mir/control_flow.rb:1251 (1)
+  - src/mir/lowering/variables.rb:1286 node.auto_lock[:var]; receiver node.auto_lock
+  - src/mir/lowering/variables.rb:1290 node.auto_lock[:sync]; receiver node.auto_lock
   - suggested struct:
     class SyncRecord < T::Struct
       prop :captured_bg, T.nilable(T::Boolean)
@@ -3715,9 +3537,9 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - common keys: build_id_idx, file_offset, filename_idx, has_filenames, has_functions, has_line_numbers, id, memory_limit, memory_start
   - read keys: id(2)
   - accounts for: return 1, param 0, ivar 0, collection 2
-  - related pressure records: hash record param m at src/tools/pprof.rb:269 (16); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4379 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4410 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4440 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4512 (7)
-  - src/tools/pprof.rb:127 mapping[:id]; receiver mapping
-  - src/tools/pprof.rb:128 mapping[:id]; receiver mapping
+  - related pressure records: hash record param m at src/tools/pprof.rb:275 (16); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4465 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4496 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4526 (7); hash record return build_bounded_concurrent_callback at src/backends/pipeline_host.rb:4598 (7)
+  - src/tools/pprof.rb:133 mapping[:id]; receiver mapping
+  - src/tools/pprof.rb:134 mapping[:id]; receiver mapping
   - suggested struct:
     class BuildIdIdxRecord < T::Struct
       const :build_id_idx, Integer
@@ -3732,164 +3554,165 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
     end
 
 ### Weak Collection Slots With Runtime Candidates
-- src/annotator/annotator.rb:323 `SemanticAnnotator#setup_builtins` return return: T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]] -> T::Hash[Symbol, Schemas::ResourceSchema] (6324 call(s))
-- src/annotator/annotator.rb:508 `SemanticAnnotator#visit_RequireNode` return return: T.nilable(T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]]) -> T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]] (120 call(s))
-- src/annotator/annotator.rb:917 `SemanticAnnotator#validate_and_resolve_sync_policy!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (6244 call(s))
-- src/annotator/annotator.rb:1022 `SemanticAnnotator#visit_SyncPolicyDecl` return return: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, `T.untyped`]] (6 call(s))
-- src/annotator/annotator.rb:1113 `SemanticAnnotator#catch_bodies_reference_snapshot?` param bodies: T::Array[`T.untyped`] -> T::Array[Array] (122 call(s))
-- src/annotator/annotator.rb:1239 `SemanticAnnotator#analyze_control_flow_branches` return return: T.nilable(T::Array[T::Array[T::Hash[Symbol, `T.untyped`]]]) -> T::Array[T::Array[T::Hash[Symbol, `T.untyped`]]] (10795 call(s))
-- src/annotator/annotator.rb:1456 `SemanticAnnotator#match_variant_names` return return: T::Array[`T.untyped`] -> T::Array[String] (6924 call(s))
-- src/annotator/annotator.rb:1461 `SemanticAnnotator#normalized_match_payload` param union_subst: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, Symbol] (2120 call(s))
-- src/annotator/annotator.rb:2374 `SemanticAnnotator#visit_FuncCall` return return: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (15259 call(s))
-- src/annotator/annotator.rb:5007 `SemanticAnnotator#validate_snapshot_match_arms!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (8 call(s))
-- src/annotator/annotator.rb:5049 `SemanticAnnotator#resolve_error_selectors!` param clause: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T::Array[`T.untyped`]] (283 call(s))
-- src/annotator/helpers/capabilities.rb:25 `Capabilities#errors_for` return return: T::Array[`T.untyped`] -> T::Array[String] (23769 call(s))
-- src/annotator/helpers/capabilities.rb:116 `CapabilityHelper#validate_capability` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, Symbol]] (2366 call(s))
-- src/annotator/helpers/capabilities.rb:354 `CapabilityHelper#record_predicate_call_site!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (26953 call(s))
-- src/annotator/helpers/capabilities.rb:371 `CapabilityHelper#validate_predicate_purity!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (5268 call(s))
-- src/annotator/helpers/capabilities.rb:475 `CapabilityHelper#visit_pre_clauses!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, String]] (2 call(s))
-- src/annotator/helpers/effects.rb:92 `EffectTracker#effects_init!` return return: T::Hash[`T.untyped`, `T.untyped`] -> T::Hash[String, Hash] (6324 call(s))
-- src/annotator/helpers/effects.rb:1201 `EffectTracker#scan_for_calls` return return: T::Array[`T.untyped`] -> T::Array[T::Set[String]] (14192 call(s))
-- src/annotator/helpers/fixable_helpers.rb:101 `FixableHelper#emit_registry_mismatch!` param candidates: T::Array[`T.untyped`] -> T::Array[Symbol] (7 call(s))
-- src/annotator/helpers/fixable_helpers.rb:139 `FixableHelper#emit_typo_suggestion!` param candidates: T::Array[`T.untyped`] -> T::Array[String] (101 call(s))
+- src/annotator/annotator.rb:394 `SemanticAnnotator#setup_builtins` return return: T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]] -> T::Hash[Symbol, Schemas::ResourceSchema] (6422 call(s))
+- src/annotator/annotator.rb:579 `SemanticAnnotator#visit_RequireNode` return return: T.nilable(T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]]) -> T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]] (115 call(s))
+- src/annotator/annotator.rb:988 `SemanticAnnotator#validate_and_resolve_sync_policy!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (6296 call(s))
+- src/annotator/annotator.rb:1093 `SemanticAnnotator#visit_SyncPolicyDecl` return return: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, `T.untyped`]] (6 call(s))
+- src/annotator/annotator.rb:1184 `SemanticAnnotator#catch_bodies_reference_snapshot?` param bodies: T::Array[`T.untyped`] -> T::Array[Array] (122 call(s))
+- src/annotator/annotator.rb:1310 `SemanticAnnotator#analyze_control_flow_branches` return return: T.nilable(T::Array[T::Array[T::Hash[Symbol, `T.untyped`]]]) -> T::Array[T::Array[T::Hash[Symbol, `T.untyped`]]] (11285 call(s))
+- src/annotator/annotator.rb:1528 `SemanticAnnotator#match_variant_names` return return: T::Array[`T.untyped`] -> T::Array[String] (7683 call(s))
+- src/annotator/annotator.rb:2455 `SemanticAnnotator#visit_FuncCall` return return: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (15712 call(s))
+- src/annotator/annotator.rb:5080 `SemanticAnnotator#validate_snapshot_match_arms!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (10 call(s))
+- src/annotator/annotator.rb:5122 `SemanticAnnotator#resolve_error_selectors!` param clause: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T::Array[`T.untyped`]] (284 call(s))
+- src/annotator/helpers/capabilities.rb:116 `CapabilityHelper#validate_capability` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, Symbol]] (2379 call(s))
+- src/annotator/helpers/capabilities.rb:354 `CapabilityHelper#record_predicate_call_site!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (28462 call(s))
+- src/annotator/helpers/capabilities.rb:371 `CapabilityHelper#validate_predicate_purity!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (5325 call(s))
+- src/annotator/helpers/capabilities.rb:475 `CapabilityHelper#visit_pre_clauses!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, String]] (10332 call(s))
+- src/annotator/helpers/effects.rb:92 `EffectTracker#effects_init!` return return: T::Hash[`T.untyped`, `T.untyped`] -> T::Hash[String, Hash] (6422 call(s))
+- src/annotator/helpers/effects.rb:1201 `EffectTracker#scan_for_calls` return return: T::Array[`T.untyped`] -> T::Array[T::Set[String]] (14264 call(s))
+- src/annotator/helpers/fixable_helpers.rb:101 `FixableHelper#emit_registry_mismatch!` param candidates: T::Array[`T.untyped`] -> T::Array[Symbol] (13 call(s))
 - src/annotator/helpers/fixable_helpers.rb:371 `FixableHelper#emit_use_of_moved_path_error!` param path: T::Array[`T.untyped`] -> T::Array[Symbol] (3 call(s))
 - src/annotator/helpers/fixable_helpers.rb:713 `FixableHelper#emit_ambiguous_return_error!` param found_returns: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, Symbol]] (5 call(s))
-- src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` param candidates: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, String]] (12 call(s))
+- src/annotator/helpers/fixable_helpers.rb:1251 `FixableHelper#emit_with_cap_mismatch!` param candidates: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, String]] (21 call(s))
 - src/annotator/helpers/fixable_helpers.rb:1371 `FixableHelper#auto_rank_candidates` return return: T::Array[T::Array[`T.untyped`]] -> T::Array[T::Array[T.nilable(T.any(String, Symbol))]] (22 call(s))
 - src/annotator/helpers/fixable_helpers.rb:1427 `FixableHelper#build_auto_op_evidence_block` param candidates: T::Array[`T.untyped`] -> T::Array[T::Array[T.nilable(T.any(String, Symbol))]] (4 call(s))
-- src/annotator/helpers/fixable_helpers.rb:1502 `FixableHelper#build_auto_replace_fixes` return return: T::Array[`T.untyped`] -> T::Array[Fix] (15 call(s))
+- src/annotator/helpers/fixable_helpers.rb:1502 `FixableHelper#build_auto_replace_fixes` return return: T::Array[`T.untyped`] -> T::Array[Fix] (16 call(s))
 - src/annotator/helpers/fixable_helpers.rb:1667 `FixableHelper#build_auto_ambiguity_message` param observed_strs: T::Array[`T.untyped`] -> T::Array[String] (4 call(s))
-- src/annotator/helpers/function_analysis.rb:1004 `FunctionAnalysis#find_matching_intrinsic` param definitions: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, `T.untyped`]] (25777 call(s))
-- src/annotator/helpers/function_analysis.rb:1036 `FunctionAnalysis#format_intrinsic_args` param args: T::Array[`T.untyped`] -> T::Array[Symbol] (10 call(s))
-- src/annotator/helpers/lock_helper.rb:42 `LockHelper#init_lock_analysis!` return return: T::Hash[`T.untyped`, `T.untyped`] -> T::Hash[String, Array] (6324 call(s))
-- src/annotator/helpers/lock_helper.rb:83 `LockHelper#record_lock_clause_site!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (1975 call(s))
+- src/annotator/helpers/function_analysis.rb:1003 `FunctionAnalysis#find_matching_intrinsic` param definitions: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, `T.untyped`]] (27755 call(s))
+- src/annotator/helpers/function_analysis.rb:1035 `FunctionAnalysis#format_intrinsic_args` param args: T::Array[`T.untyped`] -> T::Array[Symbol] (10 call(s))
+- src/annotator/helpers/lock_helper.rb:42 `LockHelper#init_lock_analysis!` return return: T::Hash[`T.untyped`, `T.untyped`] -> T::Hash[String, Array] (6422 call(s))
+- src/annotator/helpers/lock_helper.rb:83 `LockHelper#record_lock_clause_site!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (1976 call(s))
 - src/annotator/helpers/lock_helper.rb:179 `LockHelper#record_with_acquire!` return return: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (1554 call(s))
-- src/annotator/helpers/lock_helper.rb:259 `LockHelper#build_lock_graph` return return: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T.any(T::Array[LockHelper::LockEdge], T::Hash[Symbol, T::Set[Symbol]], T::Set[Symbol])] (5416 call(s))
-- src/annotator/helpers/lock_helper.rb:331 `LockHelper#check_lock_cycles!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (5261 call(s))
-- src/annotator/helpers/lock_helper.rb:350 `LockHelper#check_lock_handler_reachability!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (5256 call(s))
-- src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` param site: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T::Array[Symbol]] (277 call(s))
-- src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` return return: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (277 call(s))
+- src/annotator/helpers/lock_helper.rb:259 `LockHelper#build_lock_graph` return return: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T.any(T::Array[LockHelper::LockEdge], T::Hash[Symbol, T::Set[Symbol]], T::Set[Symbol])] (5473 call(s))
+- src/annotator/helpers/lock_helper.rb:331 `LockHelper#check_lock_cycles!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (5318 call(s))
+- src/annotator/helpers/lock_helper.rb:350 `LockHelper#check_lock_handler_reachability!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, T::Array[Symbol]]] (5313 call(s))
+- src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` param site: T::Hash[Symbol, `T.untyped`] -> T::Hash[Symbol, T::Array[Symbol]] (280 call(s))
+- src/annotator/helpers/lock_helper.rb:381 `LockHelper#verify_handler_reachability!` return return: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (280 call(s))
 - src/annotator/helpers/lock_helper.rb:428 `LockHelper#scc_is_cyclic?` param adj: T::Hash[Symbol, T::Set[`T.untyped`]] -> T::Hash[Symbol, T::Set[Symbol]] (47 call(s))
 - src/annotator/helpers/lock_helper.rb:436 `LockHelper#report_lock_cycle!` param scc: T::Array[`T.untyped`] -> T::Array[Symbol] (5 call(s))
 - src/annotator/helpers/lock_helper.rb:436 `LockHelper#report_lock_cycle!` param edges: T::Array[`T.untyped`] -> T::Array[LockHelper::LockEdge] (5 call(s))
-- src/annotator/helpers/method_analysis.rb:165 `MethodAnalysis#resolve_index_op` return return: T.nilable(T::Hash[`T.untyped`, `T.untyped`]) -> T::Hash[Symbol, T::Hash[Symbol, Symbol]] (9461 call(s))
-- src/annotator/helpers/reentrance.rb:558 `ReentranceBridge#compute_reachable` param graph: T::Hash[String, T::Set[`T.untyped`]] -> T::Hash[String, T::Set[String]] (78 call(s))
-- src/annotator/helpers/reentrance.rb:742 `ReentranceBridge#validate_requires_clauses!` return return: T.nilable(T::Hash[`T.untyped`, `T.untyped`]) -> T::Hash[String, Symbol] (10519 call(s))
+- src/annotator/helpers/method_analysis.rb:165 `MethodAnalysis#resolve_index_op` return return: T.nilable(T::Hash[`T.untyped`, `T.untyped`]) -> T::Hash[Symbol, T::Hash[Symbol, Symbol]] (10610 call(s))
+- src/annotator/helpers/reentrance.rb:558 `ReentranceBridge#compute_reachable` param graph: T::Hash[String, T::Set[`T.untyped`]] -> T::Hash[String, T::Set[String]] (90 call(s))
 - src/annotator/helpers/test_annotation.rb:96 `TestAnnotation#visit_test_hook_bodies` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[Array] (339 call(s))
-- src/annotator/helpers/union.rb:14 `UnionAnalysis#validate_union_methods!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (49 call(s))
-- src/annotator/helpers/with_match_check.rb:52 `WithMatchCheck#check_function!` param policy_handlers: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (9052 call(s))
-- src/annotator/helpers/with_match_check.rb:193 `WithMatchCheck#enforce_polymorphic_iff_rule!` param requires_map: T::Hash[String, `T.untyped`] -> T::Hash[String, T::Set[Symbol]] (1070 call(s))
-- src/annotator/helpers/with_match_check.rb:416 `WithMatchCheck#handled_error_set` param policy_handlers: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (94 call(s))
-- src/ast/ast.rb:422 `AST#child_bodies` return return: T::Array[`T.untyped`] -> T::Array[Array] (234968 call(s))
-- src/ast/ast.rb:2115 `AST#child_bodies` return return: T::Array[`T.untyped`] -> T::Array[Array] (43702 call(s))
+- src/annotator/helpers/union.rb:14 `UnionAnalysis#validate_union_methods!` return return: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (50 call(s))
+- src/annotator/helpers/with_match_check.rb:52 `WithMatchCheck#check_function!` param policy_handlers: T.nilable(T::Array[T::Hash[Symbol, `T.untyped`]]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (9114 call(s))
+- src/annotator/helpers/with_match_check.rb:193 `WithMatchCheck#enforce_polymorphic_iff_rule!` param requires_map: T::Hash[String, `T.untyped`] -> T::Hash[String, T::Set[Symbol]] (1071 call(s))
+- src/annotator/helpers/with_match_check.rb:416 `WithMatchCheck#handled_error_set` param policy_handlers: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[Symbol, `T.untyped`]] (93 call(s))
+- src/ast/ast.rb:422 `AST#child_bodies` return return: T::Array[`T.untyped`] -> T::Array[Array] (235459 call(s))
+- src/ast/ast.rb:2114 `AST#child_bodies` return return: T::Array[`T.untyped`] -> T::Array[Array] (43771 call(s))
+- src/ast/diagnostic_examples.rb:69 `DiagnosticExamples#load!` return return: T::Hash[`T.untyped`, `T.untyped`] -> T::Hash[Symbol, T::Hash[Symbol, `T.untyped`]] (5 call(s))
+- src/ast/error_registry.rb:126 `AST#register_type!` return return: T::Array[`T.untyped`] -> T::Array[T::Hash[Symbol, `T.untyped`]] (239 call(s))
+- src/ast/error_registry.rb:164 `AST#enum_entries` return return: T::Array[`T.untyped`] -> T::Array[T::Array[T.any(Integer, Symbol)]] (1668 call(s))
+- src/ast/parser.rb:26 `Parser#stmt` param pattern: T.nilable(T::Array[`T.untyped`]) -> T::Array[T::Hash[String, Symbol]] (50295 call(s))
 
 ### Weak Collection Slots Without Candidate
-- src/annotator/annotator.rb:169 `SemanticAnnotator#annotate!` return return: T.nilable(T::Hash[String, T::Hash[Symbol, `T.untyped`]]); no key/value observations
-- src/annotator/annotator.rb:305 `SemanticAnnotator#flush_deferred_with_validations!` return return: T::Array[`T.untyped`]; no element observations
-- src/annotator/annotator.rb:872 `SemanticAnnotator#seed_error_types_from_raises!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
-- src/annotator/annotator.rb:901 `SemanticAnnotator#baked_in_default_sync_policy` return return: T::Array[T::Hash[Symbol, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: Hash
-- src/annotator/annotator.rb:986 `SemanticAnnotator#collapse_errors_for_call` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BinaryOp, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier
-- src/annotator/annotator.rb:1101 `SemanticAnnotator#collect_pipe_input_types` param body: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BindExpr, AST::ReturnNode
-- src/annotator/annotator.rb:1101 `SemanticAnnotator#collect_pipe_input_types` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BindExpr, AST::ReturnNode
-- src/annotator/annotator.rb:1127 `SemanticAnnotator#visit_stmts` param stmts: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode
-- src/annotator/annotator.rb:1127 `SemanticAnnotator#visit_stmts` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::DoBlock, AST::ForEach
-- src/annotator/annotator.rb:1386 `SemanticAnnotator#annotate_struct_pattern!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]); no element observations
-- src/annotator/annotator.rb:2284 `SemanticAnnotator#collect_implicit_type_params` param explicit: T::Array[`T.untyped`]; no element observations
-- src/annotator/annotator.rb:2507 `SemanticAnnotator#visit_IntrinsicFunc` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, AST::FuncCall
-- src/annotator/annotator.rb:2671 `SemanticAnnotator#finalize_decl_node!` return return: T.nilable(T::Hash[`T.untyped`, `T.untyped`]); key observations Symbol; value observations FalseClass, Integer, NilClass, String
-- src/annotator/annotator.rb:4309 `SemanticAnnotator#infer_element_type` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Identifier, AST::Literal
-- src/annotator/annotator.rb:4317 `SemanticAnnotator#infer_optional_element_type` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::GetField, AST::Identifier
-- src/annotator/annotator.rb:4327 `SemanticAnnotator#infer_to_list` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::RangeLit
-- src/annotator/annotator.rb:4751 `SemanticAnnotator#retryable_with_fallible_sources` param nodes: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BindExpr, AST::ForRange, AST::FreezeNode, AST::FuncCall
-- src/annotator/annotator.rb:4821 `SemanticAnnotator#validate_lock_error_clause!` param expanded_capabilities: T::Array[T::Hash[`T.untyped`, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: AST::Capability
-- src/annotator/annotator.rb:5398 `SemanticAnnotator#collect_body_identifier_names` param nodes: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
-- src/annotator/annotator.rb:5588 `SemanticAnnotator#expr_result_type` param branch: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
-- src/annotator/annotator.rb:5766 `SemanticAnnotator#collect_scope_drops` return return: T::Array[T::Hash[Symbol, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: Hash
-- src/annotator/annotator.rb:6196 `SemanticAnnotator#get_lifetime_paths` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: String, Symbol
-- src/annotator/annotator.rb:6243 `SemanticAnnotator#validate_tail_call!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
-- src/annotator/annotator.rb:6271 `SemanticAnnotator#collect_self_calls` param out: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
-- src/annotator/annotator.rb:6271 `SemanticAnnotator#collect_self_calls` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
-- src/annotator/annotator.rb:6287 `SemanticAnnotator#collect_returns` param out: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::ReturnNode
-- src/annotator/annotator.rb:6287 `SemanticAnnotator#collect_returns` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::ReturnNode
-- src/annotator/annotator.rb:6316 `SemanticAnnotator#assign_fiber_stack_tiers!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::DoBlock, AST::EnumDef
+- src/annotator/annotator.rb:240 `SemanticAnnotator#annotate!` return return: T.nilable(T::Hash[String, T::Hash[Symbol, `T.untyped`]]); no key/value observations
+- src/annotator/annotator.rb:376 `SemanticAnnotator#flush_deferred_with_validations!` return return: T::Array[`T.untyped`]; no element observations
+- src/annotator/annotator.rb:943 `SemanticAnnotator#seed_error_types_from_raises!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
+- src/annotator/annotator.rb:972 `SemanticAnnotator#baked_in_default_sync_policy` return return: T::Array[T::Hash[Symbol, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: Hash
+- src/annotator/annotator.rb:1057 `SemanticAnnotator#collapse_errors_for_call` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BinaryOp, AST::CopyNode, AST::FuncCall, AST::GetField, AST::GetIndex, AST::Identifier
+- src/annotator/annotator.rb:1172 `SemanticAnnotator#collect_pipe_input_types` param body: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BinaryOp, AST::BindExpr, AST::ReturnNode
+- src/annotator/annotator.rb:1172 `SemanticAnnotator#collect_pipe_input_types` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BinaryOp, AST::BindExpr, AST::ReturnNode
+- src/annotator/annotator.rb:1198 `SemanticAnnotator#visit_stmts` param stmts: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode
+- src/annotator/annotator.rb:1198 `SemanticAnnotator#visit_stmts` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::DoBlock, AST::ForEach
+- src/annotator/annotator.rb:1458 `SemanticAnnotator#annotate_struct_pattern!` return return: T.nilable(T::Array[T::Hash[`T.untyped`, `T.untyped`]]); no element observations
+- src/annotator/annotator.rb:2364 `SemanticAnnotator#collect_implicit_type_params` param explicit: T::Array[`T.untyped`]; no element observations
+- src/annotator/annotator.rb:2588 `SemanticAnnotator#visit_IntrinsicFunc` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::BgBlock, AST::BinaryOp, AST::CapabilityWrap, AST::Cast, AST::CopyNode, AST::FuncCall
+- src/annotator/annotator.rb:2753 `SemanticAnnotator#finalize_decl_node!` return return: T.nilable(T::Hash[`T.untyped`, `T.untyped`]); key observations Symbol; value observations FalseClass, Integer, NilClass, String
+- src/annotator/annotator.rb:4391 `SemanticAnnotator#infer_element_type` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Identifier, AST::Literal
+- src/annotator/annotator.rb:4399 `SemanticAnnotator#infer_optional_element_type` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::GetField, AST::Identifier
+- src/annotator/annotator.rb:4409 `SemanticAnnotator#infer_to_list` param args: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::RangeLit
+- src/annotator/annotator.rb:4824 `SemanticAnnotator#retryable_with_fallible_sources` param nodes: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BindExpr, AST::ForRange, AST::FreezeNode, AST::FuncCall
+- src/annotator/annotator.rb:4894 `SemanticAnnotator#validate_lock_error_clause!` param expanded_capabilities: T::Array[T::Hash[`T.untyped`, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: AST::Capability
+- src/annotator/annotator.rb:5471 `SemanticAnnotator#collect_body_identifier_names` param nodes: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
+- src/annotator/annotator.rb:5683 `SemanticAnnotator#expr_result_type` param branch: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BinaryOp, AST::BindExpr, AST::BreakNode, AST::ContinueNode
+- src/annotator/annotator.rb:5861 `SemanticAnnotator#collect_scope_drops` return return: T::Array[T::Hash[Symbol, `T.untyped`]]; element observations are heterogeneous or AST/MIR-specific: Hash
+- src/annotator/annotator.rb:6291 `SemanticAnnotator#get_lifetime_paths` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: String, Symbol
+- src/annotator/annotator.rb:6338 `SemanticAnnotator#validate_tail_call!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
+- src/annotator/annotator.rb:6366 `SemanticAnnotator#collect_self_calls` param out: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
+- src/annotator/annotator.rb:6366 `SemanticAnnotator#collect_self_calls` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall
+- src/annotator/annotator.rb:6382 `SemanticAnnotator#collect_returns` param out: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::ReturnNode
+- src/annotator/annotator.rb:6382 `SemanticAnnotator#collect_returns` return return: T::Array[`T.untyped`]; element observations are heterogeneous or AST/MIR-specific: AST::ReturnNode
+- src/annotator/annotator.rb:6411 `SemanticAnnotator#assign_fiber_stack_tiers!` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::DoBlock, AST::EnumDef
 - src/annotator/helpers/auto_inference.rb:720 `ShapeEvidenceCollector#collect_in_function` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Assignment, AST::BindExpr, AST::MethodCall, AST::ReturnNode, AST::VarDecl
 - src/annotator/helpers/auto_inference.rb:788 `ShapeEvidenceCollector#record_method_call` return return: T.nilable(T::Array[`T.untyped`]); element observations are heterogeneous or AST/MIR-specific: AST::Literal
-- ... 599 more
+- ... 614 more
 
 ### Collection Blocker Pressure
-- method_return normalize_allocating_mir_stmt! array at src/mir/hoist.rb:734; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::Let: 1 slot(s), 11880864 observation(s)
+- method_return normalize_allocating_mir_stmt! array at src/mir/hoist.rb:734; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::Let: 1 slot(s), 13506424 observation(s)
   - src/mir/hoist.rb:734 `MIRHoistLowering#normalize_allocating_mir_stmt!` return return: T::Array[`T.untyped`]
-- method_return normalize_stmt_child_exprs! array at src/mir/hoist.rb:803; no element observations: 1 slot(s), 11250341 observation(s)
+- method_return normalize_stmt_child_exprs! array at src/mir/hoist.rb:803; no element observations: 1 slot(s), 12830474 observation(s)
   - src/mir/hoist.rb:803 `MIRHoistLowering#normalize_stmt_child_exprs!` return return: T::Array[`T.untyped`]
-- method_param emitted array at src/mir/mir_lowering.rb:1332; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3753836 observation(s)
-  - mutation sites: src/mir/mir_lowering.rb:1607 (1622744), src/mir/mir_lowering.rb:1609 (257601), src/mir/mir_lowering.rb:1267 (70783)
-  - src/mir/mir_lowering.rb:1332 `MIRLowering#pre_terminator_transfer_marks` param emitted: T::Array[`T.untyped`]
-- method_param out array at src/mir/mir_lowering.rb:1391; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3522075 observation(s)
-  - mutation sites: src/mir/mir_lowering.rb:1607 (1622744), src/mir/mir_lowering.rb:1609 (257601), src/mir/mir_lowering.rb:1658 (17264)
-  - src/mir/mir_lowering.rb:1391 `MIRLowering#implicit_allocating_result_fact` param out: T::Array[`T.untyped`]
-- method_param out array at src/mir/mir_lowering.rb:1385; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3522069 observation(s)
-  - mutation sites: src/mir/mir_lowering.rb:1607 (1622744), src/mir/mir_lowering.rb:1609 (257601), src/mir/mir_lowering.rb:1658 (17264)
-  - src/mir/mir_lowering.rb:1385 `MIRLowering#implicit_alloc_mark_for_mir_node` param out: T::Array[`T.untyped`]
-- method_param marks array at src/mir/mir_lowering.rb:1155; element observations are heterogeneous or AST/MIR-specific: MIR::MoveMark, MIR::TransferMark: 1 slot(s), 3245488 observation(s)
-  - src/mir/mir_lowering.rb:1155 `MIRLowering#append_transfer_marks!` param marks: T::Array[`T.untyped`]
-- method_param values array at src/mir/mir.rb:289; element observations are heterogeneous or AST/MIR-specific: Array, Integer, MIR::AddressOf, MIR::AllocatorRef, MIR::ArrayInit, MIR::BgBlock: 1 slot(s), 2744420 observation(s)
+- method_param emitted array at src/mir/mir_lowering.rb:1392; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3967774 observation(s)
+  - mutation sites: src/mir/mir_lowering.rb:1667 (1726405), src/mir/mir_lowering.rb:1669 (263530), src/mir/mir_lowering.rb:1327 (71046)
+  - src/mir/mir_lowering.rb:1392 `MIRLowering#pre_terminator_transfer_marks` param emitted: T::Array[`T.untyped`]
+- method_param out array at src/mir/mir_lowering.rb:1451; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3735290 observation(s)
+  - mutation sites: src/mir/mir_lowering.rb:1667 (1726405), src/mir/mir_lowering.rb:1669 (263530), src/mir/mir_lowering.rb:1718 (17246)
+  - src/mir/mir_lowering.rb:1451 `MIRLowering#implicit_allocating_result_fact` param out: T::Array[`T.untyped`]
+- method_param out array at src/mir/mir_lowering.rb:1445; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 3735284 observation(s)
+  - mutation sites: src/mir/mir_lowering.rb:1667 (1726405), src/mir/mir_lowering.rb:1669 (263530), src/mir/mir_lowering.rb:1718 (17246)
+  - src/mir/mir_lowering.rb:1445 `MIRLowering#implicit_alloc_mark_for_mir_node` param out: T::Array[`T.untyped`]
+- method_param marks array at src/mir/mir_lowering.rb:1215; element observations are heterogeneous or AST/MIR-specific: MIR::MoveMark, MIR::TransferMark: 1 slot(s), 3452809 observation(s)
+  - src/mir/mir_lowering.rb:1215 `MIRLowering#append_transfer_marks!` param marks: T::Array[`T.untyped`]
+- method_param values array at src/mir/mir.rb:289; element observations are heterogeneous or AST/MIR-specific: Array, Integer, MIR::AddressOf, MIR::AllocatorRef, MIR::ArrayInit, MIR::BgBlock: 1 slot(s), 2779835 observation(s)
   - src/mir/mir.rb:289 `MIR::Emittable#compact_child_exprs` param values: T::Array[`T.untyped`]
-- method_return ownership_facts_for_structural_node array at src/mir/mir_lowering.rb:1249; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer: 1 slot(s), 2251850 observation(s)
-  - src/mir/mir_lowering.rb:1249 `MIRLowering#ownership_facts_for_structural_node` return return: T::Array[`T.untyped`]
-- method_return ownership_facts_for_mir_node array at src/mir/mir_lowering.rb:1174; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedStore, MIR::OwnedTransfer: 1 slot(s), 2228475 observation(s)
-  - src/mir/mir_lowering.rb:1174 `MIRLowering#ownership_facts_for_mir_node` return return: T::Array[`T.untyped`]
-- method_return ownership_transfer_facts_for_contract array at src/mir/mir_lowering.rb:1285; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedTransfer: 1 slot(s), 2219242 observation(s)
-  - src/mir/mir_lowering.rb:1285 `MIRLowering#ownership_transfer_facts_for_contract` return return: T::Array[`T.untyped`]
-- method_return ownership_facts_for_owned_result array at src/mir/mir_lowering.rb:1268; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedReturn: 1 slot(s), 2196919 observation(s)
-  - src/mir/mir_lowering.rb:1268 `MIRLowering#ownership_facts_for_owned_result` return return: T::Array[`T.untyped`]
-- method_return strip_capability_suffix array at src/ast/type.rb:2201; element observations are heterogeneous or AST/MIR-specific: NilClass, String, Symbol: 1 slot(s), 2000982 observation(s)
+- method_return ownership_facts_for_structural_node array at src/mir/mir_lowering.rb:1309; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer: 1 slot(s), 2369619 observation(s)
+  - src/mir/mir_lowering.rb:1309 `MIRLowering#ownership_facts_for_structural_node` return return: T::Array[`T.untyped`]
+- method_return ownership_facts_for_mir_node array at src/mir/mir_lowering.rb:1234; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedStore, MIR::OwnedTransfer: 1 slot(s), 2346355 observation(s)
+  - src/mir/mir_lowering.rb:1234 `MIRLowering#ownership_facts_for_mir_node` return return: T::Array[`T.untyped`]
+- method_return ownership_transfer_facts_for_contract array at src/mir/mir_lowering.rb:1345; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedTransfer: 1 slot(s), 2337078 observation(s)
+  - src/mir/mir_lowering.rb:1345 `MIRLowering#ownership_transfer_facts_for_contract` return return: T::Array[`T.untyped`]
+- method_return ownership_facts_for_owned_result array at src/mir/mir_lowering.rb:1328; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedReturn: 1 slot(s), 2314192 observation(s)
+  - src/mir/mir_lowering.rb:1328 `MIRLowering#ownership_facts_for_owned_result` return return: T::Array[`T.untyped`]
+- method_return strip_capability_suffix array at src/ast/type.rb:2201; element observations are heterogeneous or AST/MIR-specific: NilClass, String, Symbol: 1 slot(s), 2047404 observation(s)
   - src/ast/type.rb:2201 `Type#strip_capability_suffix` return return: T::Array[`T.untyped`]
-- method_param existing array at src/mir/mir_lowering.rb:1461; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1716062 observation(s)
-  - src/mir/mir_lowering.rb:1461 `MIRLowering#ownership_transfer_operands_for_node` param existing: T::Array[`T.untyped`]
-- method_return ownership_facts_for_mir_surface array at src/mir/mir_lowering.rb:1165; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedStore, MIR::OwnedTransfer: 1 slot(s), 1693884 observation(s)
-  - src/mir/mir_lowering.rb:1165 `MIRLowering#ownership_facts_for_mir_surface` return return: T::Array[`T.untyped`]
-- method_param remaining array at src/mir/mir_lowering.rb:1332; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1693527 observation(s)
-  - src/mir/mir_lowering.rb:1332 `MIRLowering#pre_terminator_transfer_marks` param remaining: T::Array[`T.untyped`]
-- method_return pre_terminator_transfer_marks array at src/mir/mir_lowering.rb:1332; no element observations: 1 slot(s), 1693527 observation(s)
-  - src/mir/mir_lowering.rb:1332 `MIRLowering#pre_terminator_transfer_marks` return return: T::Array[`T.untyped`]
-- method_param body array at src/mir/mir_lowering.rb:1062; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1622744 observation(s)
-  - src/mir/mir_lowering.rb:1062 `MIRLowering#finalize_ownership_for_mir_node!` param body: T::Array[`T.untyped`]
-- method_param body array at src/mir/mir_lowering.rb:1138; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1622744 observation(s)
-  - src/mir/mir_lowering.rb:1138 `MIRLowering#append_block_result_transfer!` param body: T::Array[`T.untyped`]
-- method_param points array at src/annotator/helpers/effects.rb:815; element observations are heterogeneous or AST/MIR-specific: Hash: 1 slot(s), 656734 observation(s)
-  - mutation sites: src/annotator/helpers/effects.rb:935 (2053), src/annotator/helpers/effects.rb:942 (1670), src/annotator/helpers/effects.rb:938 (1110)
+- method_param existing array at src/mir/mir_lowering.rb:1526; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1820514 observation(s)
+  - src/mir/mir_lowering.rb:1526 `MIRLowering#ownership_transfer_operands_for_node` param existing: T::Array[`T.untyped`]
+- method_return ownership_facts_for_mir_surface array at src/mir/mir_lowering.rb:1225; element observations are heterogeneous or AST/MIR-specific: MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedStore, MIR::OwnedTransfer: 1 slot(s), 1797766 observation(s)
+  - src/mir/mir_lowering.rb:1225 `MIRLowering#ownership_facts_for_mir_surface` return return: T::Array[`T.untyped`]
+- method_param remaining array at src/mir/mir_lowering.rb:1392; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1797451 observation(s)
+  - src/mir/mir_lowering.rb:1392 `MIRLowering#pre_terminator_transfer_marks` param remaining: T::Array[`T.untyped`]
+- method_return pre_terminator_transfer_marks array at src/mir/mir_lowering.rb:1392; no element observations: 1 slot(s), 1797451 observation(s)
+  - src/mir/mir_lowering.rb:1392 `MIRLowering#pre_terminator_transfer_marks` return return: T::Array[`T.untyped`]
+- method_param body array at src/mir/mir_lowering.rb:1122; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1726408 observation(s)
+  - src/mir/mir_lowering.rb:1122 `MIRLowering#finalize_ownership_for_mir_node!` param body: T::Array[`T.untyped`]
+- method_param body array at src/mir/mir_lowering.rb:1198; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 1726405 observation(s)
+  - src/mir/mir_lowering.rb:1198 `MIRLowering#append_block_result_transfer!` param body: T::Array[`T.untyped`]
+- method_param nodes array at src/mir/mir_lowering.rb:1477; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BlockExpr, MIR::BreakStmt, MIR::Call: 1 slot(s), 1656038 observation(s)
+  - mutation sites: src/mir/mir_lowering.rb:1667 (1359749), src/mir/mir_lowering.rb:1669 (228737), src/mir/mir_lowering.rb:1718 (15878)
+  - src/mir/mir_lowering.rb:1477 `MIRLowering#existing_alloc_mark` param nodes: T::Array[`T.untyped`]
+- method_param points array at src/annotator/helpers/effects.rb:815; element observations are heterogeneous or AST/MIR-specific: Hash: 1 slot(s), 660018 observation(s)
+  - mutation sites: src/annotator/helpers/effects.rb:935 (2049), src/annotator/helpers/effects.rb:942 (1674), src/annotator/helpers/effects.rb:938 (1110)
   - src/annotator/helpers/effects.rb:815 `EffectTracker#scan_suspend_points` param points: T::Array[T::Hash[Symbol, `T.untyped`]]
-- method_param _borrowed_paths array at src/ast/scope.rb:25; no element observations: 1 slot(s), 547806 observation(s)
+- method_param _borrowed_paths array at src/ast/scope.rb:25; no element observations: 1 slot(s), 556146 observation(s)
   - src/ast/scope.rb:25 `Scope#declare` param _borrowed_paths: T::Array[`T.untyped`]
-- method_param body array at src/ast/ast.rb:336; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode: 1 slot(s), 493932 observation(s)
+- method_param body array at src/ast/ast.rb:336; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode: 1 slot(s), 495142 observation(s)
   - src/ast/ast.rb:336 `AST#walk_body` param body: T::Array[`T.untyped`]
-- method_return walk_body array at src/ast/ast.rb:336; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode: 1 slot(s), 493863 observation(s)
+- method_return walk_body array at src/ast/ast.rb:336; element observations are heterogeneous or AST/MIR-specific: AST::Assert, AST::Assignment, AST::BgBlock, AST::BinaryOp, AST::BindExpr, AST::BreakNode: 1 slot(s), 495073 observation(s)
   - src/ast/ast.rb:336 `AST#walk_body` return return: T.nilable(T::Array[`T.untyped`])
-- method_return normalize_allocating_result_expr! array at src/mir/hoist.rb:842; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::Let: 1 slot(s), 451892 observation(s)
+- method_return normalize_allocating_result_expr! array at src/mir/hoist.rb:842; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::Let: 1 slot(s), 481668 observation(s)
   - src/mir/hoist.rb:842 `MIRHoistLowering#normalize_allocating_result_expr!` return return: T::Array[`T.untyped`]
-- method_param out array at src/annotator/annotator.rb:6271; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall: 1 slot(s), 430110 observation(s)
-  - mutation sites: src/annotator/annotator.rb:7336 (381)
-  - src/annotator/annotator.rb:6271 `SemanticAnnotator#collect_self_calls` param out: T::Array[`T.untyped`]
-- method_return collect_self_calls array at src/annotator/annotator.rb:6271; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall: 1 slot(s), 430110 observation(s)
-  - mutation sites: src/annotator/annotator.rb:7336 (381)
-  - src/annotator/annotator.rb:6271 `SemanticAnnotator#collect_self_calls` return return: T::Array[`T.untyped`]
-- method_return children array at src/mir/control_flow.rb:32; element observations are heterogeneous or AST/MIR-specific: AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock, AST::BgStreamBlock: 1 slot(s), 405803 observation(s)
+- method_param out array at src/annotator/annotator.rb:6366; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall: 1 slot(s), 427528 observation(s)
+  - mutation sites: src/annotator/annotator.rb:7548 (381)
+  - src/annotator/annotator.rb:6366 `SemanticAnnotator#collect_self_calls` param out: T::Array[`T.untyped`]
+- method_return collect_self_calls array at src/annotator/annotator.rb:6366; element observations are heterogeneous or AST/MIR-specific: AST::FuncCall: 1 slot(s), 427528 observation(s)
+  - mutation sites: src/annotator/annotator.rb:7548 (381)
+  - src/annotator/annotator.rb:6366 `SemanticAnnotator#collect_self_calls` return return: T::Array[`T.untyped`]
+- method_return children array at src/mir/control_flow.rb:32; element observations are heterogeneous or AST/MIR-specific: AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock, AST::BgStreamBlock: 1 slot(s), 412127 observation(s)
   - src/mir/control_flow.rb:32 `MIRControlFlowExpr#children` return return: T::Array[`T.untyped`]
-- method_return expression_children array at src/ast/ast.rb:489; element observations are heterogeneous or AST/MIR-specific: AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock, AST::BgStreamBlock: 1 slot(s), 405803 observation(s)
+- method_return expression_children array at src/ast/ast.rb:489; element observations are heterogeneous or AST/MIR-specific: AST::AllOp, AST::AnyOp, AST::AverageOp, AST::BatchWindowOp, AST::BgBlock, AST::BgStreamBlock: 1 slot(s), 412127 observation(s)
   - src/ast/ast.rb:489 `AST#expression_children` return return: T::Array[`T.untyped`]
-- method_param body array at src/mir/mir.rb:245; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 348729 observation(s)
+- method_param body array at src/mir/mir.rb:245; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 368456 observation(s)
   - src/mir/mir.rb:245 `MIR::BodySlot#initialize` param body: T::Array[`T.untyped`]
-- method_param body array at src/mir/mir.rb:298; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 348508 observation(s)
+- method_param body array at src/mir/mir.rb:298; element observations are heterogeneous or AST/MIR-specific: MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush, MIR::BinOp, MIR::BlockExpr: 1 slot(s), 368235 observation(s)
   - src/mir/mir.rb:298 `MIR::Emittable#body_slot` param body: T.nilable(T::Array[`T.untyped`])
-- method_param out array at src/annotator/annotator.rb:6287; element observations are heterogeneous or AST/MIR-specific: AST::ReturnNode: 1 slot(s), 333516 observation(s)
-  - mutation sites: src/annotator/annotator.rb:7365 (1983)
-  - src/annotator/annotator.rb:6287 `SemanticAnnotator#collect_returns` param out: T::Array[`T.untyped`]
 
 ### Runtime Collection Mutation Observations
-- ivar: 250967 slot(s)
-- method_param: 238403 slot(s)
-- method_return: 155302 slot(s)
-- struct_field: 43058 slot(s)
+- ivar: 230877 slot(s)
+- method_param: 225624 slot(s)
+- method_return: 152348 slot(s)
+- struct_field: 41240 slot(s)
+  - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 1719219 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 1719219 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 1719219 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 1719219 observation(s)
@@ -3898,48 +3721,47 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 1667068 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 1667068 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 1667068 observation(s)
-  - src/ast/lexer.rb:42 ivar @tokens; array; T::Array[Lexer::Token]; 659856 observation(s)
+  - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 1667068 observation(s)
+  - src/ast/lexer.rb:42 ivar @tokens; array; T::Array[Lexer::Token]; 663319 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 606466 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 606466 observation(s)
-  - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 596189 observation(s)
+  - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 606466 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 596189 observation(s)
   - src/mir/hoist.rb:734 method_return normalize_allocating_mir_stmt!; array; T::Array[`T.untyped`]; 596189 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 577589 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 577589 observation(s)
-  - src/tools/lint_fix_rewriter.rb:62 method_param set; set; T::Set[String]; 568408 observation(s)
+  - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 577589 observation(s)
+  - src/tools/lint_fix_rewriter.rb:68 method_param set; set; T::Set[String]; 568552 observation(s)
+  - src/tools/lint_fix_rewriter.rb:89 method_param set; set; T::Set[String]; 568243 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 568125 observation(s)
   - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 568125 observation(s)
-  - src/mir/hoist.rb:803 method_return normalize_stmt_child_exprs!; array; T::Array[`T.untyped`]; 568125 observation(s)
-  - src/tools/lint_fix_rewriter.rb:82 method_param set; set; T::Set[String]; 568099 observation(s)
-  - src/tools/lint_fix_rewriter.rb:185 method_param edits; array; T::Array[Hash]; 567502 observation(s)
-  - src/tools/predicate_rewriter.rb:98 method_param edits; array; T::Array[Hash]; 562472 observation(s)
-  - src/tools/method_rewriter.rb:140 method_param edits; array; T::Array[Hash]; 561872 observation(s)
-  - src/tools/method_rewriter.rb:140 method_param methods; set; T::Set[String]; 561722 observation(s)
-  - src/tools/method_rewriter.rb:65 method_param fns; set; T::Set[String]; 518170 observation(s)
-  - src/tools/method_rewriter.rb:65 method_param methods; set; T::Set[`T.untyped`]; 516240 observation(s)
-  - src/ast/type.rb:2201 method_return strip_capability_suffix; array; T::Array[T.nilable(String)]; 304600 observation(s)
-  - src/tools/formatter.rb:153 ivar @out; array; T::Array[Formatter::FormatLexer::Token]; 302897 observation(s)
-  - src/mir/mir_lowering.rb:1332 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
-  - src/mir/mir_lowering.rb:1332 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
-  - src/mir/mir_lowering.rb:1332 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
-  - src/mir/mir_lowering.rb:1332 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
-  - src/mir/mir_lowering.rb:1385 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1385 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1385 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1385 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1391 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1391 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
-  - src/mir/mir_lowering.rb:1391 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
+  - src/tools/lint_fix_rewriter.rb:199 method_param edits; array; T::Array[Hash]; 567646 observation(s)
+  - src/tools/predicate_rewriter.rb:103 method_param edits; array; T::Array[Hash]; 562616 observation(s)
+  - src/tools/method_rewriter.rb:140 method_param edits; array; T::Array[Hash]; 562017 observation(s)
+  - src/tools/method_rewriter.rb:140 method_param methods; set; T::Set[String]; 561866 observation(s)
+  - src/tools/method_rewriter.rb:65 method_param fns; set; T::Set[String]; 518270 observation(s)
+  - src/tools/method_rewriter.rb:65 method_param methods; set; T::Set[String]; 516340 observation(s)
+  - src/ast/type.rb:2201 method_return strip_capability_suffix; array; T::Array[T.nilable(String)]; 320830 observation(s)
+  - src/tools/formatter.rb:153 ivar @out; array; T::Array[Formatter::FormatLexer::Token]; 302979 observation(s)
+  - src/mir/mir_lowering.rb:1392 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
+  - src/mir/mir_lowering.rb:1392 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
+  - src/mir/mir_lowering.rb:1392 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
+  - src/mir/mir_lowering.rb:1392 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
+  - src/mir/mir_lowering.rb:1392 method_param emitted; array; T::Array[`T.untyped`]; 269359 observation(s)
+  - src/mir/mir_lowering.rb:1445 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
+  - src/mir/mir_lowering.rb:1445 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
+  - src/mir/mir_lowering.rb:1445 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
+  - src/mir/mir_lowering.rb:1445 method_param out; array; T::Array[`T.untyped`]; 266457 observation(s)
 
 ### Collection Index Lookup Provenance
 - provenance: the inferred origin of the collection receiver being indexed with `[]`, `fetch`, or similar lookup syntax
 - receiver origin: the parameter, literal, forwarded return, instance variable, or local record that produced the indexed receiver
 - weak index lookup: an index lookup where the receiver is unknown, `T.untyped`, or a weak collection type
-- unknown receiver type: 1846
-- weak collection receiver: 606
-- typed lookup: 376
-- typed collection receiver: 214
-- non-collection or unresolved receiver: 138
+- unknown receiver type: 1802
+- weak collection receiver: 597
+- typed lookup: 385
+- typed collection receiver: 223
+- non-collection or unresolved receiver: 172
 
 ### Unknown Or Weak Index Lookups By Receiver Origin
 - local hash record self at src/ast/ast.rb: 78
@@ -3949,89 +3771,89 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - src/ast/ast.rb:103 self[:comptime]; receiver self; index :comptime; receiver type unknown
   - src/ast/ast.rb:104 self[:type]; receiver self; index :type; receiver type unknown
 - local hash record c at src/tools/doctor.rb: 74
-  - src/tools/doctor.rb:385 c[:pushes]; receiver c; index :pushes; receiver type unknown
-  - src/tools/doctor.rb:385 c[:pops]; receiver c; index :pops; receiver type unknown
-  - src/tools/doctor.rb:394 c[:capacity]; receiver c; index :capacity; receiver type unknown
-  - src/tools/doctor.rb:395 c[:max_depth]; receiver c; index :max_depth; receiver type unknown
-  - src/tools/doctor.rb:396 c[:pushes]; receiver c; index :pushes; receiver type unknown
+  - src/tools/doctor.rb:393 c[:pushes]; receiver c; index :pushes; receiver type unknown
+  - src/tools/doctor.rb:393 c[:pops]; receiver c; index :pops; receiver type unknown
+  - src/tools/doctor.rb:402 c[:capacity]; receiver c; index :capacity; receiver type unknown
+  - src/tools/doctor.rb:403 c[:max_depth]; receiver c; index :max_depth; receiver type unknown
+  - src/tools/doctor.rb:404 c[:pushes]; receiver c; index :pushes; receiver type unknown
 - local hash record s at src/tools/doctor.rb: 57
-  - src/tools/doctor.rb:158 s[:trace]; receiver s; index :trace; receiver type unknown
-  - src/tools/doctor.rb:203 s[:trace]; receiver s; index :trace; receiver type unknown
-  - src/tools/doctor.rb:207 s[:bytes]; receiver s; index :bytes; receiver type unknown
-  - src/tools/doctor.rb:208 s[:allocs]; receiver s; index :allocs; receiver type unknown
-  - src/tools/doctor.rb:219 s[:trace]; receiver s; index :trace; receiver type unknown
+  - src/tools/doctor.rb:164 s[:trace]; receiver s; index :trace; receiver type unknown
+  - src/tools/doctor.rb:209 s[:trace]; receiver s; index :trace; receiver type unknown
+  - src/tools/doctor.rb:213 s[:bytes]; receiver s; index :bytes; receiver type unknown
+  - src/tools/doctor.rb:214 s[:allocs]; receiver s; index :allocs; receiver type unknown
+  - src/tools/doctor.rb:225 s[:trace]; receiver s; index :trace; receiver type unknown
 - local hash record d at src/tools/doctor.rb: 44
-  - src/tools/doctor.rb:1461 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
-  - src/tools/doctor.rb:1461 d[:delta_allocs]; receiver d; index :delta_allocs; receiver type unknown
-  - src/tools/doctor.rb:1462 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
-  - src/tools/doctor.rb:1470 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
-  - src/tools/doctor.rb:1472 d[:func]; receiver d; index :func; receiver type unknown
+  - src/tools/doctor.rb:1475 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
+  - src/tools/doctor.rb:1475 d[:delta_allocs]; receiver d; index :delta_allocs; receiver type unknown
+  - src/tools/doctor.rb:1476 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
+  - src/tools/doctor.rb:1484 d[:delta_bytes]; receiver d; index :delta_bytes; receiver type unknown
+  - src/tools/doctor.rb:1486 d[:func]; receiver d; index :func; receiver type unknown
 - hash record param cap at src/annotator/helpers/capabilities.rb:758: 38
   - src/annotator/helpers/capabilities.rb:761 cap[:var_node]; receiver cap; index :var_node; receiver type AST::Capability
   - src/annotator/helpers/capabilities.rb:762 cap[:old_scope]; receiver cap; index :old_scope; receiver type AST::Capability
   - src/annotator/helpers/capabilities.rb:765 cap[:var_node]; receiver cap; index :var_node; receiver type AST::Capability
   - src/annotator/helpers/capabilities.rb:769 cap[:capability]; receiver cap; index :capability; receiver type AST::Capability
   - src/annotator/helpers/capabilities.rb:769 cap[:capability]; receiver cap; index :capability; receiver type AST::Capability
-- local hash record cap at src/mir/lowering/capabilities.rb: 33
-  - src/mir/lowering/capabilities.rb:216 cap[:var_node]; receiver cap; index :var_node; receiver type unknown
-  - src/mir/lowering/capabilities.rb:217 cap[:alias]; receiver cap; index :alias; receiver type unknown
-  - src/mir/lowering/capabilities.rb:230 cap[:var_node]; receiver cap; index :var_node; receiver type unknown
-  - src/mir/lowering/capabilities.rb:232 cap[:alias]; receiver cap; index :alias; receiver type unknown
-  - src/mir/lowering/capabilities.rb:233 cap[:resolved_type]; receiver cap; index :resolved_type; receiver type unknown
 - local hash record e at src/mir/lowering/capabilities.rb: 31
-  - src/mir/lowering/capabilities.rb:1157 e[:guard_var]; receiver e; index :guard_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/mir/lowering/capabilities.rb:1157 e[:lock_expr]; receiver e; index :lock_expr; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/mir/lowering/capabilities.rb:1157 e[:method]; receiver e; index :method; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/mir/lowering/capabilities.rb:1160 e[:addr_expr]; receiver e; index :addr_expr; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/mir/lowering/capabilities.rb:1164 e[:i]; receiver e; index :i; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/mir/lowering/capabilities.rb:1171 e[:guard_var]; receiver e; index :guard_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/mir/lowering/capabilities.rb:1171 e[:lock_expr]; receiver e; index :lock_expr; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/mir/lowering/capabilities.rb:1171 e[:method]; receiver e; index :method; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/mir/lowering/capabilities.rb:1174 e[:addr_expr]; receiver e; index :addr_expr; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/mir/lowering/capabilities.rb:1178 e[:i]; receiver e; index :i; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- local hash record cap at src/mir/lowering/capabilities.rb: 30
+  - src/mir/lowering/capabilities.rb:214 cap[:var_node]; receiver cap; index :var_node; receiver type unknown
+  - src/mir/lowering/capabilities.rb:215 cap[:alias]; receiver cap; index :alias; receiver type unknown
+  - src/mir/lowering/capabilities.rb:228 cap[:var_node]; receiver cap; index :var_node; receiver type unknown
+  - src/mir/lowering/capabilities.rb:230 cap[:alias]; receiver cap; index :alias; receiver type unknown
+  - src/mir/lowering/capabilities.rb:231 cap[:resolved_type]; receiver cap; index :resolved_type; receiver type unknown
 - local variable f: 26
-  - src/tools/pprof_converter.rb:111 f[0]; receiver f; index 0; receiver type unknown
-  - src/tools/pprof_converter.rb:114 f[1]; receiver f; index 1; receiver type unknown
-  - src/tools/pprof_converter.rb:115 f[2]; receiver f; index 2; receiver type unknown
-  - src/tools/pprof_converter.rb:116 f[3]; receiver f; index 3; receiver type unknown
-  - src/tools/pprof_converter.rb:117 f[4]; receiver f; index 4; receiver type unknown
+  - src/tools/pprof_converter.rb:115 f[0]; receiver f; index 0; receiver type unknown
+  - src/tools/pprof_converter.rb:118 f[1]; receiver f; index 1; receiver type unknown
+  - src/tools/pprof_converter.rb:119 f[2]; receiver f; index 2; receiver type unknown
+  - src/tools/pprof_converter.rb:120 f[3]; receiver f; index 3; receiver type unknown
+  - src/tools/pprof_converter.rb:121 f[4]; receiver f; index 4; receiver type unknown
 - local hash record r at src/tools/doctor.rb: 24
-  - src/tools/doctor.rb:497 r[:runs]; receiver r; index :runs; receiver type unknown
-  - src/tools/doctor.rb:498 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:500 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:502 r[:idx]; receiver r; index :idx; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:502 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-- hash record param ctx at src/mir/fsm_transform/emit.rb:1161: 21
-  - src/mir/fsm_transform/emit.rb:1163 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1163 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1164 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1164 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1164 ctx[:parallel]; receiver ctx; index :parallel; receiver type unknown
+  - src/tools/doctor.rb:506 r[:runs]; receiver r; index :runs; receiver type unknown
+  - src/tools/doctor.rb:507 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:509 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:511 r[:idx]; receiver r; index :idx; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:511 r[:runs]; receiver r; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- hash record param ctx at src/mir/fsm_transform/emit.rb:1180: 21
+  - src/mir/fsm_transform/emit.rb:1182 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1182 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1183 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1183 ctx[:pin_mode]; receiver ctx; index :pin_mode; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1183 ctx[:parallel]; receiver ctx; index :parallel; receiver type unknown
 - local hash record f at src/tools/stack_verifier.rb: 21
   - src/tools/stack_verifier.rb:103 f[:name]; receiver f; index :name; receiver type unknown
   - src/tools/stack_verifier.rb:103 f[:stack_bytes]; receiver f; index :stack_bytes; receiver type unknown
   - src/tools/stack_verifier.rb:105 f[:name]; receiver f; index :name; receiver type unknown
   - src/tools/stack_verifier.rb:121 f[:stack_bytes]; receiver f; index :stack_bytes; receiver type unknown
   - src/tools/stack_verifier.rb:127 f[:name]; receiver f; index :name; receiver type unknown
-- hash record param ctx at src/mir/fsm_transform/emit.rb:479: 20
-  - src/mir/fsm_transform/emit.rb:483 ctx[:id]; receiver ctx; index :id; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:484 ctx[:bg_rt]; receiver ctx; index :bg_rt; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:485 ctx[:captured]; receiver ctx; index :captured; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:486 ctx[:capture_close_zig]; receiver ctx; index :capture_close_zig; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:487 ctx[:pointer_captures]; receiver ctx; index :pointer_captures; receiver type unknown
+- hash record param ctx at src/mir/fsm_transform/emit.rb:498: 20
+  - src/mir/fsm_transform/emit.rb:502 ctx[:id]; receiver ctx; index :id; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:503 ctx[:bg_rt]; receiver ctx; index :bg_rt; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:504 ctx[:captured]; receiver ctx; index :captured; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:505 ctx[:capture_close_zig]; receiver ctx; index :capture_close_zig; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:506 ctx[:pointer_captures]; receiver ctx; index :pointer_captures; receiver type unknown
 - local hash record sel at src/annotator/annotator.rb: 20
-  - src/annotator/annotator.rb:950 sel[:form]; receiver sel; index :form; receiver type unknown
-  - src/annotator/annotator.rb:951 sel[:name]; receiver sel; index :name; receiver type unknown
-  - src/annotator/annotator.rb:953 sel[:token]; receiver sel; index :token; receiver type unknown
-  - src/annotator/annotator.rb:957 sel[:token]; receiver sel; index :token; receiver type unknown
-  - src/annotator/annotator.rb:968 sel[:form]; receiver sel; index :form; receiver type unknown
+  - src/annotator/annotator.rb:1021 sel[:form]; receiver sel; index :form; receiver type unknown
+  - src/annotator/annotator.rb:1022 sel[:name]; receiver sel; index :name; receiver type unknown
+  - src/annotator/annotator.rb:1024 sel[:token]; receiver sel; index :token; receiver type unknown
+  - src/annotator/annotator.rb:1028 sel[:token]; receiver sel; index :token; receiver type unknown
+  - src/annotator/annotator.rb:1039 sel[:form]; receiver sel; index :form; receiver type unknown
 - local hash record spec at src/mir/fsm_transform/emit.rb: 19
-  - src/mir/fsm_transform/emit.rb:131 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:132 spec[:index]; receiver spec; index :index; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:133 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
   - src/mir/fsm_transform/emit.rb:134 spec[:index]; receiver spec; index :index; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:137 spec[:fn_name]; receiver spec; index :fn_name; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:138 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
-- hash record param result at src/ast/parser.rb:3131: 18
-  - src/ast/parser.rb:3134 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/ast/parser.rb:3137 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
-  - src/ast/parser.rb:3140 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
-  - src/ast/parser.rb:3143 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
-  - src/ast/parser.rb:3146 result[:sync]; receiver result; index :sync; receiver type T::Hash[Symbol, Symbol]
+  - src/mir/fsm_transform/emit.rb:136 spec[:index]; receiver spec; index :index; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:139 spec[:fn_name]; receiver spec; index :fn_name; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:140 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
+- hash record param result at src/ast/parser.rb:3154: 18
+  - src/ast/parser.rb:3157 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3160 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
+  - src/ast/parser.rb:3163 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
+  - src/ast/parser.rb:3166 result[:ownership]; receiver result; index :ownership; receiver type T::Hash[Symbol, Symbol]
+  - src/ast/parser.rb:3169 result[:sync]; receiver result; index :sync; receiver type T::Hash[Symbol, Symbol]
 - local hash record req at src/annotator/helpers/union.rb: 18
   - src/annotator/helpers/union.rb:21 req[:name]; receiver req; index :name; receiver type T::Hash[`T.untyped`, `T.untyped`]
   - src/annotator/helpers/union.rb:22 req[:token]; receiver req; index :token; receiver type T::Hash[`T.untyped`, `T.untyped`]
@@ -4045,89 +3867,89 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - src/annotator/helpers/pipe_analysis.rb:427 opts["size"]; receiver opts; index "size"; receiver type unknown
   - src/annotator/helpers/pipe_analysis.rb:429 opts["size"]; receiver opts; index "size"; receiver type unknown
 - local hash record c at src/tools/pprof_converter.rb: 16
-  - src/tools/pprof_converter.rb:64 c[:pushes]; receiver c; index :pushes; receiver type unknown
-  - src/tools/pprof_converter.rb:64 c[:pops]; receiver c; index :pops; receiver type unknown
-  - src/tools/pprof_converter.rb:267 c[:reads]; receiver c; index :reads; receiver type unknown
-  - src/tools/pprof_converter.rb:267 c[:commits]; receiver c; index :commits; receiver type unknown
-  - src/tools/pprof_converter.rb:270 c[:addr]; receiver c; index :addr; receiver type unknown
+  - src/tools/pprof_converter.rb:68 c[:pushes]; receiver c; index :pushes; receiver type unknown
+  - src/tools/pprof_converter.rb:68 c[:pops]; receiver c; index :pops; receiver type unknown
+  - src/tools/pprof_converter.rb:272 c[:reads]; receiver c; index :reads; receiver type unknown
+  - src/tools/pprof_converter.rb:272 c[:commits]; receiver c; index :commits; receiver type unknown
+  - src/tools/pprof_converter.rb:275 c[:addr]; receiver c; index :addr; receiver type unknown
 - local hash record l at src/tools/pprof_converter.rb: 16
-  - src/tools/pprof_converter.rb:206 l[:acquires]; receiver l; index :acquires; receiver type unknown
-  - src/tools/pprof_converter.rb:206 l[:read_acquires]; receiver l; index :read_acquires; receiver type unknown
-  - src/tools/pprof_converter.rb:212 l[:addr]; receiver l; index :addr; receiver type unknown
-  - src/tools/pprof_converter.rb:212 l[:caller_trace]; receiver l; index :caller_trace; receiver type unknown
-  - src/tools/pprof_converter.rb:227 l[:addr]; receiver l; index :addr; receiver type unknown
+  - src/tools/pprof_converter.rb:211 l[:acquires]; receiver l; index :acquires; receiver type unknown
+  - src/tools/pprof_converter.rb:211 l[:read_acquires]; receiver l; index :read_acquires; receiver type unknown
+  - src/tools/pprof_converter.rb:217 l[:addr]; receiver l; index :addr; receiver type unknown
+  - src/tools/pprof_converter.rb:217 l[:caller_trace]; receiver l; index :caller_trace; receiver type unknown
+  - src/tools/pprof_converter.rb:232 l[:addr]; receiver l; index :addr; receiver type unknown
 - forwarded return let at src/mir/ownership_graph.rb:49: 15
   - src/mir/ownership_graph.rb:102 @nodes[from]; receiver @nodes; index from; receiver type unknown
   - src/mir/ownership_graph.rb:120 @nodes[path]; receiver @nodes; index path; receiver type unknown
   - src/mir/ownership_graph.rb:129 @nodes[source]; receiver @nodes; index source; receiver type unknown
   - src/mir/ownership_graph.rb:157 @nodes[path]; receiver @nodes; index path; receiver type unknown
   - src/mir/ownership_graph.rb:162 @nodes[p]; receiver @nodes; index p; receiver type unknown
-- hash record return let at src/tools/doctor.rb:1377: 15
-  - src/tools/doctor.rb:70 @opts[:ignore]; receiver @opts; index :ignore; receiver type unknown
-  - src/tools/doctor.rb:70 @opts[:ignore]; receiver @opts; index :ignore; receiver type unknown
-  - src/tools/doctor.rb:71 @opts[:focus]; receiver @opts; index :focus; receiver type unknown
-  - src/tools/doctor.rb:72 @opts[:focus]; receiver @opts; index :focus; receiver type unknown
-  - src/tools/doctor.rb:76 @opts[:cumulative]; receiver @opts; index :cumulative; receiver type unknown
+- hash record return let at src/tools/doctor.rb:1391: 15
+  - src/tools/doctor.rb:74 @opts[:ignore]; receiver @opts; index :ignore; receiver type unknown
+  - src/tools/doctor.rb:74 @opts[:ignore]; receiver @opts; index :ignore; receiver type unknown
+  - src/tools/doctor.rb:75 @opts[:focus]; receiver @opts; index :focus; receiver type unknown
+  - src/tools/doctor.rb:76 @opts[:focus]; receiver @opts; index :focus; receiver type unknown
+  - src/tools/doctor.rb:81 @opts[:cumulative]; receiver @opts; index :cumulative; receiver type unknown
 - local hash record r at src/tools/pprof_converter.rb: 15
-  - src/tools/pprof_converter.rb:78 r[:id]; receiver r; index :id; receiver type unknown
-  - src/tools/pprof_converter.rb:80 r[:id]; receiver r; index :id; receiver type unknown
-  - src/tools/pprof_converter.rb:83 r[:pushes]; receiver r; index :pushes; receiver type unknown
-  - src/tools/pprof_converter.rb:83 r[:pops]; receiver r; index :pops; receiver type unknown
-  - src/tools/pprof_converter.rb:83 r[:push_blocked]; receiver r; index :push_blocked; receiver type unknown
+  - src/tools/pprof_converter.rb:82 r[:id]; receiver r; index :id; receiver type unknown
+  - src/tools/pprof_converter.rb:84 r[:id]; receiver r; index :id; receiver type unknown
+  - src/tools/pprof_converter.rb:87 r[:pushes]; receiver r; index :pushes; receiver type unknown
+  - src/tools/pprof_converter.rb:87 r[:pops]; receiver r; index :pops; receiver type unknown
+  - src/tools/pprof_converter.rb:87 r[:push_blocked]; receiver r; index :push_blocked; receiver type unknown
 - local variable args: 15
-  - src/annotator/annotator.rb:5541 args[idx]; receiver args; index idx; receiver type T::Array[`T.untyped`]
-  - src/annotator/annotator.rb:5541 args[idx]; receiver args; index idx; receiver type T::Array[`T.untyped`]
-  - src/annotator/annotator.rb:5571 args[param_index]; receiver args; index param_index; receiver type T::Array[`T.untyped`]
+  - src/annotator/annotator.rb:5636 args[idx]; receiver args; index idx; receiver type T::Array[`T.untyped`]
+  - src/annotator/annotator.rb:5636 args[idx]; receiver args; index idx; receiver type T::Array[`T.untyped`]
+  - src/annotator/annotator.rb:5666 args[param_index]; receiver args; index param_index; receiver type T::Array[`T.untyped`]
   - src/annotator/helpers/auto_inference.rb:801 args[0]; receiver args; index 0; receiver type T::Array[`T.untyped`]
   - src/ast/std_lib.rb:1029 args[0]; receiver args; index 0; receiver type unknown
-- hash record param m at src/tools/pprof.rb:269: 14
-  - src/tools/pprof.rb:270 m[:id]; receiver m; index :id; receiver type unknown
-  - src/tools/pprof.rb:271 m[:memory_start]; receiver m; index :memory_start; receiver type unknown
-  - src/tools/pprof.rb:271 m[:memory_start]; receiver m; index :memory_start; receiver type unknown
-  - src/tools/pprof.rb:272 m[:memory_limit]; receiver m; index :memory_limit; receiver type unknown
-  - src/tools/pprof.rb:272 m[:memory_limit]; receiver m; index :memory_limit; receiver type unknown
-- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3575: 14
-  - src/backends/pipeline_host.rb:3576 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3577 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3577 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3593 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3597 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- forwarded return let at src/annotator/annotator.rb:228: 14
+  - src/annotator/annotator.rb:1620 @og[source_name]; receiver @og; index source_name; receiver type unknown
+  - src/annotator/annotator.rb:1620 @og[source_name]; receiver @og; index source_name; receiver type unknown
+  - src/annotator/annotator.rb:1713 @og[c.binding]; receiver @og; index c.binding; receiver type unknown
+  - src/annotator/annotator.rb:1972 @og&.[](name); receiver @og; index name; receiver type unknown
+  - src/annotator/annotator.rb:1981 @og&.[](name); receiver @og; index name; receiver type unknown
+- hash record param m at src/tools/pprof.rb:275: 14
+  - src/tools/pprof.rb:276 m[:id]; receiver m; index :id; receiver type unknown
+  - src/tools/pprof.rb:277 m[:memory_start]; receiver m; index :memory_start; receiver type unknown
+  - src/tools/pprof.rb:277 m[:memory_start]; receiver m; index :memory_start; receiver type unknown
+  - src/tools/pprof.rb:278 m[:memory_limit]; receiver m; index :memory_limit; receiver type unknown
+  - src/tools/pprof.rb:278 m[:memory_limit]; receiver m; index :memory_limit; receiver type unknown
+- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3664: 14
+  - src/backends/pipeline_host.rb:3665 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3666 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3666 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3682 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3686 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
 - hash record return let at src/annotator/helpers/capabilities.rb:538: 14
   - src/annotator/helpers/capabilities.rb:308 ctx[:kind]; receiver ctx; index :kind; receiver type unknown
   - src/annotator/helpers/capabilities.rb:310 ctx[:alias]; receiver ctx; index :alias; receiver type unknown
   - src/annotator/helpers/capabilities.rb:313 ctx[:sibling_aliases]; receiver ctx; index :sibling_aliases; receiver type unknown
   - src/annotator/helpers/capabilities.rb:328 ctx[:param_names]; receiver ctx; index :param_names; receiver type unknown
   - src/annotator/helpers/capabilities.rb:333 ctx[:fn_name]; receiver ctx; index :fn_name; receiver type unknown
-- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:2843: 13
-  - src/backends/pipeline_host.rb:2844 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2845 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2846 p[:item_used]; receiver p; index :item_used; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2860 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2870 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
-- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3377: 13
-  - src/backends/pipeline_host.rb:3378 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3379 p[:elem_zig]; receiver p; index :elem_zig; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3380 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3380 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:3383 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
-- forwarded return let at src/annotator/annotator.rb:157: 12
-  - src/annotator/annotator.rb:1548 @og[source_name]; receiver @og; index source_name; receiver type unknown
-  - src/annotator/annotator.rb:1548 @og[source_name]; receiver @og; index source_name; receiver type unknown
-  - src/annotator/annotator.rb:1641 @og[c.binding]; receiver @og; index c.binding; receiver type unknown
-  - src/annotator/annotator.rb:1905 @og&.[](name); receiver @og; index name; receiver type unknown
-  - src/annotator/annotator.rb:1982 @og&.[](name); receiver @og; index name; receiver type unknown
-- forwarded return split at src/tools/doctor.rb:662: 12
-  - src/tools/doctor.rb:664 f[11]; receiver f; index 11; receiver type T::Array[String]
-  - src/tools/doctor.rb:667 f[0]; receiver f; index 0; receiver type T::Array[String]
-  - src/tools/doctor.rb:667 f[1]; receiver f; index 1; receiver type T::Array[String]
-  - src/tools/doctor.rb:667 f[2]; receiver f; index 2; receiver type T::Array[String]
-  - src/tools/doctor.rb:668 f[3]; receiver f; index 3; receiver type T::Array[String]
+- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:2934: 13
+  - src/backends/pipeline_host.rb:2935 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2936 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2937 p[:item_used]; receiver p; index :item_used; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2951 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2961 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:3466: 13
+  - src/backends/pipeline_host.rb:3467 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3468 p[:elem_zig]; receiver p; index :elem_zig; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3469 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3469 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:3472 p[:initial_capture]; receiver p; index :initial_capture; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- forwarded return split at src/tools/doctor.rb:672: 12
+  - src/tools/doctor.rb:674 f[11]; receiver f; index 11; receiver type T::Array[String]
+  - src/tools/doctor.rb:677 f[0]; receiver f; index 0; receiver type T::Array[String]
+  - src/tools/doctor.rb:677 f[1]; receiver f; index 1; receiver type T::Array[String]
+  - src/tools/doctor.rb:677 f[2]; receiver f; index 2; receiver type T::Array[String]
+  - src/tools/doctor.rb:678 f[3]; receiver f; index 3; receiver type T::Array[String]
 - local hash record c at src/annotator/annotator.rb: 12
-  - src/annotator/annotator.rb:4517 c[:alias_mutable]; receiver c; index :alias_mutable; receiver type unknown
-  - src/annotator/annotator.rb:4524 c[:var_node]; receiver c; index :var_node; receiver type unknown
-  - src/annotator/annotator.rb:4524 c[:var_node]; receiver c; index :var_node; receiver type unknown
-  - src/annotator/annotator.rb:4836 c[:capability]; receiver c; index :capability; receiver type unknown
-  - src/annotator/annotator.rb:4837 c[:var_node]; receiver c; index :var_node; receiver type unknown
+  - src/annotator/annotator.rb:4599 c[:alias_mutable]; receiver c; index :alias_mutable; receiver type unknown
+  - src/annotator/annotator.rb:4606 c[:var_node]; receiver c; index :var_node; receiver type unknown
+  - src/annotator/annotator.rb:4606 c[:var_node]; receiver c; index :var_node; receiver type unknown
+  - src/annotator/annotator.rb:4909 c[:capability]; receiver c; index :capability; receiver type unknown
+  - src/annotator/annotator.rb:4910 c[:var_node]; receiver c; index :var_node; receiver type unknown
 - local hash record e at src/tools/method_rewriter.rb: 12
   - src/tools/method_rewriter.rb:392 e[:start]; receiver e; index :start; receiver type unknown
   - src/tools/method_rewriter.rb:392 e[:len]; receiver e; index :len; receiver type unknown
@@ -4135,138 +3957,138 @@ This ranks caller origins where `String`/`Symbol` values flow into params that a
   - src/tools/method_rewriter.rb:408 e[:start]; receiver e; index :start; receiver type unknown
   - src/tools/method_rewriter.rb:408 e[:len]; receiver e; index :len; receiver type unknown
 - local hash record site at src/tools/doctor.rb: 12
-  - src/tools/doctor.rb:519 site[:runs]; receiver site; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:519 site[:runs]; receiver site; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:522 site[:dispatch]; receiver site; index :dispatch; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:538 site[:runs]; receiver site; index :runs; receiver type unknown
-  - src/tools/doctor.rb:539 site[:id]; receiver site; index :id; receiver type unknown
+  - src/tools/doctor.rb:528 site[:runs]; receiver site; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:528 site[:runs]; receiver site; index :runs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:531 site[:dispatch]; receiver site; index :dispatch; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:547 site[:runs]; receiver site; index :runs; receiver type unknown
+  - src/tools/doctor.rb:548 site[:id]; receiver site; index :id; receiver type unknown
 - method parameter @tokens (T::Array[Lexer::Token]) at src/ast/parser.rb:62: 12
   - src/ast/parser.rb:109 @tokens[@pos + 1]; receiver @tokens; index @pos + 1; receiver type unknown
   - src/ast/parser.rb:114 @tokens[@pos + n]; receiver @tokens; index @pos + n; receiver type unknown
   - src/ast/parser.rb:531 @tokens[@pos]; receiver @tokens; index @pos; receiver type unknown
   - src/ast/parser.rb:536 @tokens[@pos-1]; receiver @tokens; index @pos-1; receiver type unknown
   - src/ast/parser.rb:587 @tokens[@pos - 1]; receiver @tokens; index @pos - 1; receiver type unknown
-- hash record param spec at src/mir/fsm_transform/emit.rb:956: 11
-  - src/mir/fsm_transform/emit.rb:958 spec[:tail]; receiver spec; index :tail; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1021 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1021 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1022 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
-  - src/mir/fsm_transform/emit.rb:1022 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
-- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:1407: 11
-  - src/backends/pipeline_host.rb:1408 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1409 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1409 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1415 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1425 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
-- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:1994: 11
-  - src/backends/pipeline_host.rb:1995 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1996 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:1996 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2003 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/backends/pipeline_host.rb:2020 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- hash record param spec at src/mir/fsm_transform/emit.rb:975: 11
+  - src/mir/fsm_transform/emit.rb:977 spec[:tail]; receiver spec; index :tail; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1040 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1040 spec[:prologue_stmts]; receiver spec; index :prologue_stmts; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1041 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
+  - src/mir/fsm_transform/emit.rb:1041 spec[:body_stmts]; receiver spec; index :body_stmts; receiver type unknown
+- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:1513: 11
+  - src/backends/pipeline_host.rb:1514 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:1515 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:1515 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:1521 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:1531 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
+- hash record return build_lazy_range_prefix at src/backends/pipeline_host.rb:2085: 11
+  - src/backends/pipeline_host.rb:2086 p[:item_var]; receiver p; index :item_var; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2087 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2087 p[:next_method]; receiver p; index :next_method; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2094 p[:source_name]; receiver p; index :source_name; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/backends/pipeline_host.rb:2111 p[:outer_stmts]; receiver p; index :outer_stmts; receiver type T::Hash[`T.untyped`, `T.untyped`]
 - local hash record T.must(prefix) at src/ast/parser.rb: 11
-  - src/ast/parser.rb:3774 T.must(prefix)[:pinned]; receiver T.must(prefix); index :pinned; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/ast/parser.rb:3774 T.must(prefix)[:parallel]; receiver T.must(prefix); index :parallel; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/ast/parser.rb:3774 T.must(prefix)[:stack_size]; receiver T.must(prefix); index :stack_size; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/ast/parser.rb:3774 T.must(prefix)[:can_smash]; receiver T.must(prefix); index :can_smash; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/ast/parser.rb:3848 T.must(prefix)[:stack_size]; receiver T.must(prefix); index :stack_size; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3797 T.must(prefix)[:pinned]; receiver T.must(prefix); index :pinned; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3797 T.must(prefix)[:parallel]; receiver T.must(prefix); index :parallel; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3797 T.must(prefix)[:stack_size]; receiver T.must(prefix); index :stack_size; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3797 T.must(prefix)[:can_smash]; receiver T.must(prefix); index :can_smash; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/ast/parser.rb:3871 T.must(prefix)[:stack_size]; receiver T.must(prefix); index :stack_size; receiver type T::Hash[`T.untyped`, `T.untyped`]
 - local hash record a at src/tools/doctor.rb: 11
-  - src/tools/doctor.rb:1456 a[:bytes]; receiver a; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1457 a[:bytes]; receiver a; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1458 a[:allocs]; receiver a; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1459 a[:allocs]; receiver a; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1528 a[:contended]; receiver a; index :contended; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1470 a[:bytes]; receiver a; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1471 a[:bytes]; receiver a; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1472 a[:allocs]; receiver a; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1473 a[:allocs]; receiver a; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1542 a[:contended]; receiver a; index :contended; receiver type T::Hash[`T.untyped`, `T.untyped`]
 - local hash record b at src/tools/doctor.rb: 11
-  - src/tools/doctor.rb:1456 b[:bytes]; receiver b; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1457 b[:bytes]; receiver b; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1458 b[:allocs]; receiver b; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1459 b[:allocs]; receiver b; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
-  - src/tools/doctor.rb:1527 b[:contended]; receiver b; index :contended; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1470 b[:bytes]; receiver b; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1471 b[:bytes]; receiver b; index :bytes; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1472 b[:allocs]; receiver b; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1473 b[:allocs]; receiver b; index :allocs; receiver type T::Hash[`T.untyped`, `T.untyped`]
+  - src/tools/doctor.rb:1541 b[:contended]; receiver b; index :contended; receiver type T::Hash[`T.untyped`, `T.untyped`]
 
 ## Tuple-Like Array Report
 - tuple-like array: an array literal whose position-specific element types look meaningful enough to model as a tuple/record
 - confidence: `high` means the static shape is regular enough for a likely-safe tuple type; `review` means the shape is useful but needs human inspection
-- Tuple-like array literals: 256
-- Runtime-observed tuple-like array slots: 643
+- Tuple-like array literals: 257
+- Runtime-observed tuple-like array slots: 650
 
 ### Runtime Tuple-Like Array Slots
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 304600 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 120106 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 75837 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 320830 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 164338 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 125800 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 96486 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 96102 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 95996 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 95390 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 93263 call(s); complete, mixed, size 3
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 62738 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 62738 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 62738 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 62738 call(s); complete, mixed, size 2
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 50060 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 50060 call(s); complete, mixed, size 3
-- src/ast/parser.rb:3938 return parse_comma_seq; [Lexer::Token, Array]; 41221 call(s); complete, mixed, size 2
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31033 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31033 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31033 call(s); complete, mixed, size 3
+- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 62738 call(s); complete, mixed, size 2
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 50041 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 50041 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 50041 call(s); complete, mixed, size 3
+- src/ast/parser.rb:3961 return parse_comma_seq; [Lexer::Token, Array]; 41478 call(s); complete, mixed, size 2
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31019 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31019 call(s); complete, mixed, size 3
+- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 31019 call(s); complete, mixed, size 3
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 29157 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 29157 call(s); complete, mixed, size 2
+- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 29157 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 28097 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 28097 call(s); complete, mixed, size 2
-- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Ident]; 28097 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Lit]; 26912 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Lit]; 26912 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Lit]; 26912 call(s); complete, mixed, size 2
 - src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Lit]; 26912 call(s); complete, mixed, size 2
-- src/annotator/helpers/effects.rb:815 param points; [Hash, Hash]; 22638 call(s); complete, size 2
-- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::BinOp]; 21780 call(s); complete, mixed, size 2
-- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::BinOp]; 21780 call(s); complete, mixed, size 2
-- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::BinOp]; 21780 call(s); complete, mixed, size 2
-- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::BinOp]; 21780 call(s); complete, mixed, size 2
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 21747 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 21590 call(s); complete, mixed, size 3
-- src/ast/type.rb:2201 return strip_capability_suffix; [String, NilClass, NilClass]; 21363 call(s); complete, mixed, size 3
+- src/mir/hoist.rb:910 return normalize_allocating_used_expr; [Array, MIR::Lit]; 26912 call(s); complete, mixed, size 2
 - [String, Symbol] appears 27 time(s), confidence high; first site src/ast/parser.rb:202
-- [MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 13 time(s), confidence review; first site src/backends/pipeline_host.rb:1048
-- [MIR::Set, MIR::BreakStmt] appears 9 time(s), confidence review; first site src/backends/pipeline_host.rb:1003
-- [MIR::Let, MIR::IfStmt] appears 9 time(s), confidence review; first site src/backends/pipeline_host.rb:1113
-- [MIR::AllocMark, MIR::Let] appears 9 time(s), confidence review; first site src/mir/hoist.rb:691
-- [MIR::AllocatorRef, MIR::Ident] appears 8 time(s), confidence review; first site src/backends/pipeline_host.rb:707
+- [MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 13 time(s), confidence review; first site src/backends/pipeline_host.rb:1154
+- [MIR::Set, MIR::BreakStmt] appears 9 time(s), confidence review; first site src/backends/pipeline_host.rb:1109
+- [MIR::Let, MIR::IfStmt] appears 9 time(s), confidence review; first site src/backends/pipeline_host.rb:1219
+- [MIR::AllocatorRef, MIR::Ident] appears 8 time(s), confidence review; first site src/backends/pipeline_host.rb:813
+- [MIR::AllocMark, MIR::Let] appears 8 time(s), confidence review; first site src/mir/hoist.rb:691
+- [Symbol, Integer] appears 7 time(s), confidence high; first site src/tools/predicate_rewriter.rb:229
 - [Symbol, T::Hash[`T.untyped`, `T.untyped`]] appears 7 time(s), confidence review; first site src/ast/parser.rb:1685
-- [T::Array[`T.untyped`], String] appears 7 time(s), confidence review; first site src/backends/pipeline_host.rb:584
+- [T::Array[`T.untyped`], String] appears 7 time(s), confidence review; first site src/backends/pipeline_host.rb:696
 - [Symbol, T.nilable(String)] appears 6 time(s), confidence high; first site src/ast/parser.rb:45
-- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[`T.untyped`], MIR::Ident] appears 6 time(s), confidence high; first site src/backends/pipeline_host.rb:2616
-- [Symbol, Integer] appears 6 time(s), confidence high; first site src/tools/predicate_rewriter.rb:221
-- [MIR::AllocMark, MIR::Let, MIR::Cleanup] appears 6 time(s), confidence review; first site src/mir/lowering/variables.rb:445
+- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[`T.untyped`], MIR::Ident] appears 6 time(s), confidence high; first site src/backends/pipeline_host.rb:2707
+- [MIR::AllocMark, MIR::Let, MIR::Cleanup] appears 6 time(s), confidence review; first site src/mir/lowering/variables.rb:444
 - [T::Boolean, NilClass] appears 5 time(s), confidence review; first site src/ast/error_registry.rb:137
-- [MIR::Let, MIR::WhileStmt] appears 5 time(s), confidence review; first site src/backends/pipeline_host.rb:1542
-- [MIR::Set, MIR::Set, MIR::BreakStmt] appears 4 time(s), confidence review; first site src/backends/pipeline_host.rb:1020
+- [MIR::Let, MIR::WhileStmt] appears 5 time(s), confidence review; first site src/backends/pipeline_host.rb:1648
+- [MIR::Set, MIR::Set, MIR::BreakStmt] appears 4 time(s), confidence review; first site src/backends/pipeline_host.rb:1126
 - [Symbol, String] appears 3 time(s), confidence high; first site src/ast/parser.rb:29
-- [T::Array[`T.untyped`], MIR::AddressOf] appears 3 time(s), confidence high; first site src/backends/pipeline_host.rb:4359
+- [T::Array[`T.untyped`], MIR::AddressOf] appears 3 time(s), confidence high; first site src/backends/pipeline_host.rb:4445
 - [MIR::Let, MIR::DeferStmt] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:34
-- [MIR::Let, MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:1082
-- [MIR::Let, MIR::ExprStmt] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:1458
-- [MIR::Ident, MIR::Ident, MIR::AddressOf] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:1988
+- [MIR::Let, MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:1188
+- [MIR::Let, MIR::ExprStmt] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:1564
+- [MIR::Ident, MIR::Ident, MIR::AddressOf] appears 3 time(s), confidence review; first site src/backends/pipeline_host.rb:2079
 - [AST::Assignment, AST::BreakNode] appears 3 time(s), confidence review; first site src/backends/pipeline_rewriter.rb:630
-- [MIR::ExprStmt, MIR::ReturnStmt] appears 3 time(s), confidence review; first site src/mir/lowering/expressions.rb:624
-- [String, T::Array[`T.untyped`]] appears 3 time(s), confidence review; first site src/mir/lowering/expressions.rb:1630
+- [MIR::ExprStmt, MIR::ReturnStmt] appears 3 time(s), confidence review; first site src/mir/lowering/expressions.rb:618
+- [String, T::Array[`T.untyped`]] appears 3 time(s), confidence review; first site src/mir/lowering/expressions.rb:1624
 - [Symbol, NilClass] appears 2 time(s), confidence high; first site src/annotator/helpers/effects.rb:936
 - [T::Array[`T.untyped`], T.nilable(Lexer::Token)] appears 2 time(s), confidence high; first site src/ast/parser.rb:2589
 - [T::Array[`T.untyped`], MIR::Ident] appears 2 time(s), confidence high; first site src/mir/hoist.rb:705
-- [NilClass, Integer] appears 2 time(s), confidence high; first site src/tools/doctor.rb:544
+- [NilClass, Integer] appears 2 time(s), confidence high; first site src/tools/doctor.rb:553
 - [MIR::FieldGet, MIR::Lit] appears 2 time(s), confidence review; first site src/annotator/helpers/auto_inference.rb:954
-- [MIR::IfStmt, MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1104
-- [MIR::Ident, MIR::ListLength] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1311
-- [MIR::Let, MIR::Let, MIR::ForStmt] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1485
-- [MIR::Let, MIR::Let, MIR::Let, MIR::ExprStmt, MIR::Set] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1664
-- [Symbol, MIR::FieldGet] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:3804
+- [T::Boolean, String] appears 2 time(s), confidence review; first site src/ast/type.rb:1019
+- [MIR::IfStmt, MIR::Let, MIR::ForStmt, MIR::BreakStmt] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1210
+- [MIR::Ident, MIR::ListLength] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1417
+- [MIR::Let, MIR::Let, MIR::ForStmt] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1591
+- [MIR::Let, MIR::Let, MIR::Let, MIR::ExprStmt, MIR::Set] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:1770
+- [Symbol, MIR::FieldGet] appears 2 time(s), confidence review; first site src/backends/pipeline_host.rb:3893
 - [AST::Assignment, AST::IfStatement] appears 2 time(s), confidence review; first site src/backends/pipeline_rewriter.rb:565
 - [T::Array[`T.untyped`], T::Hash[`T.untyped`, `T.untyped`]] appears 2 time(s), confidence review; first site src/mir/fsm_transform/recursive_splitter.rb:773
 - [String, String, T.nilable(String), T.nilable(String), String] appears 2 time(s), confidence review; first site src/mir/fsm_wrapper_emitter.rb:116
 - [T::Boolean, Symbol] appears 2 time(s), confidence review; first site src/mir/lowering/capabilities.rb:80
-- [MIR::ExprStmt, MIR::ExprStmt, MIR::ReturnStmt] appears 2 time(s), confidence review; first site src/mir/lowering/capabilities.rb:873
-- [MIR::AllocMark, MIR::Let, MIR::Cleanup, MIR::BreakStmt] appears 2 time(s), confidence review; first site src/mir/mir_lowering.rb:495
-- [T.nilable(Type), NilClass] appears 1 time(s), confidence high; first site src/ast/ast.rb:859
+- [MIR::ExprStmt, MIR::ExprStmt, MIR::ReturnStmt] appears 2 time(s), confidence review; first site src/mir/lowering/capabilities.rb:887
+- [MIR::AllocMark, MIR::Let, MIR::Cleanup, MIR::BreakStmt] appears 2 time(s), confidence review; first site src/mir/mir_lowering.rb:558
+- [T.nilable(Type), NilClass] appears 1 time(s), confidence high; first site src/ast/ast.rb:858
 - [T.nilable(String), T.nilable(Type)] appears 1 time(s), confidence high; first site src/ast/parser.rb:1235
-- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[`T.untyped`], MIR::Conditional] appears 1 time(s), confidence high; first site src/backends/pipeline_host.rb:2638
-- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[MIR::IfStmt], MIR::Conditional] appears 1 time(s), confidence high; first site src/backends/pipeline_host.rb:2694
+- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[`T.untyped`], MIR::Conditional] appears 1 time(s), confidence high; first site src/backends/pipeline_host.rb:2729
+- [T::Array[MIR::Let], T.nilable(T::Array[`T.untyped`]), T::Array[MIR::IfStmt], MIR::Conditional] appears 1 time(s), confidence high; first site src/backends/pipeline_host.rb:2785
 - [T.class_of(RawZig), T.class_of(InlineZig), T.class_of(InlineBc), T.class_of(RawBc), T.class_of(ShardedMapPut), T.class_of(ShardedMapGet)] appears 1 time(s), confidence high; first site src/mir/mir.rb:3492
 - [T.nilable(String), NilClass] appears 1 time(s), confidence high; first site src/mir/mir_emitter.rb:720
-- [MIR::ScopeBlock, T::Boolean] appears 1 time(s), confidence high; first site src/mir/mir_lowering.rb:967
+- [MIR::ScopeBlock, T::Boolean] appears 1 time(s), confidence high; first site src/mir/mir_lowering.rb:1027
 - [T::Array[`T.untyped`], AST::ReturnNode, T::Hash[String, CleanupEntry], T.nilable(AST::FunctionDef)] appears 1 time(s), confidence high; first site src/mir/mir_pass.rb:777
-- [T.class_of(Symbol), T.class_of(String), T.class_of(Numeric), T.class_of(TrueClass), T.class_of(FalseClass), T.class_of(NilClass)] appears 1 time(s), confidence high; first site src/mir/pre_mir_type_check.rb:24
-- [T.nilable(Integer), Integer, String] appears 1 time(s), confidence high; first site src/tools/doctor.rb:502
+- [T.class_of(Symbol), T.class_of(String), T.class_of(Numeric), T.class_of(TrueClass), T.class_of(FalseClass), T.class_of(NilClass)] appears 1 time(s), confidence high; first site src/mir/pre_mir_type_check.rb:28

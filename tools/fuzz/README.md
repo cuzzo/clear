@@ -130,7 +130,11 @@ expected hard error is absent.
 | `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
 | `thunk_recursion_matrix`    | 43              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes, including owned accumulators and struct payloads. |
 | `fsm_suspension_matrix`     | 38              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, BG STREAM YIELD, owned suspend results, lock segments, and stream cleanup. |
+| `auto_inference_matrix`     | 15              | Explicit `Auto` inference and rejection paths across params, returns, locals, empty containers, ambiguity, unresolved slots, and parser-admission guards. |
+| `fsm_edge_matrix`           | 8               | Additional FSM splitter edges around OR fallbacks, nested loop/branch suspension, stream branches, locks before NEXT, and known early-return lowering failures. |
+| `diagnostic_policy_matrix`  | 14              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
+| `pipeline_gap_matrix`        | 7            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
 | `call_ownership_contract_matrix` | 40         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 45            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
@@ -145,6 +149,9 @@ expected hard error is absent.
 | `collection_sink_escape_matrix` | 18          | Owned string/struct/union values stored into list/set/map/pool and collection-literal sinks. |
 | `cleanup_control_matrix`     | 56           | Cleanup-bearing value shapes crossed with branch, loop, match, catch, return, move, GIVE, and discard. |
 | `lowering_boundary_matrix`   | 22           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
+| `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
+| `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
+| `curated_gap_corpus`         | 463          | Self-contained `transpile-tests/*.cht` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 
 ### `stream_into_boundary` matrix
 
