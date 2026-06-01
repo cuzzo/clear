@@ -7,6 +7,7 @@ require_relative "../ast/scope"
 require_relative "../ast/parser"
 require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
+require_relative "phases/declaration_index"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
@@ -497,29 +498,22 @@ private
 
   sig { params(node: AST::Program).returns(T.untyped) }
   def visit_Program(node)
+    declarations = Annotator::Phases::DeclarationIndexer.index(node)
+
     # Imports must be available before local types or functions are registered.
-    node.statements.each do |stmt|
-      visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
-    end
+    declarations.imports.each { |stmt| visit_RequireNode(stmt) }
 
     # Types are registered before function signatures can reference them.
-    node.statements.each do |stmt|
-      visit(stmt) if AST.type_declaration?(stmt)
-    end
+    declarations.type_declarations.each { |stmt| visit(stmt) }
 
     # Function signatures are hoisted so functions can call later definitions.
-    node.statements.each do |stmt|
-      pre_register_function(stmt) if stmt.is_a?(AST::FunctionDef)
-      visit_ExternFnDecl(stmt)    if stmt.is_a?(AST::ExternFnDecl)
-    end
+    declarations.function_declarations.each { |stmt| pre_register_function(stmt) }
+    declarations.extern_function_declarations.each { |stmt| visit_ExternFnDecl(stmt) }
 
     # Union default methods are synthesized only after all function signatures
     # are known.
     @synthetic_fns = []
-    node.statements.each do |stmt|
-      next unless stmt.is_a?(AST::UnionDef) && stmt.methods&.any?
-      validate_union_methods!(stmt)
-    end
+    declarations.union_method_declarations.each { |stmt| validate_union_methods!(stmt) }
     # Pre-register synthesized defaults so user bodies can call them.
     @synthetic_fns.each { |fn| pre_register_function(fn) }
 
@@ -535,12 +529,7 @@ private
     # passes read a single source of truth.
     validate_and_resolve_sync_policy!(node)
 
-    node.statements.each do |stmt|
-      # Skip nodes already processed in earlier passes.
-      next if AST.top_level_declaration?(stmt)
-
-      visit(stmt)
-    end
+    declarations.body_statements.each { |stmt| visit(stmt) }
 
     # Analyze synthesized default function bodies and append to program so
     # the transpiler emits them as top-level Zig functions.
