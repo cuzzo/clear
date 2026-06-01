@@ -1,13 +1,12 @@
 # Polymorphic Synchronization
 
-CLEAR's synchronization model separates the shape of the data from the
-strategy used to protect it.
+CLEAR's synchronization model separates the shape of the data from the strategy used to protect it.
 
 A function can say:
 
-* "I need to mutate a `Counter`."
-* "The caller may provide any compatible synchronization strategy."
-* "The compiler should pick the correct acquire / retry / direct-access path."
+* I need to mutate a `Counter`.
+* The caller may provide any compatible synchronization strategy.
+* The compiler should pick the correct acquire / retry / direct-access path.
 
 That is Polymorphic Synchronization.
 
@@ -15,8 +14,10 @@ Instead of baking `Mutex<T>`, `RwLock<T>`, `Versioned<T>`, or `AtomicPtr<T>`
 into every API boundary, CLEAR keeps the function parameter data-shaped and
 puts synchronization strategy at the declaration site.
 
-See [Sharing Capabilities](sharing-capabilities.md) for the ownership and
-capability model this builds on. See [Tense Compositions](tense-composition.md)
+> See [Sharing Capabilities](sharing-capabilities.md) for the ownership and
+capability model this builds on.
+
+> See [Tense Compositions](tense-composition.md)
 for how capabilities compose with failable and temporal types.
 
 ## The Core Idea
@@ -26,7 +27,7 @@ The same function body can work across multiple storage strategies:
 ```ruby clear illustrative
 STRUCT Counter { value: Int64 }
 
-FN tick!(MUTABLE c: Counter) RETURNS !Void ->
+FN tick!(MUTABLE c: SHARED Counter) RETURNS !Void ->
   WITH POLYMORPHIC c AS x {
     x.value = x.value + 1;
   }
@@ -43,11 +44,11 @@ MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
 MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
 MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
 
-tick!(local_c)     OR EXIT;
-tick!(locked_c)    OR EXIT;
-tick!(wlocked_c)   OR EXIT;
-tick!(versioned_c) OR EXIT;
-tick!(atomic_c)    OR EXIT;
+tick!(local_c)     OR DIE;
+tick!(locked_c)    OR DIE;
+tick!(wlocked_c)   OR DIE;
+tick!(versioned_c) OR DIE;
+tick!(atomic_c)    OR DIE;
 ```
 
 The compiler lowers each call to the strategy that matches the actual binding:
@@ -101,7 +102,8 @@ For public contracts, a function can constrain which synchronization families
 it accepts with `REQUIRES`.
 
 ```ruby clear illustrative
-FN bump!(MUTABLE c: Counter) RETURNS !Void
+FN bump!(MUTABLE c: Counter)
+  RETURNS !Void
   REQUIRES c: SNAPSHOTTED
 ->
   WITH SNAPSHOT c AS MUTABLE x {
@@ -135,10 +137,11 @@ Use `WITH POLYMORPHIC` when the body must work for more than one possible
 storage strategy.
 
 ```ruby clear illustrative
-FN addFee!(MUTABLE acct: Account) RETURNS !Void
+FN addFee!(MUTABLE acct: SHARED Account)
+  RETURNS !Void
   REQUIRES acct: LOCKED
 ->
-  WITH POLYMORPHIC EXCLUSIVE acct AS a {
+  WITH POLYMORPHIC acct AS a {
     a.balance = a.balance - 1.0;
   }
   RETURN;
@@ -155,14 +158,12 @@ The compiler enforces the shape:
 This rule makes polymorphism visible at the synchronization boundary. If a
 function can dispatch across strategies, the `WITH` block says so.
 
-## Snapshot-Style Synchronization
+## Snapshot-Style Non-Polymorphic Synchronization
 
 Snapshot-style strategies use `WITH SNAPSHOT`.
 
 ```ruby clear illustrative
-FN updateConfig!(MUTABLE cfg: Config) RETURNS !Void
-  REQUIRES cfg: SNAPSHOTTED
-->
+FN updateConfig!(MUTABLE cfg: Config@shared:versioned) RETURNS !Void ->
   WITH SNAPSHOT cfg AS MUTABLE c {
     c.port = c.port + 1;
   }
@@ -170,7 +171,21 @@ FN updateConfig!(MUTABLE cfg: Config) RETURNS !Void
 END
 ```
 
-`SNAPSHOTTED` accepts both MVCC and atomic-pointer cells:
+The above accepts only MVCC. 
+
+But `SNAPSHOTTED` polymorphic syncronization can accept both MVCC and atomic-pointer cells:
+
+```ruby clear illustrative
+FN updateConfig!(MUTABLE cfg: SHARED Config)
+  RETURNS !Void
+  REQUIRES cfg: SNAPSHOTTED
+->
+  WITH POLYMORPHIC cfg AS MUTABLE c {
+    c.port = c.port + 1;
+  }
+  RETURN;
+END
+```
 
 ```ruby clear illustrative
 MUTABLE mvcc_cfg   = Config{ port: 8080 } @versioned;
@@ -201,7 +216,8 @@ The compiler projects the error set at each call site:
 Example:
 
 ```ruby clear illustrative
-FN tick!(MUTABLE c: Counter) RETURNS !Void
+FN tick!(MUTABLE c: Counter)
+  RETURNS !Void
   REQUIRES c: SNAPSHOTTED
 ->
   WITH SNAPSHOT c AS MUTABLE x {
@@ -243,9 +259,11 @@ Precedence is:
 A per-`WITH` handler is the most local override:
 
 ```ruby clear illustrative
-WITH SNAPSHOT cfg AS MUTABLE c {
-  c.port = c.port + 1;
-} ON MvccConflict RETRY(2) THEN RAISE
+WITH
+  SNAPSHOT cfg AS MUTABLE c {
+    c.port = c.port + 1;
+  }
+  ON MvccConflict RETRY(2) THEN RAISE
 ```
 
 `SYNC POLICY` is intentionally limited:
@@ -259,12 +277,29 @@ WITH SNAPSHOT cfg AS MUTABLE c {
 lock graph is safe, the `WITH` site must make the risk explicit:
 
 ```ruby clear illustrative
-WITH POLYMORPHIC POSSIBLE_DEADLOCK a AS x, b AS y {
-  x.balance = y.balance;
-} ON Deadlock RAISE
+WITH
+  POLYMORPHIC POSSIBLE_DEADLOCK a AS x {
+    someLockingFunc(x, b);
+  }
+  ON Deadlock RAISE
 ```
 
 The opt-out belongs beside the code that can produce the cycle.
+
+CLEAR automatically sorts locks, so you can only encounter possible deadlock when calling a locking function inside the critical section.
+
+```ruby clear illustrative
+WITH
+  EXCLUSIVE a AS x,
+  EXCLUSIVE b AS y {
+    someFunc(x, y);
+  }
+```
+
+This can never deadlock.
+
+> [!NOTE]
+> In `STRICT` mode, all possible synchronization failures must be handled inline.
 
 ## Multi-Object Transactions
 
@@ -272,13 +307,20 @@ Multiple locked or versioned cells can be synchronized together when the
 family supports that consistency model:
 
 ```ruby clear illustrative
-FN transfer!(MUTABLE a: Account, MUTABLE b: Account, amount: Float64) RETURNS !Void
+FN transfer!(MUTABLE a: SHARED Account, MUTABLE b: SHARED Account, amount: Float64)
+  RETURNS !Void
   REQUIRES a, b: LOCKED | VERSIONED
 ->
-  WITH POLYMORPHIC EXCLUSIVE a AS from, EXCLUSIVE b AS to {
-    from.balance = from.balance - amount;
-    to.balance = to.balance + amount;
-  }
+  IF amount <= 0 -> RAISE Input, TransactionFailure, "Invalid Amount, must be positive";
+
+  WITH
+    POLYMORPHIC a AS acctA,
+    POLYMORPHIC b AS acctB {
+      IF acctA.balance < amount -> RAISE Input, TransactionFailure, "Balance too low";
+
+      acctA.balance -= amount;
+      acctB.balance += amount;
+    }
   RETURN;
 END
 ```
@@ -328,7 +370,7 @@ Think of a synchronized value as three separate things:
 
 * The **type**: `Counter`
 * The **strategy**: `@shared:locked`, `@versioned`, `@indirect:atomic`
-* The **gate**: `WITH`, `WITH SNAPSHOT`, or `WITH POLYMORPHIC`
+* The **gate**: `WITH`, `WITH EXCLUSIVE`, `WITH POLYMORPHIC`, etc...
 
 Most functions should care about the type. A few functions care about the
 gate. Very few functions should care about the exact strategy.
