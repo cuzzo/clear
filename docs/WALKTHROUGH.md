@@ -1,6 +1,6 @@
 # CLEAR Language Walkthrough
 
-This guide showcases CLEAR: a memory-safe language that combines the ergonomics of scripting with the safety of affine types and the performance of hand-optimized C.
+This guide showcases CLEAR: a memory-safe language with a declarative concurrency model that combines the performance of near perfect C code, the concurrent throughput of Go, with the ergonomics of a high-level scripting language.
 
 ## 1. Immutability & Mutability
 
