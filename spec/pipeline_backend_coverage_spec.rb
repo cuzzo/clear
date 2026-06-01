@@ -342,5 +342,25 @@ RSpec.describe "pipeline backend coverage" do
       expect(field.name).to eq("c")
       expect(field.boxed_capture).to eq("Counter")
     end
+
+    it "lowers bytecode identifier streams through for-loops for distinct and reduce terminals" do
+      lowering.instance_variable_set(:@target, :bc)
+      stream = id("events", type: Type.new(:"~Int64[]"))
+      distinct = AST::DistinctOp.new(tok, id("_"))
+      smooth = AST::BinaryOp.new(tok, stream, :SMOOTH, distinct)
+      smooth.full_type = Type.new(:"Int64[]", collection: :set)
+      site = PipelineHost::PipelineSite.new(list: stream, options: smooth)
+
+      distinct_mir = pipeline_host.send(:lower_distinct, site, distinct)
+
+      reduce = AST::ReduceOp.new(tok, lit(0), id("_"))
+      reduce.full_type = Type.new(:Int64)
+      reduce_mir = pipeline_host.send(:lower_range_reduce, stream, [], reduce)
+
+      expect(distinct_mir.body).to include(a_kind_of(MIR::ForStmt))
+      expect(reduce_mir.body).to include(a_kind_of(MIR::ForStmt))
+    ensure
+      lowering.instance_variable_set(:@target, nil)
+    end
   end
 end

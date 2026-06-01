@@ -10,9 +10,17 @@ require_relative "../src/backends/importer"
 require_relative "../src/mir/concurrency_checks"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/mir/escape_analysis"
+require_relative "../src/mir/fiber_ctx_builder"
 
 RSpec.describe "MIR gap-burn characterization" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }
+
+  it "does not clean up borrowed capture values" do
+    borrowed = Type.new(:String)
+    borrowed.mark_borrowed_reference!
+
+    expect(FiberCtxBuilder.needs_capture_value_cleanup?(borrowed)).to be(false)
+  end
 
   def fn(body, params: [], return_type: :Void)
     AST::FunctionDef.new(tok, "main", params, [], return_type, nil, body, [], nil, :private, [], false)

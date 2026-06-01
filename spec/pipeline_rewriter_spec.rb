@@ -190,4 +190,22 @@ RSpec.describe PipelineRewriter do
     expect(call.name).to eq("append")
     expect(call.matched_stdlib_def).not_to be_nil
   end
+
+  it "builds nested append loops for UNNEST terminal actions" do
+    token = Lexer::Token.new(:KEYWORD, "UNNEST", 1, 1)
+    current = AST::Identifier.new(token, "__it")
+    current.full_type = Type.new(:Int64)
+    inner = AST::Identifier.new(token, "nested")
+    inner.full_type = Type.new(:"Int64[]")
+    terminal = AST::UnnestOp.new(token, inner)
+    rewriter = PipelineRewriter.new(SemanticAnnotator.new(source_code: ""))
+
+    actions = rewriter.send(:build_terminal_action, terminal, current, "__res", token, Type.new(:"Int64[]"))
+
+    expect(actions.length).to eq(1)
+    inner_loop = actions.first
+    expect(inner_loop).to be_a(AST::ForEach)
+    expect(inner_loop.body.first).to be_a(AST::MethodCall)
+    expect(inner_loop.body.first.name).to eq("append")
+  end
 end

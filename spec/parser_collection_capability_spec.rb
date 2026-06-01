@@ -56,4 +56,13 @@ RSpec.describe "Parser collection capability chains" do
   it "rejects unsupported constructor modifiers instead of silently ignoring them" do
     expect { parse_expr("List[]:locked") }.to raise_error(ParserError, /Expected 'sharded\(N\)' or 'soa'|unknown modifier/i)
   end
+
+  it "round-trips polymorphic SHARED annotations without keeping the marker on the inner type" do
+    parser = Parser.new(Lexer.new("").tokenize, "")
+    type = Type.new(:Counter)
+    type.apply_reference_ownership!(:shared)
+    type.mark_polymorphic_shared!
+
+    expect(parser.send(:type_annotation_source, type)).to eq("SHARED Counter")
+  end
 end

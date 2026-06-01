@@ -129,6 +129,38 @@ RSpec.describe "Type#zig_type gap coverage" do
     expect(observable.observable_wrapper_zig(Type.new(:Int64))).to eq("ObservableSum(i64)")
   end
 
+  it "renders every observable terminal wrapper through typed terminal metadata" do
+    wrappers = {
+      count: "ObservableCount()",
+      avg: "ObservableAvg(f64)",
+      min: "ObservableMin(i64)",
+      any: "ObservableAny()",
+      all: "ObservableAll()",
+      find: "ObservableFind(i64)",
+      reduce: "ObservableReduce(i64)",
+    }
+
+    wrappers.each do |terminal, expected|
+      observable = Type.new(:"~Int64", observable: true, observable_terminal: terminal)
+      tense_type = terminal == :find ? Type.new(:"?Int64") : Type.new(:Int64)
+      expect(observable.observable_wrapper_zig(tense_type)).to eq(expected)
+    end
+
+    distinct = Type.new(:"~Int64[4]", observable: true, observable_terminal: :distinct)
+    expect(distinct.observable_wrapper_zig(Type.new(:"Int64[4]", collection: :set))).to eq("ObservableStreamSetBounded(i64, 4)")
+  end
+
+  it "exposes placement location aliases and dynamic field-array intent through composition" do
+    heap = Type.new(:String, location: :heap)
+    fallback = Type.new(:String)
+
+    expect(heap.placement.location).to eq(:heap)
+    expect(heap.location).to eq(:heap)
+    expect(fallback.apply_cleanup_placement!(value_type: nil, alloc: nil)).to equal(fallback.placement)
+    expect(Type.new(:"Int64[]").dynamic_field_array?).to be true
+    expect(Type.new(:"Int64[2]", collection: :list).dynamic_field_array?).to be true
+  end
+
   it "applies element-level capabilities to array element types" do
     type = Type.new(:"Counter[]")
     type.elem_ownership = :shared

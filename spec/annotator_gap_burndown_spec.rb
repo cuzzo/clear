@@ -56,6 +56,16 @@ RSpec.describe "annotator branch gap burndown" do
     ann.instance_variable_get(:@direct_errors)
   end
 
+  it "marks non-stack list literal backing storage as frame-allocated" do
+    ann = quiet_annotator
+    item = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    list = AST::ListLit.new(token, [item], :heap)
+
+    ann.send(:visit_ListLit, list)
+
+    expect(list.full_type).to be_frame
+    expect(list.full_type.location).to eq(:frame)
+  end
 
   it "covers representable capability conflict validation directly" do
     type = Type.new(:Counter)

@@ -1739,6 +1739,20 @@ RSpec.describe MIRLowering do
       expect(zig).to include("return;")
     end
 
+    it "wraps catch-only functions in fallible inner return types even when the body cannot fail" do
+      ret = AST::ReturnNode.new(tok, make_lit(:NUMBER, 1, full_type: :Int64))
+      ret.full_type = :Int64
+      catch_ret = AST::ReturnNode.new(tok, make_lit(:NUMBER, 0, full_type: :Int64))
+      catch_ret.full_type = :Int64
+      fn = make_fn("recover_int", return_type: :Int64, body: [ret],
+                   can_fail: false, catch_clauses: [AST::CatchClause.new(body: [catch_ret])])
+
+      result = lowering.lower(fn)
+
+      expect(result).to be_a(Array)
+      expect(result.first.ret_type).to eq("!i64")
+    end
+
     it "lowers pub function" do
       fn = make_fn("hello", visibility: :pub, body: [])
       result = lowering.lower(fn)
@@ -2145,6 +2159,19 @@ RSpec.describe MIRLowering do
       expect(zig).to include("struct")
       expect(zig).to include("_lambda_")
       expect(zig).to include("return 42")
+    end
+
+    it "normalizes named lambda captures into capture names" do
+      body = make_lit(:NUMBER, 42, full_type: :Int64)
+      body.coerced_type = :Int64
+      capture = AST::Identifier.new(tok, "outer")
+      node = AST::LambdaLit.new(tok, [], nil, body, nil, nil)
+      node.captures = [capture]
+      node.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+
+      result = lowering.lower(node)
+
+      expect(result.captures).to eq(["outer"])
     end
   end
 
