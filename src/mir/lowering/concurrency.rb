@@ -97,12 +97,12 @@ module MIRLoweringConcurrency
   def with_bg_fiber_body_context(pointer_captures, &blk)
     prev_bg_ptr_caps = @current_bg_pointer_captures
     prev_fiber_pending = @pending_stmts
-    @current_bg_pointer_captures = pointer_captures
-    @pending_stmts = []
+    @current_bg_pointer_captures = T.let(pointer_captures, T.nilable(T::Set[String]))
+    @pending_stmts = T.let([], T.nilable(T::Array[MIR::Stmt]))
     blk.call
   ensure
-    @pending_stmts = prev_fiber_pending
-    @current_bg_pointer_captures = prev_bg_ptr_caps
+    @pending_stmts = T.let(prev_fiber_pending, T.nilable(T::Array[MIR::Stmt]))
+    @current_bg_pointer_captures = T.let(prev_bg_ptr_caps, T.nilable(T::Set[String]))
   end
 
   sig do
@@ -117,12 +117,12 @@ module MIRLoweringConcurrency
   def with_stream_body_context(local_stream, is_inf, &blk)
     prev_stream_local = @current_stream_local
     prev_stream_is_inf = @current_stream_is_inf
-    @current_stream_local = local_stream
-    @current_stream_is_inf = is_inf
+    @current_stream_local = T.let(local_stream, T.nilable(String))
+    @current_stream_is_inf = T.let(is_inf, T.nilable(T::Boolean))
     blk.call
   ensure
-    @current_stream_local = prev_stream_local
-    @current_stream_is_inf = prev_stream_is_inf
+    @current_stream_local = T.let(prev_stream_local, T.nilable(String))
+    @current_stream_is_inf = T.let(prev_stream_is_inf, T.nilable(T::Boolean))
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String).returns(T::Array[MIR::Stmt]) }

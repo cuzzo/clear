@@ -129,7 +129,7 @@ module PipeAnalysis
   sig { params(node: T.untyped).returns(T.untyped) }
   def finite_stream_element_type(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return range_element_type(node) if node.is_a?(AST::RangeLit)
+    return range_element_type(node).resolved if node.is_a?(AST::RangeLit)
     return node.full_type!(context: "pipeline result").open_stream_element_type.resolved if node.full_type!(context: "pipeline result").open_stream?
     node.full_type!(context: "pipeline result").tense_type.element_type.resolved
   end

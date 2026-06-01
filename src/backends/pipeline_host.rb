@@ -140,7 +140,7 @@ class PipelineHost
 
     sig { params(context: PipelinePlaceholderContext).void }
     def initialize(context)
-      @context = context
+      @context = T.let(context, PipelinePlaceholderContext)
     end
 
     sig { params(node: AST::Node).returns(AST::Node) }

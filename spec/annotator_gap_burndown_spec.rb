@@ -1424,7 +1424,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
     ann.define_singleton_method(:visit_stmts) do |body|
       record_effect(EffectTracker::HEAP) if body.include?(:heap_arm)
-      @snapshot_txn_violations << { effect: EffectTracker::BLOCKING } if body.include?(:snapshot_violation)
+      @snapshot_txn_violations << SemanticAnnotator::SnapshotTxnViolation.new(effect: EffectTracker::BLOCKING, fn: "with_fn") if body.include?(:snapshot_violation)
     end
 
     cap_var = AST::Identifier.new(token, "locked")

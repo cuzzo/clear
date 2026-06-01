@@ -106,7 +106,7 @@ module LockHelper
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
       vn = cap_var_name(cap[:var_node])
       next unless @held_locks.key?(vn)
-      outer_tok = @held_locks[vn][:token]
+      outer_tok = @held_locks[vn].token
       escape    = node.deadlock_escape
       if escape && escape[:kind] == :deadlock
         note!(cap[:var_node], "POSSIBLE_DEADLOCK accepted: '#{vn}' already held by an enclosing WITH " \
@@ -138,18 +138,18 @@ module LockHelper
       cap_rank = rank_of_cap(cap)
       next unless cap_rank
       @held_lock_types.each do |entry|
-        held_rank = @lock_type_ranks[entry[:type]]
+        held_rank = @lock_type_ranks[entry.type]
         next unless held_rank
         next if cap_rank > held_rank
         if escape
           msg = "Lock rank violation: acquiring ':#{lock_identity_of(cap)}' at rank #{cap_rank} while " \
-                "':#{entry[:type]}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
+                "':#{entry.type}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
                 "the acquire path to prove LockCycle freedom by construction."
           note!(cap[:var_node], msg + " (POSSIBLE_#{escape[:kind].to_s.upcase} accepted.)")
         else
           error!(cap[:var_node], :LOCK_RANK_VIOLATION,
             cap: lock_identity_of(cap), cap_rank: cap_rank,
-            held: entry[:type], held_rank: held_rank)
+            held: entry.type, held_rank: held_rank)
         end
       end
     end
@@ -175,7 +175,7 @@ module LockHelper
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
-  sig { params(fn_name: String, cap: AST::Capability, held_stack: T::Array[T::Hash[Symbol, T.untyped]], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
+  sig { params(fn_name: String, cap: AST::Capability, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], escape: T.nilable(SemanticAnnotator::DeadlockEscape)).void }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
     T.bind(self, SemanticAnnotator) rescue {}
     t = lock_identity_of(cap)
@@ -185,20 +185,20 @@ module LockHelper
     acquirer_opt = !escape.nil?
     held_stack.each do |held|
       T.must(@lock_direct_edges)[fn_name] << LockEdge.new(
-        held: held[:type], acquired: t,
+        held: held.type, acquired: t,
         site_token: site_tok, fn_name: fn_name,
-        opted_out: acquirer_opt || held[:opted_out],
+        opted_out: acquirer_opt || held.opted_out,
       )
     end
   end
 
-  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[T::Hash[Symbol, T.untyped]], site_token: Lexer::Token).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], site_token: Lexer::Token).void }
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
     T.bind(self, SemanticAnnotator) rescue nil
     held_stack.each do |held|
       T.must(@lock_held_calls)[fn_name] << {
-        held: held[:type], callee: callee_name, site_token: site_token,
-        opted_out: held[:opted_out],
+        held: held.type, callee: callee_name, site_token: site_token,
+        opted_out: held.opted_out,
       }
     end
   end

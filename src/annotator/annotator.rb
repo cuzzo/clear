@@ -53,6 +53,11 @@ class SemanticAnnotator
   include LockHelper
   include TestAnnotation
 
+  class SnapshotTxnViolation < T::Struct
+    const :effect, Symbol
+    const :fn, String
+  end
+
   sig { returns(T.untyped) }
   attr_reader :scope_stack
 
@@ -79,7 +84,7 @@ class SemanticAnnotator
 
   sig { params(effect: Symbol, fn_name: String).void }
   def record_snapshot_txn_violation!(effect, fn_name)
-    @snapshot_txn_violations << { effect: effect, fn: fn_name }
+    T.must(@snapshot_txn_violations) << SnapshotTxnViolation.new(effect: effect, fn: fn_name)
   end
 
   # Run the given block with conditional_depth incremented on the current
@@ -112,15 +117,30 @@ class SemanticAnnotator
   end
   def with_match_pattern_context(&blk)
     previous = @match_pattern_context
-    @match_pattern_context = true
+    @match_pattern_context = T.let(true, T.nilable(T::Boolean))
     blk.call
   ensure
-    @match_pattern_context = previous == true
+    @match_pattern_context = T.let(previous == true, T.nilable(T::Boolean))
   end
 
-  HeldLockEntry = T.type_alias { T::Hash[Symbol, T.nilable(Lexer::Token)] }
+  class HeldLockEntry < T::Struct
+    const :token, T.nilable(Lexer::Token)
+  end
+
   HeldLockMap = T.type_alias { T::Hash[String, HeldLockEntry] }
-  HeldLockTypeEntry = T.type_alias { T::Hash[Symbol, T.any(Symbol, T::Boolean)] }
+
+  class HeldLockTypeEntry < T::Struct
+    const :type, Symbol
+    const :opted_out, T::Boolean
+  end
+
+  DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
+
+  WITH_MATCH_FAMILY_EFFECTS = T.let({
+    LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
+    VERSIONED: [EffectTracker::CONTENTION],
+    ATOMIC: [EffectTracker::CONTENTION],
+  }.freeze, T::Hash[Symbol, T::Array[Symbol]])
 
   sig do
     type_parameters(:Result)
@@ -134,8 +154,10 @@ class SemanticAnnotator
   def with_held_locks(node, expanded_capabilities, &blk)
     previous_locks = T.let(@held_locks || {}, HeldLockMap)
     previous_types = T.let(@held_lock_types || [], T::Array[HeldLockTypeEntry])
-    @held_locks = previous_locks.dup
-    @held_lock_types = previous_types.dup
+    current_locks = T.let(previous_locks.dup, HeldLockMap)
+    current_types = T.let(previous_types.dup, T::Array[HeldLockTypeEntry])
+    @held_locks = T.let(current_locks, T.nilable(HeldLockMap))
+    @held_lock_types = T.let(current_types, T.nilable(T::Array[HeldLockTypeEntry]))
     opted_out = !node.deadlock_escape.nil?
 
     expanded_capabilities.each do |capability|
@@ -143,15 +165,15 @@ class SemanticAnnotator
 
       variable_name = cap_var_name(capability[:var_node])
       token = capability[:var_node].respond_to?(:token) ? capability[:var_node].token : node.token
-      @held_locks[variable_name] ||= { token: token }
+      current_locks[variable_name] ||= HeldLockEntry.new(token: token)
       lock_type = lock_identity_of(capability)
-      @held_lock_types << { type: lock_type, opted_out: opted_out } if lock_type
+      current_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
     end
 
     blk.call
   ensure
-    @held_locks = previous_locks
-    @held_lock_types = previous_types
+    @held_locks = T.let(previous_locks, T.nilable(HeldLockMap))
+    @held_lock_types = T.let(previous_types, T.nilable(T::Array[HeldLockTypeEntry]))
   end
 
   sig do
@@ -160,20 +182,20 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_snapshot_transaction_body(node, &blk)
-    previous_depth = @inside_snapshot_txn || 0
+    previous_depth = T.let(@inside_snapshot_txn || 0, Integer)
     previous_violations = @snapshot_txn_violations
-    @inside_snapshot_txn = previous_depth + 1
-    @snapshot_txn_violations = []
+    @inside_snapshot_txn = T.let(previous_depth + 1, T.nilable(Integer))
+    @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
     result = blk.call
-    txn_violations = @snapshot_txn_violations
+    txn_violations = T.must(@snapshot_txn_violations)
     unless txn_violations.empty?
-      kinds = txn_violations.map { |violation| EffectTracker.display(violation[:effect]) }.uniq.join(", ")
+      kinds = txn_violations.map { |violation| EffectTracker.display(violation.effect) }.uniq.join(", ")
       error!(node, :WITH_SNAPSHOT_BODY_NOT_PURE, kinds: kinds)
     end
     result
   ensure
-    @inside_snapshot_txn = previous_depth
-    @snapshot_txn_violations = previous_violations || []
+    @inside_snapshot_txn = T.let(previous_depth, T.nilable(Integer))
+    @snapshot_txn_violations = T.let(previous_violations || [], T.nilable(T::Array[SnapshotTxnViolation]))
   end
 
   # `source_code` is optional — used ONLY by fixable-error helpers to
@@ -195,7 +217,9 @@ class SemanticAnnotator
     @loop_depth = T.let(0, Integer) # Track if we are inside a loop
     @conditional_depth = T.let(0, Integer) # Track if we are inside an IF branch or MATCH arm
     @smooth_depth = T.let(0, Integer)
-    @match_pattern_context = T.let(false, T::Boolean) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
+    @match_pattern_context = T.let(false, T.nilable(T::Boolean)) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
+    @held_locks = T.let({}, T.nilable(HeldLockMap))
+    @held_lock_types = T.let([], T.nilable(T::Array[HeldLockTypeEntry]))
     # Reentrancy analysis
     @call_graph  = T.let({}, T::Hash[T.untyped, T.untyped])  # name => Set of directly-called function names (excluding self-calls)
     @fn_propagating_callees = T.let({}, T::Hash[T.untyped, T.untyped]) # name => Set of callees whose error channel can propagate (NOT OR-absorbed); authority for can_fail (#11)
@@ -229,7 +253,8 @@ class SemanticAnnotator
     @og_scope_depth = T.let(0, Integer)
     @synthetic_fns = T.let([], T::Array[T.untyped])
     @branch_terminated = T.let(false, T::Boolean)
-    @snapshot_txn_violations = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
+    @inside_snapshot_txn = T.let(0, T.nilable(Integer))
     @stream_yield_types = T.let([], T::Array[Type])
     effects_init!
     capability_audit_init!
@@ -2502,6 +2527,7 @@ private
       fn_name = current_fn_ctx&.name || "<top>"
       record_held_call!(fn_name, node.name, @held_lock_types, node.token)
     end
+    nil
   end
 
   sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
@@ -4675,12 +4701,7 @@ private
             # (CONTENTION); ATOMIC binds the alias to the cell ref so any
             # subsequent body access contends on the cache line (CONTENTION,
             # no BLOCKING — atomics never park).
-            family_effects = {
-              LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
-              VERSIONED: [EffectTracker::CONTENTION],
-              ATOMIC: [EffectTracker::CONTENTION],
-            }
-            family_effects.fetch(arm[:family], []).each { |effect| record_effect(effect) }
+            WITH_MATCH_FAMILY_EFFECTS.fetch(arm[:family], []).each { |effect| record_effect(effect) }
             with_new_scope(current_scope) do
               visit_stmts(arm[:body])
               finalize_scope(node)

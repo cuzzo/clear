@@ -652,8 +652,8 @@ module MIRLoweringCapabilities
     rc_map = T.let((prev_rc || {}).dup, RcUnwrapMap)
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, AliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, AliasOwnerMap)
-    @locked_unwrap_map = locked_map
-    @rc_unwrap_map = rc_map
+    @locked_unwrap_map = T.let(locked_map, T.nilable(LockedUnwrapMap))
+    @rc_unwrap_map = T.let(rc_map, T.nilable(RcUnwrapMap))
     @with_alias_alloc_map = T.let(alias_alloc_map, T.nilable(AliasAllocMap))
     @with_alias_owner_map = T.let(alias_owner_map, T.nilable(AliasOwnerMap))
 
@@ -667,21 +667,21 @@ module MIRLoweringCapabilities
       end
       case cap[:capability]
       when :EXCLUSIVE, :write_locked_read
-        @locked_unwrap_map[alias_name] = true
+        locked_map[alias_name] = true
         # Also map original var_name to alias so field accesses on the original
         # variable get rewritten to use the unwrapped inner alias.
-        @locked_unwrap_map[var_name] = alias_name if alias_name != var_name
+        locked_map[var_name] = alias_name if alias_name != var_name
       when :multiowned, :shared
-        @rc_unwrap_map[var_name] = "__#{var_name}_unwrap"
+        rc_map[var_name] = "__#{var_name}_unwrap"
       end
     end
 
     blk.call
   ensure
-    @locked_unwrap_map = prev_locked
-    @rc_unwrap_map = prev_rc
-    @with_alias_alloc_map = prev_alias_alloc
-    @with_alias_owner_map = prev_alias_owner
+    @locked_unwrap_map = T.let(prev_locked, T.nilable(LockedUnwrapMap))
+    @rc_unwrap_map = T.let(prev_rc, T.nilable(RcUnwrapMap))
+    @with_alias_alloc_map = T.let(prev_alias_alloc, T.nilable(AliasAllocMap))
+    @with_alias_owner_map = T.let(prev_alias_owner, T.nilable(AliasOwnerMap))
   end
 
   # Structured representation of a fallible-acquire clause for the BC
@@ -975,7 +975,7 @@ module MIRLoweringCapabilities
   #   };
   # Return structured MIR so the checker can see the transaction body and
   # runtime heap allocation instead of treating them as opaque InlineZig.
-  sig { params(node: AST::WithBlock).returns(T.untyped) }
+  sig { params(node: AST::WithBlock).returns(MIR::ScopeBlock) }
   def lower_polymorphic_universal(node)
     T.bind(self, MIRLowering) rescue nil
     @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
@@ -992,27 +992,27 @@ module MIRLoweringCapabilities
     # OBJECT to dispatch by `@hasDecl`. Set `@atomic_emit_raw` so the
     # surrounding emit_expr returns the bare ident.
     prev_raw = @atomic_emit_raw
-    @atomic_emit_raw = true
+    @atomic_emit_raw = T.let(true, T.nilable(T::Boolean))
     cell_zig = emit_expr(lower(var_node))
-    @atomic_emit_raw = prev_raw
+    @atomic_emit_raw = T.let(prev_raw, T.nilable(T::Boolean))
     cell_zig = "&#{cell_zig}"
     # The body's `x` alias is a `*T` -- grab the bare T (post-Arc,
     # post-sync-wrapper) for the closure signature.
-    resolved   = cap[:resolved_type]
-    rt_obj     = resolved.is_a?(Type) ? resolved : Type.new(resolved)
+    resolved_source = cap[:resolved_type] || var_node
+    rt_obj = Type.from_node!(resolved_source, context: "WITH polymorphic capability resolved type")
     bare_t_zig = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type.zig_type : rt_obj.zig_type
     body_mir = lower_body(node.body)
     guard_cond = combined_guard_cond(node)
     if polymorphic_flow_required?(node)
       guard_fail = guard_cond ? guard_fail_flow_body(node) : []
-      MIR::PolymorphicMutateFlow.new(
+      return MIR::ScopeBlock.new([MIR::PolymorphicMutateFlow.new(
         cell_zig, @rt_name, safe_alias, bare_t_zig,
         current_function_return_payload_zig || "void",
         body_mir, guard_cond, guard_fail
-      )
+      )])
     else
       body_mir = wrap_body_with_guard(node, T.must(body_mir), nil)
-      MIR::PolymorphicMutate.new(cell_zig, @rt_name, safe_alias, bare_t_zig, body_mir)
+      MIR::ScopeBlock.new([MIR::PolymorphicMutate.new(cell_zig, @rt_name, safe_alias, bare_t_zig, body_mir)])
     end
   end
 
@@ -1196,7 +1196,7 @@ module MIRLoweringCapabilities
     var_node = T.cast(cap[:var_node], AST::Identifier)
     var_name = with_cap_var_name(var_node)
     sym = var_node.symbol
-    resolved_type = Type.from_node(cap[:resolved_type]) || Type.new(:Any)
+    resolved_type = Type.from_node!(cap[:resolved_type], context: "mutable snapshot capability type")
     MutableSnapshotCap.new(
       var_node: var_node,
       alias_name: (cap[:alias] || var_name).to_s,
