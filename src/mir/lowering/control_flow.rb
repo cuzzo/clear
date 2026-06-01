@@ -808,7 +808,7 @@ module MIRLoweringControlFlow
         cleanup_mode: entry ? :err : :normal,
         scope: :heap
       )
-      out = T.let(materialized.statements, T::Array[T.untyped])
+      out = T.let(materialized.statements, T::Array[MIR::Stmt])
       if entry
         plan = synthetic_return_ownership_plan(name)
         out.concat(plan.transfer_marks_for(Set[name], @lowered_guarded_cleanup_names || Set.new))

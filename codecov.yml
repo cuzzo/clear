@@ -1,7 +1,26 @@
 ignore:
   - "tools/"
 
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+
 flags:
+  ruby:
+    paths:
+      - src/
+      - spec/
+      - gems/
+    carryforward: false
+    joined: false
+  zig:
+    paths:
+      - zig/
+    carryforward: false
+    joined: false
   nil-kill:
     paths:
       - gems/nil-kill/

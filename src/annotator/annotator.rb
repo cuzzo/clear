@@ -136,11 +136,17 @@ class SemanticAnnotator
 
   DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
-  WITH_MATCH_FAMILY_EFFECTS = T.let({
-    LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
-    VERSIONED: [EffectTracker::CONTENTION],
-    ATOMIC: [EffectTracker::CONTENTION],
-  }.freeze, T::Hash[Symbol, T::Array[Symbol]])
+  sig { params(family: Symbol).returns(T::Array[Symbol]) }
+  def with_match_family_effects(family)
+    case family
+    when :LOCKED
+      [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS]
+    when :VERSIONED, :ATOMIC
+      [EffectTracker::CONTENTION]
+    else
+      []
+    end
+  end
 
   sig do
     type_parameters(:Result)
@@ -4699,7 +4705,7 @@ private
             # (CONTENTION); ATOMIC binds the alias to the cell ref so any
             # subsequent body access contends on the cache line (CONTENTION,
             # no BLOCKING — atomics never park).
-            WITH_MATCH_FAMILY_EFFECTS.fetch(arm[:family], []).each { |effect| record_effect(effect) }
+            with_match_family_effects(arm[:family]).each { |effect| record_effect(effect) }
             with_new_scope(current_scope) do
               visit_stmts(arm[:body])
               finalize_scope(node)

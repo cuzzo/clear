@@ -591,12 +591,9 @@ module MIRLoweringCapabilities
     return nil if all_bindings.empty?
 
     bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
-    stdlib_def = T.let(
-      { allocates: false, borrows: with_block_borrow_names(node) },
-      T::Hash[Symbol, T.any(T::Boolean, T::Array[String], T::Array[FallibleClauseFact])],
-    )
+    stdlib_def = FunctionSignature.intrinsic_contract(borrows: with_block_borrow_names(node))
     clauses = materialization.fallible_clauses
-    stdlib_def[:fallible_clauses] = clauses unless clauses.empty?
+    stdlib_def.emit.fallible_clauses = clauses unless clauses.empty?
     bindings_iz.stdlib_def = stdlib_def
     bindings_iz
   end
