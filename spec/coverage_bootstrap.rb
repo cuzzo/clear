@@ -23,6 +23,7 @@ module CoverageBootstrap
 
     begin
       require "simplecov"
+      require "simplecov/process"
     rescue LoadError
       return
     end

@@ -227,6 +227,59 @@ end
 TEST_DIR = "transpile-tests"
 OUTPUT_FILE = "zig/all-tests.zig"
 HEADER_FILE = "zig/runtime/runtime-header.zig"
+GEN_JOBS = [Integer(ENV.fetch("TRANSPILE_GEN_JOBS", ENV.fetch("JOBS", "1"))), 1].max
+
+def simplecov_child_command!(name)
+  return unless defined?(SimpleCov)
+
+  SimpleCov.command_name("#{name}-#{Process.pid}") if SimpleCov.respond_to?(:command_name)
+end
+
+def generate_blocks_parallel(test_files, test_source_dir, jobs)
+  return test_files.map { |test_file| generate_block_result(test_file, test_source_dir) } if jobs <= 1 || test_files.length <= 1
+
+  chunks = Array.new([jobs, test_files.length].min) { [] }
+  test_files.each_with_index { |test_file, index| chunks[index % chunks.length] << [index, test_file] }
+  readers = []
+  pids = []
+
+  chunks.each do |chunk|
+    reader, writer = IO.pipe
+    pid = Process.fork do
+      reader.close
+      simplecov_child_command!("transpile-tests")
+      results = chunk.map { |index, test_file| [index, generate_block_result(test_file, test_source_dir)] }
+      writer.write(Marshal.dump(results))
+      writer.close
+      exit 0
+    rescue StandardError => e
+      writer.write(Marshal.dump(chunk.map { |index, test_file| [index, [File.basename(test_file), nil, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]] }))
+      writer.close
+      exit 1
+    end
+    writer.close
+    readers << reader
+    pids << pid
+  end
+
+  indexed = readers.flat_map do |reader|
+    Marshal.load(reader.read)
+  ensure
+    reader.close
+  end
+  pids.each { |pid| Process.wait(pid) }
+  indexed.sort_by(&:first).map(&:last)
+end
+
+def generate_block_result(test_file, test_source_dir)
+  filename = File.basename(test_file)
+  code = File.read(test_file)
+  generator = TestGenerator.new
+  block = generator.generate_test_block(filename, code, source_dir: test_source_dir)
+  [filename, block, nil]
+rescue StandardError => e
+  [filename, nil, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]
+end
 
 puts "Generating #{OUTPUT_FILE}..."
 
@@ -248,23 +301,17 @@ File.open(OUTPUT_FILE, "w") do |f|
 
   # 2. Iterate through all .cht files in the test directory
   test_source_dir = File.expand_path(TEST_DIR)
+  test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
 
-  Dir.glob("#{TEST_DIR}/*.cht").sort.each do |test_file|
-    filename = File.basename(test_file)
-    puts "  - Processing #{filename}"
-
-    code = File.read(test_file)
-    generator = TestGenerator.new
-
-    begin
-      block = generator.generate_test_block(filename, code, source_dir: test_source_dir)
-      f.puts "\n// --- TEST: #{filename} ---"
-      f.puts block
-    rescue => e
-      $stderr.puts "    [ERROR] Failed to transpile #{filename}: #{e.message}"
-      $stderr.puts e.backtrace.first(3).join("\n")
+  puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
+  generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS).each do |filename, block, error|
+    if error
+      $stderr.puts "    [ERROR] Failed to transpile #{filename}: #{error}"
       @failed_tests ||= []
       @failed_tests << filename
+    else
+      f.puts "\n// --- TEST: #{filename} ---"
+      f.puts block
     end
   end
 end

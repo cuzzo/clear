@@ -64,7 +64,7 @@ par_ruby transpile-corpus transpile-tests -maxdepth 1 -name '*.cht' -- transpile
 # 5. Fuzz matrix -- randomized inputs hammer lexer/parser/annotator/MIR.
 run fuzz-matrix ruby tools/fuzz/run.rb --matrix \
   --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param \
-  --out /tmp/clear-nil-kill-fuzz --clean
+  --out /tmp/clear-nil-kill-fuzz --clean --jobs "$JOBS"
 
 # 6. Transpile every example + benchmark (front-to-MIR Ruby pipeline).
 par_ruby examples-transpile examples benchmarks -type f -name '*.cht' -- src/backends/transpiler.rb
