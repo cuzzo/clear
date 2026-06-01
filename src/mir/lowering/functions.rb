@@ -1434,11 +1434,11 @@ module MIRLoweringFunctions
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_owned_return?(node)
     T.bind(self, MIRLowering) rescue nil
-    sig = fn_sig_for(node.name) if node.respond_to?(:name)
+    sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
     node_ti = Type.from_node!(node, context: "call owned return")
-    if !node_ti.any?
+    if !node_ti.any? && !node_ti.auto?
       return concrete_call_type_owned_return?(node_ti, sig)
     end
 
@@ -1495,6 +1495,7 @@ module MIRLoweringFunctions
     end
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
     ti.ownership_bearing?(schema_lookup) ||
+      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
       ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
       ti.resource? || ti.recursive_cleanup_shape?(schema_lookup)
   end

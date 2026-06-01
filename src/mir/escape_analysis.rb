@@ -836,7 +836,9 @@ module EscapeAnalysis
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
     return false if ti.rodata? || ti.borrowed_reference?
-    top_heap_ptr || ti.ownership != :affine || ti.ownership_bearing?(schema_lookup)
+    top_heap_ptr || ti.ownership != :affine ||
+      ti.ownership_bearing?(schema_lookup) ||
+      ti.needs_explicit_cleanup?(:heap, schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
