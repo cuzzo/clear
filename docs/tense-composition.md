@@ -17,7 +17,6 @@ See [Sharing Capabilities](sharing-capabilities.md) for more details.
  * `~(T[])` = A future to an Optional Array of `T`s (uncommon)
  * `~(?T[])` = A future to an Optional Array of `T`s (VERY uncommon)
 
-
 To some, this may be considered far less readable than Rust/C style:
 
  * `Stream<Optional<T>>`
@@ -46,24 +45,32 @@ CLEAR reads better left to right:
  * You immediately know what it is and what you must do to access it.
  * It is clearly separated what you are allowed to do with it (how it can be shared, and the cost of that).
 
-CLEAR's tense system can look like Sigil Soup, but for the vast majority of cases it is easy enough to understand.
+CLEAR's tense system can look like Sigil Soup, but for the vast majority of cases it is more readable if you take a minute to learn the 3 sigils / tenses.
 
-In the cases where you have tons of nested capabilities and tenses, CLEAR believes it's system is much easier to parse to separate the concerns of what is important.
+In the cases where you have tons of nested capabilities and tenses, CLEAR believes its system is much easier to parse to separate the concerns of what is important.
+
+In short, CLEAR separates:
+
+ 1. What you need to do before you can use data (tenses),
+ 2. From the memory layout (types),
+ 3. From what you're allowed to do with it / how it can be shared, and optimizations on it (capabilities) 
 
 ## Order of symbols:
 
-Tense symbols are read left-to-right, and allow you to know what must be done first to use them:
+Tense symbols are read left-to-right. 
+
+Following the ordered list above, the come first (left most) because they dictate what must be done first to use the underlying data (the actual type):
 
 If something is *FOR SURE* a future -> it starts with `~` no space for other tenses:
 
  * A future to an optional `~?T`
- * A future to a fallible `~!T`
- * A future to a fallible optional (bad design) `~!?T`
+ * A future to a failible `~!T`
+ * A future to a failible optional (bad design) `~!?T`
 
 If something is *FOR SURE* fallible -> it starts with `!` and a space & parens if other tenses:
 
- * A fallible `!T`
- * A fallible future `! (~T)`
+ * A failible `!T`
+ * A failible future `! (~T)`
 
 If something is *FOR SURE* optional -> it starts with `?` and a space & parens if other tenses:
 
@@ -108,7 +115,7 @@ Note that there is a space between optionals and errors, when combine with any n
 * `! (~?T)`
 * `!? (~T)`
 
-If you don't include the spaces and parenthesis, the compiler will typically auto-correct it for you.
+If you don't include the spaces and parentheses, the compiler will typically auto-correct it for you.
 
 In practice, complex types like these are often created inline, via streaming pipelines, and you never need to know the correct formatting.
 
