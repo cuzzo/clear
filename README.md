@@ -99,7 +99,7 @@ FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Bool
 END
 ```
 
-This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.  All dependencies (imports) *must* compile in STRICT mode.
+This may raise eyebrows if you come from Zig or Rust.  In `STRICT` mode, you must handle all synchronization failures inline.  All dependencies (imports) *must* compile in `STRICT` mode.
 
 See the [Polymorphic Syncronization Guide](docs/polymorphic-synchronization.md) for more details.
 
