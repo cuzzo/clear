@@ -278,7 +278,7 @@ Expected output:
   field and branch scopes merge/fork the flow fact directly.
 - [ ] `phase-expression-domains`: after binding/flow ownership is explicit,
   split expression typing domains only where it removes real branch hubs.
-- [ ] `phase-expression-domain-calls`: extract call expression typing into a
+- [x] `phase-expression-domain-calls`: extract call expression typing into a
   small typed domain object after call/body summaries are explicit. Done means
   `visit_FuncCall`/method-call callsite summary production and signature
   validation no longer rely on ambient annotator hashes, and no legacy helper

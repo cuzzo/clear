@@ -13,6 +13,7 @@ require_relative "phases/builtin_environment"
 require_relative "phases/declaration_index"
 require_relative "phases/auto_finalization"
 require_relative "phases/deferred_validation"
+require_relative "phases/expression_domains"
 require_relative "phases/program_finalization"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
@@ -68,6 +69,7 @@ class SemanticAnnotator
   include Annotator::Phases::BodyAnalysis
   include Annotator::Phases::BuiltinEnvironment
   include Annotator::Phases::DeferredValidation
+  include Annotator::Phases::ExpressionDomains
   include Annotator::Phases::ProgramFinalization
   include Annotator::Phases::TypeRegistration
   include Annotator::Phases::SignatureRegistration
@@ -99,6 +101,11 @@ class SemanticAnnotator
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
     @lock_type_ranks || {}
+  end
+
+  sig { returns(T::Array[HeldLockTypeEntry]) }
+  def semantic_held_lock_types
+    @held_lock_types || []
   end
 
   sig { returns(Integer) }
@@ -2246,130 +2253,6 @@ private
       root = chain_root_name(node.object)
       mark_var_mutated(root) if root
     end
-  end
-
-  sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
-  def visit_FuncCall(node)
-    # Mark struct literal args as call arguments so ensure_owned_value!
-    # skips CopyNode wrapping for rodata strings. The struct is a temporary
-    # argument - rodata strings are valid for the call's lifetime. The callee
-    # dupes strings it needs to escape via promoteFields.
-    node.args.each { |arg| arg.instance_variable_set(:@is_call_arg, true) if arg.is_a?(AST::StructLit) }
-    node.args.each { |arg|
-      visit(arg)
-      promote_to_expr_if!(node, arg) if arg.is_a?(AST::IfStatement)
-      promote_to_expr_match!(node, arg) if arg.is_a?(AST::MatchStatement)
-    }
-
-    if node.name == "native_call"
-      stamp_type!(node, :Any)
-      return
-    end
-
-    resolve_call(node, node.args)
-    record_predicate_call_site!(node)
-
-    # Record call-site context (loop/cond) for effects propagation.
-    # A call sitting inside a loop promotes the callee's SUSPENDS effects
-    # to SUSPENDS_LOOP; likewise for conditional.
-    record_call_site(node.name) if node.name.is_a?(String)
-
-    # Effect propagation needs the actual sync family passed at each call
-    # site so ?-form effects can collapse to concrete effects or no effect.
-    if node.args && !node.args.empty? && node.name.is_a?(String)
-      require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
-      arg_family_sets = node.args.map { |a| WithMatchCheck.family_of_arg_set(a) }
-      node.arg_families = arg_family_sets
-      record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
-
-      # Error unions narrow at the call site based on the actual binding
-      # families, not just the callee's declared family set.
-      sig = FunctionSignature.unwrap(@scope_stack.first.locals[node.name]&.type) if node.name.is_a?(String)
-      if sig && sig.requires && !sig.requires.empty?
-        node.collapsed_errors = collapse_errors_for_call(sig, node.args)
-      end
-
-      # Plain-T auto-borrow stamping waits for finalized REQUIRES in
-      # WithMatchCheck.check_call_sites!.
-    end
-
-    # Held-lock call sites become graph edges after callee lock acquires have
-    # propagated through the call graph.
-    if @held_lock_types && !@held_lock_types.empty? && @fn_nodes.key?(node.name)
-      fn_name = current_fn_ctx&.name || "<top>"
-      record_held_call!(fn_name, node.name, @held_lock_types, node.token)
-    end
-    nil
-  end
-
-  sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
-  def visit_MethodCall(node)
-    visit(node.object)
-    node.args.each { |arg| visit(arg) }
-
-    # Collection method dispatch (Pool/HashMap) via declarative registry.
-    if resolve_collection_method(node)
-      record_predicate_call_site!(node)
-      return
-    end
-
-    # EXTERN method dispatch: check if the object's type has EXTERN methods registered.
-    obj_type = node.object.full_type!(context: "method receiver")
-    if obj_type
-      resolved = obj_type.is_a?(Type) ? obj_type.resolved : obj_type.to_s.to_sym
-      # Check for generic instance: Parsed<MyDoc> → base type Parsed
-      base = obj_type.is_a?(Type) && obj_type.generic_instance? ? obj_type.generic_base : resolved
-      type_schema = lookup_type_schema(base)
-      if (Schemas.struct?(type_schema) || Schemas.resource?(type_schema)) && type_schema.methods&.key?(node.name)
-        method_sig = type_schema.methods[node.name]
-        node.extern_call = true
-        node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
-        node.instance_variable_set(:@extern_method, true)
-        stamp_type!(node, method_sig.return_type)
-        record_effect(EffectTracker::EXTERN)
-        # Track allocator usage for EFFECTS :alloc methods.
-        alloc_kind = method_sig.extern_effects&.dig(:alloc)
-        if alloc_kind && current_fn_ctx
-          if alloc_kind == :heap
-            current_fn_ctx.heap_count += 1
-          else
-            current_fn_ctx.frame_count += 1
-          end
-        end
-        record_predicate_call_site!(node)
-        return
-      end
-    end
-
-    # Intrinsic method dispatch: prefer a STD_LIB `is_method: true`
-    # overload whose first arg matches the receiver's type over UFCS
-    # resolution. This makes `s.length()` call String's intrinsic
-    # `length` even when the user has defined a free function named
-    # `length` with a different signature — UFCS would otherwise
-    # silently rewrite to `length(s)`, hit the user's function, and
-    # produce a confusing arg-type-mismatch error against the user's
-    # parameter type.
-    intrinsic_defs = STD_LIB[node.name]
-    if intrinsic_defs
-      intrinsic_defs = [intrinsic_defs] if intrinsic_defs.is_a?(Hash)
-      method_overloads = intrinsic_defs.select { |d| d[:is_method] }
-      if method_overloads.any?
-        ufcs_args = [node.object] + node.args
-        if find_matching_intrinsic(method_overloads, ufcs_args)
-          visit_IntrinsicFunc(node, ufcs_args)
-          record_predicate_call_site!(node)
-          return
-        end
-      end
-    end
-
-    # Fall through to UFCS: obj.method(args) → method(obj, args)
-    ufcs_args = [node.object] + node.args
-    resolve_call(node, ufcs_args)
-    record_predicate_call_site!(node)
-
-    # Record call-site context for effects propagation (see visit_FuncCall).
-    record_call_site(node.name) if node.name.is_a?(String)
   end
 
   # Shared logic for resolving function/method calls.
