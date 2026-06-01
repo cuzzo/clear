@@ -12,16 +12,17 @@ require_relative "phases/auto_finalization"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
+require_relative "phases/whole_program_semantics"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
 require_relative "helpers/pipe_analysis"
-require_relative "../mir/ownership_graph"
-require_relative "../mir/escape_analysis"
-require_relative "../mir/pass_state"
-require_relative "../mir/bg_capture_classifier"
-require_relative "../mir/effect_inference"
-require_relative "../mir/concurrency_checks"
+require_relative "../semantic/ownership_graph"
+require_relative "../semantic/escape_analysis"
+require_relative "../semantic/pass_state"
+require_relative "../semantic/bg_capture_classifier"
+require_relative "../semantic/effect_inference"
+require_relative "../semantic/concurrency_checks"
 require_relative "helpers/generic_analysis"
 require_relative "helpers/capabilities"
 require_relative "helpers/test_annotation"
@@ -60,6 +61,7 @@ class SemanticAnnotator
   include Annotator::Phases::AutoFinalization
   include Annotator::Phases::TypeRegistration
   include Annotator::Phases::SignatureRegistration
+  include Annotator::Phases::WholeProgramSemantics
 
   class SnapshotTxnViolation < T::Struct
     const :effect, Symbol
@@ -68,6 +70,26 @@ class SemanticAnnotator
 
   sig { returns(T.untyped) }
   attr_reader :scope_stack
+
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
+  def semantic_function_nodes
+    @fn_nodes
+  end
+
+  sig { returns(Scope) }
+  def semantic_root_scope
+    T.cast(@scope_stack.first, Scope)
+  end
+
+  sig { returns(T.nilable(AST::Program)) }
+  def semantic_program
+    @program
+  end
+
+  sig { returns(T::Hash[Symbol, Integer]) }
+  def semantic_lock_type_ranks
+    @lock_type_ranks || {}
+  end
 
   sig { returns(T.untyped) }
   def current_fn_ctx
@@ -284,42 +306,7 @@ class SemanticAnnotator
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     visit(node)
     finalize_auto_types!(node)
-    # Caller sync depends on annotated call-site args, so propagate it after
-    # the body walk and before replaying deferred WITH validations.
-    EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
-    # Single authority for BG capture-strategy facts. Runs AFTER
-    # propagate_caller_sync! (so SymbolEntry stamps are final) and
-    # BEFORE the downstream passes that need to know which captures
-    # are MoveInto / FreshHeapCopy / RcClone / ByValue. Stamps the
-    # results on each BgBlock.capture_analysis so EscapeAnalysis,
-    # OwnershipDataflow, MIRPass, and mir_lowering can READ instead
-    # of each re-deriving with their own walker (the divergence class
-    # of bug fixed in 378036a0 / 1522e534).
-    BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: ->(t) { lookup_type_schema(t) rescue nil })
-    EffectInference.analyze!(@fn_nodes)
-    err = ->(n, msg) { error!(n, :EFFECT_INFERENCE_VIOLATION, message: msg) }
-    warn = ->(n, msg) { note!(n, msg) }
-    sig_lookup = ->(name) {
-      @scope_stack.first.locals[name]&.type
-    }
-    # Pass the program policy so polymorphic warnings don't duplicate
-    # handling already covered by SYNC POLICY.
-    policy_handlers = @program&.sync_policy
-    @fn_nodes.each_value { |fn|
-      WithMatchCheck.check_function!(fn, err, warn_handler: warn,
-                                     policy_handlers: policy_handlers)
-    }
-    # Re-stamp signatures so call-site checks below see any shim-inferred
-    # REQUIRES clauses.
-    @fn_nodes.each do |name, fn|
-      sig = FunctionSignature.unwrap(@scope_stack.first.locals[name]&.type)
-      sig.requires = fn.requires if sig
-    end
-    @fn_nodes.each_value { |fn| WithMatchCheck.check_call_sites!(fn, sig_lookup, err) }
-    # Rank-annotated locks are checked by the rank-DAG analysis, not the
-    # pattern-based naked-nested-WITH check.
-    ConcurrencyChecks.check_all!(@fn_nodes, sig_lookup, err,
-                                 lock_ranks: @lock_type_ranks || {})
+    run_whole_program_semantics!
     # Residual deferred WITH validations (any param whose sync is still
     # nil after propagation, e.g., a function called from no callsite).
     flush_deferred_with_validations!

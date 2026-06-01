@@ -32,7 +32,7 @@ module EffectTracker
   # Phase 3 closed-lattice effects. Recorded directly at visit_BgBlock /
   # visit_NextExpr (and FFI sites for IO). Propagated transitively by
   # compute_effects! over the existing call graph. Read by EffectSet
-  # projection (src/mir/effect_inference.rb) and ConcurrencyChecks.
+  # projection (src/semantic/effect_inference.rb) and ConcurrencyChecks.
   YIELD        = :YIELD
   IO           = :IO
 

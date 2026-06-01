@@ -1,6 +1,6 @@
 require "rspec"
 require_relative "../src/ast/lexer"
-require_relative "../src/mir/ownership_graph"
+require_relative "../src/semantic/ownership_graph"
 
 RSpec.describe OwnershipGraph do
   subject(:graph) { OwnershipGraph.new }

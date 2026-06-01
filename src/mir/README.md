@@ -50,7 +50,7 @@ annotated AST
   -> rewrite/desugar AST
   -> hoist anonymous owned values
   -> verify AST is fully typed
-  -> analyze escape/storage/captures
+  -> consume shared semantic escape/storage/capture analyses
   -> classify cleanup
   -> analyze loop frame placement
   -> finalize runtime requirements
@@ -60,7 +60,8 @@ annotated AST
   -> emit Zig templates
 ```
 
-The exact order is enforced by [`pass_state.rb`](pass_state.rb).
+The exact order is enforced by
+[`../semantic/pass_state.rb`](../semantic/pass_state.rb).
 
 ### 0. Annotated AST Input
 
@@ -457,7 +458,8 @@ not decisions made by the emitter.
 
 ## Pass Order Summary
 
-[`MIRPassState`](pass_state.rb) records the facts each pass has made available:
+[`MIRPassState`](../semantic/pass_state.rb) records the facts each pass has made
+available:
 
 | Stage | Producer | Main effect |
 | --- | --- | --- |
@@ -466,7 +468,7 @@ not decisions made by the emitter.
 | `:string_concat_rewritten` | `StringConcatRewriter` | String `+` forms are normalized. |
 | `:hoisted` | `Hoist` | Anonymous owned escape values get synthetic bindings. |
 | `:premir_type_checked` | `PreMirTypeCheck` | Every evaluatable AST node has a resolved type. |
-| `:escape_analyzed` | `MIRPass/EscapeAnalysis` | Binding storage and BG capture facts are finalized. |
+| `:escape_analyzed` | `MIRPass` using `src/semantic` analyses | Binding storage and BG capture facts are finalized. |
 | `:cleanup_classified` | `MIRPass/CleanupClassifier` | Cleanup entries are attached to ownership-bearing bindings. |
 | `:loop_frame_analyzed` | `LoopFrameAnalysis` | Loop-sensitive frame placement facts are available. |
 | `:needs_rt_finalized` | `MIRPass#finalize_needs_rt!` | Runtime pointer threading is decided from final cleanup/placement facts. |
@@ -479,15 +481,27 @@ not decisions made by the emitter.
 The MIR directory is split by responsibility:
 
 * [`mir.rb`](mir.rb): MIR node definitions and ownership fact structs.
-* [`pass_state.rb`](pass_state.rb): enforced pass ordering.
 * [`hoist.rb`](hoist.rb): AST rewrite that creates bindings for anonymous owned values.
 * [`pre_mir_type_check.rb`](pre_mir_type_check.rb): AST-to-MIR type invariant.
-* [`escape_analysis.rb`](escape_analysis.rb): storage and escape decisions.
 * [`cleanup_classifier.rb`](cleanup_classifier.rb): cleanup plans for bindings.
 * [`control_flow.rb`](control_flow.rb): CFG construction, ownership dataflow, and use-after-move checking.
 * [`mir_pass.rb`](mir_pass.rb): coordinates MIR-side AST analysis and stamping.
 * [`mir_lowering.rb`](mir_lowering.rb) and [`lowering/`](lowering/): AST-to-MIR lowering.
 * [`mir_checker.rb`](mir_checker.rb): ownership and lifecycle verification over MIR.
+
+Shared semantic analyses live outside MIR in [`../semantic`](../semantic):
+
+* [`../semantic/pass_state.rb`](../semantic/pass_state.rb): enforced compiler
+  pass ordering from annotation through MIR checking.
+* [`../semantic/escape_analysis.rb`](../semantic/escape_analysis.rb): AST-bound
+  storage and escape decisions consumed by MIRPass.
+* [`../semantic/bg_capture_classifier.rb`](../semantic/bg_capture_classifier.rb):
+  one writer for BG capture strategy facts.
+* [`../semantic/effect_inference.rb`](../semantic/effect_inference.rb) and
+  [`../semantic/concurrency_checks.rb`](../semantic/concurrency_checks.rb):
+  source-level whole-program semantic checks run by the annotator.
+* [`../semantic/ownership_graph.rb`](../semantic/ownership_graph.rb): ownership
+  and borrow graph used while annotating source-level movement.
 * [`mir_emitter.rb`](mir_emitter.rb): pure MIR-to-Zig templates.
 * `fsm_*`: async/background FSM lowering and emission support.
 * `thunk_transform*`: recursion thunk/trampoline lowering support.

@@ -18,7 +18,7 @@
 
 require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 
 module MIR
   extend T::Sig

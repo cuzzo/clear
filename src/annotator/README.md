@@ -39,6 +39,7 @@ parsed AST
   -> hoist function signatures into the global scope
   -> analyze function bodies and expression types
   -> resolve Auto slots, if any
+  -> run shared semantic analyses
   -> classify BG capture strategy
   -> infer effects and validate capability-sensitive calls
   -> run deferred WITH / lock / reentrancy / stack metadata checks
@@ -83,6 +84,8 @@ This is already useful, but it is also one of the messier boundaries: several
 independent analyses share instance variables on `SemanticAnnotator`. The
 long-term shape should be smaller phase objects with explicit inputs and
 outputs, especially for call graph, effects, capabilities, and lock analysis.
+Shared analyses that are consumed by both annotation and MIR live in
+[`../semantic`](../semantic) rather than under MIR.
 
 ### 1. Entry Point
 
@@ -372,8 +375,10 @@ Files:
 
 * [`helpers/effects.rb`](helpers/effects.rb)
 * [`helpers/reentrance.rb`](helpers/reentrance.rb)
-* [`../mir/effect_inference.rb`](../mir/effect_inference.rb)
-* [`../mir/concurrency_checks.rb`](../mir/concurrency_checks.rb)
+* [`../semantic/effect_inference.rb`](../semantic/effect_inference.rb)
+* [`../semantic/concurrency_checks.rb`](../semantic/concurrency_checks.rb)
+* [`../semantic/bg_capture_classifier.rb`](../semantic/bg_capture_classifier.rb)
+* [`../semantic/escape_analysis.rb`](../semantic/escape_analysis.rb)
 
 After all functions have been visited, the annotator has the complete call
 graph and can compute transitive metadata:
@@ -406,6 +411,10 @@ The annotator finishes by marking the program as `:annotated`:
 ```ruby
 MIRPassState.for!(program).mark!(:annotated)
 ```
+
+`MIRPassState` itself lives in [`../semantic/pass_state.rb`](../semantic/pass_state.rb)
+because it records the shared compiler phase contract from annotation through
+MIR checking.
 
 At this boundary, MIR expects:
 
@@ -471,6 +480,9 @@ lives in the large main file:
   and strict-test validation.
 * [`helpers/fixable_helpers.rb`](helpers/fixable_helpers.rb): user-facing
   diagnostics and fix generation.
+* [`../semantic`](../semantic): shared semantic analyses such as ownership graph,
+  caller sync propagation, BG capture classification, effect projection,
+  concurrency checks, and compiler pass-state tracking.
 
 ## Current Messy Areas
 
@@ -484,9 +496,9 @@ wide for v0.1 comfort:
   through helper APIs.
 * Capability handling still mixes validation, alias construction, effect
   recording, audit, and lock graph updates in the same visitor path.
-* Some MIR-facing facts are stamped directly on AST nodes from scattered
-  helper code. The desired shape is a small number of authoritative analysis
-  outputs that lowering reads.
+* Some MIR-facing facts are stamped directly on AST nodes from scattered helper
+  code. The desired shape is a small number of authoritative outputs from
+  `src/semantic` that lowering reads.
 * `annotator.rb` is still a large visitor with many unrelated policy checks.
   More node families should move into focused helper modules or phase objects.
 

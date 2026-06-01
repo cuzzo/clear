@@ -50,7 +50,7 @@ module LockHelper
     # Phase 3: per-type lock rank. First declaration of a type with
     # @locked(rank: N) / @writeLocked(rank: N) establishes the rank;
     # every subsequent declaration of that type must agree.
-    @lock_type_ranks      = T.let({}, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @lock_type_ranks      = T.let({}, T.nilable(T::Hash[Symbol, Integer]))
     @lock_transitive_acquires = T.let({}, T.nilable(T::Hash[T.untyped, T.untyped]))
     T.must(@lock_direct_edges)
   end
@@ -131,14 +131,15 @@ module LockHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @held_lock_types = T.let(@held_lock_types, T.untyped)
     return unless @held_lock_types && !@held_lock_types.empty?
-    return unless @lock_type_ranks && !@lock_type_ranks.empty?
+    lock_type_ranks = @lock_type_ranks
+    return unless lock_type_ranks && !lock_type_ranks.empty?
     escape = node.deadlock_escape
     expanded_capabilities.each do |cap|
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
       cap_rank = rank_of_cap(cap)
       next unless cap_rank
       @held_lock_types.each do |entry|
-        held_rank = @lock_type_ranks[entry.type]
+        held_rank = lock_type_ranks[entry.type]
         next unless held_rank
         next if cap_rank > held_rank
         if escape

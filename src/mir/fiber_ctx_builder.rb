@@ -2,7 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "mir"
-require_relative "capture_strategy"
+require_relative "../semantic/capture_strategy"
 
 # FiberCtxBuilder
 # ===============

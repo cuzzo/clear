@@ -11,10 +11,10 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_classifier"
-require_relative "escape_analysis"
-require_relative "bg_capture_classifier"
+require_relative "../semantic/escape_analysis"
+require_relative "../semantic/bg_capture_classifier"
 require_relative "control_flow"
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 require_relative "placement"
 
 class MIRPass

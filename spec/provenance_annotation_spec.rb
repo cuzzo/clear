@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/mir/escape_analysis"
+require_relative "../src/semantic/escape_analysis"
 
 # Phase 2 validation: provenance is set correctly during annotation
 # and agrees with existing flags (heap_promoted, location, cleanup_alloc).
