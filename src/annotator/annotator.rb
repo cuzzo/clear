@@ -9,6 +9,7 @@ require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
 require_relative "phases/declaration_index"
 require_relative "phases/signature_registry"
+require_relative "phases/type_registration"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
@@ -54,6 +55,7 @@ class SemanticAnnotator
   include UnionAnalysis
   include LockHelper
   include TestAnnotation
+  include Annotator::Phases::TypeRegistration
 
   class SnapshotTxnViolation < T::Struct
     const :effect, Symbol
@@ -505,7 +507,7 @@ private
     declarations.imports.each { |stmt| visit_RequireNode(stmt) }
 
     # Types are registered before function signatures can reference them.
-    declarations.type_declarations.each { |stmt| visit(stmt) }
+    register_type_declarations(declarations)
 
     # Function signatures are hoisted so functions can call later definitions.
     declarations.function_declarations.each { |stmt| register_function_signature(stmt) }
@@ -670,32 +672,6 @@ private
       # Free function — register in scope as before
       current_scope.declare(node.name, nil, signature, false, false, nil, :static)
     end
-    stamp_type!(node, :Void)
-  end
-
-  # EXTERN STRUCT Name<T> { fields } [CLOSE "method"] FROM "module"
-  # Registers a native Zig/C struct type for CLEAR type-checking.
-  # CLOSE makes it a resource type — auto-defer cleanup via RAII.
-  sig { params(node: AST::ExternStructDecl).returns(Symbol) }
-  def visit_ExternStructDecl(node)
-    fields = node.field_decls.transform_keys(&:to_s)
-    type_params = node.respond_to?(:type_params) ? node.type_params : nil
-    tp = type_params&.any? ? type_params.map(&:to_sym) : nil
-
-    schema = if node.close_method && node.from_module
-      Schemas::ResourceSchema.new(
-        close_zig: "{0}.#{node.close_method}()",
-        fields: fields, type_params: tp,
-        extern_module: node.from_module, as_type: node.as_type,
-      )
-    else
-      Schemas::StructSchema.new(
-        fields: fields, type_params: tp,
-        extern_module: node.from_module, as_type: node.as_type,
-      )
-    end
-
-    current_scope.declare_type(node.name.to_sym, schema)
     stamp_type!(node, :Void)
   end
 
@@ -1196,86 +1172,6 @@ private
       visit(stmt)
     end
     @stmts_after = saved
-  end
-
-  sig { params(node: AST::StructDef).returns(T.nilable(Symbol)) }
-  def visit_StructDef(node)
-    # Validate generic type parameters (duplicate / builtin-shadow)
-    validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
-
-    # A field default's type IS the field's declared type (it must be
-    # assignable to it) — not a guess. These default nodes (Literal /
-    # DefaultLit) are schema metadata never walked by the expression
-    # visitor, so type them here.
-    node.field_decls.each do |_, f|
-      d = f.default
-      next unless d
-      # In field-default position the value's type IS the field type;
-      # assign unconditionally (overrides a Literal's derived kind).
-      stamp_type!(d, f.type.is_a?(Type) ? f.type : Type.new(f.type || :Any))
-    end
-
-    schema = Schemas::StructSchema.new(
-      fields: node.field_decls,
-      type_params: node.type_params&.any? ? node.type_params.map(&:to_sym) : nil,
-      visibility: node.visibility || :package,
-    )
-    current_scope.declare_type(node.name.to_sym, schema)
-    stamp_type!(node, :Void)
-  end
-
-  sig { params(node: AST::EnumDef).returns(Symbol) }
-  def visit_EnumDef(node)
-    schema = Schemas::EnumSchema.new(
-      variants: node.variants.to_set,
-      visibility: node.visibility || :package,
-    )
-    current_scope.declare_type(node.name.to_sym, schema)
-    stamp_type!(node, :Void)
-  end
-
-  sig { params(node: AST::UnionDef).returns(T.nilable(Symbol)) }
-  def visit_UnionDef(node)
-    # Validate generic type parameters (duplicate / builtin-shadow)
-    validate_type_param_list!(node, node.type_params, "union") if node.type_params&.any?
-
-    # Inline struct variants are not supported in generic unions.
-    if node.type_params&.any? && node.variants.any? { |_, v| Schemas.inline_struct?(v) }
-      error!(node, :UNION_INLINE_IN_GENERIC)
-    end
-
-    # Register a synthetic struct schema for each inline struct variant so
-    # that MATCH AS bindings (e.g. `Shape.Circle AS c`) can field-access the payload.
-    node.variants.each do |var_name, var_data|
-      next unless Schemas.inline_struct?(var_data)
-      synthetic_name = :"#{node.name}_#{var_name}"
-      current_scope.declare_type(synthetic_name, Schemas::StructSchema.new(
-        fields: var_data.fields.transform_values { |t| AST::StructField.new(type: t) }))
-
-      # Pre-compute deinit entries for transpiler: which fields need cleanup.
-      deinit_entries = []
-      var_data.fields.each do |fname, ftype|
-        ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-        if ft.indirect?
-          deinit_entries << { field: fname, kind: :indirect, zig_type: Type.new(ft.resolved).zig_type }
-        elsif ft.string?
-          deinit_entries << { field: fname, kind: :uniform, zig_type: ft.zig_type }
-        elsif ft.collection?
-          deinit_entries << { field: fname, kind: :uniform, zig_type: ft.zig_type }
-        elsif ft.array? && !ft.string?
-          deinit_entries << { field: fname, kind: :array, elem_zig_type: Type.new(ft.element_type).zig_type }
-        end
-      end
-      var_data.deinit_entries = deinit_entries if deinit_entries.any?
-    end
-
-    schema = Schemas::UnionSchema.new(
-      variants: node.variants,
-      type_params: node.type_params&.any? ? node.type_params.map(&:to_sym) : nil,
-      visibility: node.visibility || :package,
-    )
-    current_scope.declare_type(node.name.to_sym, schema)
-    stamp_type!(node, :Void)
   end
 
   # Called after Pass 2 (all function signatures registered).

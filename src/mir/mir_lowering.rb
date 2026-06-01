@@ -2411,13 +2411,17 @@ class MIRLowering
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_stmts = (fact.data.deinit_entries || []).flat_map { |de|
-        self_field = MIR::FieldGet.new(self_ref, de[:field])
-        case de[:kind]
+      deinit_entries = T.cast(
+        fact.data.deinit_entries || [],
+        T::Array[Schemas::InlineStructDeinitEntry]
+      )
+      deinit_stmts = deinit_entries.flat_map { |de|
+        self_field = MIR::FieldGet.new(self_ref, de.field)
+        case de.kind
         when :indirect
           [
             MIR::ExprStmt.new(
-              emit_builtin(:cleanup, [MIR::Ident.new(de[:zig_type]), alloc_ref, self_field]),
+              emit_builtin(:cleanup, [MIR::Ident.new(T.must(de.zig_type)), alloc_ref, self_field]),
               false
             ),
             MIR::ExprStmt.new(MIR::DestroyPtr.new(self_field, alloc_ref), false),
@@ -2426,7 +2430,7 @@ class MIRLowering
           [
             MIR::ExprStmt.new(
               emit_builtin(:cleanup, [
-                MIR::Ident.new(de[:zig_type]),
+                MIR::Ident.new(T.must(de.zig_type)),
                 alloc_ref,
                 MIR::AddressOf.new(self_field),
               ]),
@@ -2434,7 +2438,7 @@ class MIRLowering
             ),
           ]
         when :array
-          elem_zig = MIR::Ident.new(de[:elem_zig_type])
+          elem_zig = MIR::Ident.new(T.must(de.elem_zig_type))
           loop_body = [
             MIR::ExprStmt.new(
               emit_builtin(:cleanup, [elem_zig, alloc_ref, MIR::Ident.new("__e")]),
