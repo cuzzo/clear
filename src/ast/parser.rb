@@ -523,6 +523,11 @@ class Parser
     type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
     match!(type, val)
   end
+
+  sig { params(val: String).returns(Symbol) }
+  def literal_token_type(val)
+    val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
+  end
   ## END PATTERN DSL
 
 
@@ -781,9 +786,7 @@ class Parser
       stmt = parse_statement
       body = [stmt].compact
     else
-      consume(:KEYWORD, 'DO')
-      body  = parse_block_body(['END'])
-      consume(:KEYWORD, 'END')
+      body = parse_keyword_block('DO')
     end
 
     node = AST::WhileLoop.new(tight_token, cond, body, nil)
@@ -1005,19 +1008,13 @@ class Parser
 
     # Parse name: either "fnName", "fnName<T>", or "TypeName<T>.methodName"
     owner_type = nil
-    owner_type_params = []
-    fn_type_params = []
+    owner_type_params = T.let([], T::Array[Symbol])
+    fn_type_params = T.let([], T::Array[Symbol])
 
     if match?(:TYPE_ID)
       # Could be TypeName<T>.method or just a TYPE_ID-named function
       type_name = T.must(consume(:TYPE_ID)).value
-      if match!(:CHAR, '<')
-        loop do
-          owner_type_params << T.must(consume(:TYPE_ID)).value.to_sym
-          break unless match!(:CHAR, ',')
-        end
-        consume(:CHAR, '>')
-      end
+      owner_type_params = parse_generic_type_param_symbols
       if match!(:CHAR, '.')
         # It's a method: TypeName<T>.methodName
         owner_type = type_name
@@ -1031,13 +1028,7 @@ class Parser
     else
       name = T.must(consume(:VAR_ID)).value
       # Optional generic type params on the function: fnName<T>
-      if match!(:CHAR, '<')
-        loop do
-          fn_type_params << T.must(consume(:TYPE_ID)).value.to_sym
-          break unless match!(:CHAR, ',')
-        end
-        consume(:CHAR, '>')
-      end
+      fn_type_params = parse_generic_type_param_symbols
     end
 
     params = parse_argument_list
@@ -1103,14 +1094,7 @@ class Parser
     name = T.must(consume(:TYPE_ID)).value
 
     # Optional generic type params: EXTERN STRUCT Parsed<T> { ... }
-    type_params = []
-    if match!(:CHAR, '<')
-      loop do
-        type_params << T.must(consume(:TYPE_ID)).value.to_sym
-        break unless match!(:CHAR, ',')
-      end
-      consume(:CHAR, '>')
-    end
+    type_params = parse_generic_type_param_symbols
 
     # Fields can be empty: EXTERN STRUCT Opaque {} FROM "mod";
     fields = parse_struct_body
@@ -1143,15 +1127,7 @@ class Parser
   def parse_struct_def(visibility = :package)
     tok = consume(:KEYWORD, 'STRUCT')
     name = T.must(consume(:TYPE_ID)).value
-    type_params = []
-    if match?(:CHAR, '<')
-      consume(:CHAR, '<')
-      until match?(:CHAR, '>')
-        type_params << T.must(consume(:TYPE_ID)).value
-        match!(:CHAR, ',')
-      end
-      consume(:CHAR, '>')
-    end
+    type_params = parse_generic_type_param_names
     fields = parse_struct_body
     AST::StructDef.new(tok, name, fields, visibility, type_params)
   end
@@ -1176,15 +1152,7 @@ class Parser
     name = T.must(consume(:TYPE_ID)).value
 
     # Parse optional generic type parameters: UNION Option<T> { ... }
-    type_params = []
-    if match?(:CHAR, '<')
-      consume(:CHAR, '<')
-      until match?(:CHAR, '>')
-        type_params << T.must(consume(:TYPE_ID)).value
-        match!(:CHAR, ',')
-      end
-      consume(:CHAR, '>')
-    end
+    type_params = parse_generic_type_param_names
 
     consume(:CHAR, '{')
     variants = {}
@@ -1294,15 +1262,7 @@ class Parser
     end
 
     # Parse optional generic type parameters: FN name<T, U>(...)
-    type_params = []
-    if match?(:CHAR, '<')
-      consume(:CHAR, '<')
-      until match?(:CHAR, '>')
-        type_params << T.must(consume(:TYPE_ID)).value
-        match!(:CHAR, ',')
-      end
-      consume(:CHAR, '>')
-    end
+    type_params = parse_generic_type_param_names
 
     params = parse_argument_list()
 
@@ -1742,17 +1702,35 @@ class Parser
     [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
   end
 
-  sig { params(stop_words: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stop_words: T::Array[String]).returns(T::Array[Object]) }
   def parse_block_body(stop_words = ['END'])
-    stmts = []
+    stmts = T.let([], T::Array[Object])
     types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
     stop_words = stop_words.zip(types)
     # Keep going until we hit a stop word (END, ELSE, CATCH, }, etc)
     until stop_words.any? { |w, t| match?(T.must(t), w) } || match?(:EOF)
       stmt = parse_statement()
-      stmts << stmt if stmt
+      stmts << T.cast(stmt, Object) if stmt
     end
     stmts
+  end
+
+  sig { params(type: Symbol, open: String, close: String).returns(T::Array[Object]) }
+  def parse_statement_block(type, open, close)
+    consume(type, open)
+    body = parse_block_body([close])
+    consume(literal_token_type(close), close)
+    body
+  end
+
+  sig { params(open: String, terminator: String).returns(T::Array[Object]) }
+  def parse_keyword_block(open, terminator: 'END')
+    parse_statement_block(:KEYWORD, open, terminator)
+  end
+
+  sig { returns(T::Array[Object]) }
+  def parse_brace_block
+    parse_statement_block(:CHAR, '{', '}')
   end
 
   sig { params(precedence: Integer).returns(T.untyped) }
@@ -2220,9 +2198,7 @@ class Parser
       stmt = parse_statement
       body = [stmt].compact
     else
-      consume(:KEYWORD, 'DO')
-      body = parse_stmts_until_end
-      consume(:KEYWORD, 'END')
+      body = parse_keyword_block('DO')
     end
 
     if expr.is_a?(AST::RangeLit)
@@ -2439,9 +2415,7 @@ class Parser
         stmt = parse_statement
         return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, [stmt].compact, nil)
       end
-      consume(:KEYWORD, 'DO')
-      body = parse_stmts_until_end
-      consume(:KEYWORD, 'END')
+      body = parse_keyword_block('DO')
       return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, body, nil)
     end
 
@@ -2452,15 +2426,8 @@ class Parser
       return AST::WhileLoop.new(tok, condition, [stmt].compact)
     end
 
-    consume(:KEYWORD, 'DO')
-    body = parse_stmts_until_end
-    consume(:KEYWORD, 'END')
+    body = parse_keyword_block('DO')
     AST::WhileLoop.new(tok, condition, body)
-  end
-
-  sig { returns(T.nilable(T::Array[T.untyped])) }
-  def parse_stmts_until_end
-    parse_block_body(['END'])
   end
 
   sig { returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
@@ -3008,9 +2975,7 @@ class Parser
   sig { returns(AST::EachOp) }
   def parse_each_op
     token = consume(:KEYWORD, 'EACH')
-    consume(:CHAR, '{')
-    body = parse_block_body(['}'])
-    consume(:CHAR, '}')
+    body = parse_brace_block
     AST::EachOp.new(token, body)
   end
 
@@ -3020,9 +2985,7 @@ class Parser
     # TAP f -> single function call (short form)
     # TAP { body } -> block form
     if match?(:CHAR, '{')
-      consume(:CHAR, '{')
-      body = parse_block_body(['}'])
-      consume(:CHAR, '}')
+      body = parse_brace_block
       AST::TapOp.new(token, body)
     else
       # Short form: TAP func -> becomes TAP { func(_); }
@@ -3342,9 +3305,7 @@ class Parser
     end
 
     # Parse block
-    consume(:CHAR, '{')
-    body = parse_block_body(['}'])
-    consume(:CHAR, '}')
+    body = parse_brace_block
 
     node = AST::WithBlock.new(with_token, capabilities, body)
     node.lock_error_clause = parse_lock_error_clause
@@ -3410,9 +3371,7 @@ class Parser
       return node
     end
 
-    consume(:CHAR, '{')
-    body = parse_block_body(['}'])
-    consume(:CHAR, '}')
+    body = parse_brace_block
 
     # Optional `ON Conflict ...` handler. Reuses the same generic
     # `parse_lock_error_clause` path so `RETRY(N) THEN` and the
@@ -3461,9 +3420,7 @@ class Parser
       body = parse_block_body(['END'])
       consume(:KEYWORD, 'END')
     else
-      consume(:CHAR, '{')
-      body = parse_block_body(['}'])
-      consume(:CHAR, '}')
+      body = parse_brace_block
     end
 
     # `view_token` lets fixable errors replace VIEW with MATERIALIZED VIEW
@@ -3494,9 +3451,7 @@ class Parser
       when_tok = consume(:KEYWORD, 'WHEN')
       family = parse_requires_family
       consume(:ARROW, '->')
-      consume(:CHAR, '{')
-      body = parse_block_body(['}'])
-      consume(:CHAR, '}')
+      body = parse_brace_block
 
       # Per-arm ON / RETRY clauses, zero or more.
       lock_error_clauses = []
@@ -3616,9 +3571,7 @@ class Parser
       { action: :exit, message: msg, token: tok }
     elsif match?(:ARROW, '->')
       tok = consume(:ARROW, '->')
-      consume(:CHAR, '{')
-      body = parse_block_body(['}'])
-      consume(:CHAR, '}')
+      body = parse_brace_block
       { action: :block, body: body, token: tok }
     else
       error!(current, :EXPECTED_AFTER_ERROR_CLAUSE)
@@ -3939,9 +3892,7 @@ class Parser
   sig { params(bg_token: Lexer::Token).returns(AST::BgStreamBlock) }
   def parse_bg_stream_block(bg_token)
     consume(:KEYWORD, 'STREAM')
-    consume(:CHAR, '{')
-    body = parse_block_body(['}'])
-    consume(:CHAR, '}')
+    body = parse_brace_block
     AST::BgStreamBlock.new(bg_token, body, nil)
   end
 
@@ -3970,6 +3921,22 @@ class Parser
     end
     consume(:CHAR, close)
     [start_token, items]
+  end
+
+  sig { returns(T::Array[String]) }
+  def parse_generic_type_param_names
+    return [] unless match?(:CHAR, '<')
+
+    _, names = parse_comma_seq(:CHAR, '<', '>') { T.must(consume(:TYPE_ID)).value }
+    names
+  end
+
+  sig { returns(T::Array[Symbol]) }
+  def parse_generic_type_param_symbols
+    return [] unless match?(:CHAR, '<')
+
+    _, names = parse_comma_seq(:CHAR, '<', '>') { T.must(consume(:TYPE_ID)).value.to_sym }
+    names
   end
 
   # Deep-clone an AST node for compound assignment desugaring.
@@ -4062,13 +4029,7 @@ class Parser
   def parse_test_hook(first, second)
     consume(:KEYWORD, first)
     consume(:KEYWORD, second)
-    consume(:KEYWORD, 'DO')
-    body = []
-    until match?(:KEYWORD, 'END')
-      body << parse_statement
-    end
-    consume(:KEYWORD, 'END')
-    body
+    parse_keyword_block('DO')
   end
 
   # WHEN "description" [TAGS [tag1, tag2, ...]] DO ... END
@@ -4159,13 +4120,7 @@ class Parser
     tok = consume(:KEYWORD, 'TEST')
     consume(:KEYWORD, 'THAT')
     desc = T.must(consume(:STRING)).value
-    consume(:KEYWORD, 'DO')
-
-    body = []
-    until match?(:KEYWORD, 'END')
-      body << parse_statement
-    end
-    consume(:KEYWORD, 'END')
+    body = parse_keyword_block('DO')
 
     AST::TestThat.new(tok, desc, body)
   end
