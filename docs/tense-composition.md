@@ -6,9 +6,12 @@ See [Sharing Capabilities](sharing-capabilities.md) for more details.
 
 ## Tenses:
 
- * `~T`: Future Tense: A `T` that is not guaranteed to be available now, but at some point in the future will be, certainly.
- * `!T`: Failable Tense: A `T` that could be an error or a `T`.
- * `?T`: Optional Tense: A `T` that could be Nil or a `T`.
+ * **Future Tense:** `~T`
+   * A `T` that is not guaranteed to be available now, but at some point in the future will be.
+ * **Failable Tense:** `!T`
+   * A `T` that could be an error or a `T`.
+ * **Optional Tense:** `?T`
+   * A `T` that could be Nil or a `T`.
 
 ## Combinations:
 
@@ -64,13 +67,13 @@ Following the ordered list above, the come first (left most) because they dictat
 If something is *FOR SURE* a future -> it starts with `~` no space for other tenses:
 
  * A future to an optional `~?T`
- * A future to a failible `~!T`
- * A future to a failible optional (bad design) `~!?T`
+ * A future to a fallible `~!T`
+ * A future to a fallible optional (bad design) `~!?T`
 
 If something is *FOR SURE* fallible -> it starts with `!` and a space & parens if other tenses:
 
- * A failible `!T`
- * A failible future `! (~T)`
+ * A fallible `!T`
+ * A fallible future `! (~T)`
 
 If something is *FOR SURE* optional -> it starts with `?` and a space & parens if other tenses:
 
@@ -173,7 +176,7 @@ print("stream closed.");
 | `T[]` | Standard Array | Ultra-Common |
 | `!T[]` | Array of Fallible Elements<br>(you build an array / map of individual funcs that fail) | Common |
 | `~!T[]` | Stream of Fallible Elements (Your BG STREAM type)<br>(you BG STREAM a func that fails) | Common |
-| `! (~T[])` | Fallible Stream (Stream closes if it errors)<br>You return a stream in a function that can fail | Rare<br>(BAD DESIGN) |
 | `! (T[])` | Fallible Array Container (Synchronous error)<br>(You return an array in a function that can fail) | Common |
 | `~(T[])` | Future Array | Less Common |
-| `! ~(T[])` | Fallible Future Array (Standard Async API Fetch) | Common |
+| `! ~(T[])` | Fallible Future Array (Standard Async API Fetch) | Less Common<br />Some APIs |
+| `! (~T[])` | Fallible Stream (Stream closes if it errors)<br>You return a stream in a function that can fail | Rare<br />Some APIs |
