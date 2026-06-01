@@ -56,6 +56,20 @@ RSpec.describe "annotator branch gap burndown" do
     ann.instance_variable_get(:@direct_errors)
   end
 
+  def record_body_summaries(ann, graph, propagating: {}, raises: Set.new, fnptr: Set.new)
+    graph.each do |name, callees|
+      callee_set = callees.to_set
+      prop_set = (propagating.key?(name) ? propagating.fetch(name) : callee_set).to_set
+      ann.send(:record_function_body_summary!, Annotator::Phases::FunctionBodySummary.new(
+        name: name,
+        callees: callee_set,
+        propagating_callees: prop_set,
+        has_fnptr_call: fnptr.include?(name),
+        raises_directly: raises.include?(name)
+      ))
+    end
+  end
+
   it "marks non-stack list literal backing storage as frame-allocated" do
     ann = quiet_annotator
     item = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
@@ -768,9 +782,12 @@ RSpec.describe "annotator branch gap burndown" do
     caller = AST::FunctionDef.new(token, "caller", [], [], Type.new(:Void), nil, [], [], nil, :package)
     callee = AST::FunctionDef.new(token, "callee", [], [], Type.new(:"!Void"), nil, [], [], nil, :package)
     effects_ann.instance_variable_set(:@fn_nodes, { "caller" => caller, "callee" => callee })
-    effects_ann.instance_variable_set(:@fn_raises_directly, { "callee" => true })
-    effects_ann.instance_variable_set(:@call_graph, { "caller" => ["callee", "missing"], "callee" => [] })
-    effects_ann.instance_variable_set(:@fn_propagating_callees, { "caller" => ["callee"] })
+    record_body_summaries(
+      effects_ann,
+      { "caller" => ["callee", "missing"], "callee" => [] },
+      propagating: { "caller" => ["callee"] },
+      raises: Set["callee"]
+    )
     effects_ann.send(:compute_can_fail!)
     expect(caller.can_fail).to eq(true)
 
@@ -885,7 +902,7 @@ RSpec.describe "annotator branch gap burndown" do
     other.reentrance_kind = :reentrant
     ann.instance_variable_set(:@fn_nodes, { "direct" => direct, "mutual" => mutual, "other" => other })
     ann.instance_variable_set(:@fn_direct_effects, { "direct" => Set[EffectTracker::REENTRANT], "mutual" => Set.new, "other" => Set.new })
-    ann.instance_variable_set(:@call_graph, { "direct" => Set.new, "mutual" => Set["other"], "other" => Set["mutual"] })
+    record_body_summaries(ann, { "direct" => Set.new, "mutual" => Set["other"], "other" => Set["mutual"] })
 
     ann.send(:validate_not_logical_recursion!)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_NOT_LOGICAL_BUT_RECURSIVE)
@@ -907,7 +924,7 @@ RSpec.describe "annotator branch gap burndown" do
     partner.reentrance_kind = :reentrant
     ann.instance_variable_set(:@fn_nodes, { "bounded" => max_depth, "partner" => partner })
     ann.instance_variable_set(:@fn_direct_effects, { "bounded" => Set.new, "partner" => Set.new })
-    ann.instance_variable_set(:@call_graph, { "bounded" => Set["partner"], "partner" => Set["bounded"] })
+    record_body_summaries(ann, { "bounded" => Set["partner"], "partner" => Set["bounded"] })
     ann.send(:validate_max_depth_mutual_cycle!)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
 
@@ -919,7 +936,7 @@ RSpec.describe "annotator branch gap burndown" do
     CHT
     lonely.reentrance_kind = :reentrant_thunk
     ann.instance_variable_set(:@fn_nodes, { "lonely" => lonely })
-    ann.instance_variable_set(:@call_graph, { "lonely" => Set.new })
+    record_body_summaries(ann, { "lonely" => Set.new })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, lonely)).to eq(false)
 
     a = function_from(<<~CHT, "a")
@@ -937,7 +954,7 @@ RSpec.describe "annotator branch gap burndown" do
     a.reentrance_kind = :reentrant_thunk
     b.reentrance_kind = :reentrant_thunk
     ann.instance_variable_set(:@fn_nodes, { "a" => a, "b" => b })
-    ann.instance_variable_set(:@call_graph, { "a" => Set["b"], "b" => Set["a"] })
+    record_body_summaries(ann, { "a" => Set["b"], "b" => Set["a"] })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, a)).to eq(false)
 
     c = function_from(<<~CHT, "c")
@@ -955,7 +972,7 @@ RSpec.describe "annotator branch gap burndown" do
     c.reentrance_kind = :reentrant_thunk
     d.reentrance_kind = :reentrant_thunk
     ann.instance_variable_set(:@fn_nodes, { "c" => c, "d" => d })
-    ann.instance_variable_set(:@call_graph, { "c" => Set["d"], "d" => Set["c"] })
+    record_body_summaries(ann, { "c" => Set["d"], "d" => Set["c"] })
     ann.send(:emit_mutual_thunk_unsupported!, c)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
 
@@ -977,7 +994,7 @@ RSpec.describe "annotator branch gap burndown" do
       fn.return_type_token = nil
     end
     ann.instance_variable_set(:@fn_nodes, { "no_span" => no_span, "no_edit" => no_edit })
-    ann.instance_variable_set(:@call_graph, { "no_span" => Set["no_edit"], "no_edit" => Set["no_span"] })
+    record_body_summaries(ann, { "no_span" => Set["no_edit"], "no_edit" => Set["no_span"] })
     ann.send(:emit_mutual_thunk_unsupported!, no_span)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_MUTUAL_THUNK_UNSUPPORTED)
   end
@@ -1436,7 +1453,7 @@ RSpec.describe "annotator branch gap burndown" do
       "caller" => caller,
       "missing_caller" => missing_caller,
     })
-    ann.instance_variable_set(:@call_graph, {
+    record_body_summaries(ann, {
       "micro" => Set.new,
       "standard" => Set.new,
       "large" => Set.new,
@@ -1567,7 +1584,7 @@ RSpec.describe "annotator branch gap burndown" do
     fixable.error_fallible = true
     fixable.explicit_return_type = true
     fixable.return_type_token = token(:TYPE_ID, "Int64")
-    ann.instance_variable_set(:@fn_raises_directly, { "fixable" => true })
+    record_body_summaries(ann, { "fixable" => Set.new }, raises: Set["fixable"])
 
     plain_error = function_from("FN plain_error() RETURNS Int64 -> RETURN 1_i64; END", "plain_error")
     plain_error.error_fallible = true

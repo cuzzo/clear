@@ -276,13 +276,11 @@ class SemanticAnnotator
     @match_pattern_context = T.let(false, T.nilable(T::Boolean)) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @held_locks = T.let({}, T.nilable(HeldLockMap))
     @held_lock_types = T.let([], T.nilable(T::Array[HeldLockTypeEntry]))
-    # Reentrancy analysis
-    @call_graph  = T.let({}, T::Hash[T.untyped, T.untyped])  # name => Set of directly-called function names (excluding self-calls)
-    @fn_propagating_callees = T.let({}, T::Hash[T.untyped, T.untyped]) # name => Set of callees whose error channel can propagate (NOT OR-absorbed); authority for can_fail (#11)
-    @fn_has_fnptr = T.let({}, T::Hash[T.untyped, T.untyped]) # name => true if function calls a fn-type variable or lambda
+    # Reentrancy and fallibility analysis facts recorded by the body-summary
+    # phase. This is the single source for call graph, propagating callees,
+    # fn-pointer calls, and direct failure seeds.
+    @body_summaries = T.let({}, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @fn_nodes    = T.let({}, T::Hash[String, AST::FunctionDef])  # name => FunctionDef node (for error reporting in the post-pass)
-    # Performance analysis
-    @fn_raises_directly = T.let({}, T::Hash[T.untyped, T.untyped])  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
@@ -295,7 +293,7 @@ class SemanticAnnotator
     @in_auto_locked_assign = T.let(nil, T.nilable(String))
     @with_block_depth = T.let(0, Integer)
 
-    # Lock analysis is cycle-checked after @call_graph is complete.
+    # Lock analysis is cycle-checked after function_call_graph is complete.
     init_lock_analysis!
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = T.let(false, T::Boolean)
@@ -679,15 +677,6 @@ private
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
     called_names, has_fnptr, unabsorbed_calls = scan_for_calls(node.body)
     directly_recursive = called_names.include?(node.name)
-    # Record in call graph for the later indirect-cycle post-pass.
-    @call_graph[node.name]   = called_names - [node.name]
-    # Single authority for can_fail propagation: only callees whose error
-    # channel is NOT locally terminated (e.g. NOT `f() OR <fallback>`)
-    # can propagate failure to this fn. The shared @call_graph keeps
-    # every callee (reentrancy / needs_rt need that); this is the subset
-    # that actually carries the error channel. (puck-clear-bugs.md #11)
-    @fn_propagating_callees[node.name] = (unabsorbed_calls || called_names) - [node.name]
-    @fn_has_fnptr[node.name] = has_fnptr
     current_fn_ctx.uses_rt = true if has_fnptr && current_fn_ctx
 
     if directly_recursive
@@ -736,7 +725,7 @@ private
     elsif node.reentrance_kind == :reentrant_thunk
       # The "directly recursive" branch above is false here. The
       # function might still be MUTUALLY recursive (A calls B calls
-      # A), which @call_graph hasn't fully recorded yet at this
+      # A), which function_call_graph hasn't fully recorded yet at this
       # point in Pass 3. Defer the THUNK-recursion validation to
       # Pass 4.1 (validate_thunk_recursion!) which runs after
       # check_indirect_reentrancy populates the cycle data.
@@ -774,11 +763,18 @@ private
     # are NOT failure. Conflating allocation with failure forced every
     # string-touching `RETURNS T` to `RETURNS !T` with a lying "raises
     # directly via RAISE" diagnostic (puck-clear-bugs.md #3).
-    @fn_raises_directly[node.name] =
-      (@fn_has_fnptr[node.name] == true) ||
+    raises_directly =
+      has_fnptr ||
       (node.reentrant == :non_reentrant) ||
       (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
-      scan_for_raises(node.body)
+      scan_for_raises(node.body) == true
+    record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
+      name: node.name,
+      callees: called_names - [node.name],
+      propagating_callees: (unabsorbed_calls || called_names) - [node.name],
+      has_fnptr_call: has_fnptr,
+      raises_directly: raises_directly
+    ))
     if current_fn_ctx && runtime_error_clause?(node)
       current_fn_ctx.uses_rt = true
     end
@@ -4537,7 +4533,7 @@ private
     mark_with_runtime_requirements!(node)
     # Queue this WITH for the post-pass handler-reachability check. Running
     # it here (during annotation) is too early — cycle information isn't
-    # known until compute_lock_cycles! has propagated through @call_graph.
+    # known until compute_lock_cycles! has propagated through function_call_graph.
     record_lock_clause_site!(node, expanded_capabilities)
 
     @with_block_depth -= 1
@@ -6295,7 +6291,7 @@ private
       visited << name
       fn = @fn_nodes[name]
       return name if fn && fn.reentrance_kind == :reentrant
-      (@call_graph[name] || []).each { |c| queue << c }
+      (function_call_graph[name] || []).each { |c| queue << c }
     end
     nil
   end
@@ -6314,7 +6310,7 @@ private
       visited << name
       fn = @fn_nodes[name]
       return name if fn && fn.reentrance_kind == :reentrant_max_depth && mutually_recursive_in_call_graph?(name)
-      (@call_graph[name] || []).each { |c| queue << c }
+      (function_call_graph[name] || []).each { |c| queue << c }
     end
     nil
   end
@@ -6370,7 +6366,7 @@ private
       next if visited.include?(name)
       visited << name
       return name if @fn_nodes[name]&.stack_tier == :unbounded
-      (@call_graph[name] || []).each { |c| queue << c }
+      (function_call_graph[name] || []).each { |c| queue << c }
     end
     nil
   end

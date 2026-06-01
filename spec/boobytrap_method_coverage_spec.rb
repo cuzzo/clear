@@ -216,7 +216,18 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(a.send(:contains_self_call?, nested, "recur")).to be(true)
     expect(a.send(:contains_self_call?, nil, "recur")).to be(false)
 
-    a.instance_variable_set(:@call_graph, { "start" => Set["mid"], "mid" => Set["deep"] })
+    {
+      "start" => Set["mid"],
+      "mid" => Set["deep"],
+    }.each do |name, callees|
+      a.send(:record_function_body_summary!, Annotator::Phases::FunctionBodySummary.new(
+        name: name,
+        callees: callees,
+        propagating_callees: callees,
+        has_fnptr_call: false,
+        raises_directly: false
+      ))
+    end
     fn = AST::FunctionDef.new(tok, "deep", [], [], :Void, nil, [], [], nil, :private, [], false)
     fn.stack_tier = :unbounded
     a.instance_variable_set(:@fn_nodes, { "deep" => fn })

@@ -68,7 +68,7 @@ module ReentranceBridge
         # path. Setting fn_node.reentrant = :non_reentrant makes
         # MIRLowering emit the StackGuard prologue (which raises
         # `error.UnexpectedRecursion` if the fn re-enters), and
-        # @fn_raises_directly[name] picks it up as a can_fail seed.
+        # function_raises_directly?(name) picks it up as a can_fail seed.
         fn_node.reentrant = :non_reentrant
       when :reentrant_max_depth
         # Phase 4f.3: bounded recursion. The codegen path emits
@@ -198,12 +198,12 @@ module ReentranceBridge
   # is genuinely recursive (direct or mutual) AND that the recursion
   # shape is supported by the current sub-phase. Runs as Pass 4.1
   # in the annotator (after check_indirect_reentrancy populates
-  # @call_graph cycles), so transitive reachability is available.
+  # function_call_graph cycles), so transitive reachability is available.
   #
   # Three buckets, each with a precise forward-pointing error
   # message naming the sub-phase that will (or won't) support it:
   #
-  #   1. Not recursive at all (no path back to self in @call_graph)
+  #   1. Not recursive at all (no path back to self in function_call_graph)
   #      -> "Remove ':THUNK' -- the function is not recursive."
   #   2. Directly self-recursive
   #      -> OK; Phase 4a-d already handle this (factorial-shape).
@@ -227,7 +227,7 @@ module ReentranceBridge
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
-      # `@call_graph[name]` strips self-calls (annotator.rb:599), so
+      # `function_call_graph[name]` strips self-calls (annotator.rb:599), so
       # direct self-recursion shows up in `@fn_direct_effects[name]`
       # as the REENTRANT marker recorded at visit_FunctionDef. Mutual
       # cycles still go through `reachable_from_self?`.
@@ -244,7 +244,7 @@ module ReentranceBridge
   end
 
   # F4: EFFECTS REENTRANT:MAX_DEPTH(N) on a function whose name
-  # appears in a @call_graph cycle silently demotes the cycle to
+  # appears in a function_call_graph cycle silently demotes the cycle to
   # `:unbounded` stack tier (4 MB :service OS thread per fiber) --
   # the user picked `:MAX_DEPTH` precisely to avoid that cost; the
   # silent demotion defeats the choice. Computing a precise SCC
@@ -309,14 +309,13 @@ module ReentranceBridge
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @call_graph = T.let(@call_graph, T.untyped)
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
       next if fn_node.thunk_plan # simple-recurrence handled by Phase 4d codegen
       next if fn_node.mutual_thunk_plan # tagged-union mutual handled by Phase 4f.1
 
-      direct = (@call_graph[name] || Set.new).include?(name)
+      direct = (function_call_graph[name] || Set.new).include?(name)
       mutually = !direct && reachable_from_self?(name)
 
       if direct
@@ -535,7 +534,7 @@ module ReentranceBridge
     )]
   end
 
-  # Strongly-connected component containing `start` in @call_graph
+  # Strongly-connected component containing `start` in function_call_graph
   # (intersection of forward- and backward-reachable sets, plus
   # `start` itself when start is on a cycle). Used by Phase 4f.1
   # to enumerate cycle members for tagged-union frame codegen.
@@ -543,9 +542,9 @@ module ReentranceBridge
   def thunk_cycle_members(start)
     T.bind(self, SemanticAnnotator) rescue nil
     start_s = start.to_s
-    forward = compute_reachable(@call_graph, start_s)
+    forward = compute_reachable(function_call_graph, start_s)
     reverse_graph = {}
-    @call_graph.each do |s, callees|
+    function_call_graph.each do |s, callees|
       callees.each { |t| (reverse_graph[t.to_s] ||= Set.new) << s.to_s }
     end
     backward = compute_reachable(reverse_graph, start_s)
@@ -568,7 +567,7 @@ module ReentranceBridge
     seen
   end
 
-  # BFS over @call_graph: is `start` reachable from itself via at
+  # BFS over function_call_graph: is `start` reachable from itself via at
   # least one edge? (Used to detect mutual recursion -- a fn that
   # transitively calls back to itself but doesn't have a direct
   # self-call edge.)
@@ -576,13 +575,13 @@ module ReentranceBridge
   def reachable_from_self?(start)
     T.bind(self, SemanticAnnotator) rescue nil
     visited = Set.new
-    queue   = (@call_graph[start] || Set.new).to_a
+    queue   = (function_call_graph[start] || Set.new).to_a
     until queue.empty?
       callee = queue.shift
       next if visited.include?(callee)
       visited << callee
       return true if callee == start
-      queue.concat((@call_graph[callee] || Set.new).to_a)
+      queue.concat((function_call_graph[callee] || Set.new).to_a)
     end
     false
   end

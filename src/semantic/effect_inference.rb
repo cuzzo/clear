@@ -8,7 +8,7 @@ require_relative "effect_set"
 # Phase 3.2: project the closed effect lattice from existing annotator
 # fields. Direct effects are recorded by the annotator at visit_X sites
 # (record_effect(EffectTracker::YIELD) etc.); compute_effects! propagates
-# transitively over @call_graph; fn.can_fail is computed by the existing
+# transitively over function_call_graph; fn.can_fail is computed by the existing
 # can-fail post-pass. EffectInference adds nothing at runtime — it just
 # packages those facts as an EffectSet for the formatter and concurrency
 # checks.

@@ -19,7 +19,7 @@ require "set"
 #       - direct_edges:    (held, acquired) pairs from nested WITH sites
 #       - held_calls:      (held, callee) pairs for held-during-call sites
 #     Post-pass:
-#       1. Fixed-point propagate acquires through @call_graph.
+#       1. Fixed-point propagate acquires through function_call_graph.
 #       2. Resolve held_calls into synthetic edges via callee's transitive
 #          acquires.
 #       3. Build the global held->acquired graph over non-opted-out edges.
@@ -204,21 +204,20 @@ module LockHelper
     end
   end
 
-  # Fixed-point propagate direct_acquires through @call_graph so every
+  # Fixed-point propagate direct_acquires through function_call_graph so every
   # fn's "transitive acquires" set contains every lock type it or any
   # transitive callee takes. Mirrors compute_needs_rt! / compute_can_fail!
   # structure.
   sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def propagate_lock_acquires!
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_graph = T.let(@call_graph, T.untyped)
     transitive = {}
     T.must(@lock_direct_acquires).each { |fn, set| transitive[fn] = set.dup }
-    @call_graph.each_key { |fn| transitive[fn] ||= Set.new }
+    function_call_graph.each_key { |fn| transitive[fn] ||= Set.new }
 
     loop do
       changed = T.let(false, T::Boolean)
-      @call_graph.each do |fn, callees|
+      function_call_graph.each do |fn, callees|
         callees.each do |callee|
           next unless transitive[callee]
           transitive[callee].each do |t|
@@ -327,7 +326,7 @@ module LockHelper
     sccs
   end
 
-  # Called as a post-pass once @call_graph is complete.
+  # Called as a post-pass once function_call_graph is complete.
   sig { returns(T.nilable(T::Array[T.untyped])) }
   def check_lock_cycles!
     T.bind(self, SemanticAnnotator) rescue nil

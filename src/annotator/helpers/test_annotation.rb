@@ -190,8 +190,7 @@ module TestAnnotation
       end
 
       # Continue down the call chain
-      @call_graph = T.let(@call_graph, T.untyped)
-      (@call_graph[name] || []).each { |c| queue << c }
+      (function_call_graph[name] || []).each { |c| queue << c }
     end
   end
 end

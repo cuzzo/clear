@@ -258,6 +258,11 @@ Expected output:
   already produced during the existing body walk. Done means at least one old
   deferred queue or ad hoc record payload is fully replaced, with no consumer
   reading both the old and new source for the same decision.
+- [ ] `phase-body-summary-call-facts`: replace the old parallel call/failure
+  hashes with one typed per-function `FunctionBodySummary`. Done means the call
+  graph, propagating callees, fn-pointer-call bit, and direct-failure seed have
+  one owner, and whole-program/effect/lock/reentrance consumers read the typed
+  summary rather than legacy ivars.
 - [x] `phase-body-summary-deferred-with`: replace the old
   `@deferred_with_validations` hash queue with a typed
   `DeferredWithValidation` fact consumed by the deferred-validation phase. This
@@ -267,8 +272,17 @@ Expected output:
   copying with stable binding identity plus explicit flow state. This is the
   large remaining architectural item. Done means migrated flow facts have one
   owner and direct writes to the old `SymbolEntry` fact fields are deleted.
+- [ ] `phase-binding-flow-moved-state`: migrate move/borrow flow facts that are
+  currently mutated directly on `SymbolEntry` into an explicit flow owner. Done
+  means moved-state readers/writers no longer mutate a copied `SymbolEntry`
+  field and branch scopes merge/fork the flow fact directly.
 - [ ] `phase-expression-domains`: after binding/flow ownership is explicit,
   split expression typing domains only where it removes real branch hubs.
+- [ ] `phase-expression-domain-calls`: extract call expression typing into a
+  small typed domain object after call/body summaries are explicit. Done means
+  `visit_FuncCall`/method-call callsite summary production and signature
+  validation no longer rely on ambient annotator hashes, and no legacy helper
+  path remains for the migrated call facts.
 - [x] `phase-program-finalization`: move post-body metadata computation,
   call-graph checks, fallibility/effect propagation, FSM/stack metadata, and
   program result stamping behind one typed program-finalization phase.
