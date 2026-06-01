@@ -234,9 +234,9 @@ module FiberCtxBuilder
   sig { params(ti: Type).returns(String) }
   def self.rc_payload_zig_type(ti)
     payload = Type.new(ti)
-    payload.ownership = :affine
+    payload.apply_reference_ownership!(:affine)
     payload.provenance = nil
-    payload.instance_variable_set(:@zig_type_cache, nil)
+    payload.clear_zig_type_cache!
     if payload.any_sync? && !(payload.map? && payload.striped?)
       inner = payload.bare_data_type.zig_type
       inner = "CheatLib.Locked(#{inner})" if payload.locked?

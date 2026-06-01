@@ -1033,39 +1033,8 @@ module AST
         final_type
       else
         new_t = Type.new(final_type.resolved)
-        # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
-        # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
         val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
-        new_t.shard_count = final_type.shard_count if final_type.shard_count
-        new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
-        new_t.sync = final_type.sync if final_type.sync
-        new_t.soa = final_type.soa if final_type.soa
-        new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
-        new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
-        # Carry @observable through finalize_storage! — without this the
-        # binding's full_type loses the @is_observable bit and downstream
-        # cleanup classification can't recognise `~T@observable`. The
-        # terminal kind (`:sum`/`:count`/.../`:distinct`) must come along
-        # too so OBSERVABLE_WRAPPERS can pick the right wrapper Zig type;
-        # without it the lookup falls back to a default and silently
-        # emits the wrong wrapper.
-        new_t.is_observable = true if final_type.observable? ||
-                                       (val_ti.respond_to?(:observable?) && val_ti.observable?)
-        if final_type.observable_terminal
-          new_t.observable_terminal = final_type.observable_terminal
-        elsif val_ti.respond_to?(:observable_terminal) && val_ti.observable_terminal
-          new_t.observable_terminal = val_ti.observable_terminal
-        end
-        new_t.elem_ownership = final_type.elem_ownership if final_type.elem_ownership
-        new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
-        new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
-        new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
-        new_t.layout = final_type.layout if final_type.respond_to?(:layout) && final_type.layout
-        # Propagate @link_source from value's type
-        if val_ti&.link?
-          link_src = val_ti.link_source
-          new_t.link_source = link_src if link_src
-        end
+        new_t.apply_finalized_value_shape!(final_type: final_type, value_type: val_ti)
         new_t
       end
       # Propagate @link ownership from the value's LinkNode
@@ -1075,36 +1044,20 @@ module AST
       end
 
       case storage
-      when :frozen
-        t.ownership = :frozen
-      when :multiowned
-        t.ownership = :multiowned
-      when :shared
-        t.ownership = :shared
-      when :link
-        t.ownership = :link
       when :rodata
         t.provenance = :rodata
       when :frame
         t.provenance = :frame
       when :heap
         t.provenance = :heap
-        if value_sync == :locked
-          t.sync = :locked
-        elsif value_sync == :write_locked
-          t.sync = :write_locked
-        end
       # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
       end
+      t.apply_storage_capability!(storage, value_sync: value_sync)
 
       # Propagate additional capability fields from the value's type_object
       if respond_to?(:value) && value.type_object
         vt = value.type_object
-        t.ownership = vt.ownership if vt.ownership && vt.ownership != :affine
-        t.sync      = vt.sync      if vt.sync
-        # Preserve value layout so VarDecl can propagate @indirect:atomic
-        # bindings into the symbol table.
-        t.layout    = vt.layout    if vt.layout
+        t.merge_capabilities_from!(vt)
       end
 
       self.full_type = t

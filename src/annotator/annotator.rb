@@ -1445,8 +1445,7 @@ private
       # Propagate ownership so field access auto-derefs through .ctrl.data and
       # the lowering knows to inject rcRelease cleanup.
       if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
-        unwrapped.ownership = ti.ownership
-        unwrapped.link_source = ti.link_source
+        unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
       end
       b.unwrapped_type = unwrapped
     end
@@ -1728,7 +1727,7 @@ private
                 elsif raw_payload.is_a?(Type) && raw_payload.indirect?
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                   inner_type = raw_payload.dup
-                  inner_type.layout = nil
+                  inner_type.strip_layout!
                   inner_type = apply_type_subst(inner_type, union_subst)
                   current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
                   og_declare(c.binding, nil, inner_type)
@@ -2046,8 +2045,7 @@ private
 
     unwrapped = ti.wrapped_type
     if node.condition.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
-      unwrapped.ownership = ti.ownership
-      unwrapped.link_source = ti.link_source
+      unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
     end
 
     current_fn_ctx.loop_depth += 1
@@ -2761,7 +2759,7 @@ private
           nil,
         )
       end
-      target_t.observable_terminal = pipe_terminal
+      target_t.stamp_observable_terminal!(pipe_terminal)
       node.type = target_t
       # node.full_type is the resolved Type read by mir_lowering's
       # transpile_type; propagate the terminal kind there too so
@@ -2779,7 +2777,7 @@ private
             nil,
           )
         end
-        node_type.observable_terminal = pipe_terminal
+        node_type.stamp_observable_terminal!(pipe_terminal)
       end
     end
     stamp_type!(pipe, node.type)
@@ -2892,7 +2890,7 @@ private
     # (WITH EXCLUSIVE unwrapping reads the raw entry.type expecting just the base type).
     scope_type = if node_type.collection && !(final_type.is_a?(Type) && final_type.collection)
       ft = Type.new(final_type)
-      ft.collection = node_type.collection
+      ft.copy_collection_shape_from!(node_type)
       ft
     else
       final_type
@@ -3545,7 +3543,7 @@ private
         # ti.zig_type renders "*T".
         if !struct_pointee
           field_type = field_type.dup
-          field_type.layout = nil
+          field_type.strip_layout!
         end
       end
       if node.target.is_a?(AST::OptionalUnwrap) && field_type.is_a?(Type) && !field_type.optional?
@@ -3693,7 +3691,7 @@ private
       indirect_payload = raw_expected.is_a?(Type) && raw_expected.indirect?
       raw_for_check = if indirect_payload
                         d = raw_expected.dup
-                        d.layout = nil
+                        d.strip_layout!
                         d
                       else
                         raw_expected
@@ -3824,8 +3822,11 @@ private
       # The collection type is set; element type resolves on first append/insert.
       if (coll = node.instance_variable_get(:@constructor_collection))
         t = Type.new(:"Any[]", collection: coll)
-        t.soa = true if node.instance_variable_get(:@constructor_soa)
-        t.shard_count = node.instance_variable_get(:@constructor_shard_count)
+        t.apply_constructor_collection!(
+          collection: nil,
+          soa: !!node.instance_variable_get(:@constructor_soa),
+          shard_count: node.instance_variable_get(:@constructor_shard_count)
+        )
         t.provenance = :heap if coll == :pool || coll == :set
         stamp_type!(node, t)
         node.storage = (coll == :pool || coll == :set) ? :heap : :stack
@@ -4241,15 +4242,17 @@ private
       end
     end
 
-    ti.ownership = node.ownership if node.ownership
-    ti.sync      = node.sync      if node.sync
-    ti.lock_rank = node.lock_rank if node.lock_rank
-    ti.layout    = node.layout    if node.layout
+    ti.apply_declared_type_capabilities!(
+      ownership: node.ownership,
+      sync: node.sync,
+      lock_rank: node.lock_rank,
+      layout: node.layout
+    )
     # AtomicPtr implies shared ownership because escaping the declaring
     # scope is the point of the construct; local and multiowned cases were
     # rejected above.
     if node.atomic_ptr? && !node.ownership
-      ti.ownership = :shared
+      ti.apply_reference_ownership!(:shared)
     end
     # @indirect forces heap location (same as @local, but different intent).
     ti.provenance = :heap           if node.indirect?
@@ -4463,9 +4466,8 @@ private
 
     # Result is the same base type with :link ownership
     link_type = Type.new(ti.resolved)
-    link_type.ownership = :link
     # Track which strong ownership kind the link was created from
-    link_type.link_source = ti.shared? ? :shared : :multiowned
+    link_type.apply_reference_ownership!(:link, link_source: ti.shared? ? :shared : :multiowned)
     stamp_type!(node, link_type)
   end
 
@@ -4482,8 +4484,7 @@ private
     # Use RESOLVE(link)?.field OR fallback to safely access the target.
     source = ti.link_source || :multiowned
     resolved_type = Type.new(:"?#{ti.resolved}")
-    resolved_type.ownership = source == :shared ? :shared : :multiowned
-    resolved_type.link_source = source
+    resolved_type.apply_reference_ownership!(source == :shared ? :shared : :multiowned, link_source: source)
     stamp_type!(node, resolved_type)
   end
 
@@ -4496,7 +4497,7 @@ private
     end
     base = ti.resolved.to_s.sub(/^\?/, '')
     result_type = Type.new(base.to_sym)
-    result_type.ownership  = :frozen
+    result_type.apply_reference_ownership!(:frozen)
     stamp_type!(node, result_type)
     node.storage   = :frozen
   end
@@ -4593,9 +4594,7 @@ private
     # Preserve ownership/sync so Rc/Arc auto-deref works on the unwrapped value.
     unwrapped = type.wrapped_type
     result = Type.new(unwrapped.resolved)
-    result.ownership = type.ownership if type.ownership
-    result.sync = type.sync if type.sync
-    result.link_source = type.link_source if type.link_source
+    result.merge_capabilities_from!(type, include_affine_ownership: true)
     stamp_type!(node, result)
   end
 

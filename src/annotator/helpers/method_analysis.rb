@@ -45,11 +45,9 @@ module MethodAnalysis
 
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
-    new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
-    new_type.shard_count = ti.shard_count if ti.shard_count
+    new_type.copy_collection_shape_from!(ti)
+    new_type.copy_element_capabilities_from!(ti)
     new_type.provenance = ti.provenance
-    new_type.elem_ownership = ti.elem_ownership if ti.elem_ownership
-    new_type.elem_sync = ti.elem_sync if ti.elem_sync
     scope_entry.type = new_type
     stamp_type!(list_arg, new_type)
   end
@@ -157,8 +155,8 @@ module MethodAnalysis
     val_type = node.args[0].resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
     new_type.provenance = obj_type.provenance
-    new_type.elem_ownership = obj_type.elem_ownership if obj_type.elem_ownership
-    new_type.elem_sync = obj_type.elem_sync if obj_type.elem_sync
+    new_type.copy_collection_shape_from!(obj_type)
+    new_type.copy_element_capabilities_from!(obj_type)
     if node.object.is_a?(AST::Identifier)
       entry = node.object.symbol
       if entry

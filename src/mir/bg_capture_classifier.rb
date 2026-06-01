@@ -119,12 +119,8 @@ module BgCaptureClassifier
     return nil unless type_obj
     base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
     return base unless sym
-    case sym.storage
-    when :multiowned then base.ownership = :multiowned unless base.ownership && base.ownership != :affine
-    when :shared     then base.ownership = :shared     unless base.ownership && base.ownership != :affine
-    end
+    base.apply_bg_capture_symbol!(storage: sym.storage, sync: sym.sync)
     base.provenance = :borrow if sym.borrowed_alias
-    base.sync = sym.sync if sym.sync && !base.sync
     base
   end
 

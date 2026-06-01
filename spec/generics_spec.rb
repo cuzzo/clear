@@ -562,12 +562,12 @@ RSpec.describe SemanticAnnotator do
         expect(node.full_type.shard_count).to eq(4)
       end
 
-      it "propagates sharding and sync metadata from map declarations" do
+      it "propagates sharding, sync, and ownership metadata from map declarations" do
         annotator = SemanticAnnotator.new
         token = Lexer::Token.new(:IDENTIFIER, "counts", 1, 1)
         value = AST::Identifier.new(token, "value")
         value.full_type = Type.new(:"HashMap<Int64, String>")
-        declared = Type.new(:"HashMap<Int64, String>", shard_count: 4, sync: :locked)
+        declared = Type.new(:"HashMap<Int64, String>", ownership: :shared, shard_count: 4, sync: :locked)
         node = AST::VarDecl.new(token, "counts", declared, value, true)
         node.full_type = Type.new(:"HashMap<Int64, String>")
 
@@ -575,6 +575,7 @@ RSpec.describe SemanticAnnotator do
 
         expect(node.full_type.shard_count).to eq(4)
         expect(node.full_type.sync).to eq(:locked)
+        expect(node.full_type.ownership).to eq(:shared)
       end
 
       it "treats nil expressions as having no container source" do

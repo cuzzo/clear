@@ -52,7 +52,7 @@ RSpec.describe "Type promotion/cleanup analysis" do
     # --- ArrayList (@list): true (Zig: isArrayList) ---
     it "true for @list collection" do
       t = Type.new(:"Float64[]")
-      t.instance_variable_set(:@collection, :list)
+      t.collection = :list
       expect(t.needs_promotion?).to be true
     end
 
@@ -124,7 +124,7 @@ RSpec.describe "Type promotion/cleanup analysis" do
     # --- Collections: true ---
     it "true for @list" do
       t = Type.new(:"Float64[]")
-      t.instance_variable_set(:@collection, :list)
+      t.collection = :list
       expect(t.needs_cleanup?).to be true
     end
 
@@ -151,7 +151,7 @@ RSpec.describe "Type promotion/cleanup analysis" do
     # --- Invariant: needs_promotion => needs_cleanup for non-strings ---
     it "needs_promotion implies needs_cleanup for non-string types" do
       types = [
-        Type.new(:"Float64[]").tap { |t| t.instance_variable_set(:@collection, :list) },
+        Type.new(:"Float64[]").tap { |t| t.collection = :list },
         Type.new(:"HashMap<Int64>"),
       ]
       types.each do |t|

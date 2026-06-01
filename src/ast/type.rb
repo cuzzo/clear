@@ -11,6 +11,102 @@ class TypeCapabilitySuffix < T::Struct
   const :sync, T.nilable(Symbol)
 end
 
+class TypeCapabilityUnset < T::Struct
+end
+
+class TypeCapabilities < T::Struct
+  extend T::Sig
+
+  UNSET = T.let(TypeCapabilityUnset.new.freeze, TypeCapabilityUnset)
+  MaybeSymbol = T.type_alias { T.any(TypeCapabilityUnset, Symbol, NilClass) }
+  MaybeInteger = T.type_alias { T.any(TypeCapabilityUnset, Integer, NilClass) }
+  MaybeBoolean = T.type_alias { T.any(TypeCapabilityUnset, T::Boolean) }
+  MaybeObject = T.type_alias { T.any(TypeCapabilityUnset, Object, NilClass) }
+
+  const :ownership, T.nilable(Symbol), default: nil
+  const :sync, T.nilable(Symbol), default: nil
+  const :layout, T.nilable(Symbol), default: nil
+  const :lock_rank, T.nilable(Integer), default: nil
+  const :collection, T.nilable(Symbol), default: nil
+  const :shard_count, T.nilable(Integer), default: nil
+  const :soa, T::Boolean, default: false
+  const :elem_ownership, T.nilable(Symbol), default: nil
+  const :elem_sync, T.nilable(Symbol), default: nil
+  const :link_source, T.nilable(Symbol), default: nil
+  const :observable, T::Boolean, default: false
+  const :observable_terminal, T.nilable(Symbol), default: nil
+  const :observable_token, T.nilable(Object), default: nil
+  const :polymorphic_shared, T::Boolean, default: false
+
+  sig { returns(TypeCapabilities) }
+  def copy
+    with
+  end
+
+  sig do
+    params(
+      ownership: MaybeSymbol,
+      sync: MaybeSymbol,
+      layout: MaybeSymbol,
+      lock_rank: MaybeInteger,
+      collection: MaybeSymbol,
+      shard_count: MaybeInteger,
+      soa: MaybeBoolean,
+      elem_ownership: MaybeSymbol,
+      elem_sync: MaybeSymbol,
+      link_source: MaybeSymbol,
+      observable: MaybeBoolean,
+      observable_terminal: MaybeSymbol,
+      observable_token: MaybeObject,
+      polymorphic_shared: MaybeBoolean
+    ).returns(TypeCapabilities)
+  end
+  def with(
+    ownership: UNSET,
+    sync: UNSET,
+    layout: UNSET,
+    lock_rank: UNSET,
+    collection: UNSET,
+    shard_count: UNSET,
+    soa: UNSET,
+    elem_ownership: UNSET,
+    elem_sync: UNSET,
+    link_source: UNSET,
+    observable: UNSET,
+    observable_terminal: UNSET,
+    observable_token: UNSET,
+    polymorphic_shared: UNSET
+  )
+    TypeCapabilities.new(
+      ownership: ownership.is_a?(TypeCapabilityUnset) ? self.ownership : ownership,
+      sync: sync.is_a?(TypeCapabilityUnset) ? self.sync : sync,
+      layout: layout.is_a?(TypeCapabilityUnset) ? self.layout : layout,
+      lock_rank: lock_rank.is_a?(TypeCapabilityUnset) ? self.lock_rank : lock_rank,
+      collection: collection.is_a?(TypeCapabilityUnset) ? self.collection : collection,
+      shard_count: shard_count.is_a?(TypeCapabilityUnset) ? self.shard_count : shard_count,
+      soa: soa.is_a?(TypeCapabilityUnset) ? self.soa : soa,
+      elem_ownership: elem_ownership.is_a?(TypeCapabilityUnset) ? self.elem_ownership : elem_ownership,
+      elem_sync: elem_sync.is_a?(TypeCapabilityUnset) ? self.elem_sync : elem_sync,
+      link_source: link_source.is_a?(TypeCapabilityUnset) ? self.link_source : link_source,
+      observable: observable.is_a?(TypeCapabilityUnset) ? self.observable : observable,
+      observable_terminal: observable_terminal.is_a?(TypeCapabilityUnset) ? self.observable_terminal : observable_terminal,
+      observable_token: observable_token.is_a?(TypeCapabilityUnset) ? self.observable_token : observable_token,
+      polymorphic_shared: polymorphic_shared.is_a?(TypeCapabilityUnset) ? self.polymorphic_shared : polymorphic_shared
+    )
+  end
+
+  sig { returns(TypeCapabilities) }
+  def without_runtime_wrappers
+    with(
+      ownership: :affine,
+      sync: nil,
+      layout: nil,
+      elem_ownership: nil,
+      elem_sync: nil
+    )
+  end
+end
+
 class Type
     extend T::Sig
 
@@ -18,21 +114,9 @@ class Type
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
 
   attr_reader :raw, :name, :generic_args, :capacity
-  attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
-  attr_accessor :sync        # nil (default), :locked, :write_locked, :versioned, :atomic, :always_mutable, :local, :raw, :symbol
-  attr_accessor :layout      # nil (default), :indirect — heap-pinned cell with stable address (e.g., @indirect:atomic = AtomicPtr(T))
-  attr_accessor :lock_rank   # nil (default) or Integer — @locked(rank: N) / @writeLocked(rank: N)
-  attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
-  attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
-  attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout
-  attr_accessor :elem_ownership # Element-level ownership: T@shared[] = Array<Arc<T>>
-  attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
-  attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
+  sig { returns(TypeCapabilities) }
+  attr_reader :capabilities
   attr_writer :is_resource      # set by annotator; read internally as @is_resource in #resource?
-  attr_accessor :is_observable  # true on ~T@observable — backed by single-writer snapshot / atomic accumulator
-  attr_accessor :observable_terminal  # :sum/:count/:max/:min/:avg/:any/:all/:find/:reduce — picks the Zig wrapper
-  attr_accessor :observable_token   # A20: source token for the `@observable` capability, used by I1's fixable to offer to delete it
-  attr_accessor :polymorphic_shared # true for `SHARED T`: shared-family polymorphic contract, not concrete Arc syntax
 
   # Unified provenance: where was this data allocated?
   #   :rodata — string literal in binary, valid forever, never freed
@@ -299,21 +383,9 @@ class Type
     @generic_args       = T.let(nil, T.untyped)
     @capacity           = T.let(nil, T.untyped)
     @provenance         = T.let(nil, T.untyped)
-    @ownership          = T.let(nil, T.untyped)
-    @sync               = T.let(nil, T.untyped)
-    @layout             = T.let(nil, T.untyped)
-    @lock_rank          = T.let(nil, T.untyped)
-    @collection         = T.let(nil, T.untyped)
-    @shard_count        = T.let(nil, T.untyped)
-    @soa                = T.let(nil, T.untyped)
-    @elem_ownership     = T.let(nil, T.untyped)
-    @elem_sync          = T.let(nil, T.untyped)
-    @link_source        = T.let(nil, T.untyped)
+    @capabilities       = T.let(TypeCapabilities.new, TypeCapabilities)
     @is_resource        = T.let(nil, T.untyped)
-    @observable_terminal = T.let(nil, T.untyped)
-    @observable_token   = T.let(nil, T.untyped)
     @auto_token          = T.let(nil, T.untyped)
-    @polymorphic_shared = T.let(nil, T.untyped)
     @payload_type_raw   = T.let(nil, T.untyped)
     @wrapped_type_raw   = T.let(nil, T.untyped)
     @element_type_raw   = T.let(nil, T.untyped)
@@ -324,13 +396,13 @@ class Type
     @resolved_cache     = T.let(nil, T.untyped)
     @tense_type_raw     = T.let(nil, T.untyped)
     @zig_type_cache     = T.let(nil, T.untyped)
+    @generic_payload_type_arg = T.let(false, T::Boolean)
     @location          = T.let(nil, T.nilable(Symbol))
     @key_type_raw      = T.let(nil, T.nilable(Symbol))
     @is_array          = T.let(false, T::Boolean)
     @is_map            = T.let(false, T::Boolean)
     @is_optional       = T.let(false, T::Boolean)
     @is_tense          = T.let(false, T::Boolean)
-    @is_observable     = T.let(false, T::Boolean)
     @is_auto           = T.let(false, T::Boolean)
     @is_error_union    = T.let(false, T::Boolean)
     @is_generic_instance = T.let(false, T::Boolean)
@@ -338,12 +410,7 @@ class Type
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
       @raw                = other.instance_variable_get(:@raw)
-      @ownership          = other.ownership
-      @sync               = other.sync
-      @layout             = other.layout
-      @collection         = other.instance_variable_get(:@collection)
-      @shard_count        = other.instance_variable_get(:@shard_count)
-      @soa                = other.instance_variable_get(:@soa)
+      @capabilities       = other.capabilities.copy
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
       @is_optional        = other.instance_variable_get(:@is_optional)
@@ -360,14 +427,9 @@ class Type
       @generic_args_raw      = other.instance_variable_get(:@generic_args_raw)
       @is_tense              = other.instance_variable_get(:@is_tense)
       @tense_type_raw        = other.instance_variable_get(:@tense_type_raw)
-      @elem_ownership        = other.elem_ownership
-      @elem_sync             = other.elem_sync
-      @link_source           = other.link_source
       @provenance            = other.provenance
-      @is_observable         = other.instance_variable_get(:@is_observable)
-      @observable_terminal   = other.instance_variable_get(:@observable_terminal)
-      @polymorphic_shared    = other.polymorphic_shared
       @is_auto               = other.instance_variable_get(:@is_auto)
+      @generic_payload_type_arg = other.generic_payload_type_arg?
     else
       @raw = raw_input
       parse_raw_input
@@ -375,9 +437,15 @@ class Type
 
     # Capability fields — set after parse/copy so they can override.
     @provenance = location if location && location != :stack
-    @ownership = ownership if ownership
-    @sync      = sync      if sync
-    @layout    = layout    if layout
+    apply_capabilities!(
+      ownership: ownership || TypeCapabilities::UNSET,
+      sync: sync || TypeCapabilities::UNSET,
+      layout: layout || TypeCapabilities::UNSET,
+      collection: collection || TypeCapabilities::UNSET,
+      shard_count: shard_count || TypeCapabilities::UNSET,
+      observable: observable ? true : TypeCapabilities::UNSET,
+      observable_terminal: observable_terminal || TypeCapabilities::UNSET
+    )
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
     @provenance = T.let(:heap, T.nilable(Symbol)) if sync_requires_heap_provenance?
@@ -389,14 +457,7 @@ class Type
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
     @provenance = :rodata if symbol?
     # Pool collection always lives on the heap (owns internal slot array).
-    if collection
-      @collection = collection
-      @zig_type_cache = nil
-      @provenance = :heap if pool?
-    end
-    @shard_count = shard_count if shard_count
-    @is_observable = true if observable
-    @observable_terminal = observable_terminal if observable_terminal
+    @provenance = :heap if collection && pool?
     # Gradual-typing placeholder. When set, this Type represents an
     # unresolved Auto slot — the inference pass (see
     # docs/agents/gradual-typing.md) walks every Auto Type, collects
@@ -440,6 +501,451 @@ class Type
     return :slice_managed  if collection?
     return :value          if non_string_array?
     :by_ref
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def ownership=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(ownership: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def ownership
+    @capabilities.ownership
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def sync=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(sync: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def sync
+    @capabilities.sync
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def layout=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(layout: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def layout
+    @capabilities.layout
+  end
+
+  sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
+  def lock_rank=(value)
+    @capabilities = @capabilities.with(lock_rank: value)
+    value
+  end
+
+  sig { returns(T.nilable(Integer)) }
+  def lock_rank
+    @capabilities.lock_rank
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def collection=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(collection: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def collection
+    @capabilities.collection
+  end
+
+  sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
+  def shard_count=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(shard_count: value)
+    value
+  end
+
+  sig { returns(T.nilable(Integer)) }
+  def shard_count
+    @capabilities.shard_count
+  end
+
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def soa=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(soa: value)
+    value
+  end
+
+  sig { returns(T::Boolean) }
+  def soa
+    @capabilities.soa
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def elem_ownership=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(elem_ownership: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def elem_ownership
+    @capabilities.elem_ownership
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def elem_sync=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(elem_sync: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def elem_sync
+    @capabilities.elem_sync
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def link_source=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(link_source: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def link_source
+    @capabilities.link_source
+  end
+
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def is_observable=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(observable: value)
+    value
+  end
+
+  sig { returns(T::Boolean) }
+  def is_observable
+    @capabilities.observable
+  end
+
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def observable_terminal=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(observable_terminal: value)
+    value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def observable_terminal
+    @capabilities.observable_terminal
+  end
+
+  sig { params(value: T.nilable(Object)).returns(T.nilable(Object)) }
+  def observable_token=(value)
+    @capabilities = @capabilities.with(observable_token: value)
+    value
+  end
+
+  sig { returns(T.nilable(Object)) }
+  def observable_token
+    @capabilities.observable_token
+  end
+
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def polymorphic_shared=(value)
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(polymorphic_shared: value)
+    value
+  end
+
+  sig { returns(T::Boolean) }
+  def polymorphic_shared
+    @capabilities.polymorphic_shared
+  end
+
+  sig do
+    params(
+      ownership: TypeCapabilities::MaybeSymbol,
+      sync: TypeCapabilities::MaybeSymbol,
+      layout: TypeCapabilities::MaybeSymbol,
+      lock_rank: TypeCapabilities::MaybeInteger,
+      collection: TypeCapabilities::MaybeSymbol,
+      shard_count: TypeCapabilities::MaybeInteger,
+      soa: TypeCapabilities::MaybeBoolean,
+      elem_ownership: TypeCapabilities::MaybeSymbol,
+      elem_sync: TypeCapabilities::MaybeSymbol,
+      link_source: TypeCapabilities::MaybeSymbol,
+      observable: TypeCapabilities::MaybeBoolean,
+      observable_terminal: TypeCapabilities::MaybeSymbol,
+      observable_token: TypeCapabilities::MaybeObject,
+      polymorphic_shared: TypeCapabilities::MaybeBoolean
+    ).returns(TypeCapabilities)
+  end
+  def apply_capabilities!(
+    ownership: TypeCapabilities::UNSET,
+    sync: TypeCapabilities::UNSET,
+    layout: TypeCapabilities::UNSET,
+    lock_rank: TypeCapabilities::UNSET,
+    collection: TypeCapabilities::UNSET,
+    shard_count: TypeCapabilities::UNSET,
+    soa: TypeCapabilities::UNSET,
+    elem_ownership: TypeCapabilities::UNSET,
+    elem_sync: TypeCapabilities::UNSET,
+    link_source: TypeCapabilities::UNSET,
+    observable: TypeCapabilities::UNSET,
+    observable_terminal: TypeCapabilities::UNSET,
+    observable_token: TypeCapabilities::UNSET,
+    polymorphic_shared: TypeCapabilities::UNSET
+  )
+    @zig_type_cache = nil
+    @capabilities = @capabilities.with(
+      ownership: ownership,
+      sync: sync,
+      layout: layout,
+      lock_rank: lock_rank,
+      collection: collection,
+      shard_count: shard_count,
+      soa: soa,
+      elem_ownership: elem_ownership,
+      elem_sync: elem_sync,
+      link_source: link_source,
+      observable: observable,
+      observable_terminal: observable_terminal,
+      observable_token: observable_token,
+      polymorphic_shared: polymorphic_shared
+    )
+  end
+
+  sig { void }
+  def clear_zig_type_cache!
+    @zig_type_cache = nil
+  end
+
+  sig { void }
+  def mark_generic_payload_type_arg!
+    @generic_payload_type_arg = true
+  end
+
+  sig { returns(T::Boolean) }
+  def generic_payload_type_arg?
+    @generic_payload_type_arg
+  end
+
+  sig { params(ownership: T.nilable(Symbol), link_source: T.nilable(Symbol)).returns(TypeCapabilities) }
+  def apply_reference_ownership!(ownership, link_source: nil)
+    apply_capabilities!(
+      ownership: ownership || TypeCapabilities::UNSET,
+      link_source: link_source || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(terminal: Symbol).returns(TypeCapabilities) }
+  def stamp_observable_terminal!(terminal)
+    apply_capabilities!(observable_terminal: terminal)
+  end
+
+  sig { params(value: T::Boolean).returns(TypeCapabilities) }
+  def mark_polymorphic_shared!(value = true)
+    apply_capabilities!(polymorphic_shared: value)
+  end
+
+  sig { returns(TypeCapabilities) }
+  def mark_soa_layout!
+    apply_capabilities!(soa: true)
+  end
+
+  sig { params(collection: T.nilable(Symbol), soa: T::Boolean, shard_count: T.nilable(Integer)).returns(TypeCapabilities) }
+  def apply_constructor_collection!(collection:, soa:, shard_count:)
+    apply_capabilities!(
+      collection: collection || TypeCapabilities::UNSET,
+      soa: soa ? true : TypeCapabilities::UNSET,
+      shard_count: shard_count || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(soa: T::Boolean, elem_ownership: T.nilable(Symbol), elem_sync: T.nilable(Symbol), observable_token: T.nilable(Object)).returns(TypeCapabilities) }
+  def apply_type_annotation_extras!(soa:, elem_ownership:, elem_sync:, observable_token:)
+    apply_capabilities!(
+      soa: soa ? true : TypeCapabilities::UNSET,
+      elem_ownership: elem_ownership || TypeCapabilities::UNSET,
+      elem_sync: elem_sync || TypeCapabilities::UNSET,
+      observable_token: observable_token || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(ownership: T.nilable(Symbol), sync: T.nilable(Symbol), lock_rank: T.nilable(Integer), layout: T.nilable(Symbol)).returns(TypeCapabilities) }
+  def apply_declared_type_capabilities!(ownership:, sync:, lock_rank:, layout:)
+    apply_capabilities!(
+      ownership: ownership || TypeCapabilities::UNSET,
+      sync: sync || TypeCapabilities::UNSET,
+      lock_rank: lock_rank || TypeCapabilities::UNSET,
+      layout: layout || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { returns(TypeCapabilities) }
+  def strip_layout!
+    apply_capabilities!(layout: nil)
+  end
+
+  sig { params(storage: Symbol, value_sync: T.nilable(Symbol), link_source: T.nilable(Symbol)).returns(TypeCapabilities) }
+  def apply_storage_capability!(storage, value_sync: nil, link_source: nil)
+    case storage
+    when :frozen
+      apply_reference_ownership!(:frozen)
+    when :multiowned
+      apply_reference_ownership!(:multiowned)
+    when :shared
+      apply_reference_ownership!(:shared)
+    when :link
+      apply_reference_ownership!(:link, link_source: link_source)
+    when :heap
+      if value_sync == :locked || value_sync == :write_locked
+        apply_capabilities!(sync: value_sync)
+      else
+        capabilities
+      end
+    else
+      capabilities
+    end
+  end
+
+  sig { params(storage: Symbol, entry_sync: T.nilable(Symbol), entry_layout: T.nilable(Symbol), value_sync: T.nilable(Symbol), link_source: T.nilable(Symbol), atomic_ptr: T::Boolean).returns(TypeCapabilities) }
+  def apply_symbol_overlay!(storage:, entry_sync:, entry_layout:, value_sync:, link_source:, atomic_ptr:)
+    apply_storage_capability!(storage, value_sync: value_sync, link_source: link_source)
+    apply_capabilities!(
+      ownership: atomic_ptr && ownership == :affine ? :shared : TypeCapabilities::UNSET,
+      sync: entry_sync && !sync ? entry_sync : TypeCapabilities::UNSET,
+      layout: entry_layout && !layout ? entry_layout : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(storage: Symbol, sync: T.nilable(Symbol)).returns(TypeCapabilities) }
+  def apply_bg_capture_symbol!(storage:, sync:)
+    apply_capabilities!(
+      ownership: (storage == :multiowned || storage == :shared) && (!ownership || ownership == :affine) ? storage : TypeCapabilities::UNSET,
+      sync: sync && !self.sync ? sync : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type).returns(TypeCapabilities) }
+  def copy_collection_shape_from!(source)
+    apply_capabilities!(
+      collection: !collection && source.collection ? source.collection : TypeCapabilities::UNSET,
+      shard_count: !shard_count && source.shard_count ? source.shard_count : TypeCapabilities::UNSET,
+      soa: source.soa? && !soa? ? true : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type).returns(TypeCapabilities) }
+  def copy_topology_from!(source)
+    apply_capabilities!(
+      shard_count: !shard_count && source.shard_count ? source.shard_count : TypeCapabilities::UNSET,
+      soa: source.soa? && !soa? ? true : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type).returns(TypeCapabilities) }
+  def copy_declared_collection_modifiers_from!(source)
+    apply_capabilities!(
+      ownership: source.ownership != :affine ? source.ownership : TypeCapabilities::UNSET,
+      sync: source.sync && !sync ? source.sync : TypeCapabilities::UNSET,
+      shard_count: source.shard_count && !shard_count ? source.shard_count : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type).returns(TypeCapabilities) }
+  def copy_element_capabilities_from!(source)
+    apply_capabilities!(
+      elem_ownership: source.elem_ownership || TypeCapabilities::UNSET,
+      elem_sync: source.elem_sync || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type).returns(TypeCapabilities) }
+  def copy_striped_map_topology_from!(source)
+    apply_capabilities!(
+      shard_count: source.shard_count || TypeCapabilities::UNSET,
+      sync: source.shard_count && source.sync ? T.must(source.sync) : TypeCapabilities::UNSET,
+      ownership: :affine
+    )
+  end
+
+  sig { params(final_type: Type, value_type: T.nilable(Type)).returns(TypeCapabilities) }
+  def apply_finalized_value_shape!(final_type:, value_type:)
+    final_shard_count = final_type.shard_count || value_type&.shard_count
+    final_soa = final_type.soa || (value_type&.respond_to?(:soa) && value_type.soa)
+    observable = final_type.observable? ||
+                 (!value_type.nil? && value_type.respond_to?(:observable?) && value_type.observable?)
+    observable_terminal = if final_type.observable_terminal
+      final_type.observable_terminal
+    elsif !value_type.nil? && value_type.respond_to?(:observable_terminal) && value_type.observable_terminal
+      value_type.observable_terminal
+    end
+    elem_ownership = final_type.elem_ownership ||
+                     (value_type&.respond_to?(:elem_ownership) ? value_type.elem_ownership : nil)
+    elem_sync = final_type.elem_sync ||
+                (value_type&.respond_to?(:elem_sync) ? value_type.elem_sync : nil)
+    link_src = value_type&.link? ? value_type.link_source : nil
+    apply_capabilities!(
+      shard_count: final_shard_count || TypeCapabilities::UNSET,
+      sync: final_type.sync || TypeCapabilities::UNSET,
+      soa: final_soa ? true : TypeCapabilities::UNSET,
+      collection: value_type&.collection || TypeCapabilities::UNSET,
+      observable: observable ? true : TypeCapabilities::UNSET,
+      observable_terminal: observable_terminal || TypeCapabilities::UNSET,
+      elem_ownership: elem_ownership || TypeCapabilities::UNSET,
+      elem_sync: elem_sync || TypeCapabilities::UNSET,
+      layout: final_type.layout || TypeCapabilities::UNSET,
+      link_source: link_src || TypeCapabilities::UNSET
+    )
+  end
+
+  sig { params(source: Type, preserve_existing: T::Boolean, include_affine_ownership: T::Boolean).returns(TypeCapabilities) }
+  def merge_capabilities_from!(source, preserve_existing: true, include_affine_ownership: false)
+    source_ownership = source.ownership
+    existing_concrete_ownership = ownership && ownership != :affine
+    next_ownership = if preserve_existing && existing_concrete_ownership
+      TypeCapabilities::UNSET
+    elsif source_ownership && (include_affine_ownership || source_ownership != :affine)
+      source_ownership
+    else
+      TypeCapabilities::UNSET
+    end
+    source_collection = source.collection
+    source_shard_count = source.shard_count
+    source_layout = source.layout
+    source_sync = source.sync
+    source_elem_ownership = source.elem_ownership
+    source_elem_sync = source.elem_sync
+    source_link_source = source.link_source
+    apply_capabilities!(
+      ownership: next_ownership,
+      sync: (!preserve_existing || !sync) && source_sync ? source_sync : TypeCapabilities::UNSET,
+      layout: (!preserve_existing || !layout) && source_layout ? source_layout : TypeCapabilities::UNSET,
+      collection: (!preserve_existing || !collection) && source_collection ? source_collection : TypeCapabilities::UNSET,
+      shard_count: (!preserve_existing || !shard_count) && source_shard_count ? source_shard_count : TypeCapabilities::UNSET,
+      soa: source.soa? && (!preserve_existing || !soa?) ? true : TypeCapabilities::UNSET,
+      elem_ownership: (!preserve_existing || !elem_ownership) && source_elem_ownership ? source_elem_ownership : TypeCapabilities::UNSET,
+      elem_sync: (!preserve_existing || !elem_sync) && source_elem_sync ? source_elem_sync : TypeCapabilities::UNSET,
+      link_source: (!preserve_existing || !link_source) && source_link_source ? source_link_source : TypeCapabilities::UNSET,
+      observable: source.observable? && (!preserve_existing || !observable?) ? true : TypeCapabilities::UNSET,
+      observable_terminal: (!preserve_existing || !observable_terminal) && source.observable_terminal ? T.must(source.observable_terminal) : TypeCapabilities::UNSET,
+      observable_token: (!preserve_existing || !observable_token) && source.observable_token ? source.observable_token : TypeCapabilities::UNSET,
+      polymorphic_shared: source.polymorphic_shared? && (!preserve_existing || !polymorphic_shared?) ? true : TypeCapabilities::UNSET
+    )
+  end
+
+  sig { returns(TypeCapabilities) }
+  def strip_runtime_capabilities!
+    @zig_type_cache = nil
+    @capabilities = @capabilities.without_runtime_wrappers
   end
 
   # -----------------------------------------------
@@ -703,42 +1209,42 @@ class Type
 
   sig { returns(T::Boolean) }
   def multiowned?
-    @ownership == :multiowned
+    ownership == :multiowned
   end
 
   sig { returns(T::Boolean) }
   def shared?
-    @ownership == :shared
+    ownership == :shared
   end
 
   sig { returns(T::Boolean) }
   def polymorphic_shared?
-    !!@polymorphic_shared
+    polymorphic_shared
   end
 
   sig { returns(T::Boolean) }
   def frozen?
-    @ownership == :frozen
+    ownership == :frozen
   end
 
   sig { returns(T::Boolean) }
   def split?
-    @ownership == :split
+    ownership == :split
   end
 
   sig { returns(T::Boolean) }
   def link?
-    @ownership == :link
+    ownership == :link
   end
 
   sig { returns(T::Boolean) }
   def locked?
-    @sync == :locked
+    sync == :locked
   end
 
   sig { returns(T::Boolean) }
   def write_locked?
-    @sync == :write_locked
+    sync == :write_locked
   end
 
   # MVCC: T@versioned -> Shared(T) (atomic-pointer COW + EBR).
@@ -747,7 +1253,7 @@ class Type
   # with `ON MvccConflict ...` for the retries-exhausted case.
   sig { returns(T::Boolean) }
   def versioned?
-    @sync == :versioned
+    sync == :versioned
   end
 
   # Atomic single-cell: T@atomic -> Atomic(T) (lock-free CPU-atomic
@@ -756,12 +1262,12 @@ class Type
   # M2 will drop the Arc and tie the lifetime to declaring scope.
   sig { returns(T::Boolean) }
   def indirect?
-    @layout == :indirect
+    layout == :indirect
   end
 
   sig { returns(T::Boolean) }
   def atomic?
-    @sync == :atomic
+    sync == :atomic
   end
 
   # AtomicPtr cell: @indirect:atomic. The `sync == :atomic && layout ==
@@ -773,23 +1279,23 @@ class Type
 
   sig { returns(T::Boolean) }
   def local?
-    @sync == :local
+    sync == :local
   end
 
   sig { returns(T::Boolean) }
   def raw?
-    @sync == :raw
+    sync == :raw
   end
 
   sig { returns(T::Boolean) }
   def symbol?
-    @sync == :symbol
+    sync == :symbol
   end
 
   # True for any sync capability (excludes :raw and :symbol which are data-access modes, not locks)
   sig { returns(T::Boolean) }
   def any_sync?
-    !@sync.nil? && @sync != :raw && @sync != :symbol
+    !sync.nil? && sync != :raw && sync != :symbol
   end
 
   # Group 1 vs Group 2 separation: return a copy of this type with the
@@ -806,11 +1312,7 @@ class Type
   sig { returns(Type) }
   def bare_data_type
     bare = Type.new(self)
-    bare.ownership = :affine
-    bare.sync      = nil
-    bare.layout    = nil
-    bare.instance_variable_set(:@elem_ownership, nil)
-    bare.instance_variable_set(:@elem_sync, nil)
+    bare.strip_runtime_capabilities!
     # Provenance was set by sync/ownership wrappers (Type#initialize
     # forces :heap when @sync is set). Stripping the wrappers means the
     # bare shape's provenance must come from its OWN nature (e.g.
@@ -818,7 +1320,7 @@ class Type
     # Reset; the outer wrap layer that consumes this bare form is
     # responsible for re-pinning.
     bare.provenance = nil
-    bare.instance_variable_set(:@zig_type_cache, nil)
+    bare.clear_zig_type_cache!
     bare
   end
 
@@ -841,7 +1343,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def sync_requires_heap_provenance?
-    any_sync? && @ownership == :affine
+    any_sync? && ownership == :affine
   end
 
   sig { returns(T::Boolean) }
@@ -874,19 +1376,19 @@ class Type
   # True when this is an explicit @pool (generational pool) collection.
   sig { returns(T::Boolean) }
   def pool?
-    @collection == :pool
+    collection == :pool
   end
 
   # True when this is an explicit @list (heap list) collection.
   sig { returns(T::Boolean) }
   def list_collection?
-    @collection == :list
+    collection == :list
   end
 
   # True when this is an explicit @set (hash set) collection.
   sig { returns(T::Boolean) }
   def set_collection?
-    @collection == :set
+    collection == :set
   end
 
   # --- Unified collection predicates ---
@@ -1155,12 +1657,12 @@ class Type
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
   sig { returns(T::Boolean) }
   def sharded?
-    !@shard_count.nil?
+    !shard_count.nil?
   end
 
   sig { returns(T::Boolean) }
   def soa?
-    !!@soa
+    soa
   end
 
   # Fixed-size SOA array without collection wrapper (T[N]@soa).
@@ -1212,7 +1714,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def plain_indirect_value?
-    !!(indirect? && !any_sync? && (@ownership.nil? || @ownership == :affine) &&
+    !!(indirect? && !any_sync? && (ownership.nil? || ownership == :affine) &&
       !fn_type? && !error_union? && !optional?)
   end
 
@@ -1249,17 +1751,20 @@ class Type
 
   sig { returns(T.nilable(String)) }
   def ownership_surface_name
-    OWNERSHIP_SURFACE_NAMES[@ownership]
+    own = ownership
+    own ? OWNERSHIP_SURFACE_NAMES[own] : nil
   end
 
   sig { returns(T.nilable(String)) }
   def sync_surface_name
-    SYNC_SURFACE_NAMES[@sync]
+    current_sync = sync
+    current_sync ? SYNC_SURFACE_NAMES[current_sync] : nil
   end
 
   sig { returns(T.nilable(String)) }
   def sync_family_name
-    SYNC_FAMILY_NAMES[@sync]
+    current_sync = sync
+    current_sync ? SYNC_FAMILY_NAMES[current_sync] : nil
   end
 
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
@@ -1307,13 +1812,8 @@ class Type
   sig { returns(Type) }
   def error_union_payload_with_outer_capabilities
     payload = Type.new(T.must(payload_type))
-    payload.instance_variable_set(:@collection, @collection) if @collection && !payload.collection
-    payload.instance_variable_set(:@shard_count, @shard_count) if @shard_count && !payload.shard_count
-    payload.instance_variable_set(:@soa, @soa) if @soa && !payload.soa?
-    payload.instance_variable_set(:@layout, @layout) if @layout && !payload.layout
-    payload.instance_variable_set(:@ownership, @ownership) if @ownership && @ownership != :affine
-    payload.instance_variable_set(:@sync, @sync) if @sync
-    payload.instance_variable_set(:@provenance, @provenance) if @provenance && !payload.provenance
+    payload.merge_capabilities_from!(self)
+    payload.provenance = @provenance if @provenance && !payload.provenance
     payload
   end
 
@@ -1334,7 +1834,7 @@ class Type
   # accumulator. Only such types may be the target of `WITH VIEW`.
   sig { returns(T::Boolean) }
   def observable?
-    !!@is_observable
+    is_observable
   end
 
   # NEXT on an observable array future materializes an owned array snapshot.
@@ -1474,7 +1974,7 @@ class Type
     # this should be unreachable in practice, but if it does fire we
     # need a clear compiler-level message rather than the previous
     # internal "BYPASS at <ruby caller>" debug raise.
-    if @observable_terminal.nil?
+    if observable_terminal.nil?
       raise CompilerError.new(
         nil,
         "Internal: Type#observable_wrapper_zig called on `#{self.to_s}` " \
@@ -1486,10 +1986,11 @@ class Type
         nil,
       )
     end
-    builder = self.class.observable_wrappers[@observable_terminal] or
+    terminal = T.must(observable_terminal)
+    builder = self.class.observable_wrappers[terminal] or
       raise CompilerError.new(
         nil,
-        "Internal: unknown observable terminal kind #{@observable_terminal.inspect}. " \
+        "Internal: unknown observable terminal kind #{terminal.inspect}. " \
         "Add an entry to Type.observable_terminals in src/ast/type.rb.",
         nil,
       )
@@ -1630,8 +2131,10 @@ class Type
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
     @element_type_obj ||= T.let(begin
       t = Type.new(@element_type_raw || :Any)
-      t.ownership = @elem_ownership if @elem_ownership
-      t.sync = @elem_sync if @elem_sync
+      t.apply_capabilities!(
+        ownership: elem_ownership || TypeCapabilities::UNSET,
+        sync: elem_sync || TypeCapabilities::UNSET
+      )
       t
     end, T.nilable(Type))
   end
@@ -2042,18 +2545,6 @@ class Type
     t
   end
 
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def ownership=(value)
-    @zig_type_cache = nil
-    @ownership = value
-  end
-
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def sync=(value)
-    @zig_type_cache = nil
-    @sync = value
-  end
-
   # Returns the Zig type string representation of this type.
   # Memoized for performance; cache is invalidated when location changes.
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
@@ -2235,9 +2726,7 @@ class Type
     # FunctionSignature and Array raws are function signatures — no string parsing applies.
     # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
     if @raw.is_a?(FunctionSignature) || @raw.is_a?(Array)
-      @ownership  = :affine
-      @sync       = nil
-      @collection = nil
+      apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
       @is_error_union      = false; @payload_type_raw = nil
       @is_optional         = false; @wrapped_type_raw  = nil
       @is_array            = false; @capacity = nil; @element_type_raw = nil
@@ -2270,9 +2759,7 @@ class Type
       @is_array       = false; @capacity = nil; @element_type_raw = nil
       @is_map              = false; @value_type_raw = nil
       @is_generic_instance = false; @generic_base_raw = nil; @generic_args_raw = nil
-      @ownership      = :affine
-      @sync           = nil
-      @collection     = nil
+      apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
       @location       = :stack  # Promise handle lives on the stack; result_cell is heap
       @resolved_cache = @raw.to_sym
       return
@@ -2308,9 +2795,7 @@ class Type
     end
 
     # C. Capability fields default — callers pass ownership:/sync:/location:/collection: as keyword args.
-    @ownership  = suffix.ownership || :affine
-    @sync       = suffix.sync
-    @collection = nil
+    apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
 
     # D. Detect Array Structure
     # Regex Breakdown:
@@ -2452,7 +2937,7 @@ class Type
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }
   def capability_wrapped_zig_type(is_param:, is_field:)
-    return nil unless (@ownership != :affine || any_sync?) && !(map? && striped? && @ownership == :affine)
+    return nil unless (ownership != :affine || any_sync?) && !(map? && striped? && ownership == :affine)
 
     inner_zig = capability_inner_zig_type(is_param: is_param, is_field: is_field)
 
@@ -2460,7 +2945,7 @@ class Type
       return "*#{inner_zig}"
     end
 
-    case @ownership
+    case ownership
     when :multiowned
       "CheatLib.Rc(#{inner_zig})"
     when :shared
@@ -2479,8 +2964,7 @@ class Type
   def capability_inner_zig_type(is_param:, is_field:)
     if map? && striped?
       bare = Type.new(resolved.to_s)
-      bare.shard_count = @shard_count
-      bare.sync = @sync
+      bare.apply_capabilities!(shard_count: shard_count, sync: sync, ownership: :affine)
       return bare.zig_type(is_param: is_param, is_field: is_field)
     end
 
@@ -2493,7 +2977,7 @@ class Type
 
     inner_zig = "CheatLib.Locked(#{inner_zig})" if locked?
     inner_zig = "CheatLib.RwLocked(#{inner_zig})" if write_locked?
-    inner_zig = "CheatLib.RefCell(#{inner_zig})" if @sync == :always_mutable
+    inner_zig = "CheatLib.RefCell(#{inner_zig})" if sync == :always_mutable
     inner_zig = "CheatLib.Versioned(#{inner_zig})" if versioned?
     if atomic_ptr?
       "CheatLib.AtomicPtr(#{inner_zig})"
@@ -2571,7 +3055,7 @@ class Type
     # every type uniformly (the String/slice path below otherwise drops it).
     if plain_indirect_value?
       pointee = Type.new(self)
-      pointee.layout = nil
+      pointee.strip_layout!
       pointee.provenance = :stack if pointee.respond_to?(:provenance=)
       return "*#{pointee.zig_type(is_param: is_param, is_field: is_field)}"
     end

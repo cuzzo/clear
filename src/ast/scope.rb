@@ -143,35 +143,26 @@ class Scope
 
     # Overlay storage-derived capabilities onto the type
     case entry.storage
-    when :frozen
-      base_type.ownership = :frozen
-    when :multiowned
-      base_type.ownership = :multiowned
-    when :shared
-      base_type.ownership = :shared
-    when :link
-      base_type.ownership = :link
-      base_type.link_source = entry.link_source
     when :rodata
       base_type.provenance = :rodata  # string literal: static data, never freed
     when :frame
       base_type.provenance = :frame   # large local var: arena pointer (*T in Zig)
     when :heap
       base_type.provenance = :heap
-      if entry.locked?
-        base_type.sync = :locked
-      elsif entry.write_locked?
-        base_type.sync = :write_locked
-      end
     end
-
-    # Always propagate sync — it may coexist with an ownership wrapper (e.g. @shared:locked
-    # has storage=:shared AND sync=:locked; the case above only sets ownership).
-    base_type.sync = entry.sync if entry.sync && !base_type.sync
-    base_type.layout = entry.layout if entry.layout && !base_type.layout
-    if entry.atomic_ptr? && base_type.ownership == :affine
-      base_type.ownership = :shared
+    value_sync = if entry.locked?
+      :locked
+    elsif entry.write_locked?
+      :write_locked
     end
+    base_type.apply_symbol_overlay!(
+      storage: entry.storage,
+      entry_sync: entry.sync,
+      entry_layout: entry.layout,
+      value_sync: value_sync,
+      link_source: entry.link_source,
+      atomic_ptr: entry.atomic_ptr?
+    )
 
     base_type
   end

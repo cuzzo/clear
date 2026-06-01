@@ -2877,25 +2877,27 @@ class Parser
       ownership = :shared
     end
     t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable)
-    t.soa = true if is_soa
-    t.elem_ownership = elem_ownership if elem_ownership
-    t.elem_sync = elem_sync if elem_sync
-    t.observable_token = observable_token if observable_token
+    t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, observable_token: observable_token)
     t
   end
 
   sig { params(type: Type).returns(Type) }
   def mark_polymorphic_shared_type(type)
     t = Type.new(type)
-    t.ownership = :shared
-    t.polymorphic_shared = true
+    t.apply_reference_ownership!(:shared)
+    t.mark_polymorphic_shared!
     t
   end
 
   sig { params(type: Type).returns(String) }
   def type_annotation_source(type)
     t = type.is_a?(Type) ? type : Type.new(type)
-    return "SHARED #{type_annotation_source(Type.new(t).tap { |inner| inner.ownership = :affine; inner.polymorphic_shared = false })}" if t.polymorphic_shared?
+    if t.polymorphic_shared?
+      inner = Type.new(t)
+      inner.apply_reference_ownership!(:affine)
+      inner.mark_polymorphic_shared!(false)
+      return "SHARED #{type_annotation_source(inner)}"
+    end
 
     parts = [t.resolved.to_s]
 

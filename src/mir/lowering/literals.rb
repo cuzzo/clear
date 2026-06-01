@@ -183,8 +183,7 @@ module MIRLoweringLiterals
       # the unified Group 1 / Group 2 separation.
       if ti.striped?
         bare_ft = Type.new(ti.resolved.to_s)
-        bare_ft.shard_count = ti.shard_count if ti.shard_count
-        bare_ft.sync = ti.sync if ti.shard_count && ti.sync
+        bare_ft.copy_striped_map_topology_from!(ti)
         zig_t = bare_ft.zig_type
 
         needs_alloc = bare_ft.map_init_needs_alloc?

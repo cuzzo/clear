@@ -1206,11 +1206,7 @@ module MIRLoweringExpressions
 
   sig { params(source: Type, target: Type).void }
   def copy_type_capabilities(source, target)
-    target.ownership = source.ownership if source.ownership != :affine
-    target.sync = source.sync if source.sync
-    target.layout = source.layout if source.layout
-    target.elem_ownership = source.elem_ownership if source.elem_ownership
-    target.elem_sync = source.elem_sync if source.elem_sync
+    target.merge_capabilities_from!(source)
   end
 
   # True when the destination is a dynamic slice (`[]T`, no capacity), as
@@ -1993,7 +1989,7 @@ module MIRLoweringExpressions
   sig { params(type: T.untyped).returns(String) }
   def generic_type_arg_zig(type)
     T.bind(self, MIRLowering) rescue nil
-    if type.is_a?(Type) && type.instance_variable_get(:@generic_payload_type_arg)
+    if type.is_a?(Type) && type.generic_payload_type_arg?
       return rc_payload_zig_type(type)
     end
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
