@@ -39,9 +39,24 @@ END
 This is deliberately small but it exercises the important MIR machinery:
 
 * `d` owns a `Data` value that may carry a heap-backed string payload.
-* `consume(GIVE d)` transfers ownership on one path.
-* The fallthrough path keeps ownership in `demo`, so `d` must be cleaned up.
-* The CFG has a branch, so ownership must be joined across control flow.
+* `consume(makeData())` transfers ownership on one path (via `TAKES`).
+* This means the value of `makeData()` must be "hoisted".
+
+
+If the code instead looked like so:
+
+```ruby clear illustrative
+FN demo(flag: Bool) RETURNS Int64 ->
+  d = makeData();
+  IF flag -> RETURN consume(d);
+
+  RETURN 0;
+END
+```
+
+* `d = makeData();` would already "hoist" the value.
+* But, when `flag` if false, `consume(d)` does not `TAKE` ownership and cleanup `d`.
+* So when the CFG branches, ownership is joined across control flow, and `d` is cleaned up.
 
 At a high level, MIR is:
 
