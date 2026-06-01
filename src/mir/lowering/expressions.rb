@@ -1143,38 +1143,52 @@ module MIRLoweringExpressions
 
     if t.generic_instance?
       new_args = t.generic_args.map { |arg| substitute_mir_type(arg, subst) }
-      arg_names = new_args.map { |arg| generic_subst_source(arg) }.join(",")
-      replacement = Type.new(:"#{t.generic_base}<#{arg_names}>")
+      replacement = Type.generic_instance_of(t.generic_base, new_args)
       copy_type_capabilities(t, replacement)
       return replacement
     end
 
-    str = resolved.to_s
-    if str.end_with?("[]")
-      inner = T.must(str[0..-3]).to_sym
-      if subst.key?(inner)
-        replacement = Type.new(:"#{subst.fetch(inner)}[]")
-        copy_type_capabilities(t, replacement)
-        return replacement
-      end
+    if t.array?
+      element_type = T.must(t.element_type)
+      new_element = substitute_mir_type(element_type, subst)
+      return raw_type if Type.surface_name(element_type) == Type.surface_name(new_element)
+
+      replacement = Type.array_of(new_element, capacity: t.capacity)
+      copy_type_capabilities(t, replacement)
+      return replacement
     end
 
-    if (prefix = str.match(/\A([!?~]+)/)&.[](1))
-      inner = T.must(str[prefix.length..]).to_sym
-      if subst.key?(inner)
-        replacement = Type.new(:"#{prefix}#{subst.fetch(inner)}")
-        copy_type_capabilities(t, replacement)
-        return replacement
-      end
+    if t.error_union?
+      payload_type = T.must(t.payload_type)
+      new_payload = substitute_mir_type(payload_type, subst)
+      return raw_type if Type.surface_name(payload_type) == Type.surface_name(new_payload)
+
+      replacement = Type.error_union_of(new_payload)
+      copy_type_capabilities(t, replacement)
+      return replacement
+    end
+
+    if t.optional?
+      wrapped_type = T.must(t.wrapped_type)
+      new_wrapped = substitute_mir_type(wrapped_type, subst)
+      return raw_type if Type.surface_name(wrapped_type) == Type.surface_name(new_wrapped)
+
+      replacement = Type.optional_of(new_wrapped)
+      copy_type_capabilities(t, replacement)
+      return replacement
+    end
+
+    if t.tense?
+      tense_type = t.tense_type
+      new_tense_type = substitute_mir_type(tense_type, subst)
+      return raw_type if Type.surface_name(tense_type) == Type.surface_name(new_tense_type)
+
+      replacement = Type.tense_of(new_tense_type)
+      copy_type_capabilities(t, replacement)
+      return replacement
     end
 
     raw_type
-  end
-
-  sig { params(type_obj: T.untyped).returns(String) }
-  def generic_subst_source(type_obj)
-    t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    t.resolved.to_s
   end
 
   sig { params(source: Type, target: Type).void }

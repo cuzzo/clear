@@ -33,6 +33,7 @@
 #   }
 #
 # The <return-or-pop logic> is shared by base case and combine
+require_relative "../../backends/zig_type"
 # branches: if current.parent is non-null, write result into
 # parent.child_result, free current (if heap), and resume in
 # parent. If parent is null, return result.
@@ -167,7 +168,7 @@ module ThunkTransform
     sig { params(fn_node: T.untyped, ret_zig: T.untyped).returns(NilClass) }
     def assert_non_fallible_ret!(fn_node, ret_zig)
       T.bind(self, T.untyped) rescue nil
-      return unless ret_zig.start_with?("!")
+      return unless ZigType.new(ret_zig).inferred_error_union?
       raise "INTERNAL: THUNK trampoline for '#{fn_node.name}' has fallible " \
             "return type (#{ret_zig.inspect}). The current codegen frees " \
             "heap-allocated child Frames only on the normal return path; an " \

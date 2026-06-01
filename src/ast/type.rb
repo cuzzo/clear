@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../backends/zig_type"
 
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
@@ -12,6 +13,9 @@ end
 
 class Type
     extend T::Sig
+
+  TypeInput = T.type_alias { T.any(Type, Symbol, String) }
+  ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
 
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
@@ -73,6 +77,62 @@ class Type
     return false unless value.is_a?(Type)
 
     value.indirect? == true
+  end
+
+  sig { params(type: TypeInput).returns(String) }
+  def self.surface_name(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+
+    return "~#{surface_name(t.tense_type)}" if t.tense?
+    return "!#{surface_name(T.must(t.payload_type))}" if t.error_union?
+    return "?#{surface_name(T.must(t.wrapped_type))}" if t.optional?
+    return "#{surface_name(T.must(t.element_type))}#{array_capacity_suffix(t.capacity)}" if t.array?
+
+    if t.generic_instance?
+      args = T.cast(t.generic_args, T::Array[Type]).map { |arg| surface_name(arg) }
+      return "#{t.generic_base}<#{args.join(",")}>"
+    end
+
+    t.resolved.to_s
+  end
+
+  sig { params(element_type: TypeInput, capacity: ArrayCapacity).returns(Type) }
+  def self.array_of(element_type, capacity: nil)
+    Type.new("#{surface_name(element_type)}#{array_capacity_suffix(capacity)}")
+  end
+
+  sig { params(payload_type: TypeInput).returns(Type) }
+  def self.error_union_of(payload_type)
+    Type.new("!#{surface_name(payload_type)}")
+  end
+
+  sig { params(wrapped_type: TypeInput).returns(Type) }
+  def self.optional_of(wrapped_type)
+    Type.new("?#{surface_name(wrapped_type)}")
+  end
+
+  sig { params(value_type: TypeInput).returns(Type) }
+  def self.tense_of(value_type)
+    Type.new("~#{surface_name(value_type)}")
+  end
+
+  sig { params(base: Symbol, args: T::Array[TypeInput]).returns(Type) }
+  def self.generic_instance_of(base, args)
+    Type.new("#{base}<#{args.map { |arg| surface_name(arg) }.join(",")}>")
+  end
+
+  sig { params(capacity: ArrayCapacity).returns(String) }
+  def self.array_capacity_suffix(capacity)
+    case capacity
+    when nil
+      "[]"
+    when :STREAM_OPEN
+      "[?]"
+    when :INF
+      "[INF]"
+    else
+      "[#{capacity}]"
+    end
   end
 
   # Operator categories
@@ -2408,7 +2468,7 @@ class Type
       end
       ret_zig = @raw.return_type.zig_type
       all_params = ["*Runtime"] + param_types_zig
-      ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
+      ret_str = ZigType.new(ret_zig).anyerror_return_type
       return "*const fn(#{all_params.join(', ')}) #{ret_str}"
     end
 

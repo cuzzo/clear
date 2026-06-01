@@ -719,6 +719,18 @@ RSpec.describe "MIR gap-burn characterization" do
     array = low.send(:substitute_mir_type, Type.new(:"T[]"), { T: :Int64 })
     expect(array.resolved).to eq(:"Int64[]")
 
+    fixed_array = low.send(:substitute_mir_type, Type.new(:"T[4]"), { T: :String })
+    expect(fixed_array.resolved).to eq(:"String[4]")
+
+    optional = low.send(:substitute_mir_type, Type.new(:"?T"), { T: :String })
+    expect(optional.resolved).to eq(:"?String")
+
+    fallible = low.send(:substitute_mir_type, Type.new(:"!T"), { T: :String })
+    expect(fallible.resolved).to eq(:"!String")
+
+    tense = low.send(:substitute_mir_type, Type.new(:"~T[]"), { T: :Int64 })
+    expect(tense.resolved).to eq(:"~Int64[]")
+
     left = id("fallible", type: Type.new(:"!String"))
     op = AST::BinaryOp.new(tok, left, :OR_RESCUE, lit("fallback", type: :String))
     op.full_type = Type.new(:String)

@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../backends/zig_type"
 
 module MIRLoweringFunctions
   extend T::Sig
@@ -265,28 +266,17 @@ module MIRLoweringFunctions
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
     tied_shared_return = tied_shared_family_return_param(node, context.mutable_scalar_params)
+    final_zig_type = ZigType.new(final_type)
     return_type_str = if tied_shared_return
       tied_shared_return
     elsif fn_can_fail
-      # If the user declared `RETURNS !T`, `final_type` already carries the
-      # error union. Don't double-prefix.
-      if final_type.include?("anyerror!") || final_type.include?("error{")
-        final_type
-      elsif node.reentrant == :reentrant && final_type.start_with?("!")
-        # Reentrant / mutually-recursive fns must carry `anyerror!T`
-        # rather than the bare `!T`. Zig's inferred-error-set
-        # convergence fails for cycles where two `!T` fns call each
-        # other (`'eval' uses inferred error set of function
-        # 'evalList' here -> dependency loop`). The `anyerror`
-        # prefix makes the error set concrete and breaks the loop.
-        "anyerror#{final_type}"
-      elsif final_type.start_with?("!")
-        final_type
-      elsif node.reentrant == :reentrant
-        "anyerror!#{final_type}"
-      else
-        "!#{final_type}"
-      end
+      # Reentrant / mutually-recursive fns must carry `anyerror!T`
+      # rather than Zig's inferred `!T`. Zig's inferred-error-set
+      # convergence fails for cycles where two `!T` fns call each
+      # other (`'eval' uses inferred error set of function 'evalList'
+      # here -> dependency loop`). The `anyerror` prefix makes the
+      # error set concrete and breaks the loop.
+      final_zig_type.fallible_return_type_for(reentrant: node.reentrant == :reentrant)
     else
       final_type
     end
@@ -340,15 +330,12 @@ module MIRLoweringFunctions
     elsif has_catch
       # Emit inner/outer function pair
       inner_name = "__#{node.name}_body"
-      already_error_union = final_type.start_with?("!") ||
-                            final_type.include?("anyerror!") ||
-                            final_type.include?("error{")
-      inner_ret = if already_error_union
-                    final_type
+      inner_ret = if final_zig_type.error_union?
+                    final_zig_type.source
                   elsif fn_can_fail
-                    "anyerror!#{final_type}"
+                    final_zig_type.concrete_fallible_return_type
                   else
-                    "!#{final_type}"
+                    final_zig_type.fallible_return_type
                   end
 
       inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
@@ -536,10 +523,7 @@ module MIRLoweringFunctions
 
   sig { params(final_type: String, node: AST::FunctionDef).returns(String) }
   def faulting_return_type_str(final_type, node)
-    return final_type if final_type.include?("anyerror!") || final_type.include?("error{") || final_type.start_with?("!")
-    return "anyerror!#{final_type}" if node.reentrant == :reentrant
-
-    "!#{final_type}"
+    ZigType.new(final_type).fallible_return_type_for(reentrant: node.reentrant == :reentrant)
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
@@ -2061,11 +2045,7 @@ module MIRLoweringFunctions
     }, T::Array[MIR::Param])
 
     ret_zig = sig.return_type.zig_type
-    ret_str = if ret_zig.start_with?("!") || ret_zig.include?("anyerror!") || ret_zig.include?("error{")
-                ret_zig
-              else
-                "anyerror!#{ret_zig}"
-              end
+    ret_str = ZigType.new(ret_zig).anyerror_return_type
 
     # Build body: suppressions + return expr
     body_mir = []
@@ -2075,9 +2055,7 @@ module MIRLoweringFunctions
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     captures = node.captures&.map { |c|
-      if c.is_a?(Hash)
-        c[:name].to_s
-      elsif c.respond_to?(:name)
+      if c.respond_to?(:name)
         c.name.to_s
       else
         c.to_s

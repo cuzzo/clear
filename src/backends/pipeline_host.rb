@@ -2164,8 +2164,8 @@ class PipelineHost
 
     if is_lambda
       params = key_expr.params
-      left_param  = params[0].is_a?(Hash) ? params[0][:name] : params[0].name
-      right_param = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
+      left_param  = params[0].name
+      right_param = params[1].name
       old_join_map = @join_param_map
       @join_param_map = { left_param => "__jl", right_param => "__jr" }
       pred_mir = visit_mir(key_expr.body)

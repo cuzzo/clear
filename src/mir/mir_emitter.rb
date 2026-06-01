@@ -25,6 +25,7 @@ require "sorbet-runtime"
 require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "placement"
+require_relative "../backends/zig_type"
 
 class MIREmitter
     extend T::Sig
@@ -1341,7 +1342,7 @@ class MIREmitter
     # tense path; the inferred error set folds into anyerror at the
     # call site.)
     target_t = node.target_type
-    target_t = "anyerror#{target_t}" if target_t&.start_with?("!")
+    target_t = ZigType.new(target_t).cast_target_type if target_t
     case node.method
     when :as
       "@as(#{target_t}, #{inner})"
@@ -1578,7 +1579,7 @@ class MIREmitter
     # If the binding came from a fallible call (`MUTABLE x = fn()`
     # where fn is `!T`), the annotator stamps `x` as `!T`, but the
     # Zig variable holds `T` post-`try`. Strip a leading `!`.
-    zig_type = zig_type[1..] if zig_type.start_with?("!")
+    zig_type = ZigType.new(zig_type).cleanup_storage_type
     if guarded
       guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", true, errdefer:)
     else

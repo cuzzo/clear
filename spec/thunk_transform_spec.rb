@@ -7,6 +7,19 @@ require_relative "../src/ast/ast"
 require_relative "../src/backends/transpiler"
 
 RSpec.describe "ThunkTransform module wiring" do
+  describe ZigType do
+    it "classifies and formats Zig error-return shapes" do
+      expect(ZigType.new("i64").error_union?).to eq(false)
+      expect(ZigType.new("i64").fallible_return_type).to eq("!i64")
+      expect(ZigType.new("i64").concrete_fallible_return_type).to eq("anyerror!i64")
+      expect(ZigType.new("!i64").error_union?).to eq(true)
+      expect(ZigType.new("!i64").concrete_fallible_return_type).to eq("anyerror!i64")
+      expect(ZigType.new("anyerror!i64").fallible_return_type).to eq("anyerror!i64")
+      expect(ZigType.new("!i64").cast_target_type).to eq("anyerror!i64")
+      expect(ZigType.new("!i64").cleanup_storage_type).to eq("i64")
+    end
+  end
+
   describe "module structure" do
     it "loads ThunkTransform" do
       expect(defined?(ThunkTransform)).to eq("constant")
