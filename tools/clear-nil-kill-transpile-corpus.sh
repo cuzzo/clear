@@ -13,6 +13,7 @@ should_skip_live_data_file() {
     examples/minivm/bench_pool_ops_nosync.cht|\
     examples/minivm/debugger.cht|\
     examples/minivm/parser.cht|\
+    examples/minivm/register_debugger.cht|\
     examples/minivm/sus-int.cht|\
     examples/minivm/types.cht|\
     examples/minivm/vm.cht|\
@@ -127,7 +128,7 @@ find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.ch
   | xargs -0 -P "$jobs" -I{} bash -c '
       file="$1"
       should_skip_live_data_file "$file" && exit 0
-      run_transpiler "$file" >/dev/null
+      run_transpiler_with_timeout "$file" >/dev/null
     ' _ {} || status=1
 
 exit "$status"

@@ -66,13 +66,38 @@ run fuzz-matrix ruby tools/fuzz/run.rb --matrix \
   --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param \
   --out /tmp/clear-nil-kill-fuzz --clean --jobs "$JOBS"
 
-# 6. Transpile every example + benchmark (front-to-MIR Ruby pipeline).
-par_ruby examples-transpile examples benchmarks -type f -name '*.cht' -- src/backends/transpiler.rb
+# 6. Transpile example + benchmark corpus (front-to-MIR Ruby pipeline).
+# Use the dedicated corpus helper instead of raw per-file transpiles: it
+# shards REQUIRE-heavy coverage, skips known MiniVM cleanup exceptions, and
+# applies per-file timeouts so a single pathological file cannot stall the
+# whole evidence run.
+run examples-transpile bash tools/clear-nil-kill-transpile-corpus.sh
 
 # 7. Full default build of every example + benchmark -- MIR checker +
 #    backend codegen Ruby that pure transpile skips. Parallel via the
-#    CLI (each `clear build` is its own traced process).
-build_one() { ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1 || true; }
+#    CLI (each `clear build` is its own traced process). Keep this
+#    timeout-protected: under source tracing, large interpreter examples can
+#    run for minutes and should not block the entire collect.
+should_skip_build_file() {
+  case "$1" in
+    examples/mal/*|\
+    examples/minivm/*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+build_one() {
+  should_skip_build_file "$1" && return 0
+  local timeout_seconds="${NIL_KILL_BUILD_TIMEOUT:-120}"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_seconds}s" ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1 || true
+  else
+    ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1 || true
+  fi
+}
+export -f should_skip_build_file
 export -f build_one
 {
   local_t0=$SECONDS

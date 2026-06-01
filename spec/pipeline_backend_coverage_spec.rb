@@ -2,6 +2,7 @@ require "rspec"
 require "ostruct"
 require_relative "../src/ast/ast"
 require_relative "../src/ast/lexer"
+require_relative "../src/ast/symbol_entry"
 require_relative "../src/ast/type"
 require_relative "../src/backends/pipeline_generator"
 require_relative "../src/backends/pipeline_host"
@@ -304,6 +305,42 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(mir).to be_a(MIR::InlineZig)
       expect(mir.code).to eq("@intCast(8)")
+    end
+
+    it "stamps boxed capture fields for pointer bounded callbacks" do
+      counter_type = Type.new(:Counter, sync: :locked)
+      sym = SymbolEntry.new(reg: "c", type: counter_type, mutable: true, storage: :heap, sync: :locked)
+      analysis = OpenStruct.new(
+        has_local: false,
+        has_rc: false,
+        has_shared: false,
+        has_sharded: false,
+        has_affine_locked: false,
+        has_outer_ref: false,
+        has_non_escaping_capture: false,
+        captures: { "c" => counter_type },
+        capture_symbols: { "c" => sym },
+        close_patterns: {},
+        pointer_captures: Set.new,
+        string_captures: Set.new,
+        resource_captures: Set["c"],
+        site_moved: Set.new,
+        site_copied: Set.new,
+        strategies: {},
+        move_mark_names: Set.new,
+        alloc_mark_entries: {}
+      )
+      conc = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
+      conc.capture_analysis = analysis
+      pipeline_host.define_singleton_method(:visit_pipeline_body_mir) do |_body, placeholder:|
+        [MIR::Suppress.new(placeholder)]
+      end
+
+      callback = pipeline_host.send(:build_bounded_concurrent_callback_pointer, conc, Type.new(:Int64))
+
+      field = callback[:ctx_def].fields.first
+      expect(field.name).to eq("c")
+      expect(field.boxed_capture).to eq("Counter")
     end
   end
 end

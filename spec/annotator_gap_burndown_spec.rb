@@ -331,6 +331,58 @@ RSpec.describe "annotator branch gap burndown" do
     expect(list.full_type.element_type.resolved).to eq(:Int64)
   end
 
+  it "narrows receiver collections from mutating method calls" do
+    ann = SemanticAnnotator.new(source_code: "")
+    emit = IntrinsicEmit.new(narrows_receiver_collection: true)
+
+    list_type = Type.new(:"Any[]", collection: :list)
+    list_type.provenance = :heap
+    list_type.elem_ownership = :shared
+    list_type.elem_sync = :locked
+    sym = SymbolEntry.new(reg: "items", type: list_type, mutable: true, storage: :heap)
+
+    receiver = AST::Identifier.new(token, "items")
+    receiver.symbol = sym
+    value = AST::Literal.new(token(:INT64, 1), :INT64, 1, :stack)
+    value.full_type = Type.new(:Int64)
+    call = AST::MethodCall.new(token, receiver, "append", [value])
+
+    ann.send(:narrow_receiver_collection!, call, list_type, emit)
+
+    expect(sym.type.element_type.resolved).to eq(:Int64)
+    expect(sym.type.collection).to eq(:list)
+    expect(sym.type.provenance).to eq(:heap)
+    expect(sym.type.elem_ownership).to eq(:shared)
+    expect(sym.type.elem_sync).to eq(:locked)
+    expect(receiver.full_type.element_type.resolved).to eq(:Int64)
+  end
+
+  it "returns Any for iterable element analysis when no element type is known" do
+    ann = SemanticAnnotator.new(source_code: "")
+    source = AST::Identifier.new(token, "mystery")
+    source.full_type = Type.new(:Mystery)
+
+    expect(ann.send(:pipeline_iterable_element_type, source, Type.new(:Mystery))).to eq(:Any)
+  end
+
+  it "uses Any after reporting non-iterable auto-shard inputs" do
+    ann = quiet_annotator
+    scope = double
+    allow(scope).to receive(:declare)
+    ann.define_singleton_method(:current_scope) { scope }
+    ann.define_singleton_method(:with_new_scope) { |&block| block.call }
+
+    left = AST::Identifier.new(token, "n")
+    left.full_type = Type.new(:Int64)
+    smooth = AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::EachOp.new(token(:KEYWORD, "EACH"), []))
+    conc = double(op: double(body: []))
+
+    ann.send(:analyze_auto_shard_each_op, smooth, conc, smooth)
+
+    expect(direct_errors(ann).map { |e| e[1] }).to include(:CONCURRENT_EACH_BAD_INPUT)
+    expect(scope).to have_received(:declare).with("_", nil, :Any, true, false, nil, :stack)
+  end
+
   it "covers borrow source resolver branches directly" do
     ann = SemanticAnnotator.new(source_code: "")
     source = AST::Identifier.new(token, "source")

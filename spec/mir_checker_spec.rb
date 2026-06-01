@@ -215,6 +215,15 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
     end
 
+    it "detects discarded RawZig stdlib call with allocates:true" do
+      rz = MIR::RawZig.new("try CheatLib.clone(value)", "raw_clone", MIR::OwnershipContract.empty, { allocates: true, return: :String, return_alloc: :heap })
+      body = [
+        MIR::ExprStmt.new(rz, false),
+      ]
+      errors = checker.check_fn!(fn_def("raw_stdlib_leak", body))
+      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("RawZig block") }).to be true
+    end
+
     it "rejects InlineZig stdlib call with allocates:true returning Void without explicit ownership facts" do
       iz = MIR::InlineZig.new("CheatLib.sort({0})", "sort", MIR::OwnershipContract.empty, { allocates: true, return: :Void })
       body = [

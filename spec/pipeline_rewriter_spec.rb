@@ -157,4 +157,37 @@ RSpec.describe PipelineRewriter do
     expect(foreach.body[0].value).to be_a(AST::BinaryOp)
     expect(foreach.body[0].value.op).to eq(:ADD)
   end
+
+  it "builds set insert calls for DISTINCT terminal actions" do
+    token = Lexer::Token.new(:KEYWORD, "DISTINCT", 1, 1)
+    current = AST::Identifier.new(token, "__it")
+    current.full_type = Type.new(:Int64)
+    terminal = AST::DistinctOp.new(token, AST::Identifier.new(token, "_"))
+    rewriter = PipelineRewriter.new(SemanticAnnotator.new(source_code: ""))
+
+    actions = rewriter.send(:build_terminal_action, terminal, current, "__res", token, Type.new(:"Int64[]", collection: :set))
+
+    expect(actions.length).to eq(1)
+    call = actions.first
+    expect(call).to be_a(AST::MethodCall)
+    expect(call.name).to eq("insert")
+    expect(call.matched_stdlib_def).not_to be_nil
+    expect(call.zig_pattern).to include(".insert")
+  end
+
+  it "falls back to append actions for non-fold terminals" do
+    token = Lexer::Token.new(:KEYWORD, "JOIN", 1, 1)
+    current = AST::Identifier.new(token, "__it")
+    current.full_type = Type.new(:Int64)
+    terminal = AST::JoinOp.new(token, AST::Identifier.new(token, "other"), AST::Identifier.new(token, "_"))
+    rewriter = PipelineRewriter.new(SemanticAnnotator.new(source_code: ""))
+
+    actions = rewriter.send(:build_terminal_action, terminal, current, "__res", token, Type.new(:"Int64[]"))
+
+    expect(actions.length).to eq(1)
+    call = actions.first
+    expect(call).to be_a(AST::MethodCall)
+    expect(call.name).to eq("append")
+    expect(call.matched_stdlib_def).not_to be_nil
+  end
 end

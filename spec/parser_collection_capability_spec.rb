@@ -34,6 +34,25 @@ RSpec.describe "Parser collection capability chains" do
     expect(parse_type("Int64[]@list:sharded(1)").shard_count).to eq(1)
   end
 
+  it "parses direct constructor modifier tokens before colon chains" do
+    list = parse_expr("List[] @sharded(3)")
+    pool = parse_expr("Pool[] @soa")
+
+    expect(list.instance_variable_get(:@constructor_shard_count)).to eq(3)
+    expect(list.instance_variable_get(:@constructor_soa)).to be false
+    expect(pool.instance_variable_get(:@constructor_shard_count)).to be_nil
+    expect(pool.instance_variable_get(:@constructor_soa)).to be true
+  end
+
+  it "rejects duplicate local sync capability in type chains" do
+    expect { parse_type("Int64 @locked:local") }.to raise_error(ParserError, /Duplicate sync/)
+  end
+
+  it "parses local sync capability and rejects direct bad constructor modifiers" do
+    expect(parse_type("Int64 @local").sync).to eq(:local)
+    expect { parse_expr("List[] @locked") }.to raise_error(ParserError, /Expected 'sharded\(N\)' or 'soa'|unknown modifier/i)
+  end
+
   it "rejects unsupported constructor modifiers instead of silently ignoring them" do
     expect { parse_expr("List[]:locked") }.to raise_error(ParserError, /Expected 'sharded\(N\)' or 'soa'|unknown modifier/i)
   end

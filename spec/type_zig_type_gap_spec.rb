@@ -5,6 +5,12 @@ require_relative "../src/ast/type"
 require_relative "../src/annotator/helpers/function_signature"
 
 RSpec.describe "Type#zig_type gap coverage" do
+  it "renders generic and stream-style surface names without string re-parsing" do
+    expect(Type.surface_name(Type.generic_instance_of(:Box, [Type.new(:Int64)]))).to eq("Box<Int64>")
+    expect(Type.array_capacity_suffix(:STREAM_OPEN)).to eq("[?]")
+    expect(Type.array_capacity_suffix(:INF)).to eq("[INF]")
+  end
+
   it "keeps fallible function return types fallible" do
     sig = FunctionSignature.new(params: [], return_type: Type.new("!Int64"))
 
