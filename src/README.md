@@ -107,7 +107,7 @@ AST::FunctionDef(
       ))])
 ```
 
-### 3. Pipeline Fusion & Desugaring 
+### 3. Pipeline Fusion & Desugaring (`src/backends/*_rewriter.rb`)
 
   * At this stage, pipelines are fused together for efficiency other desugaring occurs, like string concatenation.
 
