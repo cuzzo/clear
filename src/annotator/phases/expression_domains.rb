@@ -53,6 +53,139 @@ module Annotator
         record_call_site(node.name) if node.name.is_a?(String)
       end
 
+      sig { params(node: AST::StaticCall).void }
+      def visit_StaticCall(node)
+        T.bind(self, SemanticAnnotator)
+
+        node.args.each { |arg| visit(arg) }
+
+        # `File` in `File::open(...)` is a TYPE reference, not a runtime
+        # value. The codebase's established marker for a type-position
+        # identifier is :Type (cf. comptime type args in function_analysis).
+        stamp_type!(node.type_name, Type.new(:Type))
+
+        type_name = node.type_name.name.to_sym
+        schema = lookup_type_schema(type_name)
+
+        unless schema
+          error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
+        end
+
+        unless schema.kind == :resource
+          error!(node, :STATIC_NOT_RESOURCE, type: type_name)
+        end
+
+        static_methods = schema.static_methods || {}
+        method_def = IntrinsicRegistry.sig(static_methods, T.unsafe(node).method_name)
+
+        unless method_def
+          available = static_methods.keys.join(", ")
+          available = "(none)" if available.empty?
+          method_tok = node.type_name.token
+          if method_tok
+            anchor = anchor_at(
+              method_tok.line,
+              method_tok.column + node.type_name.name.to_s.length + 2
+            )
+            emit_typo_suggestion!(
+              anchor, node.method_name, static_methods.keys,
+              "Type Error: No static method '#{node.method_name}' on '#{type_name}'. Available: #{available}.",
+              "static method of #{type_name}",
+              category: :type, cascade: true
+            )
+          else
+            error!(node, :STATIC_UNKNOWN_METHOD, method: node.method_name, type: type_name, available: available)
+          end
+          return
+        end
+
+        expected_args = method_def.arg_spec
+        if node.args.length != expected_args.length
+          error!(node, :STATIC_ARITY, type: type_name, method: node.method_name, expected: expected_args.length, got: node.args.length)
+        end
+
+        node.args.zip(expected_args).each_with_index do |(arg, expected), i|
+          actual = arg.resolved_type
+          unless expected == :Any || actual == :Any || is_safe_autocast?(actual, expected)
+            error!(node, :STATIC_ARG_TYPE, index: i + 1, type: type_name, method: node.method_name, expected: expected, got: actual)
+          end
+        end
+
+        emit = method_def.emit
+        node.zig_pattern = emit&.zig
+        stamp_type!(node, method_def.return_def.resolve(nil, node.args, self))
+        node.matched_stdlib_def = method_def
+        node.matched_signature = method_def if node.respond_to?(:matched_signature=)
+        node.stdlib_allocates = true if emit&.allocates
+        node.mutates_receiver = true if emit&.mutates_receiver
+        node.can_fail = true if method_def.can_fail
+        node.error_kind = emit.error_kind if emit&.error_kind
+        node.error_type = emit.error_type if emit&.error_type
+        current_fn_ctx.alloc_count += 1 if current_fn_ctx && (emit&.allocates || method_def.can_fail)
+
+        return unless emit&.mutates_receiver && node.is_a?(AST::MethodCall)
+
+        root = chain_root_name(node.object)
+        mark_var_mutated(root) if root
+      end
+
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node]).returns(T.nilable(Type)) }
+      def visit_IntrinsicFunc(node, args)
+        T.bind(self, SemanticAnnotator)
+
+        definitions = STD_LIB[node.name]
+        definitions = [definitions] if definitions.is_a?(Hash)
+
+        matched_def = find_matching_intrinsic(definitions, args)
+
+        unless matched_def
+          sigs = definitions.map { |definition| format_intrinsic_args(definition[:args]) }.join(" or ")
+          arg_types = args.map { |arg| arg.resolved_type }.join(", ")
+          error!(node, :INTRINSIC_NO_OVERLOAD, name: node.name, args: arg_types, candidates: sigs)
+          return
+        end
+
+        signature = normalize_intrinsic_signature(matched_def)
+
+        if signature
+          call_node = Struct.new(:token, :name, :args).new(node.token, node.name, args)
+          verify_function_signature!(call_node, signature)
+        end
+
+        emit = matched_def.emit
+        if emit&.reject_when && reject_arg_type_matches?(args.first, emit.reject_when)
+          first_arg = T.must(args.first)
+          reason = emit&.reject_error ||
+                   "#{node.name}() is not valid for #{first_arg.resolved_type}"
+          error!(node, :INTRINSIC_REJECTED, message: reason)
+          return
+        end
+
+        stamp_type!(node, matched_def.return_def.resolve(nil, args, self))
+
+        node.zig_pattern = emit&.zig
+        node.matched_stdlib_def = matched_def
+        node.matched_signature = matched_def if node.respond_to?(:matched_signature=)
+        node.stdlib_allocates = true if emit&.allocates
+        node.mutates_receiver = true if emit&.mutates_receiver
+        node.can_fail = true if matched_def.can_fail || emit&.allocates
+        node.error_kind = emit.error_kind if emit&.error_kind
+        node.error_type = emit.error_type if emit&.error_type
+        if current_fn_ctx
+          current_fn_ctx.alloc_count += 1 if emit&.allocates || matched_def.can_fail || matched_def.needs_rt
+        end
+        record_effect(EffectTracker::SUSPENDS) if emit&.suspends
+
+        if emit&.mutates_receiver && node.is_a?(AST::MethodCall)
+          mark_chain_needs_mut_ref!(node.object)
+          root = chain_root_name(node.object)
+          mark_var_mutated(root) if root
+        end
+
+        narrow_collection_type!(matched_def, args)
+        nil
+      end
+
       sig { params(parent: AST::FuncCall, arg: T.untyped).void }
       def annotate_call_argument!(parent, arg)
         T.bind(self, SemanticAnnotator)

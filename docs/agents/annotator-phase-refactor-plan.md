@@ -276,7 +276,7 @@ Expected output:
   currently mutated directly on `SymbolEntry` into an explicit flow owner. Done
   means moved-state readers/writers no longer mutate a copied `SymbolEntry`
   field and branch scopes merge/fork the flow fact directly.
-- [ ] `phase-expression-domains`: after binding/flow ownership is explicit,
+- [x] `phase-expression-domains`: after binding/flow ownership is explicit,
   split expression typing domains only where it removes real branch hubs.
 - [x] `phase-expression-domain-calls`: extract call expression typing into a
   small typed domain object after call/body summaries are explicit. Done means
