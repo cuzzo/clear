@@ -1272,10 +1272,14 @@ module MIRLoweringExpressions
           "MIR::HeapCreate",
           target_alloc: :heap,
         ), MIR::HeapCreate)
-        mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect struct field allocation"))
-        mark.scope = :heap
-        hoisted << mark
-        hoisted << MIR::Let.new(temp, hc, false, nil, nil)
+        hoisted.concat(MIR::BindingMaterialization.new(
+          name: temp,
+          expr: hc,
+          alloc: :heap,
+          type_info: v.full_type!(context: "indirect struct field allocation"),
+          mutable: false,
+          scope: :heap
+        ).statements)
         # errdefer cleans this field if a later allocation (another field or
         # the outer struct pointer) fails.
         hoisted << MIR::ErrDeferStmt.new(
@@ -1354,10 +1358,14 @@ module MIRLoweringExpressions
           "MIR::HeapCreate",
           target_alloc: :heap,
         ), MIR::HeapCreate)
-        mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect union field allocation"))
-        mark.scope = :heap
-        hoisted << mark
-        hoisted << MIR::Let.new(temp, hc, false, nil, nil)
+        hoisted.concat(MIR::BindingMaterialization.new(
+          name: temp,
+          expr: hc,
+          alloc: :heap,
+          type_info: v.full_type!(context: "indirect union field allocation"),
+          mutable: false,
+          scope: :heap
+        ).statements)
         if needs_deep_cleanup
           # Deep copy owns heap data inside __p.*; errdefer must clean it up
           # before destroying the pointer, otherwise those allocations leak.

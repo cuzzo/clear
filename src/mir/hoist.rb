@@ -382,46 +382,6 @@ module MIRHoistLowering
   extend T::Sig
   include Kernel
 
-  class HoistedAllocationPlan < T::Struct
-    extend T::Sig
-
-    const :name, String
-    const :expr, MIR::Node
-    const :alloc, Symbol
-    const :type_info, Type
-    const :mutable, T::Boolean
-    const :cleanup_entry, T.nilable(CleanupEntry)
-    const :cleanup_mode, Symbol
-
-    sig { returns(MIR::AllocMark) }
-    def alloc_mark
-      mark = MIR::AllocMark.new(name, alloc, type_info)
-      mark.scope = MIR::Placement.alloc_scope(alloc)
-      mark
-    end
-
-    sig { returns(MIR::Let) }
-    def let_node
-      MIR::Let.new(name, expr, mutable, nil, nil)
-    end
-
-    sig { returns(T.nilable(MIR::Stmt)) }
-    def cleanup_node
-      entry = cleanup_entry
-      return nil unless entry
-
-      cleanup_mode == :err ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
-    end
-
-    sig { returns(T::Array[MIR::Stmt]) }
-    def statements
-      out = T.let([alloc_mark, let_node], T::Array[MIR::Stmt])
-      cleanup = cleanup_node
-      out << cleanup if cleanup
-      out
-    end
-  end
-
   # Nodes whose ownership must be verifier-visible when nested, regardless of
   # whether placement selected heap or frame.
   ALLOC_MIR_CLASSES = [
@@ -507,13 +467,17 @@ module MIRHoistLowering
     name = "__tmp_#{@tmp_counter}"
     ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
     alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, ti)
-    mark.scope = MIR::Placement.alloc_scope(alloc)
-    @pending_stmts << mark
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: T.cast(expr, MIR::Node),
+      alloc: alloc,
+      type_info: ti,
+      mutable: false
+    )
+    @pending_stmts.concat(materialized.statements)
     @lowered_alloc_names&.add(name)
     @lowered_alloc_names&.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
-    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
 
@@ -725,7 +689,7 @@ module MIRHoistLowering
       transfer_on_success: T::Boolean,
       type_info: Type,
       cleanup_entry: T.nilable(CleanupEntry)
-    ).returns(HoistedAllocationPlan)
+    ).returns(MIR::BindingMaterialization)
   end
   def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:)
     @tmp_counter += 1
@@ -733,7 +697,7 @@ module MIRHoistLowering
     if entry
       entry[:has_moved_guard] = transfer_on_success ? true : false
     end
-    HoistedAllocationPlan.new(
+    MIR::BindingMaterialization.new(
       name: "__tmp_#{@tmp_counter}",
       expr: expr,
       alloc: mir_owned_alloc(expr) || :heap,
@@ -744,7 +708,7 @@ module MIRHoistLowering
     )
   end
 
-  sig { params(plan: HoistedAllocationPlan).void }
+  sig { params(plan: MIR::BindingMaterialization).void }
   def record_hoisted_allocation!(plan)
     @lowered_alloc_names&.add(plan.name)
     entry = plan.cleanup_entry

@@ -45,33 +45,6 @@ module MIRLoweringVariables
     const :generic_id, T::Boolean
   end
 
-  class VarDeclMaterializationPlan < T::Struct
-    extend T::Sig
-
-    const :alloc_mark, T.nilable(MIR::AllocMark)
-    const :let_node, MIR::Let
-    const :cleanup, T.nilable(MIR::Cleanup)
-
-    sig { params(let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
-    def self.let_only(let_node)
-      new(alloc_mark: nil, let_node: let_node, cleanup: nil)
-    end
-
-    sig { params(alloc_mark: MIR::AllocMark, let_node: MIR::Let, cleanup: T.nilable(MIR::Cleanup)).returns(VarDeclMaterializationPlan) }
-    def self.owned(alloc_mark, let_node, cleanup = nil)
-      new(alloc_mark: alloc_mark, let_node: let_node, cleanup: cleanup)
-    end
-
-    sig { returns(T::Array[MIR::Stmt]) }
-    def statements
-      out = T.let([], T::Array[MIR::Stmt])
-      out << T.must(alloc_mark) if alloc_mark
-      out << let_node
-      out << T.must(cleanup) if cleanup
-      out
-    end
-  end
-
   sig do
     params(
       node: AST::VarDecl,
@@ -444,7 +417,7 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def var_decl_materialization_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     return classified_cleanup_var_decl_plan(node, facts, safe_name, init, let_node) if facts.has_mir_drop
@@ -455,10 +428,10 @@ module MIRLoweringVariables
     return binding_metadata_var_decl_plan(node, facts, safe_name, init, let_node) if facts.binding_entry.present? && !facts.binding_entry.needs_cleanup?
     return allocating_init_var_decl_plan(node, facts, safe_name, init, let_node) if mir_allocates?(init) && !facts.generic_id
 
-    VarDeclMaterializationPlan.let_only(let_node)
+    MIR::MaterializationPacket.value_only(let_node)
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def classified_cleanup_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     drop_entry = facts.binding_entry
@@ -469,14 +442,14 @@ module MIRLoweringVariables
     drop_entry = drop_entry.with_alloc(node_alloc)
     @current_bindings[node.name.to_s] = drop_entry if @current_bindings
     mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
-    VarDeclMaterializationPlan.owned(
+    MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, node_alloc, node.full_type!, drop_entry),
       let_node,
       MIR::Cleanup.new(safe_name, drop_entry)
     )
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def owned_return_call_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
@@ -484,7 +457,7 @@ module MIRLoweringVariables
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     cleanup_entry[:has_moved_guard] = true
     mark_guarded_cleanup_name!(safe_name)
-    VarDeclMaterializationPlan.owned(
+    MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
       let_node,
       MIR::Cleanup.new(safe_name, cleanup_entry)
@@ -496,11 +469,11 @@ module MIRLoweringVariables
     !facts.heap_return_var && owned_return_transfer_binding?(facts.binding_entry, init) && !facts.generic_id
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def transfer_only_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
-    VarDeclMaterializationPlan.owned(
+    MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
       let_node
     )
@@ -511,10 +484,10 @@ module MIRLoweringVariables
     (init.is_a?(MIR::InlineZig) && init.has_alloc_metadata? && init.target_var == safe_name && !facts.generic_id) == true
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::InlineZig, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::InlineZig, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def inline_alloc_var_decl_plan(node, facts, safe_name, init, let_node)
     mir_alloc = init.allocs.any_heap? ? :heap : :frame
-    VarDeclMaterializationPlan.owned(
+    MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
       let_node
     )
@@ -528,47 +501,47 @@ module MIRLoweringVariables
       (!facts.ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def mutated_owned_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.binding_entry.alloc || facts.decl_alloc
     cleanup_entry = CleanupEntry.build(facts.ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     mark_guarded_cleanup_name!(safe_name)
-    VarDeclMaterializationPlan.owned(
+    MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
       let_node,
       MIR::Cleanup.new(safe_name, cleanup_entry)
     )
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def binding_metadata_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     binding_entry = facts.binding_entry
-    return VarDeclMaterializationPlan.let_only(let_node) unless mir_allocates?(init) ||
+    return MIR::MaterializationPacket.value_only(let_node) unless mir_allocates?(init) ||
                                                                (MIR::Placement.heap?(binding_entry.alloc) && binding_entry.kind != :none)
 
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-    return VarDeclMaterializationPlan.owned(alloc_mark, let_node) unless ownership_bearing_type?(facts.ft)
+    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless ownership_bearing_type?(facts.ft)
 
     cleanup_entry = moved_guard_cleanup_entry(facts.ft, mir_alloc, node)
     mark_guarded_cleanup_name!(safe_name)
-    VarDeclMaterializationPlan.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
+    MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
   end
 
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(VarDeclMaterializationPlan) }
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: MIR::Node, let_node: MIR::Let).returns(MIR::MaterializationPacket) }
   def allocating_init_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry)
-    return VarDeclMaterializationPlan.owned(alloc_mark, let_node) unless type_requires_alloc_cleanup?(facts.ft, mir_alloc)
+    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless type_requires_alloc_cleanup?(facts.ft, mir_alloc)
 
     cleanup_entry = T.must(hoist_cleanup_entry(init, node))
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
-    VarDeclMaterializationPlan.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
+    MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
   end
 
   sig { params(name: String).void }

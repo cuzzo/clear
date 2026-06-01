@@ -286,11 +286,15 @@ module MIRLoweringControlFlow
       source_name = "__for_src_#{@tmp_counter}"
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
-      mark = MIR::AllocMark.new(source_name, source_alloc, ct, MIR::Placement.alloc_scope(source_alloc))
       coll.target_var = source_name if coll.is_a?(MIR::InlineZig)
-      collection_setup << mark
-      collection_setup << MIR::Let.new(source_name, coll, false, nil, nil)
-      collection_setup << MIR::Cleanup.new(source_name, entry)
+      collection_setup.concat(MIR::BindingMaterialization.new(
+        name: source_name,
+        expr: T.cast(coll, MIR::Node),
+        alloc: source_alloc,
+        type_info: ct,
+        mutable: false,
+        cleanup_entry: entry
+      ).statements)
       coll = MIR::Ident.new(source_name)
     end
     is_mutable = node.is_mutable == true
@@ -794,17 +798,17 @@ module MIRLoweringControlFlow
       @tmp_counter += 1
       name = "__tmp_#{@tmp_counter}"
       entry = hoist_cleanup_entry(stmt.value, ast_value)
-      mark = MIR::AllocMark.new(
-        name,
-        :heap,
-        mir_alloc_mark_type_info(stmt.value, ast_value, context: "unhoisted return allocation"),
+      materialized = MIR::BindingMaterialization.new(
+        name: name,
+        expr: T.cast(stmt.value, MIR::Node),
+        alloc: :heap,
+        type_info: mir_alloc_mark_type_info(stmt.value, ast_value, context: "unhoisted return allocation"),
+        mutable: false,
+        cleanup_entry: entry,
+        cleanup_mode: entry ? :err : :normal,
+        scope: :heap
       )
-      mark.scope = :heap
-      out = T.let([
-        mark,
-        MIR::Let.new(name, stmt.value, false, nil, nil)
-      ], T::Array[T.untyped])
-      out << MIR::ErrCleanup.new(name, entry) if entry
+      out = T.let(materialized.statements, T::Array[T.untyped])
       if entry
         plan = synthetic_return_ownership_plan(name)
         out.concat(plan.transfer_marks_for(Set[name], @lowered_guarded_cleanup_names || Set.new))

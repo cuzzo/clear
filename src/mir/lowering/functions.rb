@@ -701,12 +701,13 @@ module MIRLoweringFunctions
       alloc = entry.present? ? entry.alloc : :heap
       scope = entry.present? ? entry.scope : :heap
       mark = MIR::AllocMark.new(p.name.to_s, alloc, ti, scope)
-      out << mark
-      next unless entry.needs_cleanup?
-
-      build_drop_entry!(drop_entry, ti, nil)
-      (@guarded_cleanup_names ||= {})[T.must(zig_safe_name(p.name.to_s))] = true if drop_entry.has_moved_guard?
-      out << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
+      if entry.needs_cleanup?
+        build_drop_entry!(drop_entry, ti, nil)
+        (@guarded_cleanup_names ||= {})[T.must(zig_safe_name(p.name.to_s))] = true if drop_entry.has_moved_guard?
+        out.concat(MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)).statements)
+      else
+        out.concat(MIR::MaterializationPacket.markers(mark).statements)
+      end
     end
     out
   end
@@ -1563,7 +1564,7 @@ module MIRLoweringFunctions
     MIR::IfOptional.new(inner_mir, snav_var, call_mir, MIR::Lit.new("null"))
   end
 
-  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.untyped) }
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(MIR::Node) }
   def lower_intrinsic(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars

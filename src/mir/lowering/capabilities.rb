@@ -509,14 +509,17 @@ module MIRLoweringCapabilities
     )
     return [MIR::Let.new(safe_alias, materialize, true, nil, "_ = &#{safe_alias};")] unless is_collection
 
-    mark = MIR::AllocMark.new(safe_alias, :heap, rt.tense_type)
-    mark.scope = :heap
     entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
-    [
-      mark,
-      MIR::Let.new(safe_alias, materialize, true, nil, "_ = &#{safe_alias};"),
-      MIR::Cleanup.new(safe_alias, entry),
-    ]
+    MIR::BindingMaterialization.new(
+      name: safe_alias,
+      expr: materialize,
+      alloc: :heap,
+      type_info: rt.tense_type,
+      mutable: true,
+      suppression: "_ = &#{safe_alias};",
+      cleanup_entry: entry,
+      scope: :heap
+    ).statements
   end
 
   sig { params(node: AST::WithBlock, clause: T.nilable(T::Hash[Symbol, FallibleClauseValue])).returns(T.nilable(String)) }

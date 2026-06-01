@@ -139,9 +139,8 @@ module MIRLoweringConcurrency
       type_info = Type.new(:CapturedValue, location: :heap) if spec.field_type_zig.start_with?("CheatLib.CapturedValue(")
       name = "#{receiver}.#{spec.name}"
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
-      mark = MIR::AllocMark.new(name, :heap, type_info)
-      mark.scope = :heap
-      [mark, MIR::Cleanup.new(name, entry)]
+      mark = MIR::AllocMark.new(name, :heap, type_info, :heap)
+      MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(name, entry)).statements
     end.flatten
   end
 

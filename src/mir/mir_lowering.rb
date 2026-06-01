@@ -17,6 +17,7 @@ require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "pass_state"
 require_relative "placement"
+require_relative "materialization"
 require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
@@ -560,13 +561,16 @@ class MIRLowering
       success_try.result_type = Type.new(ti)
       success_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
       build_drop_entry!(success_cleanup, ti, nil)
-      mark = MIR::AllocMark.new(success, source_alloc, ti, MIR::Placement.alloc_scope(source_alloc))
-      body = [
-        mark,
-        MIR::Let.new(success, success_try, false, nil, nil),
-        MIR::Cleanup.new(success, success_cleanup),
-        MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(success), ti, dest_alloc)),
-      ]
+      materialized = MIR::BindingMaterialization.new(
+        name: success,
+        expr: success_try,
+        alloc: source_alloc,
+        type_info: ti,
+        mutable: false,
+        cleanup_entry: success_cleanup
+      )
+      body = materialized.statements
+      body << MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(success), ti, dest_alloc))
       out_block = MIR::BlockExpr.new(label, body)
       out_block.result_type = Type.new(ti)
       return out_block
@@ -583,11 +587,14 @@ class MIRLowering
     @tmp_counter += 1
     label = "__owned_branch_#{@tmp_counter}"
     name = "__owned_branch_val_#{@tmp_counter}"
-    mark = MIR::AllocMark.new(name, dest_alloc, ti, MIR::Placement.alloc_scope(dest_alloc))
-    body = T.let([
-      mark,
-      MIR::Let.new(name, mir, false, nil, nil),
-    ], T::Array[MIR::Stmt])
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: T.cast(mir, MIR::Node),
+      alloc: dest_alloc,
+      type_info: ti,
+      mutable: false
+    )
+    body = T.let(materialized.statements, T::Array[MIR::Stmt])
     body.concat(ownership_transfer_marks(name, :block_result, target_alloc: dest_alloc))
     body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
     out = MIR::BlockExpr.new(label, body)
@@ -602,13 +609,16 @@ class MIRLowering
     name = "__owned_val_#{@tmp_counter}"
     cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
     build_drop_entry!(cleanup, ti, nil)
-    mark = MIR::AllocMark.new(name, source_alloc, ti, MIR::Placement.alloc_scope(source_alloc))
-    body = [
-      mark,
-      MIR::Let.new(name, mir, false, nil, nil),
-      MIR::Cleanup.new(name, cleanup),
-      MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(name), ti, dest_alloc)),
-    ]
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: T.cast(mir, MIR::Node),
+      alloc: source_alloc,
+      type_info: ti,
+      mutable: false,
+      cleanup_entry: cleanup
+    )
+    body = materialized.statements
+    body << MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(name), ti, dest_alloc))
     out = MIR::BlockExpr.new(label, body)
     out.result_type = Type.new(ti)
     out
@@ -712,12 +722,22 @@ class MIRLowering
     label = "__own_branch_#{@block_expr_counter}"
     name = "__tmp_#{@tmp_counter}"
     type_info = alloc_mark_type_info(mir, ast_node, "branch ownership placement")
-    mark = MIR::AllocMark.new(name, :heap, type_info, :heap)
-    body = T.let([mark, MIR::Let.new(name, mir, false, nil, nil)], T::Array[MIR::Stmt])
     entry = hoist_cleanup_entry(mir, ast_node)
     if entry
       entry[:has_moved_guard] = true
-      body << MIR::ErrCleanup.new(name, entry)
+    end
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: T.cast(mir, MIR::Node),
+      alloc: :heap,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: entry,
+      cleanup_mode: entry ? :err : :normal,
+      scope: :heap
+    )
+    body = T.let(materialized.statements, T::Array[MIR::Stmt])
+    if entry
       body.concat(ownership_transfer_marks(name, :block_result, move_guarded: true))
     end
     body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
@@ -1027,17 +1047,18 @@ class MIRLowering
     @tmp_counter += 1
     discard_name = "__discard_#{@tmp_counter}"
     alloc = entry.alloc || mir_owned_alloc(mir) || :heap
-    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node!(stmt, context: "discard allocation mark"),
-      MIR::Placement.alloc_scope(alloc))
+    materialized = MIR::BindingMaterialization.new(
+      name: discard_name,
+      expr: T.cast(mir, MIR::Node),
+      alloc: alloc,
+      type_info: Type.from_node!(stmt, context: "discard allocation mark"),
+      mutable: true,
+      annotation: discard_owned_zig_type(stmt, entry),
+      suppression: "_ = &#{discard_name};",
+      cleanup_entry: entry
+    )
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
-    [
-      MIR::ScopeBlock.new([
-        mark,
-        MIR::Let.new(discard_name, mir, true, discard_owned_zig_type(stmt, entry), "_ = &#{discard_name};"),
-        MIR::Cleanup.new(discard_name, entry),
-      ]),
-      true,
-    ]
+    [MIR::ScopeBlock.new(materialized.statements), true]
   end
 
   sig { params(stmt: T.untyped).returns(T::Boolean) }
