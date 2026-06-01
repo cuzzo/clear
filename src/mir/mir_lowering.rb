@@ -2242,9 +2242,16 @@ class MIRLowering
   # Shared root resolution for checker attribution and receiver allocator lookup.
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_receiver_node(node)
+    return nil unless node.is_a?(AST::Locatable)
+
     root = AST.root_identifier(node)
     return root if root
-    node.respond_to?(:target) ? root_receiver_node(node.target) : nil
+    case node
+    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Slice
+      root_receiver_node(node.target)
+    else
+      nil
+    end
   end
 
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).

@@ -331,12 +331,14 @@ class MIRPass
 
   sig { params(expr: T.untyped).returns(T.untyped) }
   def unwrap_return_expr(expr)
-    node = T.let(expr, T.any(AST::GetField, AST::Identifier, AST::Literal))
-    while node.is_a?(AST::MoveNode) || node.is_a?(AST::Cast) || node.is_a?(AST::FreezeNode)
-      node = node.value
+    case expr
+    when AST::MoveNode, AST::Cast, AST::FreezeNode
+      unwrap_return_expr(expr.value)
+    when AST::BinaryOp
+      expr.op == :OR_RESCUE ? unwrap_return_expr(expr.left) : expr
+    else
+      expr
     end
-    node = unwrap_return_expr(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    node
   end
 
   sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }

@@ -413,7 +413,6 @@ class SymbolEntry
   sig { void }
   def mark_borrowed_alias!
     @flow.borrowed_alias = true
-    mark_non_escaping!
   end
 
   sig { params(original: SymbolEntry).void }

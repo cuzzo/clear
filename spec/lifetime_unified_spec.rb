@@ -60,7 +60,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       child.mark_borrowed_alias!
 
       expect(child.borrowed_alias).to be(true)
-      expect(child.non_escaping).to be(true)
+      expect(child.non_escaping).to be(false)
       expect(parent.borrowed_alias).to be(false)
       expect(parent.non_escaping).to be(false)
     end

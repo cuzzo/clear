@@ -1071,7 +1071,7 @@ module CapabilityHelper
 
   sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def non_escaping_fiber_capture?(symbol)
-    return false unless symbol&.borrowed_alias
+    return false unless symbol&.borrowed_alias && symbol.non_escaping
 
     # WITH aliases unwrap a synchronized cell into a stack borrow and have no
     # sync on the alias itself. Capturing those is a UAF. Capturing the
