@@ -9,6 +9,7 @@ require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
 require_relative "phases/declaration_index"
 require_relative "phases/signature_registry"
+require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
@@ -56,6 +57,7 @@ class SemanticAnnotator
   include LockHelper
   include TestAnnotation
   include Annotator::Phases::TypeRegistration
+  include Annotator::Phases::SignatureRegistration
 
   class SnapshotTxnViolation < T::Struct
     const :effect, Symbol
@@ -261,7 +263,7 @@ class SemanticAnnotator
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
     @og = T.let(OwnershipGraph.new, T.untyped)
     @og_scope_depth = T.let(0, Integer)
-    @synthetic_fns = T.let([], T::Array[T.untyped])
+    @synthetic_fns = T.let([], T::Array[AST::FunctionDef])
     @branch_terminated = T.let(false, T::Boolean)
     @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
     @inside_snapshot_txn = T.let(0, T.nilable(Integer))
@@ -488,6 +490,14 @@ private
     return unless node
     return if node.is_a?(Symbol)
 
+    case node
+    when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
+      return register_type_declaration(node)
+    when AST::ExternFnDecl
+      register_extern_function_signature(node)
+      return
+    end
+
     # Dynamic Dispatch
     method_name = "visit_#{node.class.name.split('::').last}"
     send(method_name, node)
@@ -509,16 +519,9 @@ private
     # Types are registered before function signatures can reference them.
     register_type_declarations(declarations)
 
-    # Function signatures are hoisted so functions can call later definitions.
-    declarations.function_declarations.each { |stmt| register_function_signature(stmt) }
-    declarations.extern_function_declarations.each { |stmt| visit_ExternFnDecl(stmt) }
-
-    # Union default methods are synthesized only after all function signatures
-    # are known.
-    @synthetic_fns = []
-    declarations.union_method_declarations.each { |stmt| validate_union_methods!(stmt) }
-    # Pre-register synthesized defaults so user bodies can call them.
-    @synthetic_fns.each { |fn| register_function_signature(fn) }
+    # Function, extern, method, and synthesized union default signatures are
+    # hoisted so bodies can call later definitions.
+    register_program_signatures(declarations)
 
     # Bridge legacy `@reentrant` and new `EFFECTS REENTRANT` after
     # @fn_nodes is populated and before function bodies are checked.
@@ -602,6 +605,11 @@ private
     end
   end
 
+  sig { returns(T::Array[AST::FunctionDef]) }
+  def synthetic_function_definitions
+    @synthetic_fns
+  end
+
   sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
   def visit_RequireNode(node)
     unless @importer
@@ -652,44 +660,6 @@ private
       next unless (vis == :pub) || (vis == :package && same_dir)
       current_scope.declare_type(type_name, type_entry[:schema])
     end
-  end
-
-  # EXTERN FN name(params) RETURNS type FROM "module"
-  # Registers a native Zig/C function in the current scope.
-  # At call sites, no rt is injected and no try is emitted.
-  sig { params(node: AST::ExternFnDecl).returns(Symbol) }
-  def visit_ExternFnDecl(node)
-    signature = Annotator::Phases::SignatureRegistry.extern_function_signature(node)
-
-    if node.owner_type
-      # EXTERN FN TypeName<T>.method(...) — register as method on the type
-      type_sym = node.owner_type.to_sym
-      type_schema = current_scope.types[type_sym]&.dig(:schema)
-      if Schemas.struct?(type_schema) || Schemas.resource?(type_schema)
-        type_schema.methods[node.name] = signature
-      end
-    else
-      # Free function — register in scope as before
-      current_scope.declare(node.name, nil, signature, false, false, nil, :static)
-    end
-    stamp_type!(node, :Void)
-  end
-
-  sig { params(node: AST::FunctionDef).returns(SymbolEntry) }
-  def register_function_signature(node)
-    signature = Annotator::Phases::SignatureRegistry.function_signature(
-      node,
-      return_lifetime: get_lifetime_path(node)
-    )
-    current_scope.declare(
-      node.name,
-      nil,        # Reg (Unused in Analyzer)
-      signature,  # Type Info
-      false,      # Mutable?
-      false,      # Rebindable?
-      nil,        # Size
-      :static     # Storage
-    )
   end
 
   # Unifies analysis for callables (Functions and Lambdas).
