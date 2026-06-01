@@ -5,6 +5,7 @@ PIPELINE_GAP_CELLS = [
   { shape: :skip_sum },
   { shape: :window_time_only },
   { shape: :unnest_bind_sum },
+  { shape: :unnest_plain_sum },
   { shape: :concurrent_sum },
   { shape: :concurrent_count },
   { shape: :concurrent_average },
@@ -54,6 +55,20 @@ FuzzGenerator.register(:pipeline_gap_matrix, cells: PIPELINE_GAP_CELLS) do |p|
         ];
         total = users AS $u |> UNNEST $u.orders AS $o |> SUM $o.price * $u.discount;
         ASSERT total == 40.0, "unnest bind sum";
+        RETURN;
+      END
+    CHT
+
+  when :unnest_plain_sum
+    <<~CHT
+      STRUCT Bucket { values: Int64[] }
+
+      FN main() RETURNS Void ->
+        MUTABLE buckets: Bucket[8]@pool = [];
+        _ = buckets.insert(Bucket{ values: [1_i64, 2_i64] });
+        _ = buckets.insert(Bucket{ values: [3_i64, 4_i64] });
+        total = buckets |> UNNEST _.values |> SUM toFloat(_);
+        ASSERT total == 10.0, "unnest plain sum";
         RETURN;
       END
     CHT

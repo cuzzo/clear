@@ -72,7 +72,11 @@ if ENV["COVERAGE"] == "1"
     add_filter "/vendor/"
     add_filter "/examples/"
     add_filter "/benchmarks/"
-    add_filter "/tools/"
+    # Track user-facing compiler tools under src/tools. Root-level tools/
+    # is internal repo automation and is not tracked by track_files above.
+    add_filter do |source_file|
+      source_file.filename.start_with?(File.join(SimpleCov.root, "tools/"))
+    end
 
     # Subsystem groups so the index page surfaces where coverage is
     # concentrated vs. missing.
@@ -81,6 +85,7 @@ if ENV["COVERAGE"] == "1"
     add_group "Annotator helpers", "src/annotator/helpers"
     add_group "MIR",               "src/mir"
     add_group "Backends",          "src/backends"
+    add_group "Tools",             "src/tools"
 
     # Hold the resultset for an hour so a partial re-run merges into
     # existing data rather than dropping files the subset didn't load.

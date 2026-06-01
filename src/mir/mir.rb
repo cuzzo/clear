@@ -23,6 +23,18 @@ require_relative "pass_state"
 module MIR
   extend T::Sig
 
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
+  def self.const_u8_literal_cast?(node)
+    node.is_a?(MIR::Cast) && node.method == :as &&
+      node.target_type == "[]const u8" && node.expr.is_a?(MIR::Lit)
+  end
+
+  sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
+  def self.expr_wrapper?(node)
+    node.respond_to?(:expr) &&
+      (node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr) || node.is_a?(MIR::TryCatch))
+  end
+
   class OwnershipOperandFact < T::Struct
     extend T::Sig
 
@@ -3301,8 +3313,7 @@ module MIR
       return OwnershipEffect.none if stdlib_def&.mutates_receiver? && !stdlib_def&.heap_return_alloc?
       result_owns = result_ownership_bearing
       return OwnershipEffect.none if stdlib_def&.heap_return_alloc? && result_owns == false
-      return OwnershipEffect.none if stdlib_def&.heap_return_alloc? && result_owns.nil? &&
-        result_type && !owned_result_type?(T.must(result_type))
+      return OwnershipEffect.none if heap_return_not_owned?(result_owns)
       alloc = if stdlib_def&.heap_return_alloc?
         :heap
       elsif allocs.is_a?(InlineAllocMetadata)
@@ -3312,6 +3323,12 @@ module MIR
       end
       return OwnershipEffect.none unless alloc || stdlib_def&.heap_return_alloc?
       OwnershipEffect.owned(alloc: alloc, target_var: target_var)
+    end
+
+    sig { params(result_owns: T.nilable(T::Boolean)).returns(T::Boolean) }
+    def heap_return_not_owned?(result_owns)
+      !!(stdlib_def&.heap_return_alloc? && result_owns.nil? &&
+        result_type && !owned_result_type?(T.must(result_type)))
     end
 
     sig { params(type_info: Type).returns(T::Boolean) }

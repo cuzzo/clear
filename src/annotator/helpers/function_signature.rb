@@ -84,7 +84,7 @@ class FunctionSignature
   sig { params(x: T.untyped).returns(T.nilable(FunctionSignature)) }
   def self.unwrap(x)
     return x if x.is_a?(FunctionSignature)
-    return x.raw if x.is_a?(Type) && x.raw.is_a?(FunctionSignature)
+    return x.function_signature if x.is_a?(Type)
     nil
   end
 

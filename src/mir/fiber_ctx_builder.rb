@@ -215,7 +215,7 @@ module FiberCtxBuilder
   sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.needs_move_capture_cleanup?(type_obj, schema_lookup = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.borrowed_reference?
     ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
   rescue StandardError
     false
@@ -224,7 +224,7 @@ module FiberCtxBuilder
   sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    return false if ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    return false if ti.void? || ti.any? || ti.rodata? || ti.borrowed_reference?
     needs_move_capture_cleanup?(ti, schema_lookup) ||
       ti.any_sync? || ti.any_rc? || !!(ti.ownership && ti.ownership != :affine)
   rescue StandardError
@@ -234,9 +234,9 @@ module FiberCtxBuilder
   sig { params(ti: Type).returns(String) }
   def self.rc_payload_zig_type(ti)
     payload = Type.new(ti)
-    payload.ownership = :affine
-    payload.provenance = nil
-    payload.instance_variable_set(:@zig_type_cache, nil)
+    payload.apply_reference_ownership!(:affine)
+    payload.mark_stack_value!
+    payload.clear_zig_type_cache!
     if payload.any_sync? && !(payload.map? && payload.striped?)
       inner = payload.bare_data_type.zig_type
       inner = "CheatLib.Locked(#{inner})" if payload.locked?

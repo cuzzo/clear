@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require_relative "../src/ast/type"
 
 ROOT = File.expand_path("..", __dir__)
 OUT = File.expand_path(File.join(ROOT, "tmp", "nil-kill", "combined-corpus.cht"))
@@ -134,7 +135,7 @@ end
 body << "# ===== nil-kill combined dispatcher =====\n"
 body << "FN main() RETURNS !Void ->\n"
 dispatch.each do |name, return_type|
-  call = return_type.start_with?("!") ? "#{name}() OR RAISE;" : "#{name}();"
+  call = Type.new(return_type).error_union? ? "#{name}() OR RAISE;" : "#{name}();"
   body << "  #{call}\n"
 end
 body << "  RETURN;\n"

@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "zig_type"
 
 module ZigTypeMapper
     extend T::Sig

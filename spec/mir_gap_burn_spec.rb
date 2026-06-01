@@ -10,9 +10,17 @@ require_relative "../src/backends/importer"
 require_relative "../src/mir/concurrency_checks"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/mir/escape_analysis"
+require_relative "../src/mir/fiber_ctx_builder"
 
 RSpec.describe "MIR gap-burn characterization" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }
+
+  it "does not clean up borrowed capture values" do
+    borrowed = Type.new(:String)
+    borrowed.mark_borrowed_reference!
+
+    expect(FiberCtxBuilder.needs_capture_value_cleanup?(borrowed)).to be(false)
+  end
 
   def fn(body, params: [], return_type: :Void)
     AST::FunctionDef.new(tok, "main", params, [], return_type, nil, body, [], nil, :private, [], false)
@@ -689,7 +697,7 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers escape heap return and argument-return dependency facts" do
     p = param("value", type: :String)
     heap_arg = id("arg", type: :String, storage: :heap)
-    heap_arg.full_type.provenance = :heap
+    heap_arg.full_type.mark_heap_allocated!
 
     expect(EscapeAnalysis.send(:heap_return_from_args?, [heap_arg], [p], Set["value"], Type.new(:String), nil)).to eq(true)
     expect(EscapeAnalysis.send(:heap_return_from_args?, [lit("x", type: :String)], [p], Set["missing"], Type.new(:String), nil)).to eq(true)
@@ -707,6 +715,8 @@ RSpec.describe "MIR gap-burn characterization" do
 
   it "covers MIR expression type substitution and fallback type decisions" do
     low = lowering
+    expect(SymbolEntry.new(reg: "locked", type: Type.new(:String), mutable: true, storage: :stack, sync: :locked).sync_or_shared_storage?).to eq(true)
+
     source = Type.new(:T, sync: :locked, layout: :indirect)
     replaced = low.send(:substitute_mir_type, source, { T: :String })
     expect(replaced.resolved).to eq(:String)
@@ -719,6 +729,20 @@ RSpec.describe "MIR gap-burn characterization" do
     array = low.send(:substitute_mir_type, Type.new(:"T[]"), { T: :Int64 })
     expect(array.resolved).to eq(:"Int64[]")
 
+    fixed_array = low.send(:substitute_mir_type, Type.new(:"T[4]"), { T: :String })
+    expect(fixed_array.resolved).to eq(:"String[4]")
+
+    optional = low.send(:substitute_mir_type, Type.new(:"?T"), { T: :String })
+    expect(optional.resolved).to eq(:"?String")
+
+    fallible = low.send(:substitute_mir_type, Type.new(:"!T"), { T: :String })
+    expect(fallible.resolved).to eq(:"!String")
+
+    tense = low.send(:substitute_mir_type, Type.new(:"~T[]"), { T: :Int64 })
+    expect(tense.resolved).to eq(:"~Int64[]")
+    unchanged_tense = Type.new(:"~String")
+    expect(low.send(:substitute_mir_type, unchanged_tense, { T: :Int64 })).to equal(unchanged_tense)
+
     left = id("fallible", type: Type.new(:"!String"))
     op = AST::BinaryOp.new(tok, left, :OR_RESCUE, lit("fallback", type: :String))
     op.full_type = Type.new(:String)
@@ -727,6 +751,18 @@ RSpec.describe "MIR gap-burn characterization" do
     idx = AST::GetIndex.new(tok, id("items", type: Type.new(:"String[]")), lit(0, type: :Int64))
     idx.full_type = Type.new(:Untyped)
     expect(low.send(:copy_source_type_info, idx).resolved).to eq(:String)
+  end
+
+  it "materializes unhoisted owned return values before returning identifiers" do
+    low = lowering
+    ast_return = AST::ReturnNode.new(tok, lit("made", type: :String))
+    call = MIR::Call.new("makeString", [MIR::Ident.new("rt")], false, true)
+
+    lowered = low.send(:hoist_unhoisted_return_allocs, [MIR::ReturnStmt.new(call)], [ast_return])
+
+    expect(lowered.grep(MIR::AllocMark).first.name).to start_with("__tmp_")
+    expect(lowered.grep(MIR::Let).first.init).to equal(call)
+    expect(lowered.last.value).to be_a(MIR::Ident)
   end
 
   it "covers non-switch match lowering branches that switch lowering intentionally bypasses" do

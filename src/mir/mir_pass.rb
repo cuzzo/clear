@@ -155,8 +155,7 @@ class MIRPass
         next
       end
       AST.each_locatable(fn.body) do |n|
-        if ((n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.storage == :heap) ||
-           ast_node_lowers_through_runtime?(n)
+        if ast_node_needs_runtime?(n)
           fn.needs_rt = true
         end
       end
@@ -645,6 +644,11 @@ class MIRPass
     Type.indirect_type?(ti)
   rescue
     false
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def ast_node_needs_runtime?(node)
+    AST.declaration_with_heap_symbol?(node) || ast_node_lowers_through_runtime?(node)
   end
 
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.

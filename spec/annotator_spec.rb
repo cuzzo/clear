@@ -620,6 +620,17 @@ RSpec.describe SemanticAnnotator do
             annotator.send(:validate_type_annotation!, node, type)
           }.to raise_error(CompilerError, /observable.*lock-free.*sharing it/i)
         end
+
+        it "rejects sharded collection annotations with fewer than two shards" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
+          node = AST::Identifier.new(token, "items")
+          type = Type.new(:"Float64[]", collection: :list, shard_count: 1)
+
+          expect {
+            annotator.send(:validate_type_annotation!, node, type)
+          }.to raise_error(CompilerError, /@sharded requires N >= 2/i)
+        end
       end
 
       context "direct visitor type propagation" do

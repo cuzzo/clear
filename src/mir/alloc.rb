@@ -18,7 +18,7 @@ module AllocHelper
     return storage unless storage == :frame && (current_fn_ctx&.loop_depth || T.cast(T.unsafe(self).instance_variable_get(:@loop_depth), T.nilable(Integer))) .to_i > 0
     return storage unless node.value.is_a?(AST::StructLit)
 
-    node.full_type!.provenance = nil  # nil = stack, no allocation needed
+    node.full_type!.mark_stack_value!
     node.storage              = :stack
     node.value.storage      = :stack
     :stack
@@ -41,7 +41,7 @@ module AllocHelper
   # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
   # Returns [is_resource, resource_close_zig].
   # Delegates to Type#resolve_resource_close for type-specific logic.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(node: AST::Node, final_type: Type::TypeInput).returns(Type::ResourceCloseResult) }
   def resolve_resource_close(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     ti = node.full_type!

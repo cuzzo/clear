@@ -1265,6 +1265,13 @@ class MIRChecker
     node.allocs&.any_heap? == true
   end
 
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def stdlib_owned_fixed_return?(node)
+    return false unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+
+    stdlib_owned_return?(node) && node.stdlib_def.fixed_return?
+  end
+
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
@@ -1586,12 +1593,12 @@ class MIRChecker
         next
       end
 
-      if (expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::RawZig)) && stdlib_owned_return?(expr) &&
-         expr.stdlib_def.fixed_return?
-        ret = expr.stdlib_def.return_type
+      if stdlib_owned_fixed_return?(expr)
+        owned_expr = T.cast(expr, T.any(MIR::InlineZig, MIR::RawZig))
+        ret = owned_expr.stdlib_def.return_type
         unless ret.void?
-          label = expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
-          leaks << error(:HPT_LEAK, expr.reason,
+          label = owned_expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
+          leaks << error(:HPT_LEAK, owned_expr.reason,
             "#{label} with allocates:true result not bound to variable (leak)")
         end
       end
@@ -2365,7 +2372,7 @@ class MIRChecker
       node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
       return
     when MIR::WhileStmt
-      if node.capture && binder_capture_cleanup?(node.body, node.capture.to_s)
+      if node.capture && (binder_capture_cleanup?(node.body, node.capture.to_s) || block_expr_transfers_result?(node.cond))
         check_owned_expr_position_for_unhoisted(node.cond, "While capture")
       else
         check_expr_for_unhoisted(node.cond)
@@ -2384,6 +2391,13 @@ class MIRChecker
   def binder_capture_cleanup?(body, name)
     return false unless body.is_a?(Array)
     body.any? { |stmt| stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == name }
+  end
+
+  sig { params(expr: MIR::Emittable).returns(T::Boolean) }
+  def block_expr_transfers_result?(expr)
+    return false unless expr.is_a?(MIR::BlockExpr)
+
+    expr.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
   end
 
   sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }

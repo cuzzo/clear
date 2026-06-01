@@ -2053,4 +2053,32 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
     end
   end
+
+  it "applies exact stack tier overrides to BG blocks before MIR lowering" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR, exact_tiers: { 0 => :large })
+      FN main() RETURNS !Void ->
+        p: ~Int64 = BG { @stack -> 1_i64; };
+        x: Int64 = NEXT p;
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include(".{ .stack_size = .Large")
+  end
+
+  it "lowers catch-wrapped non-error returns through concrete fallible inner functions" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      FN recoverable(flag: Bool) RETURNS String ->
+        IF flag THEN
+          RAISE Input, "bad";
+        END
+        RETURN "ok";
+      CATCH Input
+        RETURN "recovered";
+      END
+    CLEAR
+
+    expect(zig).to include("fn __recoverable_body")
+    expect(zig).to include("anyerror![]const u8")
+  end
 end

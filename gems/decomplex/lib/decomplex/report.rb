@@ -39,6 +39,7 @@ module Decomplex
       )
       @pressure = DecisionPressure.scan(@files).ranked
       @fsimple = FalseSimplicity.scan(@files).findings
+      @oversized_predicates = OversizedPredicate.scan(@files).findings
       @fatu = FatUnion.scan(@files).fat_unions
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
@@ -64,6 +65,7 @@ module Decomplex
       ["Derived-State Staleness", :@derived, 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug"],
       ["Neglected Conditions",   :@negc,   2, "dispatch/conjunction minus one element -- *POSSIBLE* bug"],
       ["Neglected Path Conditions", :@pcneg, 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)"],
+      ["Oversized Predicates", :@oversized_predicates, 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate"],
       ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"],
       ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)"],
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
@@ -255,6 +257,10 @@ module Decomplex
                when "Neglected Conditions", "Neglected Path Conditions"
                  "- *POSSIBLE* (support=#{h[:support]}) #{nav(h[:at])} -- MISSING " \
                  "`#{h[:missing]}` from `#{(h[:pattern] || h[:guards]).join(' | ')}`\n"
+               when "Oversized Predicates"
+                 "- *POSSIBLE* #{nav(h[:at])} -- #{h[:count]} condition atoms in " \
+                 "`#{h[:predicate]}`\n" \
+                 "  - atoms: `#{h[:atoms].first(8).join(' | ')}`\n"
                when "Neglected Updates"
                  "- *POSSIBLE* (support=#{h[:support]}) #{nav(h[:at])} writes `.#{h[:has]}` " \
                  "but NOT `.#{h[:missing]}` (recv `#{h[:recv]}`)\n"

@@ -619,8 +619,9 @@ module MIRLoweringVariables
       end
       return lower(node.value) unless rhs_unwrapped.is_a?(AST::ListLit)
       return with_expected_type(ft) { lower(node.value) } unless rhs_unwrapped.items.empty?
-      init_kind = ft.capacity.is_a?(Integer) && ft.capacity > 0 ? :list_capacity : :list_empty
-      init_capacity = init_kind == :list_capacity ? ft.capacity : nil
+      ft_capacity = ft.capacity
+      init_kind = ft_capacity.is_a?(Integer) && ft_capacity > 0 ? :list_capacity : :list_empty
+      init_capacity = init_kind == :list_capacity ? ft_capacity : nil
       inner = MIR::ContainerInit.new(bare_zig, init_kind, decl_alloc, init_capacity)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     end
@@ -1037,7 +1038,7 @@ module MIRLoweringVariables
     val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
     val = hoist_alloc(val, node.value, err_cleanup: true)
 
-    if @target != :bc && receiver_type.map? && (receiver_type.shared? || receiver_type.multiowned?)
+    if @target != :bc && receiver_type.rc_map?
       # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
       # .ctrl.data wrapping and a single MapRef cell holds the data).
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))

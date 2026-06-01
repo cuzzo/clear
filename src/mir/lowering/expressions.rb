@@ -200,7 +200,7 @@ module MIRLoweringExpressions
     capture_map = @do_capture_map || {}
     if capture_map.key?(node.name)
       ident = MIR::Ident.new(capture_map[node.name])
-      if node.symbol&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && node.symbol&.layout != :indirect
+      if atomic_capture_load?(node)
         return MIR::MethodCall.new(ident, "load", [], false, MIR::CallableContract.no_ownership(0))
       end
       return ident
@@ -231,6 +231,19 @@ module MIRLoweringExpressions
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def atomic_capture_load?(node)
+    sym = node.symbol
+    !!(sym&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && sym.layout != :indirect)
+  end
+
+  sig { params(ft: Object, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
+  def recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
+    lowering = T.cast(self, MIRLowering)
+    !!(ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
+      !lowering.ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
 
   sig { params(node: AST::UnaryOp).returns(MIR::UnaryOp) }
@@ -475,7 +488,7 @@ module MIRLoweringExpressions
   def smooth_collect_type(type_info, collect_method)
     if collect_method == "materializeNext"
       elem_t = type_info.tense_type.element_type
-      Type.new("#{elem_t.resolved}[]", collection: :list)
+      Type.new("#{T.must(elem_t).resolved}[]", collection: :list)
     else
       type_info.tense_type ? Type.new(type_info.tense_type) : Type.new(type_info)
     end
@@ -1004,7 +1017,7 @@ module MIRLoweringExpressions
     target = plan.target
     index = plan.index
     ti = plan.type_info
-    if ti.map? && (ti.shared? || ti.multiowned?) && @target != :bc
+    if ti.rc_map? && @target != :bc
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -1143,47 +1156,57 @@ module MIRLoweringExpressions
 
     if t.generic_instance?
       new_args = t.generic_args.map { |arg| substitute_mir_type(arg, subst) }
-      arg_names = new_args.map { |arg| generic_subst_source(arg) }.join(",")
-      replacement = Type.new(:"#{t.generic_base}<#{arg_names}>")
+      replacement = Type.generic_instance_of(t.generic_base, new_args)
       copy_type_capabilities(t, replacement)
       return replacement
     end
 
-    str = resolved.to_s
-    if str.end_with?("[]")
-      inner = T.must(str[0..-3]).to_sym
-      if subst.key?(inner)
-        replacement = Type.new(:"#{subst.fetch(inner)}[]")
-        copy_type_capabilities(t, replacement)
-        return replacement
-      end
+    if t.array?
+      element_type = T.must(t.element_type)
+      new_element = substitute_mir_type(element_type, subst)
+      return raw_type if Type.surface_name(element_type) == Type.surface_name(new_element)
+
+      replacement = Type.array_of(new_element, capacity: t.capacity)
+      copy_type_capabilities(t, replacement)
+      return replacement
     end
 
-    if (prefix = str.match(/\A([!?~]+)/)&.[](1))
-      inner = T.must(str[prefix.length..]).to_sym
-      if subst.key?(inner)
-        replacement = Type.new(:"#{prefix}#{subst.fetch(inner)}")
-        copy_type_capabilities(t, replacement)
-        return replacement
-      end
+    if t.error_union?
+      payload_type = T.must(t.payload_type)
+      new_payload = substitute_mir_type(payload_type, subst)
+      return raw_type if Type.surface_name(payload_type) == Type.surface_name(new_payload)
+
+      replacement = Type.error_union_of(new_payload)
+      copy_type_capabilities(t, replacement)
+      return replacement
+    end
+
+    if t.optional?
+      wrapped_type = T.must(t.wrapped_type)
+      new_wrapped = substitute_mir_type(wrapped_type, subst)
+      return raw_type if Type.surface_name(wrapped_type) == Type.surface_name(new_wrapped)
+
+      replacement = Type.optional_of(new_wrapped)
+      copy_type_capabilities(t, replacement)
+      return replacement
+    end
+
+    if t.tense?
+      tense_type = t.tense_type
+      new_tense_type = substitute_mir_type(tense_type, subst)
+      return raw_type if Type.surface_name(tense_type) == Type.surface_name(new_tense_type)
+
+      replacement = Type.tense_of(new_tense_type)
+      copy_type_capabilities(t, replacement)
+      return replacement
     end
 
     raw_type
   end
 
-  sig { params(type_obj: T.untyped).returns(String) }
-  def generic_subst_source(type_obj)
-    t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
-    t.resolved.to_s
-  end
-
   sig { params(source: Type, target: Type).void }
   def copy_type_capabilities(source, target)
-    target.ownership = source.ownership if source.ownership != :affine
-    target.sync = source.sync if source.sync
-    target.layout = source.layout if source.layout
-    target.elem_ownership = source.elem_ownership if source.elem_ownership
-    target.elem_sync = source.elem_sync if source.elem_sync
+    target.merge_capabilities_from!(source)
   end
 
   # True when the destination is a dynamic slice (`[]T`, no capacity), as
@@ -1249,8 +1272,7 @@ module MIRLoweringExpressions
           end
           field_alloc = mir_owned_alloc(field_value)
           lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
-          if ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
-             !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc
+          if recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
             hoist_alloc(MIR::DeepCopy.new(lowered, ft.zig_type, nil, :full_value, field_sink_alloc),
               field_node, err_cleanup: true)
           else
@@ -1649,8 +1671,7 @@ module MIRLoweringExpressions
     lt = type_info_for(left)
     rt = type_info_for(right)
 
-    if (lt&.string? && (rt.nil? || rt.string?)) ||
-       (rt&.string? && (lt.nil? || lt.string?))
+    if (lt&.string_comparable_with?(rt)) || (rt&.string_comparable_with?(lt))
       return ["expectEqualStrings", []]
     end
 
@@ -1903,7 +1924,7 @@ module MIRLoweringExpressions
              when :multiowned then (node.atomic? ? nil : "rcCreate")
              end
 
-    strategy = if node.local? || (node.indirect? && !node.sync && !node.ownership)
+    strategy = if node.local_storage_wrap?
       :local
     elsif sync_fn && own_fn
       :both
@@ -1968,7 +1989,7 @@ module MIRLoweringExpressions
   sig { params(type: T.untyped).returns(String) }
   def generic_type_arg_zig(type)
     T.bind(self, MIRLowering) rescue nil
-    if type.is_a?(Type) && type.instance_variable_get(:@generic_payload_type_arg)
+    if type.is_a?(Type) && type.generic_payload_type_arg?
       return rc_payload_zig_type(type)
     end
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)

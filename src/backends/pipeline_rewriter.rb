@@ -25,7 +25,7 @@ class PipelineRewriter
     @var_counter = T.let(0, Integer)
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite!(node)
     return node unless node
 
@@ -48,7 +48,7 @@ class PipelineRewriter
     "#{prefix}#{@var_counter}"
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite_children!(node)
     case node
     when AST::Program
@@ -94,6 +94,8 @@ class PipelineRewriter
       node.body.map! { |s| rewrite!(s) }
       node.result = rewrite!(node.result)
     end
+
+    node
   end
 
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
@@ -136,14 +138,13 @@ class PipelineRewriter
                              AST.pipeline_terminal_fold?(terminal)
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
-    inf_with_limit = real_source.full_type!.inf_stream? &&
-                     stages.any? { |s| s.is_a?(AST::LimitOp) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.full_type!.dynamic_stream? ||
-        real_source.full_type!.open_stream? ||
-        real_source.full_type!.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
-       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
-      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
-      return node
+    source_type = real_source.full_type!
+    has_limit = stages.any? { |s| s.is_a?(AST::LimitOp) }
+    if is_range_fold_terminal && stages.all? { |s| AST.pipeline_fusible_stage?(s) }
+      if real_source.is_a?(AST::RangeLit) || source_type.bounded_pipeline_stream_source?(has_limit)
+        patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+        return node
+      end
     end
 
     # DISTINCT always bypasses to pipeline_host lower_distinct: it handles
@@ -159,10 +160,8 @@ class PipelineRewriter
 
     # INDEX on a finite or LIMIT-bounded stream source bypasses: the MIR lowering
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
-    # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.full_type!.dynamic_stream? || real_source.full_type!.open_stream? ||
-                       real_source.full_type!.bounded_stream? || inf_with_limit) &&
+                      source_type.bounded_pipeline_stream_source?(has_limit) &&
                       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -248,7 +247,7 @@ class PipelineRewriter
     node
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def is_fusible?(node)
     AST.pipeline_fusible_stage?(node)
   end
@@ -256,7 +255,7 @@ class PipelineRewriter
   # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
   # These are handled by MIR lowering (lower_binding_chain) which performs
   # correct $u -> loop_var substitution. PipelineRewriter must leave them alone.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def binding_source?(node)
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
     return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
@@ -685,10 +684,7 @@ class PipelineRewriter
       et = Type.new(inner_expr.full_type!(context: "pipeline unnest inner expression")).element_type
       AST.stamp_synthetic_type!(inner_it, et, context: "synthetic AST type") if et
 
-      append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
-      AST.stamp_synthetic_type!(append, Type.new(:Void), context: "synthetic AST type")
-      append.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      append.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      append = synthetic_append_call(token, res_ident, inner_it.dup)
 
       # Iterate directly over the expression (avoids ArrayList/slice confusion).
       # Mark collection as a slice so the transpiler uses &expr, not .items.
@@ -700,47 +696,49 @@ class PipelineRewriter
     when AST::DistinctOp
       # Set insert: result is a T[]@set; insert deduplicates in O(1).
       key_expr = replace_placeholder(terminal.expression, current_val)
-      insert_call = AST::MethodCall.new(token, res_ident.dup, "insert", [key_expr])
-      AST.stamp_synthetic_type!(insert_call, Type.new(:Void), context: "synthetic AST type")
-      insert_call.zig_pattern = "try {0}.insert({alloc}, {1})"
-      insert_call.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "insert") if STD_LIB.key?("insert")
+      insert_call = synthetic_set_insert_call(token, res_ident.dup, key_expr)
       [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = AST::MethodCall.new(token, res_ident, "append", [value])
-      AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-      call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      call = synthetic_append_call(token, res_ident, value)
       [call]
     else
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = AST::MethodCall.new(token, res_ident, "append", [value])
-      call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
-      call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+      call = synthetic_append_call(token, res_ident, value)
       [call]
     end
     actions
   end
 
-  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(T.any(AST::BinaryOp, AST::Identifier)) }
+  sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
+  def synthetic_append_call(token, receiver, value)
+    defn = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
+    call = AST::MethodCall.new(token, receiver, "append", [value])
+    AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
+    call.zig_pattern = defn.emit&.zig
+    call.matched_stdlib_def = defn
+    call
+  end
+
+  sig { params(token: Lexer::Token, receiver: AST::Node, value: AST::Node).returns(AST::MethodCall) }
+  def synthetic_set_insert_call(token, receiver, value)
+    defn = T.must(IntrinsicRegistry.sig(SET_METHODS, "insert"))
+    call = AST::MethodCall.new(token, receiver, "insert", [value])
+    AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
+    call.zig_pattern = defn.emit&.zig
+    call.matched_stdlib_def = defn
+    call
+  end
+
+  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(AST::Identifier) }
   def build_final_result(terminal, res_var, token, smooth_node)
-    if terminal.is_a?(AST::AverageOp)
-      sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
-      cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
-      AST.stamp_synthetic_type!(sum_ident, Type.new(:Float64), context: "synthetic AST type")
-      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Float64), context: "synthetic AST type")
-      div = AST::BinaryOp.new(token, sum_ident, :DIV, cnt_ident)
-      AST.stamp_synthetic_type!(div, Type.new(:Float64), context: "synthetic AST type")
-      div
-    else
-      res = AST::Identifier.new(token, res_var)
-      AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
-      res.storage   = smooth_node.storage
-      res
-    end
+    res = AST::Identifier.new(token, res_var)
+    AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
+    res.storage = smooth_node.storage
+    res
   end
 
   sig { returns(Proc) }

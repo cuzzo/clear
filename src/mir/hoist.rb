@@ -40,8 +40,6 @@ module Hoist
   extend T::Sig
   module_function
 
-  ELEMENT_STORE = T.let(%w[append insert push put].freeze, T::Array[String])
-
   sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
@@ -104,7 +102,7 @@ module Hoist
   sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
   def collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup, return_type: nil)
     each_call(stmt) do |call|
-      next if call.is_a?(AST::MethodCall) && ELEMENT_STORE.include?(call.name.to_s)
+      next if call.is_a?(AST::MethodCall) && collection_value_store_call?(call)
       call.args.each_with_index do |arg, idx|
         next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
@@ -113,7 +111,7 @@ module Hoist
     end
 
     each_method_call(stmt) do |call|
-      next unless ELEMENT_STORE.include?(call.name.to_s)
+      next unless collection_value_store_call?(call)
       next unless composite_element_store?(call)
       call.args.each_with_index do |arg, idx|
         if concat?(arg)
@@ -204,9 +202,7 @@ module Hoist
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
     # Separate frames -- their bodies are walked independently.
-    return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
-              node.is_a?(AST::DoBlock)
+    return if AST.call_like_boundary?(node)
     blk.call(node) if matches.call(node)
     # A body-bearing control-flow node: walk only its condition/subject
     # expressions, never its statement bodies.
@@ -280,6 +276,23 @@ module Hoist
     return false unless ti.is_a?(Type) && ti.collection?
     et = ti.element_type
     !!(et.is_a?(Type) && !et.primitive? && !et.string?)
+  end
+
+  sig { params(call: AST::MethodCall).returns(T::Boolean) }
+  def collection_value_store_call?(call)
+    sig = FunctionSignature.unwrap(call.matched_stdlib_def)
+    sig ||= FunctionSignature.unwrap(call.matched_signature) if call.respond_to?(:matched_signature)
+    emit = sig&.emit
+    takes_args = emit&.takes_args
+    takes_value = (takes_args && !takes_args.empty?) ||
+      (sig ? sig.params.drop(1).any?(&:takes) : false)
+    return false unless (emit&.mutates_receiver && takes_value) ||
+      IntrinsicRegistry.collection_value_store_method?(call.name, call.args.length)
+
+    obj = call.object
+    sym = (obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField)) ? obj.symbol : nil
+    ti = sym&.type
+    !!(ti.is_a?(Type) && ti.collection?)
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -1061,9 +1074,10 @@ module MIRHoistLowering
       expr.target_var = name
       expr.allocs = expr.allocs.with_all(alloc) if alloc && expr.allocs
     else
-      if alloc && expr.respond_to?(:ownership_effect) && expr.ownership_effect.produces_owned &&
-         expr.respond_to?(:alloc=)
-        expr.alloc = alloc
+      if alloc && expr.respond_to?(:ownership_effect)
+        if expr.ownership_effect.produces_owned && expr.respond_to?(:alloc=)
+          expr.alloc = alloc
+        end
       end
       expr.ownership_source_exprs.each do |child|
         has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
@@ -1159,7 +1173,7 @@ module MIRHoistLowering
     return mir.zig_type if mir.zig_type
     ti = Type.from_node!(ast_node, context: "deep-copy zig type")
     bare = Type.new(ti)
-    bare.provenance = :stack if bare.respond_to?(:provenance=)
+    bare.mark_stack_value!
     bare.zig_type
   end
 

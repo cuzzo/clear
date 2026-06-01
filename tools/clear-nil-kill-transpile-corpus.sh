@@ -3,6 +3,7 @@ set -u
 
 status=0
 tracer="gems/nil-kill/lib/nil_kill/runtime_trace.rb"
+jobs="${NIL_KILL_JOBS:-${NK_JOBS:-$(nproc 2>/dev/null || echo 1)}}"
 
 should_skip_live_data_file() {
   case "$1" in
@@ -12,6 +13,7 @@ should_skip_live_data_file() {
     examples/minivm/bench_pool_ops_nosync.cht|\
     examples/minivm/debugger.cht|\
     examples/minivm/parser.cht|\
+    examples/minivm/register_debugger.cht|\
     examples/minivm/sus-int.cht|\
     examples/minivm/types.cht|\
     examples/minivm/vm.cht|\
@@ -40,6 +42,9 @@ run_transpiler_with_timeout() {
     run_transpiler "$file"
   fi
 }
+
+export -f run_transpiler run_transpiler_with_timeout should_skip_live_data_file
+export tracer
 
 run_require_corpus() {
   local require_file="$1"
@@ -71,12 +76,14 @@ requires.each_slice(shard_size).with_index do |lines, index|
 end
 RUBY
 
-  while IFS= read -r -d '' shard; do
-    if ! run_transpiler_with_timeout "$shard" >/dev/null; then
-      echo "nil-kill corpus shard failed: $shard" >&2
-      failures=$((failures + 1))
-    fi
-  done < <(find "$shard_dir" -maxdepth 1 -type f -name 'require-corpus-shard-*.cht' -print0 | sort -z)
+  find "$shard_dir" -maxdepth 1 -type f -name 'require-corpus-shard-*.cht' -print0 \
+    | sort -z \
+    | xargs -0 -P "$jobs" -I{} bash -c '
+        if ! run_transpiler_with_timeout "$1" >/dev/null; then
+          echo "nil-kill corpus shard failed: $1" >&2
+          exit 1
+        fi
+      ' _ {} || failures=$?
 
   return "$failures"
 }
@@ -116,14 +123,12 @@ if [ "${NIL_KILL_COMBINED_CHT_CORPUS:-0}" = "1" ]; then
   fi
 fi
 
-while IFS= read -r -d '' file; do
-  if should_skip_live_data_file "$file"; then
-    continue
-  fi
-
-  if ! run_transpiler "$file" >/dev/null; then
-    status=1
-  fi
-done < <(find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 | sort -z)
+find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
+  | sort -z \
+  | xargs -0 -P "$jobs" -I{} bash -c '
+      file="$1"
+      should_skip_live_data_file "$file" && exit 0
+      run_transpiler_with_timeout "$file" >/dev/null
+    ' _ {} || status=1
 
 exit "$status"

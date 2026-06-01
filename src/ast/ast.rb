@@ -384,7 +384,7 @@ module AST
   # resolution, capability source naming, and placeholder-root detection
   # each hand-rolled the same `case node; GetField/GetIndex -> .target`
   # recursion (decomplex Missing-Abstraction, scatter=7).
-  sig { params(node: T.untyped).returns(T.nilable(AST::Identifier)) }
+  sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
   def self.root_identifier(node)
     case node
     when AST::GetField, AST::GetIndex then root_identifier(node.target)
@@ -397,33 +397,146 @@ module AST
   # recomputed inline across the MIR pipeline (decomplex
   # Missing-Abstraction). Syntactic `case ... when FuncCall, MethodCall`
   # dispatch arms are NOT this -- leave those.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
   def self.call?(node)
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.collection_method_call?(node)
+    !!(node.is_a?(AST::MethodCall) &&
+      (node.pool_method || node.set_method || node.map_method)
+    )
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.empty_auto_collection_literal_decl?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false unless node.type&.auto?
+    value = node.value
+    return false unless value.respond_to?(:type_object) && value.type_object
+
+    !!((value.is_a?(AST::ListLit) && value.items.empty? &&
+      !value.instance_variable_get(:@constructor_collection)) ||
+      (value.is_a?(AST::HashLit) && value.pairs.empty?))
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.negative_integer_literal?(node)
+    return false unless node.is_a?(AST::UnaryOp) && node.op == :SUB
+    lit = node.right
+    !!(lit.is_a?(AST::Literal) && (lit.type == :INT64 || lit.type == :PREFIXED_INT))
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.declaration_with_identifier_value?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false if node.is_a?(AST::BindExpr) && node.mode != :decl
+
+    node.value.is_a?(AST::Identifier)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.declaration_with_heap_symbol?(node)
+    !!((node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) &&
+      node.symbol&.storage == :heap)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.type_declaration?(node)
+    node.is_a?(AST::StructDef) || node.is_a?(AST::ExternStructDecl) ||
+      node.is_a?(AST::EnumDef) || node.is_a?(AST::UnionDef)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.top_level_declaration?(node)
+    type_declaration?(node) || node.is_a?(AST::RequireNode) ||
+      node.is_a?(AST::ExternFnDecl)
+  end
+
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
+  def self.statement_result_void?(node)
+    node.is_a?(AST::ReturnNode) || node.is_a?(AST::VarDecl) ||
+      node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::WhileLoop) || node.is_a?(AST::ForRange) ||
+      node.is_a?(AST::ForEach) || node.is_a?(AST::MatchStatement) ||
+      node.is_a?(AST::Assert) || node.is_a?(AST::Raise) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::BgBlock) ||
+      node.is_a?(AST::DoBlock) || node.is_a?(AST::PassStmt) ||
+      node.is_a?(AST::DieNode) || node.is_a?(AST::ThrowNode)
+  end
+
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
+  def self.ownership_transfer_stmt?(node)
+    node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
+      node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach) ||
+      node.is_a?(AST::IfStatement) || node.is_a?(AST::MatchStatement) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::DoBlock)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.ownership_wrapper?(node)
+    node.is_a?(AST::MoveNode) || node.is_a?(AST::CopyNode) ||
+      node.is_a?(AST::CloneNode) || node.is_a?(AST::ShareNode) ||
+      node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
+  end
+
+  sig { params(node: Object).returns(T::Boolean) }
+  def self.scalar_literal_value?(node)
+    node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
+      node.is_a?(TrueClass) || node.is_a?(FalseClass)
+  end
+
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
+  def self.call_like_boundary?(node)
+    node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
+      node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) ||
+      node.is_a?(AST::WithBlock) || node.is_a?(AST::DoBlock)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.inline_union_constructor_target?(node)
+    return false unless node.is_a?(AST::GetField)
+    target = node.target
+    !!(target.is_a?(AST::Identifier) && (target.name[0] =~ /[A-Z]/))
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.soa_placeholder_field?(node)
+    return false unless node.is_a?(AST::GetField)
+    target = node.target
+    !!(target.is_a?(AST::Identifier) && target.name == "_")
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.soa_placeholder_assignment?(node)
+    return false unless node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment)
+
+    soa_placeholder_field?(node.name)
+  end
+
   # Explicit ownership transfer marker stamped by annotation. This is a
   # predicate over the AST contract, not an ad hoc respond_to? check.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.moved?(node)
-    node.respond_to?(:was_moved) && node.was_moved == true
+    !!(node && node.respond_to?(:was_moved) && node.was_moved == true)
   end
 
   # Statement-position body traversal is an AST fact. MIR passes may attach
   # loop-specific meaning to a body, but they should not maintain parallel
   # lists of every node shape that can contain one.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
   def self.loop_node?(node)
     node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
       node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
   end
 
-  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Array[T::Array[T.any(AST::Node, Struct)]]) }
   def self.child_bodies(node)
     node.is_a?(AST::HasBodies) ? node.child_bodies : []
   end
 
-  sig { params(node: T.untyped).returns(T::Array[BodySlot]) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Array[BodySlot]) }
   def self.body_slots(node)
     slots = T.let([], T::Array[BodySlot])
     case node
@@ -920,39 +1033,8 @@ module AST
         final_type
       else
         new_t = Type.new(final_type.resolved)
-        # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
-        # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
         val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
-        new_t.shard_count = final_type.shard_count if final_type.shard_count
-        new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
-        new_t.sync = final_type.sync if final_type.sync
-        new_t.soa = final_type.soa if final_type.soa
-        new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
-        new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
-        # Carry @observable through finalize_storage! — without this the
-        # binding's full_type loses the @is_observable bit and downstream
-        # cleanup classification can't recognise `~T@observable`. The
-        # terminal kind (`:sum`/`:count`/.../`:distinct`) must come along
-        # too so OBSERVABLE_WRAPPERS can pick the right wrapper Zig type;
-        # without it the lookup falls back to a default and silently
-        # emits the wrong wrapper.
-        new_t.is_observable = true if final_type.observable? ||
-                                       (val_ti.respond_to?(:observable?) && val_ti.observable?)
-        if final_type.observable_terminal
-          new_t.observable_terminal = final_type.observable_terminal
-        elsif val_ti.respond_to?(:observable_terminal) && val_ti.observable_terminal
-          new_t.observable_terminal = val_ti.observable_terminal
-        end
-        new_t.elem_ownership = final_type.elem_ownership if final_type.elem_ownership
-        new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
-        new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
-        new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
-        new_t.layout = final_type.layout if final_type.respond_to?(:layout) && final_type.layout
-        # Propagate @link_source from value's type
-        if val_ti&.link?
-          link_src = val_ti.link_source
-          new_t.link_source = link_src if link_src
-        end
+        new_t.apply_finalized_value_shape!(final_type: final_type, value_type: val_ti)
         new_t
       end
       # Propagate @link ownership from the value's LinkNode
@@ -961,37 +1043,12 @@ module AST
         storage = :link
       end
 
-      case storage
-      when :frozen
-        t.ownership = :frozen
-      when :multiowned
-        t.ownership = :multiowned
-      when :shared
-        t.ownership = :shared
-      when :link
-        t.ownership = :link
-      when :rodata
-        t.provenance = :rodata
-      when :frame
-        t.provenance = :frame
-      when :heap
-        t.provenance = :heap
-        if value_sync == :locked
-          t.sync = :locked
-        elsif value_sync == :write_locked
-          t.sync = :write_locked
-        end
-      # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
-      end
+      t.apply_storage_capability!(storage, value_sync: value_sync)
 
       # Propagate additional capability fields from the value's type_object
       if respond_to?(:value) && value.type_object
         vt = value.type_object
-        t.ownership = vt.ownership if vt.ownership && vt.ownership != :affine
-        t.sync      = vt.sync      if vt.sync
-        # Preserve value layout so VarDecl can propagate @indirect:atomic
-        # bindings into the symbol table.
-        t.layout    = vt.layout    if vt.layout
+        t.merge_capabilities_from!(vt)
       end
 
       self.full_type = t
@@ -1229,6 +1286,12 @@ module AST
     sig { returns(T::Boolean) }
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
+    end
+
+    sig { params(recursion_yield: T::Boolean, declared_runtime_return: T::Boolean).returns(T::Boolean) }
+    def runtime_stack_required?(recursion_yield, declared_runtime_return)
+      uses_runtime? || fn_value_ref == true || !thunk_plan.nil? ||
+        !mutual_thunk_plan.nil? || recursion_yield || declared_runtime_return
     end
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
@@ -1904,9 +1967,15 @@ module AST
     def local? = sync == :local
     sig { returns(T::Boolean) }
     def multiowned? = ownership == :multiowned
-    sig { returns(T::Boolean) }
-    def write_locked? = sync == :write_locked
-  end
+	    sig { returns(T::Boolean) }
+	    def write_locked? = sync == :write_locked
+	    sig { returns(T::Boolean) }
+	    def capability? = !!(ownership || sync || layout)
+	    sig { returns(T::Boolean) }
+	    def locked_sync? = locked? || write_locked?
+	    sig { returns(T::Boolean) }
+	    def local_storage_wrap? = local? || (indirect? && !sync && !ownership)
+	  end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   # CopyNode -- explicit COPY expr (deep copy of value).
   #   deep_copy: true for unions with heap variants.

@@ -1019,6 +1019,7 @@ POOL_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
     mutates_receiver: true,
+    narrows_receiver_collection: true,
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
@@ -1093,6 +1094,7 @@ SET_METHODS = T.let({
     bc: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    narrows_receiver_collection: true,
     takes_args: [0],
     args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
@@ -1281,6 +1283,8 @@ MAP_METHODS = T.let({
     is_method: true,
   },
 }.freeze, T::Hash[String, T.untyped])
+
+MAP_METHOD_ALIASES = T.let({ "insert" => "put" }.freeze, T::Hash[String, String])
 
 # ============================================================================
 # Index Operations Registry — container[key] get/set semantics

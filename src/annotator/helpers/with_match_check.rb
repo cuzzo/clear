@@ -243,8 +243,7 @@ module WithMatchCheck
         next unless arg.is_a?(AST::Identifier)
         sym = arg.symbol
         next unless sym
-        next if sym.sync || sym.rc_stored? ||
-                sym.storage == :local || sym.storage == :heap
+        next if sym.with_match_capability_family?
         next unless sym.respond_to?(:mutable) && sym.mutable
         sym.poly_borrow_target = true if sym.respond_to?(:poly_borrow_target=)
       end
@@ -307,9 +306,7 @@ module WithMatchCheck
     #   - plain T      -> sym.sync nil + storage stack/heap (no shared)
     return :LOCAL if sym.local?
     return :LOCAL if sym.sync.nil? && sym.storage == :multiowned
-    return :LOCAL if sym.sync.nil? && (sym.storage.nil? ||
-                                       sym.storage == :stack ||
-                                       sym.storage == :heap)
+    return :LOCAL if sym.plain_local_family?
     nil
   end
 

@@ -416,11 +416,11 @@ module FsmTransform
       # Passthrough for tails the caller has already built as MIR
       # nodes (FsmTailLockTry / FsmTailWokenCheck / FsmTailRetryOrError
       # used by B2-WITH's fan-out, etc.).
-      return tail if tail.is_a?(MIR::FsmTailLockTry) ||
-                     tail.is_a?(MIR::FsmTailWokenCheck) ||
-                     tail.is_a?(MIR::FsmTailRetryOrError) ||
-                     tail.is_a?(MIR::FsmTailJump) ||
-                     tail.is_a?(MIR::FsmTailDone)
+      case tail
+      when MIR::FsmTailLockTry, MIR::FsmTailWokenCheck, MIR::FsmTailRetryOrError,
+           MIR::FsmTailJump, MIR::FsmTailDone
+        return tail
+      end
       case tail
       when Segments::Done
         MIR::FsmTailDone.new(nil)

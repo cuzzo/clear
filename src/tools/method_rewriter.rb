@@ -138,9 +138,7 @@ module MethodRewriter
   # rewrites see the (logically) rewritten inner. Edits are applied
   # right-to-left on the source so positions don't shift.
   def walk_collect_edits(node, methods, source, edits)
-    return if node.nil? || node.is_a?(Symbol) || node.is_a?(String) ||
-              node.is_a?(Integer) || node.is_a?(Float) ||
-              node.is_a?(TrueClass) || node.is_a?(FalseClass)
+    return if node.nil? || AST.scalar_literal_value?(node)
 
     if node.is_a?(Array)
       node.each { |n| walk_collect_edits(n, methods, source, edits) }

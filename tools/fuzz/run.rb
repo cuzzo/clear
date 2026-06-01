@@ -37,6 +37,7 @@ opts = {
   clean: false,
   templates: nil,
   shard: nil,
+  jobs: Integer(ENV.fetch('FUZZ_JOBS', Etc.nprocessors.to_s)),
 }
 
 OptionParser.new do |o|
@@ -49,6 +50,7 @@ OptionParser.new do |o|
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
   o.on('--exclude LIST')        { |v| opts[:exclude] = v.split(',').map(&:to_sym) }
+  o.on('--jobs N', Integer)     { |v| opts[:jobs] = v }
   # Quarantine: tools/fuzz/quarantine.txt lists templates with a known
   # bug. --skip-quarantined runs the green gate (full matrix minus
   # quarantine); --only-quarantined runs just the quarantined set
@@ -62,6 +64,7 @@ OptionParser.new do |o|
   end
   o.on('-h', '--help')          { puts o; exit 0 }
 end.parse!
+opts[:jobs] = 1 if opts[:jobs] < 1
 
 opts[:seed] ||= Random.new_seed
 
@@ -240,12 +243,71 @@ def print_failure_excerpt(out)
   puts "      ... #{lines.size - excerpt.size} more lines omitted"
 end
 
-def run_negative_builds(entries, out_dir)
+def fuzz_worker_count(entries, env_key, default_workers)
+  [
+    Integer(ENV.fetch(env_key, default_workers.to_s)),
+    entries.size,
+  ].min.then { |n| n < 1 ? 1 : n }
+end
+
+def simplecov_child_command!(name)
+  return unless defined?(SimpleCov)
+
+  SimpleCov.command_name("#{name}-#{Process.pid}") if SimpleCov.respond_to?(:command_name)
+end
+
+def parallel_compile_entries(entries, workers, label)
+  return [[], []] if entries.empty?
+
+  queue = entries.each_with_index.to_a
+  chunks = Array.new(workers) { [] }
+  queue.each_with_index { |item, index| chunks[index % workers] << item }
+  readers = []
+  pids = []
+
+  chunks.reject(&:empty?).each do |chunk|
+    reader, writer = IO.pipe
+    pid = Process.fork do
+      reader.close
+      simplecov_child_command!("fuzz-#{label}")
+      generator = TestGenerator.new
+      results = chunk.map do |entry, _index|
+        path = entry[:path]
+        begin
+          generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
+          [entry, nil]
+        rescue StandardError => e
+          [entry, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]
+        end
+      end
+      writer.write(Marshal.dump(results))
+      writer.close
+      exit 0
+    rescue StandardError => e
+      writer.write(Marshal.dump(chunk.map { |entry, _index| [entry, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"] }))
+      writer.close
+      exit 1
+    end
+    writer.close
+    readers << reader
+    pids << pid
+  end
+
+  results = readers.flat_map do |reader|
+    Marshal.load(reader.read)
+  ensure
+    reader.close
+  end
+  pids.each { |pid| Process.wait(pid) }
+  results
+end
+
+def run_negative_builds(entries, out_dir, default_workers)
   return [[], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   clear = File.expand_path('../../clear', __dir__)
-  workers = [Etc.nprocessors, entries.size].min
+  workers = fuzz_worker_count(entries, 'FUZZ_NEGATIVE_WORKERS', default_workers)
   queue = Queue.new
   entries.each_with_index { |entry, i| queue << [entry, i] }
   pass = []
@@ -279,85 +341,79 @@ def run_negative_builds(entries, out_dir)
   [pass, unexpected_pass]
 end
 
-def run_mir_checker_negatives(entries)
+def run_mir_checker_negatives(entries, default_workers)
   return [[], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   pass = []
   unexpected_pass = []
+  workers = fuzz_worker_count(entries, 'FUZZ_MIR_NEGATIVE_WORKERS', default_workers)
+  queue = Queue.new
+  entries.each { |entry| queue << entry }
+  mutex = Mutex.new
 
-  entries.each do |entry|
-    out, status = Open3.capture2e(RbConfig.ruby, entry[:path], chdir: LITEDB_ROOT)
-    if status.success?
-      pass << entry[:path]
-    else
-      unexpected_pass << [entry[:path], out]
+  threads = workers.times.map do
+    Thread.new do
+      loop do
+        entry = queue.pop(true) rescue nil
+        break unless entry
+
+        out, status = Open3.capture2e(RbConfig.ruby, entry[:path], chdir: LITEDB_ROOT)
+        mutex.synchronize do
+          if status.success?
+            pass << entry[:path]
+          else
+            unexpected_pass << [entry[:path], out]
+          end
+        end
+      end
     end
   end
+  threads.each(&:join)
 
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-  puts "[fuzz] MIR checker negatives: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  puts "[fuzz] MIR checker negatives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
   [pass, unexpected_pass]
 end
 
-def run_compile_only_positive_coverage(entries)
+def run_compile_only_positive_coverage(entries, default_workers)
   return [[], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  generator = TestGenerator.new
-  pass = []
-  mir_errors = []
-
-  entries.each do |entry|
-    path = entry[:path]
-    begin
-      generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
-      pass << path
-    rescue StandardError => e
-      mir_errors << [path, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]
-    end
-  end
+  workers = fuzz_worker_count(entries, 'FUZZ_COVERAGE_WORKERS', default_workers)
+  results = parallel_compile_entries(entries, workers, 'coverage-positive')
+  pass = results.filter_map { |entry, error| entry[:path] unless error }
+  mir_errors = results.filter_map { |entry, error| [entry[:path], error] if error }
 
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-  puts "[fuzz] coverage compile positives: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  puts "[fuzz] coverage compile positives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
   [pass, mir_errors, []]
 end
 
-def run_compile_only_negative_coverage(entries)
+def run_compile_only_negative_coverage(entries, default_workers)
   return [[], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  generator = TestGenerator.new
-  pass = []
-  rejected = 0
-  emitted = 0
-
-  entries.each do |entry|
-    path = entry[:path]
-    begin
-      generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
-      emitted += 1
-    rescue StandardError
-      rejected += 1
-    ensure
-      pass << path
-    end
-  end
+  workers = fuzz_worker_count(entries, 'FUZZ_COVERAGE_WORKERS', default_workers)
+  results = parallel_compile_entries(entries, workers, 'coverage-negative')
+  rejected = results.count { |_entry, error| error }
+  emitted = results.length - rejected
+  pass = results.map { |entry, _error| entry[:path] }
 
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-  puts "[fuzz] coverage compile negatives: #{entries.size} cells in #{format('%.2f', elapsed)}s " \
+  puts "[fuzz] coverage compile negatives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s " \
        "(#{rejected} rejected by Ruby compile/lower, #{emitted} emitted for downstream gates)"
   [pass, []]
 end
 
-def compile_only_coverage_run(emitted)
+def compile_only_coverage_run(emitted, default_workers)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries)
-  negative_ok, unexpected_pass = run_compile_only_negative_coverage(negative_entries)
-  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
+  pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries, default_workers)
+  negative_ok, unexpected_pass = run_compile_only_negative_coverage(negative_entries, default_workers)
+  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries, default_workers)
 
   [
     pass_ok + negative_ok + mir_negative_ok,
@@ -373,17 +429,13 @@ def async_runtime_cell?(entry)
   src.include?('BG') || src.include?('DO {')
 end
 
-def run_positive_files(entries)
+def run_positive_files(entries, default_workers)
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   clear = File.expand_path('../../clear', __dir__)
   pass, fails, leaks, mir_errors = [], [], [], []
-  workers = [
-    Integer(ENV.fetch('FUZZ_ISOLATED_WORKERS', '8')),
-    entries.size,
-  ].min
-  workers = 1 if workers < 1
+  workers = fuzz_worker_count(entries, 'FUZZ_ISOLATED_WORKERS', default_workers)
   queue = Queue.new
   entries.each { |entry| queue << entry }
   mutex = Mutex.new
@@ -426,16 +478,16 @@ def run_positive_files(entries)
   [pass, fails, mir_errors, leaks]
 end
 
-def hybrid_run(emitted, out_dir)
+def hybrid_run(emitted, out_dir, default_workers)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
   isolated_pass_entries, bundled_pass_entries = pass_entries.partition { |entry| async_runtime_cell?(entry) }
   pass_ok, fails, mir_errors, leaks = run_pass_bundle(bundled_pass_entries, out_dir)
-  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries)
-  negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir)
-  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
+  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, default_workers)
+  negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir, default_workers)
+  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries, default_workers)
 
   [
     pass_ok + iso_ok + negative_ok + mir_negative_ok,
@@ -500,9 +552,9 @@ end
 
 pass, fails, leaks, mir_errors, unexpected_pass =
   if ENV['COVERAGE'] == '1'
-    compile_only_coverage_run(emitted)
+    compile_only_coverage_run(emitted, opts[:jobs])
   else
-    hybrid_run(emitted, opts[:out])
+    hybrid_run(emitted, opts[:out], opts[:jobs])
   end
 
 puts

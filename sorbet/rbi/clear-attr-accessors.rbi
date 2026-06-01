@@ -2072,76 +2072,14 @@ class Type
   def auto_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_token=(value); end
-  sig { returns(T.untyped) }
-  def capacity; end
-  sig { returns(T.untyped) }
-  def collection; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def collection=(value); end
-  sig { returns(T.untyped) }
-  def elem_ownership; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def elem_ownership=(value); end
-  sig { returns(T.untyped) }
-  def elem_sync; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def elem_sync=(value); end
-  sig { returns(T.untyped) }
-  def generic_args; end
-  sig { returns(T::Boolean) }
-  def is_observable; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def is_observable=(value); end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { returns(TypeCapabilities) }
+  def capabilities; end
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def is_resource=(value); end
-  sig { returns(T.untyped) }
-  def layout; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def layout=(value); end
-  sig { returns(T.untyped) }
-  def link_source; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def link_source=(value); end
-  sig { returns(T.untyped) }
-  def lock_rank; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def lock_rank=(value); end
-  sig { returns(T.untyped) }
-  def name; end
-  sig { returns(T.untyped) }
-  def observable_terminal; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def observable_terminal=(value); end
-  sig { returns(T.untyped) }
-  def observable_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def observable_token=(value); end
-  sig { returns(T.untyped) }
-  def ownership; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def ownership=(value); end
-  sig { returns(T.untyped) }
-  def polymorphic_shared; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def polymorphic_shared=(value); end
-  sig { returns(T.untyped) }
-  def provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def provenance=(value); end
-  sig { returns(T.untyped) }
-  def raw; end
-  sig { returns(T.untyped) }
-  def shard_count; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def shard_count=(value); end
-  sig { returns(T.untyped) }
-  def soa; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def soa=(value); end
-  sig { returns(T.untyped) }
-  def sync; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def sync=(value); end
+  sig { returns(TypePlacement) }
+  def placement; end
+  sig { returns(TypeShape) }
+  def shape; end
 end
 
 class UnionDef
@@ -2265,5 +2203,10 @@ class ZigTranspiler
   def struct_schemas; end
   sig { returns(T.untyped) }
   def union_schemas; end
+end
+
+class ZigType
+  sig { returns(String) }
+  def source; end
 end
 

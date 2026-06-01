@@ -1501,23 +1501,10 @@ RSpec.describe Formatter do
       end
     end
 
-    # Companion case discovered while stress-testing on vm.cht but
-    # NOT fixed by the matching_end one-line change. When an IF chain
-    # is itself nested inside a MATCH arm body, the inner MATCHes
-    # within IF/ELSE_IF arm bodies do NOT get expanded — emit_match_body
-    # copies the inner tokens verbatim rather than recursively running
-    # `expand_match_blocks`. Result: even though the outer IF body walk
-    # would now visit every ELSE_IF, the inner one-line MATCHes stay
-    # collapsed because they were never multi-line in the first place.
-    #
-    # Fixing this requires teaching emit_match_body (or copy_arm_tokens)
-    # to recursively expand nested MATCH/IF/etc., which is a larger
-    # change than the matching_end fix and lives outside the "one
-    # function" scope of this hotfix. Pinned as `pending` so the
-    # observation is captured in the test corpus and the bug doesn't
-    # silently regress further.
+    # Companion case discovered while stress-testing on vm.cht: nested
+    # IF chains inside MATCH arm bodies must get the same recursive
+    # one-line MATCH expansion as top-level IF bodies.
     it "expands IF chains nested inside a MATCH arm body" do
-      pending "emit_match_body needs recursive expansion of inner constructs"
       src = <<~CLEAR
         ENUM Op { Get, Put }
         ENUM SubOp { A, B }

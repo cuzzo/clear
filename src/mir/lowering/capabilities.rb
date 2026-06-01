@@ -446,13 +446,19 @@ module MIRLoweringCapabilities
     source_zig = with_capability_source_zig(context.var_node)
     is_param = with_cap_is_param?(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    if is_param && (context.var_sync.nil? || context.var_sync == :local) &&
-       context.var_node.symbol && !context.var_node.symbol.mutable
+    if borrowed_const_param_alias?(context, is_param)
       aliased_value = with_match_unwrap_value(source_zig)
       "const #{safe_alias} = #{aliased_value};\n_ = &#{safe_alias};"
     else
       "const #{safe_alias} = #{source_zig};\n_ = &#{safe_alias};"
     end
+  end
+
+  sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
+  def borrowed_const_param_alias?(context, is_param)
+    sym = context.var_node.symbol
+    is_param && (context.var_sync.nil? || context.var_sync == :local) &&
+      sym && !sym.mutable
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }
@@ -477,10 +483,11 @@ module MIRLoweringCapabilities
     source_zig = with_capability_source_zig(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
     rt = context.resolved_type || Type.new(:Any)
-    inner_t = rt.future? && rt.tense_type ? rt.tense_type : rt
+    inner_t = rt.future? ? rt.tense_type : rt
+    wrapped_inner = inner_t.wrapped_type
     is_value_shape = inner_t.primitive? || inner_t.string? ||
-                     (inner_t.optional? && inner_t.wrapped_type &&
-                      (inner_t.wrapped_type.primitive? || inner_t.wrapped_type.string?))
+                     (inner_t.optional? && wrapped_inner &&
+                      (wrapped_inner.primitive? || wrapped_inner.string?))
     wants_release = !is_value_shape && (inner_t.collection_value? || !inner_t.primitive?)
     coop_yield = "if (CheatHeader.scheduler.scheduler_running) { CheatHeader.scheduler.active_scheduler.drainChannels(); CheatHeader.scheduler.active_scheduler.coopYield(); }"
     if wants_release
@@ -585,12 +592,9 @@ module MIRLoweringCapabilities
     return nil if all_bindings.empty?
 
     bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
-    stdlib_def = T.let(
-      { allocates: false, borrows: with_block_borrow_names(node) },
-      T::Hash[Symbol, T.any(T::Boolean, T::Array[String], T::Array[FallibleClauseFact])],
-    )
+    stdlib_def = FunctionSignature.intrinsic_contract(borrows: with_block_borrow_names(node))
     clauses = materialization.fallible_clauses
-    stdlib_def[:fallible_clauses] = clauses unless clauses.empty?
+    stdlib_def.emit.fallible_clauses = clauses unless clauses.empty?
     bindings_iz.stdlib_def = stdlib_def
     bindings_iz
   end

@@ -141,6 +141,27 @@ module PipeAnalysis
     node.full_type!(context: "pipeline result").inf_stream_element_type.resolved
   end
 
+  sig { params(source: AST::Locatable, source_type: Type, include_inf_stream: T::Boolean).returns(T::Boolean) }
+  def pipeline_iterable_source?(source, source_type, include_inf_stream: false)
+    finite_stream_source?(source) ||
+      (include_inf_stream && source_type.inf_stream?) ||
+      source_type.linear_collection?
+  end
+
+  sig { params(source: AST::Locatable, source_type: Type, include_inf_stream: T::Boolean).returns(Symbol) }
+  def pipeline_iterable_element_type(source, source_type, include_inf_stream: false)
+    if include_inf_stream && source_type.inf_stream?
+      return inf_stream_element_type(source)
+    end
+
+    return finite_stream_element_type(source) if finite_stream_source?(source)
+
+    element_type = source_type.element_type
+    return element_type.resolved if element_type
+
+    :Any
+  end
+
   sig { returns(T.nilable(T::Boolean)) }
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
@@ -489,8 +510,8 @@ module PipeAnalysis
       # Lambda form: %(a, b) -> a.id == b.userId
       params = key_expr.params
       error!(key_expr, :JOIN_LAMBDA_ARITY) unless params.size == 2
-      left_name  = params[0].is_a?(Hash) ? params[0][:name] : params[0].name
-      right_name = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
+      left_name  = params[0].name
+      right_name = params[1].name
       with_new_scope do
         current_scope.declare(left_name, nil, left_type, false, false, nil, :stack)
         current_scope.declare(right_name, nil, right_type, false, false, nil, :stack)
@@ -583,7 +604,7 @@ module PipeAnalysis
     # inside Zig with "observable accumulator: T must be int or float";
     # reject them here with a CLEAR-level message instead.
     acc_t = Type.new(acc_type)
-    if !acc_t.array? && !acc_t.list_collection? && !acc_t.set_collection? && !acc_t.map?
+    unless acc_t.collection_value?
       if observable_reducible_scalar?(acc_type)
         mark_observable_terminal!(node, terminal: :reduce, raw: :"~#{acc_type}")
       end
@@ -819,24 +840,14 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # EACH accepts arrays, collections, and finite streams.
     lhs_type  = node.left.full_type!(context: "pipeline left")
-    is_pool   = lhs_type&.pool?
-    is_list   = lhs_type&.list_collection?
-    is_array  = node.left.metatype == :array
-    is_range  = finite_stream_source?(node.left)
 
-    unless is_pool || is_list || is_array || is_range
+    unless pipeline_iterable_source?(node.left, lhs_type)
       error!(node.left, :EACH_NEEDS_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
-    item_type = if is_range
-      finite_stream_element_type(node.left)
-    elsif is_pool || is_list
-      lhs_type.element_type.resolved
-    else
-      lhs_type.element_type.resolved
-    end
+    item_type = pipeline_iterable_element_type(node.left, lhs_type)
 
     with_new_scope(current_scope) do
       # Mutable: EACH body may mutate the item via field assignment (_.field = value)
@@ -882,25 +893,14 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # TAP: list |> TAP { body } -> same list type (pass-through); also accepts range/stream source.
     lhs_type = node.left.full_type!(context: "pipeline left")
-    is_inf   = lhs_type&.inf_stream?
-    is_range = finite_stream_source?(node.left) || is_inf
-    is_pool  = lhs_type&.pool?
-    is_list  = lhs_type&.list_collection?
-    is_array = node.left.metatype == :array
 
-    unless is_pool || is_list || is_array || is_range
+    unless pipeline_iterable_source?(node.left, lhs_type, include_inf_stream: true)
       error!(node.left, :TAP_NEEDS_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
-    item_type = if is_inf
-      inf_stream_element_type(node.left)
-    elsif is_range
-      finite_stream_element_type(node.left)
-    else
-      lhs_type.element_type.resolved
-    end
+    item_type = pipeline_iterable_element_type(node.left, lhs_type, include_inf_stream: true)
 
     with_new_scope do
       # Read-only: TAP is for observation, not mutation
@@ -1190,17 +1190,12 @@ module PipeAnalysis
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.full_type!(context: "pipeline left")
-    is_range = finite_stream_source?(smooth_node.left)
-    is_array = smooth_node.left.metatype == :array
-    is_list  = lhs_type&.list_collection?
 
-    item_type = if is_range
-      finite_stream_element_type(smooth_node.left)
-    elsif is_array || is_list
-      lhs_type.element_type.resolved
-    else
+    unless pipeline_iterable_source?(smooth_node.left, lhs_type)
       error!(smooth_node.left, :CONCURRENT_EACH_BAD_INPUT, got: smooth_node.left.resolved_type)
-      :Any
+      item_type = :Any
+    else
+      item_type = pipeline_iterable_element_type(smooth_node.left, lhs_type)
     end
 
     with_new_scope do
@@ -1341,21 +1336,15 @@ module PipeAnalysis
     # LHS must be iterable (range or array)
     lhs_type = node.left.full_type!(context: "pipeline left")
     is_range = node.left.is_a?(AST::RangeLit)
-    is_array = node.left.metatype == :array
-    is_list  = lhs_type&.list_collection?
 
-    unless is_range || is_array || is_list
+    unless is_range || lhs_type.linear_collection?
       error!(node.left, :SHARD_NEEDS_RANGE_OR_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
     # Determine element type for `_` binding
-    item_type = if is_range
-      :Int64
-    else
-      lhs_type.element_type.resolved
-    end
+    item_type = is_range ? :Int64 : pipeline_iterable_element_type(node.left, lhs_type)
 
     # Type-check key expression with `_` in scope
     with_new_scope do
@@ -1774,8 +1763,7 @@ module PipeAnalysis
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
-    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream? ||
-                               lhs_type&.inf_stream? || lhs_type&.open_stream?)
+    return if allow_stream && lhs_type&.runtime_stream?
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, :SELECT_NEEDS_LIST, got: node.left.resolved_type)

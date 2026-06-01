@@ -37,6 +37,7 @@ class IntrinsicEmit < T::Struct
   prop :is_method,           T::Boolean,                     default: false
   prop :suspends,            T::Boolean,                     default: false
   prop :narrows_collection,  T::Boolean,                     default: false
+  prop :narrows_receiver_collection, T::Boolean,              default: false
   prop :mutates_receiver,    T::Boolean,                     default: false
   prop :allocates,           T::Boolean,                     default: false
   prop :takes_value,         T::Boolean,                     default: false

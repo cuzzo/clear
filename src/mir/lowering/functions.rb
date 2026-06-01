@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../backends/zig_type"
 
 module MIRLoweringFunctions
   extend T::Sig
@@ -265,28 +266,17 @@ module MIRLoweringFunctions
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
     tied_shared_return = tied_shared_family_return_param(node, context.mutable_scalar_params)
+    final_zig_type = ZigType.new(final_type)
     return_type_str = if tied_shared_return
       tied_shared_return
     elsif fn_can_fail
-      # If the user declared `RETURNS !T`, `final_type` already carries the
-      # error union. Don't double-prefix.
-      if final_type.include?("anyerror!") || final_type.include?("error{")
-        final_type
-      elsif node.reentrant == :reentrant && final_type.start_with?("!")
-        # Reentrant / mutually-recursive fns must carry `anyerror!T`
-        # rather than the bare `!T`. Zig's inferred-error-set
-        # convergence fails for cycles where two `!T` fns call each
-        # other (`'eval' uses inferred error set of function
-        # 'evalList' here -> dependency loop`). The `anyerror`
-        # prefix makes the error set concrete and breaks the loop.
-        "anyerror#{final_type}"
-      elsif final_type.start_with?("!")
-        final_type
-      elsif node.reentrant == :reentrant
-        "anyerror!#{final_type}"
-      else
-        "!#{final_type}"
-      end
+      # Reentrant / mutually-recursive fns must carry `anyerror!T`
+      # rather than Zig's inferred `!T`. Zig's inferred-error-set
+      # convergence fails for cycles where two `!T` fns call each
+      # other (`'eval' uses inferred error set of function 'evalList'
+      # here -> dependency loop`). The `anyerror` prefix makes the
+      # error set concrete and breaks the loop.
+      final_zig_type.fallible_return_type_for(reentrant: node.reentrant == :reentrant)
     else
       final_type
     end
@@ -340,15 +330,12 @@ module MIRLoweringFunctions
     elsif has_catch
       # Emit inner/outer function pair
       inner_name = "__#{node.name}_body"
-      already_error_union = final_type.start_with?("!") ||
-                            final_type.include?("anyerror!") ||
-                            final_type.include?("error{")
-      inner_ret = if already_error_union
-                    final_type
+      inner_ret = if final_zig_type.error_union?
+                    final_zig_type.source
                   elsif fn_can_fail
-                    "anyerror!#{final_type}"
+                    final_zig_type.concrete_fallible_return_type
                   else
-                    "!#{final_type}"
+                    final_zig_type.fallible_return_type
                   end
 
       inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
@@ -536,10 +523,7 @@ module MIRLoweringFunctions
 
   sig { params(final_type: String, node: AST::FunctionDef).returns(String) }
   def faulting_return_type_str(final_type, node)
-    return final_type if final_type.include?("anyerror!") || final_type.include?("error{") || final_type.start_with?("!")
-    return "anyerror!#{final_type}" if node.reentrant == :reentrant
-
-    "!#{final_type}"
+    ZigType.new(final_type).fallible_return_type_for(reentrant: node.reentrant == :reentrant)
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
@@ -591,7 +575,7 @@ module MIRLoweringFunctions
                          @enum_schemas&.key?(bare_ret.resolved) ||
                          @union_schemas&.key?(bare_ret.resolved)
     returns_string = bare_ret.string?
-    heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
+    heap_carry_return = !!(node.respond_to?(:heap_carry_return) && node.heap_carry_return)
     has_frame_bindings = if node.cleanup_bindings
       node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
     else
@@ -605,13 +589,25 @@ module MIRLoweringFunctions
       ),
     ], T::Array[MIR::Node])
 
-    if has_frame_bindings && (returns_value_type || (returns_string && heap_carry_return))
+    if runtime_frame_save_required?(has_frame_bindings, returns_value_type, returns_string, heap_carry_return)
       out << MIR::FrameSave.new(@rt_name)
       out << MIR::FrameRestore.new(@rt_name)
     else
       out << MIR::Suppress.new("rt")
     end
     out
+  end
+
+  sig do
+    params(
+      has_frame_bindings: T::Boolean,
+      returns_value_type: T::Boolean,
+      returns_string: T::Boolean,
+      heap_carry_return: T::Boolean,
+    ).returns(T::Boolean)
+  end
+  def runtime_frame_save_required?(has_frame_bindings, returns_value_type, returns_string, heap_carry_return)
+    has_frame_bindings && (returns_value_type || (returns_string && heap_carry_return))
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
@@ -996,8 +992,7 @@ module MIRLoweringFunctions
                 (AST.moved?(a) &&
                  !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
-    if callee_param&.takes && moved_arg &&
-       ti.is_a?(Type) && ti.direct_indexable_collection? && !callee_param_type.collection?
+    if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
       sink_alloc = allocator_for_takes_param!(callee_param)
       return T.cast(T.unsafe(self).with_ownership_consumption(
         MIR::OwnedSlice.new(arg, sink_alloc),
@@ -1013,15 +1008,25 @@ module MIRLoweringFunctions
       arg = hoist_alloc(placed, a, err_cleanup: true)
     end
 
-    if ti.is_a?(Type) && ti.non_string_array? && !ti.pool? &&
-       !a.is_a?(AST::MoveNode) &&
-       !callee_param_type.collection?
+    if borrowed_array_argument_required?(ti, a, callee_param_type)
       return MIR::ItemsAccess.new(arg, true)
     end
 
     return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
     return arg if arg_already_pointer_shaped?(a)
     MIR::AddressOf.new(arg)
+  end
+
+  sig { params(callee_param: T.nilable(AST::Param), moved_arg: T::Boolean, ti: Type, callee_param_type: Type).returns(T::Boolean) }
+  def owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
+    !!(callee_param&.takes && moved_arg && ti.direct_indexable_collection? &&
+      !callee_param_type.collection?)
+  end
+
+  sig { params(ti: Type, ast_arg: AST::Node, callee_param_type: Type).returns(T::Boolean) }
+  def borrowed_array_argument_required?(ti, ast_arg, callee_param_type)
+    ti.borrowed_array_argument? && !ast_arg.is_a?(AST::MoveNode) &&
+      !callee_param_type.collection?
   end
 
   sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[T.untyped]).returns(T.nilable(MIR::CallableContract)) }
@@ -1429,11 +1434,11 @@ module MIRLoweringFunctions
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_owned_return?(node)
     T.bind(self, MIRLowering) rescue nil
-    sig = fn_sig_for(node.name) if node.respond_to?(:name)
+    sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
     node_ti = Type.from_node!(node, context: "call owned return")
-    if !node_ti.any?
+    if !node_ti.any? && !node_ti.auto?
       return concrete_call_type_owned_return?(node_ti, sig)
     end
 
@@ -1490,6 +1495,7 @@ module MIRLoweringFunctions
     end
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
     ti.ownership_bearing?(schema_lookup) ||
+      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
       ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
       ti.resource? || ti.recursive_cleanup_shape?(schema_lookup)
   end
@@ -1603,7 +1609,7 @@ module MIRLoweringFunctions
       # shared collections (e.g. map.contains?, map.count) get rewritten
       # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
       # resolve to the underlying MapRef.
-      if receiver_type && (receiver_type.shared? || receiver_type.multiowned?) && @target != :bc
+      if receiver_type&.rc_map? && @target != :bc
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
       elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
@@ -1747,9 +1753,11 @@ module MIRLoweringFunctions
       index = arg_fact.index
       next unless ownership_facts.takes?(index)
 
-      materialized_args[index] = T.cast(
-        materialize_owned_sink_value(materialized_args[index], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type),
-        MIR::Node,
+      materialized_args[index] = materialize_owned_sink_value(
+        T.must(materialized_args[index]),
+        arg_fact.ast_arg,
+        sink_alloc,
+        arg_fact.sink_type,
       )
     end
 
@@ -1867,7 +1875,7 @@ module MIRLoweringFunctions
   def lower_extern_arg(ast_arg)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(ast_arg)
-    if mir.is_a?(MIR::Cast) && mir.method == :as && mir.target_type == "[]const u8" && mir.expr.is_a?(MIR::Lit)
+    if MIR.const_u8_literal_cast?(mir)
       mir.expr
     else
       mir
@@ -2046,7 +2054,7 @@ module MIRLoweringFunctions
     # mir-lowering strict ivars
     @lambda_counter = T.let(@lambda_counter, T.untyped)
     sig = node.full_type!
-    sig = sig.raw if sig.is_a?(Type)
+    sig = T.must(sig.function_signature) if sig.is_a?(Type)
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"
 
@@ -2061,11 +2069,7 @@ module MIRLoweringFunctions
     }, T::Array[MIR::Param])
 
     ret_zig = sig.return_type.zig_type
-    ret_str = if ret_zig.start_with?("!") || ret_zig.include?("anyerror!") || ret_zig.include?("error{")
-                ret_zig
-              else
-                "anyerror!#{ret_zig}"
-              end
+    ret_str = ZigType.new(ret_zig).anyerror_return_type
 
     # Build body: suppressions + return expr
     body_mir = []
@@ -2075,9 +2079,7 @@ module MIRLoweringFunctions
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     captures = node.captures&.map { |c|
-      if c.is_a?(Hash)
-        c[:name].to_s
-      elsif c.respond_to?(:name)
+      if c.respond_to?(:name)
         c.name.to_s
       else
         c.to_s

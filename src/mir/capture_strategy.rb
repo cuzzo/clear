@@ -241,7 +241,7 @@ module CaptureStrategy
   def self.deep_copy_capture?(type, schema_lookup = nil)
     return false if type.needs_pointer_passing?
     return false if type.future? || type.any_sync? || type.any_rc? || type.resource?
-    return false if type.provenance == :borrow
+    return false if type.borrowed_reference?
 
     type.ownership_bearing?(schema_lookup)
   end

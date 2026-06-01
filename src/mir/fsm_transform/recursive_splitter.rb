@@ -257,7 +257,7 @@ module FsmTransform
     # Does this stmt introduce a segment split? True for top-level
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
-    sig { params(stmt: T.anything).returns(T::Boolean) }
+    sig { params(stmt: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
     def stmt_introduces_split?(stmt)
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
@@ -265,6 +265,8 @@ module FsmTransform
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
       else
+        return false unless stmt.is_a?(Struct)
+
         AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
       end
     end
@@ -490,6 +492,7 @@ module FsmTransform
       if desc.nil?
         raise UnsupportedShape, "ForEach over #{ct.inspect} not supported in FSM"
       end
+      desc = T.must(desc)
 
       coll_zig = lower_to_zig(coll_ast, lowering)
       raise UnsupportedShape, "ForEach collection did not lower" if coll_zig.nil?
@@ -498,17 +501,14 @@ module FsmTransform
       counter = builder.segments.length
       # Per-shape var type comes from the descriptor (e.g. map's
       # bound var is the KEY type, not the element/value type).
-      elem_zig = desc[:var_zig_type] || begin
-        elem_t = ct.is_a?(Type) ? ct.element_type : nil
-        elem_t ? Type.new(elem_t).zig_type : "anyopaque"
-      end
+      elem_zig = desc.var_zig_type
       ctx_var = "__FSM_CTX.#{var_name}"
 
-      case desc[:kind]
+      case desc.kind
       when :indexed_slice
         emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
                               coll_zig, var_name, ctx_var, elem_zig,
-                              counter, desc[:slice_suffix])
+                              counter, desc.slice_suffix)
       when :pool_indexed
         emit_for_each_pool(for_stmt, after_idx, builder, lowering,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
@@ -517,19 +517,19 @@ module FsmTransform
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
       else
-        raise UnsupportedShape, "Unknown FSM ForEach kind #{desc[:kind].inspect}"
+        raise UnsupportedShape, "Unknown FSM ForEach kind #{desc.kind.inspect}"
       end
     end
 
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, desc: T.untyped, ct: T.untyped).returns(Integer) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
     def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
       T.bind(self, T.untyped) rescue nil
       iter_field = "__feiter_#{counter}"
       has_field  = "__fehas_#{counter}"
-      init_method     = desc[:init_method]
-      advance_method  = desc[:advance_method]
+      init_method     = T.must(desc.init_method)
+      advance_method  = T.must(desc.advance_method)
       # Use a pointer-to-undefined as the receiver so Zig can match
       # whichever method signature (`*Self` or `*const Self`) the
       # collection exposes -- @as(T, undefined) is an rvalue and
@@ -549,7 +549,7 @@ module FsmTransform
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
       body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering)
 
-      bind_zig = desc[:deref] ? "__nxt_#{counter}.*" : "__nxt_#{counter}"
+      bind_zig = desc.deref ? "__nxt_#{counter}.*" : "__nxt_#{counter}"
       cond_pre = [
         "if (#{ctx_iter}.#{advance_method}()) |__nxt_#{counter}| {",
         "    #{ctx_var} = #{bind_zig};",

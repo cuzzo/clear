@@ -105,7 +105,7 @@ module GenericAnalysis
     # on the inner tense_type, not the outer tense wrapper. Accept those
     # by also checking tense_type.array?.
     inner_array = type_obj.tense? && type_obj.tense_type&.array?
-    if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list? && !inner_array
+    if type_obj.list_requires_array_shape?
       error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list')
     end
     if type_obj.pool? && !type_obj.array? && !inner_array
@@ -122,8 +122,7 @@ module GenericAnalysis
     # is not an observable backing at all. Reject explicitly: the
     # only observable shape over an array today is `@set:observable`
     # (DISTINCT terminal). Plain array observables are not supported.
-    if type_obj.tense? && type_obj.observable? && type_obj.tense_type&.array? &&
-       !type_obj.set_collection?
+    if type_obj.observable_array_without_set?
       error!(node, :OBSERVABLE_REQUIRES_SET)
     end
 
@@ -170,13 +169,14 @@ module GenericAnalysis
     end
 
     # @soa requires a fixed-size array (or collection, which handles its own SOA).
-    if type_obj.soa? && !type_obj.collection? && (!type_obj.array? || !type_obj.fixed?)
+    if type_obj.soa_requires_fixed_array?
       error!(node, :SOA_NEEDS_FIXED_ARRAY)
     end
 
     # @sharded requires N >= 2.
-    if type_obj.shard_count && type_obj.shard_count < 2
-      error!(node, :SHARDED_NEEDS_2_PLUS, got: type_obj.shard_count)
+    shard_count = type_obj.shard_count
+    if shard_count && shard_count < 2
+      error!(node, :SHARDED_NEEDS_2_PLUS, got: shard_count)
     end
 
     # Pools require a fixed capacity: Entity[1000]@pool, not Entity[]@pool.
@@ -356,11 +356,7 @@ module GenericAnalysis
       substituted = Type.new(subst[resolved])
       if generic_type_has_capabilities?(t)
         merged = Type.new(substituted)
-        merged.ownership = t.ownership if t.ownership != :affine
-        merged.sync = t.sync if t.sync
-        merged.layout = t.layout if t.layout
-        merged.elem_ownership = t.elem_ownership if t.elem_ownership
-        merged.elem_sync = t.elem_sync if t.elem_sync
+        merged.merge_capabilities_from!(t)
         merged
       else
         substituted
@@ -410,9 +406,9 @@ module GenericAnalysis
   def generic_shared_payload_binding(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
-    t.ownership = :affine
-    t.provenance = nil if t.respond_to?(:provenance=)
-    t.instance_variable_set(:@generic_payload_type_arg, true)
+    t.apply_reference_ownership!(:affine)
+    t.mark_stack_value!
+    t.mark_generic_payload_type_arg!
     t
   end
 
@@ -525,7 +521,7 @@ module GenericAnalysis
 
     # Propagate shard_count from declared type into final_type (lost during coerce!).
     if node.type.shard_count
-      final_type_info.shard_count = node.type.shard_count
+      final_type_info.copy_topology_from!(node.type)
     end
 
     # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
@@ -553,28 +549,18 @@ module GenericAnalysis
       value_type
     end
     if coll_src
-      node_type.collection  = coll_src.collection unless node_type.collection
-      node_type.provenance  = :heap if coll_src.pool? || coll_src.set_collection?
-      node_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node_type.shard_count
-      node_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+      node_type.copy_collection_shape_from!(coll_src)
+      node_type.mark_heap_allocated! if coll_src.pool? || coll_src.set_collection?
     end
 
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
     if !coll_src && decl_type&.soa
-      node_type.soa = true
+      node_type.mark_soa_layout!
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
     if decl_type
-      if decl_type.shard_count && !node_type.shard_count
-        node_type.shard_count = decl_type.shard_count
-      end
-      if decl_type.sync && !node_type.sync
-        node_type.sync = decl_type.sync
-      end
-      if decl_type.ownership != :affine
-        node_type.instance_variable_set(:@ownership, decl_type.ownership)
-      end
+      node_type.copy_declared_collection_modifiers_from!(decl_type)
     end
   end
 

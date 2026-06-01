@@ -66,6 +66,15 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     struct_lit = AST::StructLit.new(tok, "User", { "name" => id("name") }, :stack, [])
     node = OpenStruct.new(value: struct_lit)
     expect(CleanupClassifier.send(:struct_lit_borrows_cleanup_fields?, node, schema, schema_lookup)).to be(true)
+
+    borrowed_type = Type.new(:String)
+    borrowed_type.mark_borrowed_reference!
+    borrowed_value = id("borrowed_name", type: borrowed_type)
+    owned_field = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: false)
+    borrowed_schema = OpenStruct.new(fields: { "name" => owned_field }, borrowed_fields: Set.new)
+    borrowed_struct = AST::StructLit.new(tok, "User", { "name" => borrowed_value }, :stack, [])
+    expect(CleanupClassifier.send(:struct_lit_borrows_cleanup_fields?, OpenStruct.new(value: borrowed_struct), borrowed_schema, schema_lookup)).to be(true)
+
     expect(CleanupClassifier.send(:struct_lit_borrows_cleanup_fields?, OpenStruct.new(value: lit), schema, schema_lookup)).to be(false)
   end
 

@@ -23,6 +23,7 @@ module CoverageBootstrap
 
     begin
       require "simplecov"
+      require "simplecov/process"
     rescue LoadError
       return
     end
@@ -46,12 +47,16 @@ module CoverageBootstrap
       add_filter "/vendor/"
       add_filter "/examples/"
       add_filter "/benchmarks/"
+      add_filter do |source_file|
+        source_file.filename.start_with?(File.join(SimpleCov.root, "tools/"))
+      end
 
       add_group "AST + Parser",      "src/ast"
       add_group "Annotator",         "src/annotator"
       add_group "Annotator helpers", "src/annotator/helpers"
       add_group "MIR",               "src/mir"
       add_group "Backends",          "src/backends"
+      add_group "Tools",             "src/tools"
 
       # Hold for an hour so a partial re-run of one entry point merges
       # into the existing data instead of dropping files the partial

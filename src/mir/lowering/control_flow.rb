@@ -430,7 +430,7 @@ module MIRLoweringControlFlow
         # zero runtime overhead. Defer container shape to the runtime/comptime
         # layer instead of re-deriving from "is this a param?".
         MIR::ItemsAccess.new(coll, true)
-      elsif is_field_access && ct.array? && (ct.dynamic? || ct.list_collection?)
+      elsif is_field_access && ct.dynamic_field_array?
         coll
       else
         MIR::AddressOf.new(coll)
@@ -808,7 +808,7 @@ module MIRLoweringControlFlow
         cleanup_mode: entry ? :err : :normal,
         scope: :heap
       )
-      out = T.let(materialized.statements, T::Array[T.untyped])
+      out = T.let(materialized.statements, T::Array[MIR::Stmt])
       if entry
         plan = synthetic_return_ownership_plan(name)
         out.concat(plan.transfer_marks_for(Set[name], @lowered_guarded_cleanup_names || Set.new))
@@ -1036,14 +1036,17 @@ module MIRLoweringControlFlow
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     out = T.let(Set.new, T::Set[String])
     names.each do |name|
-      if @guarded_cleanup_names&.[](name) ||
-         returned_hoist_binding?(name) ||
-         returned_takes_param?(name) ||
-         returned_owned_binding?(name)
+      if return_transfer_required?(name)
         out << name
       end
     end
     out
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def return_transfer_required?(name)
+    @guarded_cleanup_names&.[](name) || returned_hoist_binding?(name) ||
+      returned_takes_param?(name) || returned_owned_binding?(name)
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -1159,8 +1162,7 @@ module MIRLoweringControlFlow
     return false unless sym
     # Skip if the binding is already pointer-shaped or sync-wrapped --
     # the helper handles those via comptime dispatch.
-    return false if sym.sync || sym.rc_stored? ||
-                    sym.local_storage? || sym.heap_storage?
+    return false if sym.with_match_capability_family?
     # Only auto-borrow MUTABLE plain T: an immutable plain T can't be
     # mutated through any path so & buys us nothing (and would be a
     # pessimization).

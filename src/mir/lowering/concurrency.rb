@@ -710,7 +710,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     result_alloc = escaping_value_alloc(inner_t)
     last_mir = T.cast(with_decl_alloc(result_alloc) { lower(step.expr) }, MIR::Node)
-    last_mir = T.cast(place_value_for_destination(last_mir, step.expr, result_alloc, inner_t), MIR::Node)
+    last_mir = place_value_for_destination(last_mir, step.expr, result_alloc, inner_t)
     last_mir = T.cast(hoist_alloc(last_mir, step.expr, err_cleanup: true), MIR::Node) if mir_allocates?(last_mir)
     last_pending = flush_pending
     body_mir.concat(last_pending)
@@ -1064,7 +1064,7 @@ module MIRLoweringConcurrency
       end
 
       promise_list_inner_str = emit_expr(promise_list_inner)
-      elem_zig = promise_type.tense_type.element_type.zig_type
+      elem_zig = T.must(promise_type.tense_type.element_type).zig_type
       @tmp_counter += 1
       promise_list_label = "__next_all_#{@tmp_counter}"
       results_var = "__next_results_#{@tmp_counter}"

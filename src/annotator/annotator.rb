@@ -136,11 +136,17 @@ class SemanticAnnotator
 
   DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
-  WITH_MATCH_FAMILY_EFFECTS = T.let({
-    LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
-    VERSIONED: [EffectTracker::CONTENTION],
-    ATOMIC: [EffectTracker::CONTENTION],
-  }.freeze, T::Hash[Symbol, T::Array[Symbol]])
+  sig { params(family: Symbol).returns(T::Array[Symbol]) }
+  def with_match_family_effects(family)
+    case family
+    when :LOCKED
+      [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS]
+    when :VERSIONED, :ATOMIC
+      [EffectTracker::CONTENTION]
+    else
+      []
+    end
+  end
 
   sig do
     type_parameters(:Result)
@@ -231,7 +237,7 @@ class SemanticAnnotator
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_predicate_context = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
     @capability_audit = T.let({}, T::Hash[T.untyped, T.untyped])
     @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
     @call_site_context = T.let(nil, T.untyped)
@@ -245,7 +251,7 @@ class SemanticAnnotator
     @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
     @deferred_with_validations = T.let([], T::Array[T.untyped])
-    @predicate_call_sites = T.let([], T::Array[T.untyped])
+    @predicate_call_sites = T.let([], T.nilable(T::Array[CapabilityHelper::PredicateCallSite]))
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -317,6 +323,13 @@ class SemanticAnnotator
   end
 
 private
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def runtime_error_clause?(node)
+    (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
+      (node.catch_clauses.is_a?(Array) && node.catch_clauses.any?) ||
+      (node.default_catch.is_a?(Array) && node.default_catch.any?)
+  end
 
   # Auto inference runs after the body walk has populated type_info on
   # every constraint source. It mutates successful Auto declarations to
@@ -491,8 +504,7 @@ private
 
     # Types are registered before function signatures can reference them.
     node.statements.each do |stmt|
-      visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl) ||
-                     stmt.is_a?(AST::EnumDef)   || stmt.is_a?(AST::UnionDef)
+      visit(stmt) if AST.type_declaration?(stmt)
     end
 
     # Function signatures are hoisted so functions can call later definitions.
@@ -525,9 +537,7 @@ private
 
     node.statements.each do |stmt|
       # Skip nodes already processed in earlier passes.
-      next if stmt.is_a?(AST::StructDef)    || stmt.is_a?(AST::RequireNode) ||
-              stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl) ||
-              stmt.is_a?(AST::EnumDef)      || stmt.is_a?(AST::UnionDef)
+      next if AST.top_level_declaration?(stmt)
 
       visit(stmt)
     end
@@ -919,9 +929,7 @@ private
       (node.reentrant == :non_reentrant) ||
       (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
       scan_for_raises(node.body)
-    if current_fn_ctx && ((node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
-                          (node.catch_clauses.is_a?(Array) && node.catch_clauses.any?) ||
-                          (node.default_catch.is_a?(Array) && node.default_catch.any?))
+    if current_fn_ctx && runtime_error_clause?(node)
       current_fn_ctx.uses_rt = true
     end
 
@@ -1437,8 +1445,7 @@ private
       # Propagate ownership so field access auto-derefs through .ctrl.data and
       # the lowering knows to inject rcRelease cleanup.
       if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
-        unwrapped.ownership = ti.ownership
-        unwrapped.link_source = ti.link_source
+        unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
       end
       b.unwrapped_type = unwrapped
     end
@@ -1720,7 +1727,7 @@ private
                 elsif raw_payload.is_a?(Type) && raw_payload.indirect?
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                   inner_type = raw_payload.dup
-                  inner_type.layout = nil
+                  inner_type.strip_layout!
                   inner_type = apply_type_subst(inner_type, union_subst)
                   current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
                   og_declare(c.binding, nil, inner_type)
@@ -2038,8 +2045,7 @@ private
 
     unwrapped = ti.wrapped_type
     if node.condition.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
-      unwrapped.ownership = ti.ownership
-      unwrapped.link_source = ti.link_source
+      unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
     end
 
     current_fn_ctx.loop_depth += 1
@@ -2275,7 +2281,7 @@ private
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     unless node.value.is_a?(AST::Identifier)
-      if (expected.heap? || expected.dynamic?) &&
+      if expected.heap_return_storage? &&
          node.value.respond_to?(:storage=) &&
          node.value.full_type!(context: "return expression storage").requires_move?
         node.value.storage = :heap
@@ -2287,9 +2293,10 @@ private
     actual_is_auto = actual_full.auto?
     expected_is_auto = expected.auto?
 
-    if !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
+    return_checkable = !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any
+    if return_checkable && !return_type_compatible?(actual_full, expected)
       error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
-    elsif !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && actual != expected
+    elsif return_checkable && actual != expected
       # A value's coercion target is the PAYLOAD, never the error union
       # `!T`. `!` is the channel (added by the return mechanism / fn
       # signature), orthogonal to the value's type. Stamping `!T` here
@@ -2308,9 +2315,8 @@ private
         (node.value.respond_to?(:error_union_type) && node.value.error_union_type) ||
         actual_full.error_union?
       coerce_target =
-        if !value_is_fallible && expected.respond_to?(:error_union?) && expected.error_union? &&
-           expected.respond_to?(:payload_type) && expected.payload_type
-          expected.payload_type
+        if !value_is_fallible && expected.plain_return_payload_type
+          expected.plain_return_payload_type
         else
           expected
         end
@@ -2664,7 +2670,9 @@ private
     node.can_fail = true if matched_def.can_fail || emit&.allocates
     node.error_kind = emit.error_kind if emit&.error_kind
     node.error_type = emit.error_type if emit&.error_type
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (emit&.allocates || matched_def.can_fail || matched_def.needs_rt)
+    if current_fn_ctx
+      current_fn_ctx.alloc_count += 1 if emit&.allocates || matched_def.can_fail || matched_def.needs_rt
+    end
     record_effect(EffectTracker::SUSPENDS) if emit&.suspends
 
     # 5. Flag mutable access through list indexing.
@@ -2751,7 +2759,7 @@ private
           nil,
         )
       end
-      target_t.observable_terminal = pipe_terminal
+      target_t.stamp_observable_terminal!(pipe_terminal)
       node.type = target_t
       # node.full_type is the resolved Type read by mir_lowering's
       # transpile_type; propagate the terminal kind there too so
@@ -2769,7 +2777,7 @@ private
             nil,
           )
         end
-        node_type.observable_terminal = pipe_terminal
+        node_type.stamp_observable_terminal!(pipe_terminal)
       end
     end
     stamp_type!(pipe, node.type)
@@ -2849,13 +2857,7 @@ private
     # Empty collection literals annotated as Auto need a permissive
     # container type in scope so method dispatch works during the body walk;
     # the declaration annotation remains Auto for the later constraint pass.
-    if node.type&.auto? &&
-       node.value.respond_to?(:type_object) && node.value.type_object &&
-       (
-         (node.value.is_a?(AST::ListLit) && node.value.items.empty? &&
-          !node.value.instance_variable_get(:@constructor_collection)) ||
-         (node.value.is_a?(AST::HashLit) && node.value.pairs.empty?)
-       )
+    if AST.empty_auto_collection_literal_decl?(node)
       final_type = node.value.type_object
     end
 
@@ -2888,7 +2890,7 @@ private
     # (WITH EXCLUSIVE unwrapping reads the raw entry.type expecting just the base type).
     scope_type = if node_type.collection && !(final_type.is_a?(Type) && final_type.collection)
       ft = Type.new(final_type)
-      ft.collection = node_type.collection
+      ft.copy_collection_shape_from!(node_type)
       ft
     else
       final_type
@@ -3375,7 +3377,7 @@ private
 
   sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).returns(T.untyped) }
   def validate_assignment_type(node, target_type, value_type)
-    return if target_type.nil? || false || target_type == :Any || value_type == :Any
+    return if target_type.nil? || target_type == :Any || value_type == :Any
     return if target_type == :NIL # Allow narrowing from initial NIL
     return if target_type == value_type
 
@@ -3541,7 +3543,7 @@ private
         # ti.zig_type renders "*T".
         if !struct_pointee
           field_type = field_type.dup
-          field_type.layout = nil
+          field_type.strip_layout!
         end
       end
       if node.target.is_a?(AST::OptionalUnwrap) && field_type.is_a?(Type) && !field_type.optional?
@@ -3689,7 +3691,7 @@ private
       indirect_payload = raw_expected.is_a?(Type) && raw_expected.indirect?
       raw_for_check = if indirect_payload
                         d = raw_expected.dup
-                        d.layout = nil
+                        d.strip_layout!
                         d
                       else
                         raw_expected
@@ -3820,9 +3822,12 @@ private
       # The collection type is set; element type resolves on first append/insert.
       if (coll = node.instance_variable_get(:@constructor_collection))
         t = Type.new(:"Any[]", collection: coll)
-        t.soa = true if node.instance_variable_get(:@constructor_soa)
-        t.shard_count = node.instance_variable_get(:@constructor_shard_count)
-        t.provenance = :heap if coll == :pool || coll == :set
+        t.apply_constructor_collection!(
+          collection: nil,
+          soa: !!node.instance_variable_get(:@constructor_soa),
+          shard_count: node.instance_variable_get(:@constructor_shard_count)
+        )
+        t.mark_heap_allocated! if coll == :pool || coll == :set
         stamp_type!(node, t)
         node.storage = (coll == :pool || coll == :set) ? :heap : :stack
         record_effect(EffectTracker::HEAP)
@@ -3856,7 +3861,7 @@ private
       stamp_type!(node, Type.new(:"#{base_type}[#{node.items.size}]"))
     else
       t = Type.new(:"#{base_type}[]", location: :heap)
-      t.provenance = :frame  # makeList uses frameAlloc for backing
+      t.mark_frame_allocated!  # makeList uses frameAlloc for backing
       stamp_type!(node, t)
     end
   end
@@ -3977,7 +3982,7 @@ private
       # String concat result is frame-allocated.
       node.storage = :frame
       ti = node.full_type!(context: "binary result")
-      ti.provenance = :frame if ti.is_a?(Type)
+      ti.mark_frame_allocated! if ti.is_a?(Type)
     end
   end
 
@@ -4216,7 +4221,7 @@ private
       error!(node, :INDIRECT_ATOMIC_PRIMITIVE, type: base_type)
     end
 
-    if ti.primitive? && (node.ownership || node.sync || node.layout) && !is_atomic_primitive
+    if ti.primitive? && !is_atomic_primitive && node.capability?
       cap_name = node.sync || node.ownership || node.layout
       error!(node, :CAPABILITY_ON_PRIMITIVE, cap: cap_name, type: base_type, hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
     end
@@ -4237,22 +4242,24 @@ private
       end
     end
 
-    ti.ownership = node.ownership if node.ownership
-    ti.sync      = node.sync      if node.sync
-    ti.lock_rank = node.lock_rank if node.lock_rank
-    ti.layout    = node.layout    if node.layout
+    ti.apply_declared_type_capabilities!(
+      ownership: node.ownership,
+      sync: node.sync,
+      lock_rank: node.lock_rank,
+      layout: node.layout
+    )
     # AtomicPtr implies shared ownership because escaping the declaring
     # scope is the point of the construct; local and multiowned cases were
     # rejected above.
     if node.atomic_ptr? && !node.ownership
-      ti.ownership = :shared
+      ti.apply_reference_ownership!(:shared)
     end
     # @indirect forces heap location (same as @local, but different intent).
-    ti.provenance = :heap           if node.indirect?
+    ti.pin_heap_for_indirect!       if node.indirect?
 
     # Lock ranks induce a total order only if every declaration of a type
     # uses the same rank.
-    if node.lock_rank && node.sync && (node.locked? || node.write_locked?)
+    if node.lock_rank && node.locked_sync?
       record_lock_type_rank!(ti.base_type, node.lock_rank, node)
     end
 
@@ -4390,7 +4397,7 @@ private
       # a string literal); override on the cloned Type so internal Type
       # predicates (needs_cleanup?, finalize_storage) see :heap. The
       # storage_override is the authoritative signal for Locatable readers.
-      ti.provenance = :heap if ti.is_a?(Type)
+      ti.mark_heap_allocated! if ti.is_a?(Type)
       node.storage = :heap
       current_fn_ctx.heap_count += 1 if current_fn_ctx
     end
@@ -4459,9 +4466,8 @@ private
 
     # Result is the same base type with :link ownership
     link_type = Type.new(ti.resolved)
-    link_type.ownership = :link
     # Track which strong ownership kind the link was created from
-    link_type.link_source = ti.shared? ? :shared : :multiowned
+    link_type.apply_reference_ownership!(:link, link_source: ti.shared? ? :shared : :multiowned)
     stamp_type!(node, link_type)
   end
 
@@ -4478,8 +4484,7 @@ private
     # Use RESOLVE(link)?.field OR fallback to safely access the target.
     source = ti.link_source || :multiowned
     resolved_type = Type.new(:"?#{ti.resolved}")
-    resolved_type.ownership = source == :shared ? :shared : :multiowned
-    resolved_type.link_source = source
+    resolved_type.apply_reference_ownership!(source == :shared ? :shared : :multiowned, link_source: source)
     stamp_type!(node, resolved_type)
   end
 
@@ -4492,7 +4497,7 @@ private
     end
     base = ti.resolved.to_s.sub(/^\?/, '')
     result_type = Type.new(base.to_sym)
-    result_type.ownership  = :frozen
+    result_type.apply_reference_ownership!(:frozen)
     stamp_type!(node, result_type)
     node.storage   = :frozen
   end
@@ -4589,9 +4594,7 @@ private
     # Preserve ownership/sync so Rc/Arc auto-deref works on the unwrapped value.
     unwrapped = type.wrapped_type
     result = Type.new(unwrapped.resolved)
-    result.ownership = type.ownership if type.ownership
-    result.sync = type.sync if type.sync
-    result.link_source = type.link_source if type.link_source
+    result.merge_capabilities_from!(type, include_affine_ownership: true)
     stamp_type!(node, result)
   end
 
@@ -4701,7 +4704,7 @@ private
             # (CONTENTION); ATOMIC binds the alias to the cell ref so any
             # subsequent body access contends on the cache line (CONTENTION,
             # no BLOCKING — atomics never park).
-            WITH_MATCH_FAMILY_EFFECTS.fetch(arm[:family], []).each { |effect| record_effect(effect) }
+            with_match_family_effects(arm[:family]).each { |effect| record_effect(effect) }
             with_new_scope(current_scope) do
               visit_stmts(arm[:body])
               finalize_scope(node)
@@ -5620,7 +5623,7 @@ private
   def handle_assign_borrow(node)
     return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
     call_node = node.value
-    return if call_node.is_a?(AST::MethodCall) && (call_node.pool_method || call_node.set_method || call_node.map_method)
+    return if AST.collection_method_call?(call_node)
 
     # Resolve the borrowed argument from either user-defined or stdlib functions.
     actual_arg = resolve_borrow_source(call_node)
@@ -5712,14 +5715,7 @@ private
     ti = last.full_type!(context: "branch result")
     return nil if ti.void? || ti.resolved == :NoReturn
     # These are statement-level constructs, not value-producing expressions
-    return nil if last.is_a?(AST::ReturnNode)   || last.is_a?(AST::VarDecl)   ||
-                  last.is_a?(AST::BindExpr)      || last.is_a?(AST::Assignment) ||
-                  last.is_a?(AST::WhileLoop)     || last.is_a?(AST::ForRange)   ||
-                  last.is_a?(AST::ForEach)       || last.is_a?(AST::MatchStatement) ||
-                  last.is_a?(AST::Assert)        || last.is_a?(AST::Raise)      ||
-                  last.is_a?(AST::WithBlock)     || last.is_a?(AST::BgBlock)    ||
-                  last.is_a?(AST::DoBlock)       || last.is_a?(AST::PassStmt)   ||
-                  last.is_a?(AST::DieNode)       || last.is_a?(AST::ThrowNode)
+    return nil if AST.statement_result_void?(last)
     ti
   end
 
@@ -5824,7 +5820,7 @@ private
         og_drop(name)
       when :affine
         t = Type.new(info.type)
-        if t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
+        if t.single_future?
           error!(node, :PROMISE_NOT_CONSUMED, name: name)
         end
         drops << { name: name, type: info.type }
@@ -5890,7 +5886,7 @@ private
         og_drop(name)
       when :affine
         t = Type.new(info.type)
-        if node && t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
+        if node && t.single_future?
           error!(node, :PROMISE_NOT_CONSUMED, name: name)
         end
         drops << { name: name, type: info.type }
@@ -6646,7 +6642,8 @@ private
     # Propagate provenance: prefer value's provenance, then computed alloc.
     val_ti = val.is_a?(AST::Locatable) ? val.full_type!(context: "cleanup value provenance") : nil
     val_ti = val_ti.is_a?(Type) ? val_ti : nil
-    ti.provenance ||= val_ti&.provenance || alloc
+    ti.apply_cleanup_placement!(value_type: val_ti, alloc: alloc)
+    alloc
   end
 
   sig { params(name: String, node: T.untyped, type_info: T.any(Type, Symbol, String)).returns(T.untyped) }
@@ -6694,7 +6691,7 @@ private
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
     existing = @og&.nodes&.[](node.name)
-    if existing && existing.moved? && existing.move_action && existing.move_action != :move
+    if existing&.specific_move_action?
       # An earlier visitor (typically visit_GiveNode) already stamped
       # the move site with a more-specific action like `:give`. Don't
       # overwrite the action — but DO backfill the consumer's
@@ -6721,7 +6718,7 @@ private
     return if vt.primitive? || vt.id_handle?
 
     existing = @og&.nodes&.[](node.name)
-    if existing && existing.moved? && existing.move_action && existing.move_action != :move
+    if existing&.specific_move_action?
       existing.move_consumer_param_type = consumer_param_type if consumer_param_type && existing.move_consumer_param_type.nil?
       node.was_moved = true
       return

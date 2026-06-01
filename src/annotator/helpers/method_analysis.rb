@@ -40,15 +40,14 @@ module MethodAnalysis
 
     scope_entry = list_arg.symbol
     ti = scope_entry&.type
+    return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
-    new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
-    new_type.shard_count = ti.shard_count if ti.shard_count
-    new_type.provenance = ti.provenance
-    new_type.elem_ownership = ti.elem_ownership if ti.elem_ownership
-    new_type.elem_sync = ti.elem_sync if ti.elem_sync
+    new_type.copy_collection_shape_from!(ti)
+    new_type.copy_element_capabilities_from!(ti)
+    new_type.copy_placement_from!(ti, preserve_existing: false)
     scope_entry.type = new_type
     stamp_type!(list_arg, new_type)
   end
@@ -96,7 +95,7 @@ module MethodAnalysis
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
     zig = if (obj_type.sharded? || obj_type.striped?) && em.sharded_zig
       em.sharded_zig
-    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && em.numeric_zig
+    elsif obj_type.plain_numeric_map? && em.numeric_zig
       em.numeric_zig
     else
       em.zig
@@ -125,19 +124,7 @@ module MethodAnalysis
     node.stdlib_allocates = true if em.allocates
     node.mutates_receiver = true if em.mutates_receiver
 
-    # Narrow Set element type on first insert (Any[] -> T[])
-    if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
-      val_type = node.args[0].resolved_type
-      new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
-      new_type.provenance = obj_type.provenance
-      if node.object.is_a?(AST::Identifier)
-        entry = node.object.symbol
-        if entry
-          entry.type = new_type
-          stamp_type!(node.object, new_type)
-        end
-      end
-    end
+    narrow_receiver_collection!(node, obj_type, em)
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     if em.takes_args
@@ -156,6 +143,27 @@ module MethodAnalysis
     node.error_type = em.error_type
 
     true
+  end
+
+  sig { params(node: AST::MethodCall, obj_type: Type, emit: IntrinsicEmit).void }
+  def narrow_receiver_collection!(node, obj_type, emit)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return unless emit.narrows_receiver_collection
+    return unless node.args.length == 1
+    return unless obj_type.element_type&.resolved == :Any
+
+    val_type = node.args[0].resolved_type
+    new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
+    new_type.copy_placement_from!(obj_type, preserve_existing: false)
+    new_type.copy_collection_shape_from!(obj_type)
+    new_type.copy_element_capabilities_from!(obj_type)
+    if node.object.is_a?(AST::Identifier)
+      entry = node.object.symbol
+      if entry
+        entry.type = new_type
+        stamp_type!(node.object, new_type)
+      end
+    end
   end
 
   # Look up the INDEX_OPS entry for a container type.

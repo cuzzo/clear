@@ -25,6 +25,7 @@ require "sorbet-runtime"
 require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "placement"
+require_relative "../backends/zig_type"
 
 class MIREmitter
     extend T::Sig
@@ -719,12 +720,18 @@ class MIREmitter
     iter = emit(node.iter)
     captures = [node.capture, node.index_capture].compact.join(", ")
     body = emit_body(node.body)
-    if node.iter.is_a?(MIR::IterRange) && node.iter.capture_type == :i64 && node.index_capture.nil? &&
-       node.capture.is_a?(String) && !node.capture.start_with?("*")
+    if i64_range_capture_cast_required?(node)
       raw_capture = "__#{node.capture}_usize"
       return "for (#{iter}) |#{raw_capture}| {\nconst #{node.capture}: i64 = @intCast(#{raw_capture});\n#{body}\n}"
     end
     "for (#{iter}) |#{captures}| {\n#{body}\n}"
+  end
+
+  sig { params(node: MIR::ForStmt).returns(T::Boolean) }
+  def i64_range_capture_cast_required?(node)
+    node.iter.is_a?(MIR::IterRange) && node.iter.capture_type == :i64 &&
+      node.index_capture.nil? && node.capture.is_a?(String) &&
+      !node.capture.start_with?("*")
   end
 
   sig { params(node: MIR::SwitchStmt).returns(String) }
@@ -1341,7 +1348,7 @@ class MIREmitter
     # tense path; the inferred error set folds into anyerror at the
     # call site.)
     target_t = node.target_type
-    target_t = "anyerror#{target_t}" if target_t&.start_with?("!")
+    target_t = ZigType.new(target_t).cast_target_type if target_t
     case node.method
     when :as
       "@as(#{target_t}, #{inner})"
@@ -1528,12 +1535,18 @@ class MIREmitter
       # Statement nodes (Let, Set, If, While, etc.) already include them
       # or end with }. Block openers ({) and closers (}) never get ;.
       stripped = code.strip
-      if s.expr? && !stripped.end_with?(";") && !stripped.end_with?("}") && !stripped.end_with?("{")
+      if semicolon_required?(s, stripped)
         "#{code};"
       else
         code
       end
     }.join("\n")
+  end
+
+  sig { params(stmt: MIR::Node, stripped: String).returns(T::Boolean) }
+  def semicolon_required?(stmt, stripped)
+    stmt.expr? && !stripped.end_with?(";") && !stripped.end_with?("}") &&
+      !stripped.end_with?("{")
   end
 
   sig { params(entry: CleanupEntry).returns(String) }
@@ -1578,7 +1591,7 @@ class MIREmitter
     # If the binding came from a fallible call (`MUTABLE x = fn()`
     # where fn is `!T`), the annotator stamps `x` as `!T`, but the
     # Zig variable holds `T` post-`try`. Strip a leading `!`.
-    zig_type = zig_type[1..] if zig_type.start_with?("!")
+    zig_type = ZigType.new(zig_type).cleanup_storage_type
     if guarded
       guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", true, errdefer:)
     else

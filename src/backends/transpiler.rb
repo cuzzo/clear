@@ -42,23 +42,6 @@ class ZigTranspiler
     @module_type_defs    = T.let(nil, T.untyped)
   end
 
-  private
-
-  sig { params(node: T.untyped, result: T.untyped).returns(T.untyped) }
-  def collect_bg_blocks(node, result)
-    case node
-    when Array
-      node.each { |n| collect_bg_blocks(n, result) }
-    when AST::BgBlock
-      result << node
-      collect_bg_blocks(node.body, result)
-    else
-      node.each_pair { |_, v| collect_bg_blocks(v, result) } if node.respond_to?(:each_pair)
-    end
-  end
-
-  public
-
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
   sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[T.untyped, T.untyped]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
@@ -82,10 +65,12 @@ class ZigTranspiler
 
     # Apply exact stack tier overrides (from post-build binary analysis).
     if exact_tiers && !exact_tiers.empty?
-      bg_nodes = []
+      bg_nodes = T.let([], T::Array[AST::BgBlock])
       T.must(result).ast.statements.each do |stmt|
         next unless stmt.is_a?(AST::FunctionDef)
-        collect_bg_blocks(stmt.body, bg_nodes)
+        AST.each_bg_block(stmt.body) do |node|
+          bg_nodes << node if node.is_a?(AST::BgBlock)
+        end
       end
       exact_tiers.each do |idx, tier|
         bg_nodes[idx]&.tap { |n| n.computed_stack_tier = tier }
