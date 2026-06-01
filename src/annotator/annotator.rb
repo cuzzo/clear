@@ -8,6 +8,7 @@ require_relative "../ast/parser"
 require_relative "../ast/std_lib"
 require_relative "../ast/async_result_shape"
 require_relative "phases/declaration_index"
+require_relative "phases/auto_finalization"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
@@ -56,6 +57,7 @@ class SemanticAnnotator
   include UnionAnalysis
   include LockHelper
   include TestAnnotation
+  include Annotator::Phases::AutoFinalization
   include Annotator::Phases::TypeRegistration
   include Annotator::Phases::SignatureRegistration
 
@@ -281,9 +283,7 @@ class SemanticAnnotator
     AST.reset_user_types!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     visit(node)
-    # Resolve Auto slots before downstream analyses so they see finalized
-    # signatures and concrete declaration types.
-    run_auto_inference!(node) if program_has_auto?(node)
+    finalize_auto_types!(node)
     # Caller sync depends on annotated call-site args, so propagate it after
     # the body walk and before replaying deferred WITH validations.
     EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
