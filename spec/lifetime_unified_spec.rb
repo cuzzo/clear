@@ -52,6 +52,18 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       sym.lifetime = :current_scope
       expect(sym.lifetime_sources).to eq([sym])
     end
+
+    it "dups binding flow facts independently for branch scopes" do
+      parent = fresh
+      child = parent.dup
+
+      child.mark_borrowed_alias!
+
+      expect(child.borrowed_alias).to be(true)
+      expect(child.non_escaping).to be(true)
+      expect(parent.borrowed_alias).to be(false)
+      expect(parent.non_escaping).to be(false)
+    end
   end
 
   describe "tied lifetime sources" do

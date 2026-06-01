@@ -351,6 +351,22 @@ class SymbolEntry
     mark_non_escaping!
   end
 
+  sig { params(original: SymbolEntry).void }
+  def initialize_copy(original)
+    super
+    @flow = original.flow_snapshot
+    @lifetime = original.lifetime.dup
+  end
+
+  sig { returns(BindingFlowFacts) }
+  def flow_snapshot
+    BindingFlowFacts.new(
+      non_escaping: @flow.non_escaping,
+      borrowed_alias: @flow.borrowed_alias
+    )
+  end
+  protected :flow_snapshot
+
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime_sources
     @lifetime
