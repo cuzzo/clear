@@ -41,3 +41,5 @@ group :development do
   gem 'rubocop', require: false
   gem 'rubocop-sorbet', require: false
 end
+
+gem "stackprof", "~> 0.2.28"

@@ -18,6 +18,14 @@ rescue LoadError
   # (e.g., installed at the system level or via a wrapper script).
 end
 
+# Compiler runtime type wrappers are useful while debugging compiler internals,
+# but they dominate normal build time if enabled before src/ is loaded.
+begin
+  require "sorbet-runtime"
+  T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
+rescue LoadError
+end
+
 require 'fileutils'
 require 'optparse'
 require 'digest'

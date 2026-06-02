@@ -521,8 +521,9 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         drops = T.let([], T::Array[AST::DeferredDrop])
-        current_scope.locals.each do |name, info|
-          next unless current_scope.owned_names.include?(name)
+        current_scope.owned_names.each do |name|
+          info = current_scope.locals[name]
+          next unless info
           # TAKES params always need cleanup guards even if moved (the _moved
           # flag controls whether cleanup runs at runtime).
           is_takes = info.respond_to?(:takes) && info.takes
@@ -551,8 +552,9 @@ module Annotator
 
         # Unused variable warnings (function-level finalize only)
         if branch.nil?
-          current_scope.locals.each do |name, info|
-            next unless current_scope.owned_names.include?(name)
+          current_scope.owned_names.each do |name|
+            info = current_scope.locals[name]
+            next unless info
             next if name.start_with?('_')
             next if info.read
             next if info.reg&.respond_to?(:var_used) && info.reg.var_used
@@ -567,8 +569,9 @@ module Annotator
           end
 
           # MUTABLE-never-reassigned warnings
-          current_scope.locals.each do |name, info|
-            next unless current_scope.owned_names.include?(name)
+          current_scope.owned_names.each do |name|
+            info = current_scope.locals[name]
+            next unless info
             next if name.start_with?('_')
             next unless info.mutable
             next unless info.read || (info.reg&.respond_to?(:var_used) && info.reg.var_used)
@@ -587,6 +590,7 @@ module Annotator
             emit_mutable_unused_finding!(info.reg, name)
           end
         end
+        nil
       end
 
       sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[AST::DeferredDrop]) }

@@ -35,15 +35,12 @@ module MIR
       (node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr) || node.is_a?(MIR::TryCatch))
   end
 
-  class OwnershipOperandFact < T::Struct
+  class OwnershipOperandFact < Struct.new(:kind, :name, :borrowed, :type_info, :source, :target_alloc, keyword_init: true)
     extend T::Sig
 
-    const :kind, Symbol
-    const :name, T.nilable(String)
-    const :borrowed, T::Boolean
-    const :type_info, Type
-    const :source, String
-    const :target_alloc, T.nilable(Symbol), default: nil
+    def initialize(kind:, name:, borrowed:, type_info:, source:, target_alloc: nil)
+      super
+    end
 
     sig { params(name: String, type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
     def self.owned_binding(name, type_info, source, target_alloc = nil)
@@ -157,24 +154,24 @@ module MIR
     end
   end
 
-  class OwnershipEffect < T::Struct
+  class OwnershipEffect < Struct.new(:produces_owned, :alloc, :cleanup_kind, :requires_hoist, :target_var, keyword_init: true)
     extend T::Sig
 
-    const :produces_owned, T::Boolean
-    const :alloc, T.nilable(Symbol)
-    const :cleanup_kind, T.nilable(Symbol)
-    const :requires_hoist, T::Boolean
-    const :target_var, T.nilable(String)
+    def initialize(produces_owned:, alloc:, cleanup_kind:, requires_hoist:, target_var:)
+      super
+    end
+
+    NONE = T.let(new(
+      produces_owned: false,
+      alloc: nil,
+      cleanup_kind: nil,
+      requires_hoist: false,
+      target_var: nil,
+    ).freeze, OwnershipEffect)
 
     sig { returns(OwnershipEffect) }
     def self.none
-      new(
-        produces_owned: false,
-        alloc: nil,
-        cleanup_kind: nil,
-        requires_hoist: false,
-        target_var: nil,
-      )
+      NONE
     end
 
     sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol, requires_hoist: T::Boolean, target_var: T.nilable(String)).returns(OwnershipEffect) }
@@ -221,23 +218,20 @@ module MIR
     const :captures, T::Array[BoundaryCaptureFact]
   end
 
-  class FsmOwnershipFact < T::Struct
+  class FsmOwnershipFact < Struct.new(:name, :target, :target_alloc, :move_guarded, keyword_init: true)
     extend T::Sig
 
-    const :name, String
-    const :target, Symbol
-    const :target_alloc, T.nilable(Symbol)
-    const :move_guarded, T::Boolean
+    def initialize(name:, target:, target_alloc:, move_guarded:)
+      super
+    end
   end
 
-  class OwnershipConsumptionFact < T::Struct
+  class OwnershipConsumptionFact < Struct.new(:operands, :target, :target_alloc, :source, :covers_consuming_params, keyword_init: true)
     extend T::Sig
 
-    const :operands, T::Array[OwnershipOperandFact]
-    const :target, Symbol
-    const :target_alloc, T.nilable(Symbol)
-    const :source, String
-    const :covers_consuming_params, T::Boolean, default: false
+    def initialize(operands:, target:, target_alloc:, source:, covers_consuming_params: false)
+      super
+    end
 
     sig { returns(T::Array[String]) }
     def names

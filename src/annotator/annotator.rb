@@ -55,6 +55,8 @@ require_relative "../backends/importer" # ModuleImporter — referenced by Seman
 class SemanticAnnotator
     extend T::Sig
 
+  VISITOR_METHOD_CACHE = T.let({}, T::Hash[T.untyped, String])
+
   include ErrorHelper
   include FixableHelper
   include FunctionAnalysis
@@ -506,7 +508,6 @@ private
     ))
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
   def visit(node)
     return unless node
     return if node.is_a?(Symbol)
@@ -520,7 +521,8 @@ private
     end
 
     # Dynamic Dispatch
-    method_name = "visit_#{node.class.name.split('::').last}"
+    klass = node.class
+    method_name = VISITOR_METHOD_CACHE[klass] ||= "visit_#{klass.name.split('::').last}"
     send(method_name, node)
   end
 
@@ -826,15 +828,12 @@ private
     pop_function_context!
   end
 
-  # Visit a statement body while tracking remaining siblings in @stmts_after.
-  # This lets visit_MatchStatement check whether the match subject is used
-  # after the match (to avoid incorrect auto-TAKES consumption).
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  # Visit a statement body.
   def visit_stmts(stmts)
     return unless stmts.is_a?(Array)
     saved = @stmts_after
-    stmts.each_with_index do |stmt, i|
-      @stmts_after = T.let(stmts[(i + 1)..], T.nilable(T::Array[T.untyped]))
+    @stmts_after = nil
+    stmts.each do |stmt|
       visit(stmt)
     end
     @stmts_after = saved

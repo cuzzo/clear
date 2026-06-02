@@ -3,6 +3,13 @@
 
 require 'bundler/setup' # so `bundle exec` not needed
 require "sorbet-runtime"
+begin
+  T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
+rescue RuntimeError
+  # Embedded callers may have already loaded sigs. The standalone CLI path
+  # reaches this before compiler files load, which is the performance-critical
+  # case for `clear build`.
+end
 require "optparse"
 require "logger"
 require "set"

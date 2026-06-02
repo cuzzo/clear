@@ -245,6 +245,8 @@ class MIRChecker
     owned_result_lets = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
+    inline_alloc_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
+    all_zig_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
     structural_ownership_nodes = []
     ownership_fact_nodes = T.let([], T::Array[MIR::Node])
 
@@ -281,26 +283,45 @@ class MIRChecker
         owned_result_lets << node if expr_owned_result_alloc(node.init)
         if node.init.is_a?(MIR::InlineZig) && node.init.has_alloc_metadata?
           inline_alloc_nodes << node.init
+          inline_alloc_node_ids[node.init.object_id] = true
         end
-        all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
+        if node.init.is_a?(MIR::InlineZig)
+          all_zig_nodes << node.init
+          all_zig_node_ids[node.init.object_id] = true
+        end
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
         if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
+          inline_alloc_node_ids[node.expr.object_id] = true
         end
-        all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
+        if node.expr.is_a?(MIR::InlineZig)
+          all_zig_nodes << node.expr
+          all_zig_node_ids[node.expr.object_id] = true
+        end
       when MIR::DiscardOwned
         if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
+          inline_alloc_node_ids[node.expr.object_id] = true
         end
-        all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
+        if node.expr.is_a?(MIR::InlineZig)
+          all_zig_nodes << node.expr
+          all_zig_node_ids[node.expr.object_id] = true
+        end
       when MIR::InlineZig
-        if node.has_alloc_metadata? && !inline_alloc_nodes.include?(node)
+        if node.has_alloc_metadata? && !inline_alloc_node_ids.key?(node.object_id)
           inline_alloc_nodes << node
+          inline_alloc_node_ids[node.object_id] = true
         end
-        all_zig_nodes << node unless all_zig_nodes.include?(node)
+        unless all_zig_node_ids.key?(node.object_id)
+          all_zig_nodes << node
+          all_zig_node_ids[node.object_id] = true
+        end
       when MIR::RawZig
-        all_zig_nodes << node unless all_zig_nodes.include?(node)
+        unless all_zig_node_ids.key?(node.object_id)
+          all_zig_nodes << node
+          all_zig_node_ids[node.object_id] = true
+        end
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new
@@ -1150,6 +1171,7 @@ class MIRChecker
       value = MIR.const_get(const_name)
       next unless value.is_a?(Class)
       next unless value < Struct
+      next unless value < MIR::Emittable
 
       klass = value
       if klass < MIR::Stmt && !LINEAR_STATEMENT_NODE_TYPES.include?(klass)

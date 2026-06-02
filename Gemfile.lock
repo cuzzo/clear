@@ -198,6 +198,7 @@ GEM
       rexml (>= 3.2.6)
       sorbet-static-and-runtime (>= 0.5.10187)
       thor (>= 0.19.2)
+    stackprof (0.2.28)
     tapioca (0.19.1)
       benchmark
       bundler (>= 2.2.25)
@@ -250,6 +251,7 @@ DEPENDENCIES
   simplecov-cobertura
   sorbet
   sorbet-runtime
+  stackprof (~> 0.2.28)
   tapioca
   tty-cursor
   tty-reader

@@ -38,6 +38,26 @@ RSpec.describe "MIRLowering body finalization performance" do
     end
   end
 
+  OwnedTargetExpr = Struct.new(:target_var) do
+    include MIR::Expr
+
+    def ownership_effect
+      MIR::OwnershipEffect.owned(alloc: :heap, target_var: target_var)
+    end
+  end
+
+  OwnedWrapperExpr = Struct.new(:child, :target_var) do
+    include MIR::Expr
+
+    def child_exprs
+      [child]
+    end
+
+    def ownership_effect
+      child.ownership_effect
+    end
+  end
+
   def balanced_if_body(depth)
     return [MIR::ExprStmt.new(MIR::Lit.new("0"), false)] if depth.zero?
 
@@ -69,5 +89,37 @@ RSpec.describe "MIRLowering body finalization performance" do
     lowering.send(:append_ownership_transfers_for_mir_body, outer, Set.new, Set.new)
 
     expect(lowering.finalize_node_calls - before).to be <= 2
+  end
+
+  it "does not duplicate ownership facts when a finalized flat body is assembled again" do
+    lowering = CountingMIRLowering.new
+    cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+    body = [
+      MIR::AllocMark.new("items", :heap, Type.new(:"Int64[]", collection: :list), :heap),
+      MIR::Let.new("items", MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), true, "std.ArrayListUnmanaged(i64)"),
+      MIR::Cleanup.new("items", cleanup),
+    ]
+
+    finalized = lowering.send(:append_ownership_transfers_for_mir_body, body, Set.new, Set.new)
+    refinalized = lowering.send(:append_ownership_transfers_for_mir_body, finalized, Set.new, Set.new)
+
+    owned_creates = refinalized.select { |node| node.is_a?(MIR::OwnedCreate) }
+    owned_destroys = refinalized.select { |node| node.is_a?(MIR::OwnedDestroy) }
+
+    expect(owned_creates.count { |node| node.name == "items" && node.source == "items" }).to eq(1)
+    expect(owned_creates.count { |node| node.name == "items" && node.source == "MIR::ContainerInit" }).to eq(1)
+    expect(owned_creates.count { |node| node.name == "MIR::ContainerInit" && node.source == "MIR::ContainerInit" }).to eq(1)
+    expect(owned_destroys.count { |node| node.name == "items" && node.source == "items" }).to eq(1)
+  end
+
+  it "does not duplicate owned-result facts for target-var inline zig initializers" do
+    lowering = CountingMIRLowering.new
+    init = OwnedWrapperExpr.new(OwnedTargetExpr.new("tmp"), "tmp")
+    let = MIR::Let.new("tmp", init, false, Type.new(:String), nil)
+    owned_creates_after_let = lowering
+      .send(:ownership_facts_for_mir_surface, let)
+      .select { |node| node.is_a?(MIR::OwnedCreate) }
+
+    expect(owned_creates_after_let.count { |node| node.name == "tmp" && node.source == "tmp" }).to eq(1)
   end
 end

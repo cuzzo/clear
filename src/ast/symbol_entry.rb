@@ -49,17 +49,34 @@ class SymbolEntry
     extend T::Sig
 
   @next_binding_id = T.let(0, Integer)
+  EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
 
-  class BindingFlowFacts < T::Struct
-    prop :non_escaping, T::Boolean, default: false
-    prop :borrowed_alias, T::Boolean, default: false
-    prop :valid, T::Boolean, default: true
-    prop :invalid_reason, T.nilable(String), default: nil
-    prop :read, T::Boolean, default: false
-    prop :mutated, T::Boolean, default: false
-    prop :mutable_ref_target, T::Boolean, default: false
-    prop :poly_borrow_target, T::Boolean, default: false
-    prop :init_contents_heap, T::Boolean, default: false
+  class BindingFlowFacts < Struct.new(
+    :non_escaping,
+    :borrowed_alias,
+    :valid,
+    :invalid_reason,
+    :read,
+    :mutated,
+    :mutable_ref_target,
+    :poly_borrow_target,
+    :init_contents_heap,
+    keyword_init: true
+  )
+    def initialize(
+      non_escaping: false,
+      borrowed_alias: false,
+      valid: true,
+      invalid_reason: nil,
+      read: false,
+      mutated: false,
+      mutable_ref_target: false,
+      poly_borrow_target: false,
+      init_contents_heap: false
+    )
+      super
+    end
+
   end
 
   attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
@@ -418,8 +435,8 @@ class SymbolEntry
   sig { params(original: SymbolEntry).void }
   def initialize_copy(original)
     super
-    @flow = original.flow_snapshot
-    @lifetime = original.lifetime.dup
+    @flow = original.instance_variable_get(:@flow).dup
+    @lifetime = original.lifetime.empty? ? EMPTY_LIFETIME : original.lifetime.dup
   end
 
   sig { returns(BindingFlowFacts) }

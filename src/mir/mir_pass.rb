@@ -89,8 +89,9 @@ class MIRPass
     # lowering and cleanup only read that fact.
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
+    promoted_fns = CleanupClassifier.compute_promoted_fns(@fn_nodes)
     @fn_nodes.each do |name, fn|
-      @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
+      @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup, promoted_fns: promoted_fns)
     end
     pass_state.mark!(:cleanup_classified)
 

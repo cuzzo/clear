@@ -333,7 +333,6 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: T::Array[T.untyped], visitor: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -346,9 +345,11 @@ module AST
   # Walk every AST Locatable reachable from a root object. This is the
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
-  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.untyped).void }
+  EACH_LOCATABLE_MEMBERS_CACHE = T.let({}, T::Hash[T.untyped, T::Array[Symbol]])
+  GENERATED_WALK_MEMBER_PATTERN = /token|drops/i.freeze
+
   def self.each_locatable(root, descend_functions: false, &visitor)
-    stack = T.let(root.is_a?(Array) ? root.reverse : [root], T::Array[T.untyped])
+    stack = root.is_a?(Array) ? root.reverse : [root]
     until stack.empty?
       node = stack.pop
       next unless node
@@ -362,9 +363,12 @@ module AST
       end
       yield node if node.is_a?(Locatable)
       next if node.is_a?(FunctionDef) && !descend_functions
+      next if defined?(Lexer::Token) && node.is_a?(Lexer::Token)
       next unless node.is_a?(Struct)
 
-      node.class.members.reverse_each do |member|
+      members = EACH_LOCATABLE_MEMBERS_CACHE[node.class] ||=
+        node.class.members.reject { |member| member.to_s.match?(GENERATED_WALK_MEMBER_PATTERN) }
+      members.reverse_each do |member|
         value = node[member]
         if value.is_a?(Array)
           stack << value

@@ -369,6 +369,7 @@ class OwnershipDataflow
     @block_in  = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
     @block_out = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
     @point_states = T.let({}, T::Hash[T.untyped, T.untyped]) # [block.id, stmt_index] => { var_name => OwnerEntry }
+    @block_exit_cleanup_summary = T.let(nil, T.nilable(T::Hash[String, T::Hash[Symbol, T::Boolean]]))
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -377,16 +378,14 @@ class OwnershipDataflow
     # Initialize all blocks to empty state.
     @cfg.blocks.each do |b|
       @block_in[b.id]  = {}
-      @block_out[b.id] = {}
+      @block_out[b.id] = nil
     end
 
     # Seed entry block with TAKES param ownership.
     @block_in[@cfg.entry.id] = init_entry_state
 
-    # Seed worklist with all blocks so every block is processed at least
-    # once (an empty entry block produces {} which equals the initial {},
-    # and would otherwise fail to schedule successors).
-    worklist = @cfg.blocks.dup
+    order_index = reverse_postorder_index
+    worklist = @cfg.blocks.sort_by { |block| order_index.fetch(block.id, @cfg.blocks.length) }
     in_worklist = {}
     worklist.each { |b| in_worklist[b.id] = true }
 
@@ -406,11 +405,12 @@ class OwnershipDataflow
       new_out = apply_transfer(block, dup_state(new_in))
 
       # If exit state changed, schedule successors.
-      unless new_out == @block_out[block.id]
+      old_out = @block_out[block.id]
+      unless old_out && new_out == old_out
         @block_out[block.id] = new_out
         block.successors.each do |succ|
           unless in_worklist[succ.id]
-            worklist << succ
+            insert_ordered_worklist!(worklist, succ, order_index)
             in_worklist[succ.id] = true
           end
         end
@@ -418,6 +418,35 @@ class OwnershipDataflow
     end
 
     self
+  end
+
+  sig { returns(T::Hash[Integer, Integer]) }
+  def reverse_postorder_index
+    visited = T.let(Set.new, T::Set[Integer])
+    order = T.let([], T::Array[BasicBlock])
+    visit = T.let(nil, T.untyped)
+    visit = lambda do |block|
+      next if visited.include?(block.id)
+
+      visited << block.id
+      block.successors.each { |succ| visit.call(succ) }
+      order << block
+    end
+    visit.call(@cfg.entry)
+    @cfg.blocks.each { |block| visit.call(block) }
+    order.reverse.each_with_index.to_h { |block, index| [block.id, index] }
+  end
+
+  sig { params(worklist: T::Array[BasicBlock], block: BasicBlock, order_index: T::Hash[Integer, Integer]).void }
+  def insert_ordered_worklist!(worklist, block, order_index)
+    rank = order_index.fetch(block.id, worklist.length)
+    idx = worklist.index { |queued| order_index.fetch(queued.id, worklist.length) > rank }
+    if idx
+      worklist.insert(idx, block)
+    else
+      worklist << block
+    end
+    nil
   end
 
   # Ownership state at function exit (join of all paths reaching exit_block).
@@ -576,19 +605,40 @@ class OwnershipDataflow
 
   sig { params(var: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
   def block_exit_cleanup_summary(var)
-    states = @block_out.values.filter_map do |state|
-      entry = state[var]
-      entry if entry.is_a?(OwnerEntry)
-    end
-    return nil if states.empty?
+    block_exit_cleanup_summaries[var]
+  end
 
-    moved = states.any? { |entry| entry.state == MOVED } &&
-            states.none? { |entry| entry.state == MAYBE_MOVED }
-    maybe = states.any? { |entry| entry.state == MAYBE_MOVED }
-    {
-      needs_cleanup: !moved,
-      has_moved_guard: maybe || (!moved && states.any? { |entry| entry.state == MOVED }),
-    }
+  sig { returns(T::Hash[String, T::Hash[Symbol, T::Boolean]]) }
+  def block_exit_cleanup_summaries
+    cached = @block_exit_cleanup_summary
+    return cached if cached
+
+    saw = T.let({}, T::Hash[String, T::Hash[Symbol, T::Boolean]])
+    @block_out.each_value do |state|
+      next unless state
+
+      state.each do |var, entry|
+        next unless entry.is_a?(OwnerEntry)
+
+        rec = saw[var] ||= { any_moved: false, any_maybe: false, any_not_moved: false }
+        case entry.state
+        when MOVED
+          rec[:any_moved] = true
+        when MAYBE_MOVED
+          rec[:any_maybe] = true
+        else
+          rec[:any_not_moved] = true
+        end
+      end
+    end
+
+    @block_exit_cleanup_summary = saw.transform_values do |rec|
+      moved = rec[:any_moved] && !rec[:any_maybe]
+      {
+        needs_cleanup: !moved,
+        has_moved_guard: rec[:any_maybe] || (!moved && rec[:any_moved]),
+      }
+    end
   end
 
   private
@@ -596,14 +646,15 @@ class OwnershipDataflow
   # Returns true if the given variable is the subject of a MATCH TAKES statement.
   sig { params(fn_node: AST::FunctionDef, var_name: String).returns(T::Boolean) }
   def match_takes_var?(fn_node, var_name)
-    found = T.let(false, T::Boolean)
-    AST.walk_body(fn_node.body) do |stmt|
-      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
-         stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
-        found = true
+    catch(:found_match_takes_var) do
+      AST.walk_body(fn_node.body) do |stmt|
+        if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
+           stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
+          throw :found_match_takes_var, true
+        end
       end
+      false
     end
-    found
   end
 
   # Build CFG + run dataflow for a function node. Returns the analysis.
@@ -635,12 +686,12 @@ class OwnershipDataflow
   # Merge predecessor exit states. Variables present on any path are joined.
   sig { params(block: BasicBlock).returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def join_predecessors(block)
-    preds = block.predecessors
+    preds = block.predecessors.select { |pred| @block_out[pred.id] }
     return {} if preds.empty?
 
-    result = dup_state(@block_out[preds.first.id])
+    result = dup_state(T.must(@block_out[preds.first.id]))
     preds.drop(1).each do |pred|
-      pred_out = @block_out[pred.id]
+      pred_out = T.must(@block_out[pred.id])
       pred_out.each do |var, b|
         result[var] = T.cast(join_entry(result[var], b), OwnerEntry)
       end
@@ -1297,14 +1348,12 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmts!(stmts, schema_lookup = nil)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s, schema_lookup) }
     nil
   end
 
-  sig { params(stmt: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmt!(stmt, schema_lookup = nil)
     child_bodies = AST.child_bodies(stmt)
     child_bodies.each { |body| walk_stmts!(body, schema_lookup) }
@@ -1314,7 +1363,6 @@ module LoopFrameAnalysis
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
-  sig { params(loop_node: T.untyped, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)

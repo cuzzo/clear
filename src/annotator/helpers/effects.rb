@@ -1133,19 +1133,18 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     return if false
     stmts = [stmts] unless stmts.is_a?(Array)
-    stmts.each { |s| validate_tight_node!(s, loop_node) }
-  end
-
-  sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange)).returns(T.untyped) }
-  def validate_tight_node!(node, loop_node)
-    T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
+    stmts.each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
+  end
+
+  sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange), fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T.untyped) }
+  def validate_tight_node!(node, loop_node, fn_nodes)
     return if node.nil?
     case node
     when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
     when Array
-      node.each { |n| validate_tight_node!(n, loop_node) }
+      node.each { |n| validate_tight_node!(n, loop_node, fn_nodes) }
     when AST::FunctionDef
       # Don't descend into nested function definitions.
     when AST::FuncCall
@@ -1158,7 +1157,7 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      node.args.each { |a| validate_tight_node!(a, loop_node) }
+      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
     when AST::MethodCall
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
@@ -1169,10 +1168,10 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)
-      node.args.each { |a| validate_tight_node!(a, loop_node) }
+      validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node, fn_nodes)
+      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
     else
-      node.each_pair { |_, v| validate_tight_node!(v, loop_node) } if node.respond_to?(:each_pair)
+      node.each_pair { |_, v| validate_tight_node!(v, loop_node, fn_nodes) } if node.respond_to?(:each_pair)
     end
   end
 

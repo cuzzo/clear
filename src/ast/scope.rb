@@ -8,6 +8,8 @@ require_relative "./schemas"
 class Scope
     extend T::Sig
 
+  EMPTY_CAPABILITIES = T.let(Set.new.freeze, T::Set[Symbol])
+
   attr_accessor :locals, :dependencies, :owned_names
   attr_accessor :depth   # stack depth at scope creation; 0 for root
   attr_reader   :types
@@ -84,7 +86,7 @@ class Scope
     @locals = original.locals.transform_values do |entry|
       new_entry = entry.dup
       # Sets/Arrays inside the entry must be duped too, or they remain shared
-      new_entry.capabilities = entry.capabilities.dup
+      new_entry.capabilities = entry.capabilities.empty? ? EMPTY_CAPABILITIES : entry.capabilities.dup
       new_entry.scope = self  # Point to the new (copied) scope
       new_entry
     end
@@ -196,6 +198,7 @@ class Scope
     local = capability[:old_scope].locals[name]
     return nil if local.nil?
     local = local.dup
+    local.capabilities = local.capabilities.dup
     # Whole-variable or field restriction: add capability marker.
     # Borrow conflict detection is handled by the OwnershipGraph.
     local.capabilities << capability[:capability]
@@ -297,7 +300,6 @@ module ScopeHelper
     names.uniq
   end
 
-  sig { params(scope: T.nilable(Scope), blk: T.untyped).returns(T.nilable(Scope)) }
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by

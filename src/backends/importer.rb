@@ -116,7 +116,7 @@ class ModuleImporter
 
     reject_auto_in_public_signatures!(T.must(ast), abs_path)
 
-    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
+    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
     annotator.annotate!(T.must(ast))
 
     mod = compile_module_mir(T.must(ast), annotator, source_dir)

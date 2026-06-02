@@ -39,11 +39,11 @@ module CleanupClassifier
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   # @return [Hash] { var_name => entry_hash } or empty hash
-  sig { params(fn_node: AST::FunctionDef, fn_nodes: FnNodes, schema_lookup: Proc).returns(T::Hash[String, CleanupEntry]) }
-  def self.classify(fn_node, fn_nodes:, schema_lookup:)
+  sig { params(fn_node: AST::FunctionDef, fn_nodes: FnNodes, schema_lookup: Proc, promoted_fns: T.nilable(T::Set[String])).returns(T::Hash[String, CleanupEntry]) }
+  def self.classify(fn_node, fn_nodes:, schema_lookup:, promoted_fns: nil)
     return {} unless fn_node.body
 
-    promoted_fns = compute_promoted_fns(fn_nodes)
+    promoted_fns ||= compute_promoted_fns(fn_nodes)
     bindings = {}
 
     # 1. Walk all VarDecl/BindExpr in the function body.
@@ -253,7 +253,7 @@ module CleanupClassifier
   # ── Promoted function detection ──────────────────────────────────
 
   sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
-  private_class_method def self.compute_promoted_fns(fn_nodes)
+  def self.compute_promoted_fns(fn_nodes)
     promoted = Set.new
 
     changed = T.let(true, T::Boolean)
@@ -273,13 +273,14 @@ module CleanupClassifier
 
   sig { params(body: T::Array[T.untyped], promoted: T::Set[String]).returns(T::Boolean) }
   private_class_method def self.body_calls_promoted?(body, promoted)
-    found = T.let(false, T::Boolean)
-    AST.walk_body(body) do |node|
+    catch(:found_promoted_call) do
+      AST.walk_body(body) do |node|
       if node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::FuncCall) && promoted.include?(node.value.name)
-        found = true
+          throw :found_promoted_call, true
+        end
       end
+      false
     end
-    found
   end
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────

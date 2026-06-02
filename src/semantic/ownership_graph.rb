@@ -18,16 +18,16 @@ require "sorbet-runtime"
 class OwnershipGraph
     extend T::Sig
 
-  class LightweightNodeState < T::Struct
-    const :state, Symbol
-    const :move_line, T.nilable(Integer)
-    const :move_col, T.nilable(Integer)
-    const :move_action, T.nilable(Symbol)
+  class LightweightNodeState < Struct.new(:state, :move_line, :move_col, :move_action, keyword_init: true)
+    def initialize(state:, move_line: nil, move_col: nil, move_action: nil)
+      super
+    end
   end
 
-  class LightweightSnapshot < T::Struct
-    const :node_states, T::Hash[String, LightweightNodeState]
-    const :edge_count, Integer
+  class LightweightSnapshot < Struct.new(:node_states, :edge_count, keyword_init: true)
+    def initialize(node_states:, edge_count:)
+      super
+    end
   end
 
   Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
