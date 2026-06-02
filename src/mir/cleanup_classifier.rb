@@ -787,7 +787,8 @@ module CleanupClassifier
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
     val = node.respond_to?(:value) ? node.value : nil
-    return nil unless ti.non_string_array? && !ti.collection? && val.is_a?(AST::ListLit)
+    return nil unless ti.non_string_array? && !ti.collection? &&
+      (val.is_a?(AST::ListLit) || val.is_a?(AST::DefaultArrayLit))
     et = ti.element_type
     return nil unless et && elem_type_needs_cleanup?(et, schema_lookup)
     sym = node.respond_to?(:symbol) ? node.symbol : nil

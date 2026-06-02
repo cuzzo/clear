@@ -144,6 +144,7 @@ class MIREmitter
     when MIR::FnRef            then "&#{node.name}"
     when MIR::StructInit       then emit_struct_init(node)
     when MIR::ArrayInit        then emit_array_init(node)
+    when MIR::ArrayDefaultInit then emit_array_default_init(node)
     when MIR::SliceExpr        then emit_slice_expr(node)
     when MIR::BlockExpr        then emit_block_expr(node)
     when MIR::ConcatStr        then emit_concat(node)
@@ -1311,6 +1312,11 @@ class MIREmitter
   def emit_array_init(node)
     items = node.items.map { |i| emit(i) }.join(", ")
     "[#{node.count}]#{node.elem_type}{ #{items} }"
+  end
+
+  sig { params(node: MIR::ArrayDefaultInit).returns(String) }
+  def emit_array_default_init(node)
+    "[_]#{node.elem_type}{ #{emit(node.default_value)} } ** #{node.count}"
   end
 
   sig { params(node: MIR::SliceExpr).returns(String) }

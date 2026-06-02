@@ -302,6 +302,11 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("[3]i64{ 1, 2, 3 }")
   end
 
+  it "emits compact repeated default array init" do
+    node = MIR::ArrayDefaultInit.new("[]const u8", "256", MIR::Lit.new("\"\""), :frame)
+    expect(e.emit(node)).to eq("[_][]const u8{ \"\" } ** 256")
+  end
+
   it "emits slice expression with type coercion" do
     node = MIR::SliceExpr.new(MIR::Ident.new("buf"), MIR::Lit.new("0"), MIR::Lit.new("5"), "u8")
     expect(e.emit(node)).to eq("@as([]const u8, buf[0..5])")

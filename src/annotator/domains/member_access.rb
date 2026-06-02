@@ -458,6 +458,15 @@ module Annotator
         end
       end
 
+      sig { params(node: AST::DefaultArrayLit).returns(Type) }
+      def visit_DefaultArrayLit(node)
+        T.bind(self, SemanticAnnotator)
+        type_info = Type.new(node.type_info)
+        stamp_type!(node, type_info)
+        node.storage = :stack
+        type_info
+      end
+
       sig { params(node: AST::RangeLit).returns(T.nilable(Type)) }
       def visit_RangeLit(node)
         T.bind(self, SemanticAnnotator)

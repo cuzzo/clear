@@ -830,6 +830,7 @@ class MIRLowering
 
     # --- Collections ---
     when AST::ListLit           then lower_list_lit(node)
+    when AST::DefaultArrayLit   then lower_default_array_lit(node)
     when AST::HashLit           then lower_hash_lit(node)
 
     # --- Expressions ---

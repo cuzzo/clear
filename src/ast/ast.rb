@@ -589,6 +589,8 @@ module AST
       (expr.fields&.values || []).compact
     when ListLit
       (expr.items || []).compact
+    when DefaultArrayLit
+      []
     when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
          FreezeNode, CapabilityWrap
       expr.value ? [expr.value] : []
@@ -624,6 +626,8 @@ module AST
       (node.fields&.values || []).compact
     when ListLit
       node.items.compact
+    when DefaultArrayLit
+      []
     when HashLit
       node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
     when ReturnNode
@@ -1557,6 +1561,23 @@ module AST
       [res, nil]
     end
   }
+  DefaultArrayLit = Struct.new(:token, :type_info, :storage) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(Type) }
+    def full_type
+      Type.new(type_info)
+    end
+
+    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    def coerce!(declared_type)
+      target = Type.new(declared_type)
+      return [nil, "Cannot initialize array of size #{target.capacity} with #{type_info.capacity} elements"] unless target.accepts?(type_info)
+
+      [target.resolved, nil]
+    end
+  end
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   DefaultLit   = Struct.new(:token) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do

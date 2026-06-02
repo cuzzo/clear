@@ -2774,6 +2774,21 @@ module MIR
     def ownership_source_exprs = child_exprs
   end
 
+  # Fixed-size array default initialization.
+  # Zig: [_]T{ default } ** N
+  ArrayDefaultInit = Struct.new(:elem_type, :count, :default_value, :alloc) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([default_value])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = []
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
+  end
+
   # Slice expression.
   # Zig: @as([]const T, target[start..end])
   SliceExpr = Struct.new(:target, :start, :end_expr, :elem_type) do
@@ -3563,7 +3578,7 @@ module MIR
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
-    RcDowngrade, WeakUpgrade, MakeList, ConcatStr, OwnedSlice,
+    RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,
     ShardedMapPut, ShardedMapGet,
