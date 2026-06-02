@@ -907,7 +907,7 @@ private
 
   # Tail-call lowering relies on recursion becoming a self-loop; any
   # wrapped or nested self-call would still consume real stack.
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[AST::FuncCall])) }
   def validate_tail_call!(fn_node)
     fn_name = fn_node.name
     all_self_calls = collect_self_calls(fn_node.body, fn_name)

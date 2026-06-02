@@ -121,6 +121,55 @@ RSpec.describe NilKill::StaticDiffAudit do
     expect(findings).not_to include(a_hash_including("kind" => "untyped_ivar", "line" => 7))
   end
 
+  it "does not flag moved module writes to ivars typed elsewhere in src" do
+    Dir.mktmpdir("nil-kill-static-diff-audit", File.join(NilKill::ROOT, "tmp")) do |dir|
+      FileUtils.mkdir_p(File.join(dir, "src/annotator/domains"))
+      File.write(File.join(dir, "src/annotator/annotator.rb"), <<~RUBY)
+        class SemanticAnnotator
+          def initialize
+            @branch_terminated = T.let(false, T::Boolean)
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "src/annotator/domains/control_flow.rb"), <<~RUBY)
+        module Annotator
+          module Domains
+            module ControlFlow
+              def reset_branch
+                @branch_terminated = false
+              end
+            end
+          end
+        end
+      RUBY
+
+      audit = described_class.new(
+        root: dir,
+        added_lines: { "src/annotator/domains/control_flow.rb" => [5].to_set }
+      )
+      findings = audit.findings.map(&:to_h)
+      expect(findings).not_to include(a_hash_including("kind" => "untyped_ivar", "line" => 5))
+    end
+  end
+
+  it "does not flag initialize_copy reassignments for ivars typed in initialize" do
+    findings, = audit_for("src/static_diff_copy_state.rb", <<~RUBY, [9])
+      class StaticDiffCopyState
+        extend T::Sig
+
+        def initialize
+          @flow = T.let(Flow.new, Flow)
+        end
+
+        def initialize_copy(original)
+          @flow = original.flow_snapshot
+        end
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "untyped_ivar", "line" => 9))
+  end
+
   it "does not treat homogeneous lookup maps as hash records" do
     findings, = audit_for("src/static_diff_lookup_map.rb", <<~RUBY, [5])
       class StaticDiffLookupMap

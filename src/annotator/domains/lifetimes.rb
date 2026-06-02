@@ -7,7 +7,7 @@ module Annotator
       extend T::Sig
 
 
-      sig { params(node: AST::MoveNode).returns(T.nilable(T::Set[T.untyped])) }
+      sig { params(node: AST::MoveNode).returns(T.nilable(T::Set[String])) }
       def visit_MoveNode(node)
         T.bind(self, SemanticAnnotator)
 
@@ -56,7 +56,7 @@ module Annotator
       # +val_node+:      the AST value node being stored
       # +expected_type+: the target field/param type (Type or Symbol)
       # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
-      sig { params(val_node: T.untyped, expected_type: T.untyped, container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::CopyNode)) }
+      sig { params(val_node: AST::Node, expected_type: T.nilable(Type::TypeInput), container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::CopyNode)) }
       def ensure_owned_value!(val_node, expected_type, container_desc = nil, container_alloc: :heap)
         T.bind(self, SemanticAnnotator)
 
@@ -157,6 +157,17 @@ module Annotator
         end
       end
 
+      sig { params(node: AST::Copy).returns(T.nilable(T::Boolean)) }
+      def visit_Copy(node)
+        T.bind(self, SemanticAnnotator)
+
+        record_capture_site!(node, copied: true)
+        without_capture_moves { visit(node.value) }
+        stamp_type!(node, node.value.full_type!(context: "COPY value"))
+        node.storage = node.value.storage
+        nil
+      end
+
       # Infer return type for list.remove(i) — returns the element type.
       # `node` is unused (the receiver is args.first); nilable because
       # FunctionReturn#resolve dispatches without a call node.
@@ -213,44 +224,6 @@ module Annotator
         node.storage   = :frozen
       end
 
-      sig { params(node: T.untyped).void }
-      def visit_Give(node)
-        T.bind(self, SemanticAnnotator)
-
-        visit(node.value)
-
-        # Validate that GIVE is used on something that makes sense
-        # (e.g., an identifier, field access, or index access)
-        if !node.value.is_a?(AST::Identifier) &&
-           !node.value.is_a?(AST::GetField) &&
-           !node.value.is_a?(AST::GetIndex)
-          error!(node, :GIVE_BAD_TARGET)
-        end
-
-        # Mark the original as moved
-        root = get_root_object(node.value)
-        if root.is_a?(AST::Identifier)
-          og_set_moved(root.name)
-        end
-
-        stamp_type!(node, node.value.resolved_type)
-      end
-
-      sig { params(node: AST::Copy).void }
-      def visit_Copy(node)
-        T.bind(self, SemanticAnnotator)
-
-        visit(node.value)
-
-        # Validate that the type is actually copyable
-        type = node.value.full_type!(context: "COPY keyword value")
-        unless type&.copyable? { |name| lookup_type_schema(name) }
-          error!(node, :COPY_NON_COPYABLE, type: node.value.resolved_type)
-        end
-
-        stamp_type!(node, node.value.resolved_type)
-      end
-
       sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
       def visit_CloneNode(node)
         T.bind(self, SemanticAnnotator)
@@ -299,11 +272,11 @@ module Annotator
         record_effect(EffectTracker::HEAP)
       end
 
-      sig { params(node: T.untyped).returns(T.untyped) }
+      sig { params(node: AST::Node).returns(AST::Node) }
       def get_root_object(node)
         T.bind(self, SemanticAnnotator)
 
-        curr = T.let(node, T.any(AST::CopyNode, AST::Identifier, AST::StructLit))
+        curr = T.let(node, AST::Node)
         while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
           curr = curr.target
         end
@@ -312,7 +285,7 @@ module Annotator
 
       # Collect all identifier names referenced (directly) in an AST subtree.
       # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
-      sig { params(nodes: T::Array[T.untyped]).returns(T::Set[String]) }
+      sig { params(nodes: T::Array[AST::Node]).returns(T::Set[String]) }
       def collect_body_identifier_names(nodes)
         T.bind(self, SemanticAnnotator)
 
@@ -342,7 +315,7 @@ module Annotator
       # The scope handles type resolution, variable declarations, mutability,
       # and capability tracking. All ownership state is in the OwnershipGraph.
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assign_move(node)
         T.bind(self, SemanticAnnotator)
 
@@ -358,7 +331,7 @@ module Annotator
         handle_assignment_identifier_move!(node)
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def reject_scoped_assignment_move!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -376,7 +349,7 @@ module Annotator
         error!(node, :MOVE_WITH_SCOPED, name: node.value.name) if needs_move
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assignment_path_move!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -398,7 +371,7 @@ module Annotator
         @og.declare(graph_path, kind: :affine, type_info: value_type, scope_depth: @og_scope_depth)
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def reject_borrowed_index_assignment_move!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -421,7 +394,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assignment_identifier_move!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -454,7 +427,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assign_borrow(node)
         T.bind(self, SemanticAnnotator)
 
@@ -475,12 +448,13 @@ module Annotator
         return if T.must(borrowed_scope).is_immutable?(root_var)
 
         lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
-        err = @og.borrow(lhs_name, root_var, mutable: node.mutable)
+        mutable = node.is_a?(AST::VarDecl) && node.mutable
+        err = @og.borrow(lhs_name, root_var, mutable: mutable)
         error!(node, :LIFETIME_ALREADY_BORROWED, name: root_var) if err
       end
 
       # Returns the AST node of the argument the return value borrows from, or nil.
-      sig { params(call_node: T.untyped).returns(T.untyped) }
+      sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(AST::Node)) }
       def resolve_borrow_source(call_node)
         T.bind(self, SemanticAnnotator)
 
@@ -529,7 +503,7 @@ module Annotator
         args[param_index]
       end
 
-      sig { params(node: T.untyped).void }
+      sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def verify_unrestricted!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -541,7 +515,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.untyped, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[String, SymbolEntry])) }
+      sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[String, SymbolEntry])) }
       def finalize_scope(node, branch: nil)
         T.bind(self, SemanticAnnotator)
 
@@ -569,9 +543,9 @@ module Annotator
         end
 
         case branch
-        when :then  then node.then_drops = drops
-        when :else  then node.else_drops = drops
-        else node.deferred_drops = drops
+        when :then  then T.cast(node, AST::IfStatement).then_drops = drops
+        when :else  then T.cast(node, AST::IfStatement).else_drops = drops
+        else T.unsafe(node).deferred_drops = drops
         end
 
         # Unused variable warnings (function-level finalize only)
@@ -614,7 +588,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+      sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[Symbol, T.any(String, Type, T::Boolean)]]) }
       def collect_scope_drops(node: nil)
         T.bind(self, SemanticAnnotator)
 
@@ -642,18 +616,18 @@ module Annotator
       # mutable pointer access.  Called when the chain leads to mutation
       # (field assignment, mutating method call, etc.) so the transpiler can
       # emit `.items[idx]` instead of by-value `getAt(list, idx)`.
-      sig { params(node: T.untyped).void }
+      sig { params(node: AST::Node).void }
       def mark_chain_needs_mut_ref!(node)
         T.bind(self, SemanticAnnotator)
 
-        curr = node
+        curr = T.let(node, T.nilable(AST::Node))
         while curr
           curr.needs_mut_ref = true if curr.is_a?(AST::GetIndex)
-          curr = curr.respond_to?(:target) ? curr.target : nil
+          curr = curr.respond_to?(:target) ? T.unsafe(curr).target : nil
         end
       end
 
-      sig { params(node: T.untyped).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: T.any(AST::Node, String, Symbol)).returns(T.nilable(T::Array[Symbol])) }
       def get_path_to_root(node)
         T.bind(self, SemanticAnnotator)
 
@@ -689,7 +663,7 @@ module Annotator
         # tied value would let it outlive its anchor.
         sources.each do |source|
           next if source.scope_depth.nil?
-          next unless dest_depth < source.scope_depth
+          next unless dest_depth < T.must(source.scope_depth)
           source_name = lookup_source_name(source) || "(unnamed)"
           msg = "Lifetime Error: cannot store value tied to '#{source_name}' " \
                 "(declared at scope depth #{source.scope_depth}) into a destination " \
@@ -800,7 +774,7 @@ module Annotator
 
       # Return an error string when storing val_node at dest_depth would let it
       # outlive one of its tied-lifetime sources.
-      sig { params(val_node: T.untyped, dest_depth: T.untyped).returns(T.nilable(String)) }
+      sig { params(val_node: AST::Node, dest_depth: Integer).returns(T.nilable(String)) }
       def lifetime_violation_for_store(val_node, dest_depth)
         T.bind(self, SemanticAnnotator)
 
@@ -814,7 +788,7 @@ module Annotator
         sources.each do |source|
           next if source.scope_depth.nil?
           next if dest_depth.nil?
-          if dest_depth < source.scope_depth
+          if dest_depth < T.must(source.scope_depth)
             return "Lifetime Error: cannot store value with lifetime tied to " \
                    "scope depth #{source.scope_depth} into a destination at " \
                    "depth #{dest_depth} (the destination outlives the source)."
@@ -823,7 +797,7 @@ module Annotator
         nil
       end
 
-      sig { params(val_node: T.untyped).returns(T::Array[SymbolEntry]) }
+      sig { params(val_node: AST::Node).returns(T::Array[SymbolEntry]) }
       def lifetime_sources_for_value(val_node)
         T.bind(self, SemanticAnnotator)
 
@@ -840,7 +814,7 @@ module Annotator
       # For a struct-field assign `a.field = v`, depth = a's binding scope.
       # For a method receiver (`list.append(v)`), depth = list's binding scope.
       # For a free local in current scope, depth = current scope.
-      sig { params(target_node: T.untyped).returns(T.untyped) }
+      sig { params(target_node: AST::Node).returns(T.nilable(Integer)) }
       def dest_scope_depth_for_target(target_node)
         T.bind(self, SemanticAnnotator)
 
@@ -869,7 +843,7 @@ module Annotator
       #   - Captures whose binding has no SymbolEntry on capture_symbols
       #     (e.g. observable view aliases); those are already errored at
       #     visit_BgBlock via has_non_escaping_capture.
-      sig { params(decl_node: T.untyped).void }
+      sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
       def stamp_bg_handle_lifetime!(decl_node)
         T.bind(self, SemanticAnnotator)
 
@@ -882,7 +856,7 @@ module Annotator
 
       # Single-writer stamp: this binding's heap-bearing contents were already
       # materialized for heap storage at bind time.
-      sig { params(decl_node: T.untyped).void }
+      sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
       def stamp_init_contents_heap!(decl_node)
         T.bind(self, SemanticAnnotator)
 
@@ -892,7 +866,7 @@ module Annotator
         sym.mark_init_contents_heap! if init_value_contents_heap?(init)
       end
 
-      sig { params(init: T.untyped).returns(T::Boolean) }
+      sig { params(init: T.nilable(AST::Node)).returns(T::Boolean) }
       def init_value_contents_heap?(init)
         T.bind(self, SemanticAnnotator)
 
@@ -941,7 +915,26 @@ module Annotator
       # SemanticAnnotator::BG_SOURCE_OPAQUE_AST_NODES). New AST container types added later
       # propagate for free; missing-recursion bugs surface as compile-time
       # over-rejection rather than silent UAF.
-      sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
+      BgSourceWalkValue = T.type_alias do
+        T.any(
+          AST::Node,
+          T::Array[BasicObject],
+          T::Hash[BasicObject, BasicObject],
+          Struct,
+          NilClass,
+          String,
+          Symbol,
+          Integer,
+          Float,
+          TrueClass,
+          FalseClass,
+          Type,
+          SymbolEntry,
+          Proc,
+        )
+      end
+
+      sig { params(expr: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def collect_bg_sources_in_expr(expr)
         T.bind(self, SemanticAnnotator)
 
@@ -955,7 +948,7 @@ module Annotator
         end
       end
 
-      sig { params(v: T.untyped).returns(T::Array[SymbolEntry]) }
+      sig { params(v: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def collect_bg_sources_walk(v)
         T.bind(self, SemanticAnnotator)
 
@@ -967,11 +960,11 @@ module Annotator
         end
       end
 
-      sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
+      sig { params(expr: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def bg_sources_for_block(expr)
         T.bind(self, SemanticAnnotator)
 
-        analysis = expr.respond_to?(:capture_analysis) ? expr.capture_analysis : nil
+        analysis = expr.respond_to?(:capture_analysis) ? T.unsafe(expr).capture_analysis : nil
         return [] unless analysis && analysis.respond_to?(:capture_symbols)
         bg_lifetime_sources(analysis)
       end
@@ -1002,7 +995,7 @@ module Annotator
       # BG handle's lifetime by default. New storage/sync/layout
       # combinations land here as compile-time RETURN-rejections, not
       # silent UAFs.
-      sig { params(info: T.untyped).returns(T::Boolean) }
+      sig { params(info: SymbolEntry).returns(T::Boolean) }
       def bg_capture_independent?(info)
         T.bind(self, SemanticAnnotator)
 
@@ -1033,7 +1026,7 @@ module Annotator
       # access to resolve enum / union-without-heap / all-Copy struct
       # cases via lookup_type_schema; structs are always rejected (ref
       # capture into the fiber frame, even if every field is Copy).
-      sig { params(t: T.untyped).returns(T::Boolean) }
+      sig { params(t: Type).returns(T::Boolean) }
       def value_copy_capture?(t)
         T.bind(self, SemanticAnnotator)
 
@@ -1043,7 +1036,7 @@ module Annotator
 
       # Produce dotted-path lifetime roots. Wildcard and nil return [] because
       # there is no source-restricted path the return value must match.
-      sig { params(func_node: AST::FunctionDef).returns(T::Array[T.untyped]) }
+      sig { params(func_node: AST::FunctionDef).returns(T::Array[T.any(String, Symbol)]) }
       def get_lifetime_paths(func_node)
         T.bind(self, SemanticAnnotator)
 
@@ -1063,21 +1056,22 @@ module Annotator
 
         paths = get_lifetime_paths(func_node)
         return nil if paths.size != 1 || paths.first == :wildcard
-        paths.first
+        first = paths.first
+        first.is_a?(String) ? first : nil
       end
 
       # Walk through GetField/GetIndex chains to find the root Identifier name.
-      sig { params(node: T.untyped).returns(T.nilable(String)) }
+      sig { params(node: T.nilable(AST::Node)).returns(T.nilable(String)) }
       def root_variable_name(node)
         T.bind(self, SemanticAnnotator)
 
-        curr = node
+        curr = T.let(node, T.nilable(AST::Node))
         while curr
           return curr.name if curr.is_a?(AST::Identifier)
           curr = if curr.respond_to?(:target)
-                   curr.target
+                   T.unsafe(curr).target
                  elsif curr.respond_to?(:object)
-                   curr.object
+                   T.unsafe(curr).object
                  else
                    nil
                  end
@@ -1089,7 +1083,7 @@ module Annotator
 
       # Determine which allocator cleanup should use for this binding.
       # Sets provenance on the type_info; cleanup_alloc is now derived from provenance.
-      sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+      sig { params(node: T.any(AST::VarDecl, AST::BindExpr)).returns(T.nilable(Symbol)) }
       def set_cleanup_alloc!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -1128,7 +1122,7 @@ module Annotator
         alloc
       end
 
-      sig { params(name: String, node: T.untyped, type_info: T.any(Type, Symbol, String)).returns(T.untyped) }
+      sig { params(name: String, node: T.nilable(AST::Node), type_info: Type::TypeInput).returns(T.nilable(T::Set[String])) }
       def og_declare(name, node, type_info)
         T.bind(self, SemanticAnnotator)
 
@@ -1139,7 +1133,7 @@ module Annotator
                     scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
       end
 
-      sig { params(node: T.untyped).returns(T::Boolean) }
+      sig { params(node: AST::Node).returns(T::Boolean) }
       def share_consumes_source?(node)
         T.bind(self, SemanticAnnotator)
 
@@ -1163,7 +1157,7 @@ module Annotator
       # the USE_OF_MOVED_VALUE fix-dropdown can skip suggesting an
       # `@shared` / `@multiowned` upgrade when the consumer's parameter
       # is a plain affine type that won't accept a refcounted handle.
-      sig { params(node: T.untyped, action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Boolean)) }
+      sig { params(node: AST::Node, action: Symbol, consumer_param_type: T.nilable(Type)).returns(T.nilable(T::Boolean)) }
       def move_if_not_copyable!(node, action: :move, consumer_param_type: nil)
         T.bind(self, SemanticAnnotator)
 
@@ -1191,7 +1185,7 @@ module Annotator
         node.was_moved = true
       end
 
-      sig { params(node: T.untyped, action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Boolean)) }
+      sig { params(node: AST::Node, action: Symbol, consumer_param_type: T.nilable(Type)).returns(T.nilable(T::Boolean)) }
       def move_if_takes_ownership!(node, action: :takes, consumer_param_type: nil)
         T.bind(self, SemanticAnnotator)
 
@@ -1214,7 +1208,7 @@ module Annotator
 
       # Reject storing a borrowed value into an owned container (struct, union, TAKES param).
       # Borrows can't outlive the scope they reference. Use COPY for owned data.
-      sig { params(val_node: T.untyped, container_desc: String).returns(NilClass) }
+      sig { params(val_node: AST::Node, container_desc: String).returns(NilClass) }
       def reject_borrowed_value!(val_node, container_desc)
         T.bind(self, SemanticAnnotator)
 

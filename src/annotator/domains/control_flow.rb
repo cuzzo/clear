@@ -6,7 +6,10 @@ module Annotator
     module ControlFlow
       extend T::Sig
 
-      sig { params(branches: T::Array[Proc], merge_to_parent: T::Boolean).returns(T.nilable(T::Array[T::Array[T::Hash[Symbol, T.untyped]]])) }
+      MatchSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
+      MatchPayload = T.type_alias { T.any(Type, Symbol, Schemas::InlineStructVariant, NilClass) }
+
+      sig { params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean).returns(T::Array[BasicObject]) }
       def analyze_control_flow_branches(branches, merge_to_parent: true)
         T.bind(self, SemanticAnnotator)
 
@@ -162,7 +165,7 @@ module Annotator
       # Type-checks a struct destructuring pattern against the match subject type.
       # Verifies field names exist and value types match the struct schema.
 
-      sig { params(match_node: AST::MatchStatement, pat: AST::StructPattern).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+      sig { params(match_node: AST::MatchStatement, pat: AST::StructPattern).void }
       def annotate_struct_pattern!(match_node, pat)
         T.bind(self, SemanticAnnotator)
 
@@ -226,7 +229,7 @@ module Annotator
         nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
       end
 
-      sig { params(pattern: T.untyped).returns(T.untyped) }
+      sig { params(pattern: AST::Node).returns(T.nilable(String)) }
       def match_variant_name(pattern)
         T.bind(self, SemanticAnnotator)
 
@@ -236,14 +239,14 @@ module Annotator
         end
       end
 
-      sig { params(arm: T.untyped).returns(T::Array[T.untyped]) }
+      sig { params(arm: AST::MatchCase).returns(T::Array[String]) }
       def match_variant_names(arm)
         T.bind(self, SemanticAnnotator)
 
         [arm.value, *(arm.extra_values || [])].filter_map { |pattern| match_variant_name(pattern) }
       end
 
-      sig { params(payload: T.untyped, union_subst: T::Hash[Symbol, Symbol]).returns(T.untyped) }
+      sig { params(payload: MatchPayload, union_subst: T::Hash[Symbol, Symbol]).returns(MatchPayload) }
       def normalized_match_payload(payload, union_subst)
         T.bind(self, SemanticAnnotator)
 
@@ -256,10 +259,10 @@ module Annotator
       sig do
         params(
           node: AST::MatchStatement,
-          arm: T.untyped,
-          schema: T.untyped,
-          variant_name: T.untyped,
-          union_subst: T::Hash[Symbol, T.untyped],
+          arm: AST::MatchCase,
+          schema: Schemas::UnionSchema,
+          variant_name: T.nilable(String),
+          union_subst: T::Hash[Symbol, Symbol],
           kind: String,
           name: String
         ).void
@@ -279,7 +282,7 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::StructLit, schema: T.untyped).returns(T::Hash[Symbol, Symbol]) }
+      sig { params(node: AST::StructLit, schema: T.any(Schemas::StructSchema, Schemas::UnionSchema)).returns(T::Hash[Symbol, Symbol]) }
       def literal_type_substitution!(node, schema)
         T.bind(self, SemanticAnnotator)
 

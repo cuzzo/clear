@@ -400,14 +400,14 @@ class SymbolEntry
   sig { void }
   def mark_non_escaping!
     @flow.non_escaping = true
-    @lifetime = [self]
+    self.lifetime = [self]
   end
 
   sig { void }
   def clear_non_escaping!
     return unless non_escaping
     @flow.non_escaping = false
-    @lifetime = []
+    self.lifetime = []
   end
 
   sig { void }

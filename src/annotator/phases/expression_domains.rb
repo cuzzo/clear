@@ -11,7 +11,7 @@ module Annotator
     module ExpressionDomains
       extend T::Sig
 
-      sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
+      sig { params(node: AST::FuncCall).void }
       def visit_FuncCall(node)
         T.bind(self, SemanticAnnotator)
 
@@ -186,7 +186,7 @@ module Annotator
         nil
       end
 
-      sig { params(parent: AST::FuncCall, arg: T.untyped).void }
+      sig { params(parent: AST::FuncCall, arg: AST::Node).void }
       def annotate_call_argument!(parent, arg)
         T.bind(self, SemanticAnnotator)
 

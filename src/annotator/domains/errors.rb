@@ -6,13 +6,16 @@ module Annotator
     module Errors
       extend T::Sig
 
+      ErrorSelector = T.type_alias { T::Hash[Symbol, BasicObject] }
+      ErrorClause = T.type_alias { T::Hash[Symbol, BasicObject] }
+      ReturnFact = T.type_alias { T::Hash[Symbol, BasicObject] }
 
       # Pre-pass: walk every RAISE and OR EXIT site that provides both a
       # kind and a type, and seed the registry with (kind, type). Lets
       # CATCH Type clauses resolve regardless of source order. OR EXIT
       # counts too because it can introduce new types that only the
       # CATCH for a particular call needs to see.
-      sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
+      sig { params(program_node: AST::Program).void }
       def seed_error_types_from_raises!(program_node)
         T.bind(self, SemanticAnnotator)
 
@@ -40,7 +43,7 @@ module Annotator
       # The baked-in default applied when the user writes no SYNC POLICY.
       # Synthesized as a hash matching the parser's lock_error_clause
       # shape so the resolver can use it interchangeably.
-      sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+      sig { returns(T::Array[ErrorClause]) }
       def baked_in_default_sync_policy
         T.bind(self, SemanticAnnotator)
 
@@ -58,7 +61,7 @@ module Annotator
       # require an `FN main` when one is present, validate the body, and
       # stamp `program_node.sync_policy` with the resolved handlers (the
       # user's if present, else the baked-in default).
-      sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+      sig { params(program_node: AST::Program).void }
       def validate_and_resolve_sync_policy!(program_node)
         T.bind(self, SemanticAnnotator)
 
@@ -131,7 +134,7 @@ module Annotator
       # call site can surface. Forwarded polymorphic args keep the caller's
       # narrower family constraint instead of widening to the callee's full
       # REQUIRES set.
-      sig { params(sig: FunctionSignature, args: T::Array[T.untyped]).returns(T::Set[Symbol]) }
+      sig { params(sig: FunctionSignature, args: T::Array[AST::Node]).returns(T::Set[Symbol]) }
       def collapse_errors_for_call(sig, args)
         T.bind(self, SemanticAnnotator)
 
@@ -156,7 +159,7 @@ module Annotator
 
       # Synthesize the same clause shape as a per-WITH handler so emission can
       # use one path. Inline-only errors intentionally have no policy fallback.
-      sig { params(error_name: Symbol).returns(T.untyped) }
+      sig { params(error_name: Symbol).returns(T.nilable(ErrorClause)) }
       def synthesize_clause_from_policy(error_name)
         T.bind(self, SemanticAnnotator)
 
@@ -171,7 +174,7 @@ module Annotator
 
       # SyncPolicyDecl is validated up front. This visitor keeps the AST walker
       # explicit and visits block-action handler bodies so their types are annotated.
-      sig { params(node: AST::SyncPolicyDecl).returns(T::Array[T.untyped]) }
+      sig { params(node: AST::SyncPolicyDecl).void }
       def visit_SyncPolicyDecl(node)
         T.bind(self, SemanticAnnotator)
 
@@ -254,7 +257,7 @@ module Annotator
       end
 
       # Collect input types from pipeline |> steps that can fail.
-      sig { params(body: T::Array[T.untyped], types: T::Set[T.untyped]).returns(T::Array[T.untyped]) }
+      sig { params(body: T::Array[AST::Node], types: T::Set[String]).void }
       def collect_pipe_input_types(body, types)
         T.bind(self, SemanticAnnotator)
 
@@ -268,7 +271,7 @@ module Annotator
         end
       end
 
-      sig { params(bodies: T::Array[T.untyped]).returns(T::Boolean) }
+      sig { params(bodies: T::Array[T.nilable(T::Array[AST::Node])]).returns(T::Boolean) }
       def catch_bodies_reference_snapshot?(bodies)
         T.bind(self, SemanticAnnotator)
 
@@ -338,7 +341,7 @@ module Annotator
       #   - kind nil   + type nil    : no-op (legacy message-only form).
       # On collision, emits a diagnostic anchored at the second site,
       # naming the first registration line for context.
-      sig { params(node: T.untyped, kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
+      sig { params(node: T.any(AST::Raise, AST::OrExit), kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
       def resolve_error_registration!(node, kind_sym, type_name_str, site_tok)
         T.bind(self, SemanticAnnotator)
 
@@ -686,7 +689,7 @@ module Annotator
       # and the transpiler defaults its element type (f64). Push the OR
       # success type onto the empty literal -- the same expected-type
       # propagation VarDecl does for `MUTABLE v: T[]@list = []`.
-      sig { params(rhs: T.untyped, expected: T.untyped).void }
+      sig { params(rhs: AST::Node, expected: T.nilable(Type)).void }
       def coerce_empty_collection_fallback!(rhs, expected)
         T.bind(self, SemanticAnnotator)
 

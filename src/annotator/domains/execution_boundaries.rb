@@ -218,7 +218,24 @@ module Annotator
         !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
       end
 
-      sig { params(node: AST::WithBlock, fn_ctx: T.untyped).void }
+      ErrorClause = T.type_alias { T::Hash[Symbol, BasicObject] }
+      FallibleWalkValue = T.type_alias do
+        T.any(
+          AST::Node,
+          T::Array[BasicObject],
+          T::Hash[BasicObject, BasicObject],
+          NilClass,
+          String,
+          Symbol,
+          Integer,
+          Float,
+          TrueClass,
+          FalseClass,
+          Type,
+        )
+      end
+
+      sig { params(node: AST::WithBlock, fn_ctx: FunctionContext).void }
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
         T.bind(self, SemanticAnnotator)
 
@@ -236,7 +253,7 @@ module Annotator
         fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
       end
 
-      sig { params(fn_node: T.untyped, bound_name: T.nilable(String)).returns(T::Boolean) }
+      sig { params(fn_node: AST::FunctionDef, bound_name: T.nilable(String)).returns(T::Boolean) }
       def with_requires_binding?(fn_node, bound_name)
         T.bind(self, SemanticAnnotator)
 
@@ -264,7 +281,7 @@ module Annotator
       # check.
       SNAPSHOT_POSSIBLE_TYPES = %i[MvccConflict AtomicConflict].freeze
 
-      sig { params(nodes: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
+      sig { params(nodes: T::Array[AST::Node]).returns(T.nilable(T::Array[String])) }
       def retryable_with_fallible_sources(nodes)
         T.bind(self, SemanticAnnotator)
 
@@ -307,12 +324,12 @@ module Annotator
         sources.uniq
       end
 
-      sig { params(node: T.untyped).returns(T::Boolean) }
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall)).returns(T::Boolean) }
       def retryable_with_call_fallible?(node)
         T.bind(self, SemanticAnnotator)
 
         return true if node.respond_to?(:can_fail) && node.can_fail
-        return true if node.respond_to?(:error_union_type) && node.error_union_type
+        return true if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
         false
       end
 
@@ -333,7 +350,7 @@ module Annotator
         is_param && !has_req
       end
 
-      sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))).void }
+      sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T::Array[String])).void }
       def retryable_with_fallible_body_error!(node, with_name, sources)
         T.bind(self, SemanticAnnotator)
 
@@ -342,7 +359,7 @@ module Annotator
         error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
       end
 
-      sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).void }
+      sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).void }
       def validate_lock_error_clause!(node, expanded_capabilities)
         T.bind(self, SemanticAnnotator)
 
@@ -546,7 +563,7 @@ module Annotator
       # Read-mode SNAPSHOT MATCH (no MUTABLE) skips this entirely --
       # read paths can't fail, so neither arm needs / accepts a handler.
 
-      sig { params(node: AST::WithBlock).returns(T.nilable(T::Array[T.untyped])) }
+      sig { params(node: AST::WithBlock).void }
       def validate_snapshot_match_arms!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -591,7 +608,7 @@ module Annotator
       #   3. Retry selectors resolve to Transient types only.
       #   4. The matched set intersects the block's possible error set.
 
-      sig { params(node: AST::WithBlock, clause: T::Hash[Symbol, T.untyped], is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: AST::WithBlock, clause: ErrorClause, is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
       def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
         T.bind(self, SemanticAnnotator)
 
@@ -604,26 +621,31 @@ module Annotator
         possible = possible.to_a
         matched  = []
 
-        clause[:selectors].each do |sel|
-          case sel[:form]
+        selectors = T.cast(clause[:selectors], T::Array[ErrorClause])
+        selectors.each do |sel|
+          form = T.cast(sel[:form], Symbol)
+          name = T.cast(sel[:name], Symbol)
+          token = T.cast(sel[:token], T.nilable(Lexer::Token))
+          diagnostic_token = token || node.token
+          case form
           when :kind
-            unless AST.error_kind?(sel[:name])
+            unless AST.error_kind?(name)
               emit_registry_mismatch!(
-                sel[:token], sel[:name], AST::ERROR_KINDS,
-                "Unknown error kind '#{sel[:name]}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
+                diagnostic_token, name, AST::ERROR_KINDS,
+                "Unknown error kind '#{name}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
                 "closest known kind"
               )
             end
-            matched.concat(AST.types_for_kind(sel[:name])) if AST.error_kind?(sel[:name])
+            matched.concat(AST.types_for_kind(name)) if AST.error_kind?(name)
           when :type
-            unless AST.error_type?(sel[:name])
+            unless AST.error_type?(name)
               emit_registry_mismatch!(
-                sel[:token], sel[:name], AST::ERROR_TYPES.keys,
-                "Unknown error type '#{sel[:name]}'. Register it in src/ast/error_registry.rb.",
+                diagnostic_token, name, AST::ERROR_TYPES.keys,
+                "Unknown error type '#{name}'. Register it in src/ast/error_registry.rb.",
                 "closest registered type"
               )
             end
-            matched << sel[:name] if AST.error_type?(sel[:name])
+            matched << name if AST.error_type?(name)
           end
         end
 

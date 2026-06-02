@@ -55,7 +55,7 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::GetField).returns(T.untyped) }
+      sig { params(node: AST::GetField).returns(T.nilable(Object)) }
       def visit_GetField(node)
         T.bind(self, SemanticAnnotator)
 
@@ -498,7 +498,7 @@ module Annotator
         stamp_type!(node, Type.new(:"~#{base_type}[]"))
       end
 
-      sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Symbol) }
+      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Symbol) }
       def infer_element_type(args, node)
         T.bind(self, SemanticAnnotator)
 
@@ -509,7 +509,7 @@ module Annotator
 
       # Infer return type for list.pop() — returns ?T (optional element type).
 
-      sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Symbol) }
+      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Symbol) }
       def infer_optional_element_type(args, node)
         T.bind(self, SemanticAnnotator)
 
@@ -522,11 +522,11 @@ module Annotator
       # Infer return type for stream/list `.toList()` — an owned heap list
       # of the receiver's element type (unwrapping stream/promise tenses).
 
-      sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Type) }
+      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_to_list(args, node)
         T.bind(self, SemanticAnnotator)
 
-        recv_t = Type.new(args[0].resolved_type)
+        recv_t = Type.new(T.must(args[0]).resolved_type)
         elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
           recv_t.tense_type.element_type
         elsif recv_t.bounded_stream?

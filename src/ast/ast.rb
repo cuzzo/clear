@@ -1351,7 +1351,7 @@ module AST
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
   end
-  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
@@ -1367,11 +1367,26 @@ module AST
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
+	  end
+  class AutoLockPlan < T::Struct
+    extend T::Sig
+
+    const :var, String
+    const :sync, Symbol
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync
+    end
+    alias eql? ==
+
+    sig { returns(Integer) }
+    def hash = [var, sync].hash
   end
-  Assignment   = Struct.new(:token, :name, :value) do
-    include Locatable
-    include StatementVoidType
-    attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
+	  Assignment   = Struct.new(:token, :name, :value) do
+	    include Locatable
+	    include StatementVoidType
+	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.

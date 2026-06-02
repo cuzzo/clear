@@ -20,7 +20,7 @@ module Annotator
         (explicit + inferred).uniq
       end
 
-      sig { params(type: T.untyped, out: T::Array[String], explicit: T::Array[T.untyped]).returns(T.untyped) }
+      sig { params(type: T.nilable(Type), out: T::Array[String], explicit: T::Array[String]).void }
       def collect_implicit_type_params(type, out, explicit)
         T.bind(self, SemanticAnnotator)
 
@@ -71,7 +71,7 @@ module Annotator
           sigil: sigil, n: node.n, variant_hint: variant_hint)
       end
 
-      sig { params(node: AST::UnaryOp).returns(T.untyped) }
+      sig { params(node: AST::UnaryOp).returns(T.nilable(Object)) }
       def visit_UnaryOp(node)
         T.bind(self, SemanticAnnotator)
 
@@ -90,7 +90,7 @@ module Annotator
       # ==========================================
       # LITERALS & BINARY OPS
       # ==========================================
-      sig { params(node: AST::Literal).returns(T.untyped) }
+      sig { params(node: AST::Literal).returns(T.nilable(Object)) }
       def visit_Literal(node)
         T.bind(self, SemanticAnnotator)
 
@@ -137,7 +137,7 @@ module Annotator
         stamp_type!(node, :Any)
       end
 
-      sig { params(node: AST::BinaryOp).returns(T.untyped) }
+      sig { params(node: AST::BinaryOp).returns(T.nilable(Object)) }
       def visit_BinaryOp(node)
         T.bind(self, SemanticAnnotator)
 
@@ -178,7 +178,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.untyped).returns(T.nilable(SymbolEntry)) }
+      sig { params(node: AST::Placeholder).returns(T.nilable(SymbolEntry)) }
       def visit_Placeholder(node)
         T.bind(self, SemanticAnnotator)
 
@@ -333,7 +333,7 @@ module Annotator
       # Returns the Type of the last value-producing expression in a branch body,
       # or nil if the branch doesn't end with a usable expression.
       # Used to determine whether an IF/MATCH node can be promoted to expression mode.
-      sig { params(branch: T.nilable(T::Array[T.untyped])).returns(T.nilable(Type)) }
+      sig { params(branch: T.nilable(T::Array[AST::Node])).returns(T.nilable(Type)) }
       def expr_result_type(branch)
         T.bind(self, SemanticAnnotator)
 
@@ -354,7 +354,7 @@ module Annotator
       # Promotes an AST::IfStatement that is used in expression position
       # (value of a VarDecl, BindExpr, ReturnNode, or FuncCall arg).
       # Sets expr_mode = true and full_type = result_type if valid; errors otherwise.
-      sig { params(parent_node: T.untyped, if_node: AST::IfStatement).returns(T.nilable(Type)) }
+      sig { params(parent_node: AST::Node, if_node: AST::IfStatement).returns(T.nilable(Type)) }
       def promote_to_expr_if!(parent_node, if_node)
         T.bind(self, SemanticAnnotator)
 
@@ -395,7 +395,7 @@ module Annotator
       end
 
       # Promotes an AST::MatchStatement that is used in expression position.
-      sig { params(parent_node: T.untyped, match_node: AST::MatchStatement).returns(T.nilable(Type)) }
+      sig { params(parent_node: AST::Node, match_node: AST::MatchStatement).returns(T.nilable(Type)) }
       def promote_to_expr_match!(parent_node, match_node)
         T.bind(self, SemanticAnnotator)
 

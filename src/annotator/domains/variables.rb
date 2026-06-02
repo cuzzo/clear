@@ -32,7 +32,9 @@ module Annotator
       # type so coerce! accepts the assignment and codegen chooses the
       # accumulator path instead of an inline fold.
 
-      sig { params(node: T.untyped).returns(T.nilable(Type)) }
+      DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+
+      sig { params(node: DeclarationNode).returns(T.nilable(Type)) }
       def promote_pipe_to_observable_dest!(node)
         T.bind(self, SemanticAnnotator)
 
@@ -91,7 +93,7 @@ module Annotator
         stamp_type!(pipe, node.type)
       end
 
-      sig { params(node: T.untyped, mutable_flag: T::Boolean).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+      sig { params(node: DeclarationNode, mutable_flag: T::Boolean).returns(T.nilable(T::Hash[Symbol, BasicObject])) }
       def finalize_decl_node!(node, mutable_flag)
         T.bind(self, SemanticAnnotator)
 
@@ -450,7 +452,7 @@ module Annotator
       # Track alias relationships for union values extracted from another union/collection.
       # Aliased variables share backing data with the source - skip cleanup to avoid double-free.
 
-      sig { params(var_name: String, value_node: T.untyped).returns(T.nilable(T::Array[OwnershipGraph::Edge])) }
+      sig { params(var_name: String, value_node: AST::Node).returns(T.nilable(T::Array[OwnershipGraph::Edge])) }
       def track_union_alias(var_name, value_node)
         T.bind(self, SemanticAnnotator)
 
@@ -481,7 +483,7 @@ module Annotator
         end
       end
 
-      sig { params(storage: Symbol, node: T.untyped).returns(T.nilable(Integer)) }
+      sig { params(storage: Symbol, node: DeclarationNode).returns(T.nilable(Integer)) }
       def accumulate_stack_bytes(storage, node)
         T.bind(self, SemanticAnnotator)
 
@@ -528,7 +530,7 @@ module Annotator
       # doesn't bottom out at one. Used to attribute receiver mutation back to
       # the declared binding.
 
-      sig { params(node: T.untyped).returns(T.nilable(String)) }
+      sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::Identifier)).returns(T.nilable(String)) }
       def chain_root_name(node)
         T.bind(self, SemanticAnnotator)
 
@@ -697,7 +699,7 @@ module Annotator
           # field assignments are statements (not expressions).
           syn = field_node.target.symbol&.sync
           if syn == :locked || syn == :write_locked || syn == :always_mutable
-            assignment_node.auto_lock = { var: var_name, sync: syn }
+            assignment_node.auto_lock = AST::AutoLockPlan.new(var: var_name, sync: syn)
           end
         else
           # Chained target (e.g. `y.items.field = ...` or `obj.f.g = ...`).
@@ -714,7 +716,7 @@ module Annotator
         stamp_type!(assignment_node, :Void)
       end
 
-      sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).returns(T.untyped) }
+      sig { params(node: T.any(AST::Assignment, AST::BindExpr), target_type: T.nilable(Type::TypeInput), value_type: Symbol).void }
       def validate_assignment_type(node, target_type, value_type)
         T.bind(self, SemanticAnnotator)
 

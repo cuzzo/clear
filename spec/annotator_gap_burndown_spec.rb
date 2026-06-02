@@ -81,6 +81,87 @@ RSpec.describe "annotator branch gap burndown" do
     expect(list.full_type.location).to eq(:frame)
   end
 
+  it "covers collection return inference across stream and list receiver shapes" do
+    ann = quiet_annotator
+
+    receiver = AST::Identifier.new(token, "xs")
+    [
+      [Type.new(:"~Int64[]"), :Int64],
+      [Type.new(:"~Int64[3]"), :Int64],
+      [Type.new(:"~Int64[INF]"), :Int64],
+      [Type.new(:"~?Int64[]"), :Int64],
+      [Type.new(:"String[]"), :String],
+    ].each do |receiver_type, expected_elem|
+      receiver.full_type = receiver_type
+      inferred = ann.send(:infer_to_list, [receiver], nil)
+      expect(inferred.element_type.resolved).to eq(expected_elem)
+      expect(inferred.list_collection?).to be(true)
+      expect(inferred.location).to eq(:heap)
+    end
+  end
+
+  it "covers moved annotator domain defensive branches directly" do
+    ann = quiet_annotator
+
+    with_node = AST::WithBlock.new(token(:WITH, "WITH"), [
+      AST::Capability.new(
+        capability: :EXCLUSIVE,
+        var_node: AST::Identifier.new(token, "cell"),
+        alias_mutable: true,
+      ),
+      AST::Capability.new(
+        capability: :EXCLUSIVE,
+        var_node: AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack),
+      ),
+    ], [])
+    with_node.arms = [{ family: :VERSIONED, body: [], lock_error_clauses: [] }]
+    with_node.snapshot_mode = nil
+
+    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded << cap }
+    ann.define_singleton_method(:check_nested_lock_reacquire!) { |_node, _caps| nil }
+    ann.define_singleton_method(:check_lock_rank_ordering!) { |_node, _caps| nil }
+    ann.define_singleton_method(:record_with_acquire!) { |_fn, _cap, _held, _escape| nil }
+    ann.define_singleton_method(:cap_var_name) { |node| node.respond_to?(:name) ? node.name : "cap" }
+    ann.define_singleton_method(:lock_identity_of) { |_cap| :Counter }
+    ann.define_singleton_method(:with_new_scope) { |_scope, &blk| blk.call }
+    ann.define_singleton_method(:current_scope) { nil }
+    ann.define_singleton_method(:declare_capability_scope!) { |_cap| nil }
+    ann.define_singleton_method(:validate_and_visit_with_guards!) { |_node| nil }
+    ann.define_singleton_method(:validate_with_guard_no_body_mutation!) { |_node| nil }
+    ann.define_singleton_method(:retryable_with_fallible_sources) { |_body| [] }
+    ann.define_singleton_method(:retryable_with_universal_poly_candidate?) { |_node| false }
+    ann.define_singleton_method(:finalize_scope) { |_node| nil }
+    ann.define_singleton_method(:validate_no_multi_object_atomic!) { |_node| nil }
+    ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
+    ann.define_singleton_method(:validate_snapshot_match_arms!) { |_node| nil }
+    ann.define_singleton_method(:visit_stmts) { |_body| nil }
+
+    ann.send(:visit_WithBlock, with_node)
+
+    infer_without_symbol = AST::Capability.new(
+      capability: :infer,
+      var_node: AST::Identifier.new(token, "missing"),
+    )
+    infer_with_sync = AST::Capability.new(
+      capability: :infer,
+      var_node: AST::Identifier.new(token, "syncy"),
+    )
+    infer_with_sync[:var_node].symbol = SymbolEntry.new(
+      reg: nil,
+      type: Type.new(:Int64),
+      mutable: true,
+      storage: :heap,
+      sync: :atomic,
+    )
+
+    expect(ann.send(:sync_constrained_cap?, infer_without_symbol)).to be(false)
+    expect(ann.send(:sync_constrained_cap?, infer_with_sync)).to be(true)
+    expect(ann.send(:field_name_for_msg, AST::GetField.new(token, AST::Identifier.new(token, "x"), nil))).to eq("<field>")
+
+    codes = direct_errors(ann).map { |e| e[1] }
+    expect(codes).to include(:WITH_MATCH_VERSIONED_AS_MUTABLE, :WITH_MATCH_MULTI_CELL)
+  end
+
   it "covers representable capability conflict validation directly" do
     type = Type.new(:Counter)
     type.ownership = :shared

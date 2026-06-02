@@ -267,7 +267,7 @@ RSpec.describe SemanticAnnotator do
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
         assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
         expect(assign).not_to be_nil
-        expect(assign.auto_lock).to eq({ var: "c", sync: :locked })
+        expect(assign.auto_lock).to eq(AST::AutoLockPlan.new(var: "c", sync: :locked))
       end
     end
 
@@ -287,7 +287,7 @@ RSpec.describe SemanticAnnotator do
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
         assign = fn.body.find { |s| s.is_a?(AST::Assignment) && s.name.is_a?(AST::GetField) }
         expect(assign).not_to be_nil
-        expect(assign.auto_lock).to eq({ var: "c", sync: :write_locked })
+        expect(assign.auto_lock).to eq(AST::AutoLockPlan.new(var: "c", sync: :write_locked))
       end
     end
 
