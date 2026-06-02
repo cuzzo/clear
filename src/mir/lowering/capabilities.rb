@@ -92,6 +92,16 @@ module MIRLoweringCapabilities
     const :source_line, String
   end
 
+  class SortedAcquireEntry < T::Struct
+    const :index, Integer
+    const :alias_name, String
+    const :guard_var, String
+    const :held_var, String
+    const :lock_expr, String
+    const :addr_expr, String
+    const :method_name, String
+  end
+
   class LockBindingPlan < T::Struct
     const :guard_var, String
     const :alias_name, String
@@ -1337,7 +1347,7 @@ module MIRLoweringCapabilities
   # in its own labeled block today, so collisions are impossible in
   # practice, but the suffix makes the property defensible against
   # future lowering changes.
-  sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[SortedAcquireEntry]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1359,13 +1369,15 @@ module MIRLoweringCapabilities
                                  when :write_locked_read
                                    %w[read readOrErr]
                                  end
-      {
-        i: i, alias_name: alias_name,
+      SortedAcquireEntry.new(
+        index: i,
+        alias_name: alias_name.to_s,
         guard_var: "__sort_guard#{suffix}_#{i}",
-        held_var:  "__held#{suffix}_#{i}",
-        lock_expr: lock_expr, addr_expr: addr_expr,
-        method: fallible ? err_method : panic_method,
-      }
+        held_var: "__held#{suffix}_#{i}",
+        lock_expr: lock_expr,
+        addr_expr: addr_expr,
+        method_name: (fallible ? err_method : panic_method).to_s,
+      )
     end
   end
 
@@ -1388,19 +1400,19 @@ module MIRLoweringCapabilities
     entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
 
     guard_decls = entries.map { |e|
-      "var #{e[:guard_var]}: @TypeOf(#{e[:lock_expr]}.#{e[:method]}()) = undefined;"
+      "var #{e.guard_var}: @TypeOf(#{e.lock_expr}.#{e.method_name}()) = undefined;"
     }.join("\n")
 
-    ptr_init = entries.map { |e| "@intFromPtr(#{e[:addr_expr]})" }.join(", ")
+    ptr_init = entries.map { |e| "@intFromPtr(#{e.addr_expr})" }.join(", ")
     order_init = (0...n).to_a.join(", ")
 
     switch_arms = entries.map { |e|
-      "#{e[:i]} => #{e[:guard_var]} = #{e[:lock_expr]}.#{e[:method]}(),"
+      "#{e.index} => #{e.guard_var} = #{e.lock_expr}.#{e.method_name}(),"
     }.join("\n                ")
 
-    defer_releases = entries.map { |e| "defer #{e[:guard_var]}.release();" }.join("\n")
+    defer_releases = entries.map { |e| "defer #{e.guard_var}.release();" }.join("\n")
     alias_decls    = entries.map { |e|
-      "const #{e[:alias_name]} = #{e[:guard_var]}.get();\n_ = &#{e[:alias_name]};"
+      "const #{e.alias_name} = #{e.guard_var}.get();\n_ = &#{e.alias_name};"
     }.join("\n")
 
     <<~ZIG.rstrip
@@ -1453,19 +1465,19 @@ module MIRLoweringCapabilities
     acq_loop   = "__acq_sort_#{with_node.object_id.abs}"
 
     guard_decls = entries.map { |e|
-      "var #{e[:guard_var]}: @TypeOf(try #{e[:lock_expr]}.#{e[:method]}()) = undefined;"
+      "var #{e.guard_var}: @TypeOf(try #{e.lock_expr}.#{e.method_name}()) = undefined;"
     }.join("\n")
-    held_decls = entries.map { |e| "var #{e[:held_var]}: bool = false;" }.join("\n")
+    held_decls = entries.map { |e| "var #{e.held_var}: bool = false;" }.join("\n")
 
-    ptr_init   = entries.map { |e| "@intFromPtr(#{e[:addr_expr]})" }.join(", ")
+    ptr_init   = entries.map { |e| "@intFromPtr(#{e.addr_expr})" }.join(", ")
     order_init = (0...n).to_a.join(", ")
 
     acquire_arms = entries.map { |e|
       <<~ZIG.rstrip
-        #{e[:i]} => {
-                                        if (#{e[:lock_expr]}.#{e[:method]}()) |__g| {
-                                            #{e[:guard_var]} = __g;
-                                            #{e[:held_var]} = true;
+        #{e.index} => {
+                                        if (#{e.lock_expr}.#{e.method_name}()) |__g| {
+                                            #{e.guard_var} = __g;
+                                            #{e.held_var} = true;
                                         } else |__err_inner| {
                                             __err_caught = __err_inner;
                                             __success = false;
@@ -1475,7 +1487,7 @@ module MIRLoweringCapabilities
     }.join("\n                                ")
 
     release_arms = entries.map { |e|
-      "#{e[:i]} => if (#{e[:held_var]}) { #{e[:guard_var]}.release(); #{e[:held_var]} = false; },"
+      "#{e.index} => if (#{e.held_var}) { #{e.guard_var}.release(); #{e.held_var} = false; },"
     }.join("\n                            ")
 
     handler_arms = []
@@ -1502,9 +1514,9 @@ module MIRLoweringCapabilities
       "// no retries configured"
     end
 
-    defer_releases = entries.map { |e| "defer if (#{e[:held_var]}) #{e[:guard_var]}.release();" }.join("\n")
+    defer_releases = entries.map { |e| "defer if (#{e.held_var}) #{e.guard_var}.release();" }.join("\n")
     alias_decls    = entries.map { |e|
-      "const #{e[:alias_name]} = #{e[:guard_var]}.get();\n_ = &#{e[:alias_name]};"
+      "const #{e.alias_name} = #{e.guard_var}.get();\n_ = &#{e.alias_name};"
     }.join("\n")
 
     <<~ZIG.rstrip

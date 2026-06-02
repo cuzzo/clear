@@ -1109,7 +1109,7 @@ class RegisterBcEmitter
   # ends in an escape JUMP patched by compile_scope_block to land past
   # the LOCKREL. The acquired path registers the cell for release.
   def emit_fallible_lock_dispatch(fc, cell_reg)
-    retries = fc[:retries]
+    retries = fc.retries
     retry_reg = nil
     retry_top = nil
     if retries
@@ -1141,8 +1141,8 @@ class RegisterBcEmitter
       emit(JMP, retry_top)
       @ops[giveup] = @ops.length
     end
-    if fc[:action_kind] == :block
-      semantic_body(fc[:action_mir] || []).each { |s| compile_stmt(s) }
+    if fc.action_kind == :block
+      semantic_body(fc.action_mir || []).each { |s| compile_stmt(s) }
     end
     emit(JMP, 0)
     @with_fallible_escapes ||= []
@@ -2267,7 +2267,7 @@ class RegisterBcEmitter
       cell_reg = cell_backed_field_cell(src)
       if cell_reg
         @with_lock_releases ||= []
-        fc = fallible.find { |c| c[:var_name].to_s == src_name }
+        fc = fallible.find { |c| c.var_name.to_s == src_name }
         if fc
           emit_fallible_lock_dispatch(fc, cell_reg)
         else

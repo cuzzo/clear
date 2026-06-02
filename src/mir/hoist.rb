@@ -497,12 +497,34 @@ module MIRHoistLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_produces_owned_result?(node)
     return false unless node
+    return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
+
     effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
     return true if effect.produces_owned && effect.requires_hoist
     return true if node.is_a?(MIR::BgBlock)
-    return true if node.is_a?(MIR::Call) && node.owned_return?
 
     false
+  end
+
+  sig { params(call: MIR::Call).returns(T::Boolean) }
+  def owned_call_result_requires_cleanup?(call)
+    return false unless call.owned_return?
+
+    raw_type = call.result_type || call.callable_contract&.signature&.return_type
+    return true unless raw_type
+
+    ti = Type.new(raw_type)
+    ti = ti.success_type || ti
+    ti.string? ||
+      ti.collection? ||
+      ti.collection_value? ||
+      ti.recursive_cleanup_shape?(@schema_lookup) ||
+      ti.needs_cleanup?(@schema_lookup) ||
+      ti.heap_ptr? ||
+      ti.indirect? ||
+      ti.any_rc? ||
+      ti.any_sync? ||
+      ti.resource?
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -893,7 +915,7 @@ module MIRHoistLowering
         ))
         next
       end
-      if mir_produces_owned_result?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+      if mir_produces_owned_result?(child)
         owned_pair = normalize_allocating_used_expr(
           child,
           transfer_on_success: consumes_owned_children?(expr),
@@ -1184,6 +1206,12 @@ module MIRHoistLowering
     ti = ti.success_type || ti
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?
+    return nil unless ti.needs_explicit_cleanup?(alloc, @schema_lookup) ||
+      ti.recursive_cleanup_shape?(@schema_lookup) ||
+      ti.needs_cleanup?(@schema_lookup) ||
+      ti.heap_ptr? ||
+      ti.collection_value?
+
     zig_t = (Type.new(ti.resolved).zig_type rescue nil)
     return nil unless zig_t
     uniform_cleanup_entry(zig_t, alloc: alloc)

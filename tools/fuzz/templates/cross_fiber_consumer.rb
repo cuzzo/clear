@@ -51,19 +51,19 @@ FuzzGenerator.register(:cross_fiber_consumer, cells: CROSS_FIBER_CELLS) do |p|
     ]
   when :observable_find
     [
-      "gen: ~String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    matched: ~?String@observable = gen |> FIND _.contains?(\"1\");",
+      "gen: ~?String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    matched: ~?String@observable = gen |> FIND _.contains?(\"1\");",
       "matched", "?String",
       'final != NIL',
     ]
   when :observable_reduce_int
     [
-      "gen: ~Int64[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };\n    acc: ~Int64@observable = gen |> SUM _;",
+      "gen: ~?Int64[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };\n    acc: ~Int64@observable = gen |> SUM _;",
       "acc", "Int64",
       'final >= 0_i64',
     ]
   when :observable_distinct_string
     [
-      "gen: ~String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    distinct: ~String[]@set:observable = gen |> DISTINCT _;",
+      "gen: ~?String[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k.toString(); k = k + 1_i64; END\n    };\n    distinct: ~String[]@set:observable = gen |> DISTINCT _;",
       "distinct", "String[]@set",
       'final.length() >= 0_i64',
     ]

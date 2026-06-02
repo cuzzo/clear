@@ -1437,7 +1437,11 @@ module MIRLoweringFunctions
     sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
-    node_ti = Type.from_node!(node, context: "call owned return")
+    node_ti = if node.is_a?(AST::FunctionDef) && node.return_type
+      Type.new(node.return_type)
+    else
+      Type.from_node!(node, context: "call owned return")
+    end
     if !node_ti.any? && !node_ti.auto?
       return concrete_call_type_owned_return?(node_ti, sig)
     end
@@ -1494,8 +1498,18 @@ module MIRLoweringFunctions
       return ti.heap?
     end
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
+    schema_name = ti.generic_instance? ? ti.generic_base : ti.resolved
+    enum_schemas = T.unsafe(self).instance_variable_get(:@enum_schemas)
+    return false if enum_schemas&.key?(schema_name)
+
+    union_schemas = T.unsafe(self).instance_variable_get(:@union_schemas)
+    union_schema = union_schemas&.[](schema_name)
+    if union_schema
+      variants = union_schema.respond_to?(:variants) ? union_schema.variants : {}
+      return variants.any? { |_, variant_type| Type.variant_has_heap?(variant_type) }
+    end
+
     ti.ownership_bearing?(schema_lookup) ||
-      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
       ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
       ti.resource? || ti.recursive_cleanup_shape?(schema_lookup)
   end

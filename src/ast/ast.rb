@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
+require_relative "lexer"
 require_relative "../annotator/helpers/intrinsic_registry"
 
 # ==========================================
