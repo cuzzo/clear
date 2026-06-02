@@ -203,6 +203,24 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
   end
 
+  it "does not use regexes or regex-driven text rewriting in src/mir" do
+    pending("fsm-thunk structural rearchitecture: MIR must stop using generated text as semantic IR")
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/Regexp|\.match\?|\.match\(|\.scan\(|\.gsub\(\s*\//) ||
+                    line.match?(/\.sub\(\s*\//) ||
+                    line.match?(/=~\s*\//)
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty, offenders.join("\n")
+  end
+
   it "requires structural calls to carry typed callable contracts" do
     expect(source("src/mir/mir.rb")).to include("class CallableContract")
     expect(source("src/mir/mir.rb")).to include("attr_reader :signature")

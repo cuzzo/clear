@@ -57,12 +57,30 @@ require_relative "../../backends/zig_type"
 # loudly if the invariant is ever violated.
 
 require "sorbet-runtime"
+require "set"
 require_relative "../mir_emitter"
 
 module ThunkTransform
   module Emit
     extend T::Sig
     module_function
+
+    class FrameBindingContext < T::Struct
+      extend T::Sig
+
+      const :receiver_name, String
+      const :param_names, T::Set[String]
+
+      sig { params(name: String).returns(T::Boolean) }
+      def binds?(name)
+        param_names.include?(name)
+      end
+
+      sig { params(name: String).returns(MIR::FieldGet) }
+      def field_ref(name)
+        MIR::FieldGet.new(MIR::Ident.new(receiver_name), name)
+      end
+    end
 
     # Map normalized op codes (from AST::OP_TO_OP_CODE) to Zig
     # operators. Phase 4c restricts to these four; Phase 4f-g may
@@ -92,23 +110,25 @@ module ThunkTransform
         ".#{p[:name]} = #{p[:name]}"
       }
 
+      context = current_frame_context(fn_node)
+
       base_cases = plan.base_cases.map { |bc|
-        cond  = render_expr(bc[:cond_ast], lowering)
-        value = render_expr(bc[:value_ast], lowering)
+        cond  = render_expr(bc[:cond_ast], lowering, context)
+        value = render_expr(bc[:value_ast], lowering, context)
         {
-          cond_zig: qualify_params(cond, fn_node),
-          value_zig: qualify_params(value, fn_node),
+          cond_zig: cond,
+          value_zig: value,
         }
       }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
         param = fn_node.params[i]
         raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
-        rendered = qualify_params(render_expr(arg, lowering), fn_node)
+        rendered = render_expr(arg, lowering, context)
         ".#{param[:name]} = #{rendered}"
       }
 
-      combine_lhs_zig = qualify_params(render_expr(plan.combine_lhs, lowering), fn_node)
+      combine_lhs_zig = render_expr(plan.combine_lhs, lowering, context)
       op_zig = OP_TO_ZIG.fetch(plan.combine_op) {
         raise "thunk: unsupported op #{plan.combine_op}"
       }
@@ -127,14 +147,81 @@ module ThunkTransform
       )
     end
 
-    # Lower an AST expression to Zig text via the surrounding
-    # MIRLowering (mirrors fsm_transform/recursive_splitter.rb's
-    # pattern).
-    sig { params(ast_expr: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def render_expr(ast_expr, lowering)
-      T.bind(self, T.untyped) rescue nil
+    # Lower an AST expression through the surrounding MIRLowering, rewrite
+    # frame-bound param references structurally, then emit Zig from MIR.
+    sig { params(ast_expr: T.untyped, lowering: T.untyped, context: FrameBindingContext).returns(String) }
+    def render_expr(ast_expr, lowering, context)
       mir = lowering.lower(ast_expr)
-      lowering.send(:emit_expr, mir)
+      lowering.send(:emit_expr, bind_frame_refs(mir, context)).to_s
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(FrameBindingContext) }
+    def current_frame_context(fn_node)
+      FrameBindingContext.new(receiver_name: "current", param_names: param_names(fn_node))
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(FrameBindingContext) }
+    def mutual_frame_context(fn_node)
+      FrameBindingContext.new(receiver_name: "f", param_names: param_names(fn_node))
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(T::Set[String]) }
+    def param_names(fn_node)
+      names = T.let(Set.new, T::Set[String])
+      fn_node.params.each { |p| names << p[:name].to_s }
+      names
+    end
+
+    sig { params(mir: MIR::Node, context: FrameBindingContext).returns(MIR::Node) }
+    def bind_frame_refs(mir, context)
+      case mir
+      when MIR::Ident
+        name = mir.name.to_s
+        context.binds?(name) ? context.field_ref(name) : mir
+      when MIR::BinOp
+        MIR::BinOp.new(mir.op, bind_frame_refs(mir.left, context), bind_frame_refs(mir.right, context))
+      when MIR::UnaryOp
+        MIR::UnaryOp.new(mir.op, bind_frame_refs(mir.operand, context))
+      when MIR::FieldGet
+        MIR::FieldGet.new(bind_frame_refs(mir.object, context), mir.field)
+      when MIR::IndexGet
+        MIR::IndexGet.new(bind_frame_refs(mir.object, context), bind_frame_refs(mir.index, context))
+      when MIR::MethodCall
+        MIR::MethodCall.new(
+          bind_frame_refs(mir.receiver, context),
+          mir.method,
+          mir.args.map { |arg| bind_frame_refs(arg, context) },
+          mir.try_wrap,
+          mir.callable_contract,
+          mir.owned_result_alloc,
+        )
+      when MIR::Call
+        MIR::Call.new(
+          mir.callee,
+          mir.args.map { |arg| bind_frame_refs(arg, context) },
+          mir.try_wrap == true,
+          mir.owned_return?,
+          mir.callable_contract,
+        )
+      when MIR::Cast
+        MIR::Cast.new(bind_frame_refs(mir.expr, context), mir.target_type, mir.method)
+      when MIR::TryExpr
+        MIR::TryExpr.new(bind_frame_refs(mir.expr, context))
+      when MIR::TryCatch
+        MIR::TryCatch.new(
+          bind_frame_refs(mir.expr, context),
+          bind_frame_refs(mir.catch_body, context),
+          mir.capture,
+        )
+      when MIR::AddressOf
+        MIR::AddressOf.new(bind_frame_refs(mir.expr, context))
+      when MIR::Deref
+        MIR::Deref.new(bind_frame_refs(mir.expr, context))
+      when MIR::OptionalUnwrap
+        MIR::OptionalUnwrap.new(bind_frame_refs(mir.expr, context))
+      else
+        mir
+      end
     end
 
     sig { params(param: T.untyped, _lowering: T.untyped).returns(String) }
@@ -176,22 +263,6 @@ module ThunkTransform
             "non-fallible invariant, extend `build_trampoline` and " \
             "`build_mutual_trampoline` to emit an errdefer that walks " \
             "`current.parent` and frees every non-initial Frame."
-    end
-
-    # Rewrite bare param refs to `current.<name>` so the rendered
-    # body reads from the live frame instead of the (now-stale)
-    # outer fn parameters. The render_expr path emits parameter
-    # identifiers as their bare Zig names; we substitute them here
-    # via a word-boundary regex sweep.
-    sig { params(zig_text: T.untyped, fn_node: T.untyped).returns(T.untyped) }
-    def qualify_params(zig_text, fn_node)
-      T.bind(self, T.untyped) rescue nil
-      out = zig_text.dup
-      fn_node.params.each do |p|
-        name = p[:name]
-        out = out.gsub(/(?<![A-Za-z0-9_.])#{Regexp.escape(name)}(?![A-Za-z0-9_])/, "current.#{name}")
-      end
-      out
     end
 
     # Phase 4f.1: emit a tagged-union trampoline for one member of a
@@ -267,10 +338,11 @@ module ThunkTransform
     def build_mutual_arm(cf, _mtp, ret_zig, lowering)
       T.bind(self, T.untyped) rescue nil
       own_plan = cf.mutual_thunk_plan.own_plan
+      context = mutual_frame_context(cf)
 
       base_cases = own_plan.base_cases.map { |bc|
-        cond = qualify_with_f(render_expr(bc[:cond_ast], lowering), cf)
-        value = qualify_with_f(render_expr(bc[:value_ast], lowering), cf)
+        cond = render_expr(bc[:cond_ast], lowering, context)
+        value = render_expr(bc[:value_ast], lowering, context)
         {
           cond_zig: cond,
           value_zig: value,
@@ -283,7 +355,7 @@ module ThunkTransform
       raise "thunk: target arg/param count mismatch for '#{cf.name}' -> '#{target_fn}'" \
         if target_args.length != target_params.length
       arg_inits = target_args.each_with_index.map { |arg, i|
-        rendered = qualify_with_f(render_expr(arg, lowering), cf)
+        rendered = render_expr(arg, lowering, context)
         ".#{target_params[i][:name]} = #{rendered}"
       }
       _ = ret_zig
@@ -301,19 +373,6 @@ module ThunkTransform
       T.bind(self, T.untyped) rescue nil
       cf.mutual_thunk_plan.cycle_fns.find { |x| x.name == name } or
         raise "thunk: cycle member '#{name}' not found for '#{cf.name}'"
-    end
-
-    # Mutual variant: bare param refs become `f.<name>` (the switch
-    # capture binds the active variant's payload to `f`).
-    sig { params(zig_text: T.untyped, cf: T.untyped).returns(T.untyped) }
-    def qualify_with_f(zig_text, cf)
-      T.bind(self, T.untyped) rescue nil
-      out = zig_text.dup
-      cf.params.each do |p|
-        name = p[:name]
-        out = out.gsub(/(?<![A-Za-z0-9_.])#{Regexp.escape(name)}(?![A-Za-z0-9_])/, "f.#{name}")
-      end
-      out
     end
 
   end
