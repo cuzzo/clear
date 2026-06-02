@@ -19,21 +19,21 @@ CLEAR makes the common case zero-cost and the uncommon case explicit. You pay fo
 CLEAR excels at high-throughput data processing. Here is a pipeline that handles back-pressure, manages complex errors, and leverages shared-nothing architecture:
 
 ```ruby clear illustrative
--- Shared-nothing pool with Sharded Structure-of-Arrays for lock-free, cache-optimal access
+# Shared-nothing pool with Sharded Structure-of-Arrays for lock-free, cache-optimal access
 MUTABLE sensors: Sensor[]@pool:sharded(64):soa = load_sensors();
 
--- Pipeline with parallel execution and dynamic control plane monitoring
+# Pipeline with parallel execution and dynamic control plane monitoring
 results = sensors
-  s> CONCURRENT(workers: 16, parallel: TRUE) 
-     SELECT process_reading(_) OR PRUNE    -- Drop failed readings
-  s> WHERE _.intensity > 0.8
-  s> LIMIT 1000;
+  |> CONCURRENT(workers: 16, parallel: TRUE) 
+     SELECT process_reading(_) OR PRUNE    # Drop failed readings
+  |> WHERE _.intensity > 0.8
+  |> LIMIT 1000;
 
--- The Control Plane automatically handles 'OnSkew'
--- If one shard becomes a bottleneck, the runtime detects the statistical
--- imbalance and enables work-stealing across shards automatically.
--- Note: IFF skew is detected, shared-nothing optimizations are sacrificed
--- to re-enable parallel processing of the skewed data.
+# The Control Plane automatically handles 'OnSkew'
+# If one shard becomes a bottleneck, the runtime detects the statistical
+# imbalance and enables work-stealing across shards automatically.
+# Note: IFF skew is detected, shared-nothing optimizations are sacrificed
+# to re-enable parallel processing of the skewed data.
 ```
 
 ## PERFORMANCE
