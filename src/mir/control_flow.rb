@@ -641,14 +641,9 @@ class OwnershipDataflow
     result = dup_state(@block_out[preds.first.id])
     preds.drop(1).each do |pred|
       pred_out = @block_out[pred.id]
-      all_vars = (result.keys | pred_out.keys)
-      merged = {}
-      all_vars.each do |var|
-        a = result[var]
-        b = pred_out[var]
-        merged[var] = join_entry(a, b)
+      pred_out.each do |var, b|
+        result[var] = T.cast(join_entry(result[var], b), OwnerEntry)
       end
-      result = merged
     end
     result
   end
@@ -668,8 +663,12 @@ class OwnershipDataflow
     # These are immutable per-variable properties, so both sides agree
     # (or one side is nil/UNINIT and has no entry).
     if a.is_a?(OwnerEntry)
+      return a if joined_state == a.state
+
       OwnerEntry.new(state: joined_state, allocator: a.allocator, needs_cleanup: a.needs_cleanup)
     elsif b.is_a?(OwnerEntry)
+      return b if joined_state == b.state
+
       OwnerEntry.new(state: joined_state, allocator: b.allocator, needs_cleanup: b.needs_cleanup)
     else
       joined_state
@@ -700,6 +699,8 @@ class OwnershipDataflow
   def mark_moved!(state, name)
     existing = state[name]
     if existing.is_a?(OwnerEntry)
+      return existing if existing.state == MOVED
+
       state[name] = OwnerEntry.new(state: MOVED, allocator: existing.allocator, needs_cleanup: existing.needs_cleanup)
     else
       state[name] = MOVED

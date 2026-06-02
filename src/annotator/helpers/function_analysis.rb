@@ -1043,18 +1043,36 @@ module FunctionAnalysis
         spec = config[:args][i]
         if spec.is_a?(Hash)
           expected = spec[:type]
-          next false unless is_safe_autocast?(arg.resolved_type, expected)
+          next true if expected == :Any && !spec[:sync] && !spec[:ownership]
+          next false unless expected == :Any || is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
           arg_type = arg.full_type!(context: "intrinsic capability argument")
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true
         else
+          next true if spec == :Any
+          next true if spec.is_a?(Symbol) && any_array_intrinsic_arg?(spec, arg)
           is_safe_autocast?(arg.resolved_type, spec)
         end
       end
     end
     matched && IntrinsicRegistry.fs(matched)
+  end
+
+  sig { params(spec: Symbol, arg: Object).returns(T::Boolean) }
+  def any_array_intrinsic_arg?(spec, arg)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return false unless spec == :"Any[]"
+    return false unless arg.respond_to?(:full_type!)
+
+    type = arg.send(:full_type!, context: "intrinsic Any[] argument")
+    return false unless type.is_a?(Type)
+    return true if type.array?
+    return false unless type.future?
+
+    type.dynamic_stream? || type.promise_list? || type.bounded_stream? ||
+      type.open_stream? || type.inf_stream?
   end
 
   # Formats intrinsic args for error messages

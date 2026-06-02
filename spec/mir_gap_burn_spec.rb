@@ -59,6 +59,20 @@ RSpec.describe "MIR gap-burn characterization" do
     MIRLowering.new
   end
 
+  def ownership_finalization_context(out: [], guarded_cleanup_names: Set.new, alloc_marks: {}, body_alloc_mark_names: Set.new)
+    MIRLowering::OwnershipFinalizationContext.new(
+      inherited_alloc_names: Set.new,
+      out: out,
+      guarded_cleanup_names: guarded_cleanup_names,
+      alloc_marks: alloc_marks,
+      body_alloc_mark_names: body_alloc_mark_names,
+      transfer_mark_names: Set.new,
+      body_transfer_mark_names: Set.new,
+      move_mark_names: out.filter_map { |node| node.name.to_s if node.is_a?(MIR::MoveMark) }.to_set,
+      cleanup_by_name: {},
+    )
+  end
+
   it "builds CFG edges for every structured body form in one pass" do
     one = lit(1, type: :Int64)
     if_stmt = AST::IfStatement.new(tok, one, [AST::BreakNode.new(tok)], [AST::ContinueNode.new(tok)], nil, nil)
@@ -199,16 +213,17 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:apply_lowered_coercion, MIR::Ident.new("n"), same)).to be_a(MIR::Ident)
 
     plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
-    fact = low.send(:implicit_allocating_result_fact, plain, [])
+    fact = low.send(:implicit_allocating_result_fact, plain, ownership_finalization_context)
     expect(fact.name).to eq("tmp")
     expect(fact.ownership_effect.target_var).to eq("tmp")
 
     wrapped_alloc = MIR::Let.new("wrapped", MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", nil), false, "[]const u8", nil)
-    expect(low.send(:implicit_allocating_result_fact, wrapped_alloc, []).ownership_effect.target_var).to eq("wrapped")
+    expect(low.send(:implicit_allocating_result_fact, wrapped_alloc, ownership_finalization_context).ownership_effect.target_var).to eq("wrapped")
 
     marked = MIR::Let.new("marked", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
-    out = [MIR::AllocMark.new("marked", :heap, Type.new(:String), :function)]
-    expect(low.send(:implicit_allocating_result_fact, marked, out)).to be_nil
+    mark = MIR::AllocMark.new("marked", :heap, Type.new(:String), :function)
+    expect(low.send(:implicit_allocating_result_fact, marked,
+      ownership_finalization_context(alloc_marks: { "marked" => mark }))).to be_nil
   end
 
   it "covers lowering ownership source predicates without lowering syntax" do
@@ -358,7 +373,7 @@ RSpec.describe "MIR gap-burn characterization" do
       stdlib_alloc, { alloc: :heap })
     mutating_alloc.result_ownership_bearing = true
     expect(low.send(:implicit_allocating_result_fact,
-      MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), [])).to be_nil
+      MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), ownership_finalization_context)).to be_nil
 
     nested_alloc = Struct.new(:child) do
       include MIR::Expr
@@ -367,7 +382,7 @@ RSpec.describe "MIR gap-burn characterization" do
       def ownership_effect = MIR::OwnershipEffect.none
     end.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))
     nested_fact = low.send(:implicit_allocating_result_fact,
-      MIR::Let.new("nested", nested_alloc, false, Type.new(:String), nil), [])
+      MIR::Let.new("nested", nested_alloc, false, Type.new(:String), nil), ownership_finalization_context)
     expect(nested_fact.ownership_effect.target_var).to eq("nested")
 
     if_bind = MIR::IfBindStmt.new([
@@ -400,7 +415,7 @@ RSpec.describe "MIR gap-burn characterization" do
     end.new
     expect(empty_target_lowering.send(:ownership_transfers_for_node,
       MIR::ExprStmt.new(MIR::Ident.new("x"), false),
-      MIRLowering::OwnershipFinalizationContext.new(inherited_alloc_names: Set.new, out: [], guarded_cleanup_names: Set.new))).to eq([])
+      ownership_finalization_context)).to eq([])
 
     low.instance_variable_set(:@current_bindings, nil)
     expect(low.send(:ownership_consumed_name_operands, ["hidden"], "src", :heap)).to eq([])
@@ -422,7 +437,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:mir_cast, MIR::Ident.new("fn"), Type.new(fn_sig), Type.new(:Any))).to be_a(MIR::Cast)
     expect(low.send(:mir_cast, MIR::Ident.new("err"), Type.new(:Int64), Type.new(:"!String"))).to be_a(MIR::Cast)
     expect(low.send(:ast_void_type?, nil)).to eq(true)
-    expect(low.send(:implicit_allocating_result_fact, MIR::Ident.new("not_let"), [])).to be_nil
+    expect(low.send(:implicit_allocating_result_fact, MIR::Ident.new("not_let"), ownership_finalization_context)).to be_nil
     borrowed_field = AST::GetField.new(tok, id("owner", type: :String, storage: :heap), "field")
     borrowed_field.full_type = Type.new(:String)
     expect(low.send(:return_destination_alloc, AST::ReturnNode.new(tok, borrowed_field))).to eq(:heap)
@@ -535,18 +550,13 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers hardened MIR ownership finalization fallbacks directly" do
     low = lowering
 
-    state = MIRLowering::OwnershipFinalizationContext.new(
-      inherited_alloc_names: Set.new,
+    state = ownership_finalization_context(
       out: [MIR::MoveMark.new("owned")],
       guarded_cleanup_names: Set["owned"],
     )
     low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), state)
     expect(state.out.count { |stmt| stmt.is_a?(MIR::MoveMark) && stmt.name == "owned" }).to eq(1)
-    unmarked_state = MIRLowering::OwnershipFinalizationContext.new(
-      inherited_alloc_names: Set.new,
-      out: [],
-      guarded_cleanup_names: Set["owned"],
-    )
+    unmarked_state = ownership_finalization_context(guarded_cleanup_names: Set["owned"])
     low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), unmarked_state)
     expect(unmarked_state.out).to include(an_instance_of(MIR::MoveMark))
 
