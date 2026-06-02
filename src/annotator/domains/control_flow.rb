@@ -8,15 +8,20 @@ module Annotator
 
       MatchSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
       MatchPayload = T.type_alias { T.any(Type, Symbol, Schemas::InlineStructVariant, NilClass) }
+      BranchSnapshot = T.type_alias { T.nilable(T::Hash[Symbol, T.untyped]) }
+
+      class BranchAnalysisResult < T::Struct
+        const :drops, BasicObject
+        const :snapshot, BranchSnapshot
+        const :terminated, T::Boolean
+      end
 
       sig { params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean).returns(T::Array[BasicObject]) }
       def analyze_control_flow_branches(branches, merge_to_parent: true)
         T.bind(self, SemanticAnnotator)
 
         og_snapshot = @og&.fork_lightweight
-        og_branch_snapshots = []
-        branch_terminates = []
-        all_drops = []
+        branch_results = T.let([], T::Array[BranchAnalysisResult])
 
         branches.each do |branch_logic|
           # Restore graph to pre-branch state before analyzing each branch
@@ -25,9 +30,11 @@ module Annotator
           @branch_terminated = false
           with_new_scope(current_scope) do
             og_push_scope
-            all_drops << branch_logic.call
-            og_branch_snapshots << (@og&.fork_lightweight)
-            branch_terminates << @branch_terminated
+            branch_results << BranchAnalysisResult.new(
+              drops: branch_logic.call,
+              snapshot: @og&.fork_lightweight,
+              terminated: @branch_terminated,
+            )
             og_pop_scope
           end
           @branch_terminated = prev_terminated
@@ -38,8 +45,9 @@ module Annotator
           # A terminating branch (RETURN/RAISE) cannot reach the merge point, so
           # its moved states must not poison the post-branch scope.
           @og&.restore_lightweight(og_snapshot) if og_snapshot
-          og_branch_snapshots.each_with_index do |snap, i|
-            next if branch_terminates[i]
+          branch_results.each do |branch_result|
+            next if branch_result.terminated
+            snap = branch_result.snapshot
             next unless snap
             # Lightweight merge: just apply moved states
             snap[:node_states].each do |path, saved|
@@ -62,7 +70,7 @@ module Annotator
           @og&.restore_lightweight(og_snapshot) if og_snapshot
         end
 
-        all_drops
+        branch_results.map(&:drops)
       end
 
       sig { params(node: AST::BlockExpr).returns(T.nilable(Scope)) }
