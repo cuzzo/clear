@@ -178,7 +178,7 @@ module MIRLoweringExpressions
     # before reaching the MIR lowering. If one arrives here it means it was
     # used outside its pipeline context (after the pipeline expression ended,
     # or in a pipeline that doesn't have a matching AS declaration).
-    if node.name.match?(/\A\$[a-z]/)
+    if synthetic_pipeline_binding_name?(node.name)
       line = node.token&.line || "?"
       raise "line #{line}: Undefined pipeline binding '#{node.name}'. " \
             "Pipeline bindings must be declared with 'AS #{node.name}' " \
@@ -231,6 +231,15 @@ module MIRLoweringExpressions
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def synthetic_pipeline_binding_name?(name)
+    return false unless name.start_with?("$")
+    return false if name.length < 2
+
+    codepoint = T.must(name[1]).ord
+    codepoint >= 97 && codepoint <= 122
   end
 
   sig { params(node: AST::Identifier).returns(T::Boolean) }

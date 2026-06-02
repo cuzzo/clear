@@ -260,8 +260,6 @@ class MIRLowering
   include MIRLoweringVariables
   include MIRLoweringControlFlow
 
-  ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
-
   attr_reader :fn_sigs
   attr_accessor :shard_context
 
@@ -2145,7 +2143,7 @@ class MIRLowering
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     cleaned = "clearMain" if cleaned == "main"
-    cleaned =~ ZIG_PRIMITIVE_RE ? "@\"#{cleaned}\"" : cleaned
+    ZigType.primitive_numeric_identifier?(T.must(cleaned)) ? "@\"#{cleaned}\"" : cleaned
   end
 
   sig { params(node: T.untyped).returns(Symbol) }
@@ -2769,9 +2767,10 @@ class MIRLowering
     i = T.let(0, Integer)
     while i < lines.length
       line = lines[i]
-      if line =~ /\Aconst (\w+)\s*=\s*(?:(struct|union\(enum\)|enum)\s*[\{(])?/
-        name = T.must(Regexp.last_match(1))
-        kind = Regexp.last_match(2)
+      header = parse_zig_const_header(T.must(line))
+      if header
+        name = header.name
+        kind = header.kind
         block_lines = T.let([T.must(line)], T::Array[String])
         depth = brace_depth(T.must(line))
         i += 1
@@ -2800,6 +2799,64 @@ class MIRLowering
   sig { params(line: String).returns(Integer) }
   def brace_depth(line)
     line.count("{") - line.count("}")
+  end
+
+  sig { params(line: String).returns(T.nilable(ZigConstBlock)) }
+  def parse_zig_const_header(line)
+    rest = line.lstrip
+    return nil unless rest.start_with?("const ")
+    rest = T.must(rest[6..])
+    name = read_zig_identifier_prefix(rest)
+    return nil if name.empty?
+
+    rest = T.must(rest[name.length..]).lstrip
+    return nil unless rest.start_with?("=")
+    rest = T.must(rest[1..]).lstrip
+    ZigConstBlock.new(name: name, kind: zig_const_kind(rest), lines: [])
+  end
+
+  sig { params(text: String).returns(String) }
+  def read_zig_identifier_prefix(text)
+    chars = T.let([], T::Array[String])
+    text.each_char.with_index do |ch, idx|
+      valid = if idx.zero?
+        zig_identifier_start?(ch)
+      else
+        zig_identifier_part?(ch)
+      end
+      break unless valid
+      chars << ch
+    end
+    chars.join
+  end
+
+  sig { params(ch: String).returns(T::Boolean) }
+  def zig_identifier_start?(ch)
+    codepoint = ch.ord
+    (codepoint >= 65 && codepoint <= 90) || (codepoint >= 97 && codepoint <= 122) || ch == "_"
+  end
+
+  sig { params(ch: String).returns(T::Boolean) }
+  def zig_identifier_part?(ch)
+    return true if zig_identifier_start?(ch)
+    codepoint = ch.ord
+    codepoint >= 48 && codepoint <= 57
+  end
+
+  sig { params(rest: String).returns(T.nilable(String)) }
+  def zig_const_kind(rest)
+    return "union(enum)" if zig_const_kind_prefix?(rest, "union(enum)")
+    return "struct" if zig_const_kind_prefix?(rest, "struct")
+    return "enum" if zig_const_kind_prefix?(rest, "enum")
+
+    nil
+  end
+
+  sig { params(rest: String, prefix: String).returns(T::Boolean) }
+  def zig_const_kind_prefix?(rest, prefix)
+    return false unless rest.start_with?(prefix)
+    suffix = T.must(rest[prefix.length..]).lstrip
+    suffix.start_with?("{") || suffix.start_with?("(")
   end
 
   # ================================================================
@@ -2856,7 +2913,16 @@ class MIRLowering
     fields = ".profile_site_id = #{site_id}, .profile_dispatch = #{profile_dispatch_id(dispatch)}"
     stripped = task_cfg.strip
     return ".{ #{fields} }" if stripped == ".{}"
-    stripped.sub(/\}\s*\z/, ", #{fields} }")
+    append_zig_struct_literal_fields(stripped, fields)
+  end
+
+  sig { params(literal: String, fields: String).returns(String) }
+  def append_zig_struct_literal_fields(literal, fields)
+    trimmed = literal.rstrip
+    return literal unless trimmed.end_with?("}")
+
+    prefix = T.must(trimmed[0...-1])
+    "#{prefix}, #{fields} }"
   end
 
   sig { params(dispatch: T.untyped).returns(Integer) }

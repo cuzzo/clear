@@ -532,6 +532,12 @@ module MIR
     end
   end
 
+  class InlineZigAuditMetadata < T::Struct
+    extend T::Sig
+
+    prop :opaque_ownership_operations, T::Boolean
+  end
+
   sig do
     params(
       alloc: T.nilable(Symbol),
@@ -1068,7 +1074,7 @@ module MIR
 
     sig { returns(RawZig) }
     def without_try
-      RawZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def)
+      RawZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def)
     end
 
     private
@@ -3281,10 +3287,31 @@ module MIR
       @result_ownership_bearing = T.let(value, T.nilable(T::Boolean))
       value
     end
+    sig { returns(T::Boolean) }
+    def opaque_ownership_operations
+      @audit_metadata.opaque_ownership_operations
+    end
+    sig { void }
+    def mark_opaque_ownership_operations!
+      @audit_metadata.opaque_ownership_operations = true
+      nil
+    end
+    sig { returns(T::Array[String]) }
+    def copied_consumed_bindings
+      @copied_consumed_bindings
+    end
+    sig { params(name: String).void }
+    def mark_copied_consumed_binding!(name)
+      normalized = name.to_s
+      copied_consumed_bindings << normalized unless normalized.empty? || copied_consumed_bindings.include?(normalized)
+      nil
+    end
 
     sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
     def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
       super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
+      @audit_metadata = T.let(InlineZigAuditMetadata.new(opaque_ownership_operations: false), InlineZigAuditMetadata)
+      @copied_consumed_bindings = T.let([], T::Array[String])
     end
 
     sig { params(contract: OwnershipContract).returns(OwnershipContract) }
@@ -3360,10 +3387,12 @@ module MIR
 
     sig { returns(InlineZig) }
     def without_try
-      out = InlineZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def, allocs, target_var)
+      out = InlineZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var)
       owns = result_ownership_bearing
       out.result_ownership_bearing = owns unless owns.nil?
       out.result_type = Type.new(result_type) if result_type
+      out.mark_opaque_ownership_operations! if opaque_ownership_operations
+      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
       out
     end
 

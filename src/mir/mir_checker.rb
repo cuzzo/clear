@@ -1811,9 +1811,7 @@ class MIRChecker
 
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }
   def opaque_zig_allocator_ownership?(node)
-    code = node.code.to_s
-    code.match?(/\b(?:heapAlloc|getSched\(\)\.allocator|allocator)\s*\(\)?\s*\.(?:alloc|dupe|create|destroy|free|deinit)\b/) ||
-      code.match?(/\b(?:alloc|dupe|create|destroy|free|deinit)\s*\(/)
+    node.opaque_ownership_operations
   end
 
   sig { params(body: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
@@ -2081,12 +2079,86 @@ class MIRChecker
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }
   def inline_zig_requires_contract?(node)
     code = node.code.to_s
-    return true if code.match?(/\bCheat(?:Lib|Header)\./)
-    return false if code.match?(/\A\s*@(?:as|bitCast|constCast|enumFromInt|floatFromInt|intCast|intFromEnum|intFromPtr|ptrCast|alignCast)\b/)
-    return false if code.match?(/\A\s*\.?[A-Za-z_][A-Za-z0-9_]*\s*\z/)
-    return false if code.match?(/\A\s*[A-Za-z_][A-Za-z0-9_]*(?:\.\*)?\s*=/)
+    return true if code.include?("CheatLib.") || code.include?("CheatHeader.")
+    return false if harmless_zig_builtin_expr?(code)
+    return false if simple_zig_value_expr?(code)
+    return false if simple_zig_assignment_stmt?(code)
 
-    code.match?(/\b[A-Za-z_][A-Za-z0-9_]*\s*\(/)
+    has_zig_call_syntax?(code)
+  end
+
+  sig { params(code: String).returns(T::Boolean) }
+  def harmless_zig_builtin_expr?(code)
+    stripped = code.strip
+    [
+      "@as", "@bitCast", "@constCast", "@enumFromInt", "@floatFromInt",
+      "@intCast", "@intFromEnum", "@intFromPtr", "@ptrCast", "@alignCast",
+    ].any? { |name| stripped.start_with?(name) }
+  end
+
+  sig { params(code: String).returns(T::Boolean) }
+  def simple_zig_value_expr?(code)
+    stripped = code.strip
+    stripped = stripped.delete_prefix(".")
+    return false if stripped.empty?
+
+    read_zig_identifier_prefix(stripped) == stripped
+  end
+
+  sig { params(code: String).returns(T::Boolean) }
+  def simple_zig_assignment_stmt?(code)
+    stripped = code.strip
+    equals_idx = stripped.index("=")
+    return false unless equals_idx
+
+    lhs = T.must(stripped[0...equals_idx]).strip
+    lhs = lhs.delete_suffix(".*")
+    read_zig_identifier_prefix(lhs) == lhs
+  end
+
+  sig { params(code: String).returns(T::Boolean) }
+  def has_zig_call_syntax?(code)
+    chars = code.each_char.to_a
+    chars.each_with_index.any? do |ch, idx|
+      next false unless ch == "("
+      prev = previous_non_space(chars, idx)
+      prev && zig_identifier_part?(prev)
+    end
+  end
+
+  sig { params(chars: T::Array[String], idx: Integer).returns(T.nilable(String)) }
+  def previous_non_space(chars, idx)
+    i = idx - 1
+    while i >= 0
+      ch = T.must(chars[i])
+      return ch unless ch == " " || ch == "\t" || ch == "\n"
+      i -= 1
+    end
+    nil
+  end
+
+  sig { params(text: String).returns(String) }
+  def read_zig_identifier_prefix(text)
+    chars = T.let([], T::Array[String])
+    text.each_char.with_index do |ch, idx|
+      valid = idx.zero? ? zig_identifier_start?(ch) : zig_identifier_part?(ch)
+      break unless valid
+      chars << ch
+    end
+    chars.join
+  end
+
+  sig { params(ch: String).returns(T::Boolean) }
+  def zig_identifier_start?(ch)
+    codepoint = ch.ord
+    (codepoint >= 65 && codepoint <= 90) || (codepoint >= 97 && codepoint <= 122) || ch == "_"
+  end
+
+  sig { params(ch: String).returns(T::Boolean) }
+  def zig_identifier_part?(ch)
+    return true if zig_identifier_start?(ch)
+    codepoint = ch.ord
+    codepoint >= 48 && codepoint <= 57
   end
 
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }
@@ -2181,10 +2253,9 @@ class MIRChecker
 
   sig { params(node: T.untyped, name: String).returns(T::Boolean) }
   def copying_consumed_binding?(node, name)
-    return false unless node.respond_to?(:code) && node.code.is_a?(String)
-    escaped = Regexp.escape(name)
-    !!(node.code.match?(/CheatLib\.dupe(?:Value|UnionValue)?\(.*\b#{escaped}\b/m) ||
-       node.code.match?(/\.dupe\(.*\b#{escaped}\b/m))
+    return false unless node.is_a?(MIR::InlineZig)
+
+    node.copied_consumed_bindings.include?(name)
   end
 
   # FRAME_NO_REWIND: every iteration-scoped frame allocation must be inside a

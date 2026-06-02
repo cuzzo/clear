@@ -248,6 +248,62 @@ RSpec.describe MIRLowering do
       expect(out).to include("&__Worker.run")
       expect(out).to include("__worker")
     end
+
+    it "strips leading try when assigning a BG value result" do
+      fake = Object.new
+      fake.extend(MIRLoweringConcurrency)
+      expr = make_lit(:INT64, 1)
+      step = MIRLoweringConcurrency::BgBodyStep.new(expr: expr, binding: nil)
+      lowered = MIR::RawZig.new("try compute()", "spec")
+
+      fake.define_singleton_method(:escaping_value_alloc) { |_inner| :heap }
+      fake.define_singleton_method(:with_decl_alloc) { |_alloc, &blk| blk.call }
+      fake.define_singleton_method(:lower) { |_node| lowered }
+      fake.define_singleton_method(:place_value_for_destination) { |mir, _node, _alloc, _type| mir }
+      fake.define_singleton_method(:mir_allocates?) { |_mir| false }
+      fake.define_singleton_method(:flush_pending) { [] }
+      fake.define_singleton_method(:emit_expr) { |_mir| "try compute()" }
+      fake.define_singleton_method(:ownership_marks_for_transferred_temp) { |_mir, target_alloc:| [] }
+
+      body = []
+      result = fake.send(:lower_bg_value_result, step, body, 7, Type.new(:Int64))
+      expect(result).to eq("__ctx_7.inner.result = compute();")
+      expect(body).to include(an_instance_of(MIR::Set))
+    end
+  end
+
+  describe "small MIR text-shape helpers" do
+    it "classifies synthetic pipeline bindings without regex parsing" do
+      low = lowering
+
+      expect(low.send(:synthetic_pipeline_binding_name?, "$a")).to be true
+      expect(low.send(:synthetic_pipeline_binding_name?, "$")).to be false
+      expect(low.send(:synthetic_pipeline_binding_name?, "$A")).to be false
+    end
+
+    it "normalizes union match fallback variants without regex parsing" do
+      fake = Object.new
+      fake.extend(MIRLoweringControlFlow)
+      fake.define_singleton_method(:lower) { |value| value }
+      fake.define_singleton_method(:emit_expr) { |_value| ".Fallback" }
+      arm = Struct.new(:value, :extra_values).new(Object.new, [])
+
+      expect(fake.send(:union_match_case_variants, arm)).to eq(["Fallback"])
+    end
+
+    it "builds pointer return payloads without regex parsing" do
+      fake = Object.new
+      fake.extend(MIRLoweringControlFlow)
+      fake.define_singleton_method(:current_function_return_payload_zig) { "*Payload" }
+      fake.define_singleton_method(:return_value_already_payload_pointer?) { |_value| false }
+      fake.define_singleton_method(:mir_ident_names) { |_value| [] }
+      fake.define_singleton_method(:with_ownership_consumption) { |value, *_args, **_kwargs| value }
+      node = AST::ReturnNode.new(tok, make_lit(:INT64, 1))
+
+      result = fake.send(:return_payload_pointer_value, node, MIR::Ident.new("value"))
+      expect(result).to be_a(MIR::HeapCreate)
+      expect(result.zig_type).to eq("Payload")
+    end
   end
 
   # =========================================================================

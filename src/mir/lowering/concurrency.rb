@@ -440,7 +440,7 @@ module MIRLoweringConcurrency
                 # @TypeOf(<outer_ref>) so the field type resolves under the
                 # rewritten scope (e.g. @TypeOf(__ctx_0.x) instead of
                 # @TypeOf(x)).
-                s.field_type_zig.sub(/\(#{Regexp.escape(s.name)}\)/, "(#{outer_capture_map[s.name]})")
+	                s.field_type_zig.sub("(#{s.name})", "(#{outer_capture_map[s.name]})")
       end
       "#{s.name}: #{ftype},"
     }
@@ -716,7 +716,7 @@ module MIRLoweringConcurrency
     body_mir.concat(last_pending)
     result_code = T.cast(emit_expr(last_mir), String)
     pending_code = bg_pending_code(last_pending).join("\n            ")
-    result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+    result_code = result_code.delete_prefix("try ")
     result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
     body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
     body_mir << MIR::Set.new(result_target, last_mir)

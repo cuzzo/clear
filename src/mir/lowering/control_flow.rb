@@ -736,7 +736,7 @@ module MIRLoweringControlFlow
       when AST::MethodCall
         value.name.to_s
       else
-        emit_expr(lower(value)).to_s.sub(/\A\./, "")
+	        emit_expr(lower(value)).to_s.delete_prefix(".")
       end
     end
   end
@@ -881,7 +881,7 @@ module MIRLoweringControlFlow
     return value if value.is_a?(MIR::HeapCreate) || value.is_a?(MIR::Call)
     return value if return_value_already_payload_pointer?(node.value)
 
-    bare_ret = payload_zig.sub(/\A\*/, "")
+	    bare_ret = payload_zig.delete_prefix("*")
     with_ownership_consumption(
       MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
       mir_ident_names(value),

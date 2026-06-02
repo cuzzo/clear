@@ -761,6 +761,7 @@ RSpec.describe MIRChecker do
     it "rejects opaque allocator ownership even when stdlib_def is set" do
       iz = MIR::InlineZig.new("const p = try rt.heapAlloc().create(Node); rt.heapAlloc().destroy(p);", "opaque_alloc")
       iz.stdlib_def = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+      iz.mark_opaque_ownership_operations!
       body = [MIR::ExprStmt.new(iz, false)]
       errors = checker.check_fn!(fn_def("f", body))
       expect(errors.any? { |e| e.include?("OPAQUE_ZIG_OWNERSHIP") && e.include?("opaque_alloc") }).to be true
@@ -785,6 +786,11 @@ RSpec.describe MIRChecker do
       body = [MIR::ExprStmt.new(MIR::Call.new("use", [iz], false), false)]
       errors = checker.check_fn!(fn_def("f", body))
       expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("nested_opaque") }).to be true
+    end
+
+    it "does not require contracts for simple assignment-shaped inline Zig" do
+      iz = MIR::InlineZig.new("value.* = next", "assignment")
+      expect(checker.send(:inline_zig_requires_contract?, iz)).to be false
     end
   end
 
@@ -1154,6 +1160,7 @@ RSpec.describe MIRChecker do
         { alloc: :heap },
         "items"
       )
+      iz.mark_copied_consumed_binding!("m")
       body = [
         alloc_mark("m", :heap),
         MIR::TransferMark.new("m", :owned_sink, :heap),
@@ -1163,6 +1170,22 @@ RSpec.describe MIRChecker do
       ]
       errors = checker.check_fn!(fn_def("take_copy_mismatch", body))
       expect(errors.any? { |e| e.include?("OWNERSHIP_TRANSFER_COPIED") && e.include?("m") }).to be true
+    end
+
+    it "preserves InlineZig ownership metadata when stripping try" do
+      iz = MIR::InlineZig.new("try use(m)", "intrinsic")
+      iz.mark_opaque_ownership_operations!
+      iz.mark_copied_consumed_binding!("m")
+
+      stripped = iz.without_try
+      expect(stripped.code).to eq("use(m)")
+      expect(stripped.opaque_ownership_operations).to be true
+      expect(stripped.copied_consumed_bindings).to eq(["m"])
+    end
+
+    it "strips try from RawZig without regex parsing" do
+      raw = MIR::RawZig.new("try rawCall()", "raw")
+      expect(raw.without_try.code).to eq("rawCall()")
     end
   end
 
