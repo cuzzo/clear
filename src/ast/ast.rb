@@ -1189,6 +1189,12 @@ module AST
     end
   end
 
+  class DeferredDrop < T::Struct
+    const :name, String
+    const :type, Type
+    const :resource, T::Boolean, default: false
+  end
+
   sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
   def self.each_child_node(node, &blk)
     node.class.members.each do |member|

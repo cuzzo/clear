@@ -519,7 +519,7 @@ module Annotator
       def finalize_scope(node, branch: nil)
         T.bind(self, SemanticAnnotator)
 
-        drops = []
+        drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.locals.each do |name, info|
           next unless current_scope.owned_names.include?(name)
           # TAKES params always need cleanup guards even if moved (the _moved
@@ -530,14 +530,14 @@ module Annotator
 
           case info.ownership_kind
           when :resource
-            drops << { name: name, type: info.type, resource: true }
+            drops << deferred_drop_for(name, info, resource: true)
             og_drop(name)
           when :affine
             t = Type.new(info.type)
             if t.single_future?
               error!(node, :PROMISE_NOT_CONSUMED, name: name)
             end
-            drops << { name: name, type: info.type }
+            drops << deferred_drop_for(name, info)
             og_drop(name)
           end
         end
@@ -588,28 +588,39 @@ module Annotator
         end
       end
 
-      sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[Symbol, T.any(String, Type, T::Boolean)]]) }
+      sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[AST::DeferredDrop]) }
       def collect_scope_drops(node: nil)
         T.bind(self, SemanticAnnotator)
 
-        drops = []
+        drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.locals.each do |name, info|
           next unless @og.live?(name)
           classify_ownership!(info) unless info.ownership_kind
           case info.ownership_kind
           when :resource
-            drops << { name: name, type: info.type, resource: true }
+            drops << deferred_drop_for(name, info, resource: true)
             og_drop(name)
           when :affine
             t = Type.new(info.type)
             if node && t.single_future?
               error!(node, :PROMISE_NOT_CONSUMED, name: name)
             end
-            drops << { name: name, type: info.type }
+            drops << deferred_drop_for(name, info)
             og_drop(name)
           end
         end
         drops
+      end
+
+      sig { params(name: String, info: SymbolEntry, resource: T::Boolean).returns(AST::DeferredDrop) }
+      def deferred_drop_for(name, info, resource: false)
+        T.bind(self, SemanticAnnotator)
+
+        AST::DeferredDrop.new(
+          name: name,
+          type: Type.from_node!(info.type, context: "deferred drop type"),
+          resource: resource,
+        )
       end
 
       # Walk a GetField/GetIndex chain and flag any GetIndex nodes as needing
