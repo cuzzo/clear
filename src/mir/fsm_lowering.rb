@@ -460,8 +460,7 @@ module FsmLowering
                                 else                    ["tryLockForFsm",      "unlock"]
                                 end
 
-    retries = (with_node.lock_error_clause &&
-               with_node.lock_error_clause[:retries]) || 0
+    retries = with_node.lock_error_clause&.retries || 0
 
     {
       cap:            cap,
@@ -485,13 +484,13 @@ module FsmLowering
   #   :goto_post  -> fail-step segment Gotos to the post-WITH
   #                  segment. Body is empty for :pass, the user
   #                  block for :block.
-  sig { params(clause: T::Hash[Symbol, T.untyped], ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: T::Set[T.untyped], bg_rt: String, rt_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(clause: AST::ErrorClause, ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: T::Set[T.untyped], bg_rt: String, rt_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
                                     capture_map:, pointer_captures:, bg_rt:,
                                     rt_name:)
     T.bind(self, MIRLowering) rescue nil
     line = with_node.token&.line.to_s
-    case clause[:action]
+    case clause.action
     when :raise
       body = <<~ZIG.chomp
         __ctx_#{ctx_id}.rt.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), "lock acquire failed", #{line});
@@ -500,7 +499,7 @@ module FsmLowering
       { body_zig: body, exit_kind: :done }
     when :exit
       msg_zig = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-        emit_expr(lower(clause[:message]))
+        emit_expr(lower(T.must(clause.message)))
       end
       return nil if msg_zig.nil?
       body = <<~ZIG.chomp
@@ -518,7 +517,7 @@ module FsmLowering
       prev_fiber_pending = @pending_stmts
       @pending_stmts = []
       block_code = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-        emit_step_stmts(clause[:body] || [], no_result: true)
+        emit_step_stmts(clause.body || [], no_result: true)
       end
       @pending_stmts = prev_fiber_pending
       @current_bg_pointer_captures = prev_bg_ptr_caps

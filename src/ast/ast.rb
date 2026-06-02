@@ -1148,6 +1148,47 @@ module AST
 
   Node = T.type_alias { Locatable }
 
+  class ErrorSelector < T::Struct
+    const :form, Symbol
+    const :name, Symbol
+    const :token, T.nilable(Lexer::Token)
+  end
+
+  class ErrorAction < T::Struct
+    const :action, Symbol
+    const :token, T.nilable(Lexer::Token)
+    const :value, T.nilable(Node), default: nil
+    const :message, T.nilable(Node), default: nil
+    const :body, T.nilable(T::Array[Node]), default: nil
+  end
+
+  class ErrorClause < T::Struct
+    extend T::Sig
+
+    const :selectors, T::Array[ErrorSelector]
+    const :action, Symbol
+    const :retries, T.nilable(Integer)
+    const :token, T.nilable(Lexer::Token)
+    const :value, T.nilable(Node), default: nil
+    const :message, T.nilable(Node), default: nil
+    const :body, T.nilable(T::Array[Node]), default: nil
+    prop :matched_types, T::Array[Symbol], default: []
+    prop :bubble_types, T::Array[Symbol], default: []
+
+    sig { params(selectors: T::Array[ErrorSelector], retries: T.nilable(Integer), action: ErrorAction).returns(ErrorClause) }
+    def self.from_action(selectors:, retries:, action:)
+      new(
+        selectors: selectors,
+        action: action.action,
+        retries: retries,
+        token: action.token,
+        value: action.value,
+        message: action.message,
+        body: action.body,
+      )
+    end
+  end
+
   sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
   def self.each_child_node(node, &blk)
     node.class.members.each do |member|
@@ -1670,9 +1711,8 @@ module AST
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
   Require      = Struct.new(:token, :path) { include Locatable }
-  # lock_error_clause: optional Hash describing ON TIMEOUT / RETRY handling for
-  # EXCLUSIVE / write_locked_read captures. Shape:
-  #   { action: :raise | :pass | :exit | :block, message: <string|nil>, body: <Array|nil>, retries: <Integer|nil> }
+  # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
+  # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
     extend T::Sig

@@ -1338,8 +1338,8 @@ module EffectTracker
         # non-raising action like :pass / :return / :block), no path
         # raises, so we don't flag the enclosing fn.
         if (clause = n.lock_error_clause)
-          action_raises  = %i[raise exit].include?(clause[:action])
-          has_bubble     = clause[:bubble_types].is_a?(Array) && !clause[:bubble_types].empty?
+          action_raises  = %i[raise exit].include?(clause.action)
+          has_bubble     = !clause.bubble_types.empty?
           found[0] = true if action_raises || has_bubble
         end
         n.body.each { |stmt| traverse.call(stmt) } unless found[0]

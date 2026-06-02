@@ -1325,22 +1325,23 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock"))
     ], [])
-    clause = {
+    clause = AST::ErrorClause.new(
       token: token(:ON, "ON"),
-      retries: true,
+      retries: 1,
+      action: :raise,
       selectors: [
-        { form: :kind, name: :Transient, token: token(:TYPE_ID, "Transient") },
-        { form: :kind, name: :Transint, token: token(:TYPE_ID, "Transint") },
-        { form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout") },
-        { form: :type, name: :MadeUpFailure, token: token(:TYPE_ID, "MadeUpFailure") },
-        { form: :message, name: :ignored, token: token(:STRING, "\"x\"") },
-      ]
-    }
+        AST::ErrorSelector.new(form: :kind, name: :Transient, token: token(:TYPE_ID, "Transient")),
+        AST::ErrorSelector.new(form: :kind, name: :Transint, token: token(:TYPE_ID, "Transint")),
+        AST::ErrorSelector.new(form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout")),
+        AST::ErrorSelector.new(form: :type, name: :MadeUpFailure, token: token(:TYPE_ID, "MadeUpFailure")),
+        AST::ErrorSelector.new(form: :message, name: :ignored, token: token(:STRING, "\"x\"")),
+      ],
+    )
 
     ann.send(:resolve_error_selectors!, node, clause)
 
-    expect(clause[:matched_types]).to include(:LockTimeout, :LockCycle)
-    expect(clause[:bubble_types]).to include(:Deadlock)
+    expect(clause.matched_types).to include(:LockTimeout, :LockCycle)
+    expect(clause.bubble_types).to include(:Deadlock)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:REGISTRY_MISMATCH_REJECTED)
   end
 
@@ -1413,7 +1414,7 @@ RSpec.describe "annotator branch gap burndown" do
     visited = []
     policy_msg = AST::Literal.new(token(:STRING, "\"policy\""), :STRING, "policy", :rodata)
     ann.define_singleton_method(:synthesize_clause_from_policy) do |name|
-      name == :MvccConflict ? { action: :exit, message: policy_msg } : nil
+      name == :MvccConflict ? AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: nil, message: policy_msg) : nil
     end
     ann.define_singleton_method(:visit) do |node|
       visited << node
@@ -1425,15 +1426,15 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     node.arms = [
       { family: :VERSIONED, lock_error_clauses: [], body: [] },
-      { family: :ATOMIC, lock_error_clauses: [{ action: :raise }], body: [] },
-      { family: :LOCKED, lock_error_clauses: [{ action: :block, body: block_body }], body: [] },
-      { family: :OTHER, lock_error_clauses: [{ action: :exit, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata) }], body: [] },
+      { family: :ATOMIC, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :raise, retries: nil, token: nil)], body: [] },
+      { family: :LOCKED, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: nil, body: block_body)], body: [] },
+      { family: :OTHER, lock_error_clauses: [AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: nil, message: AST::Literal.new(token(:STRING, "\"x\""), :STRING, "x", :rodata))], body: [] },
     ]
 
     ann.send(:validate_snapshot_match_arms!, node)
 
-    expect(node.arms.first[:lock_error_clauses].first[:action]).to eq(:exit)
-    expect(visited).to include(node.arms.first[:lock_error_clauses].first[:message], block_body.first, node.arms.last[:lock_error_clauses].first[:message])
+    expect(node.arms.first[:lock_error_clauses].first.action).to eq(:exit)
+    expect(visited).to include(node.arms.first[:lock_error_clauses].first.message, block_body.first, node.arms.last[:lock_error_clauses].first.message)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_MATCH_ATOMIC_FORBIDS_HANDLER)
 
     miss = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
@@ -1450,16 +1451,19 @@ RSpec.describe "annotator branch gap burndown" do
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock")),
       AST::Capability.new(capability: :RESTRICT, var_node: AST::Identifier.new(token, "guarded"), guard_expr: AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)),
     ], [])
-    lock_node.lock_error_clause = {
+    lock_node.lock_error_clause = AST::ErrorClause.new(
+      action: :raise,
+      retries: nil,
+      token: nil,
       selectors: [
-        { form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout") },
-        { form: :type, name: :LockCycle, token: token(:TYPE_ID, "LockCycle") },
-        { form: :type, name: :Deadlock, token: token(:TYPE_ID, "Deadlock") },
-        { form: :type, name: :GuardFail, token: token(:TYPE_ID, "GuardFail") },
-        { form: :kind, name: :System, token: token(:TYPE_ID, "System") },
-        { form: :message, name: :Ignored, token: token(:STRING, "\"ignored\"") },
-      ]
-    }
+        AST::ErrorSelector.new(form: :type, name: :LockTimeout, token: token(:TYPE_ID, "LockTimeout")),
+        AST::ErrorSelector.new(form: :type, name: :LockCycle, token: token(:TYPE_ID, "LockCycle")),
+        AST::ErrorSelector.new(form: :type, name: :Deadlock, token: token(:TYPE_ID, "Deadlock")),
+        AST::ErrorSelector.new(form: :type, name: :GuardFail, token: token(:TYPE_ID, "GuardFail")),
+        AST::ErrorSelector.new(form: :kind, name: :System, token: token(:TYPE_ID, "System")),
+        AST::ErrorSelector.new(form: :message, name: :Ignored, token: token(:STRING, "\"ignored\"")),
+      ],
+    )
     ann.send(:verify_handler_reachability!,
       { node: lock_node, cap_types: [:Counter] },
       Set[:Counter],
@@ -1472,24 +1476,30 @@ RSpec.describe "annotator branch gap burndown" do
       AST::Capability.new(capability: :SNAPSHOT, var_node: atomic_var)
     ], [])
     atomic_node.snapshot_mode = :transaction
-    atomic_node.lock_error_clause = {
+    atomic_node.lock_error_clause = AST::ErrorClause.new(
+      action: :raise,
+      retries: nil,
+      token: nil,
       selectors: [
-        { form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict") },
-        { form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict") },
-      ]
-    }
+        AST::ErrorSelector.new(form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict")),
+        AST::ErrorSelector.new(form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict")),
+      ],
+    )
     ann.send(:verify_handler_reachability!, { node: atomic_node, cap_types: [] }, Set.new, Set.new)
 
     versioned_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: AST::Identifier.new(token, "versioned"))
     ], [])
     versioned_node.snapshot_mode = :transaction
-    versioned_node.lock_error_clause = {
+    versioned_node.lock_error_clause = AST::ErrorClause.new(
+      action: :raise,
+      retries: nil,
+      token: nil,
       selectors: [
-        { form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict") },
-        { form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict") },
-      ]
-    }
+        AST::ErrorSelector.new(form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict")),
+        AST::ErrorSelector.new(form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict")),
+      ],
+    )
     ann.send(:verify_handler_reachability!, { node: versioned_node, cap_types: [] }, Set.new, Set.new)
 
     expect(direct_errors(ann).map { |e| e[1] }.count(:SELECTOR_NOT_POSSIBLE)).to be >= 3

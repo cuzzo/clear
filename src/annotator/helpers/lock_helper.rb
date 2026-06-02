@@ -410,17 +410,17 @@ module LockHelper
     end
     possible << :GuardFail if (node.capabilities || []).any? { |c| c[:guard_expr] }
 
-    clause[:selectors].each do |sel|
-      expansion = case sel[:form]
-                  when :kind then AST.types_for_kind(sel[:name]).to_set
-                  when :type then Set.new([sel[:name]])
+    clause.selectors.each do |sel|
+      expansion = case sel.form
+                  when :kind then AST.types_for_kind(sel.name).to_set
+                  when :type then Set.new([sel.name])
                   else Set.new
                   end
       reachable = expansion & possible
       next unless reachable.empty?
 
-      label = sel[:name].to_s
-      error!(sel[:token] || node, :SELECTOR_NOT_POSSIBLE, label: label)
+      label = sel.name.to_s
+      error!(sel.token || node, :SELECTOR_NOT_POSSIBLE, label: label)
     end
   end
 

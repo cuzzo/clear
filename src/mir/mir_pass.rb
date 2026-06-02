@@ -279,8 +279,8 @@ class MIRPass
 
     clause = node.lock_error_clause
     return false unless clause
-    action_raises = %i[raise exit].include?(clause[:action])
-    has_bubble = clause[:bubble_types].is_a?(Array) && clause[:bubble_types].any?
+    action_raises = %i[raise exit].include?(clause.action)
+    has_bubble = clause.bubble_types.any?
     action_raises || has_bubble
   end
 

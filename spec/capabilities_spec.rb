@@ -1308,9 +1308,9 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:action]).to eq(:raise)
-      expect(clause[:selectors]).to eq([{ form: :kind, name: :Transient, token: clause[:selectors].first[:token] }])
-      expect(clause[:retries]).to be_nil
+      expect(clause.action).to eq(:raise)
+      expect(clause.selectors.map { |s| [s.form, s.name, s.token] }).to eq([[:kind, :Transient, clause.selectors.first.token]])
+      expect(clause.retries).to be_nil
     end
 
     it "parses ON LockTimeout, LockCycle PASS" do
@@ -1320,8 +1320,8 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout, LockCycle PASS
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:action]).to eq(:pass)
-      expect(clause[:selectors].map { |s| [s[:form], s[:name]] }).to eq([[:type, :LockTimeout], [:type, :LockCycle]])
+      expect(clause.action).to eq(:pass)
+      expect(clause.selectors.map { |s| [s.form, s.name] }).to eq([[:type, :LockTimeout], [:type, :LockCycle]])
     end
 
     it "parses ON Transient EXIT with a message" do
@@ -1331,8 +1331,8 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient EXIT "stuck"
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:action]).to eq(:exit)
-      expect(clause[:message]).not_to be_nil
+      expect(clause.action).to eq(:exit)
+      expect(clause.message).not_to be_nil
     end
 
     it "parses ON Transient -> { stmts }" do
@@ -1342,8 +1342,8 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient -> { c.v = 0; }
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:action]).to eq(:block)
-      expect(clause[:body]).to be_an(Array)
+      expect(clause.action).to eq(:block)
+      expect(clause.body).to be_an(Array)
     end
 
     it "parses RETRY(N) THEN RAISE as sugar for ON Transient" do
@@ -1353,9 +1353,9 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } RETRY(3) THEN RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:action]).to eq(:raise)
-      expect(clause[:retries]).to eq(3)
-      expect(clause[:selectors].first[:name]).to eq(:Transient)
+      expect(clause.action).to eq(:raise)
+      expect(clause.retries).to eq(3)
+      expect(clause.selectors.first.name).to eq(:Transient)
     end
 
     it "parses ON LockTimeout RETRY(2) THEN RAISE" do
@@ -1365,8 +1365,8 @@ RSpec.describe SemanticAnnotator do
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout RETRY(2) THEN RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause[:retries]).to eq(2)
-      expect(clause[:selectors].map { |s| s[:name] }).to eq([:LockTimeout])
+      expect(clause.retries).to eq(2)
+      expect(clause.selectors.map { |s| s.name }).to eq([:LockTimeout])
     end
 
     it "rejects RETRY(0)" do

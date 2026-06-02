@@ -218,7 +218,6 @@ module Annotator
         !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
       end
 
-      ErrorClause = T.type_alias { T::Hash[Symbol, BasicObject] }
       FallibleWalkValue = T.type_alias do
         T.any(
           AST::Node,
@@ -269,7 +268,7 @@ module Annotator
       #
       # Possible error set for WITH EXCLUSIVE / write_locked_read:
       #   {:LockTimeout, :LockCycle, :Deadlock}
-      # Symbols matched by the clause are stamped onto clause[:matched_types];
+      # Symbols matched by the clause are stamped onto clause.matched_types;
       # unmatched types bubble up as their registry kind at codegen time.
       LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
       # SNAPSHOT MUTABLE commit errors depend on the cell family.
@@ -397,9 +396,7 @@ module Annotator
 
         # AtomicPtr commits can raise AtomicConflict, not MvccConflict.
         if has_atomic_ptr && clause
-          bad_selector = (clause[:selectors] || []).find { |s|
-            s[:form] == :type && s[:name] == :MvccConflict
-          }
+          bad_selector = clause.selectors.find { |s| s.form == :type && s.name == :MvccConflict }
           if bad_selector
             error!(node, :WITH_ATOMIC_HANDLER_WRONG_ERROR)
           end
@@ -422,13 +419,13 @@ module Annotator
 
         resolve_error_selectors!(node, clause, is_snapshot_txn)
 
-        case clause[:action]
+        case clause.action
         when :exit
-          visit(clause.fetch(:message))
+          visit(T.must(clause.message))
         when :return
-          visit(clause.fetch(:value))
+          visit(T.must(clause.value))
         when :block
-          visit_stmts(clause.fetch(:body))
+          visit_stmts(T.must(clause.body))
         end
       end
 
@@ -591,11 +588,11 @@ module Annotator
         # validate_lock_error_clause!.
         (node.arms || []).each do |arm|
           (arm[:lock_error_clauses] || []).each do |clause|
-            case clause[:action]
+            case clause.action
             when :exit
-              visit(clause.fetch(:message))
+              visit(T.must(clause.message))
             when :block
-              visit_stmts(clause.fetch(:body))
+              visit_stmts(T.must(clause.body))
             end
           end
         end
@@ -608,7 +605,7 @@ module Annotator
       #   3. Retry selectors resolve to Transient types only.
       #   4. The matched set intersects the block's possible error set.
 
-      sig { params(node: AST::WithBlock, clause: ErrorClause, is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
       def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
         T.bind(self, SemanticAnnotator)
 
@@ -621,11 +618,10 @@ module Annotator
         possible = possible.to_a
         matched  = []
 
-        selectors = T.cast(clause[:selectors], T::Array[ErrorClause])
-        selectors.each do |sel|
-          form = T.cast(sel[:form], Symbol)
-          name = T.cast(sel[:name], Symbol)
-          token = T.cast(sel[:token], T.nilable(Lexer::Token))
+        clause.selectors.each do |sel|
+          form = sel.form
+          name = sel.name
+          token = sel.token
           diagnostic_token = token || node.token
           case form
           when :kind
@@ -651,10 +647,10 @@ module Annotator
 
         matched.uniq!
 
-        if clause[:retries]
+        if clause.retries
           non_transient = matched.reject { |t| AST.kind_of_type(t) == :Transient }
           unless non_transient.empty?
-            error!(clause[:token] || node, :RETRY_ONLY_TRANSIENT, types: non_transient.join(', '))
+            error!(clause.token || node, :RETRY_ONLY_TRANSIENT, types: non_transient.join(', '))
           end
         end
 
@@ -663,8 +659,8 @@ module Annotator
           error!(node, :SELECTORS_NO_MATCH, matched: matched.join(', '), possible: "any error the WITH acquire can produce (#{possible.join(', ')}).")
         end
 
-        clause[:matched_types] = overlap
-        clause[:bubble_types]  = possible - overlap
+        clause.matched_types = overlap
+        clause.bubble_types = possible - overlap
       end
 
       # Walk statements looking for assignments where a borrowed alias escapes

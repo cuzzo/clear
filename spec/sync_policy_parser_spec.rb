@@ -52,16 +52,16 @@ RSpec.describe "True-Sync-Polymorphism parser (step 1)" do
       second = node.handlers[1]
       third  = node.handlers[2]
 
-      expect(first[:selectors].first[:name]).to eq(:LockTimeout)
-      expect(first[:retries]).to eq(3)
-      expect(first[:action]).to eq(:raise)
+      expect(first.selectors.first.name).to eq(:LockTimeout)
+      expect(first.retries).to eq(3)
+      expect(first.action).to eq(:raise)
 
-      expect(second[:selectors].first[:name]).to eq(:MvccConflict)
-      expect(second[:retries]).to be_nil
-      expect(second[:action]).to eq(:raise)
+      expect(second.selectors.first.name).to eq(:MvccConflict)
+      expect(second.retries).to be_nil
+      expect(second.action).to eq(:raise)
 
-      expect(third[:selectors].first[:name]).to eq(:AtomicConflict)
-      expect(third[:action]).to eq(:raise)
+      expect(third.selectors.first.name).to eq(:AtomicConflict)
+      expect(third.action).to eq(:raise)
     end
 
     it "accepts a single handler" do
@@ -210,8 +210,8 @@ RSpec.describe "True-Sync-Polymorphism parser (step 1)" do
       with_block = prog.statements.first.body.first
       expect(with_block.polymorphic).to be true
       expect(with_block.lock_error_clause).not_to be_nil
-      expect(with_block.lock_error_clause[:selectors].first[:name]).to eq(:MvccConflict)
-      expect(with_block.lock_error_clause[:retries]).to eq(2)
+      expect(with_block.lock_error_clause.selectors.first.name).to eq(:MvccConflict)
+      expect(with_block.lock_error_clause.retries).to eq(2)
     end
   end
 end

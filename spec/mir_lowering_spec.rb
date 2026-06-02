@@ -1850,12 +1850,9 @@ RSpec.describe MIRLowering do
         { capability: :EXCLUSIVE, var_node: a, alias: "left", resolved_type: Type.new(:Counter) },
         { capability: :write_locked_read, var_node: b, alias: "right", resolved_type: Type.new(:Counter) }
       ]
-      clause = {
-        action: :pass,
-        matched_types: [:LockTimeout],
-        bubble_types: [:Deadlock],
-        retries: 3
-      }
+      clause = AST::ErrorClause.new(selectors: [], action: :pass, retries: 3, token: nil)
+      clause.matched_types = [:LockTimeout]
+      clause.bubble_types = [:Deadlock]
       with_node = AST::WithBlock.new(tok, caps, [], nil)
 
       zig = lowering.send(:emit_sorted_lock_acquires_fallible, caps, clause, "__with_label", with_node)

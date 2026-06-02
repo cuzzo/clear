@@ -6,8 +6,6 @@ module Annotator
     module Errors
       extend T::Sig
 
-      ErrorSelector = T.type_alias { T::Hash[Symbol, BasicObject] }
-      ErrorClause = T.type_alias { T::Hash[Symbol, BasicObject] }
       ReturnFact = T.type_alias { T::Hash[Symbol, BasicObject] }
 
       # Pre-pass: walk every RAISE and OR EXIT site that provides both a
@@ -41,19 +39,25 @@ module Annotator
       # Errors that may NEVER appear in a SYNC POLICY block.
       SYNC_POLICY_INLINE_ONLY_ERRORS = %i[Deadlock LockCycle].freeze
       # The baked-in default applied when the user writes no SYNC POLICY.
-      # Synthesized as a hash matching the parser's lock_error_clause
-      # shape so the resolver can use it interchangeably.
-      sig { returns(T::Array[ErrorClause]) }
+      # Synthesized as typed clauses so the resolver can use it interchangeably
+      # with parser-authored per-WITH clauses.
+      sig { returns(T::Array[AST::ErrorClause]) }
       def baked_in_default_sync_policy
         T.bind(self, SemanticAnnotator)
 
         [
-          { selectors: [{ form: :type, name: :LockTimeout, token: nil }],
-            retries: 3, action: :raise, token: nil },
-          { selectors: [{ form: :type, name: :MvccConflict, token: nil }],
-            retries: nil, action: :raise, token: nil },
-          { selectors: [{ form: :type, name: :AtomicConflict, token: nil }],
-            retries: nil, action: :raise, token: nil },
+          AST::ErrorClause.new(
+            selectors: [AST::ErrorSelector.new(form: :type, name: :LockTimeout, token: nil)],
+            retries: 3, action: :raise, token: nil,
+          ),
+          AST::ErrorClause.new(
+            selectors: [AST::ErrorSelector.new(form: :type, name: :MvccConflict, token: nil)],
+            retries: nil, action: :raise, token: nil,
+          ),
+          AST::ErrorClause.new(
+            selectors: [AST::ErrorSelector.new(form: :type, name: :AtomicConflict, token: nil)],
+            retries: nil, action: :raise, token: nil,
+          ),
         ]
       end
 
@@ -98,15 +102,15 @@ module Annotator
 
         seen = []
         (decl.handlers || []).each do |clause|
-          (clause[:selectors] || []).each do |sel|
-            next unless sel[:form] == :type
-            name = sel[:name]
+          clause.selectors.each do |sel|
+            next unless sel.form == :type
+            name = sel.name
             if SYNC_POLICY_INLINE_ONLY_ERRORS.include?(name)
-              error!(sel[:token] || decl, :SYNC_POLICY_INLINE_ONLY,
+              error!(sel.token || decl, :SYNC_POLICY_INLINE_ONLY,
                 name: name, escape: (name == :Deadlock ? "DEADLOCK" : "LOCK_CYCLE"))
             end
             unless SYNC_POLICY_REQUIRED_ERRORS.include?(name)
-              error!(sel[:token] || decl, :SYNC_POLICY_INVALID_ERROR,
+              error!(sel.token || decl, :SYNC_POLICY_INVALID_ERROR,
                 name: name, required: SYNC_POLICY_REQUIRED_ERRORS.join(', '))
             end
             seen << name
@@ -116,9 +120,9 @@ module Annotator
           # completeness is checkable. Sugar like `RETRY(N) THEN <action>`
           # desugars to `ON Transient ...` at parse time, which would land
           # here with form==:kind.
-          (clause[:selectors] || []).each do |sel|
-            next unless sel[:form] == :kind
-            error!(sel[:token] || decl, :SYNC_POLICY_NEEDS_TYPE_NOT_KIND, name: sel[:name])
+          clause.selectors.each do |sel|
+            next unless sel.form == :kind
+            error!(sel.token || decl, :SYNC_POLICY_NEEDS_TYPE_NOT_KIND, name: sel.name)
           end
         end
 
@@ -159,16 +163,14 @@ module Annotator
 
       # Synthesize the same clause shape as a per-WITH handler so emission can
       # use one path. Inline-only errors intentionally have no policy fallback.
-      sig { params(error_name: Symbol).returns(T.nilable(ErrorClause)) }
+      sig { params(error_name: Symbol).returns(T.nilable(AST::ErrorClause)) }
       def synthesize_clause_from_policy(error_name)
         T.bind(self, SemanticAnnotator)
 
         handlers = @program&.sync_policy
         return nil unless handlers
         handlers.find { |h|
-          (h[:selectors] || []).any? { |s|
-            s[:form] == :type && s[:name] == error_name
-          }
+          h.selectors.any? { |s| s.form == :type && s.name == error_name }
         }
       end
 
@@ -179,11 +181,11 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         (node.handlers || []).each do |clause|
-          case clause[:action]
+          case clause.action
           when :exit
-            visit(clause.fetch(:message))
+            visit(T.must(clause.message))
           when :block
-            visit_stmts(clause.fetch(:body))
+            visit_stmts(T.must(clause.body))
           end
         end
       end
