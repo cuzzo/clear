@@ -230,6 +230,7 @@ HEADER_FILE = "zig/runtime/runtime-header.zig"
 GEN_JOBS = [Integer(ENV.fetch("TRANSPILE_GEN_JOBS", ENV.fetch("JOBS", "1"))), 1].max
 
 def simplecov_child_command!(name)
+  CoverageBootstrap.isolate_process!(name)
   return unless defined?(SimpleCov)
 
   SimpleCov.command_name("#{name}-#{Process.pid}") if SimpleCov.respond_to?(:command_name)

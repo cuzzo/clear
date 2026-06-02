@@ -413,6 +413,7 @@ class MIRLowering
     @current_stream_local = T.let(nil, T.nilable(String))
     @loop_mark_counter = T.let(0, Integer)
     @for_counter = T.let(0, Integer)
+    @ownership_finalized_body_ids = T.let(Set.new, T::Set[Integer])
     @_emitter = T.let(nil, T.nilable(MIREmitter))
   end
 
@@ -925,7 +926,19 @@ class MIRLowering
       append_pending_packet_nodes!(state, packet)
       append_lowered_statement_packet!(state, packet)
     }
+    mark_ownership_finalized_body!(state.out)
     state.out
+  end
+
+  sig { params(body: T::Array[Object]).returns(T::Array[Object]) }
+  def mark_ownership_finalized_body!(body)
+    @ownership_finalized_body_ids << body.object_id
+    body
+  end
+
+  sig { params(body: T::Array[Object]).returns(T::Boolean) }
+  def ownership_finalized_body?(body)
+    @ownership_finalized_body_ids.include?(body.object_id)
   end
 
   sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
@@ -1125,7 +1138,7 @@ class MIRLowering
     normalized.each do |node|
       finalize_ownership_for_mir_node!(node, normalized, state)
     end
-    state.out
+    mark_ownership_finalized_body!(state.out)
   end
 
   sig do
@@ -1137,6 +1150,11 @@ class MIRLowering
     ).returns(T::Array[T.untyped])
   end
   def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, parent)
+    if ownership_finalized_body?(body)
+      parent.guarded_cleanup_names.merge(guarded_names_in_surface(body))
+      return body
+    end
+
     normalized = normalize_allocating_mir_body(body)
     state = OwnershipFinalizationContext.new(
       inherited_alloc_names: inherited_alloc_names,
@@ -1147,7 +1165,7 @@ class MIRLowering
     normalized.each do |node|
       finalize_ownership_for_mir_node!(node, normalized, state)
     end
-    state.out
+    mark_ownership_finalized_body!(state.out)
   end
 
   sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
@@ -1783,6 +1801,7 @@ class MIRLowering
 
   sig { params(ast_value: AST::Node, value_mir: MIR::Node, mapped: String).returns(T::Boolean) }
   def visible_owned_operand_value?(ast_value, value_mir, mapped)
+    ast_value = ast_value.value if ast_value.is_a?(AST::MoveNode)
     !!(ast_value.is_a?(AST::Identifier) && value_mir.is_a?(MIR::Ident) &&
       value_mir.name.to_s == mapped && !borrowed_ownership_ast?(ast_value))
   end

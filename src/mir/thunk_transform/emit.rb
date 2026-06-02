@@ -80,6 +80,13 @@ module ThunkTransform
       def field_ref(name)
         MIR::FieldGet.new(MIR::Ident.new(receiver_name), name)
       end
+
+      sig { returns(T::Hash[String, String]) }
+      def capture_map
+        param_names.each_with_object({}) do |name, map|
+          map[name] = "#{receiver_name}.#{name}"
+        end
+      end
     end
 
     # Map normalized op codes (from AST::OP_TO_OP_CODE) to Zig
@@ -151,7 +158,14 @@ module ThunkTransform
     # frame-bound param references structurally, then emit Zig from MIR.
     sig { params(ast_expr: T.untyped, lowering: T.untyped, context: FrameBindingContext).returns(String) }
     def render_expr(ast_expr, lowering, context)
-      mir = lowering.lower(ast_expr)
+      mir =
+        if lowering.respond_to?(:with_fiber_capture_map)
+          lowering.with_fiber_capture_map(context.capture_map) do
+            lowering.lower(ast_expr)
+          end
+        else
+          lowering.lower(ast_expr)
+        end
       lowering.send(:emit_expr, bind_frame_refs(mir, context)).to_s
     end
 

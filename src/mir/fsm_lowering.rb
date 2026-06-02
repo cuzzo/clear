@@ -393,7 +393,11 @@ module FsmLowering
   sig { params(name: String, cleanup_entry: CleanupEntry).returns(String) }
   def render_fsm_destroy_cleanup(name, cleanup_entry)
     rendered = render_mir_list([MIR::Cleanup.new(name, cleanup_entry)])
-    rendered = rendered.delete_prefix("defer ")
+    if name.include?(".")
+      guard = "#{name}_moved"
+      rendered = rendered.delete_prefix("var #{guard} = false; _ = &#{guard};\n")
+    end
+    rendered = rendered.delete_prefix("defer ").strip
     rendered.end_with?(";") ? rendered : "#{rendered};"
   end
 

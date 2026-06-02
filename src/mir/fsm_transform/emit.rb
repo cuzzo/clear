@@ -158,7 +158,7 @@ module FsmTransform
       #    FsmTailRetryOrError for the LOCK fan-out, etc.) -- no
       #    more per-shape dispatch overrides.
       arms = segment_specs.map.with_index do |spec, k|
-        tail = build_dispatch_tail(spec, k, segment_specs)
+        tail = build_dispatch_tail(spec, k, segment_specs, id)
         MIR::FsmStateArm.new(
           spec[:index],
           spec[:pre_body_skip],
@@ -204,10 +204,12 @@ module FsmTransform
       # pipeline. Locks first (so other tasks can acquire) in reverse
       # acquisition order, then captures, then any lifted body
       # cleanups.
-      destroy_entries = ctx[:fsm_destroy_lines] || []
-      lock_zigs    = destroy_entries.select { |e| e[:kind] == :lock    }.map { |e| e[:zig] }
-      capture_zigs = destroy_entries.select { |e| e[:kind] == :capture }.map { |e| e[:zig] }
-      body_zigs    = destroy_entries.select { |e| e[:kind] == :body    }.map { |e| e[:zig] }
+      destroy_entries = Array(ctx[:fsm_destroy_lines]).select { |entry|
+        fsm_destroy_zig_present?(entry[:zig])
+      }
+      lock_zigs    = destroy_entries.select { |e| e[:kind] == :lock    }.map { |e| e[:zig].to_s }
+      capture_zigs = destroy_entries.select { |e| e[:kind] == :capture }.map { |e| e[:zig].to_s }
+      body_zigs    = destroy_entries.select { |e| e[:kind] == :body    }.map { |e| e[:zig].to_s }
       destroy_seq  = lock_zigs.reverse + capture_zigs + body_zigs
       destroy_extra = destroy_seq.empty? ? nil : destroy_seq.join("\n")
       ctx_struct = MIR::FsmGenericCtxStruct.new(
@@ -271,6 +273,12 @@ module FsmTransform
       structure
     end
 
+    sig { params(zig: T.nilable(String)).returns(T::Boolean) }
+    def fsm_destroy_zig_present?(zig)
+      stripped = zig.to_s.strip
+      !stripped.empty? && stripped != ";"
+    end
+
     sig { params(sources: T::Array[FsmStructureSource], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
     def collect_required_move_guards(sources, id, cleanup_names)
       collect_fsm_nodes(sources).filter_map do |node|
@@ -290,7 +298,8 @@ module FsmTransform
     def fsm_structure_sources_for_spec(spec)
       out = T.let([], T::Array[FsmStructureSource])
       out.concat(fsm_structure_source_array(spec[:prologue_stmts]))
-      out.concat(fsm_structure_source_array(spec[:body_stmts]))
+      structure_stmts = spec[:structure_stmts]
+      out.concat(fsm_structure_source_array(structure_stmts || spec[:body_stmts]))
       descriptor = spec[:descriptor]
       if descriptor
         out.concat(fsm_structure_source_array(descriptor.setup_stmts))
@@ -311,12 +320,18 @@ module FsmTransform
     sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
     def collect_move_guard_writes(sources, id)
       collect_fsm_nodes(sources).filter_map do |node|
+        if node.is_a?(MIR::MoveMark)
+          name = node.name.to_s
+          normalized = normalized_ctx_field_name(name, id)
+          next [normalized, "__ctx_#{id}.#{normalized}"]
+        end
+
         next nil unless node.is_a?(MIR::Set)
         next nil unless true_literal?(node.value)
         field = ctx_field_name(node.target, id)
         next nil unless field&.end_with?("_moved")
         field.delete_suffix("_moved")
-      end.uniq
+      end.flatten.uniq
     end
 
     sig { params(name: String, id: Integer).returns(String) }
@@ -416,8 +431,8 @@ module FsmTransform
     # tails consult the descriptor for the kind-specific tail variant
     # (Yield / RegisterYield); non-suspend tails (Goto / LoopBack /
     # CondBranch / Done) map to the structural tail variants directly.
-    sig { params(spec: T.untyped, k: T.untyped, all_specs: T.untyped).returns(T.untyped) }
-    def build_dispatch_tail(spec, k, all_specs)
+    sig { params(spec: T.untyped, k: T.untyped, all_specs: T.untyped, id: Integer).returns(T.untyped) }
+    def build_dispatch_tail(spec, k, all_specs, id)
       T.bind(self, T.untyped) rescue nil
       tail = spec[:tail]
       desc = spec[:descriptor]
@@ -445,6 +460,8 @@ module FsmTransform
             tail.cond_ast.cond_zig
           elsif tail.cond_ast.respond_to?(:zig_text)
             tail.cond_ast.zig_text
+          elsif tail.cond_ast.respond_to?(:render)
+            tail.cond_ast.render("__ctx_#{id}")
           elsif tail.cond_ast.is_a?(String)
             tail.cond_ast
           else
@@ -635,6 +652,7 @@ module FsmTransform
         # the destroyTask exit anyway, so the unconditional cleanup fires
         # exactly once.
         zig = line.delete_prefix("defer ")
+        zig = zig.split("rt.").join("__ctx_#{id}.rt.")
         ctx[:fsm_destroy_lines] << {
           kind: :capture,
           name: fresh_heap_names[cleanup_index]&.to_s,
@@ -721,7 +739,9 @@ module FsmTransform
             lowered_mir = lift_ctx_cleanups_to_destroy!(lowered_mir, promoted_names, "__ctx_#{id}", ctx, lowering)
           end
           seg_mir_codes[i] = lowered_mir
-          lowered = lowering.render_mir_list(lowered_mir)
+          lowered = lowering.with_fiber_capture_map({}, rt_override: bg_rt) do
+            lowering.render_mir_list(lowered_mir)
+          end
           [lowered, *raw_stmts].reject { |s| s.is_a?(String) && s.strip.empty? }
         end
       end
@@ -784,6 +804,7 @@ module FsmTransform
           index:           seg.index,
           prologue_stmts:  prologue,
           body_stmts:      body_stmts,
+          structure_stmts: seg_mir_codes[i] || [],
           tail:            seg.tail,
           descriptor:      descriptor,
           fsm_result_transfer_facts: seg_result_facts[seg.index] || [],
@@ -936,10 +957,13 @@ module FsmTransform
         if node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
           promoted_name = promoted_fsm_field_name(node.name.to_s, promoted_names)
           if promoted_name
+            zig = lowering.with_fiber_capture_map({}, rt_override: "#{ctx_ref}.rt") do
+              lowering.render_fsm_destroy_cleanup("#{ctx_ref}.#{promoted_name}", node.cleanup_entry)
+            end
             ctx[:fsm_destroy_lines] << {
               kind: :body,
               name: promoted_name,
-              zig: lowering.render_fsm_destroy_cleanup("#{ctx_ref}.#{promoted_name}", node.cleanup_entry),
+              zig: zig,
             }
             next nil
           end

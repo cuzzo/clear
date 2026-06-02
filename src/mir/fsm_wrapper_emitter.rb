@@ -107,10 +107,12 @@ module FsmWrapperEmitter
   sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_run_body(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
-    rendered = (step.body_stmts || []).filter_map do |stmt|
-      out = mir_emitter.emit(stmt)
-      next nil if out.nil? || out.strip.empty?
-      out
+    rendered = with_rt_name(mir_emitter, step.bg_rt) do
+      (step.body_stmts || []).filter_map do |stmt|
+        out = mir_emitter.emit(stmt)
+        next nil if out.nil? || out.strip.empty?
+        out
+      end
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
     [
@@ -213,10 +215,12 @@ module FsmWrapperEmitter
   sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_step(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
-    rendered = (step.body_stmts || []).filter_map do |stmt|
-      out = mir_emitter.emit(stmt)
-      next nil if out.nil? || out.strip.empty?
-      out
+    rendered = with_rt_name(mir_emitter, step.bg_rt) do
+      (step.body_stmts || []).filter_map do |stmt|
+        out = mir_emitter.emit(stmt)
+        next nil if out.nil? || out.strip.empty?
+        out
+      end
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
 
@@ -505,10 +509,12 @@ module FsmWrapperEmitter
   sig { params(fn: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_member_fn(fn, mir_emitter)
     T.bind(self, T.untyped) rescue nil
-    rendered = (fn.body_stmts || []).filter_map do |stmt|
-      out = mir_emitter.emit(stmt)
-      next nil if out.nil? || out.strip.empty?
-      out
+    rendered = with_rt_name(mir_emitter, fn.bg_rt) do
+      (fn.body_stmts || []).filter_map do |stmt|
+        out = mir_emitter.emit(stmt)
+        next nil if out.nil? || out.strip.empty?
+        out
+      end
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
 
@@ -571,6 +577,16 @@ module FsmWrapperEmitter
   def empty?(s)
     T.bind(self, T.untyped) rescue nil
     s.nil? || s.strip.empty?
+  end
+
+  sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_rt_name(mir_emitter, rt_name, &blk)
+    previous = T.let("rt", String)
+    previous = mir_emitter.rt_name
+    mir_emitter.rt_name = rt_name
+    blk.call
+  ensure
+    mir_emitter.rt_name = T.must(previous)
   end
 
   # Re-indent every line of `text` by `n` spaces. Preserves blank

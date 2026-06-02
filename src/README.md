@@ -66,13 +66,16 @@ AST::Program(
           ))])])
 ```
 
-### 2. Annotation (`src/annoator/annotator.rb`)
+### 2. Annotation (`src/annotator/annotator.rb`)
 
  * In this pass, the tree is semantically decorated:
    * Names are resolved,
    * Types are inferred,
    * Storage is known,
    * And `x = 41` has been classified as a declaration.
+ * See [`src/annotator/README.md`](annotator/README.md) for the detailed
+   annotation phase order, including capability checks, execution-boundary
+   validation, `Auto` finalization, and the MIR handoff.
 
 ```ruby
 AST::FunctionDef(
@@ -109,13 +112,18 @@ AST::FunctionDef(
 
 ### 3. Pipeline Fusion & Desugaring (`src/backends/*_rewriter.rb`)
 
-  * At this stage, pipelines are fused together for efficiency other desugaring occurs, like string concatenation.
+  * At this stage, pipelines are fused together for efficiency, and other
+    desugaring occurs, like string concatenation.
+  * See [`src/mir/README.md`](mir/README.md) for where these rewrites sit in
+    the MIR-preparation order.
 
-### 4. MIR Pass / Hoisting / Control Flow (`src/mir/*.rb`)
+### 4. MIR Preparation / Hoisting / Ownership Analysis (`src/mir/*.rb`)
 
 An Abstract Syntax Tree is very difficult to work with to ensure sound Affine Ownership: ensure no use-after-free, no double-free, and no memory leaks.
 
-In this pass, we build a Control Flow Graph (CFG), run ownership analysis, and use this to create the MIR.
+In these passes, we hoist anonymous owned values, build a Control Flow Graph
+(CFG), run ownership analysis, and stamp the facts that lowering will use to
+create MIR.
 
 This makes it more feasible to ensure the critical invariants:
 
@@ -139,9 +147,14 @@ needs cleanup? no
 moved guard? no
 ```
 
+See [`src/mir/README.md`](mir/README.md) for the detailed MIR phase order,
+ownership dataflow, cleanup classification, async FSM/Thunk lowering, and MIR
+checker boundaries.
+
 ### 5. MIR Lowering (`src/mir/*.rb`)
 
- * In the pass, we take the CFG, and transform it into a MIR (a Mid-level Representation).
+ * In this pass, we take the annotated AST plus ownership facts and transform
+   them into MIR (a Mid-level Representation).
 
 ```ruby
 MIR::Program([

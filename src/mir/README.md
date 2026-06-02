@@ -2,6 +2,8 @@
 
 The top-level compiler overview in [`src/README.md`](../README.md) shows how
 CLEAR transpiles CLEAR code to Zig.
+The source semantic boundary before MIR is described in
+[`src/annotator/README.md`](../annotator/README.md).
 
 The MIR lowering portion is ~40% of the entire compiler code. This document zooms into 
 how MIR works and why it exists.
@@ -72,7 +74,7 @@ annotated AST
   -> stamp ownership facts onto the AST
   -> lower AST to MIR::Program
   -> check MIR ownership invariants (prevent Use After Free, Double Free, and Memory Leaks)
-  -> emit Zig templates
+  -> emit Zig from MIR
 ```
 
 The exact order is enforced by
@@ -145,20 +147,19 @@ RETURN consume(makeData())
 
 # After
 __hoist_1 = makeData()
-RETURN consume(__host_1)
+RETURN consume(__hoist_1)
 ```
 
-This needs to happen, so that when transpiled to Zig, we can easily do cleanup using defer:
+This needs to happen so ownership-sensitive cleanup can refer to a named
+binding:
 
-```zig
-// Before
-return consume(makeData()); // memory leak
-
-// After
-__hoist_1 = makeData();
-defer { cleanup(rt.heapAllocator(), __hoist_1); } // no memory leak
-RETURN consume(__host_1);
+```text
+before: anonymous owned value flows through a call argument
+after:  named binding has cleanup, transfer, and moved-guard facts
 ```
+
+The emitter may eventually print Zig `defer` code for that cleanup, but the
+cleanup decision is made by MIR analysis and lowering, not by the emitter.
 
 That makes every allocation that escape analysis cares about symbol-bearing:
 escape decisions can be written to a binding instead of to a floating
@@ -184,8 +185,8 @@ not a user-level type error.
 
 Files:
 
-* [`escape_analysis.rb`](escape_analysis.rb)
-* [`bg_capture_classifier.rb`](bg_capture_classifier.rb)
+* [`../semantic/escape_analysis.rb`](../semantic/escape_analysis.rb)
+* [`../semantic/bg_capture_classifier.rb`](../semantic/bg_capture_classifier.rb)
 
 Escape analysis decides where bindings live. It updates symbol/storage facts
 that later passes read.
@@ -203,7 +204,9 @@ __hoist_1:
 ```
 
 Background capture classification runs here too. This example has no `BG`
-block, so no capture facts are added.
+block, so no capture facts are added. Architecturally, BG capture strategy is a
+shared semantic fact: annotation validates the source-level boundary, and
+MIRPass ensures the fact is available before lowering consumes it.
 
 ```text
 pass state: :escape_analyzed
@@ -243,7 +246,7 @@ demo.cleanup_bindings = {
 
 The `has_moved_guard` flag is the key branch-sensitive fact: cleanup must be
 guarded because the compiler cannot emit an unconditional cleanup after a path
-that gave `d` away.
+that gave the owned value away.
 
 ```text
 pass state: :cleanup_classified
@@ -330,9 +333,9 @@ The AST is stamped schematically like this:
 ```ruby
 AST::FunctionDef("demo",
   cleanup_bindings: {
-    "d" => CleanupEntry(needs_cleanup: true, has_moved_guard: true)
+    "__hoist_1" => CleanupEntry(needs_cleanup: true, has_moved_guard: true)
   },
-  moved_guard_info: { "d" => true },
+  moved_guard_info: { "__hoist_1" => true },
   body: [
     BindExpr("__hoist_1", FuncCall("makeData")),
     IfStatement(
@@ -380,17 +383,17 @@ MIR::FnDef(
   params: [MIR::Param("rt", "*Runtime"), MIR::Param("flag", "bool")],
   ret_type: "i64",
   body: [
-    MIR::Let("d", MIR::Call("makeData", [MIR::Ident("rt")]), mutable: false),
-    MIR::Let("d_moved", MIR::Lit(false), mutable: true), # schematic guard
-    MIR::Cleanup("d", has_moved_guard: true, alloc: :heap),
+    MIR::Let("__hoist_1", MIR::Call("makeData", [MIR::Ident("rt")]), mutable: false),
+    MIR::Let("__hoist_1_moved", MIR::Lit(false), mutable: true), # schematic guard
+    MIR::Cleanup("__hoist_1", has_moved_guard: true, alloc: :heap),
 
     MIR::IfStmt(
       cond: MIR::Ident("flag"),
       then_body: [
-        MIR::TransferMark("d", :call_arg, :heap),
-        MIR::MoveMark("d"),
+        MIR::TransferMark("__hoist_1", :call_arg, :heap),
+        MIR::MoveMark("__hoist_1"),
         MIR::ReturnStmt(
-          MIR::Call("consume", [MIR::Ident("rt"), MIR::Ident("d")])
+          MIR::Call("consume", [MIR::Ident("rt"), MIR::Ident("__hoist_1")])
         )
       ],
       else_body: nil
@@ -412,6 +415,28 @@ The exact generated tree may include extra temporaries, ownership fact nodes,
 pass state: :mir_lowered
 ```
 
+#### BG, WITH, FSMs, and Thunks
+
+Annotation validates source-level execution boundaries. MIR lowering owns the
+runtime form:
+
+```text
+AST::BgBlock / async boundary
+  -> capture materialization and cleanup facts
+  -> FSM or thunk transform
+  -> MIR::FsmGenericCtxStruct / MIR::FsmMemberFn / dispatch nodes
+  -> MIR checker structure validation
+```
+
+`WITH` aliases and capability requirements are already validated by the
+annotator. MIR consumes those facts to preserve safe access while lowering
+captures, borrows, transfers, and cleanup guards around the runtime boundary.
+
+FSM and thunk lowering must remain structural: it should create or inspect MIR
+nodes, not recover intent from rendered Zig strings. Regex/text rewriting in
+FSM or thunk lowering is an architectural blocker because it hides ownership
+and capture facts from the checker.
+
 ### 11. MIR Checker (`mir_checker.rb`)
 
 The checker validates the lowered MIR ownership surface before Zig is emitted.
@@ -421,7 +446,7 @@ For this example it verifies facts such as:
 
 ```text
 __hoist_1 has an allocation/ownership creation fact
-d has a cleanup on the local path
+__hoist_1 has a cleanup on the local path
 the TAKES path has a TransferMark
 the guarded cleanup has a matching MoveMark
 __hoist_1 is not used after the transfer path
@@ -503,6 +528,14 @@ The MIR directory is split by responsibility:
 * [`mir_pass.rb`](mir_pass.rb): coordinates MIR-side AST analysis and stamping.
 * [`mir_lowering.rb`](mir_lowering.rb) and [`lowering/`](lowering/): AST-to-MIR lowering.
 * [`mir_checker.rb`](mir_checker.rb): ownership and lifecycle verification over MIR.
+* [`mir_emitter.rb`](mir_emitter.rb): MIR-to-Zig emission.
+* [`fsm_transform.rb`](fsm_transform.rb), [`fsm_transform/`](fsm_transform),
+  [`fsm_lowering.rb`](fsm_lowering.rb), [`fsm_ops.rb`](fsm_ops.rb), and
+  [`fsm_wrapper_emitter.rb`](fsm_wrapper_emitter.rb): async/background FSM
+  lowering and emission support.
+* [`thunk_transform.rb`](thunk_transform.rb) and
+  [`thunk_transform/`](thunk_transform): recursion thunk/trampoline lowering
+  support.
 
 Shared semantic analyses live outside MIR in [`../semantic`](../semantic):
 
@@ -517,9 +550,6 @@ Shared semantic analyses live outside MIR in [`../semantic`](../semantic):
   source-level whole-program semantic checks run by the annotator.
 * [`../semantic/ownership_graph.rb`](../semantic/ownership_graph.rb): ownership
   and borrow graph used while annotating source-level movement.
-* [`mir_emitter.rb`](mir_emitter.rb): pure MIR-to-Zig templates.
-* `fsm_*`: async/background FSM lowering and emission support.
-* `thunk_transform*`: recursion thunk/trampoline lowering support.
 
 The design boundary is intentional: analysis belongs before or during lowering,
 verification belongs in the checker, and emission is mechanical.

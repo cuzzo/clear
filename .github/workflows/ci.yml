@@ -148,6 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       COVERAGE: "1"
+      COVERAGE_ISOLATED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -208,6 +209,7 @@ jobs:
         shard: [0, 1, 2, 3, 4]
     env:
       COVERAGE: "1"
+      COVERAGE_ISOLATED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1

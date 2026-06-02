@@ -40,7 +40,7 @@ parsed AST
   -> analyze function bodies and expression types
   -> resolve Auto slots, if any
   -> run shared semantic analyses
-  -> classify BG capture strategy
+  -> classify source-level BG / execution-boundary facts
   -> infer effects and validate capability-sensitive calls
   -> run deferred WITH / lock / reentrancy / stack metadata checks
   -> stamp Program as :annotated for MIR
@@ -58,12 +58,18 @@ The annotator has five core jobs:
 
 The important boundary is that MIR should receive typed semantic AST, not a
 tree that still needs type inference or user-level capability validation.
+Annotation decides whether source-level operations are valid; MIR decides how
+valid operations become runtime state, cleanup, FSMs, thunks, and Zig-shaped
+control flow.
 
 ## Phase Flow
 
 ### 0. Annotator Construction
 
-File: [`annotator.rb`](annotator.rb)
+Files:
+
+* [`annotator.rb`](annotator.rb)
+* [`phases/builtin_environment.rb`](phases/builtin_environment.rb)
 
 `SemanticAnnotator#initialize` creates the mutable analysis state used during
 the pass:
@@ -80,16 +86,24 @@ the pass:
 It also calls `setup_builtins`, which registers stdlib functions, built-in
 types, resources, and schemas into the root scope.
 
-This is already useful, but it is also one of the messier boundaries: several
-independent analyses share instance variables on `SemanticAnnotator`. The
-long-term shape should be smaller phase objects with explicit inputs and
-outputs, especially for call graph, effects, capabilities, and lock analysis.
-Shared analyses that are consumed by both annotation and MIR live in
+The current implementation is organized into phase, domain, and helper modules
+included into `SemanticAnnotator`. That is materially easier to navigate than a
+single large visitor, but it is still one object with shared mutable state.
+The long-term A-tier shape is smaller phase objects with explicit context and
+result types, especially for call graph, effects, capabilities, and lock
+analysis. Shared analyses that are consumed by both annotation and MIR live in
 [`../semantic`](../semantic) rather than under MIR.
 
 ### 1. Entry Point
 
-File: [`annotator.rb`](annotator.rb)
+Files:
+
+* [`annotator.rb`](annotator.rb)
+* [`phases/annotation_boundary.rb`](phases/annotation_boundary.rb)
+* [`phases/auto_finalization.rb`](phases/auto_finalization.rb)
+* [`phases/whole_program_semantics.rb`](phases/whole_program_semantics.rb)
+* [`phases/deferred_validation.rb`](phases/deferred_validation.rb)
+* [`phases/program_finalization.rb`](phases/program_finalization.rb)
 
 `annotate!(program)` is the public entry point. It resets user-defined types,
 walks the program, runs whole-program post-passes, and marks the MIR pass state:
@@ -113,7 +127,12 @@ the complete function set happen after the body walk.
 
 ### 2. Program-Level Declaration Order
 
-File: [`annotator.rb`](annotator.rb), `visit_Program`
+Files:
+
+* [`annotator.rb`](annotator.rb), `visit_Program`
+* [`phases/type_registration.rb`](phases/type_registration.rb)
+* [`phases/signature_registration.rb`](phases/signature_registration.rb)
+* [`phases/declaration_index.rb`](phases/declaration_index.rb)
 
 The program walk is deliberately multi-pass:
 
@@ -147,7 +166,7 @@ Files:
 
 * [`../ast/scope.rb`](../ast/scope.rb)
 * [`../ast/symbol_entry.rb`](../ast/symbol_entry.rb)
-* [`annotator.rb`](annotator.rb)
+* [`domains/variables.rb`](domains/variables.rb)
 
 Scopes map names to `SymbolEntry` objects. A symbol carries the binding's type,
 mutability, storage, sync/layout facts, ownership flags, and analysis metadata.
@@ -181,7 +200,9 @@ would split stable binding identity from branch-local flow state.
 
 Files:
 
-* [`annotator.rb`](annotator.rb)
+* [`phases/signature_registration.rb`](phases/signature_registration.rb)
+* [`phases/signature_registry.rb`](phases/signature_registry.rb)
+* [`phases/body_analysis.rb`](phases/body_analysis.rb)
 * [`helpers/function_signature.rb`](helpers/function_signature.rb)
 * [`helpers/function_analysis.rb`](helpers/function_analysis.rb)
 
@@ -213,7 +234,13 @@ then verifies or infers the return type.
 
 ### 5. Expression Type Stamping
 
-File: [`annotator.rb`](annotator.rb)
+Files:
+
+* [`phases/expression_domains.rb`](phases/expression_domains.rb)
+* [`domains/expressions.rb`](domains/expressions.rb)
+* [`domains/member_access.rb`](domains/member_access.rb)
+* [`helpers/method_analysis.rb`](helpers/method_analysis.rb)
+* [`helpers/union.rb`](helpers/union.rb)
 
 Every expression visitor is responsible for stamping `full_type` through
 `stamp_type!`. The stamp helper rejects missing and `:Untyped` types, making it
@@ -246,7 +273,7 @@ declaration finalization.
 
 Files:
 
-* [`annotator.rb`](annotator.rb)
+* [`domains/variables.rb`](domains/variables.rb)
 * [`helpers/generic_analysis.rb`](helpers/generic_analysis.rb)
 
 `visit_BindExpr` handles keywordless declarations and assignments:
@@ -303,10 +330,11 @@ The body walk records the initializer and operator evidence. The unifier later
 chooses `Int64`, stamps the declaration, and emits an optional fix replacing
 `Auto` with `Int64`.
 
-### 8. Capabilities and WITH Blocks
+### 8. Capabilities, WITH Blocks, and Execution Boundaries
 
 Files:
 
+* [`domains/execution_boundaries.rb`](domains/execution_boundaries.rb)
 * [`helpers/capabilities.rb`](helpers/capabilities.rb)
 * [`helpers/lock_helper.rb`](helpers/lock_helper.rb)
 * [`helpers/with_match_check.rb`](helpers/with_match_check.rb)
@@ -332,6 +360,22 @@ visit_WithBlock
   -> record lock/effect/capability audit facts
 ```
 
+For `BG` and `WITH`, annotation handles source-level safety:
+
+```text
+WITH target AS alias -> body END
+  annotator: target type, alias capability, locks, purity, call requirements
+
+BG { body }
+  annotator: capture legality, spawn form, effects, fallibility, stack tier
+```
+
+It does not decide the runtime execution shape. FSM context structs, thunk
+frames, suspend points, runtime aliases, cleanup guards, and Zig emission are
+MIR responsibilities. Keeping this split matters: if annotation starts
+predicting MIR runtime layout, it becomes another lowering pass instead of the
+source semantic boundary.
+
 Errors are raised at the earliest reliable point:
 
 * impossible local targets fail during `acquire_capability!`;
@@ -346,7 +390,10 @@ named operation instead of open-coded field updates.
 
 ### 9. Control Flow and Branch State
 
-File: [`annotator.rb`](annotator.rb)
+Files:
+
+* [`domains/control_flow.rb`](domains/control_flow.rb)
+* [`domains/lifetimes.rb`](domains/lifetimes.rb)
 
 `analyze_control_flow_branches` snapshots the ownership graph, visits each
 branch in an isolated scope, then merges non-terminating branch state.
@@ -375,6 +422,7 @@ Files:
 
 * [`helpers/effects.rb`](helpers/effects.rb)
 * [`helpers/reentrance.rb`](helpers/reentrance.rb)
+* [`domains/errors.rb`](domains/errors.rb)
 * [`../semantic/effect_inference.rb`](../semantic/effect_inference.rb)
 * [`../semantic/concurrency_checks.rb`](../semantic/concurrency_checks.rb)
 * [`../semantic/bg_capture_classifier.rb`](../semantic/bg_capture_classifier.rb)
@@ -451,8 +499,15 @@ boundary before MIR lowering.
 The annotator directory is split by concern, though some older logic still
 lives in the large main file:
 
-* [`annotator.rb`](annotator.rb): main visitor, top-level phase orchestration,
-  declaration/call/control-flow typing, and many legacy checks.
+* [`annotator.rb`](annotator.rb): main visitor and top-level phase
+  orchestration. It should stay thin; node-family logic belongs in domains,
+  phase modules, or helpers.
+* [`phases/`](phases): annotator phase modules for builtin setup, declaration
+  indexing, type registration, signature registration, body analysis, `Auto`
+  finalization, whole-program semantics, deferred validation, and boundary
+  finalization.
+* [`domains/`](domains): visitor domains for control flow, variables,
+  expressions, member access, execution boundaries, lifetimes, and errors.
 * [`helpers/function_analysis.rb`](helpers/function_analysis.rb): routine
   analysis, call resolution, parameter checks, lifetime checks, and function
   metadata collection.
@@ -499,8 +554,9 @@ wide for v0.1 comfort:
 * Some MIR-facing facts are stamped directly on AST nodes from scattered helper
   code. The desired shape is a small number of authoritative outputs from
   `src/semantic` that lowering reads.
-* `annotator.rb` is still a large visitor with many unrelated policy checks.
-  More node families should move into focused helper modules or phase objects.
+* The include chain makes many methods look local to one class even when they
+  are implemented in phase/domain modules. This is organized but not isolated.
+  Explicit phase contexts would make state ownership clearer.
 
 ## Cleanup Direction
 

@@ -25,8 +25,9 @@ require "simplecov"
 require "json"
 
 resultset_path = File.expand_path("../coverage/.resultset.json", __dir__)
-unless File.exist?(resultset_path)
-  warn "no #{resultset_path} -- run specs first"
+resultset_paths = Dir[File.expand_path("../coverage/**/.resultset.json", __dir__)].sort
+unless resultset_paths.any?
+  warn "no coverage resultsets -- run specs first"
   exit 1
 end
 
@@ -47,8 +48,12 @@ SimpleCov.configure do
   add_group "Tools", "src/tools"
 end
 
-original_keys = JSON.parse(File.read(resultset_path)).keys
-merged = SimpleCov::ResultMerger.merge_results(resultset_path, ignore_timeout: true)
+original_keys = resultset_paths.flat_map do |path|
+  JSON.parse(File.read(path)).keys
+rescue JSON::ParserError
+  []
+end
+merged = SimpleCov::ResultMerger.merge_results(*resultset_paths, ignore_timeout: true)
 abort "merge produced nothing" unless merged
 
 # Persist back as a single "RSpec" entry. SimpleCov::Result#to_hash

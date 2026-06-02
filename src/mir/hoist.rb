@@ -770,7 +770,6 @@ module MIRHoistLowering
   def normalize_allocating_mir_body(body)
     out = T.let([], T::Array[T.untyped])
     body.each do |stmt|
-      normalize_nested_mir_bodies!(stmt)
       prefix = normalize_allocating_mir_stmt!(stmt)
       out.concat(prefix)
       out << stmt

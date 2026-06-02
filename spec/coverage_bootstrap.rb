@@ -18,6 +18,23 @@
 # When COVERAGE != 1 or simplecov isn't installed, this is a no-op.
 
 module CoverageBootstrap
+  def self.isolated_coverage_dir(command_name)
+    File.join(
+      ENV.fetch("COVERAGE_DIR", "coverage"),
+      "isolated",
+      "#{command_name}-#{Process.pid}"
+    )
+  end
+
+  def self.isolate_process!(command_name)
+    return unless ENV["COVERAGE"] == "1"
+    return unless ENV["COVERAGE_ISOLATED"] == "1"
+    return unless defined?(SimpleCov)
+
+    SimpleCov.command_name("#{command_name}-#{Process.pid}") if SimpleCov.respond_to?(:command_name)
+    SimpleCov.coverage_dir(isolated_coverage_dir(command_name))
+  end
+
   def self.start(command_name)
     return unless ENV["COVERAGE"] == "1"
 
@@ -29,7 +46,11 @@ module CoverageBootstrap
     end
 
     SimpleCov.start do
-      coverage_dir ENV.fetch("COVERAGE_DIR", "coverage")
+      coverage_dir(
+        ENV["COVERAGE_ISOLATED"] == "1" ?
+          isolated_coverage_dir(command_name) :
+          ENV.fetch("COVERAGE_DIR", "coverage")
+      )
       command_name "#{command_name}-#{Process.pid}"
       enable_coverage :branch
 
