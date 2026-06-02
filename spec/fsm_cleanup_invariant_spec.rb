@@ -16,8 +16,8 @@ require_relative '../src/mir/fsm_transform/emit'
 # model and never sees Pass 4's segment splitting.
 #
 # This invariant closes the hole at the Pass 4 boundary: the FSM
-# transform asserts post-render that no forbidden defer slipped
-# through.
+# transform asserts before rendering that no forbidden cleanup node
+# slipped through.
 
 RSpec.describe FsmTransform::Emit do
   let(:liveness_double) {
@@ -33,9 +33,17 @@ RSpec.describe FsmTransform::Emit do
     s
   end
 
+  def cleanup(name)
+    MIR::Cleanup.new(name, CleanupEntry.new)
+  end
+
+  def err_cleanup(name)
+    MIR::ErrCleanup.new(name, CleanupEntry.new)
+  end
+
   describe "#check_fsm_cleanup_invariant!" do
     it "passes when no defers appear" do
-      seg_codes = ["__ctx_0.x = 1;", "__ctx_0.y = 2;"]
+      seg_codes = [[], []]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0), fake_seg(1)],
@@ -47,11 +55,7 @@ RSpec.describe FsmTransform::Emit do
     it "passes when a defer targets a segment-local var (not in any ctx set)" do
       # `tmp` is purely segment-local; defer on tmp is fine because
       # tmp lives entirely within this runSegN.
-      seg_codes = [
-        "var tmp = std.ArrayListUnmanaged(i64).empty;\n" \
-        "defer tmp.deinit(rt.frameAlloc());\n" \
-        "tmp.append(rt.frameAlloc(), 1);",
-      ]
+      seg_codes = [[cleanup("tmp")]]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0)],
@@ -61,10 +65,7 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "raises when a defer targets a cross-segment liveness var" do
-      seg_codes = [
-        "__ctx_0.list = std.ArrayListUnmanaged(i64).empty;\n" \
-        "defer list.deinit(rt.frameAlloc());\n",
-      ]
+      seg_codes = [[cleanup("list")]]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0)],
@@ -78,9 +79,7 @@ RSpec.describe FsmTransform::Emit do
       # seg 0's prologue. The defer fires when seg 0 returns
       # (before the body completes) so the captured collection is
       # deinit'd while the body still references it.
-      seg_codes = [
-        "defer s.deinit(rt.heapAlloc());",
-      ]
+      seg_codes = [[cleanup("s")]]
       captured = { "s" => :stub }
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
@@ -91,7 +90,7 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "raises when an errdefer targets a cross-segment var" do
-      seg_codes = ["errdefer X.deinit(rt.heapAlloc());"]
+      seg_codes = [[err_cleanup("X")]]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0)],
@@ -101,7 +100,7 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "raises when a defer targets a conservatively-promoted local" do
-      seg_codes = ["defer promoted.deinit(rt.heapAlloc());"]
+      seg_codes = [[cleanup("promoted")]]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0)],
@@ -111,7 +110,7 @@ RSpec.describe FsmTransform::Emit do
     end
 
     it "names the offending segment in the error message" do
-      seg_codes = ["foo();", "defer s.deinit(rt.heapAlloc());"]
+      seg_codes = [[], [cleanup("s")]]
       expect {
         FsmTransform::Emit.check_fsm_cleanup_invariant!(
           seg_codes, [fake_seg(0), fake_seg(7)],

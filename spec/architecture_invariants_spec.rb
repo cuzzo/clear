@@ -203,10 +203,12 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
   end
 
-  it "does not use regexes or regex-driven text rewriting in src/mir" do
-    pending("fsm-thunk structural rearchitecture: MIR must stop using generated text as semantic IR")
+  it "does not use regexes or regex-driven text rewriting in FSM/Thunk lowering" do
+    paths = Dir[File.join(ARCH_ROOT, "src/mir/fsm*.rb")] +
+            Dir[File.join(ARCH_ROOT, "src/mir/fsm_transform/**/*.rb")] +
+            Dir[File.join(ARCH_ROOT, "src/mir/thunk_transform/**/*.rb")]
 
-    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+    offenders = paths.uniq.sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       File.readlines(path).filter_map.with_index do |line, idx|
         next if line.strip.start_with?("#")

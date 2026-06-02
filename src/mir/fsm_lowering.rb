@@ -20,10 +20,6 @@ require_relative 'fsm_wrapper_emitter'
 #                                          text (consults
 #                                          @do_capture_map)
 #   render_mir_list                    -- shared MIREmitter wrapper
-#   promote_fsm_decls_to_fields        -- regex rewrite of `var X = ...`
-#                                          to `__ctx.X = ...` for
-#                                          conservatively-promoted
-#                                          body locals
 #   fsm_cap_metadata                   -- per-cap lock-acquire metadata
 #                                          (try_method, alias_data_ref,
 #                                          retries) used by
@@ -70,28 +66,6 @@ module FsmLowering
     parts = capture_inits.split(", ").drop(2)
     parts.empty? ? "" : parts.join(", ") + ","
   end
-  sig { params(code: String, promoted_names: T::Array[String], ctx_var: String).returns(String) }
-  def promote_fsm_decls_to_fields(code, promoted_names, ctx_var)
-    T.bind(self, MIRLowering) rescue nil
-    return code if promoted_names.empty?
-    out = code.dup
-    promoted_names.each do |name|
-      esc = Regexp.escape(name)
-      local_name = "#{esc}(?:_L\\d+)?"
-      out = out.gsub(/(^|\n)(\s*)(?:const|var)\s+#{local_name}\s*(?::\s*[^=]+)?=\s*/) do
-        "#{$1}#{$2}#{ctx_var}.#{name} = "
-      end
-      out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
-      out = out.gsub(/(?<!\.)\b#{esc}(?:_L\d+)?_moved\b/, "#{ctx_var}.#{name}_moved")
-      out = out.gsub(/\bvar\s+#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*=\s*/, "#{ctx_var}.#{name}_moved = ")
-      out = out.gsub(/@TypeOf\(\s*#{esc}\s*\)/, "@TypeOf(#{ctx_var}.#{name})")
-      out = out.gsub(/&#{esc}\b/, "&#{ctx_var}.#{name}")
-      out = out.gsub(/\s*_\s*=\s*&?#{esc}\s*;/, "")
-      out = out.gsub(/\s*_\s*=\s*&#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*;/, "")
-    end
-    out
-  end
-
   # Lower a list of statements and produce Zig text. If no_result is
   # true, all stmts are emitted as intermediates. Otherwise the last
   # stmt may set `__ctx_N.inner.result = ...;` (for non-void result
@@ -375,16 +349,21 @@ module FsmLowering
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
-  # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
-  # finalizes ownership once, then renders through MIREmitter.
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
-  def emit_step_stmts(stmts, no_result:, ctx_id: nil)
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[T.untyped]) }
+  def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     @last_fsm_result_transfer_facts = T.let([], T.untyped)
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
     inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
     inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
-    render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
+    append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards)
+  end
+
+  # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
+  # finalizes ownership once, then renders through MIREmitter.
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
+  def emit_step_stmts(stmts, no_result:, ctx_id: nil)
+    render_mir_list(lower_finalized_fsm_step_mir(stmts, no_result: no_result, ctx_id: ctx_id))
   end
   sig { params(mir_list: T::Array[T.untyped]).returns(String) }
   def render_mir_list(mir_list)
@@ -410,6 +389,14 @@ module FsmLowering
       out
     }.join("\n            ")
   end
+
+  sig { params(name: String, cleanup_entry: CleanupEntry).returns(String) }
+  def render_fsm_destroy_cleanup(name, cleanup_entry)
+    rendered = render_mir_list([MIR::Cleanup.new(name, cleanup_entry)])
+    rendered = rendered.delete_prefix("defer ")
+    rendered.end_with?(";") ? rendered : "#{rendered};"
+  end
+
   # Resolve ONE capability's lock-acquire metadata. Returns
   # { try_method, unlock_method, lock_field_ref, alias_name,
   #   alias_data_ref, retries, lock_kind, cap } or nil if `cap`
