@@ -28,6 +28,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
   NODE_STORAGE_OK = lambda do |rel|
     rel == "annotator/annotator.rb" ||
       rel.start_with?("annotator/helpers/") ||
+      rel.start_with?("annotator/domains/") ||
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
