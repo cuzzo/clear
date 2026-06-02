@@ -265,6 +265,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
     expect(low.send(:ast_void_type?, Type.new(:Int64))).to eq(false)
     expect(low.send(:zig_format_for_type, Type.new(:String))).to eq("{s}")
+    expect(low.send(:zig_format_for_type, Type.new(:"Byte[4]"))).to eq("{s}")
     expect(low.send(:zig_format_for_type, Type.new(:Int64))).to eq("{d}")
     expect(low.send(:zig_format_for_type, Type.new(:Bool))).to eq("{}")
     expect(low.send(:zig_format_for_type, Type.new(:Any))).to eq("{any}")

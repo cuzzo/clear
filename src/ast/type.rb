@@ -1278,6 +1278,12 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def generic_type_parameter?
+    raw = shape.raw
+    raw.is_a?(Symbol) && raw.to_s.length == 1 && raw.to_s >= "A" && raw.to_s <= "Z"
+  end
+
+  sig { returns(T::Boolean) }
   def primitive?
     AST::PRIMITIVE_TYPES.include?(resolved)
   end
@@ -2112,6 +2118,11 @@ class Type
   def value_payload_type
     t = success_type
     t.optional? ? T.must(t.wrapped_type) : t
+  end
+
+  sig { returns(Type) }
+  def non_optional_type
+    optional? ? T.must(wrapped_type) : self
   end
 
   # Tense (Promise) types: ~T — a background task that will produce T

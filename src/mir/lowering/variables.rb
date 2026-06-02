@@ -84,7 +84,7 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     ret = node.return_type
     return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
-    return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
+    return nil unless ret.generic_type_parameter?
     params = node.params.select do |p|
       pt = p.type || Type.new(:Any)
       pt.shared? && pt.resolved == ret.resolved

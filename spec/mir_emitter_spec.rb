@@ -591,6 +591,14 @@ RSpec.describe MIREmitter do
     end
   end
 
+  describe "TypeSentinel" do
+    it "emits numeric sentinels through ZigType predicates" do
+      expect(e.emit(MIR::TypeSentinel.new(:max, "f64"))).to eq("std.math.floatMax(f64)")
+      expect(e.emit(MIR::TypeSentinel.new(:min, "i64"))).to eq("std.math.minInt(i64)")
+      expect(e.emit(MIR::TypeSentinel.new(:max, "Custom"))).to eq("std.math.floatMax(f64)")
+    end
+  end
+
   describe "Frame operations" do
     it "emits frame save" do
       expect(e.emit(MIR::FrameSave.new("rt"))).to eq("const frame_mark = rt.saveFrameMark();")

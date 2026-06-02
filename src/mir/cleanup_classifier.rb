@@ -831,10 +831,9 @@ module CleanupClassifier
       if ti.any_rc? && !ti.sync
         schema = schema_lookup.call(ti.resolved) rescue nil
         if Schemas.field_bearing?(schema)
-          base_type = ti.resolved.to_s
-          base_type = base_type.sub(/^\?/, '') if ti.optional?
+          base_type = ti.non_optional_type
           e[:needs_release_fields] = true
-          e[:base_zig] = Type.new(base_type).zig_type rescue base_type
+          e[:base_zig] = base_type.zig_type
         end
       end
       e

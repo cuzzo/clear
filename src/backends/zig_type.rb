@@ -15,6 +15,35 @@ class ZigType
     @explicit_error_set_union = T.let(source.include?("error{"), T::Boolean)
   end
 
+  sig { params(name: String).returns(T::Boolean) }
+  def self.primitive_numeric_identifier?(name)
+    return false if name.length < 2
+    head = name[0]
+    return false unless head == "u" || head == "i" || head == "f"
+
+    digits = name[1..]
+    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def self.float_identifier?(name)
+    return false if name.length < 2
+    return false unless name[0] == "f"
+
+    digits = name[1..]
+    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def self.integer_identifier?(name)
+    return false if name.length < 2
+    head = name[0]
+    return false unless head == "u" || head == "i"
+
+    digits = name[1..]
+    !digits.nil? && !digits.empty? && digits.each_char.all? { |char| char >= "0" && char <= "9" }
+  end
+
   sig { returns(T::Boolean) }
   def error_union?
     @inferred_error_union || @anyerror_union || @explicit_error_set_union

@@ -1969,8 +1969,7 @@ module MIRLoweringExpressions
   def lower_freeze(node)
     T.bind(self, MIRLowering) rescue nil
     ti = node.value.full_type!
-    base = ti.resolved.to_s.sub(/^\?/, '')
-    zig_base = transpile_type(base)
+    zig_base = transpile_type(ti.non_optional_type.resolved)
     inner = lower(node.value)
     # Dereference Rc data pointer to get *const T for freeze()
     rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
@@ -1980,7 +1979,7 @@ module MIRLoweringExpressions
   sig { params(ti: Type).returns(String) }
   def rc_payload_zig_type(ti)
     T.bind(self, MIRLowering) rescue nil
-    if ti.resolved.to_s.match?(/\A[A-Z]\z/) && ti.shared?
+    if ti.generic_type_parameter? && ti.shared?
       return ti.resolved.to_s
     end
     ::FiberCtxBuilder.rc_payload_zig_type(ti)

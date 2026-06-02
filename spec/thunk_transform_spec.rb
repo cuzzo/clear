@@ -18,6 +18,15 @@ RSpec.describe "ThunkTransform module wiring" do
       expect(ZigType.new("!i64").cast_target_type).to eq("anyerror!i64")
       expect(ZigType.new("!i64").cleanup_storage_type).to eq("i64")
     end
+
+    it "classifies primitive Zig numeric identifiers without regex parsing" do
+      expect(ZigType.primitive_numeric_identifier?("i64")).to eq(true)
+      expect(ZigType.primitive_numeric_identifier?("f32")).to eq(true)
+      expect(ZigType.integer_identifier?("u8")).to eq(true)
+      expect(ZigType.float_identifier?("f64")).to eq(true)
+      expect(ZigType.integer_identifier?("usize")).to eq(false)
+      expect(ZigType.primitive_numeric_identifier?("Int64")).to eq(false)
+    end
   end
 
   describe "module structure" do

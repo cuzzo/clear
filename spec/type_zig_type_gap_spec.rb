@@ -199,6 +199,15 @@ RSpec.describe "Type#zig_type gap coverage" do
     expect(payload.sync).to eq(:locked)
   end
 
+  it "exposes wrapper payloads and generic type parameters without string parsing" do
+    fallible_optional = Type.new(:"!?Mode")
+
+    expect(fallible_optional.success_type).to be_optional
+    expect(fallible_optional.value_payload_type.resolved).to eq(:Mode)
+    expect(Type.new(:T)).to be_generic_type_parameter
+    expect(Type.new(:Result)).not_to be_generic_type_parameter
+  end
+
   it "raises a compiler error for observable wrappers without terminal stamps" do
     type = Type.new(:"~Int64", observable: true)
 

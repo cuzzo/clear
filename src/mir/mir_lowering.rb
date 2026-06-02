@@ -2563,8 +2563,7 @@ class MIRLowering
     # name before lookup so `CAST(x AS ?MyEnum)` and `CAST(x AS !MyEnum)`
     # also route through the builtin -- otherwise the schema lookup misses
     # and we emit `@as(?MyEnum, intExpr)` which Zig also rejects.
-    target_resolved = node.target.is_a?(Type) ? node.target.resolved : node.target
-    target_base = target_resolved.to_s.sub(/\A[?!]+/, '').to_sym
+    target_base = Type.new(node.target).value_payload_type.resolved
     if @enum_schemas&.key?(target_base)
       return MIR::Cast.new(inner, target_type, :enumFromInt)
     end
@@ -2911,14 +2910,12 @@ class MIRLowering
 
   sig { params(flux_type: Type).returns(String) }
   def zig_format_for_type(flux_type)
-    t = flux_type.to_s
-    return "{s}" if t.include?("String") || t.match?(/^Byte\[/)
-    case t
-    when "Number", "Int64", "Byte" then "{d}"
-    when "Bool" then "{}"
-    when "Void" then "{}"
-    else "{any}"
-    end
+    return "{s}" if flux_type.string? ||
+      (flux_type.array? && flux_type.element_type&.resolved == :Byte)
+    return "{d}" if flux_type.resolved == :Number || flux_type.resolved == :Int64 || flux_type.resolved == :Byte
+    return "{}" if flux_type.resolved == :Bool || flux_type.resolved == :Boolean || flux_type.void?
+
+    "{any}"
   end
 
   sig { params(name: String).returns(T::Boolean) }

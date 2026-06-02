@@ -1451,14 +1451,14 @@ class MIREmitter
     t = node.zig_type.to_s
     case node.extreme
     when :max
-      if t =~ /\Af/         then "std.math.floatMax(#{t})"
-      elsif t =~ /\A(u|i)\d+/ then "std.math.maxInt(#{t})"
-      else                       "std.math.floatMax(f64)"
+      if ZigType.float_identifier?(t) then "std.math.floatMax(#{t})"
+      elsif ZigType.integer_identifier?(t) then "std.math.maxInt(#{t})"
+      else "std.math.floatMax(f64)"
       end
     when :min
-      if t =~ /\Af/         then "-std.math.floatMax(#{t})"
-      elsif t =~ /\A(u|i)\d+/ then "std.math.minInt(#{t})"
-      else                       "-std.math.floatMax(f64)"
+      if ZigType.float_identifier?(t) then "-std.math.floatMax(#{t})"
+      elsif ZigType.integer_identifier?(t) then "std.math.minInt(#{t})"
+      else "-std.math.floatMax(f64)"
       end
     end
   end

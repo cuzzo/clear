@@ -1827,6 +1827,18 @@ RSpec.describe MIRLowering do
       expect(zig).to include("comptime T: type")
     end
 
+    it "renders shared generic type parameters through Type classification" do
+      param_type = Type.new(:T, ownership: :shared)
+      params = [AST::Param.new(name: "value", type: param_type)]
+      fn = make_fn("keep", params: params, return_type: Type.new(:Void), type_params: ["T"])
+
+      result = lowering.lower(fn)
+      zig = emit(result)
+
+      expect(zig).to include("comptime T: type")
+      expect(zig).to include("value: CheatLib.Arc(T)")
+    end
+
     it "handles mutable scalar param shadows" do
       params = [AST::Param.new(name: "count", type: :Int64, mutable: true)]
       body_stmt = make_id("count")
@@ -2192,6 +2204,18 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::Cast)
       expect(emit(result)).to eq("@as(i32, 42)")
+    end
+
+    it "detects enum casts through Type wrapper payloads" do
+      inner = make_lit(:INT64, 1, full_type: :Int64)
+      inner.coerced_type = :Int64
+      node = AST::Cast.new(tok, inner, Type.new(:"!?Mode"))
+      node.full_type = Type.new(:"!?Mode")
+
+      result = lowering(enum_schemas: { Mode: ["Fast", "Slow"] }).lower(node)
+
+      expect(result).to be_a(MIR::Cast)
+      expect(result.method).to eq(:enumFromInt)
     end
 
     it "lowers DieNode" do

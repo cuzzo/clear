@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/lexer"
+require_relative "../../backends/zig_type"
 
 module MIRLoweringCapabilities
     extend T::Sig
@@ -394,7 +395,7 @@ module MIRLoweringCapabilities
   def safe_with_capability_alias(alias_name)
     cleaned = (alias_name.end_with?("!") || alias_name.end_with?("?")) ? T.must(alias_name[0..-2]) : alias_name
     cleaned = "clearMain" if cleaned == "main"
-    cleaned.match?(/\A[uif]\d+\z/) ? "@\"#{cleaned}\"" : cleaned
+    ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(String) }

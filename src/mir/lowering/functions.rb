@@ -397,6 +397,8 @@ module MIRLoweringFunctions
     end
 
     has_catch = function_catch_clauses(node).any?
+    return_type_info = Type.from_node!(return_type_node, context: "function lowering return type")
+    return_payload = return_type_info.plain_return_payload_type
     FunctionLoweringContext.new(
       bindings: bindings,
       binding_types: {},
@@ -416,8 +418,8 @@ module MIRLoweringFunctions
       has_rt: fn_needs_rt,
       tail_call: node.tail_call == true,
       zig_name: T.must(zig_safe_name(node.name)),
-      return_payload_zig: final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""),
-      return_type: Type.from_node!(return_type_node, context: "function lowering return type"),
+      return_payload_zig: return_payload ? return_payload.zig_type : final_type,
+      return_type: return_type_info,
       heap_carry_return: node.respond_to?(:heap_carry_return) && node.heap_carry_return == true,
       has_catch: has_catch,
     )
@@ -504,7 +506,7 @@ module MIRLoweringFunctions
     sym = param.symbol
     atomic_sync = sym && (sym.atomic? ||
                           (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
-    return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.resolved.to_s.match?(/\A[A-Z]\z/)
+    return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
     return "anytype" if is_user_struct || type_info.collection? || atomic_sync
 
     base_zig
