@@ -1195,6 +1195,12 @@ module AST
     const :resource, T::Boolean, default: false
   end
 
+  class ReturnFact < T::Struct
+    const :storage, T.nilable(Symbol)
+    const :type, Symbol
+    const :metatype, T.nilable(Symbol)
+  end
+
   sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
   def self.each_child_node(node, &blk)
     node.class.members.each do |member|

@@ -44,21 +44,21 @@ module FunctionAnalysis
       og_pop_scope(archive: true)
     end
 
-    found_returns = (current_fn_ctx&.returns || []).uniq
+    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
     # Restore saved returns (for enclosing function/lambda).
     current_fn_ctx.returns = saved_returns if current_fn_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
     return_type = if body.is_a?(Array)
-      found_returns.any? ? found_returns.first[:type] : :Any
+      found_returns.any? ? T.must(found_returns.first).type : :Any
     else
       body.resolved_type
     end
 
     # Update return type if we can narrow it
     if (is_implicit || declared_return == :Any) && found_returns.any?
-      inferred = found_returns.first[:type]
+      inferred = T.must(found_returns.first).type
       if is_implicit || found_returns.size == 1
         return_type = inferred
       end
@@ -873,14 +873,14 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped, found_returns: T::Array[T::Hash[Symbol, T.nilable(Symbol)]], declared_return: T.nilable(Type)).void }
+  sig { params(node: T.untyped, found_returns: T::Array[AST::ReturnFact], declared_return: T.nilable(Type)).void }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
     if found_returns.size > 1
       # Normalize: all string-like types (Byte[N], String) → String for comparison
       normalized = found_returns.map { |r|
-        t = r[:type].to_s
-        (t.start_with?("Byte[") || t == "String") ? :String : r[:type]
+        t = r.type.to_s
+        (t.start_with?("Byte[") || t == "String") ? :String : r.type
       }.uniq.size
       if declared_return != :Any && normalized > 1
         emit_ambiguous_return_error!(node, found_returns)

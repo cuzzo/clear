@@ -6,7 +6,6 @@ module Annotator
     module Errors
       extend T::Sig
 
-      ReturnFact = T.type_alias { T::Hash[Symbol, BasicObject] }
 
       # Pre-pass: walk every RAISE and OR EXIT site that provides both a
       # kind and a type, and seed the registry with (kind, type). Lets
@@ -508,7 +507,11 @@ module Annotator
 
         stamp_type!(node, actual)
 
-        current_fn_ctx.returns << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
+        current_fn_ctx.returns << AST::ReturnFact.new(
+          storage: T.cast(node.value.storage, T.nilable(Symbol)),
+          type: T.cast(actual, Symbol),
+          metatype: T.cast(node.value.metatype, T.nilable(Symbol)),
+        )
 
         @branch_terminated = true
       end

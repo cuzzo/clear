@@ -711,9 +711,10 @@ module FixableHelper
   # `RETURNS` annotation. :auto fix inserts `RETURNS :Any ` immediately
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
-  sig { params(fn_node: AST::FunctionDef, found_returns: T::Array[T.untyped]).void }
+  sig { params(fn_node: AST::FunctionDef, found_returns: T::Array[AST::ReturnFact]).void }
   def emit_ambiguous_return_error!(fn_node, found_returns)
     T.bind(self, SemanticAnnotator) rescue nil
+    return_types = found_returns.map(&:type)
     arrow = fn_node.arrow_token
     fix = nil
     if arrow
@@ -726,9 +727,9 @@ module FixableHelper
         )]
       )
     end
-    return error!(fn_node, :AMBIGUOUS_RETURN, types: found_returns) unless fix
+    return error!(fn_node, :AMBIGUOUS_RETURN, types: return_types) unless fix
     fixable!(fn_node,
-      message: T.must(DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: found_returns)),
+      message: T.must(DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: return_types)),
       category: :type,
       level: :error,
       fixes: [fix])

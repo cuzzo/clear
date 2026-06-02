@@ -10,8 +10,11 @@ class FunctionContext
   sig { returns(T.untyped) }
   attr_accessor :name, :type_params,
                 :frame_count, :heap_count, :alloc_count,
-                :loop_depth, :conditional_depth, :returns,
+                :loop_depth, :conditional_depth,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
+
+  sig { returns(T::Array[AST::ReturnFact]) }
+  attr_accessor :returns
 
   sig { returns(T::Boolean) }
   attr_accessor :uses_rt
@@ -44,7 +47,7 @@ class FunctionContext
     @uses_rt = T.let(false, T::Boolean)
     @loop_depth = T.let(0, Integer)
     @conditional_depth = T.let(0, Integer)
-    @returns = T.let([], T::Array[T.untyped])
+    @returns = T.let([], T::Array[AST::ReturnFact])
     @stack_vars_bytes = T.let(0, Integer)
   end
 end
