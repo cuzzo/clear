@@ -85,7 +85,7 @@ require "set"
 
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 
 class MIRChecker
     extend T::Sig

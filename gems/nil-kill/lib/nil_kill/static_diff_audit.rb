@@ -150,9 +150,35 @@ module NilKill
 
     def typed_ivar_initialized_before?(path, line_number, ivar)
       lines = SourceIndex.source_lines(File.join(root, path))
-      lines.first(line_number - 1).any? do |prior|
-        prior.strip.match?(/\A#{Regexp.escape(ivar)}\s*=\s*T\.let\(/)
+      return true if lines.first(line_number - 1).any? { |prior| typed_ivar_line?(prior, ivar) }
+      return true if in_initialize_copy?(lines, line_number) && lines.any? { |line| typed_ivar_line?(line, ivar) }
+
+      typed_ivar_initialized_elsewhere?(path, ivar)
+    end
+
+    def in_initialize_copy?(lines, line_number)
+      idx = line_number.to_i - 1
+      idx.downto(0) do |line_idx|
+        stripped = lines[line_idx].to_s.strip
+        return true if stripped.match?(/\Adef\s+initialize_copy\b/)
+        return false if stripped.start_with?("def ")
       end
+      false
+    end
+
+    def typed_ivar_initialized_elsewhere?(path, ivar)
+      return false unless path.start_with?("src/")
+
+      Dir.glob(File.join(root, "src/**/*.rb")).any? do |candidate|
+        rel = candidate.delete_prefix("#{root}/")
+        next false if rel == path
+
+        SourceIndex.source_lines(candidate).any? { |line| typed_ivar_line?(line, ivar) }
+      end
+    end
+
+    def typed_ivar_line?(line, ivar)
+      line.strip.match?(/\A#{Regexp.escape(ivar)}\s*=\s*T\.let\(/)
     end
 
     def homogeneous_lookup_hash?(code)

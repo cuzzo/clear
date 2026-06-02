@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
+require_relative "lexer"
 require_relative "../annotator/helpers/intrinsic_registry"
 
 # ==========================================
@@ -1148,6 +1149,59 @@ module AST
 
   Node = T.type_alias { Locatable }
 
+  class ErrorSelector < T::Struct
+    const :form, Symbol
+    const :name, Symbol
+    const :token, T.nilable(Lexer::Token)
+  end
+
+  class ErrorAction < T::Struct
+    const :action, Symbol
+    const :token, T.nilable(Lexer::Token)
+    const :value, T.nilable(Node), default: nil
+    const :message, T.nilable(Node), default: nil
+    const :body, T.nilable(T::Array[Node]), default: nil
+  end
+
+  class ErrorClause < T::Struct
+    extend T::Sig
+
+    const :selectors, T::Array[ErrorSelector]
+    const :action, Symbol
+    const :retries, T.nilable(Integer)
+    const :token, T.nilable(Lexer::Token)
+    const :value, T.nilable(Node), default: nil
+    const :message, T.nilable(Node), default: nil
+    const :body, T.nilable(T::Array[Node]), default: nil
+    prop :matched_types, T::Array[Symbol], default: []
+    prop :bubble_types, T::Array[Symbol], default: []
+
+    sig { params(selectors: T::Array[ErrorSelector], retries: T.nilable(Integer), action: ErrorAction).returns(ErrorClause) }
+    def self.from_action(selectors:, retries:, action:)
+      new(
+        selectors: selectors,
+        action: action.action,
+        retries: retries,
+        token: action.token,
+        value: action.value,
+        message: action.message,
+        body: action.body,
+      )
+    end
+  end
+
+  class DeferredDrop < T::Struct
+    const :name, String
+    const :type, Type
+    const :resource, T::Boolean, default: false
+  end
+
+  class ReturnFact < T::Struct
+    const :storage, T.nilable(Symbol)
+    const :type, Symbol
+    const :metatype, T.nilable(Symbol)
+  end
+
   sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
   def self.each_child_node(node, &blk)
     node.class.members.each do |member|
@@ -1351,7 +1405,7 @@ module AST
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
   end
-  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
@@ -1367,11 +1421,26 @@ module AST
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
+	  end
+  class AutoLockPlan < T::Struct
+    extend T::Sig
+
+    const :var, String
+    const :sync, Symbol
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      other.is_a?(AutoLockPlan) && other.var == var && other.sync == sync
+    end
+    alias eql? ==
+
+    sig { returns(Integer) }
+    def hash = [var, sync].hash
   end
-  Assignment   = Struct.new(:token, :name, :value) do
-    include Locatable
-    include StatementVoidType
-    attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
+	  Assignment   = Struct.new(:token, :name, :value) do
+	    include Locatable
+	    include StatementVoidType
+	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
@@ -1655,9 +1724,8 @@ module AST
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
   Require      = Struct.new(:token, :path) { include Locatable }
-  # lock_error_clause: optional Hash describing ON TIMEOUT / RETRY handling for
-  # EXCLUSIVE / write_locked_read captures. Shape:
-  #   { action: :raise | :pass | :exit | :block, message: <string|nil>, body: <Array|nil>, retries: <Integer|nil> }
+  # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
+  # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
     extend T::Sig

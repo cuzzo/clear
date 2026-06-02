@@ -18,7 +18,7 @@
 # to inventory annotator holes); default behavior raises the ICE.
 require "sorbet-runtime"
 
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 
 module PreMirTypeCheck
   extend T::Sig

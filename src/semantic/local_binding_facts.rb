@@ -2,7 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
-require_relative "cleanup_entry"
+require_relative "../mir/cleanup_entry"
 
 module MIR
   class LocalBindingFacts < T::Struct

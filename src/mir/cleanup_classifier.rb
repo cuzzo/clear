@@ -5,7 +5,7 @@ require_relative "cleanup_entry"
 require_relative "../ast/type"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator/helpers/function_signature"
-require_relative "local_binding_facts"
+require_relative "../semantic/local_binding_facts"
 
 # =========================================================================
 # Pass C (caller side): Cleanup Classification

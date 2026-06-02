@@ -3507,22 +3507,25 @@ class Parser
   # Parse an optional error-handling clause following a WITH block's `}`:
   #   ON <selectors> [RETRY(N) THEN] <action>
   #   RETRY(N) THEN <action>                  -- sugar for ON Transient
-  # Returns a Hash { selectors:, kinds:, types:, action:, retries:, ... } or nil.
+  # Returns an ErrorClause or nil.
   # Selector validation (existence, retry-is-Transient) runs in the annotator.
-  sig { returns(T.nilable(T::Hash[Symbol, T::Array[T.untyped]])) }
+  sig { returns(T.nilable(AST::ErrorClause)) }
   def parse_lock_error_clause
     if match?(:KEYWORD, 'ON')
       consume(:KEYWORD, 'ON')
       selectors = parse_error_selectors
       retries = match_optional_retry!
       action = parse_lock_action
-      T.must(action).merge(selectors: selectors, retries: retries)
+      AST::ErrorClause.from_action(selectors: selectors, retries: retries, action: T.must(action))
     elsif match?(:KEYWORD, 'RETRY')
       retries = match_optional_retry!
       action = parse_lock_action
       # Sugar: `RETRY(N) THEN <action>` == `ON Transient RETRY(N) THEN <action>`.
-      T.must(action).merge(selectors: [{ form: :kind, name: :Transient, token: T.must(action)[:token] }],
-                   retries: retries)
+      AST::ErrorClause.from_action(
+        selectors: [AST::ErrorSelector.new(form: :kind, name: :Transient, token: T.must(action).token)],
+        retries: retries,
+        action: T.must(action),
+      )
     else
       nil
     end
@@ -3546,7 +3549,7 @@ class Parser
   # selector; anything else is a type selector. Types are enum values
   # (no `:` prefix) per the unified error-system design; the 6 kind
   # names are effectively reserved.
-  sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Array[AST::ErrorSelector]) }
   def parse_error_selectors
     selectors = [parse_error_selector]
     while match!(:CHAR, ',')
@@ -3555,35 +3558,35 @@ class Parser
     selectors
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(AST::ErrorSelector) }
   def parse_error_selector
     unless match?(:TYPE_ID)
       error!(current, :EXPECTED_ERROR_SELECTOR)
     end
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
-    { form: form, name: T.must(tok).value.to_sym, token: tok }
+    AST::ErrorSelector.new(form: form, name: T.must(tok).value.to_sym, token: tok)
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(AST::ErrorAction)) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
-      { action: :raise, token: previous }
+      AST::ErrorAction.new(action: :raise, token: previous)
     elsif match!(:KEYWORD, 'PASS')
-      { action: :pass, token: previous }
+      AST::ErrorAction.new(action: :pass, token: previous)
     elsif match!(:KEYWORD, 'RETURN')
       tok = previous
       value = parse_expression
-      { action: :return, value: value, token: tok }
+      AST::ErrorAction.new(action: :return, value: value, token: tok)
     elsif match!(:KEYWORD, 'EXIT')
       tok = previous
       msg = parse_expression
-      { action: :exit, message: msg, token: tok }
+      AST::ErrorAction.new(action: :exit, message: msg, token: tok)
     elsif match?(:ARROW, '->')
       tok = consume(:ARROW, '->')
       body = parse_brace_block
-      { action: :block, body: body, token: tok }
+      AST::ErrorAction.new(action: :block, body: T.cast(body, T::Array[AST::Node]), token: tok)
     else
       error!(current, :EXPECTED_AFTER_ERROR_CLAUSE)
     end

@@ -18,6 +18,18 @@ require "sorbet-runtime"
 class OwnershipGraph
     extend T::Sig
 
+  class LightweightNodeState < T::Struct
+    const :state, Symbol
+    const :move_line, T.nilable(Integer)
+    const :move_col, T.nilable(Integer)
+    const :move_action, T.nilable(Symbol)
+  end
+
+  class LightweightSnapshot < T::Struct
+    const :node_states, T::Hash[String, LightweightNodeState]
+    const :edge_count, Integer
+  end
+
   Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
                     :move_line, :move_col, :move_action,
                     :move_consumer_param_type,
@@ -44,12 +56,13 @@ class OwnershipGraph
   #   :borrows     — immutable borrow (y borrows x)
   #   :borrows_mut — mutable borrow (y mutably borrows x)
 
+  sig { returns(T::Array[OwnershipGraph::Edge]) }
   attr_reader :edges
 
   sig { void }
   def initialize
     @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
-    @edges = T.let([], T::Array[T.untyped])           # Array of Edge
+    @edges = T.let([], T::Array[OwnershipGraph::Edge])           # Array of Edge
     @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # target_path => [Edge]
     @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # source_path => [Edge]
     @children = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])    # parent_path => Set of child paths
@@ -216,39 +229,35 @@ class OwnershipGraph
 
   # Lightweight snapshot: only saves node states, not full graph.
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
-  sig { returns(T::Hash[Symbol, T::Hash[String, T::Hash[Symbol, T.untyped]]]) }
+  sig { returns(LightweightSnapshot) }
   def fork_lightweight
-    states = {}
+    states = T.let({}, T::Hash[String, LightweightNodeState])
     @nodes.each do |k, v|
-      states[k] = {
+      states[k] = LightweightNodeState.new(
         state: v.state,
         move_line: v.move_line,
         move_col: v.move_col,
         move_action: v.move_action,
-      }
+      )
     end
-    { node_states: states, edge_count: @edges.size }
+    LightweightSnapshot.new(node_states: states, edge_count: @edges.size)
   end
 
   # Restore from lightweight snapshot: reset states and truncate edges.
-  sig { params(snapshot: T::Hash[Symbol, T.untyped]).void }
+  sig { params(snapshot: LightweightSnapshot).void }
   def restore_lightweight(snapshot)
-    snapshot[:node_states].each do |path, saved|
+    snapshot.node_states.each do |path, saved|
       node = @nodes[path]
       next unless node
 
-      if saved.is_a?(Hash)
-        node.state = saved[:state]
-        node.move_line = saved[:move_line]
-        node.move_col = saved[:move_col]
-        node.move_action = saved[:move_action]
-      else
-        node.state = saved
-      end
+      node.state = saved.state
+      node.move_line = saved.move_line
+      node.move_col = saved.move_col
+      node.move_action = saved.move_action
     end
-    target_count = snapshot[:edge_count]
+    target_count = snapshot.edge_count
     while @edges.size > target_count
-      removed = @edges.pop
+      removed = T.must(@edges.pop)
       @edges_by_target[removed.to]&.delete(removed)
       @edges_by_source[removed.from]&.delete(removed)
     end

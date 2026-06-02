@@ -11,10 +11,10 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_classifier"
-require_relative "escape_analysis"
-require_relative "bg_capture_classifier"
+require_relative "../semantic/escape_analysis"
+require_relative "../semantic/bg_capture_classifier"
 require_relative "control_flow"
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 require_relative "placement"
 
 class MIRPass
@@ -279,8 +279,8 @@ class MIRPass
 
     clause = node.lock_error_clause
     return false unless clause
-    action_raises = %i[raise exit].include?(clause[:action])
-    has_bubble = clause[:bubble_types].is_a?(Array) && clause[:bubble_types].any?
+    action_raises = %i[raise exit].include?(clause.action)
+    has_bubble = clause.bubble_types.any?
     action_raises || has_bubble
   end
 
@@ -331,12 +331,14 @@ class MIRPass
 
   sig { params(expr: T.untyped).returns(T.untyped) }
   def unwrap_return_expr(expr)
-    node = T.let(expr, T.any(AST::GetField, AST::Identifier, AST::Literal))
-    while node.is_a?(AST::MoveNode) || node.is_a?(AST::Cast) || node.is_a?(AST::FreezeNode)
-      node = node.value
+    case expr
+    when AST::MoveNode, AST::Cast, AST::FreezeNode
+      unwrap_return_expr(expr.value)
+    when AST::BinaryOp
+      expr.op == :OR_RESCUE ? unwrap_return_expr(expr.left) : expr
+    else
+      expr
     end
-    node = unwrap_return_expr(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    node
   end
 
   sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }

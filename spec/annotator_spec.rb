@@ -569,7 +569,8 @@ RSpec.describe SemanticAnnotator do
           param = AST::Param.new(name: "cfg", type: nil, default: AST::DefaultLit.new(token),
             mutable: false, takes: false, comptime: false, name_token: token,
             required: false, sync: nil)
-          node = Struct.new(:params, :requires).new([param], {})
+          node = AST::FunctionDef.new(token, "direct_default", [param], [], nil, nil, [], [], nil, :private, [], false)
+          node.requires = {}
 
           expect {
             annotator.send(:declare_and_verify_params, node)
@@ -737,7 +738,8 @@ RSpec.describe SemanticAnnotator do
           unknown = AST::Param.new(name: "unknown", type: Type.new(:Int64), default: nil,
             mutable: false, takes: false, comptime: false, name_token: token,
             required: true, sync: nil)
-          node = Struct.new(:params, :requires).new([locked, unknown], { "unknown" => Set[:BOGUS] })
+          node = AST::FunctionDef.new(token, "direct_params", [locked, unknown], [], nil, nil, [], [], nil, :private, [], false)
+          node.requires = { "unknown" => Set[:BOGUS] }
 
           annotator.send(:declare_and_verify_params, node)
 

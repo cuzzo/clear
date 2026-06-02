@@ -73,6 +73,30 @@ module Schemas
     def struct? = false
   end
 
+  class InlineStructDeinitEntry < T::Struct
+      extend T::Sig
+
+    const :field, String
+    const :kind, Symbol
+    const :zig_type, T.nilable(String)
+    const :elem_zig_type, T.nilable(String)
+
+    sig { params(field: String, zig_type: String).returns(Schemas::InlineStructDeinitEntry) }
+    def self.indirect(field:, zig_type:)
+      new(field: field, kind: :indirect, zig_type: zig_type, elem_zig_type: nil)
+    end
+
+    sig { params(field: String, zig_type: String).returns(Schemas::InlineStructDeinitEntry) }
+    def self.uniform(field:, zig_type:)
+      new(field: field, kind: :uniform, zig_type: zig_type, elem_zig_type: nil)
+    end
+
+    sig { params(field: String, elem_zig_type: String).returns(Schemas::InlineStructDeinitEntry) }
+    def self.array(field:, elem_zig_type:)
+      new(field: field, kind: :array, zig_type: nil, elem_zig_type: elem_zig_type)
+    end
+  end
+
   # One union variant whose payload is an anonymous inline struct
   # (`UNION Shape { Circle { radius: Float64 } }`). `fields` maps field
   # name (String) to its declared Type. `deinit_entries` is filled in by
@@ -82,12 +106,21 @@ module Schemas
   class InlineStructVariant
       extend T::Sig
 
+    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
+
     attr_reader :fields
     attr_accessor :deinit_entries
-    sig { params(fields: T.untyped, deinit_entries: T.untyped).void }
+    sig { params(fields: FieldMap, deinit_entries: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).void }
     def initialize(fields:, deinit_entries: nil)
-      @fields = fields
-      @deinit_entries = deinit_entries
+      @fields = T.let(fields, Schemas::InlineStructVariant::FieldMap)
+      @deinit_entries = T.let(deinit_entries, T.nilable(T::Array[Schemas::InlineStructDeinitEntry]))
+    end
+
+    sig { returns(T::Hash[String, Type]) }
+    def typed_fields
+      @fields.transform_keys(&:to_s).transform_values do |field_type|
+        field_type.is_a?(Type) ? field_type : Type.new(field_type)
+      end
     end
 
     # Value equality on the field shape (not deinit_entries, which is
@@ -95,7 +128,7 @@ module Schemas
     # variants' payloads structurally — this used to be Hash `==`.
     sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
-      other.is_a?(InlineStructVariant) && other.fields == @fields
+      !!(other.is_a?(Schemas::InlineStructVariant) && other.fields == @fields)
     end
     alias eql? ==
     sig { returns(Integer) }

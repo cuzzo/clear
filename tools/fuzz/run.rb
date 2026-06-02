@@ -172,6 +172,7 @@ def run_pass_bundle(entries, out_dir)
   ensure_symlink(File.join(build_dir, 'runtime'), File.join(LITEDB_ROOT, 'zig', 'runtime'))
   ensure_symlink(File.join(build_dir, 'lib'), File.join(LITEDB_ROOT, 'zig', 'lib'))
   ensure_symlink(File.join(build_dir, 'experimental'), File.join(LITEDB_ROOT, 'zig', 'experimental'))
+  ensure_symlink(File.join(build_dir, 'testdata'), File.join(LITEDB_ROOT, 'testdata'))
 
   zig_path = File.join(build_dir, 'all-fuzz.zig')
   generator = TestGenerator.new

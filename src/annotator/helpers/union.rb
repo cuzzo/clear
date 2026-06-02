@@ -202,7 +202,7 @@ module UnionAnalysis
       ef = expected_fields[fname]
       if ef.is_a?(Type) && ef.indirect?
         val_node.needs_heap_create = true
-        current_fn_ctx.heap_count += 1 if current_fn_ctx
+        current_fn_ctx&.record_heap_use!
         record_effect(EffectTracker::HEAP)
       end
 

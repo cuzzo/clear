@@ -111,12 +111,10 @@ FuzzGenerator.register(:bg_capture_transfer_matrix, cells: BG_CAPTURE_TRANSFER_C
       #{prelude}#{helper}
       FN main() RETURNS Void ->
           #{bct_decl(p[:shape])}
-          MUTABLE out: Int64[]@list = [];
           DO {
-              out.append(#{body_expr}),
-              out.append(#{body_expr})
+              #{body_expr},
+              #{body_expr}
           }
-          ASSERT out.length() >= 0_i64, "do capture transfer";
           RETURN;
       END
     CHT
@@ -125,7 +123,7 @@ FuzzGenerator.register(:bg_capture_transfer_matrix, cells: BG_CAPTURE_TRANSFER_C
       #{prelude}#{helper}
       FN main() RETURNS Void ->
           #{bct_decl(p[:shape])}
-          s: ~Int64[] = BG STREAM {
+          s: ~Int64[INF] = BG STREAM {
               YIELD #{body_expr};
           };
           ASSERT (NEXT s) == 3_i64, "bg stream capture transfer";

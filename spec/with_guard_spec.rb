@@ -305,7 +305,7 @@ RSpec.describe "WITH GUARD clauses" do
     CLEAR
 
     with_node = ast.statements.last.body[1]
-    expect(with_node.lock_error_clause[:selectors].first[:name]).to eq(:GuardFail)
+    expect(with_node.lock_error_clause.selectors.first.name).to eq(:GuardFail)
   end
 
   it "parses ON GuardFail RETURN for guarded WITH blocks" do
@@ -320,8 +320,8 @@ RSpec.describe "WITH GUARD clauses" do
     CLEAR
 
     clause = ast.statements.last.body[1].lock_error_clause
-    expect(clause[:action]).to eq(:return)
-    expect(clause[:value]).to be_a(AST::Literal)
+    expect(clause.action).to eq(:return)
+    expect(clause.value).to be_a(AST::Literal)
   end
 
   it "allows ON GuardFail on guard-only non-locking access" do

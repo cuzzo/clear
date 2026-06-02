@@ -15,10 +15,10 @@ require "set"
 
 require_relative "mir"
 require_relative "cleanup_entry"
-require_relative "pass_state"
+require_relative "../semantic/pass_state"
 require_relative "placement"
 require_relative "materialization"
-require_relative "capture_strategy"
+require_relative "../semantic/capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
@@ -2242,9 +2242,16 @@ class MIRLowering
   # Shared root resolution for checker attribution and receiver allocator lookup.
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_receiver_node(node)
+    return nil unless node.is_a?(AST::Locatable)
+
     root = AST.root_identifier(node)
     return root if root
-    node.respond_to?(:target) ? root_receiver_node(node.target) : nil
+    case node
+    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Slice
+      root_receiver_node(node.target)
+    else
+      nil
+    end
   end
 
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
@@ -2411,13 +2418,17 @@ class MIRLowering
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_stmts = (fact.data.deinit_entries || []).flat_map { |de|
-        self_field = MIR::FieldGet.new(self_ref, de[:field])
-        case de[:kind]
+      deinit_entries = T.cast(
+        fact.data.deinit_entries || [],
+        T::Array[Schemas::InlineStructDeinitEntry]
+      )
+      deinit_stmts = deinit_entries.flat_map { |de|
+        self_field = MIR::FieldGet.new(self_ref, de.field)
+        case de.kind
         when :indirect
           [
             MIR::ExprStmt.new(
-              emit_builtin(:cleanup, [MIR::Ident.new(de[:zig_type]), alloc_ref, self_field]),
+              emit_builtin(:cleanup, [MIR::Ident.new(T.must(de.zig_type)), alloc_ref, self_field]),
               false
             ),
             MIR::ExprStmt.new(MIR::DestroyPtr.new(self_field, alloc_ref), false),
@@ -2426,7 +2437,7 @@ class MIRLowering
           [
             MIR::ExprStmt.new(
               emit_builtin(:cleanup, [
-                MIR::Ident.new(de[:zig_type]),
+                MIR::Ident.new(T.must(de.zig_type)),
                 alloc_ref,
                 MIR::AddressOf.new(self_field),
               ]),
@@ -2434,7 +2445,7 @@ class MIRLowering
             ),
           ]
         when :array
-          elem_zig = MIR::Ident.new(de[:elem_zig_type])
+          elem_zig = MIR::Ident.new(T.must(de.elem_zig_type))
           loop_body = [
             MIR::ExprStmt.new(
               emit_builtin(:cleanup, [elem_zig, alloc_ref, MIR::Ident.new("__e")]),

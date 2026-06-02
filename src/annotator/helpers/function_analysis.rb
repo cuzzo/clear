@@ -8,15 +8,18 @@ module FunctionAnalysis
 
   requires_ancestor { SemanticAnnotator }
 
+  RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
+
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
-  sig { params(node: T.untyped, body: T.untyped, declared_return: T.untyped, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
+  sig { params(node: RoutineNode, body: T.untyped, declared_return: T.untyped, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
     verify_captures!(node)
     # Save and reset returns on the current FunctionContext (supports nested lambdas).
-    saved_returns = current_fn_ctx&.returns
-    current_fn_ctx.returns = [] if current_fn_ctx
+    fn_ctx = current_fn_ctx
+    saved_returns = fn_ctx&.returns
+    fn_ctx.returns = [] if fn_ctx
 
     with_new_scope do
       og_push_scope
@@ -44,21 +47,22 @@ module FunctionAnalysis
       og_pop_scope(archive: true)
     end
 
-    found_returns = (current_fn_ctx&.returns || []).uniq
+    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
     # Restore saved returns (for enclosing function/lambda).
-    current_fn_ctx.returns = saved_returns if current_fn_ctx && saved_returns
+    restore_ctx = current_fn_ctx
+    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
     return_type = if body.is_a?(Array)
-      found_returns.any? ? found_returns.first[:type] : :Any
+      found_returns.any? ? T.must(found_returns.first).type : :Any
     else
       body.resolved_type
     end
 
     # Update return type if we can narrow it
     if (is_implicit || declared_return == :Any) && found_returns.any?
-      inferred = found_returns.first[:type]
+      inferred = T.must(found_returns.first).type
       if is_implicit || found_returns.size == 1
         return_type = inferred
       end
@@ -129,9 +133,9 @@ module FunctionAnalysis
         alloc_kind = signature.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
-            current_fn_ctx.heap_count += 1
+            current_fn_ctx&.record_heap_use!
           else
-            current_fn_ctx.frame_count += 1
+            current_fn_ctx&.record_frame_use!
           end
         end
       end
@@ -538,7 +542,9 @@ module FunctionAnalysis
   sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }
   def any_element_collection_param?(expected_type, actual_type)
     expected_elem = expected_type.element_type
-    !!((expected_type.collection? || expected_type.dynamic?) && expected_elem&.any? && actual_type.collection?)
+    expected_accepts_any_element = (expected_type.collection_value? || expected_type.dynamic?) && expected_elem&.any?
+    actual_is_collection_like = actual_type.collection_value? || actual_type.runtime_stream?
+    !!(expected_accepts_any_element && actual_is_collection_like)
   end
 
   sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
@@ -725,9 +731,10 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
+  sig { params(node: RoutineNode).void }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
+    requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires : nil, T.nilable(T::Hash[String, T::Set[Symbol]]))
     node.params.each do |param|
       # Validate Defaults
       if param.default
@@ -765,8 +772,8 @@ module FunctionAnalysis
         param_sync = param.sync
       elsif param.type&.any_sync?
         param_sync = param.type.sync
-      elsif node.respond_to?(:requires) && node.requires
-        families = node.requires[param.name.to_s]
+      elsif requires_map
+        families = requires_map[param.name.to_s]
         if families
           # Polymorphic family seeds are only defaults; visible callers
           # override them during caller-sync propagation.
@@ -798,8 +805,8 @@ module FunctionAnalysis
       param.symbol.is_param = true
       param.symbol.param_decl_token = param.name_token
       # Preserve REQUIRES disjunctions for call-site effect resolution.
-      if node.respond_to?(:requires) && node.requires
-        fams = node.requires[param.name.to_s]
+      if requires_map
+        fams = requires_map[param.name.to_s]
         param.symbol.sync_families = fams if fams.is_a?(Set) && !fams.empty?
       end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
@@ -813,15 +820,17 @@ module FunctionAnalysis
       end
       param.type
     end
+    nil
   end
 
   # Cannot be part of declare, needs to happen in outer-scope
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: RoutineNode).void }
   def verify_captures!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return if node.captures.nil? || node.captures.empty?
+    captures = node.captures
+    return if captures.nil? || captures.empty?
 
-    node.captures.each do |cap|
+    captures.each do |cap|
       cap_name = cap.name
 
       if cap.default
@@ -842,7 +851,7 @@ module FunctionAnalysis
 
       entry = owner_scope.locals[cap_name]
 
-      if cap.mutable && !entry.mutable
+      if cap.mutable && !entry.mutable && node.is_a?(AST::FunctionDef)
         emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
       end
 
@@ -853,14 +862,16 @@ module FunctionAnalysis
       cap.type = entry.type
       cap.storage = entry.storage
     end
+    nil
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: RoutineNode).void }
   def declare_captures(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return if node.captures.nil? || node.captures.empty?
+    captures = node.captures
+    return if captures.nil? || captures.empty?
 
-    node.captures.each do |cap|
+    captures.each do |cap|
       current_scope.declare(
         cap.name,
         nil,
@@ -871,19 +882,26 @@ module FunctionAnalysis
         cap.storage
       )
     end
+    nil
   end
 
-  sig { params(node: T.untyped, found_returns: T::Array[T::Hash[Symbol, T.nilable(Symbol)]], declared_return: T.nilable(Type)).void }
+  sig { params(node: RoutineNode, found_returns: T::Array[AST::ReturnFact], declared_return: T.nilable(Type)).void }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
     if found_returns.size > 1
+      return if declared_return&.any?
+
+      if declared_return
+        return if found_returns.all? { |r| declared_return.accepts?(Type.new(r.type)) }
+      end
+
       # Normalize: all string-like types (Byte[N], String) → String for comparison
       normalized = found_returns.map { |r|
-        t = r[:type].to_s
-        (t.start_with?("Byte[") || t == "String") ? :String : r[:type]
+        t = r.type.to_s
+        (t.start_with?("Byte[") || t == "String") ? :String : r.type
       }.uniq.size
-      if declared_return != :Any && normalized > 1
-        emit_ambiguous_return_error!(node, found_returns)
+      if normalized > 1
+        emit_ambiguous_return_error!(node, found_returns) if node.is_a?(AST::FunctionDef)
       end
     end
   end
@@ -916,7 +934,7 @@ module FunctionAnalysis
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
-    lifetime_paths = current_fn_ctx.lifetime
+    lifetime_paths = current_fn_ctx!.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]
@@ -949,7 +967,7 @@ module FunctionAnalysis
     # declared source as its prefix; reject with a clear "expected one
     # of: ..." diagnostic when none match.
     matched = lifetime_paths.any? do |p|
-      lifetime_syms = p.split(".").map(&:to_sym)
+      lifetime_syms = p.to_s.split(".").map(&:to_sym)
       T.must(actual_path)[0...lifetime_syms.size] == lifetime_syms
     end
 

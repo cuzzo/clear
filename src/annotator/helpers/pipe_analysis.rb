@@ -356,7 +356,8 @@ module PipeAnalysis
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
     # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
     # only count frame allocation for finite (list-producing) results.
-    current_fn_ctx.frame_count += 1 if current_fn_ctx && !is_inf
+    current_fn_ctx&.record_frame_use! unless is_inf
+    nil
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -384,7 +385,8 @@ module PipeAnalysis
 
     stamp_type!(node, is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]")
     node.storage = :frame
-    current_fn_ctx.frame_count += 1 if current_fn_ctx && !is_inf
+    current_fn_ctx&.record_frame_use! unless is_inf
+    nil
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -410,7 +412,8 @@ module PipeAnalysis
     expr_type = node.right.expression.full_type!(context: "WINDOW expression")
     stamp_type!(node, Type.new(:"#{expr_type}[]"))
     node.storage = :frame
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx&.record_frame_use!
+    nil
   end
 
   # Time string format: '500ms', '1s', '2min', '1h'
@@ -487,7 +490,8 @@ module PipeAnalysis
     expr_type = bw.expression.full_type!(context: "BATCH WINDOW expression")
     stamp_type!(node, Type.new(:"#{expr_type}[]"))
     node.storage = :heap
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx&.record_frame_use!
+    nil
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -549,7 +553,8 @@ module PipeAnalysis
 
     stamp_type!(node, Type.new(:"#{join_type_name}[]"))
     node.storage = :frame
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx&.record_frame_use!
+    nil
   end
 
   sig { params(node: AST::BinaryOp).returns(Symbol) }
@@ -741,12 +746,12 @@ module PipeAnalysis
     if bounded_n
       stamp_type!(node, Type.new(:"#{key_type}[#{bounded_n}]", collection: :set))
       node.storage = :heap
-      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      current_fn_ctx&.record_heap_use!
       mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[#{bounded_n}]", collection: :set)
     else
       stamp_type!(node, Type.new(:"#{key_type}[]", collection: :set))
       node.storage = :heap
-      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      current_fn_ctx&.record_heap_use!
       mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[]", collection: :set)
     end
   end
@@ -1629,7 +1634,8 @@ module PipeAnalysis
     result_type = concurrent_select_family_result_type(node, item_type)
     stamp_type!(node, Type.new(result_type))
     node.storage = :heap
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx&.record_frame_use!
+    nil
   end
 
   sig { params(node: AST::BinaryOp).returns(Symbol) }
@@ -1686,7 +1692,8 @@ module PipeAnalysis
     result_type = concurrent_select_family_result_type(node, item_type)
     stamp_type!(node, Type.new(result_type))
     node.storage = :heap
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx&.record_frame_use!
+    0
   end
 
   sig { params(node: AST::BinaryOp).void }

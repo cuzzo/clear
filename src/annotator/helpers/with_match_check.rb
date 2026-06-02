@@ -48,7 +48,7 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[T::Hash[Symbol, T.untyped]])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).void }
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
@@ -156,6 +156,7 @@ module WithMatchCheck
           "to REQUIRES.")
       end
     end
+    nil
   end
 
   # Names of parameters bound by this WITH (i.e., the original variable
@@ -245,7 +246,7 @@ module WithMatchCheck
         next unless sym
         next if sym.with_match_capability_family?
         next unless sym.respond_to?(:mutable) && sym.mutable
-        sym.poly_borrow_target = true if sym.respond_to?(:poly_borrow_target=)
+        sym.mark_poly_borrow_target!
       end
     end
 
@@ -385,7 +386,7 @@ module WithMatchCheck
   # remainder is empty and no warning fires. The check exists so a
   # user-written partial-coverage scenario (or a future strict-mode
   # build) surfaces unhandled polymorphic errors at the WITH site.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[T::Hash[Symbol, T.untyped]], warn_handler: Proc).returns(T.nilable(T::Set[String])) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[AST::ErrorClause], warn_handler: Proc).returns(T.nilable(T::Set[String])) }
   def self.warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                               policy_handlers, warn_handler)
     return unless warn_handler && node.polymorphic
@@ -405,20 +406,18 @@ module WithMatchCheck
   end
 
   # Names of errors handled by either the per-WITH `ON ...` clause
-  # or the program-level SYNC POLICY. Both forms carry a `:selectors`
-  # array of `{ form: :type | :kind, name: Symbol }` entries; type
-  # selectors contribute their literal name, kind selectors expand
-  # via AST.types_for_kind.
-  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[T.untyped])).returns(T::Set[Symbol]) }
+  # or the program-level SYNC POLICY. Type selectors contribute their
+  # literal name, kind selectors expand via AST.types_for_kind.
+  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[AST::ErrorClause])).returns(T::Set[Symbol]) }
   def self.handled_error_set(node, policy_handlers)
     handled = Set.new
     [node.lock_error_clause, *(policy_handlers || [])].compact.each do |clause|
-      (clause[:selectors] || []).each do |sel|
-        case sel[:form]
+      clause.selectors.each do |sel|
+        case sel.form
         when :type
-          handled << sel[:name]
+          handled << sel.name
         when :kind
-          AST.types_for_kind(sel[:name]).each { |t| handled << t }
+          AST.types_for_kind(sel.name).each { |t| handled << t }
         end
       end
     end

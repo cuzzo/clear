@@ -172,7 +172,7 @@ class ModuleImporter
     require_relative "../mir/mir_lowering"
     require_relative "../mir/mir_emitter"
     require_relative "../mir/hoist"
-    require_relative "../mir/pass_state"
+    require_relative "../semantic/pass_state"
     require_relative "../mir/pre_mir_type_check"
     require_relative "pipeline_rewriter"
     require_relative "string_concat_rewriter"

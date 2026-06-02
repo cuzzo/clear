@@ -1175,7 +1175,7 @@ class BcEmitter
         # explicit dispatch (after the regex pass) emits LOCK_ACQUIRE +
         # IS_ERR + branch + action_mir + retry loop.
         fallible_clauses = sd_get(mir_node.stdlib_def, :fallible_clauses) || []
-        fallible_var_names = fallible_clauses.map { |c| c[:var_name].to_s }.to_set
+        fallible_var_names = fallible_clauses.map { |c| c.var_name.to_s }.to_set
         # Emit fallible-acquire dispatch BEFORE the bare-acquire regex pass
         # and BEFORE the alias-setup passes. On runtime success path, the
         # alias bytecode that follows runs as usual; on the error path we
@@ -6539,9 +6539,9 @@ class BcEmitter
   # `:raise` and `:exit` are not yet wired (would need to construct a
   # Value.Error and BC_RET out of the enclosing fn).
   def emit_fallible_lock_dispatch(fc, lock_timeout_ms)
-    var = fc[:var_name].to_s
+    var = fc.var_name.to_s
     raise "fallible-lock dispatch: no slot for #{var.inspect}" unless has_slot?(var)
-    retries = fc[:retries]
+    retries = fc.retries
     retry_slot = nil
     retry_top = nil
     if retries
@@ -6575,9 +6575,9 @@ class BcEmitter
     end
     # Run the matched action (only reached after retries exhausted, or
     # immediately when no RETRY was specified).
-    case fc[:action_kind]
+    case fc.action_kind
     when :block
-      semantic_mir_nodes(fc[:action_mir] || []).each do |stmt|
+      semantic_mir_nodes(fc.action_mir || []).each do |stmt|
         compile_stmt(stmt, nil)
         t = pop_type
         emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool

@@ -48,15 +48,22 @@ class Scope; end unless defined?(Scope)
 class SymbolEntry
     extend T::Sig
 
+  @next_binding_id = T.let(0, Integer)
+
+  class BindingFlowFacts < T::Struct
+    prop :non_escaping, T::Boolean, default: false
+    prop :borrowed_alias, T::Boolean, default: false
+    prop :valid, T::Boolean, default: true
+    prop :invalid_reason, T.nilable(String), default: nil
+    prop :read, T::Boolean, default: false
+    prop :mutated, T::Boolean, default: false
+    prop :mutable_ref_target, T::Boolean, default: false
+    prop :poly_borrow_target, T::Boolean, default: false
+    prop :init_contents_heap, T::Boolean, default: false
+  end
+
   attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
-                :size, :capabilities, :valid,
-                :mutated,        # set by mark_var_mutated when the binding
-                                 # is reassigned, field/index-assigned, or
-                                 # passed to a mutates_receiver method.
-                                 # Lives on the SymbolEntry (not just the
-                                 # decl node) so WITH aliases — which have
-                                 # no `reg` — also record their mutation.
-                :invalid_reason, :resource, :close_zig, :read,
+                :size, :capabilities, :resource, :close_zig,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # declaring scope depth (0 = root)
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
@@ -68,18 +75,8 @@ class SymbolEntry
                                    # auto-fix at the parameter when the body
                                    # mutates it without `MUTABLE`.
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
-                :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF
                 :sync_families,  # Set of families when bound by REQUIRES disjunction
-                :layout,         # nil | :indirect — heap-pinned cell with stable address
-                :mutable_ref_target, # This binding is passed to a MUTABLE parameter by reference.
-                                     # Forces Zig `var` storage so &binding yields *T, not *const T.
-                :poly_borrow_target, # address is taken at a universal-polymorphic call site;
-                                     # forces mutable Zig storage so the callee can write back.
-                :init_contents_heap  # true when the binding's init expression's heap-bearing
-                                     # fields are already reflected in storage (e.g. struct
-                                     # lit with COPY'd strings). Legacy field; not an escape decision.
-                                     # Escape placement is symbol.storage. See docs/agents/
-                                     # provenance-collapse.md.
+                :layout          # nil | :indirect — heap-pinned cell with stable address
 
   # Explicit async handle shape for bindings whose surface Type cannot
   # distinguish Promise<List<T>> from List<Promise<T>>.
@@ -108,9 +105,13 @@ class SymbolEntry
   sig { returns(T::Array[SymbolEntry]) }
   attr_reader :lifetime
 
+  sig { returns(Integer) }
+  attr_reader :binding_id
+
   sig { params(value: T.untyped).void }
   def lifetime=(value)
     @lifetime = normalize_lifetime(value)
+    @flow.non_escaping = @lifetime.length == 1 && @lifetime.first.equal?(self)
   end
 
   # A function binding is a Type whose @raw is its FunctionSignature
@@ -319,17 +320,123 @@ class SymbolEntry
 
   sig { returns(T::Boolean) }
   def non_escaping
-    @lifetime.length == 1 && @lifetime.first.equal?(self)
+    @flow.non_escaping
   end
 
-  sig { params(value: T::Boolean).void }
-  def non_escaping=(value)
-    if value
-      @lifetime = [self]
-    elsif non_escaping
-      @lifetime = []
-    end
+  sig { returns(T::Boolean) }
+  def borrowed_alias
+    @flow.borrowed_alias
   end
+
+  sig { returns(T::Boolean) }
+  def valid
+    @flow.valid
+  end
+
+  sig { returns(T.nilable(String)) }
+  def invalid_reason
+    @flow.invalid_reason
+  end
+
+  sig { returns(T::Boolean) }
+  def read
+    @flow.read
+  end
+
+  sig { returns(T::Boolean) }
+  def mutated
+    @flow.mutated
+  end
+
+  sig { returns(T::Boolean) }
+  def mutable_ref_target
+    @flow.mutable_ref_target
+  end
+
+  sig { returns(T::Boolean) }
+  def poly_borrow_target
+    @flow.poly_borrow_target
+  end
+
+  sig { returns(T::Boolean) }
+  def init_contents_heap
+    @flow.init_contents_heap
+  end
+
+  sig { params(reason: String).void }
+  def invalidate!(reason)
+    @flow.valid = false
+    @flow.invalid_reason = reason
+  end
+
+  sig { void }
+  def mark_read!
+    @flow.read = true
+    @reg.var_used = true if @reg&.respond_to?(:var_used=)
+  end
+
+  sig { params(touch_declaration: T::Boolean).void }
+  def mark_mutated!(touch_declaration: false)
+    @flow.mutated = true
+    @reg.var_mutated = true if touch_declaration && @reg&.respond_to?(:var_mutated=)
+  end
+
+  sig { void }
+  def mark_mutated_via_reference!
+    @flow.mutated = true
+    @flow.mutable_ref_target = true
+  end
+
+  sig { void }
+  def mark_poly_borrow_target!
+    @flow.poly_borrow_target = true
+  end
+
+  sig { void }
+  def mark_init_contents_heap!
+    @flow.init_contents_heap = true
+  end
+
+  sig { void }
+  def mark_non_escaping!
+    @flow.non_escaping = true
+    self.lifetime = [self]
+  end
+
+  sig { void }
+  def clear_non_escaping!
+    return unless non_escaping
+    @flow.non_escaping = false
+    self.lifetime = []
+  end
+
+  sig { void }
+  def mark_borrowed_alias!
+    @flow.borrowed_alias = true
+  end
+
+  sig { params(original: SymbolEntry).void }
+  def initialize_copy(original)
+    super
+    @flow = original.flow_snapshot
+    @lifetime = original.lifetime.dup
+  end
+
+  sig { returns(BindingFlowFacts) }
+  def flow_snapshot
+    BindingFlowFacts.new(
+      non_escaping: @flow.non_escaping,
+      borrowed_alias: @flow.borrowed_alias,
+      valid: @flow.valid,
+      invalid_reason: @flow.invalid_reason,
+      read: @flow.read,
+      mutated: @flow.mutated,
+      mutable_ref_target: @flow.mutable_ref_target,
+      poly_borrow_target: @flow.poly_borrow_target,
+      init_contents_heap: @flow.init_contents_heap
+    )
+  end
+  protected :flow_snapshot
 
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime_sources
@@ -348,6 +455,7 @@ class SymbolEntry
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
+    @binding_id = T.let(self.class.next_binding_id, Integer)
     @reg = reg
     @type = T.let(Type.new(:Untyped), Type)
     self.type = type
@@ -359,16 +467,11 @@ class SymbolEntry
     @size = size
     @capabilities = capabilities
     @valid = valid
-    @invalid_reason = invalid_reason
     @resource = resource
     @close_zig = close_zig
     @lifetime = T.let([], T::Array[SymbolEntry])
-    @borrowed_alias = T.let(false, T::Boolean)
+    @flow = T.let(BindingFlowFacts.new(valid: valid, invalid_reason: invalid_reason), BindingFlowFacts)
     @sync_families = T.let(nil, T.untyped)
-    @mutable_ref_target = T.let(false, T::Boolean)
-    @poly_borrow_target = T.let(false, T::Boolean)
-    @mutated = T.let(false, T::Boolean)
-    @read = T.let(false, T::Boolean)
     @scope = T.let(nil, T.nilable(Scope))
     @scope_depth = T.let(nil, T.nilable(Integer))
     @ownership_kind = T.let(nil, T.nilable(Symbol))
@@ -376,11 +479,17 @@ class SymbolEntry
     @is_param = T.let(false, T::Boolean)
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
-    @init_contents_heap = T.let(false, T::Boolean)
     @async_result_shape = T.let(nil, T.nilable(AsyncResultShape))
   end
 
   private
+
+  sig { returns(Integer) }
+  def self.next_binding_id
+    id = @next_binding_id
+    @next_binding_id += 1
+    id
+  end
 
   sig { params(value: T.untyped).returns(T::Array[SymbolEntry]) }
   def normalize_lifetime(value)

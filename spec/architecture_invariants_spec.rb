@@ -28,6 +28,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
   NODE_STORAGE_OK = lambda do |rel|
     rel == "annotator/annotator.rb" ||
       rel.start_with?("annotator/helpers/") ||
+      rel.start_with?("annotator/domains/") ||
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
@@ -38,9 +39,9 @@ RSpec.describe "architecture invariants: placement-field writers" do
       rel.start_with?("mir/lowering/")
   end
 
-  # symbol.storage is made DEFINITIVE by escape analysis.
+  # symbol.storage is made DEFINITIVE by the shared semantic escape analysis.
   SYMBOL_STORAGE_OK = lambda do |rel|
-    rel == "mir/escape_analysis.rb"
+    rel == "semantic/escape_analysis.rb"
   end
 
   # CleanupEntry#alloc is set once, by cleanup classification.
@@ -189,7 +190,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
   end
 
   it "keeps pass stages registered as typed producer/requirement specs" do
-    pass_state = source("src/mir/pass_state.rb")
+    pass_state = source("src/semantic/pass_state.rb")
     expect(pass_state).to include("class StageSpec < T::Struct")
     expect(pass_state).to include("const :producer, String")
     expect(pass_state).to include("const :requires, T.nilable(Symbol)")
@@ -226,7 +227,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
   end
 
   it "keeps escape analysis sinks registered with concrete handlers" do
-    escape = source("src/mir/escape_analysis.rb")
+    escape = source("src/semantic/escape_analysis.rb")
     expect(escape).to include("ESCAPE_SINK_HANDLERS")
     expect(escape).to include("DERIVED_PLACEMENT_HANDLERS")
     expect(escape).to include("validate_escape_sink_handlers!")
@@ -481,7 +482,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/annotator/helpers/pipe_analysis.rb",
     "src/backends/pipeline_host.rb",
     "src/backends/pipeline_rewriter.rb",
-    "src/mir/escape_analysis.rb",
+    "src/semantic/escape_analysis.rb",
     "src/mir/lowering/expressions.rb",
     "src/mir/lowering/variables.rb",
   ].freeze
@@ -490,6 +491,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/annotator",
     "src/backends",
     "src/mir",
+    "src/semantic",
   ].freeze
 
   def scoped_source_files
@@ -720,7 +722,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
         next if rel == "src/mir/mir_checker.rb" && line.include?("alloc_marks.first.full_type")
         # OwnershipGraph::Node exposes its stored Type payload through
         # #full_type; this is not an AST annotation read.
-        next if rel == "src/mir/ownership_graph.rb" && line.include?("source.full_type")
+        next if rel == "src/semantic/ownership_graph.rb" && line.include?("source.full_type")
         "#{rel}:#{idx + 1}: #{line.strip}"
       end
     end
@@ -914,7 +916,7 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
     ),
     ForbiddenPattern.new(
       name: "source-specific call metadata in escape analysis",
-      glob: "src/mir/escape_analysis.rb",
+      glob: "src/semantic/escape_analysis.rb",
       pattern: /\bmatched_stdlib_def\b/,
       allowed: [],
     ),

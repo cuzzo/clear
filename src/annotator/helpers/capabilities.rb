@@ -134,14 +134,11 @@ module CapabilityHelper
   end
 
   # Validate that a capability type is legal for the given variable.
-  sig { params(node: AST::WithBlock, capability_type: Symbol, var_node: T.untyped).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, capability_type: Symbol, var_node: AST::Locatable).void }
   def validate_capability(node, capability_type, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @deferred_with_validations = T.let(@deferred_with_validations, T.untyped)
     var_type = var_node.full_type!(context: "WITH capability target")
-    allowed = T.let([AST::Identifier, AST::GetField], T::Array[T::Class[T.untyped]])
-    allowed << AST::GetIndex if capability_type == :BORROWED
-    unless allowed.any? { |t| var_node.is_a?(t) }
+    unless valid_capability_target?(capability_type, var_node)
       error!(var_node, :WITH_CAP_BAD_TARGET, capability: capability_type, got: var_node.class)
     end
 
@@ -152,9 +149,7 @@ module CapabilityHelper
         # Function parameters may not have propagated sync yet; locals error
         # eagerly because no later propagation can fix them.
         if var_node.symbol&.is_param
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :EXCLUSIVE
-          }
+          record_deferred_with_validation!(node, var_node, :EXCLUSIVE)
         else
           storage = cap_var_storage(var_node)
           name = cap_var_label(var_node)
@@ -174,9 +169,7 @@ module CapabilityHelper
       syn = cap_var_sync(var_node)
       unless syn == :write_locked
         if var_node.symbol&.is_param && syn.nil?
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :write_locked_read
-          }
+          record_deferred_with_validation!(node, var_node, :write_locked_read)
         else
           name = cap_var_label(var_node)
           emit_with_read_needs_write_lock!(node, name, var_node)
@@ -184,7 +177,7 @@ module CapabilityHelper
       end
 
     when :RESTRICT
-      if var_node.symbol && !var_node.symbol.mutable
+      if var_node.is_a?(AST::Identifier) && var_node.symbol && !var_node.symbol.mutable
         emit_with_restrict_immutable_error!(node, var_node)
       end
 
@@ -197,7 +190,13 @@ module CapabilityHelper
       # always-correct fallback for non-observable tense aggregates.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future? && t.observable?
-        emit_view_not_observable_finding!(node, var_node, t)
+        if var_node.is_a?(AST::Identifier)
+          emit_view_not_observable_finding!(node, var_node, t)
+        else
+          name = cap_var_label(var_node)
+          error!(node, :CAPABILITY_VIOLATION_FIXABLE,
+            message: "WITH VIEW requires an `@observable` source, but '#{name}' has type #{t.resolved}.")
+        end
       end
 
     when :MATERIALIZED_VIEW
@@ -262,9 +261,7 @@ module CapabilityHelper
       syn = cap_var_sync(var_node)
       unless syn == :atomic
         if var_node.symbol&.is_param && syn.nil?
-          @deferred_with_validations << {
-            node: node, var_node: var_node, capability: :ATOMIC
-          }
+          record_deferred_with_validation!(node, var_node, :ATOMIC)
         else
           name = cap_var_label(var_node)
           storage = cap_var_storage(var_node)
@@ -281,6 +278,13 @@ module CapabilityHelper
       error!(node, :UNKNOWN_WITH_CAP_TYPE, type: capability_type)
     end
   end
+
+  sig { params(capability_type: Symbol, var_node: AST::Locatable).returns(T::Boolean) }
+  def valid_capability_target?(capability_type, var_node)
+    return true if var_node.is_a?(AST::Identifier) || var_node.is_a?(AST::GetField)
+    capability_type == :BORROWED && var_node.is_a?(AST::GetIndex)
+  end
+  private :valid_capability_target?
 
   # Observables Phase 2.8: emit a fixable error for `WITH VIEW v AS s`
   # where v is not `@observable`. The :auto fix replaces `VIEW` with
@@ -826,7 +830,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].non_escaping = true
+      current_scope.locals[alias_name].mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -845,7 +849,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].non_escaping = true
+      current_scope.locals[alias_name].mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -873,8 +877,8 @@ module CapabilityHelper
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         record_capture_local!(alias_name)
         sym = current_scope.locals[alias_name]
-        sym.non_escaping  = true
-        sym.borrowed_alias = true  # RESTRICT alias: fiber capture is stack-UAF
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!  # RESTRICT alias: fiber capture is stack-UAF
         og_declare(alias_name, nil, resolved_type)
       end
     elsif cap[:capability] == :VIEW || cap[:capability] == :MATERIALIZED_VIEW
@@ -892,8 +896,8 @@ module CapabilityHelper
       record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
       if cap[:capability] == :VIEW
-        sym.non_escaping  = true
-        sym.borrowed_alias = true
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!
       end
       og_declare(alias_name, nil, bind_type_sym)
     elsif cap[:capability] == :SNAPSHOT
@@ -922,8 +926,8 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
       record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
-      sym.non_escaping  = true
-      sym.borrowed_alias = true
+      sym.mark_non_escaping!
+      sym.mark_borrowed_alias!
       og_declare(alias_name, nil, inner_type)
     elsif cap[:capability] == :BORROWED
       # BORROWED guarantees the aliased data is stable for the borrow duration.
@@ -949,8 +953,8 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.locals[alias_name]
-      sym.non_escaping  = true
-      sym.borrowed_alias = true  # BORROWED alias: fiber capture is stack-UAF
+      sym.mark_non_escaping!
+      sym.mark_borrowed_alias!  # BORROWED alias: fiber capture is stack-UAF
       og_declare(alias_name, nil, resolved_type)
       @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
     end
@@ -1067,7 +1071,7 @@ module CapabilityHelper
 
   sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def non_escaping_fiber_capture?(symbol)
-    return false unless symbol&.borrowed_alias
+    return false unless symbol&.borrowed_alias && symbol.non_escaping
 
     # WITH aliases unwrap a synchronized cell into a stack borrow and have no
     # sync on the alias itself. Capturing those is a UAF. Capturing the
@@ -1079,7 +1083,6 @@ module CapabilityHelper
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_info!(ctx, name, info, node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
     result = ctx.analysis
     result.has_outer_ref = true
     unless result.captures.key?(name)
@@ -1109,13 +1112,7 @@ module CapabilityHelper
         result.has_shared = true
       end
     end
-    if current_fn_ctx&.name
-      key = "#{current_fn_ctx.name}:#{name}"
-      if @capability_audit&.dig(key)
-        @capability_audit[key][:captured_bg] = true
-        @capability_audit[key][:captured_parallel] = true if ctx.is_parallel
-      end
-    end
+    audit_mark_captured(name, parallel: ctx.is_parallel)
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
@@ -1167,18 +1164,46 @@ end
 module CapabilityAudit
     extend T::Sig
 
-  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
+  class BindingAuditRecord < T::Struct
+    extend T::Sig
+
+    const :fn, String
+    const :var, String
+    const :line, T.nilable(Integer)
+    const :column, T.nilable(Integer)
+    const :sync, T.nilable(Symbol)
+    const :ownership, T.nilable(Symbol)
+    const :storage, Symbol
+    const :sharded, T::Boolean
+    prop :mutated, T::Boolean
+    prop :captured_bg, T::Boolean
+    prop :captured_parallel, T::Boolean
+
+    sig { void }
+    def mark_mutated!
+      self.mutated = true
+    end
+
+    sig { params(parallel: T::Boolean).void }
+    def mark_captured!(parallel:)
+      self.captured_bg = true
+      self.captured_parallel = true if parallel
+    end
+  end
+
+  BindingAuditStore = T.type_alias { T::Hash[String, BindingAuditRecord] }
+
+  sig { returns(BindingAuditStore) }
   def capability_audit_init!
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let({}, T.untyped)
+    @capability_audit = {}
   end
 
   # Record a capability binding for later audit.
-  sig { params(var_name: String, node: T.untyped, final_type: T.untyped, storage: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(var_name: String, node: AST::Locatable, final_type: T.any(Type, Symbol), storage: Symbol).returns(T.nilable(BindingAuditRecord)) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    return unless var_name.is_a?(String) && current_fn_ctx&.name
+    return unless current_fn_ctx&.name
 
     info = current_scope.locals[var_name]
     sync = info&.sync
@@ -1186,56 +1211,88 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_name = current_fn_ctx&.name
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
     fn_node = fn_name ? fn_nodes[fn_name] : nil
     return if fn_node&.visibility == :pub
 
-    key = "#{current_fn_ctx&.name}:#{var_name}"
+    fn_name = T.must(fn_name)
+    key = capability_audit_key(fn_name, var_name)
     line   = node.token&.line
     column = node.token&.column
-    ft = final_type.is_a?(Type) ? final_type : nil
-    is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
-    @capability_audit[key] = {
-      fn: current_fn_ctx&.name, var: var_name, line: line, column: column,
-      sync: sync, ownership: own, storage: storage, sharded: is_sharded,
-      mutated: false, captured_bg: false, captured_parallel: false
-    }
+    final_type_info = final_type.is_a?(Type) ? final_type : Type.new(final_type)
+    record = BindingAuditRecord.new(
+      fn: fn_name,
+      var: var_name,
+      line: line,
+      column: column,
+      sync: sync,
+      ownership: own,
+      storage: storage,
+      sharded: final_type_info.sharded?,
+      mutated: false,
+      captured_bg: false,
+      captured_parallel: false
+    )
+    capability_audit_store[key] = record
+    record
   end
 
-  sig { params(var_name: String).returns(T.nilable(T::Boolean)) }
+  sig { params(var_name: String).void }
   def audit_mark_mutated(var_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    return unless current_fn_ctx&.name
-    key = "#{current_fn_ctx&.name}:#{var_name}"
-    @capability_audit[key][:mutated] = true if @capability_audit[key]
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    return unless fn_name
+    record = capability_audit_store[capability_audit_key(fn_name, var_name)]
+    record&.mark_mutated!
   end
 
-  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
+  sig { params(var_name: String, parallel: T::Boolean).void }
+  def audit_mark_captured(var_name, parallel:)
+    T.bind(self, SemanticAnnotator) rescue nil
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    return unless fn_name
+    record = capability_audit_store[capability_audit_key(fn_name, var_name)]
+    record&.mark_captured!(parallel: parallel)
+  end
+
+  sig { returns(BindingAuditStore) }
   def finalize_capability_audit!
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    @capability_audit.each do |_key, info|
-      loc = info[:line] ? " (line #{info[:line]})" : ""
-      sync = info[:sync]
-      own  = info[:ownership]
+    capability_audit_store.each_value do |info|
+      loc = info.line ? " (line #{info.line})" : ""
+      sync = info.sync
+      own  = info.ownership
 
-      if SymbolEntry.locked_family_sync?(sync) && !info[:mutated] && !info[:sharded]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
+      if SymbolEntry.locked_family_sync?(sync) && !info.mutated && !info.sharded
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info.var}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
                      "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
       end
 
-      if own == :shared && !info[:captured_parallel]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @shared (Arc) but never leaves the local scheduler. " \
+      if own == :shared && !info.captured_parallel
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info.var}' is @shared (Arc) but never leaves the local scheduler. " \
                      "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
       end
 
-      if SymbolEntry.local_sync?(sync) && !info[:captured_bg]
+      if SymbolEntry.local_sync?(sync) && !info.captured_bg
         emit_local_never_shared_finding!(info)
       end
     end
   end
+
+  sig { returns(BindingAuditStore) }
+  def capability_audit_store
+    T.bind(self, SemanticAnnotator) rescue nil
+    @capability_audit = T.let(@capability_audit, T.nilable(BindingAuditStore))
+    T.must(@capability_audit)
+  end
+  private :capability_audit_store
+
+  sig { params(fn_name: String, var_name: String).returns(String) }
+  def capability_audit_key(fn_name, var_name)
+    "#{fn_name}:#{var_name}"
+  end
+  private :capability_audit_key
 
 end

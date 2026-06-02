@@ -20,11 +20,12 @@ require_relative "../src/ast/ast"
 # fuller TRAVERSAL-table proposal we DIDN'T adopt -- this guard is the
 # cherry-picked piece.
 RSpec.describe "AST walker coverage" do
-  # Nodes visited via a parent's visit_ rather than directly. Adding a
-  # new entry here is intentional: it documents that the node is a
-  # sub-expression of some larger construct whose own visit_ method
-  # walks into it.
+  # Nodes visited through a non-visit phase route, or via a parent's visit_
+  # rather than directly. Adding a new entry here is intentional: it documents
+  # that the node is handled without a dedicated visit_ method.
   INDIRECT_DISPATCH = %w[
+    StructDef ExternStructDecl EnumDef UnionDef ExternFnDecl
+
     Require StringConcat StructPattern ThrowNode CatchBlock
 
     SelectOp WhereOp IndexOp OrderByOp LimitOp SkipOp UnnestOp DistinctOp

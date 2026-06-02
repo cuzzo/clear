@@ -47,10 +47,10 @@ RSpec.describe "SYNC POLICY chain (#328)" do
 
       with_node = find_with(ast)
       expect(with_node.lock_error_clause).not_to be_nil
-      expect(with_node.lock_error_clause[:selectors].first[:name]).to eq(:MvccConflict)
-      expect(with_node.lock_error_clause[:action]).to eq(:raise)
+      expect(with_node.lock_error_clause.selectors.first.name).to eq(:MvccConflict)
+      expect(with_node.lock_error_clause.action).to eq(:raise)
       # The baked-in default for MvccConflict is `RAISE` (no retry).
-      expect(with_node.lock_error_clause[:retries]).to be_nil
+      expect(with_node.lock_error_clause.retries).to be_nil
     end
   end
 
@@ -81,8 +81,8 @@ RSpec.describe "SYNC POLICY chain (#328)" do
 
       # VERSIONED: synthesized clause from policy.
       expect(versioned_arm[:lock_error_clauses]).not_to be_empty
-      sel = versioned_arm[:lock_error_clauses].first[:selectors].first
-      expect(sel[:name]).to eq(:MvccConflict)
+      sel = versioned_arm[:lock_error_clauses].first.selectors.first
+      expect(sel.name).to eq(:MvccConflict)
 
       # ATOMIC: still empty (rcu retries until success; #330 will
       # bound and add AtomicConflict policy fallback).
@@ -108,8 +108,8 @@ RSpec.describe "SYNC POLICY chain (#328)" do
       CLEAR
 
       with_node = find_with(ast)
-      expect(with_node.lock_error_clause[:retries]).to eq(2)
-      expect(with_node.lock_error_clause[:action]).to eq(:raise)
+      expect(with_node.lock_error_clause.retries).to eq(2)
+      expect(with_node.lock_error_clause.action).to eq(:raise)
     end
   end
 
@@ -125,8 +125,8 @@ RSpec.describe "SYNC POLICY chain (#328)" do
       CLEAR
 
       with_node = find_with(ast)
-      expect(with_node.lock_error_clause[:retries]).to eq(5)
-      expect(with_node.lock_error_clause[:action]).to eq(:pass)
+      expect(with_node.lock_error_clause.retries).to eq(5)
+      expect(with_node.lock_error_clause.action).to eq(:pass)
     end
   end
 end

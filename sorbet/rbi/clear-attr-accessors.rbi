@@ -1118,9 +1118,9 @@ class FunctionContext
   def name=(value); end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::ReturnFact]) }
   def returns; end
-  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(value: T::Array[AST::ReturnFact]).returns(T::Array[AST::ReturnFact]) }
   def returns=(value); end
   sig { returns(Integer) }
   def stack_vars_bytes; end
@@ -1449,11 +1449,11 @@ class InlineAllocMetadata
 end
 
 class InlineStructVariant
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
   def deinit_entries; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
   def deinit_entries=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::InlineStructVariant::FieldMap) }
   def fields; end
 end
 
@@ -1684,7 +1684,7 @@ class OwnershipDataflow
 end
 
 class OwnershipGraph
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[OwnershipGraph::Edge]) }
   def edges; end
 end
 
@@ -1758,11 +1758,11 @@ class Schemas::EnumSchema
 end
 
 class Schemas::InlineStructVariant
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
   def deinit_entries; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
   def deinit_entries=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::InlineStructVariant::FieldMap) }
   def fields; end
 end
 
@@ -1897,10 +1897,8 @@ class SymbolEntry
   def async_result_shape; end
   sig { params(value: T.nilable(AsyncResultShape)).returns(T.nilable(AsyncResultShape)) }
   def async_result_shape=(value); end
-  sig { returns(T::Boolean) }
-  def borrowed_alias; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def borrowed_alias=(value); end
+  sig { returns(Integer) }
+  def binding_id; end
   sig { returns(T.untyped) }
   def capabilities; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1909,14 +1907,6 @@ class SymbolEntry
   def close_zig; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def close_zig=(value); end
-  sig { returns(T::Boolean) }
-  def init_contents_heap; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def init_contents_heap=(value); end
-  sig { returns(T.untyped) }
-  def invalid_reason; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def invalid_reason=(value); end
   sig { returns(T::Boolean) }
   def is_param; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -1935,14 +1925,6 @@ class SymbolEntry
   def mutable; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutable=(value); end
-  sig { returns(T::Boolean) }
-  def mutable_ref_target; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def mutable_ref_target=(value); end
-  sig { returns(T::Boolean) }
-  def mutated; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def mutated=(value); end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1951,14 +1933,6 @@ class SymbolEntry
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
-  sig { returns(T::Boolean) }
-  def poly_borrow_target; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def poly_borrow_target=(value); end
-  sig { returns(T::Boolean) }
-  def read; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def read=(value); end
   sig { returns(T.untyped) }
   def rebindable; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -2001,10 +1975,6 @@ class SymbolEntry
   def takes=(value); end
   sig { returns(Type) }
   def type; end
-  sig { returns(T.untyped) }
-  def valid; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def valid=(value); end
 end
 
 class TestBlock

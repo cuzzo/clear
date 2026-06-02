@@ -291,7 +291,7 @@ RSpec.describe SemanticAnnotator do
         func_node = ast.statements.last
         if_node = func_node.body.first
 
-        expect(if_node.then_drops).to include(include(name: "x"))
+        expect(if_node.then_drops.map(&:name)).to include("x")
       end
     end
 
@@ -313,7 +313,7 @@ RSpec.describe SemanticAnnotator do
         func_node = ast.statements.last
         if_node = func_node.body.first
 
-        expect(if_node.else_drops).to include(include(name: "x"))
+        expect(if_node.else_drops.map(&:name)).to include("x")
       end
     end
 
@@ -332,10 +332,10 @@ RSpec.describe SemanticAnnotator do
         func_node = ast.statements.last
 
         # Verify 'a' is dropped
-        expect(func_node.deferred_drops).to include(include(name: "a"))
+        expect(func_node.deferred_drops.map(&:name)).to include("a")
 
         # Verify 'b' is NOT dropped (it's a primitive)
-        expect(func_node.deferred_drops).not_to include(include(name: "b"))
+        expect(func_node.deferred_drops.map(&:name)).not_to include("b")
       end
     end
 

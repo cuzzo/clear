@@ -234,6 +234,14 @@ module MIRLoweringControlFlow
     rt = MIR::Ident.new(@rt_name)
     cond, cond_pending = lower_head { lower_control_condition(node.condition, transfers_to_capture: true) }
     body = lower_body(node.do_branch)
+    if (capture_cleanup = while_bind_capture_cleanup(node))
+      capture_name = node.binding_name.to_s
+      capture_type = Type.from_node!(node.condition)
+      body = [
+        MIR::AllocMark.new(capture_name, :heap, capture_type, :iteration),
+        MIR::Cleanup.new(capture_name, capture_cleanup),
+      ] + T.must(body)
+    end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
@@ -243,6 +251,15 @@ module MIRLoweringControlFlow
     end
 
     MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, false)
+  end
+
+  sig { params(node: AST::WhileBindLoop).returns(T.nilable(CleanupEntry)) }
+  def while_bind_capture_cleanup(node)
+    ti = Type.from_node!(node.condition)
+    ti = ti.success_type || ti
+    return nil unless ti.any_rc? || (ti.optional? && ti.wrapped_type&.any_rc?)
+
+    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false)
   end
 
   # Returns true when the last reachable statement in a loop body is an

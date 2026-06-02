@@ -2691,7 +2691,7 @@ class Formatter::Emitter
   # generic span opened just before. Tracks nested `<>` depth. Returns
   # the close index, or nil if anything that disqualifies the span as
   # a generic appears (call/index/struct-lit brackets, `=`, etc).
-  sig { params(line: Array, start_idx: Integer).returns(Integer) }
+  sig { params(line: Array, start_idx: Integer).returns(T.nilable(Integer)) }
   def find_generic_close_idx(line, start_idx)
     depth = 1
     i = start_idx

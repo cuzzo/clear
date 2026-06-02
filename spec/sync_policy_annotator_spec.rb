@@ -252,9 +252,9 @@ RSpec.describe "SYNC POLICY annotator validation (#325)" do
       handlers = ast.sync_policy
       expect(handlers).to be_an(Array)
       expect(handlers.size).to eq(3)
-      lt = handlers.find { |h| h[:selectors].first[:name] == :LockTimeout }
-      expect(lt[:retries]).to eq(2)
-      expect(lt[:action]).to eq(:raise)
+      lt = handlers.find { |h| h.selectors.first.name == :LockTimeout }
+      expect(lt.retries).to eq(2)
+      expect(lt.action).to eq(:raise)
     end
 
     it "stamps the baked-in default when no SYNC POLICY is present" do
@@ -264,7 +264,7 @@ RSpec.describe "SYNC POLICY annotator validation (#325)" do
 
       handlers = ast.sync_policy
       expect(handlers).to be_an(Array)
-      names = handlers.flat_map { |h| h[:selectors].map { |s| s[:name] } }.to_set
+      names = handlers.flat_map { |h| h.selectors.map { |s| s.name } }.to_set
       expect(names).to eq(Set[:LockTimeout, :MvccConflict, :AtomicConflict])
     end
 
@@ -273,9 +273,9 @@ RSpec.describe "SYNC POLICY annotator validation (#325)" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
 
-      lt = ast.sync_policy.find { |h| h[:selectors].first[:name] == :LockTimeout }
-      expect(lt[:retries]).to eq(3)
-      expect(lt[:action]).to eq(:raise)
+      lt = ast.sync_policy.find { |h| h.selectors.first.name == :LockTimeout }
+      expect(lt.retries).to eq(3)
+      expect(lt.action).to eq(:raise)
     end
 
     it "the baked-in MvccConflict / AtomicConflict defaults are RAISE (no retry)" do
@@ -284,9 +284,9 @@ RSpec.describe "SYNC POLICY annotator validation (#325)" do
       CLEAR
 
       %i[MvccConflict AtomicConflict].each do |name|
-        h = ast.sync_policy.find { |hh| hh[:selectors].first[:name] == name }
-        expect(h[:retries]).to be_nil
-        expect(h[:action]).to eq(:raise)
+        h = ast.sync_policy.find { |hh| hh.selectors.first.name == name }
+        expect(h.retries).to be_nil
+        expect(h.action).to eq(:raise)
       end
     end
   end

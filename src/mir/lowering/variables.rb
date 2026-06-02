@@ -1331,11 +1331,12 @@ module MIRLoweringVariables
   sig { params(node: AST::Assignment).returns(AutoLockAssignmentFacts) }
   def auto_lock_assignment_facts(node)
     T.bind(self, MIRLowering) rescue nil
-    var_name = node.auto_lock[:var].to_s
+    auto_lock = T.let(node.auto_lock, AST::AutoLockPlan)
+    var_name = auto_lock.var
     cleanup_alloc = T.let(node.field_pre_cleanup, T.nilable(Symbol))
     AutoLockAssignmentFacts.new(
       var_name: var_name,
-      sync: node.auto_lock[:sync],
+      sync: auto_lock.sync,
       guard_var: "__#{var_name}_guard",
       alias_var: "__#{var_name}_inner",
       zig_var: (@do_capture_map&.dig(var_name) || var_name).to_s,

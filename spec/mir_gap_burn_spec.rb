@@ -7,9 +7,9 @@ require_relative "../src/ast/symbol_entry"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
 require_relative "../src/backends/importer"
-require_relative "../src/mir/concurrency_checks"
+require_relative "../src/semantic/concurrency_checks"
 require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/escape_analysis"
+require_relative "../src/semantic/escape_analysis"
 require_relative "../src/mir/fiber_ctx_builder"
 
 RSpec.describe "MIR gap-burn characterization" do

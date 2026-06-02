@@ -2,8 +2,8 @@ require "rspec"
 require "set"
 
 require_relative "../src/backends/transpiler"
-require_relative "../src/mir/effect_set"
-require_relative "../src/mir/effect_inference"
+require_relative "../src/semantic/effect_set"
+require_relative "../src/semantic/effect_inference"
 
 # P3.7: pin the four Phase 3 compile-time correctness checks plus the
 # EffectSet / EffectInference scaffolding.

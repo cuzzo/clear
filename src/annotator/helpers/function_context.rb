@@ -10,8 +10,11 @@ class FunctionContext
   sig { returns(T.untyped) }
   attr_accessor :name, :type_params,
                 :frame_count, :heap_count, :alloc_count,
-                :loop_depth, :conditional_depth, :returns,
+                :loop_depth, :conditional_depth,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
+
+  sig { returns(T::Array[AST::ReturnFact]) }
+  attr_accessor :returns
 
   sig { returns(T::Boolean) }
   attr_accessor :uses_rt
@@ -31,6 +34,51 @@ class FunctionContext
     @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
+  sig { void }
+  def record_frame_use!
+    self.frame_count += 1
+  end
+
+  sig { void }
+  def record_heap_use!
+    self.heap_count += 1
+  end
+
+  sig { void }
+  def record_alloc_use!
+    self.alloc_count += 1
+  end
+
+  sig { params(bytes: Integer).void }
+  def record_stack_bytes!(bytes)
+    self.stack_vars_bytes += bytes
+  end
+
+  sig { void }
+  def mark_runtime_used!
+    self.uses_rt = true
+  end
+
+  sig { void }
+  def enter_loop!
+    self.loop_depth += 1
+  end
+
+  sig { void }
+  def exit_loop!
+    self.loop_depth -= 1
+  end
+
+  sig { void }
+  def enter_conditional!
+    self.conditional_depth += 1
+  end
+
+  sig { void }
+  def exit_conditional!
+    self.conditional_depth -= 1
+  end
+
   sig { params(name: String, return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type: nil, lifetime: [], type_params: [])
     @name = name
@@ -44,7 +92,7 @@ class FunctionContext
     @uses_rt = T.let(false, T::Boolean)
     @loop_depth = T.let(0, Integer)
     @conditional_depth = T.let(0, Integer)
-    @returns = T.let([], T::Array[T.untyped])
+    @returns = T.let([], T::Array[AST::ReturnFact])
     @stack_vars_bytes = T.let(0, Integer)
   end
 end

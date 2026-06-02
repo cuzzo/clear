@@ -10,7 +10,7 @@ require 'set'
 #
 # Effects are computed in two phases:
 #   1. Direct collection (during visit_* methods in pass 3)
-#   2. Transitive propagation (fixed-point over @call_graph, after pass 5b)
+#   2. Transitive propagation (fixed-point over function_call_graph, after pass 5b)
 #
 # The result is stored on each FunctionDef node as `node.effects` (a frozen Set).
 #
@@ -32,7 +32,7 @@ module EffectTracker
   # Phase 3 closed-lattice effects. Recorded directly at visit_BgBlock /
   # visit_NextExpr (and FFI sites for IO). Propagated transitively by
   # compute_effects! over the existing call graph. Read by EffectSet
-  # projection (src/mir/effect_inference.rb) and ConcurrencyChecks.
+  # projection (src/semantic/effect_inference.rb) and ConcurrencyChecks.
   YIELD        = :YIELD
   IO           = :IO
 
@@ -118,16 +118,17 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.nilable(Integer))
-    return unless current_fn_ctx&.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
-    @fn_direct_effects[current_fn_ctx.name]&.add(effect)
+    @fn_direct_effects[fn_ctx.name]&.add(effect)
     # MVCC L5-followup (D1): a SNAPSHOT-transaction body must be pure
     # for atomicity -- yielding the fiber breaks EBR pin guarantees,
     # and IO can't be rolled back if the transaction aborts. Track
     # SUSPENDS effects recorded while @inside_snapshot_txn is set so
     # the WITH-block visitor can raise once the body is complete.
     if @inside_snapshot_txn && @inside_snapshot_txn > 0 && SUSPENDS_FAMILY.include?(effect)
-      record_snapshot_txn_violation!(effect, current_fn_ctx.name)
+      record_snapshot_txn_violation!(effect, fn_ctx.name)
     end
     nil
   end
@@ -167,8 +168,9 @@ module EffectTracker
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_context = T.let(@call_site_context, T.untyped)
-    return unless current_fn_ctx&.name
-    caller_name = current_fn_ctx.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
+    caller_name = fn_ctx.name
     in_loop = current_loop_depth > 0
     in_cond = current_conditional_depth > 0
     return unless in_loop || in_cond
@@ -188,13 +190,14 @@ module EffectTracker
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
-    return unless current_fn_ctx&.name
-    @call_site_arg_families[current_fn_ctx.name][callee_name] << arg_family_sets
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
+    @call_site_arg_families[fn_ctx.name][callee_name] << arg_family_sets
   end
 
   # --- Phase 2: Transitive propagation ---
 
-  # Fixed-point propagation through @call_graph.
+  # Fixed-point propagation through function_call_graph.
   # Follows the same pattern as compute_needs_rt! and compute_can_fail!.
   #
   # SUSPENDS-family effects promote based on call-site context: if foo
@@ -206,7 +209,6 @@ module EffectTracker
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @call_graph = T.let(@call_graph, T.untyped)
     @call_site_context = T.let(@call_site_context, T.untyped)
     # Seed from direct effects.
     resolved = {}
@@ -228,7 +230,7 @@ module EffectTracker
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      @call_graph.each do |fn_name, callees|
+      function_call_graph.each do |fn_name, callees|
         current = resolved[fn_name] ||= Set.new
         callees.each do |callee|
           callee_effs = resolved[callee]
@@ -361,9 +363,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
-    @fn_has_fnptr = T.let(@fn_has_fnptr, T.untyped)
-    @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     fn_nodes.each do |name, fn_node|
       fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
@@ -376,7 +375,7 @@ module EffectTracker
         !is_pure_copy
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
-      has_raise = @fn_raises_directly[name]
+      has_raise = function_raises_directly?(name)
       # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
       # recognized get a synthesized trampoline that allocates child
       # frames via rt.heapAlloc(). Force needs_rt=true so callers
@@ -386,12 +385,12 @@ module EffectTracker
       # `rt.checkYield()` injected at entry by mir_lowering, so they
       # need rt threaded.
       yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_runtime? || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
     # but is imported with needs_rt=true, include it so propagation works.
-    @call_graph.each do |_, callees|
+    function_call_graph.each do |_, callees|
       callees.each do |c|
         next if needs_rt.key?(c)
         scope = lookup_scope_for(c)
@@ -404,7 +403,7 @@ module EffectTracker
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      @call_graph.each do |fn_name, callees|
+      function_call_graph.each do |fn_name, callees|
         next if needs_rt[fn_name]
         if callees.any? { |c| needs_rt[c] }
           needs_rt[fn_name] = true
@@ -429,8 +428,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
-    @call_graph = T.let(@call_graph, T.untyped)
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
     # @nonReentrant / BG-spawn / declared `!T` / transitive ERROR
     # callee). This is the axis that forces `RETURNS !T` (step 4). It
@@ -453,7 +450,7 @@ module EffectTracker
         rescue StandardError
           false
         end
-      error_fallible[name] = @fn_raises_directly[name] == true || declared_fallible || name == "main"
+      error_fallible[name] = function_raises_directly?(name) || declared_fallible || name == "main"
     end
 
     # Seed imported (cross-module) functions. Read the callee's
@@ -461,7 +458,7 @@ module EffectTracker
     # can_fail solely because it allocates must not seed local ERROR
     # fallibility. Fallback to can_fail only for extern/legacy sigs
     # that predate the error_fallible split.
-    @call_graph.each do |_, callees|
+    function_call_graph.each do |_, callees|
       callees.each do |c|
         next if error_fallible.key?(c)
         scope = lookup_scope_for(c)
@@ -474,18 +471,17 @@ module EffectTracker
     end
 
     # Propagate failure ONLY through callees whose error channel is not
-    # locally terminated. `@fn_propagating_callees` is the single
+    # locally terminated. `function_propagating_callees` is the single
     # authority (set by scan_for_calls): a callee reached only via
     # `f() OR <fallback>` does not carry failure into fn_name, so it is
-    # absent here even though it stays in the shared @call_graph.
+    # absent here even though it stays in the shared function_call_graph.
     # (puck-clear-bugs.md #11)
-    @fn_propagating_callees = T.let(@fn_propagating_callees, T.untyped)
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      @call_graph.each do |fn_name, callees|
+      function_call_graph.each do |fn_name, callees|
         next if error_fallible[fn_name]
-        prop = @fn_propagating_callees[fn_name] || callees
+        prop = function_propagating_callees[fn_name] || callees
         if prop.any? { |c| error_fallible[c] }
           error_fallible[fn_name] = true
           changed = T.let(true, T::Boolean)
@@ -495,7 +491,7 @@ module EffectTracker
 
     # ── FAULT axis: allocation (OOM) ─────────────────────────────────
     # Computed parallel to can_fail, with the SAME single authority for
-    # channel termination (@fn_propagating_callees, #11): a callee
+    # channel termination (function_propagating_callees, #11): a callee
     # reached only via `f() OR <fallback>` / `OR PASS` has its fault
     # channel terminated locally and does not propagate the alloc fault
     # into the caller. A FAULT rides the same Zig `!T`+try path as an
@@ -544,7 +540,7 @@ module EffectTracker
         end
       alloc_fault[name] = direct_alloc || decl_alloc
     end
-    @call_graph.each do |_, callees|
+    function_call_graph.each do |_, callees|
       callees.each do |c|
         next if alloc_fault.key?(c)
         scope = lookup_scope_for(c)
@@ -557,9 +553,9 @@ module EffectTracker
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      @call_graph.each do |fn_name, callees|
+      function_call_graph.each do |fn_name, callees|
         next if alloc_fault[fn_name]
-        prop = @fn_propagating_callees[fn_name] || callees
+        prop = function_propagating_callees[fn_name] || callees
         if prop.any? { |c| alloc_fault[c] }
           alloc_fault[fn_name] = true
           changed = T.let(true, T::Boolean)
@@ -690,10 +686,8 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
-    @call_graph = T.let(@call_graph, T.untyped)
-    return "raises directly via RAISE" if @fn_raises_directly[name]
-    callees = @call_graph[name] || []
+    return "raises directly via RAISE" if function_raises_directly?(name)
+    callees = function_call_graph[name] || []
     fallible_callee = callees.find { |c| fn_nodes[c]&.can_fail }
     return "calls fallible '#{fallible_callee}'" if fallible_callee
     "transitively"
@@ -916,7 +910,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @call_graph = T.let(@call_graph, T.untyped)
     return [:stackful, :fn_pointer] if has_fnptr
     visited = Set.new
     queue = callee_names.to_a.dup
@@ -931,7 +924,7 @@ module EffectTracker
       effs = fn.effects || Set.new
       return [:stackful, :reentrant] if effs.include?(REENTRANT) || fn.reentrant == :reentrant
       return [:stackful, :extern]    if effs.include?(EXTERN)
-      (@call_graph[name] || []).each { |c| queue << c }
+      (function_call_graph[T.must(name)] || []).each { |c| queue << c }
     end
     [:fsm, nil]
   end
@@ -983,7 +976,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @call_graph = T.let(@call_graph, T.untyped)
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
     #   :reentrant            unbounded -> :service (OS thread)
@@ -1061,7 +1053,7 @@ module EffectTracker
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      @call_graph.each do |fn_name, callees|
+      function_call_graph.each do |fn_name, callees|
         fn = fn_nodes[fn_name]
         next unless fn
         next if fn.stack_tier == :unbounded
@@ -1073,7 +1065,7 @@ module EffectTracker
     end
   end
 
-  # Phase 4g: detect mutual recursion in @call_graph (the graph
+  # Phase 4g: detect mutual recursion in function_call_graph (the graph
   # already excludes self-loops -- see annotator.rb:530). Returns
   # true iff `start` participates in a cycle that goes through at
   # least one other function. Used to fall back :MAX_DEPTH(N) to
@@ -1082,8 +1074,7 @@ module EffectTracker
   sig { params(start: String).returns(T::Boolean) }
   def mutually_recursive_in_call_graph?(start)
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_graph = T.let(@call_graph, T.untyped)
-    (@call_graph[start] || Set.new).any? do |callee|
+    (function_call_graph[start] || Set.new).any? do |callee|
       next false if callee == start
       reachable_in_call_graph?(callee, start)
     end
@@ -1092,7 +1083,6 @@ module EffectTracker
   sig { params(from_name: String, target: String).returns(T::Boolean) }
   def reachable_in_call_graph?(from_name, target)
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_graph = T.let(@call_graph, T.untyped)
     visited = Set.new
     queue = [from_name]
     until queue.empty?
@@ -1100,7 +1090,7 @@ module EffectTracker
       next if visited.include?(n)
       visited << n
       return true if n == target
-      queue.concat((@call_graph[n] || Set.new).to_a)
+      queue.concat((function_call_graph[T.must(n)] || Set.new).to_a)
     end
     false
   end
@@ -1114,7 +1104,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @call_graph = T.let(@call_graph, T.untyped)
     visited = Set.new
     max = T.let(:micro, Symbol)
     queue = fn_names.to_a.dup
@@ -1129,7 +1118,7 @@ module EffectTracker
         max = fn.stack_tier if TIER_ORDER.fetch(fn.stack_tier, 0) > TIER_ORDER.fetch(max, 0)
       end
 
-      (@call_graph[name] || []).each { |callee| queue << callee }
+      (function_call_graph[T.must(name)] || []).each { |callee| queue << callee }
     end
 
     max
@@ -1201,7 +1190,7 @@ module EffectTracker
     calls      = Set.new
     unabsorbed = Set.new   # callees whose error CHANNEL does not terminate
                            # locally (i.e. can propagate failure to this fn).
-                           # `calls` keeps every callee (shared @call_graph
+                           # `calls` keeps every callee (shared function_call_graph
                            # users need that); `unabsorbed` is the authority
                            # for can_fail propagation.
     has_fnptr  = T.let([false], T::Array[T::Boolean])
@@ -1264,15 +1253,14 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    @call_graph = T.let(@call_graph, T.untyped)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @call_graph.each_key do |fn_name|
+    function_call_graph.each_key do |fn_name|
       node = fn_nodes[fn_name]
       next if node.nil?
       next if node.reentrant  # already annotated — no complaint needed
 
       visited = Set.new
-      queue   = (@call_graph[fn_name] || Set.new).to_a
+      queue   = (function_call_graph[fn_name] || Set.new).to_a
 
       until queue.empty?
         callee = queue.shift
@@ -1302,7 +1290,7 @@ module EffectTracker
           break
         end
 
-        (@call_graph[callee] || Set.new).each { |c| queue << c }
+        (function_call_graph[callee] || Set.new).each { |c| queue << c }
       end
     end
   end
@@ -1353,8 +1341,8 @@ module EffectTracker
         # non-raising action like :pass / :return / :block), no path
         # raises, so we don't flag the enclosing fn.
         if (clause = n.lock_error_clause)
-          action_raises  = %i[raise exit].include?(clause[:action])
-          has_bubble     = clause[:bubble_types].is_a?(Array) && !clause[:bubble_types].empty?
+          action_raises  = %i[raise exit].include?(clause.action)
+          has_bubble     = !clause.bubble_types.empty?
           found[0] = true if action_raises || has_bubble
         end
         n.body.each { |stmt| traverse.call(stmt) } unless found[0]

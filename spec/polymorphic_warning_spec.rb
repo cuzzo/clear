@@ -57,8 +57,12 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
   describe "handled_error_set" do
     let(:type_clause) {
       ->(name) {
-        { selectors: [{ form: :type, name: name, token: nil }],
-          retries: nil, action: :raise }
+        AST::ErrorClause.new(
+          selectors: [AST::ErrorSelector.new(form: :type, name: name, token: nil)],
+          retries: nil,
+          action: :raise,
+          token: nil,
+        )
       }
     }
 
@@ -72,10 +76,12 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
 
     it "expands kind-form selectors via AST.types_for_kind" do
       node = AST::WithBlock.new(nil, [], [], nil)
-      node.lock_error_clause = {
-        selectors: [{ form: :kind, name: :Transient, token: nil }],
+      node.lock_error_clause = AST::ErrorClause.new(
+        selectors: [AST::ErrorSelector.new(form: :kind, name: :Transient, token: nil)],
+        retries: nil,
         action: :raise,
-      }
+        token: nil,
+      )
       handled = WithMatchCheck.handled_error_set(node, [])
       # :Transient expands to LockTimeout, LockCycle, MvccConflict,
       # AtomicConflict (all stdlib Transient types).

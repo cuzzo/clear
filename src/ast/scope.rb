@@ -185,8 +185,7 @@ class Scope
   def mark_read(name)
     entry = @locals[name]
     return unless entry
-    entry.read = true
-    entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
+    entry.mark_read!
   end
 
   # Returns the new SymbolEntry on success, nil if the binding wasn't found

@@ -3,7 +3,7 @@ require "set"
 
 require_relative "../src/ast/ast"
 require_relative "../src/ast/type"
-require_relative "../src/mir/capture_strategy"
+require_relative "../src/semantic/capture_strategy"
 
 RSpec.describe CaptureStrategy do
   let(:empty_site) { CaptureStrategy::CaptureSiteInfo.empty }

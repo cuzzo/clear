@@ -28,15 +28,15 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
   describe "[self] current-scope lifetime (replaces non_escaping = true)" do
     it "non_escaping = true sets lifetime to [self]" do
       sym = fresh
-      sym.non_escaping = true
+      sym.mark_non_escaping!
       expect(sym.lifetime).to eq([sym])
       expect(sym.non_escaping).to be(true)
     end
 
     it "non_escaping = false clears the current-scope lifetime" do
       sym = fresh
-      sym.non_escaping = true
-      sym.non_escaping = false
+      sym.mark_non_escaping!
+      sym.clear_non_escaping!
       expect(sym.lifetime).to eq([])
       expect(sym.non_escaping).to be(false)
     end
@@ -51,6 +51,18 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       sym = fresh
       sym.lifetime = :current_scope
       expect(sym.lifetime_sources).to eq([sym])
+    end
+
+    it "dups binding flow facts independently for branch scopes" do
+      parent = fresh
+      child = parent.dup
+
+      child.mark_borrowed_alias!
+
+      expect(child.borrowed_alias).to be(true)
+      expect(child.non_escaping).to be(false)
+      expect(parent.borrowed_alias).to be(false)
+      expect(parent.non_escaping).to be(false)
     end
   end
 
@@ -100,7 +112,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       sym = fresh
       other = fresh
       sym.lifetime = SymbolEntry.tied_lifetime([other])
-      sym.non_escaping = false
+      sym.clear_non_escaping!
       expect(sym.lifetime).to eq([other])
     end
 
