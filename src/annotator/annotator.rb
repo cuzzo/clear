@@ -1106,7 +1106,7 @@ private
   def visit_UnionVariantLit(node)
     schema = lookup_type_schema(node.union_name.to_sym)
     var_data = validate_union_schema!(node, schema)
-    validate_union_fields!(node, T.must(var_data).fields)
+    validate_union_fields!(node, T.must(var_data).typed_fields)
     stamp_type!(node, node.union_name.to_sym)
   end
 
