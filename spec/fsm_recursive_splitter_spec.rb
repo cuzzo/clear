@@ -13,6 +13,20 @@ require_relative '../src/mir/fsm_transform/recursive_splitter'
 # IO / NEXT suspends.
 
 RSpec.describe FsmTransform::RecursiveSplitter do
+  describe "synthetic FSM ctx fragments" do
+    it "renders ctx fields late and passes through plain strings" do
+      step_ref = FsmTransform::Segments::CtxFieldRef.new(name: "step")
+      fragment = FsmTransform::Segments::SyntheticZig.new(parts: [
+        step_ref, " = ", step_ref, " + 1;",
+      ])
+
+      expect(FsmTransform::Segments.render_synthetic_zig(fragment, "__ctx_4"))
+        .to eq("__ctx_4.step = __ctx_4.step + 1;")
+      expect(FsmTransform::Segments.render_synthetic_zig("return;", "__ctx_4"))
+        .to eq("return;")
+    end
+  end
+
   # Minimal lowering double: returns the input unchanged for AST
   # nodes (the splitter uses .lower and .emit_expr to render
   # cond / start / end exprs; for shape tests we just need a
@@ -134,17 +148,21 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       stmt = for_range("i", lit(0), lit(3), [next_expr])
       segs = FsmTransform::RecursiveSplitter.split([stmt], lowering)
       expect(segs).not_to be_nil
-      # init segment includes "__FSM_CTX.__for_X = 0;" (placeholder
-      # substituted by the unified emit at lower-time).
       init_seg = segs.find { |s|
-        s.stmts.any? { |st| st.is_a?(String) && st.include?("__FSM_CTX.__for_") }
+        s.stmts.any? { |st|
+          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("__ctx_9.__for_")
+        }
       }
       expect(init_seg).not_to be_nil
       cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
       expect(cond_seg).not_to be_nil
-      expect(cond_seg.tail.cond_ast).to match(/__FSM_CTX\.__for_\d+ < 3/)
+      rendered_cond = FsmTransform::Segments.render_synthetic_zig(cond_seg.tail.cond_ast, "__ctx_9")
+      expect(rendered_cond).to match(/__ctx_9\.__for_\d+ < 3/)
       incr_seg = segs.find { |s|
-        s.stmts.any? { |st| st.is_a?(String) && st.include?("__FSM_CTX.__for_") && st.include?("+ 1") }
+        s.stmts.any? { |st|
+          rendered = FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9")
+          rendered.include?("__ctx_9.__for_") && rendered.include?("+ 1")
+        }
       }
       expect(incr_seg).not_to be_nil
       # Synthetic fields registered for the unified emit.

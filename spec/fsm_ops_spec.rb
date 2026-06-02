@@ -8,8 +8,8 @@ require_relative '../src/mir/fsm_ops'
 #   - Each op kind renders to the expected Zig fragment.
 #   - Template arg substitution ({0}, {1}, ...) goes through ArgRef,
 #     not string interpolation.
-#   - State-field placeholder __FSM_CTX resolves to __ctx_<id> in
-#     function paths.
+#   - Context-rooted function paths render to __ctx_<id> without
+#     placeholder substitution.
 #   - Structure-derivation helpers (referenced_state_fields,
 #     alloc_state_fields, free_state_fields) walk op trees correctly
 #     and let the FsmStructure derivation in fsm_lowering.rb avoid
@@ -56,7 +56,7 @@ RSpec.describe FsmOps do
     end
 
     it "renders BinOp with parens" do
-      expr = FO.binop("+", FO.call("clock", []), FO.intcast("i64", FO.arg(0)))
+      expr = FO.binop("+", FO.call(FO.fn("clock"), []), FO.intcast("i64", FO.arg(0)))
       expect(emitter.emit_expr(expr)).to eq("(clock() + @as(i64, @intCast(path_arg)))")
     end
 
@@ -68,7 +68,7 @@ RSpec.describe FsmOps do
     end
 
     it "renders try CallExpr" do
-      expr = FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)
+      expr = FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)
       expect(emitter.emit_expr(expr))
         .to eq("try CheatHeader.fsmOpenForRead(path_arg)")
     end
@@ -78,18 +78,24 @@ RSpec.describe FsmOps do
       expect(emitter.emit_expr(expr)).to eq("try __ctx_0.alloc.alloc(u8, __rf_size)")
     end
 
-    it "substitutes __FSM_CTX in CallExpr fn paths" do
-      expr = FO.call("__FSM_CTX.rt.getSched().fsmSleepTask",
+    it "renders context-rooted CallExpr function paths" do
+      expr = FO.call(FO.ctx_fn(["rt", "getSched()", "fsmSleepTask"]),
                      [FO.addr(FO.state("task")), FO.lit("42")])
       expect(emitter.emit_expr(expr))
         .to eq("__ctx_0.rt.getSched().fsmSleepTask(&__ctx_0.task, 42)")
+    end
+
+    it "rejects unknown function path roots" do
+      path = FsmOps::FunctionPath.new(root: :bogus, parts: ["bad"])
+      expect { path.render("__ctx_0") }
+        .to raise_error(ArgumentError, /unknown FSM function path root/)
     end
   end
 
   describe "statement emission" do
     it "renders AssignField with try call" do
       stmt = FO.assign_field("rf_fd",
-        FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true))
+        FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true))
       expect(emitter.emit_stmt(stmt))
         .to eq("__ctx_0.rf_fd = try CheatHeader.fsmOpenForRead(path_arg);")
     end
@@ -97,13 +103,13 @@ RSpec.describe FsmOps do
     it "renders LetConst with intcast(try call)" do
       stmt = FO.let_const("__rf_size", "usize",
         FO.intcast("usize",
-          FO.call("CheatHeader.fsmFileSize", [FO.state("rf_fd")], is_try: true)))
+          FO.call(FO.fn("CheatHeader.fsmFileSize"), [FO.state("rf_fd")], is_try: true)))
       expect(emitter.emit_stmt(stmt))
         .to eq("const __rf_size: usize = @as(usize, @intCast(try CheatHeader.fsmFileSize(__ctx_0.rf_fd)));")
     end
 
     it "renders ErrDeferCall" do
-      stmt = FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")])
+      stmt = FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")])
       expect(emitter.emit_stmt(stmt))
         .to eq("errdefer CheatHeader.fsmCloseFd(__ctx_0.rf_fd);")
     end
@@ -135,7 +141,7 @@ RSpec.describe FsmOps do
 
     it "renders IfFieldSubLtZeroReturnCall" do
       stmt = FO.if_neg_return_call("rf_waiter", "result",
-        "CheatHeader.fsmIoError",
+        FO.fn("CheatHeader.fsmIoError"),
         [FO.subf(FO.state("rf_waiter"), "result")])
       expect(emitter.emit_stmt(stmt)).to include("if (__ctx_0.rf_waiter.result < 0)")
       expect(emitter.emit_stmt(stmt))
@@ -147,8 +153,8 @@ RSpec.describe FsmOps do
     let(:setup_ops) {
       [
         FO.assign_field("rf_fd",
-          FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
-        FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+          FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)),
+        FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")]),
         FO.assign_field("rf_buf", FO.alloc_expr("u8", FO.local("__rf_size"))),
         FO.err_defer_free_field("rf_buf"),
         FO.io_submit(:read, "rf_waiter",
@@ -187,16 +193,16 @@ RSpec.describe FsmOps do
     it "produces all expected statements in order" do
       ops = [
         FO.assign_field("rf_fd",
-          FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
-        FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+          FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)),
+        FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")]),
         FO.let_const("__rf_size", "usize",
           FO.intcast("usize",
-            FO.call("CheatHeader.fsmFileSize", [FO.state("rf_fd")], is_try: true))),
+            FO.call(FO.fn("CheatHeader.fsmFileSize"), [FO.state("rf_fd")], is_try: true))),
         FO.assign_field("rf_buf",
           FO.alloc_expr("u8", FO.local("__rf_size"))),
         FO.err_defer_free_field("rf_buf"),
         FO.assign_field("rf_waiter",
-          FO.call("CheatHeader.FsmIoWaiter.init",
+          FO.call(FO.fn("CheatHeader.FsmIoWaiter.init"),
                   [FO.addr(FO.state("task"))])),
         FO.io_submit(:read, "rf_waiter",
           [FO.state("rf_fd"), FO.state("rf_buf")]),

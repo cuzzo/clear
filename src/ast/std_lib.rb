@@ -8,7 +8,7 @@ HEAP_STRING_TYPE = :String
 # Shorthand for FsmOps DSL constructors used in FSM templates below.
 # Usage in std_lib entries:
 #   fsm_setup: [
-#     FO.assign_field("rf_fd", FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
+#     FO.assign_field("rf_fd", FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)),
 #     ...
 #   ]
 FO = FsmOps::DSL
@@ -316,13 +316,13 @@ STD_LIB = T.let({
     fsm_setup: [
       # ctx.rf_fd = try fsmOpenForRead(path)
       FO.assign_field("rf_fd",
-        FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
+        FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)),
       # errdefer fsmCloseFd(ctx.rf_fd)
-      FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+      FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")]),
       # const __rf_size: usize = @as(usize, @intCast(try fsmFileSize(ctx.rf_fd)))
       FO.let_const("__rf_size", "usize",
         FO.intcast("usize",
-          FO.call("CheatHeader.fsmFileSize", [FO.state("rf_fd")], is_try: true))),
+          FO.call(FO.fn("CheatHeader.fsmFileSize"), [FO.state("rf_fd")], is_try: true))),
       # ctx.rf_buf = try ctx.alloc.alloc(u8, __rf_size)
       FO.assign_field("rf_buf",
         FO.alloc_expr("u8", FO.local("__rf_size"))),
@@ -331,17 +331,17 @@ STD_LIB = T.let({
       # ctx.rf_waiter = CheatHeader.FsmIoWaiter.init(ctx.task)
       # `task` is `*FsmTask` (slab-allocated), so pass directly.
       FO.assign_field("rf_waiter",
-        FO.call("CheatHeader.FsmIoWaiter.init",
+        FO.call(FO.fn("CheatHeader.FsmIoWaiter.init"),
                 [FO.state("task")])),
       # try ctx.rt.getSched().submitReadForFsm(&ctx.rf_waiter, ctx.rf_fd, ctx.rf_buf)
       FO.io_submit(:read, "rf_waiter", [FO.state("rf_fd"), FO.state("rf_buf")]),
     ],
     fsm_finish_block: [
       # fsmCloseFd(ctx.rf_fd);
-      FO.stmt_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+      FO.stmt_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")]),
       # if (ctx.rf_waiter.result < 0) return fsmIoError(ctx.rf_waiter.result);
       FO.if_neg_return_call("rf_waiter", "result",
-        "CheatHeader.fsmIoError",
+        FO.fn("CheatHeader.fsmIoError"),
         [FO.subf(FO.state("rf_waiter"), "result")]),
     ],
     # Bound expression: ctx.rf_buf[0..@as(usize, @intCast(ctx.rf_waiter.result))]
@@ -378,17 +378,17 @@ STD_LIB = T.let({
     ],
     fsm_setup: [
       FO.assign_field("wf_fd",
-        FO.call("CheatHeader.fsmOpenForWrite", [FO.arg(0)], is_try: true)),
-      FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("wf_fd")]),
+        FO.call(FO.fn("CheatHeader.fsmOpenForWrite"), [FO.arg(0)], is_try: true)),
+      FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("wf_fd")]),
       FO.assign_field("wf_waiter",
-        FO.call("CheatHeader.FsmIoWaiter.init",
+        FO.call(FO.fn("CheatHeader.FsmIoWaiter.init"),
                 [FO.state("task")])),
       FO.io_submit(:write, "wf_waiter", [FO.state("wf_fd"), FO.arg(1)]),
     ],
     fsm_finish_block: [
-      FO.stmt_call("CheatHeader.fsmCloseFd", [FO.state("wf_fd")]),
+      FO.stmt_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("wf_fd")]),
       FO.if_neg_return_call("wf_waiter", "result",
-        "CheatHeader.fsmIoError",
+        FO.fn("CheatHeader.fsmIoError"),
         [FO.subf(FO.state("wf_waiter"), "result")]),
     ],
     fsm_finish_value: nil,   # Void return,
@@ -967,13 +967,13 @@ STD_LIB = T.let({
     # is nil because sleep returns Void.
     fsm_setup: [
       FO.stmt_call(
-        "__FSM_CTX.rt.getSched().fsmSleepTask",
+        FO.ctx_fn(["rt", "getSched()", "fsmSleepTask"]),
         [
           # `task` is a `*FsmTask` (slab-allocated; the ctx holds the
           # pointer), so pass it directly — no `&` wrapper.
           FO.state("task"),
           FO.binop("+",
-                   FO.call("CheatHeader.milliTimestamp", []),
+                   FO.call(FO.fn("CheatHeader.milliTimestamp"), []),
                    FO.intcast("i64", FO.arg(0))),
         ],
       ),

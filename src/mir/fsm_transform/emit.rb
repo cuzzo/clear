@@ -506,10 +506,6 @@ module FsmTransform
       pointer_captures = ctx[:pointer_captures]
       arena_init_flag = ctx[:arena_init_flag]
 
-      # Substitute the splitter's __FSM_CTX placeholder with the real
-      # __ctx_<id> reference in any String body stmts. ForRange's
-      # synthesis emits "__FSM_CTX.<field>" so the splitter doesn't
-      # need to know the ctx_id at split time.
       ctx_token = "__ctx_#{id}"
       original_synth = segments.respond_to?(:synthetic_fields) ?
                          segments.synthetic_fields : []
@@ -517,12 +513,13 @@ module FsmTransform
                                 segments.method(:alias_overrides_for) : nil
       segments = segments.map do |seg|
         new_stmts = seg.stmts.map do |s|
-          s.is_a?(String) ? s.gsub("__FSM_CTX", ctx_token) : s
+          render_segment_stmt(s, ctx_token)
         end
         new_tail = seg.tail
-        if new_tail.is_a?(Segments::CondBranch) && new_tail.cond_ast.is_a?(String)
+        if new_tail.is_a?(Segments::CondBranch) &&
+            (new_tail.cond_ast.is_a?(String) || new_tail.cond_ast.is_a?(Segments::SyntheticZig))
           new_tail = Segments::CondBranch.new(
-            new_tail.cond_ast.gsub("__FSM_CTX", ctx_token),
+            render_segment_stmt(new_tail.cond_ast, ctx_token),
             new_tail.then_index, new_tail.else_index,
           )
         end
@@ -843,6 +840,16 @@ module FsmTransform
           ctx
         end
       build_fsm_unified(ctx_with_extras, segment_specs, promoted_field_decls, lowering)
+    end
+
+    sig { params(stmt: T.untyped, ctx_token: String).returns(T.untyped) }
+    def render_segment_stmt(stmt, ctx_token)
+      case stmt
+      when Segments::SyntheticZig
+        stmt.render(ctx_token)
+      else
+        stmt
+      end
     end
 
     sig { params(segments: T.untyped, lowering: T.untyped).returns(T::Hash[String, String]) }
