@@ -1000,25 +1000,16 @@ class MIRLowering
 
   sig { params(state: OwnershipFinalizationContext, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
-    marks.each_with_index do |mark, idx|
+    marks.each do |mark|
       stamp_source_line!(mark, line, col)
       state.out << mark
       state.out.concat(ownership_facts_for_structural_node(mark)) if mark.is_a?(MIR::Emittable)
       register_body_visible_names!(state, mark)
       next unless mark.is_a?(MIR::TransferMark)
-      next if marks[idx + 1].is_a?(MIR::MoveMark) && marks[idx + 1].name.to_s == mark.name.to_s
-      next unless emitted_guarded_cleanup_for_name?(state.out, mark.name.to_s)
 
-      move = T.must(MIR::OwnershipTransferPlan.new(
-        name: mark.name.to_s,
-        target: mark.target,
-        target_alloc: mark.target_alloc,
-        move_guarded: true,
-      ).marks.last)
-
-      stamp_source_line!(move, line, col)
-      state.out << move
-      register_body_visible_names!(state, move)
+      before_guard = state.out.length
+      append_move_guard_for_transfer_mark!(mark, state)
+      T.must(state.out[before_guard..]).each { |node| stamp_source_line!(node, line, col) } if state.out.length > before_guard
     end
     nil
   end
@@ -1198,6 +1189,11 @@ class MIRLowering
       owner_cleanup = owner_cleanup_for_transfer(state, name)
       if owner_cleanup
         owner_cleanup.cleanup_entry[:has_moved_guard] = true
+        state.guarded_cleanup_names << name
+        state.parent&.guarded_cleanup_names&.add(name)
+        guarded = true
+      elsif (entry = @current_bindings[name]) && entry.needs_cleanup?
+        entry[:has_moved_guard] = true
         state.guarded_cleanup_names << name
         state.parent&.guarded_cleanup_names&.add(name)
         guarded = true
