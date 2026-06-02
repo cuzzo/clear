@@ -31,6 +31,34 @@ module Annotator
         flush_deferred_with_validations!
         finalize_capability_audit!
       end
+
+      # Replay deferred WITH-on-param checks after caller-sync propagation has
+      # had a chance to populate entry.sync.
+      sig { returns(T::Array[DeferredWithValidation]) }
+      def flush_deferred_with_validations!
+        T.bind(self, SemanticAnnotator)
+
+        deferred_with_validations.each do |d|
+          var_node = d.var_node
+          syn = var_node.symbol&.sync
+          case d.capability
+          when :EXCLUSIVE
+            next if syn
+            storage = var_node.symbol&.storage
+            error!(d.node, :WITH_EXCLUSIVE_NEEDS_LOCK_GOT, got: storage || 'unknown')
+          when :write_locked_read
+            next if syn == :write_locked
+            error!(d.node, :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: cap_var_label(var_node))
+          when :ATOMIC
+            next if syn == :atomic
+            name = cap_var_label(var_node)
+            storage = var_node.symbol&.storage
+            actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
+            error!(d.node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: name, actual: actual)
+          end
+        end
+        deferred_with_validations.clear
+      end
     end
   end
 end
