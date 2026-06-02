@@ -497,10 +497,9 @@ module MIRHoistLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_produces_owned_result?(node)
     return false unless node
-    return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
-
     effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
     return true if effect.produces_owned && effect.requires_hoist
+    return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
     return true if node.is_a?(MIR::BgBlock)
 
     false

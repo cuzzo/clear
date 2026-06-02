@@ -2049,6 +2049,29 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "function calls" do
+    it "treats owned-return calls as allocating even when the result type is scalar-shaped" do
+      call = MIR::Call.new("ownedScalar", [], false, true)
+      call.result_type = Type.new(:Int64)
+
+      expect(lowering.send(:mir_allocates?, call)).to be(true)
+    end
+
+    it "keeps owned provenance for TAKES arguments wrapped in ItemsAccess" do
+      list_type = Type.new(:String, collection: :list, location: :heap)
+      arg = make_id("initCaps", full_type: list_type)
+      sig = FunctionSignature.new(
+        params: [AST::Param.new(name: "initCaps", type: list_type, takes: true)],
+        return_type: Type.new(:Void),
+      )
+      lowered_arg = MIR::ItemsAccess.new(MIR::Ident.new("__tmp_1"), true)
+
+      contract = lowering.callable_contract_for_lowered_args(sig, [arg], [lowered_arg])
+
+      operands = T.must(contract).ownership_contract.operands
+      expect(operands.map(&:name)).to eq(["__tmp_1"])
+      expect(operands.map(&:target_alloc)).to eq([:heap])
+    end
+
     it "lowers simple function call with rt and try" do
       arg = make_lit(:NUMBER, 42, full_type: :Int64)
       arg.coerced_type = :Int64

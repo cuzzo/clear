@@ -3164,6 +3164,9 @@ module MIR
     # safe: true -> emit @hasField guard, false -> direct .items
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
   end
 
   # Transfer an ArrayList-backed value into an owned slice.
