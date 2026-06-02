@@ -8,7 +8,7 @@ module Annotator
 
       MatchSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
       MatchPayload = T.type_alias { T.any(Type, Symbol, Schemas::InlineStructVariant, NilClass) }
-      BranchSnapshot = T.type_alias { T.nilable(T::Hash[Symbol, T.untyped]) }
+      BranchSnapshot = T.type_alias { T.nilable(OwnershipGraph::LightweightSnapshot) }
 
       class BranchAnalysisResult < T::Struct
         const :drops, BasicObject
@@ -50,18 +50,16 @@ module Annotator
             snap = branch_result.snapshot
             next unless snap
             # Lightweight merge: just apply moved states
-            snap[:node_states].each do |path, saved|
-              state = saved.is_a?(Hash) ? saved[:state] : saved
+            snap.node_states.each do |path, saved|
+              state = saved.state
               node = @og.nodes[path]
               next unless node
               if node.state != state
                 if state == :moved
                   node.state = :moved
-                  if saved.is_a?(Hash)
-                    node.move_line = saved[:move_line]
-                    node.move_col = saved[:move_col]
-                    node.move_action = saved[:move_action]
-                  end
+                  node.move_line = saved.move_line
+                  node.move_col = saved.move_col
+                  node.move_action = saved.move_action
                 end
               end
             end
@@ -708,8 +706,8 @@ module Annotator
             # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
             loop_body_names = collect_body_identifier_names(node.do_branch)
             current_scope.locals.each do |name, _entry|
-              saved = pre_loop_states&.dig(:node_states, name)
-              was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
+              saved = pre_loop_states&.node_states&.fetch(name, nil)
+              was_live = saved&.state == :live
               is_moved = @og&.moved?(name)
               if was_live && is_moved
                 if @og&.[](name)&.move_action == :capture &&
@@ -790,8 +788,8 @@ module Annotator
             loop_body_names = collect_body_identifier_names(node.do_branch)
             current_scope.locals.each do |name, _entry|
               next if name == node.binding_name
-              saved = pre_loop_states&.dig(:node_states, name)
-              was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
+              saved = pre_loop_states&.node_states&.fetch(name, nil)
+              was_live = saved&.state == :live
               is_moved = @og&.moved?(name)
               if was_live && is_moved
                 if @og&.[](name)&.move_action == :capture &&

@@ -238,16 +238,10 @@ RSpec.describe OwnershipGraph do
       expect(graph["x"].move_action).to eq(:share)
     end
 
-    it "restores legacy state-only lightweight snapshots" do
-      graph.declare("x")
-      graph.restore_lightweight({ node_states: { "x" => :moved }, edge_count: 0 })
-      expect(graph.moved?("x")).to be true
-    end
-
     it "captures edge count for restoration" do
       graph.declare("x")
       snapshot = graph.fork_lightweight
-      expect(snapshot[:edge_count]).to eq(graph.edges.size)
+      expect(snapshot.edge_count).to eq(graph.edges.size)
     end
   end
 

@@ -48,7 +48,7 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).void }
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
@@ -156,6 +156,7 @@ module WithMatchCheck
           "to REQUIRES.")
       end
     end
+    nil
   end
 
   # Names of parameters bound by this WITH (i.e., the original variable

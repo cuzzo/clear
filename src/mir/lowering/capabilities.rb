@@ -31,11 +31,17 @@ module MIRLoweringCapabilities
   CapabilitySpecValue = T.type_alias { T.any(AST::Node, Type, Symbol, String, T::Boolean, NilClass) }
   CapabilitySpec = T.type_alias { T.any(AST::Capability, T::Hash[Symbol, CapabilitySpecValue]) }
   WithBindingNode = T.type_alias { T.any(String, MIR::Node) }
-  ErrorSelectorFact = T.type_alias { T::Hash[Symbol, T.any(Symbol, String, ::Lexer::Token, NilClass)] }
-  FallibleClauseValue = T.type_alias do
-    T.any(String, Symbol, Integer, Type, AST::Node, ::Lexer::Token, MIR::Node, T::Array[Symbol], T::Array[Type], T::Array[AST::Node], T::Array[MIR::Node], T::Array[ErrorSelectorFact], NilClass)
+
+  class FallibleClauseFact < T::Struct
+    const :var_name, String
+    const :alias_name, String
+    const :action_kind, Symbol
+    const :retries, T.nilable(Integer)
+    const :matched_types, T::Array[Symbol]
+    const :bubble_types, T::Array[Symbol]
+    const :action_mir, T.nilable(T::Array[MIR::Emittable])
+    const :exit_msg_mir, T.nilable(MIR::Emittable)
   end
-  FallibleClauseFact = T.type_alias { T::Hash[Symbol, FallibleClauseValue] }
 
   class WithCapabilityBindingContext < T::Struct
     const :node, AST::WithBlock
@@ -280,14 +286,14 @@ module MIRLoweringCapabilities
   end
   def materialize_sorted_lock_bindings(node, materialization, fallible_caps, clause, with_label)
     if clause
-      materialization.add_binding(emit_sorted_lock_acquires_fallible(T.unsafe(fallible_caps), clause, with_label, node))
+      materialization.add_binding(emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, node))
       fallible_caps.each do |cap|
         var_name = with_cap_var_name(T.cast(cap[:var_node], AST::Identifier))
         alias_name = (cap[:alias] || var_name).to_s
         materialization.add_fallible_clause(build_fallible_clause_mir(var_name, alias_name, clause))
       end
     else
-      materialization.add_binding(emit_sorted_lock_acquires(T.unsafe(fallible_caps), node))
+      materialization.add_binding(emit_sorted_lock_acquires(fallible_caps, node))
     end
   end
 
@@ -704,24 +710,27 @@ module MIRLoweringCapabilities
   # lowered message expression (only for `:exit`). `matched_types` and
   # `bubble_types` are the annotator-resolved selector lists; `retries`
   # is the RETRY(N) count or nil.
-  sig { params(var_name: String, alias_name: String, clause: AST::ErrorClause).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(var_name: String, alias_name: String, clause: AST::ErrorClause).returns(FallibleClauseFact) }
   def build_fallible_clause_mir(var_name, alias_name, clause)
     T.bind(self, MIRLowering) rescue nil
-    desc = {
-      var_name:      var_name.to_s,
-      alias_name:    alias_name.to_s,
-      action_kind:   clause.action,
-      retries:       clause.retries,
-      matched_types: clause.matched_types,
-      bubble_types:  clause.bubble_types,
-    }
+    action_mir = T.let(nil, T.nilable(T::Array[MIR::Emittable]))
+    exit_msg_mir = T.let(nil, T.nilable(MIR::Emittable))
     case clause.action
     when :block
-      desc[:action_mir] = lower_body(T.must(clause.body))
+      action_mir = lower_body(T.must(clause.body))
     when :exit
-      desc[:exit_msg_mir] = lower(T.must(clause.message))
+      exit_msg_mir = lower(T.must(clause.message))
     end
-    desc
+    FallibleClauseFact.new(
+      var_name: var_name.to_s,
+      alias_name: alias_name.to_s,
+      action_kind: clause.action,
+      retries: clause.retries,
+      matched_types: clause.matched_types,
+      bubble_types: clause.bubble_types,
+      action_mir: action_mir,
+      exit_msg_mir: exit_msg_mir,
+    )
   end
 
 
@@ -1054,7 +1063,7 @@ module MIRLoweringCapabilities
     end
   end
 
-  sig { params(node: AST::WithBlock).returns(T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))) }
+  sig { params(node: AST::WithBlock).returns(T::Array[MIR::Emittable]) }
   def guard_fail_flow_body(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1063,37 +1072,35 @@ module MIRLoweringCapabilities
     return [] unless clause && clause.matched_types.include?(:GuardFail)
 
     line = node.token&.line.to_s
+    result = T.let([], T::Array[MIR::Emittable])
     case clause.action
     when :pass
-      []
+      result
     when :return
-      [MIR::ReturnStmt.new(lower(T.must(clause.value)))]
+      result << MIR::ReturnStmt.new(lower(T.must(clause.value)))
     when :raise
       fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line})), "with_guard_fail_raise")
       fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
       flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_raise_flow")
       flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      [
-        MIR::ExprStmt.new(fail, false),
-        MIR::ExprStmt.new(flow, false),
-        MIR::ReturnStmt.new(nil)
-      ]
+      result << MIR::ExprStmt.new(fail, false)
+      result << MIR::ExprStmt.new(flow, false)
+      result << MIR::ReturnStmt.new(nil)
     when :exit
       msg_zig = emit_expr(lower(T.must(clause.message)))
       fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line})), "with_guard_fail_exit")
       fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
       flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_exit_flow")
       flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      [
-        MIR::ExprStmt.new(fail, false),
-        MIR::ExprStmt.new(flow, false),
-        MIR::ReturnStmt.new(nil)
-      ]
+      result << MIR::ExprStmt.new(fail, false)
+      result << MIR::ExprStmt.new(flow, false)
+      result << MIR::ReturnStmt.new(nil)
     when :block
-      lower_body(T.must(clause.body))
+      result.concat(T.cast(lower_body(T.must(clause.body)), T::Array[MIR::Emittable]))
     else
-      []
+      result
     end
+    result
   end
 
   # Emit MIR for each PRE clause on a function definition. Each
@@ -1101,7 +1108,7 @@ module MIRLoweringCapabilities
   # predicate is false, sets PreconditionFail on the runtime context
   # and returns the CheatError sentinel. Fail-fast: the first failing
   # PRE returns; later PREs are not evaluated.
-  sig { params(node: AST::FunctionDef).returns(T::Array[T.untyped]) }
+  sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Emittable]) }
   def lower_pre_clauses(node)
     T.bind(self, MIRLowering) rescue nil
     pre_clauses = node.respond_to?(:pre_clauses) ? (node.pre_clauses || []) : []
@@ -1330,7 +1337,7 @@ module MIRLoweringCapabilities
   # in its own labeled block today, so collisions are impossible in
   # practice, but the suffix makes the property defensible against
   # future lowering changes.
-  sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1372,7 +1379,7 @@ module MIRLoweringCapabilities
   #   - const alias = __guardN.get() aliases
   # Uses panic-variant acquire methods (acquire / read / write); no
   # ON-clause handling. The fallible-variant emitter sits beside this.
-  sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], with_node: T.nilable(AST::WithBlock)).returns(String) }
+  sig { params(fallible_caps: T::Array[CapabilitySpec], with_node: T.nilable(AST::WithBlock)).returns(String) }
   def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1432,7 +1439,7 @@ module MIRLoweringCapabilities
   # safe no-ops on the failure path. The on-success path leaves all
   # __heldN flags true; the WITH body runs with all locks held; defers
   # release on scope exit as usual.
-  sig { params(fallible_caps: T::Array[T.untyped], clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
+  sig { params(fallible_caps: T::Array[CapabilitySpec], clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
   def emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, with_node)
     T.bind(self, MIRLowering) rescue nil
     n = fallible_caps.length

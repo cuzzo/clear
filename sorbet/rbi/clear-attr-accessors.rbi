@@ -1118,9 +1118,9 @@ class FunctionContext
   def name=(value); end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[AST::ReturnFact]) }
   def returns; end
-  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(value: T::Array[AST::ReturnFact]).returns(T::Array[AST::ReturnFact]) }
   def returns=(value); end
   sig { returns(Integer) }
   def stack_vars_bytes; end

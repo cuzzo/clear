@@ -857,7 +857,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped).void }
   def declare_captures(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.captures.nil? || node.captures.empty?
@@ -873,6 +873,7 @@ module FunctionAnalysis
         cap.storage
       )
     end
+    nil
   end
 
   sig { params(node: T.untyped, found_returns: T::Array[AST::ReturnFact], declared_return: T.nilable(Type)).void }

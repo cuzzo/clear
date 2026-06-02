@@ -1030,10 +1030,10 @@ module FsmTransform
       }.reverse.flatten
       fail_body_pieces = []
       fail_body_pieces.concat(prior_release_lines)
-      fail_body_pieces << err[:body_zig] unless err[:body_zig].nil? || err[:body_zig].strip.empty?
+      fail_body_pieces << err.body_zig unless err.body_zig.strip.empty?
       fail_pre_body = fail_body_pieces.empty? ? nil : fail_body_pieces.join("\n")
 
-      fail_tail = err[:exit_kind] == :done ?
+      fail_tail = err.exit_kind == :done ?
                     Segments::Done.new(nil) :
                     Segments::Goto.new(after_idx)
 
