@@ -93,7 +93,7 @@ module Annotator
         stamp_type!(pipe, node.type)
       end
 
-      sig { params(node: DeclarationNode, mutable_flag: T::Boolean).returns(T.nilable(T::Hash[Symbol, BasicObject])) }
+      sig { params(node: DeclarationNode, mutable_flag: T::Boolean).void }
       def finalize_decl_node!(node, mutable_flag)
         T.bind(self, SemanticAnnotator)
 
@@ -272,11 +272,12 @@ module Annotator
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
         ti = node.full_type!(context: "var declaration ownership")
         if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-          current_fn_ctx.heap_count += 1 if current_fn_ctx
+          current_fn_ctx&.record_heap_use!
         end
         accumulate_stack_bytes(storage, node)
         track_union_alias(node.name, node.value)
         record_capability_binding(node.name, node, final_type, storage)
+        nil
       end
 
       # Keywordless `x = val` or `x: Type = val`.
@@ -489,7 +490,8 @@ module Annotator
 
         return unless storage == :stack && current_fn_ctx
         bytes = (node.slot_size || 1) * 8
-        current_fn_ctx.stack_vars_bytes += bytes
+        current_fn_ctx&.record_stack_bytes!(bytes)
+        bytes
       end
 
       sig { params(name: String).void }
@@ -665,7 +667,7 @@ module Annotator
         # HashMap put may allocate, so needs_rt must propagate.
         target_type = index_node.target.full_type!(context: "index assignment collection")
         if target_type&.map?
-          current_fn_ctx.heap_count += 1 if current_fn_ctx
+          current_fn_ctx&.record_heap_use!
           record_effect(EffectTracker::HEAP)
         end
       end

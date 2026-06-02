@@ -34,6 +34,51 @@ class FunctionContext
     @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
+  sig { void }
+  def record_frame_use!
+    self.frame_count += 1
+  end
+
+  sig { void }
+  def record_heap_use!
+    self.heap_count += 1
+  end
+
+  sig { void }
+  def record_alloc_use!
+    self.alloc_count += 1
+  end
+
+  sig { params(bytes: Integer).void }
+  def record_stack_bytes!(bytes)
+    self.stack_vars_bytes += bytes
+  end
+
+  sig { void }
+  def mark_runtime_used!
+    self.uses_rt = true
+  end
+
+  sig { void }
+  def enter_loop!
+    self.loop_depth += 1
+  end
+
+  sig { void }
+  def exit_loop!
+    self.loop_depth -= 1
+  end
+
+  sig { void }
+  def enter_conditional!
+    self.conditional_depth += 1
+  end
+
+  sig { void }
+  def exit_conditional!
+    self.conditional_depth -= 1
+  end
+
   sig { params(name: String, return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type: nil, lifetime: [], type_params: [])
     @name = name

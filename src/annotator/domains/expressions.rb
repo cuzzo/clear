@@ -170,7 +170,7 @@ module Annotator
         # mark as frame allocation so needs_rt and loop mark elision are correct.
         if node.op == :ADD && (left_type.string? || right_type.string?)
           node.string_concat = true
-          current_fn_ctx.frame_count += 1 if current_fn_ctx
+          current_fn_ctx&.record_frame_use!
           # String concat result is frame-allocated.
           node.storage = :frame
           ti = node.full_type!(context: "binary result")
@@ -302,7 +302,7 @@ module Annotator
 
         # CapabilityWrap always allocates on the heap.
         if node.ownership || node.sync || node.layout
-          current_fn_ctx.heap_count += 1 if current_fn_ctx
+          current_fn_ctx&.record_heap_use!
           record_effect(EffectTracker::HEAP)
         end
 

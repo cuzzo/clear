@@ -88,6 +88,47 @@ These buckets should be isolated first:
 5. **Thin orchestrator cleanup.** After the above, `SemanticAnnotator` should
    sequence phase objects and expose only compatibility-free visitor dispatch.
 
+## State Cleanup Progress
+
+- [x] Return facts: reified into typed function-body summaries.
+- [x] Deferred drops: reified into typed deferred-drop records.
+- [x] Deferred WITH validations: reified as `DeferredWithValidation` and flushed
+  from the deferred-validation phase.
+- [x] Branch analysis results: branch snapshots, drops, and termination are
+  carried as `BranchAnalysisResult` rather than parallel arrays.
+- [x] Capability audit records: the old hash payload was replaced with
+  `CapabilityAudit::BindingAuditRecord`; mutation/capture updates now go
+  through named audit operations.
+- [x] Lock validation records: lock edges, held-call sites, clause sites, and
+  graph results are typed records instead of ad hoc hashes.
+- [x] Current function stack: `@function_context_stack` is typed as
+  `T::Array[FunctionContext]`, direct stack mutation is behind
+  `push_function_context!` / `pop_function_context!`, and readers that require a
+  function body use `current_fn_ctx!`.
+
+### Latest Measurement
+
+Round baseline: `tmp/agent-metrics/decomplex-before-state-finish.md`.
+Round final: `tmp/agent-metrics/decomplex-after-state-finish.md`.
+
+```text
+Cross-Detector Convergence: 398 -> 400 (+2)
+Root-Cause Clusters:        114 -> 114 (0)
+Decision Pressure:          117 -> 116 (-1)
+Missing Abstractions:        38 -> 37  (-1)
+Neglected Updates:          235 -> 235 (0)
+Derived-State Staleness:     11 -> 12  (+1)
+Neglected Path Conditions:  487 -> 487 (0)
+Broken Protocols:           711 -> 715 (+4)
+False Simplicity:           404 -> 410 (+6)
+```
+
+Assessment: architecturally worthwhile but not a decisive decomplex win. The
+cleanup deleted real untyped/hash handoff state and made the current-function
+stack strongly typed. Decomplex penalized the added typed record/context
+operations as extra protocol and false-simplicity surface. The next improvement
+should not add more record wrappers unless it also deletes a larger branch hub.
+
 ## Acceptance Criteria
 
 - No new `T.untyped` in `src/`.

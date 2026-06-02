@@ -327,7 +327,7 @@ module Annotator
 
         visit(node.message_expr) if node.message_expr
         resolve_error_registration!(node, node.kind, node.error_name, node.token)
-        current_fn_ctx.uses_rt = true if current_fn_ctx
+        current_fn_ctx&.mark_runtime_used!
         stamp_type!(node, :NoReturn) # Raises propagate up or are caught
         @branch_terminated = true
       end
@@ -384,7 +384,8 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         # Handle optional return node for Void functions.
-        expected = current_fn_ctx.return_type
+        fn_ctx = current_fn_ctx!
+        expected = fn_ctx.return_type
         if node.value.nil?
           # If the function expects a value but we return nothing -> ERROR.
           # `!Void` (error union over Void) accepts a plain `RETURN;` because
@@ -442,7 +443,7 @@ module Annotator
 
         actual = node.value.resolved_type
         actual_full = return_value_type(node.value)
-        expected = current_fn_ctx.return_type
+        expected = fn_ctx.return_type
 
         if node.value.is_a?(AST::Identifier)
           vti = node.value.full_type!(context: "return identifier")
@@ -507,7 +508,7 @@ module Annotator
 
         stamp_type!(node, actual)
 
-        current_fn_ctx.returns << AST::ReturnFact.new(
+        fn_ctx.returns << AST::ReturnFact.new(
           storage: T.cast(node.value.storage, T.nilable(Symbol)),
           type: T.cast(actual, Symbol),
           metatype: T.cast(node.value.metatype, T.nilable(Symbol)),
@@ -744,7 +745,7 @@ module Annotator
 
         visit(node.message) if node.message
         resolve_error_registration!(node, node.kind, node.error_name, node.token)
-        current_fn_ctx.uses_rt = true if current_fn_ctx
+        current_fn_ctx&.mark_runtime_used!
         stamp_type!(node, :Void)
       end
     end

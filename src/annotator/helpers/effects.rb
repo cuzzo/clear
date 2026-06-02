@@ -118,16 +118,17 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.nilable(Integer))
-    return unless current_fn_ctx&.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
-    @fn_direct_effects[current_fn_ctx.name]&.add(effect)
+    @fn_direct_effects[fn_ctx.name]&.add(effect)
     # MVCC L5-followup (D1): a SNAPSHOT-transaction body must be pure
     # for atomicity -- yielding the fiber breaks EBR pin guarantees,
     # and IO can't be rolled back if the transaction aborts. Track
     # SUSPENDS effects recorded while @inside_snapshot_txn is set so
     # the WITH-block visitor can raise once the body is complete.
     if @inside_snapshot_txn && @inside_snapshot_txn > 0 && SUSPENDS_FAMILY.include?(effect)
-      record_snapshot_txn_violation!(effect, current_fn_ctx.name)
+      record_snapshot_txn_violation!(effect, fn_ctx.name)
     end
     nil
   end
@@ -167,8 +168,9 @@ module EffectTracker
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_context = T.let(@call_site_context, T.untyped)
-    return unless current_fn_ctx&.name
-    caller_name = current_fn_ctx.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
+    caller_name = fn_ctx.name
     in_loop = current_loop_depth > 0
     in_cond = current_conditional_depth > 0
     return unless in_loop || in_cond
@@ -188,8 +190,9 @@ module EffectTracker
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
-    return unless current_fn_ctx&.name
-    @call_site_arg_families[current_fn_ctx.name][callee_name] << arg_family_sets
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx&.name
+    @call_site_arg_families[fn_ctx.name][callee_name] << arg_family_sets
   end
 
   # --- Phase 2: Transitive propagation ---

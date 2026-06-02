@@ -603,7 +603,7 @@ module Annotator
         error!(node, :FOR_RANGE_END_NEEDS_INT64, got: end_type) unless end_type == :Int64
 
         # 2. Analyze body in new scope with loop variable declared as immutable Int64
-        if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
+        if current_fn_ctx then current_fn_ctx&.enter_loop! else @loop_depth += 1 end
         analyze_control_flow_branches([
           proc {
             current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
@@ -615,7 +615,7 @@ module Annotator
             node.deferred_drops
           }
         ], merge_to_parent: false)
-        if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+        if current_fn_ctx then current_fn_ctx&.exit_loop! else @loop_depth -= 1 end
 
         # 4. TIGHT validation (same as WhileLoop).
         if node.tight
@@ -651,7 +651,7 @@ module Annotator
         elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
 
         # 2. Analyze body with loop variable
-        current_fn_ctx.loop_depth += 1
+        current_fn_ctx&.enter_loop!
         analyze_control_flow_branches([
           proc {
             current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
@@ -663,7 +663,7 @@ module Annotator
             node.deferred_drops
           }
         ], merge_to_parent: false)
-        current_fn_ctx.loop_depth -= 1
+        current_fn_ctx&.exit_loop!
 
         stamp_type!(node, :Void)
       end
@@ -687,7 +687,7 @@ module Annotator
         end
 
         # 2. Analyze Body in a New Scope AND increment loop depth
-        if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
+        if current_fn_ctx then current_fn_ctx&.enter_loop! else @loop_depth += 1 end
 
         # We use analyze_control_flow_branches to handle state merging and drops.
         # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
@@ -729,7 +729,7 @@ module Annotator
           }
         ], merge_to_parent: false)
 
-        if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+        if current_fn_ctx then current_fn_ctx&.exit_loop! else @loop_depth -= 1 end
 
         # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
         # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
@@ -761,7 +761,7 @@ module Annotator
           unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
         end
 
-        current_fn_ctx.loop_depth += 1
+        current_fn_ctx&.enter_loop!
 
         pre_loop_states = @og&.fork_lightweight
 
@@ -811,7 +811,7 @@ module Annotator
           }
         ], merge_to_parent: false)
 
-        current_fn_ctx.loop_depth -= 1
+        current_fn_ctx&.exit_loop!
 
         node.mark_per_iter = false
         stamp_type!(node, :Void)

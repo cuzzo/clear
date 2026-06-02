@@ -15,8 +15,9 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     verify_captures!(node)
     # Save and reset returns on the current FunctionContext (supports nested lambdas).
-    saved_returns = current_fn_ctx&.returns
-    current_fn_ctx.returns = [] if current_fn_ctx
+    fn_ctx = current_fn_ctx
+    saved_returns = fn_ctx&.returns
+    fn_ctx.returns = [] if fn_ctx
 
     with_new_scope do
       og_push_scope
@@ -46,7 +47,8 @@ module FunctionAnalysis
 
     found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
     # Restore saved returns (for enclosing function/lambda).
-    current_fn_ctx.returns = saved_returns if current_fn_ctx && saved_returns
+    restore_ctx = current_fn_ctx
+    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
@@ -129,9 +131,9 @@ module FunctionAnalysis
         alloc_kind = signature.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
-            current_fn_ctx.heap_count += 1
+            current_fn_ctx&.record_heap_use!
           else
-            current_fn_ctx.frame_count += 1
+            current_fn_ctx&.record_frame_use!
           end
         end
       end
@@ -916,7 +918,7 @@ module FunctionAnalysis
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
-    lifetime_paths = current_fn_ctx.lifetime
+    lifetime_paths = current_fn_ctx!.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]
@@ -949,7 +951,7 @@ module FunctionAnalysis
     # declared source as its prefix; reject with a clear "expected one
     # of: ..." diagnostic when none match.
     matched = lifetime_paths.any? do |p|
-      lifetime_syms = p.split(".").map(&:to_sym)
+      lifetime_syms = p.to_s.split(".").map(&:to_sym)
       T.must(actual_path)[0...lifetime_syms.size] == lifetime_syms
     end
 

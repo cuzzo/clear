@@ -550,11 +550,11 @@ module FixableHelper
   # declaration's source line and emit an :auto fix that removes it
   # (plus one adjacent space). Falls back to a plain stderr note when
   # source isn't available or the text isn't found on the line.
-  sig { params(info: T::Hash[Symbol, T.untyped]).returns(NilClass) }
+  sig { params(info: CapabilityAudit::BindingAuditRecord).returns(NilClass) }
   def emit_local_never_shared_finding!(info)
     T.bind(self, SemanticAnnotator) rescue nil
-    name = info[:var]
-    line = info[:line]
+    name = info.var
+    line = info.line
     msg = "Variable '#{name}' is @local but never shared across fibers. " \
           "You are paying for a heap allocation with no sharing benefit. Consider removing @local."
     fixes = []
@@ -563,7 +563,7 @@ module FixableHelper
       src_line = @source_code.lines[line - 1] || ''
       # Search from the decl-name column so a prior @local on the same
       # line (a different binding) isn't picked.
-      idx = src_line.index('@local', (info[:column] || 1) - 1)
+      idx = src_line.index('@local', (info.column || 1) - 1)
       if idx
         trail = (src_line[idx + 6] == ' ') ? 1 : 0
         lead  = (idx > 0 && src_line[idx - 1] == ' ') ? 1 : 0
@@ -586,7 +586,7 @@ module FixableHelper
       return
     end
 
-    anchor = anchor_at(line, info[:column] || 1)
+    anchor = anchor_at(T.must(line), info.column || 1)
     fixable!(anchor,
       message: msg,
       category: :lint,

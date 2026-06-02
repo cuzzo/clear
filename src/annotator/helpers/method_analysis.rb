@@ -135,9 +135,7 @@ module MethodAnalysis
     end
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.
-    if em.allocates && current_fn_ctx
-      current_fn_ctx.heap_count += 1
-    end
+    current_fn_ctx&.record_heap_use! if em.allocates
     node.can_fail = true if defn.can_fail || em.allocates
     node.error_kind = em.error_kind
     node.error_type = em.error_type

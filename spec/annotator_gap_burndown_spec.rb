@@ -1267,8 +1267,18 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:levenshtein, "", "abc")).to eq(3)
     expect(ann.send(:levenshtein, "abc", "")).to eq(3)
 
-    ann.send(:emit_local_never_shared_finding!, { var: "local", line: 1, column: 1 })
-    ann.send(:emit_local_never_shared_finding!, { var: "missing", line: 99, column: 1 })
+    local_audit = CapabilityAudit::BindingAuditRecord.new(
+      fn: "main", var: "local", line: 1, column: 1,
+      sync: :local, ownership: nil, storage: :stack, sharded: false,
+      mutated: false, captured_bg: false, captured_parallel: false
+    )
+    missing_audit = CapabilityAudit::BindingAuditRecord.new(
+      fn: "main", var: "missing", line: 99, column: 1,
+      sync: :local, ownership: nil, storage: :stack, sharded: false,
+      mutated: false, captured_bg: false, captured_parallel: false
+    )
+    ann.send(:emit_local_never_shared_finding!, local_audit)
+    ann.send(:emit_local_never_shared_finding!, missing_audit)
 
     overflow_suffix = AST::Literal.new(token(:NUMBER, "1000_i8"), :INT64, 1000, :stack)
     overflow_suffix.token.line = 3
@@ -1465,7 +1475,7 @@ RSpec.describe "annotator branch gap burndown" do
       ],
     )
     ann.send(:verify_handler_reachability!,
-      { node: lock_node, cap_types: [:Counter] },
+      LockHelper::LockClauseSite.new(node: lock_node, cap_types: [:Counter]),
       Set[:Counter],
       Set[:Counter])
 
@@ -1485,7 +1495,10 @@ RSpec.describe "annotator branch gap burndown" do
         AST::ErrorSelector.new(form: :type, name: :MvccConflict, token: token(:TYPE_ID, "MvccConflict")),
       ],
     )
-    ann.send(:verify_handler_reachability!, { node: atomic_node, cap_types: [] }, Set.new, Set.new)
+    ann.send(:verify_handler_reachability!,
+      LockHelper::LockClauseSite.new(node: atomic_node, cap_types: []),
+      Set.new,
+      Set.new)
 
     versioned_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: AST::Identifier.new(token, "versioned"))
@@ -1500,7 +1513,10 @@ RSpec.describe "annotator branch gap burndown" do
         AST::ErrorSelector.new(form: :type, name: :AtomicConflict, token: token(:TYPE_ID, "AtomicConflict")),
       ],
     )
-    ann.send(:verify_handler_reachability!, { node: versioned_node, cap_types: [] }, Set.new, Set.new)
+    ann.send(:verify_handler_reachability!,
+      LockHelper::LockClauseSite.new(node: versioned_node, cap_types: []),
+      Set.new,
+      Set.new)
 
     expect(direct_errors(ann).map { |e| e[1] }.count(:SELECTOR_NOT_POSSIBLE)).to be >= 3
   end
@@ -1810,9 +1826,16 @@ RSpec.describe "annotator branch gap burndown" do
       "c: Int64 = 3_i64",
       "d: Int64 @locked = 4_i64;"
     ].join("\n"))
-    ann.send(:emit_local_never_shared_finding!, { var: "a", line: 1, column: 1 })
-    ann.send(:emit_local_never_shared_finding!, { var: "b", line: 2, column: 1 })
-    ann.send(:emit_local_never_shared_finding!, { var: "noloc", line: nil, column: 1 })
+    audit_record = lambda do |name, line|
+      CapabilityAudit::BindingAuditRecord.new(
+        fn: "main", var: name, line: line, column: 1,
+        sync: :local, ownership: nil, storage: :stack, sharded: false,
+        mutated: false, captured_bg: false, captured_parallel: false
+      )
+    end
+    ann.send(:emit_local_never_shared_finding!, audit_record.call("a", 1))
+    ann.send(:emit_local_never_shared_finding!, audit_record.call("b", 2))
+    ann.send(:emit_local_never_shared_finding!, audit_record.call("noloc", nil))
 
     scope = Scope.new
     decl_c_tok = token(:VAR_ID, "c")

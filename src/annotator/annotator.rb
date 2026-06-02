@@ -132,10 +132,28 @@ class SemanticAnnotator
     @deferred_with_validations
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(FunctionContext)) }
   def current_fn_ctx
     @function_context_stack.last
   end
+
+  sig { returns(FunctionContext) }
+  def current_fn_ctx!
+    T.must(current_fn_ctx)
+  end
+
+  sig { params(ctx: FunctionContext).returns(FunctionContext) }
+  def push_function_context!(ctx)
+    @function_context_stack << ctx
+    ctx
+  end
+  private :push_function_context!
+
+  sig { returns(T.nilable(FunctionContext)) }
+  def pop_function_context!
+    @function_context_stack.pop
+  end
+  private :pop_function_context!
 
   sig do
     type_parameters(:Stamp)
@@ -165,11 +183,11 @@ class SemanticAnnotator
   sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def with_conditional_context(&blk)
     if current_fn_ctx
-      current_fn_ctx.conditional_depth += 1
+      current_fn_ctx&.enter_conditional!
       begin
         blk.call
       ensure
-        current_fn_ctx.conditional_depth -= 1
+        current_fn_ctx&.exit_conditional!
       end
     else
       @conditional_depth += 1
@@ -290,7 +308,7 @@ class SemanticAnnotator
     @source_code = source_code
     # We start with a global scope
     @scope_stack = T.let([Scope.new], T::Array[T.untyped])
-    @function_context_stack = T.let([], T::Array[T.untyped]) # Stack of expected return types
+    @function_context_stack = T.let([], T::Array[FunctionContext])
     @loop_depth = T.let(0, Integer) # Track if we are inside a loop
     @conditional_depth = T.let(0, Integer) # Track if we are inside an IF branch or MATCH arm
     @smooth_depth = T.let(0, Integer)
@@ -307,7 +325,7 @@ class SemanticAnnotator
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
-    @capability_audit = T.let({}, T::Hash[T.untyped, T.untyped])
+    @capability_audit = T.let({}, T.nilable(CapabilityAudit::BindingAuditStore))
     @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
     @call_site_context = T.let(nil, T.untyped)
     @call_site_arg_families = T.let(nil, T.untyped)
@@ -629,7 +647,7 @@ private
     declared_return = node.return_type || :Any
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
-    @function_context_stack.push(FunctionContext.new(
+    push_function_context!(FunctionContext.new(
       name: node.name, return_type: node.return_type || Type.new(:Any),
       lifetime: lifetime_paths, type_params: fn_type_params
     ))
@@ -672,7 +690,7 @@ private
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
     called_names, has_fnptr, unabsorbed_calls = scan_for_calls(node.body)
     directly_recursive = called_names.include?(node.name)
-    current_fn_ctx.uses_rt = true if has_fnptr && current_fn_ctx
+    current_fn_ctx&.mark_runtime_used! if has_fnptr && current_fn_ctx
 
     if directly_recursive
       record_effect(EffectTracker::REENTRANT)
@@ -739,7 +757,7 @@ private
 
     signature.return_strategy = get_return_strategy(signature.return_type)
     stamp_type!(node, signature)
-    ctx = current_fn_ctx
+    ctx = current_fn_ctx!
     node.uses_frame = (ctx.frame_count > 0)
     node.uses_heap  = (ctx.heap_count > 0)
     node.uses_alloc = (ctx.alloc_count > 0)
@@ -771,7 +789,7 @@ private
       raises_directly: raises_directly
     ))
     if current_fn_ctx && runtime_error_clause?(node)
-      current_fn_ctx.uses_rt = true
+      current_fn_ctx&.mark_runtime_used!
     end
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
@@ -805,7 +823,7 @@ private
     end
 
 
-    @function_context_stack.pop
+    pop_function_context!
   end
 
   # Visit a statement body while tracking remaining siblings in @stmts_after.

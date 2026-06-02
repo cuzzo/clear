@@ -121,7 +121,7 @@ module Annotator
         node.can_fail = true if method_def.can_fail
         node.error_kind = emit.error_kind if emit&.error_kind
         node.error_type = emit.error_type if emit&.error_type
-        current_fn_ctx.alloc_count += 1 if current_fn_ctx && (emit&.allocates || method_def.can_fail)
+        current_fn_ctx&.record_alloc_use! if emit&.allocates || method_def.can_fail
 
         return unless emit&.mutates_receiver && node.is_a?(AST::MethodCall)
 
@@ -171,9 +171,7 @@ module Annotator
         node.can_fail = true if matched_def.can_fail || emit&.allocates
         node.error_kind = emit.error_kind if emit&.error_kind
         node.error_type = emit.error_type if emit&.error_type
-        if current_fn_ctx
-          current_fn_ctx.alloc_count += 1 if emit&.allocates || matched_def.can_fail || matched_def.needs_rt
-        end
+        current_fn_ctx&.record_alloc_use! if emit&.allocates || matched_def.can_fail || matched_def.needs_rt
         record_effect(EffectTracker::SUSPENDS) if emit&.suspends
 
         if emit&.mutates_receiver && node.is_a?(AST::MethodCall)
@@ -259,9 +257,9 @@ module Annotator
         return unless alloc_kind && current_fn_ctx
 
         if alloc_kind == :heap
-          current_fn_ctx.heap_count += 1
+          current_fn_ctx&.record_heap_use!
         else
-          current_fn_ctx.frame_count += 1
+          current_fn_ctx&.record_frame_use!
         end
       end
       private :record_extern_method_alloc!

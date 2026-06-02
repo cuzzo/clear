@@ -1083,7 +1083,6 @@ module CapabilityHelper
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_info!(ctx, name, info, node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
     result = ctx.analysis
     result.has_outer_ref = true
     unless result.captures.key?(name)
@@ -1113,13 +1112,7 @@ module CapabilityHelper
         result.has_shared = true
       end
     end
-    if current_fn_ctx&.name
-      key = "#{current_fn_ctx.name}:#{name}"
-      if @capability_audit&.dig(key)
-        @capability_audit[key][:captured_bg] = true
-        @capability_audit[key][:captured_parallel] = true if ctx.is_parallel
-      end
-    end
+    audit_mark_captured(name, parallel: ctx.is_parallel)
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
@@ -1171,18 +1164,46 @@ end
 module CapabilityAudit
     extend T::Sig
 
-  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
+  class BindingAuditRecord < T::Struct
+    extend T::Sig
+
+    const :fn, String
+    const :var, String
+    const :line, T.nilable(Integer)
+    const :column, T.nilable(Integer)
+    const :sync, T.nilable(Symbol)
+    const :ownership, T.nilable(Symbol)
+    const :storage, Symbol
+    const :sharded, T::Boolean
+    prop :mutated, T::Boolean
+    prop :captured_bg, T::Boolean
+    prop :captured_parallel, T::Boolean
+
+    sig { void }
+    def mark_mutated!
+      self.mutated = true
+    end
+
+    sig { params(parallel: T::Boolean).void }
+    def mark_captured!(parallel:)
+      self.captured_bg = true
+      self.captured_parallel = true if parallel
+    end
+  end
+
+  BindingAuditStore = T.type_alias { T::Hash[String, BindingAuditRecord] }
+
+  sig { returns(BindingAuditStore) }
   def capability_audit_init!
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let({}, T.untyped)
+    @capability_audit = {}
   end
 
   # Record a capability binding for later audit.
-  sig { params(var_name: String, node: T.untyped, final_type: T.untyped, storage: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(var_name: String, node: AST::Locatable, final_type: T.any(Type, Symbol), storage: Symbol).returns(T.nilable(BindingAuditRecord)) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    return unless var_name.is_a?(String) && current_fn_ctx&.name
+    return unless current_fn_ctx&.name
 
     info = current_scope.locals[var_name]
     sync = info&.sync
@@ -1190,56 +1211,88 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_name = current_fn_ctx&.name
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
     fn_node = fn_name ? fn_nodes[fn_name] : nil
     return if fn_node&.visibility == :pub
 
-    key = "#{current_fn_ctx&.name}:#{var_name}"
+    fn_name = T.must(fn_name)
+    key = capability_audit_key(fn_name, var_name)
     line   = node.token&.line
     column = node.token&.column
-    ft = final_type.is_a?(Type) ? final_type : nil
-    is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
-    @capability_audit[key] = {
-      fn: current_fn_ctx&.name, var: var_name, line: line, column: column,
-      sync: sync, ownership: own, storage: storage, sharded: is_sharded,
-      mutated: false, captured_bg: false, captured_parallel: false
-    }
+    final_type_info = final_type.is_a?(Type) ? final_type : Type.new(final_type)
+    record = BindingAuditRecord.new(
+      fn: fn_name,
+      var: var_name,
+      line: line,
+      column: column,
+      sync: sync,
+      ownership: own,
+      storage: storage,
+      sharded: final_type_info.sharded?,
+      mutated: false,
+      captured_bg: false,
+      captured_parallel: false
+    )
+    capability_audit_store[key] = record
+    record
   end
 
-  sig { params(var_name: String).returns(T.nilable(T::Boolean)) }
+  sig { params(var_name: String).void }
   def audit_mark_mutated(var_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    return unless current_fn_ctx&.name
-    key = "#{current_fn_ctx&.name}:#{var_name}"
-    @capability_audit[key][:mutated] = true if @capability_audit[key]
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    return unless fn_name
+    record = capability_audit_store[capability_audit_key(fn_name, var_name)]
+    record&.mark_mutated!
   end
 
-  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
+  sig { params(var_name: String, parallel: T::Boolean).void }
+  def audit_mark_captured(var_name, parallel:)
+    T.bind(self, SemanticAnnotator) rescue nil
+    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    return unless fn_name
+    record = capability_audit_store[capability_audit_key(fn_name, var_name)]
+    record&.mark_captured!(parallel: parallel)
+  end
+
+  sig { returns(BindingAuditStore) }
   def finalize_capability_audit!
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    @capability_audit.each do |_key, info|
-      loc = info[:line] ? " (line #{info[:line]})" : ""
-      sync = info[:sync]
-      own  = info[:ownership]
+    capability_audit_store.each_value do |info|
+      loc = info.line ? " (line #{info.line})" : ""
+      sync = info.sync
+      own  = info.ownership
 
-      if SymbolEntry.locked_family_sync?(sync) && !info[:mutated] && !info[:sharded]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
+      if SymbolEntry.locked_family_sync?(sync) && !info.mutated && !info.sharded
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info.var}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
                      "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
       end
 
-      if own == :shared && !info[:captured_parallel]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @shared (Arc) but never leaves the local scheduler. " \
+      if own == :shared && !info.captured_parallel
+        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info.var}' is @shared (Arc) but never leaves the local scheduler. " \
                      "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
       end
 
-      if SymbolEntry.local_sync?(sync) && !info[:captured_bg]
+      if SymbolEntry.local_sync?(sync) && !info.captured_bg
         emit_local_never_shared_finding!(info)
       end
     end
   end
+
+  sig { returns(BindingAuditStore) }
+  def capability_audit_store
+    T.bind(self, SemanticAnnotator) rescue nil
+    @capability_audit = T.let(@capability_audit, T.nilable(BindingAuditStore))
+    T.must(@capability_audit)
+  end
+  private :capability_audit_store
+
+  sig { params(fn_name: String, var_name: String).returns(String) }
+  def capability_audit_key(fn_name, var_name)
+    "#{fn_name}:#{var_name}"
+  end
+  private :capability_audit_key
 
 end

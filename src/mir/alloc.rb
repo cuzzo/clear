@@ -30,9 +30,9 @@ module AllocHelper
     T.bind(self, SemanticAnnotator) rescue nil
     storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
     storage = downgrade_frame_to_stack(node, storage)
-    current_fn_ctx.frame_count += 1 if current_fn_ctx && storage == :frame
+    current_fn_ctx&.record_frame_use! if storage == :frame
     if storage == :heap
-      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      current_fn_ctx&.record_heap_use!
       record_effect(EffectTracker::HEAP)
     end
     storage

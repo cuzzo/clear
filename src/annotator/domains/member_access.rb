@@ -298,7 +298,7 @@ module Annotator
           end
           if indirect_payload
             val_node.needs_heap_create = true
-            current_fn_ctx.heap_count += 1 if current_fn_ctx  # heapAlloc().create(*T) needs rt
+            current_fn_ctx&.record_heap_use!  # heapAlloc().create(*T) needs rt
           end
           actual = val_node.full_type!(context: "union payload")
           unless expected_type.accepts?(actual)

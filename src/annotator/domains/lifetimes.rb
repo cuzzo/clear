@@ -139,7 +139,7 @@ module Annotator
           # storage_override is the authoritative signal for Locatable readers.
           ti.mark_heap_allocated! if ti.is_a?(Type)
           node.storage = :heap
-          current_fn_ctx.heap_count += 1 if current_fn_ctx
+          current_fn_ctx&.record_heap_use!
         end
 
         # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
@@ -242,7 +242,8 @@ module Annotator
 
         stamp_type!(node, node.value.full_type!(context: "CLONE result"))
         node.storage = node.value.storage
-        current_fn_ctx.uses_rt = true if current_fn_ctx && type&.any_rc?
+        current_fn_ctx&.mark_runtime_used! if type&.any_rc?
+        nil
       end
 
       sig { params(node: AST::ShareNode).void }
@@ -268,7 +269,7 @@ module Annotator
           end
         end
 
-        current_fn_ctx.heap_count += 1 if current_fn_ctx
+        current_fn_ctx&.record_heap_use!
         record_effect(EffectTracker::HEAP)
       end
 
