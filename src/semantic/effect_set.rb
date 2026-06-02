@@ -37,6 +37,7 @@ class EffectSet
     contention? blocking?
   ].to_set.freeze, T::Set[Symbol])
 
+  sig { returns(T::Set[Symbol]) }
   attr_reader :effects
 
   sig { params(effects: T.untyped).void }

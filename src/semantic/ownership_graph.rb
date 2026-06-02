@@ -44,12 +44,13 @@ class OwnershipGraph
   #   :borrows     — immutable borrow (y borrows x)
   #   :borrows_mut — mutable borrow (y mutably borrows x)
 
+  sig { returns(T::Array[OwnershipGraph::Edge]) }
   attr_reader :edges
 
   sig { void }
   def initialize
     @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
-    @edges = T.let([], T::Array[T.untyped])           # Array of Edge
+    @edges = T.let([], T::Array[OwnershipGraph::Edge])           # Array of Edge
     @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # target_path => [Edge]
     @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # source_path => [Edge]
     @children = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])    # parent_path => Set of child paths
@@ -248,7 +249,7 @@ class OwnershipGraph
     end
     target_count = snapshot[:edge_count]
     while @edges.size > target_count
-      removed = @edges.pop
+      removed = T.must(@edges.pop)
       @edges_by_target[removed.to]&.delete(removed)
       @edges_by_source[removed.from]&.delete(removed)
     end
