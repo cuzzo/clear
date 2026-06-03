@@ -31,6 +31,7 @@ require 'optparse'
 require 'digest'
 require 'set'
 require 'json'
+require_relative 'src/tools/clear_build_support'
 
 # Coverage bootstrap MUST run before any src/ require so SimpleCov can
 # instrument every file the subcommand loads. No-op unless COVERAGE=1.
@@ -52,6 +53,15 @@ ZIG = [
   File.join(ZIG_DIR, 'zig', 'zig'),
   `which zig 2>/dev/null`.strip
 ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+
+BUILD_SUPPORT_CONFIG = ClearBuildSupport::Config.new(
+  src_dir: SRC_DIR,
+  zig_dir: ZIG_DIR,
+  script_path: __FILE__,
+  zig_path: ZIG,
+  transpiler_path: TRANSPILER,
+  transpiler_cache_dir: TRANSPILER_CACHE_DIR
+)
 
 # Runtime files needed for linking
 RUNTIME_FILES = %w[runtime/switch.S runtime/onRoot.S].map { |f| File.join(ZIG_DIR, f) }
@@ -186,175 +196,6 @@ def error(msg)
   exit 1
 end
 
-def debug_cache(msg)
-  $stderr.puts("[transpile-cache] #{msg}") if ENV['CLEAR_DEBUG_CACHE'] == '1'
-end
-
-def write_if_changed(path, content)
-  FileUtils.mkdir_p(File.dirname(path))
-  return false if File.exist?(path) && File.read(path) == content
-  File.write(path, content)
-  true
-end
-
-def ensure_symlink(link_path, target_path)
-  if File.symlink?(link_path)
-    return if File.readlink(link_path) == target_path
-    File.delete(link_path)
-  elsif File.exist?(link_path)
-    FileUtils.rm_rf(link_path)
-  end
-  File.symlink(target_path, link_path)
-end
-
-def build_metadata_path(output)
-  File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
-end
-
-def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil, use_debug_allocator: false, profile_max: nil)
-  {
-    "source" => File.expand_path(source),
-    "output" => File.expand_path(output),
-    "opt_level" => opt_level,
-    "extra_flags" => Array(extra_flags),
-    "module_mode" => module_mode,
-    "profile" => profile,
-    "profile_max" => profile_max,
-    "use_c_allocator" => use_c_allocator,
-    "use_debug_allocator" => use_debug_allocator,
-    "default_stack" => default_stack,
-    "strict_test" => strict_test,
-    "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
-    "main_tier" => main_tier,
-    "zig" => ZIG
-  }
-end
-
-def read_build_signature(output)
-  meta_path = build_metadata_path(output)
-  return nil unless File.exist?(meta_path)
-  JSON.parse(File.read(meta_path))
-rescue JSON::ParserError
-  nil
-end
-
-def write_build_signature(output, signature)
-  write_if_changed(build_metadata_path(output), JSON.pretty_generate(signature))
-end
-
-def find_package_source(pkg_name, start_dir:)
-  dir = File.expand_path(start_dir)
-  loop do
-    candidate = File.join(dir, "packages", pkg_name, "src", "lib.cht")
-    return candidate if File.exist?(candidate)
-    parent = File.dirname(dir)
-    break if parent == dir
-    dir = parent
-  end
-  nil
-end
-
-def resolve_clear_require(raw, caller_dir:)
-  if raw.start_with?('pkg:')
-    pkg_name = raw.sub(/\Apkg:/, '')
-    pkg_path = find_package_source(pkg_name, start_dir: caller_dir)
-    error "Package '#{pkg_name}' not found from #{caller_dir}" unless pkg_path
-    pkg_path
-  else
-    File.expand_path(raw, caller_dir)
-  end
-end
-
-def collect_clear_dependencies(path, seen: Set.new)
-  abs_path = File.expand_path(path)
-  return seen if seen.include?(abs_path)
-  error "File not found: #{abs_path}" unless File.exist?(abs_path)
-
-  seen.add(abs_path)
-  source = File.read(abs_path)
-  caller_dir = File.dirname(abs_path)
-  source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
-    dep_path = resolve_clear_require(raw, caller_dir: caller_dir)
-    collect_clear_dependencies(dep_path, seen: seen)
-  end
-  seen
-end
-
-def newest_build_dependency_mtime(source)
-  dep_paths = collect_clear_dependencies(source).to_a
-  compiler_paths = Dir.glob(File.join(SRC_DIR, '**', '*.rb'))
-  runtime_paths = Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.zig')) +
-                  Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.S')) +
-                  Dir.glob(File.join(ZIG_DIR, 'lib', '**', '*.zig'))
-  tracked = dep_paths + compiler_paths + runtime_paths + [__FILE__]
-  tracked.filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max || Time.at(0)
-end
-
-def compiler_signature
-  @compiler_signature ||= begin
-    tracked = Dir.glob(File.join(SRC_DIR, '**', '*.rb')).sort +
-              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-footer.zig')).sort +
-              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-header.zig')).sort
-    digest = Digest::SHA256.new
-    tracked.each do |path|
-      digest << path
-      digest << File.read(path)
-    end
-    digest.hexdigest
-  end
-end
-
-def transpile_dependency_signature(source_path)
-  digest = Digest::SHA256.new
-  collect_clear_dependencies(source_path).to_a.sort.each do |path|
-    digest << File.expand_path(path)
-    digest << File.read(path)
-  end
-  digest.hexdigest
-end
-
-def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
-  Digest::SHA256.hexdigest([
-    mode,
-    transpile_flag,
-    compiler_signature,
-    transpile_dependency_signature(source_path),
-    File.expand_path(source_path),
-    source_text
-  ].join("\0"))
-end
-
-def transpile_cached(source_path:, mode:, transpile_flag:, source_text:, bypass: false)
-  # The transpile cache is content-addressed: cache_key includes the
-  # compiler signature, dependency signatures, full source path and
-  # source text. If the key hits, the output is bit-identical with
-  # what re-running the transpiler would produce, so `--force`
-  # (which forces re-EMIT of the final binary, not re-TRANSPILE)
-  # still benefits from this cache. clear_bin_spec asserts this.
-  cache_key = transpile_cache_key(
-    source_path: source_path,
-    mode: mode,
-    transpile_flag: transpile_flag,
-    source_text: source_text
-  )
-  cache_file = File.join(TRANSPILER_CACHE_DIR, "#{cache_key}.zig")
-
-  if !bypass && File.exist?(cache_file)
-    debug_cache("hit #{mode} #{File.basename(source_path)}")
-    return [File.read(cache_file), cache_file]
-  end
-
-  debug_cache("#{bypass ? 'bypass' : 'miss'} #{mode} #{File.basename(source_path)}")
-  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source_path} 2>/dev/null`
-  unless $?.success?
-    system("ruby #{TRANSPILER} #{transpile_flag} #{source_path} > /dev/null")
-    error "Transpilation failed"
-  end
-
-  write_if_changed(cache_file, zig_code)
-  [zig_code, cache_file]
-end
-
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
 def find_bg_blocks(node, result)
   case node
@@ -379,7 +220,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
-  signature = build_signature(
+  signature = ClearBuildSupport.build_signature(
+    config: BUILD_SUPPORT_CONFIG,
     source: source,
     output: output,
     opt_level: opt_level,
@@ -396,15 +238,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
-  unless force || module_mode || profile
-    if File.exist?(output)
-      out_mtime = File.mtime(output)
-      newest_dep = newest_build_dependency_mtime(source)
-      if out_mtime >= newest_dep && read_build_signature(output) == signature
-        $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
-        return :up_to_date
-      end
-    end
+  begin
+    up_to_date = ClearBuildSupport.build_up_to_date?(
+      source: source,
+      output: output,
+      signature: signature,
+      config: BUILD_SUPPORT_CONFIG,
+      force: force,
+      module_mode: module_mode,
+      profile: profile
+    )
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
+
+  if up_to_date
+    $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
+    return :up_to_date
   end
 
   # Transpile
@@ -422,7 +272,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   source_text = File.read(source)
   pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
   pkg_flags = pkg_requires.map do |pkg_name|
-    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
@@ -432,22 +282,28 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   cache_key = Digest::SHA256.hexdigest(source)[0, 16]
   build_dir = File.join(ZIG_DIR, ".clear-cache", cache_key)
   FileUtils.mkdir_p(build_dir)
-  ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-  ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-  ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
   cache_dir = File.join(build_dir, '.zig-cache')
   global_cache_dir = File.join(build_dir, '.global-zig-cache')
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
 
-  zig_code, _cache_file = transpile_cached(
-    source_path: source,
-    mode: module_mode ? :test_root : :build_root,
-    transpile_flag: transpile_flag,
-    source_text: source_text,
-    bypass: bypass_transpile_cache
-  )
+  begin
+    zig_code, _cache_file = ClearBuildSupport.transpile_cached(
+      config: BUILD_SUPPORT_CONFIG,
+      source_path: source,
+      mode: module_mode ? :test_root : :build_root,
+      transpile_flag: transpile_flag,
+      source_text: source_text,
+      bypass: bypass_transpile_cache,
+      debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1'
+    )
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
   # with zero overhead in production builds.
@@ -475,7 +331,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # the file path so EXTERN against the runtime works without needing a
   # multi-package build.zig.
   zig_code = zig_code.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
-  write_if_changed(tmp_zig, zig_code)
+  ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
   # and check if a matching .zig file exists in the source directory.
@@ -490,23 +346,29 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Transpile package modules to .zig files
   pkg_modules = pkg_requires.map do |pkg_name|
-    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     # Collect transitive package deps for nested REQUIRE "pkg:..."
     pkg_src = File.read(pkg_path)
     nested_pkgs = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
     nested_flags = nested_pkgs.map { |np|
-      np_path = find_package_source(np, start_dir: File.dirname(pkg_path))
+      np_path = ClearBuildSupport.find_package_source(np, start_dir: File.dirname(pkg_path))
       error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
       "--pkg #{np}=#{np_path}"
     }.join(" ")
-    pkg_zig, _pkg_cache_file = transpile_cached(
-      source_path: pkg_path,
-      mode: :module,
-      transpile_flag: "--module #{nested_flags}".strip,
-      source_text: pkg_src,
-      bypass: bypass_transpile_cache
-    )
+    begin
+      pkg_zig, _pkg_cache_file = ClearBuildSupport.transpile_cached(
+        config: BUILD_SUPPORT_CONFIG,
+        source_path: pkg_path,
+        mode: :module,
+        transpile_flag: "--module #{nested_flags}".strip,
+        source_text: pkg_src,
+        bypass: bypass_transpile_cache,
+        debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1'
+      )
+    rescue ClearBuildSupport::BuildError => e
+      error e.message
+    end
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
     pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
@@ -514,7 +376,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
-    write_if_changed(pkg_zig_file, pkg_zig)
+    ClearBuildSupport.write_if_changed(pkg_zig_file, pkg_zig)
     pkg_name
   end
 
@@ -551,7 +413,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     zig_binary = File.join(build_dir, "#{File.basename(output)}-#{$$}")
     if File.exist?(zig_binary)
       FileUtils.mv(zig_binary, output)
-      write_build_signature(output, signature)
+      ClearBuildSupport.write_build_signature(output, signature)
     end
   end
 
@@ -1036,9 +898,9 @@ when 'test'
     base_name = File.basename(source, '.cht')
     build_dir = File.join(ZIG_DIR, ".build-#{$$}")
     FileUtils.mkdir_p(build_dir)
-    ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-    ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-    ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
     source_dir = File.dirname(File.expand_path(source))
     extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
     ffi_modules = extern_modules.select { |m|
