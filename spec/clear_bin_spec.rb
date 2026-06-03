@@ -138,7 +138,7 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe")
+      output1, ok1 = clear_build(main_path, "--debug")
       expect(ok1).to be true
       expect(output1).to include("Built:")
 
@@ -147,7 +147,7 @@ RSpec.describe "./clear build", :integration do
       expect(root_zig_before).not_to be_nil
       mtime_before = File.mtime(root_zig_before)
 
-      output2, ok2 = clear_build(main_path, "--safe")
+      output2, ok2 = clear_build(main_path, "--debug")
       expect(ok2).to be true
       expect(output2).to include("up-to-date:")
       expect(File.mtime(root_zig_before)).to eq(mtime_before)
@@ -167,7 +167,7 @@ RSpec.describe "./clear build", :integration do
 
       before_entries = transpile_cache_entries
 
-      output1, ok1 = clear_build(main_path, "--safe", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      output1, ok1 = clear_build(main_path, "--debug", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
       expect(ok1).to be true
       expect(output1).to include("[transpile-cache] miss build_root main.cht")
 
@@ -175,7 +175,7 @@ RSpec.describe "./clear build", :integration do
       new_entries = after_first - before_entries
       expect(new_entries).not_to be_empty
 
-      output2, ok2 = clear_build(main_path, "--safe", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      output2, ok2 = clear_build(main_path, "--debug", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
       expect(ok2).to be true
       expect(output2).to include("[transpile-cache] hit build_root main.cht")
       # Don't compare the full global set - parallel tests may add unrelated entries.
@@ -197,12 +197,12 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      output1, ok1 = clear_build(main_path, "--debug", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
       expect(ok1).to be true
       expect(output1).to include("[transpile-cache] bypass build_root main.cht")
       expect(output1).not_to include("[transpile-cache] hit build_root main.cht")
 
-      output2, ok2 = clear_build(main_path, "--safe", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      output2, ok2 = clear_build(main_path, "--debug", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
       expect(ok2).to be true
       expect(output2).to include("[transpile-cache] bypass build_root main.cht")
       expect(output2).not_to include("[transpile-cache] hit build_root main.cht")
@@ -220,22 +220,23 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe")
+      output1, ok1 = clear_build(main_path, "--debug")
       expect(ok1).to be true
       expect(output1).to include("Built:")
 
       meta_path = build_metadata_path(main_path)
       expect(File.exist?(meta_path)).to be true
       first_signature = JSON.parse(File.read(meta_path))
-      expect(first_signature["opt_level"]).to eq("ReleaseSafe")
+      expect(first_signature["opt_level"]).to eq("Debug")
 
-      output2, ok2 = clear_build(main_path, "--optimized")
+      output2, ok2 = clear_build(main_path, "--debug-llvm")
       expect(ok2).to be true
       expect(output2).to include("Built:")
       expect(output2).not_to include("up-to-date:")
 
       second_signature = JSON.parse(File.read(meta_path))
-      expect(second_signature["opt_level"]).to eq("ReleaseFast")
+      expect(second_signature["opt_level"]).to eq("Debug")
+      expect(second_signature["extra_flags"]).to eq([])
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -258,18 +259,18 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe")
+      output1, ok1 = clear_build(main_path, "--debug")
       expect(ok1).to be true
       expect(output1).to include("Built:")
 
-      sleep 1
       File.write(helper_path, <<~CLEAR)
         PUB FN value() RETURNS Int64 ->
           RETURN 2;
         END
       CLEAR
+      File.utime(Time.now + 2, Time.now + 2, helper_path)
 
-      output2, ok2 = clear_build(main_path, "--safe")
+      output2, ok2 = clear_build(main_path, "--debug")
       expect(ok2).to be true
       expect(output2).to include("Built:")
       expect(output2).not_to include("up-to-date:")
@@ -298,18 +299,18 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe")
+      output1, ok1 = clear_build(main_path, "--debug")
       expect(ok1).to be true
       expect(output1).to include("Built:")
 
-      sleep 1
       File.write(lib_path, <<~CLEAR)
         PUB FN add(a: Int64, b: Int64) RETURNS Int64 ->
           RETURN a + b + 1;
         END
       CLEAR
+      File.utime(Time.now + 2, Time.now + 2, lib_path)
 
-      output2, ok2 = clear_build(main_path, "--safe")
+      output2, ok2 = clear_build(main_path, "--debug")
       expect(ok2).to be true
       expect(output2).to include("Built:")
       expect(output2).not_to include("up-to-date:")
