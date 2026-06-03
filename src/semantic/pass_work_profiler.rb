@@ -7,6 +7,15 @@ require "sorbet-runtime"
 module PassWorkProfiler
   extend T::Sig
 
+  class WorkSummary < T::Struct
+    const :stage, String
+    const :kind, String
+    const :calls, Integer
+    const :units, Integer
+    const :seconds, Float
+    const :exclusive_seconds, Float
+  end
+
   class StageRecord < T::Struct
     extend T::Sig
 
@@ -20,12 +29,24 @@ module PassWorkProfiler
     prop :walk_calls, T::Hash[String, Integer], default: {}
     prop :walk_yields, T::Hash[String, Integer], default: {}
     prop :walk_seconds, T::Hash[String, Float], default: {}
+    prop :work_calls, T::Hash[String, Integer], default: {}
+    prop :work_units, T::Hash[String, Integer], default: {}
+    prop :work_seconds, T::Hash[String, Float], default: {}
+    prop :work_exclusive_seconds, T::Hash[String, Float], default: {}
 
     sig { params(kind: String, yields: Integer, seconds: Float).void }
     def add_walk(kind, yields, seconds)
       walk_calls[kind] = walk_calls.fetch(kind, 0) + 1
       walk_yields[kind] = walk_yields.fetch(kind, 0) + yields
       walk_seconds[kind] = walk_seconds.fetch(kind, 0.0) + seconds
+    end
+
+    sig { params(kind: String, units: Integer, seconds: Float, exclusive_seconds: Float).void }
+    def add_work(kind, units, seconds, exclusive_seconds)
+      work_calls[kind] = work_calls.fetch(kind, 0) + 1
+      work_units[kind] = work_units.fetch(kind, 0) + units
+      work_seconds[kind] = work_seconds.fetch(kind, 0.0) + seconds
+      work_exclusive_seconds[kind] = work_exclusive_seconds.fetch(kind, 0.0) + exclusive_seconds
     end
 
     sig { returns(Integer) }
@@ -56,6 +77,16 @@ module PassWorkProfiler
     sig { returns(Integer) }
     def total_walk_yields
       walk_yields.values.sum
+    end
+
+    sig { returns(Integer) }
+    def total_work_calls
+      work_calls.values.sum
+    end
+
+    sig { returns(Integer) }
+    def total_work_units
+      work_units.values.sum
     end
 
     sig { params(numerator: Integer, denominator: Integer).returns(Float) }
@@ -90,6 +121,62 @@ module PassWorkProfiler
         .map { |kind, yields| "#{kind}:#{PassWorkProfiler.format_count(yields)}" }
         .join(";")
     end
+
+    sig { returns(String) }
+    def top_walk_times
+      walk_seconds
+        .sort_by { |kind, seconds| [-seconds, kind] }
+        .first(3)
+        .map { |kind, seconds| "#{kind}:#{format("%.3fs", seconds)}" }
+        .join(";")
+    end
+
+    sig { returns(String) }
+    def top_work
+      work_units
+        .sort_by { |kind, units| [-units, kind] }
+        .first(3)
+        .map { |kind, units| "#{kind}:#{PassWorkProfiler.format_count(units)}" }
+        .join(";")
+    end
+
+    sig { returns(String) }
+    def top_work_times
+      work_seconds
+        .sort_by { |kind, seconds| [-seconds, kind] }
+        .first(3)
+        .map { |kind, seconds| "#{kind}:#{format("%.3fs", seconds)}" }
+        .join(";")
+    end
+
+    sig { returns(String) }
+    def top_work_exclusive_times
+      work_exclusive_seconds
+        .sort_by { |kind, seconds| [-seconds, kind] }
+        .first(3)
+        .map { |kind, seconds| "#{kind}:#{format("%.3fs", seconds)}" }
+        .join(";")
+    end
+
+    sig { returns(T::Array[WorkSummary]) }
+    def work_summaries
+      work_calls.keys.sort.map do |kind|
+        WorkSummary.new(
+          stage: label,
+          kind: kind,
+          calls: work_calls.fetch(kind),
+          units: work_units.fetch(kind, 0),
+          seconds: work_seconds.fetch(kind, 0.0),
+          exclusive_seconds: work_exclusive_seconds.fetch(kind, 0.0),
+        )
+      end
+    end
+  end
+
+  class WorkFrame < T::Struct
+    const :stage_label, String
+    const :started_at, Float
+    prop :child_seconds, Float, default: 0.0
   end
 
   class Profiler
@@ -99,17 +186,18 @@ module PassWorkProfiler
     def initialize
       @records = T.let({}, T::Hash[String, StageRecord])
       @stack = T.let([], T::Array[String])
+      @work_stack = T.let([], T::Array[WorkFrame])
       @next_sequence = T.let(0, Integer)
     end
 
     sig do
       params(
         label: String,
-        ast_root: T.untyped,
-        mir_root: T.untyped,
+        ast_root: Object,
+        mir_root: Object,
         token_count: T.nilable(Integer),
-        block: T.proc.returns(T.untyped)
-      ).returns(T.untyped)
+        block: T.proc.returns(Object)
+      ).returns(Object)
     end
     def measure(label, ast_root: nil, mir_root: nil, token_count: nil, &block)
       record = T.let(nil, T.nilable(StageRecord))
@@ -136,9 +224,40 @@ module PassWorkProfiler
       record_for(current_label).add_walk(kind, yields, seconds)
     end
 
+    sig { params(kind: String, units: Integer, seconds: Float, exclusive_seconds: Float).void }
+    def record_work(kind, units, seconds, exclusive_seconds)
+      record_for(current_label).add_work(kind, units, seconds, exclusive_seconds)
+    end
+
+    sig { params(kind: String, units: Integer, block: T.proc.returns(Object)).returns(Object) }
+    def measure_work(kind, units: 0, &block)
+      frame = T.let(nil, T.nilable(WorkFrame))
+      frame = WorkFrame.new(
+        stage_label: current_label,
+        started_at: Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f
+      )
+      @work_stack << frame
+      block.call
+    ensure
+      if frame
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - frame.started_at
+        exclusive_seconds = elapsed - frame.child_seconds
+        exclusive_seconds = 0.0 if exclusive_seconds.negative?
+        @work_stack.pop
+        parent = @work_stack.last
+        parent.child_seconds += elapsed if parent
+        record_for(frame.stage_label).add_work(kind, units, elapsed, exclusive_seconds)
+      end
+    end
+
     sig { returns(T::Array[StageRecord]) }
     def records
       @records.values.sort_by(&:sequence)
+    end
+
+    sig { returns(T::Array[WorkSummary]) }
+    def work_summaries
+      records.flat_map(&:work_summaries)
     end
 
     sig { returns(String) }
@@ -161,6 +280,12 @@ module PassWorkProfiler
           "mir_walk_yields",
           "mir_yields_per_input_mir_node",
           "top_walkers",
+          "top_walk_times",
+          "work_calls",
+          "work_units",
+          "top_work",
+          "top_work_times",
+          "top_work_exclusive_times",
         ]
         records.each do |record|
           csv << [
@@ -180,6 +305,29 @@ module PassWorkProfiler
             record.mir_walk_yields,
             format("%.2f", record.mir_yields_per_input_node),
             record.top_walkers,
+            record.top_walk_times,
+            record.total_work_calls,
+            record.total_work_units,
+            record.top_work,
+            record.top_work_times,
+            record.top_work_exclusive_times,
+          ]
+        end
+      end
+    end
+
+    sig { returns(String) }
+    def work_details_to_csv
+      CSV.generate do |csv|
+        csv << ["stage", "kind", "calls", "units", "seconds", "exclusive_seconds"]
+        work_summaries.each do |summary|
+          csv << [
+            summary.stage,
+            summary.kind,
+            summary.calls,
+            summary.units,
+            format("%.6f", summary.seconds),
+            format("%.6f", summary.exclusive_seconds),
           ]
         end
       end
@@ -189,7 +337,7 @@ module PassWorkProfiler
     def to_table
       lines = T.let([], T::Array[String])
       lines << format(
-        "%-48s %5s %10s %10s %9s %12s %12s %9s %12s %12s %9s %12s %12s %9s %s",
+        "%-48s %5s %10s %10s %9s %12s %12s %9s %12s %12s %9s %12s %12s %9s %12s %12s %s %s %s %s %s",
         "stage",
         "calls",
         "tokens",
@@ -204,11 +352,17 @@ module PassWorkProfiler
         "mir_calls",
         "mir_yields",
         "mir_x",
-        "top_walkers"
+        "top_walkers",
+        "top_walk_times",
+        "work_calls",
+        "work_units",
+        "top_work",
+        "top_work_times",
+        "top_work_excl"
       )
       records.each do |record|
         lines << format(
-          "%-48s %5d %10s %10s %9.3f %12s %12s %9.1f %12s %12s %9.1f %12s %12s %9.1f %s",
+          "%-48s %5d %10s %10s %9.3f %12s %12s %9.1f %12s %12s %9.1f %12s %12s %9.1f %12s %12s %s %s %s %s %s",
           record.label,
           record.calls,
           PassWorkProfiler.format_count(record.input_tokens),
@@ -223,9 +377,43 @@ module PassWorkProfiler
           PassWorkProfiler.format_count(record.mir_walk_calls),
           PassWorkProfiler.format_count(record.mir_walk_yields),
           record.mir_yields_per_input_node,
-          record.top_walkers
+          record.top_walkers,
+          record.top_walk_times,
+          PassWorkProfiler.format_count(record.total_work_calls),
+          PassWorkProfiler.format_count(record.total_work_units),
+          record.top_work,
+          record.top_work_times,
+          record.top_work_exclusive_times
         )
       end
+      lines.join("\n")
+    end
+
+    sig { returns(String) }
+    def work_details_to_table
+      lines = T.let([], T::Array[String])
+      lines << format(
+        "%-48s %-56s %8s %10s %10s %10s",
+        "stage",
+        "kind",
+        "calls",
+        "units",
+        "seconds",
+        "exclusive"
+      )
+      work_summaries
+        .sort_by { |summary| [-summary.seconds, summary.stage, summary.kind] }
+        .each do |summary|
+          lines << format(
+            "%-48s %-56s %8d %10s %10.3f %10.3f",
+            summary.stage,
+            summary.kind,
+            summary.calls,
+            PassWorkProfiler.format_count(summary.units),
+            summary.seconds,
+            summary.exclusive_seconds
+          )
+        end
       lines.join("\n")
     end
 
@@ -267,12 +455,12 @@ module PassWorkProfiler
     T::Array[T.class_of(Object)]
   )
 
-  sig { params(root: T.untyped).returns(Integer) }
+  sig { params(root: Object).returns(Integer) }
   def self.count_ast_nodes(root)
     count_nodes(root, "AST::", {})
   end
 
-  sig { params(root: T.untyped).returns(Integer) }
+  sig { params(root: Object).returns(Integer) }
   def self.count_mir_nodes(root)
     count_nodes(root, "MIR::", {})
   end
@@ -285,7 +473,7 @@ module PassWorkProfiler
     format("%.1fm", value / 1_000_000.0)
   end
 
-  sig { params(root: T.untyped, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: Object, namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_nodes(root, namespace, seen)
     return 0 if scalar?(root)
     return count_array_nodes(root, namespace, seen) if root.is_a?(Array)
@@ -304,26 +492,26 @@ module PassWorkProfiler
   end
   private_class_method :count_nodes
 
-  sig { params(root: T::Array[T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Array[Object], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_array_nodes(root, namespace, seen)
     root.sum { |value| count_nodes(value, namespace, seen) }
   end
   private_class_method :count_array_nodes
 
-  sig { params(root: T::Hash[T.untyped, T.untyped], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
+  sig { params(root: T::Hash[Object, Object], namespace: String, seen: T::Hash[Integer, TrueClass]).returns(Integer) }
   def self.count_hash_nodes(root, namespace, seen)
     root.each_value.sum { |value| count_nodes(value, namespace, seen) }
   end
   private_class_method :count_hash_nodes
 
-  sig { params(root: T.untyped, namespace: String).returns(T::Boolean) }
+  sig { params(root: Object, namespace: String).returns(T::Boolean) }
   def self.profiler_node?(root, namespace)
     class_name = root.class.name
     !!class_name&.start_with?(namespace) && root.respond_to?(:each_pair)
   end
   private_class_method :profiler_node?
 
-  sig { params(root: T.untyped).returns(T::Boolean) }
+  sig { params(root: Object).returns(T::Boolean) }
   def self.scalar?(root)
     SCALAR_CLASSES.any? { |klass| root.is_a?(klass) }
   end

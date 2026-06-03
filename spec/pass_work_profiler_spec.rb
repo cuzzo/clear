@@ -64,6 +64,47 @@ RSpec.describe PassWorkProfiler do
     expect(record.ast_walk_yields).to eq(6)
     expect(record.ast_yields_per_input_node).to eq(3.0)
     expect(record.top_walkers).to eq("AST.walk_body:6")
+    expect(record.top_walk_times).to eq("AST.walk_body:0.125s")
+  end
+
+  it "records exact work counters separately from raw walker counters" do
+    profiler = described_class::Profiler.new
+
+    profiler.record_work("MIRLowering.match.switch", 4, 0.5, 0.125)
+    record = profiler.records.fetch(0)
+
+    expect(record.label).to eq("(outside)")
+    expect(record.total_work_calls).to eq(1)
+    expect(record.total_work_units).to eq(4)
+    expect(record.top_work).to eq("MIRLowering.match.switch:4")
+    expect(record.top_work_times).to eq("MIRLowering.match.switch:0.500s")
+    expect(record.top_work_exclusive_times).to eq("MIRLowering.match.switch:0.125s")
+    expect(profiler.work_summaries.fetch(0).kind).to eq("MIRLowering.match.switch")
+    expect(profiler.work_details_to_csv).to include("MIRLowering.match.switch,1,4,0.500000,0.125000")
+    expect(profiler.work_details_to_table).to include("MIRLowering.match.switch")
+  end
+
+  it "measures nested work with exclusive child time removed" do
+    profiler = described_class::Profiler.new
+
+    result = profiler.measure("mir.lower") do
+      profiler.measure_work("outer", units: 10) do
+        profiler.measure_work("inner", units: 3) { :inner }
+        :done
+      end
+    end
+
+    record = profiler.records.fetch(0)
+    outer_total = record.work_seconds.fetch("outer")
+    outer_exclusive = record.work_exclusive_seconds.fetch("outer")
+
+    expect(result).to eq(:done)
+    expect(record.total_work_calls).to eq(2)
+    expect(record.total_work_units).to eq(13)
+    expect(record.work_calls.fetch("outer")).to eq(1)
+    expect(record.work_calls.fetch("inner")).to eq(1)
+    expect(outer_exclusive).to be <= outer_total
+    expect(record.work_exclusive_seconds.fetch("inner")).to be > 0.0
   end
 
   it "records work outside an explicit stage and keeps zero-input ratios finite" do
@@ -87,6 +128,7 @@ RSpec.describe PassWorkProfiler do
     expect(profiler.to_table).to include("mir.lower")
     expect(profiler.to_table).to include("MIR.each_surface_node:5")
     expect(profiler.to_csv).to include("stage,calls,input_tokens")
+    expect(profiler.to_csv).to include("top_work_exclusive_times")
     expect(profiler.to_csv).to include("mir.lower")
   end
 

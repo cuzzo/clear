@@ -15,10 +15,11 @@ $LOAD_PATH.unshift(File.join(SRC_ROOT, "backends"))
 
 Options = T.type_alias { T::Hash[Symbol, T.untyped] }
 
-options = T.let({ format: "table", unchecked: true }, Options)
+options = T.let({ format: "table", unchecked: true, details: false }, Options)
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: bundle exec ruby tools/profile_pass_work.rb [--csv] [--checked] examples/minivm/vm.cht"
   opts.on("--csv", "Emit machine-readable CSV instead of the aligned table") { options[:format] = "csv" }
+  opts.on("--details", "Append per-event work counters and exclusive timings") { options[:details] = true }
   opts.on("--checked", "Enable sorbet-runtime checks while profiling") { options[:unchecked] = false }
   opts.on("--unchecked", "Disable sorbet-runtime checks while profiling (default)") { options[:unchecked] = true }
 end
@@ -45,6 +46,14 @@ require "semantic/pass_state"
 
 module PassWorkProfilerTool
   extend T::Sig
+
+  sig { params(kind: String, units: Integer, block: T.proc.returns(Object)).returns(Object) }
+  def self.measure_work(kind, units, &block)
+    profiler = PassWorkProfiler.current
+    return block.call unless profiler
+
+    profiler.measure_work(kind, units: units, &block)
+  end
 
   module ASTWalkerInstrumentation
     extend T::Sig
@@ -167,7 +176,9 @@ module PassWorkProfilerTool
     def with_new_scope(scope = nil, &block)
       stack = T.cast(instance_variable_get(:@scope_stack), T::Array[T.untyped])
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      super(scope, &block)
+      PassWorkProfilerTool.measure_work("Scope.with_new_scope", 1) do
+        super(scope, &block)
+      end
     ensure
       PassWorkProfiler.current&.record_walk(
         "Scope.with_new_scope",
@@ -180,12 +191,35 @@ module PassWorkProfilerTool
     sig { params(node: T.untyped).returns(T.untyped) }
     def visit(node)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      super
+      units = node.nil? || node.is_a?(Symbol) ? 0 : 1
+      PassWorkProfilerTool.measure_work("Annotator.visit.#{PassWorkProfilerTool.lower_node_label(node)}", units) do
+        super
+      end
     ensure
       PassWorkProfiler.current&.record_walk(
         "AST.visit",
         node.nil? || node.is_a?(Symbol) ? 0 : 1,
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      )
+    end
+
+    sig { params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean).returns(T::Array[BasicObject]) }
+    def analyze_control_flow_branches(branches, merge_to_parent: true)
+      T.cast(
+        PassWorkProfilerTool.measure_work("Annotator.control_flow.branches", branches.length) do
+          super
+        end,
+        T::Array[BasicObject]
+      )
+    end
+
+    sig { params(node: AST::MatchStatement).returns(T.nilable(Symbol)) }
+    def visit_MatchStatement(node)
+      T.cast(
+        PassWorkProfilerTool.measure_work("Annotator.visit.MatchStatement", node.cases.length) do
+          super
+        end,
+        T.nilable(Symbol)
       )
     end
 
@@ -302,6 +336,29 @@ module PassWorkProfilerTool
         1,
         Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       )
+    end
+  end
+
+  module OwnershipGraphInstrumentation
+    extend T::Sig
+
+    sig { returns(OwnershipGraph::LightweightSnapshot) }
+    def fork_lightweight
+      nodes = T.cast(instance_variable_get(:@nodes), T::Hash[T.untyped, T.untyped])
+      T.cast(
+        PassWorkProfilerTool.measure_work("OwnershipGraph.fork_lightweight", nodes.length) do
+          super
+        end,
+        OwnershipGraph::LightweightSnapshot
+      )
+    end
+
+    sig { params(snapshot: OwnershipGraph::LightweightSnapshot).void }
+    def restore_lightweight(snapshot)
+      PassWorkProfilerTool.measure_work("OwnershipGraph.restore_lightweight", snapshot.states.length) do
+        super
+      end
+      nil
     end
   end
 
@@ -463,6 +520,96 @@ module PassWorkProfilerTool
     end
   end
 
+  module MIRLoweringInstrumentation
+    extend T::Sig
+
+    sig { params(node: T.untyped).returns(T.untyped) }
+    def lower(node)
+      units = node.nil? ? 0 : 1
+      PassWorkProfilerTool.measure_work("MIRLowering.lower.#{PassWorkProfilerTool.lower_node_label(node)}", units) do
+        super
+      end
+    end
+
+    sig { params(stmts: T.untyped).returns(T.untyped) }
+    def lower_body(stmts)
+      units = stmts.respond_to?(:length) ? stmts.length : 0
+      PassWorkProfilerTool.measure_work("MIRLowering.lower_body", units) do
+        super
+      end
+    end
+
+    sig { params(node: T.untyped).returns(T.untyped) }
+    def lower_match(node)
+      units = node.respond_to?(:cases) ? node.cases.length : 0
+      PassWorkProfilerTool.measure_work("MIRLowering.match", units) do
+        super
+      end
+    end
+
+    sig { params(node: T.untyped, facts: T.untyped).returns(T.untyped) }
+    def lower_switch_match(node, facts)
+      units = node.respond_to?(:cases) ? node.cases.length : 0
+      PassWorkProfilerTool.measure_work("MIRLowering.match.switch", units) do
+        super
+      end
+    end
+
+    sig { params(node: T.untyped, facts: T.untyped).returns(T.untyped) }
+    def lower_union_match(node, facts)
+      units = node.respond_to?(:cases) ? node.cases.length : 0
+      PassWorkProfilerTool.measure_work("MIRLowering.match.union", units) do
+        super
+      end
+    end
+
+    sig { params(stmts: T.untyped, expr_label: T.untyped).returns(T.untyped) }
+    def lower_match_branch(stmts, expr_label)
+      units = stmts.respond_to?(:length) ? stmts.length : 0
+      PassWorkProfilerTool.measure_work("MIRLowering.match.branch_body", units) do
+        super
+      end
+    end
+
+    sig { params(c: T.untyped, node: T.untyped, expr_label: T.untyped).returns(T.untyped) }
+    def union_match_arm_plans(c, node, expr_label)
+      PassWorkProfilerTool.measure_work("MIRLowering.match.union_arm_plan", 1) do
+        super
+      end
+    end
+
+    sig { params(body: T.untyped, inherited_alloc_names: T.untyped, inherited_guarded_names: T.untyped).returns(T.untyped) }
+    def append_ownership_transfers_for_mir_body(body, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
+      units = body.respond_to?(:length) ? body.length : 1
+      PassWorkProfilerTool.measure_work("MIRLowering.ownership_finalize.body", units) do
+        super
+      end
+    end
+
+    sig { params(body: T.untyped, inherited_alloc_names: T.untyped, inherited_guarded_names: T.untyped, parent: T.untyped).returns(T.untyped) }
+    def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, parent)
+      units = body.respond_to?(:length) ? body.length : 1
+      PassWorkProfilerTool.measure_work("MIRLowering.ownership_finalize.nested_body", units) do
+        super
+      end
+    end
+
+    sig { params(node: T.untyped, body: T.untyped, state: T.untyped).returns(T.untyped) }
+    def finalize_ownership_for_mir_node!(node, body, state)
+      PassWorkProfilerTool.measure_work("MIRLowering.ownership_finalize.node.#{PassWorkProfilerTool.lower_node_label(node)}", 1) do
+        super
+      end
+    end
+  end
+
+  sig { params(node: T.untyped).returns(String) }
+  def self.lower_node_label(node)
+    return "nil" if node.nil?
+
+    name = node.class.name || node.class.to_s
+    name.sub(/^AST::/, "AST.").sub(/^MIR::/, "MIR.").gsub("::", ".")
+  end
+
   sig { void }
   def self.install!
     AST.singleton_class.prepend(ASTWalkerInstrumentation)
@@ -480,6 +627,8 @@ module PassWorkProfilerTool
     OwnershipDataflow.singleton_class.prepend(OwnershipDataflowInstrumentation)
     FunctionCFG.singleton_class.prepend(CFGInstrumentation)
     OwnershipDataflow.prepend(OwnershipDataflowInstanceInstrumentation)
+    MIRLowering.prepend(MIRLoweringInstrumentation)
+    OwnershipGraph.prepend(OwnershipGraphInstrumentation)
   end
 
   sig { returns(T.nilable(String)) }
@@ -628,6 +777,10 @@ if options[:format] == "csv"
   scale.each { |name, value| puts "#{name},#{value}" }
   puts
   puts runner.profiler.to_csv
+  if options[:details]
+    puts
+    puts runner.profiler.work_details_to_csv
+  end
 else
   puts "scale: tokens=#{PassWorkProfiler.format_count(scale.fetch(:tokens))} " \
        "parsed_ast_nodes=#{PassWorkProfiler.format_count(scale.fetch(:parsed_ast_nodes))} " \
@@ -637,4 +790,9 @@ else
   puts "scale_ratio: parsed_ast_nodes_per_token=#{format("%.3f", ratio)}"
   puts
   puts runner.profiler.to_table
+  if options[:details]
+    puts
+    puts "work details:"
+    puts runner.profiler.work_details_to_table
+  end
 end
