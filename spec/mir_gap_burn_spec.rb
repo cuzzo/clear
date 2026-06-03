@@ -241,15 +241,15 @@ RSpec.describe "MIR gap-burn characterization" do
     same.coerced_type = :Int64
     expect(low.send(:apply_lowered_coercion, MIR::Ident.new("n"), same)).to be_a(MIR::Ident)
 
-    plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
+    plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, Type.new("[]const u8"), nil)
     fact = low.send(:implicit_allocating_result_fact, plain, ownership_finalization_context)
     expect(fact.name).to eq("tmp")
     expect(fact.ownership_effect.target_var).to eq("tmp")
 
-    wrapped_alloc = MIR::Let.new("wrapped", MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", nil), false, "[]const u8", nil)
+    wrapped_alloc = MIR::Let.new("wrapped", MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", nil), false, Type.new("[]const u8"), nil)
     expect(low.send(:implicit_allocating_result_fact, wrapped_alloc, ownership_finalization_context).ownership_effect.target_var).to eq("wrapped")
 
-    marked = MIR::Let.new("marked", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
+    marked = MIR::Let.new("marked", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, Type.new("[]const u8"), nil)
     mark = MIR::AllocMark.new("marked", :heap, Type.new(:String), :function)
     expect(low.send(:implicit_allocating_result_fact, marked,
       ownership_finalization_context(alloc_marks: { "marked" => mark }))).to be_nil

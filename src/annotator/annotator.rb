@@ -508,6 +508,7 @@ private
     ))
   end
 
+  sig { params(node: T.nilable(T.any(Symbol, AST::Node))).returns(T.untyped) }
   def visit(node)
     return unless node
     return if node.is_a?(Symbol)
@@ -829,8 +830,9 @@ private
   end
 
   # Visit a statement body.
+  sig { params(stmts: T.nilable(T::Array[AST::Node])).void }
   def visit_stmts(stmts)
-    return unless stmts.is_a?(Array)
+    return unless stmts
     saved = @stmts_after
     @stmts_after = nil
     stmts.each do |stmt|

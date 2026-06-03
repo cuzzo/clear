@@ -405,7 +405,7 @@ module CleanupClassifier
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
@@ -467,7 +467,7 @@ module CleanupClassifier
   # expression whose successful capture creates a new owner. Plain
   # variable/field optional access is a borrow and remains the source owner's
   # cleanup responsibility.
-  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless capture_expr_owns_result?(expr)

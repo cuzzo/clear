@@ -1586,15 +1586,18 @@ class BcEmitter
 
   def annotation_to_vm_type(ann)
     return :any if ann.nil?
-    return :i64  if ann == "i64"
-    return :f64  if ann == "f64"
-    return :bool if ann == "bool"
-    return :str  if ann == "[]const u8"
-    return :map  if ann.include?("StringMap") || ann.include?("NumericMapType") ||
-                    ann.include?("PartitionedStringMap") || ann.include?("ShardedStringMap") ||
-                    ann.include?("PartitionedNumericMap") || ann.include?("StripedNumericMap") ||
-                    ann.include?("MutexShardedStringMap")
-    return :set  if ann.include?("CheatLib.Set(")
+    raise TypeError, "MIR::Let annotation must be Type, got #{ann.class}" unless ann.is_a?(Type)
+
+    zig_type = ann.zig_type
+    return :i64  if zig_type == "i64"
+    return :f64  if zig_type == "f64"
+    return :bool if zig_type == "bool"
+    return :str  if zig_type == "[]const u8"
+    return :map  if zig_type.include?("StringMap") || zig_type.include?("NumericMapType") ||
+                    zig_type.include?("PartitionedStringMap") || zig_type.include?("ShardedStringMap") ||
+                    zig_type.include?("PartitionedNumericMap") || zig_type.include?("StripedNumericMap") ||
+                    zig_type.include?("MutexShardedStringMap")
+    return :set  if zig_type.include?("CheatLib.Set(")
     :any
   end
 

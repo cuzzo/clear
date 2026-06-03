@@ -51,32 +51,16 @@ class SymbolEntry
   @next_binding_id = T.let(0, Integer)
   EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
 
-  class BindingFlowFacts < Struct.new(
-    :non_escaping,
-    :borrowed_alias,
-    :valid,
-    :invalid_reason,
-    :read,
-    :mutated,
-    :mutable_ref_target,
-    :poly_borrow_target,
-    :init_contents_heap,
-    keyword_init: true
-  )
-    def initialize(
-      non_escaping: false,
-      borrowed_alias: false,
-      valid: true,
-      invalid_reason: nil,
-      read: false,
-      mutated: false,
-      mutable_ref_target: false,
-      poly_borrow_target: false,
-      init_contents_heap: false
-    )
-      super
-    end
-
+  class BindingFlowFacts < T::Struct
+    prop :non_escaping, T::Boolean, default: false
+    prop :borrowed_alias, T::Boolean, default: false
+    prop :valid, T::Boolean, default: true
+    prop :invalid_reason, T.nilable(String), default: nil
+    prop :read, T::Boolean, default: false
+    prop :mutated, T::Boolean, default: false
+    prop :mutable_ref_target, T::Boolean, default: false
+    prop :poly_borrow_target, T::Boolean, default: false
+    prop :init_contents_heap, T::Boolean, default: false
   end
 
   attr_accessor :reg, :mutable, :storage, :sync, :rebindable,

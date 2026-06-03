@@ -166,14 +166,14 @@ module MIRLoweringLiterals
   sig { params(node: AST::DefaultArrayLit).returns(MIR::ArrayDefaultInit) }
   def lower_default_array_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    type_info = Type.new(node.type_info)
+    type_info = node.full_type!(context: "default fixed-array literal")
     elem_type = T.must(type_info.element_type)
     elem_zig = transpile_type(elem_type)
     count = type_info.capacity
     unless count.is_a?(Integer)
       Kernel.raise "default fixed-array literal requires an integer capacity"
     end
-    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), @current_decl_alloc || alloc_for_node(node))
+    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), @current_decl_alloc || alloc_for_node(node), type_info)
   end
 
   sig { params(elem_type: Type).returns(MIR::Lit) }

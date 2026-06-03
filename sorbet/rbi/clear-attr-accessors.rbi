@@ -1303,6 +1303,15 @@ class FunctionDef
   def uses_rt=(value); end
 end
 
+class FunctionReturn
+  sig { returns(T.untyped) }
+  def fixed; end
+  sig { returns(T.untyped) }
+  def infer; end
+  sig { returns(T.untyped) }
+  def kind; end
+end
+
 class FunctionSignature
   sig { returns(T.untyped) }
   def alloc_fault; end
@@ -1679,8 +1688,6 @@ class OwnershipDataflow
   def block_in; end
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def block_out; end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
-  def point_states; end
 end
 
 class OwnershipGraph
@@ -1818,16 +1825,34 @@ class Scope
   def depth; end
   sig { params(value: Integer).returns(Integer) }
   def depth=(value); end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
-  def locals; end
-  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
-  def locals=(value); end
-  sig { returns(T::Set[T.untyped]) }
+  sig { returns(T::Set[String]) }
   def owned_names; end
-  sig { params(value: T::Set[T.untyped]).returns(T::Set[T.untyped]) }
+  sig { params(value: T::Set[String]).returns(T::Set[String]) }
   def owned_names=(value); end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T.nilable(Scope)) }
+  def parent; end
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def types; end
+end
+
+class Scope::ScopeBindings
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def entries; end
+end
+
+class Scope::ScopeTypes
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  def entries; end
+end
+
+class ScopeBindings
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def entries; end
+end
+
+class ScopeTypes
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  def entries; end
 end
 
 class SemanticAnnotator
@@ -2038,9 +2063,9 @@ class TestThat
 end
 
 class Type
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Lexer::Token)) }
   def auto_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
   def auto_token=(value); end
   sig { returns(TypeCapabilities) }
   def capabilities; end

@@ -305,14 +305,6 @@ RSpec.describe MIRLowering do
       expect(result.zig_type).to eq("Payload")
     end
 
-    it "uses direct ownership-bearing values for escaping allocation decisions" do
-      low = lowering
-
-      expect(low.send(:escaping_value_alloc, Type.new(:String))).to eq(:heap)
-      expect(low.send(:escaping_value_alloc, Type.error_union_of(:String))).to eq(:heap)
-      expect(low.send(:escaping_value_alloc, Type.new(:Int64))).to be_nil
-    end
-
     it "heap-boxes indirect fallible return payloads at the return site" do
       program = lower_fixture_program("transpile-tests/06_heap_return.cht")
 

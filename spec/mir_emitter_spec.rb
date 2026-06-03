@@ -45,7 +45,7 @@ RSpec.describe MIREmitter do
   end
 
   it "emits var declaration with annotation" do
-    node = MIR::Let.new("count", MIR::Lit.new("0"), true, "i64", "_ = &count;")
+    node = MIR::Let.new("count", MIR::Lit.new("0"), true, Type.new("i64"), "_ = &count;")
     expect(e.emit(node)).to eq("var count: i64 = 0; _ = &count;")
   end
 
@@ -303,7 +303,8 @@ RSpec.describe MIREmitter do
   end
 
   it "emits compact repeated default array init" do
-    node = MIR::ArrayDefaultInit.new("[]const u8", "256", MIR::Lit.new("\"\""), :frame)
+    node = MIR::ArrayDefaultInit.new("[]const u8", "256", MIR::Lit.new("\"\""), :frame, Type.array_of(:String, capacity: 256))
+    expect(node.result_type.zig_type).to eq("[256][]const u8")
     expect(e.emit(node)).to eq("[_][]const u8{ \"\" } ** 256")
   end
 

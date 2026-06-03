@@ -41,6 +41,10 @@ RSpec.describe "MIRLowering body finalization performance" do
   OwnedTargetExpr = Struct.new(:target_var) do
     include MIR::Expr
 
+    def result_type
+      Type.new(:String)
+    end
+
     def ownership_effect
       MIR::OwnershipEffect.owned(alloc: :heap, target_var: target_var)
     end
@@ -48,6 +52,10 @@ RSpec.describe "MIRLowering body finalization performance" do
 
   OwnedWrapperExpr = Struct.new(:child, :target_var) do
     include MIR::Expr
+
+    def result_type
+      Type.new(:String)
+    end
 
     def child_exprs
       [child]
@@ -96,7 +104,7 @@ RSpec.describe "MIRLowering body finalization performance" do
     cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     body = [
       MIR::AllocMark.new("items", :heap, Type.new(:"Int64[]", collection: :list), :heap),
-      MIR::Let.new("items", MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), true, "std.ArrayListUnmanaged(i64)"),
+      MIR::Let.new("items", MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), true, Type.new("std.ArrayListUnmanaged(i64)")),
       MIR::Cleanup.new("items", cleanup),
     ]
 

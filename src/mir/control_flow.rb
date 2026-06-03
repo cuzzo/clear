@@ -728,11 +728,12 @@ class OwnershipDataflow
   def join_predecessors(block)
     preds = block.predecessors.select { |pred| @block_out[pred.id] }
     return {} if preds.empty?
-    return T.must(@block_out[preds.first.id]) if preds.length == 1
+    first_out = T.cast(@block_out[preds.first.id], T::Hash[String, OwnershipDataflow::OwnerEntry])
+    return first_out if preds.length == 1
 
-    result = dup_state(T.must(@block_out[preds.first.id]))
+    result = dup_state(first_out)
     preds.drop(1).each do |pred|
-      pred_out = T.must(@block_out[pred.id])
+      pred_out = T.cast(@block_out[pred.id], T::Hash[String, OwnershipDataflow::OwnerEntry])
       pred_out.each do |var, b|
         result[var] = T.cast(join_entry(result[var], b), OwnerEntry)
       end
@@ -801,7 +802,7 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(T.nilable(OwnershipDataflow::OwnerEntry)) }
   def make_owner_entry(node)
     ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "ownership dataflow owner") : nil
-    is_heap = node.is_a?(AST::Locatable) && node.heap_storage?
+    is_heap = T.let(node.is_a?(AST::Locatable) ? node.heap_storage? == true : false, T::Boolean)
     return nil unless ti && ownership_tracked_type?(ti, heap_storage: is_heap)
 
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
@@ -1390,6 +1391,7 @@ module LoopFrameAnalysis
   extend T::Sig
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+  LoopNode = T.type_alias { T.any(AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach) }
 
   # Entry point.  Call once per pass, after CleanupClassifier.
   sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(FnNodes) }
@@ -1403,21 +1405,24 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmts!(stmts, schema_lookup = nil)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s, schema_lookup) }
     nil
   end
 
+  sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmt!(stmt, schema_lookup = nil)
     child_bodies = AST.child_bodies(stmt)
     child_bodies.each { |body| walk_stmts!(body, schema_lookup) }
-    process_loop!(stmt, child_bodies.first || [], schema_lookup) if AST.loop_node?(stmt)
+    process_loop!(T.cast(stmt, LoopNode), child_bodies.first || [], schema_lookup) if AST.loop_node?(stmt)
     nil
   end
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
+  sig { params(loop_node: LoopNode, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)

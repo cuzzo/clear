@@ -47,6 +47,7 @@ module UnionAnalysis
           next
         else
           error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
+          next
         end
       end
 

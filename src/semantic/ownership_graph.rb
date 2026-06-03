@@ -49,7 +49,7 @@ class OwnershipGraph
 
     sig { params(block: T.proc.params(path: String, state: Symbol).void).void }
     def each_state(&block)
-      states.each(&block)
+      states.each { |path, state| block.call(path, state) }
       nil
     end
   end

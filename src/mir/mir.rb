@@ -9,7 +9,8 @@
 # 1. Zig-targeted: each node maps 1:1 to a Zig code pattern
 # 2. All memory explicit: every alloc/dealloc/copy/move is a node
 # 3. Structured control flow: preserves if/while/for/block (Zig requires it)
-# 4. No Type objects: nodes carry Zig type strings, never Type instances
+# 4. Type-bearing verification data carries Type objects; Zig-only templates
+#    carry target strings.
 # 5. Recursive expressions: expression nodes contain sub-expression nodes
 #
 # Old MIR nodes (Drop, Promote, SuppressCleanup, Return,
@@ -18,6 +19,7 @@
 
 require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
+require_relative "../ast/type"
 require_relative "../semantic/pass_state"
 
 module MIR
@@ -157,12 +159,14 @@ module MIR
     end
   end
 
-  class OwnershipEffect < Struct.new(:produces_owned, :alloc, :cleanup_kind, :requires_hoist, :target_var, keyword_init: true)
+  class OwnershipEffect < T::Struct
     extend T::Sig
 
-    def initialize(produces_owned:, alloc:, cleanup_kind:, requires_hoist:, target_var:)
-      super
-    end
+    const :produces_owned, T::Boolean
+    const :alloc, T.nilable(Symbol)
+    const :cleanup_kind, T.nilable(Symbol)
+    const :requires_hoist, T::Boolean
+    const :target_var, T.nilable(String)
 
     NONE = T.let(new(
       produces_owned: false,
@@ -221,12 +225,13 @@ module MIR
     const :captures, T::Array[BoundaryCaptureFact]
   end
 
-  class FsmOwnershipFact < Struct.new(:name, :target, :target_alloc, :move_guarded, keyword_init: true)
+  class FsmOwnershipFact < T::Struct
     extend T::Sig
 
-    def initialize(name:, target:, target_alloc:, move_guarded:)
-      super
-    end
+    const :name, String
+    const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
+    const :move_guarded, T::Boolean
   end
 
   class OwnershipConsumptionFact < T::Struct
@@ -698,11 +703,25 @@ module MIR
   # Zig: const/var name[: type] = init;
   #
   # mutable: false -> const, true -> var
-  # annotation: optional explicit type string (nil -> Zig infers)
+  # annotation: optional explicit Type (nil -> Zig infers)
   # suppression: optional "_ = &name;" or "_ = name;" for Zig warnings
   Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :alias_safe) do
     extend T::Sig
     include Stmt
+    sig do
+      params(
+        name: T.any(String, Symbol),
+        init: T.untyped,
+        mutable: T::Boolean,
+        annotation: T.nilable(Type),
+        suppression: T.nilable(String),
+        alias_safe: T.nilable(T::Boolean),
+      ).void
+    end
+    def initialize(name, init, mutable, annotation = nil, suppression = nil, alias_safe = nil)
+      super(name, init, mutable, annotation, suppression, alias_safe)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
     sig { returns(T.nilable(OwnershipContract)) }
@@ -2406,7 +2425,7 @@ module MIR
   OwnedCreate = Struct.new(:name, :alloc, :type_info, :source) do
     extend T::Sig
     include Stmt
-    sig { params(name: String, alloc: Symbol, type_info: T.nilable(T.any(Type, String)), source: String).void }
+    sig { params(name: String, alloc: Symbol, type_info: Type, source: String).void }
     def initialize(name, alloc, type_info, source)
       super(name, alloc, type_info, source)
     end
@@ -2789,6 +2808,18 @@ module MIR
   ArrayDefaultInit = Struct.new(:elem_type, :count, :default_value, :alloc) do
     extend T::Sig
     include Expr
+
+    sig { params(elem_type: String, count: String, default_value: T.untyped, alloc: T.nilable(Symbol), result_type: Type).void }
+    def initialize(elem_type, count, default_value, alloc, result_type)
+      super(elem_type, count, default_value, alloc)
+      @result_type = T.let(result_type, Type)
+    end
+
+    sig { returns(Type) }
+    def result_type
+      @result_type
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([default_value])
     sig { returns(T::Array[Emittable]) }
@@ -3164,6 +3195,15 @@ module MIR
   RangeLit = Struct.new(:start, :end_val, :elem_type) do
     extend T::Sig
     include Expr
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+
+    sig { params(value: T.nilable(Type)).void }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([start, end_val])
     sig { returns(OwnershipEffect) }

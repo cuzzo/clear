@@ -36,7 +36,7 @@ module MIRLoweringVariables
     const :actually_mutated, T::Boolean
     const :forced_var, T::Boolean
     const :keyword_mutable, T::Boolean
-    const :annotation, T.nilable(String)
+    const :annotation, T.nilable(Type)
     const :heap_return_var, T::Boolean
     const :decl_alloc, Symbol
     const :init_ownership_effect, MIR::OwnershipEffect
@@ -275,7 +275,7 @@ module MIRLoweringVariables
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
                        (ft.string? && is_heap)  # ""/literal infers *const [0:0]u8 without annotation
-    annotation = needs_annotation ? zig_type : nil
+    annotation = needs_annotation ? Type.new(zig_type) : nil
 
     # Resolve init value - special handling for collection types.
     # Per-declaration storage (set by escape analysis) takes precedence over the
@@ -443,7 +443,7 @@ module MIRLoweringVariables
     @current_bindings[node.name.to_s] = drop_entry if @current_bindings
     mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
     MIR::MaterializationPacket.owned(
-      var_decl_alloc_mark(safe_name, node_alloc, node.full_type!, drop_entry),
+      var_decl_alloc_mark(safe_name, node_alloc, facts.ft, drop_entry),
       let_node,
       MIR::Cleanup.new(safe_name, drop_entry)
     )
@@ -458,7 +458,7 @@ module MIRLoweringVariables
     cleanup_entry[:has_moved_guard] = true
     mark_guarded_cleanup_name!(safe_name)
     MIR::MaterializationPacket.owned(
-      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry),
       let_node,
       MIR::Cleanup.new(safe_name, cleanup_entry)
     )
@@ -474,7 +474,7 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     MIR::MaterializationPacket.owned(
-      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry),
       let_node
     )
   end
@@ -488,7 +488,7 @@ module MIRLoweringVariables
   def inline_alloc_var_decl_plan(node, facts, safe_name, init, let_node)
     mir_alloc = init.allocs.any_heap? ? :heap : :frame
     MIR::MaterializationPacket.owned(
-      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry),
       let_node
     )
   end
@@ -509,7 +509,7 @@ module MIRLoweringVariables
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     mark_guarded_cleanup_name!(safe_name)
     MIR::MaterializationPacket.owned(
-      var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry),
+      var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry),
       let_node,
       MIR::Cleanup.new(safe_name, cleanup_entry)
     )
@@ -523,7 +523,7 @@ module MIRLoweringVariables
                                                                (MIR::Placement.heap?(binding_entry.alloc) && binding_entry.kind != :none)
 
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
-    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
+    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, binding_entry)
     return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless ownership_bearing_type?(facts.ft)
 
     cleanup_entry = moved_guard_cleanup_entry(facts.ft, mir_alloc, node)
@@ -535,7 +535,7 @@ module MIRLoweringVariables
   def allocating_init_var_decl_plan(node, facts, safe_name, init, let_node)
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
-    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, facts.binding_entry)
+    alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry)
     return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless type_requires_alloc_cleanup?(facts.ft, mir_alloc)
 
     cleanup_entry = T.must(hoist_cleanup_entry(init, node))
@@ -568,7 +568,7 @@ module MIRLoweringVariables
       ft.recursive_cleanup_shape?(@schema_lookup))
   end
 
-  sig { params(name: String, alloc: Symbol, type_info: T.untyped, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
+  sig { params(name: String, alloc: Symbol, type_info: Type, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
   def var_decl_alloc_mark(name, alloc, type_info, binding_entry)
     mark = MIR::AllocMark.new(name, alloc, type_info,
       alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration))

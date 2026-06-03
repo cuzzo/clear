@@ -614,7 +614,7 @@ class MIREmitter
       return "const #{buf} = #{emit(node.init)};\n#{kw} #{node.name} = #{buf}._root;#{sup}"
     end
     kw = node.mutable ? "var" : "const"
-    ann = node.annotation ? ": #{node.annotation}" : ""
+    ann = node.annotation ? ": #{node.annotation.zig_type}" : ""
     init = emit(node.init)
     sup = node.suppression ? " #{node.suppression}" : ""
     "#{kw} #{node.name}#{ann} = #{init};#{sup}"

@@ -333,6 +333,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
+  sig { params(body: T.untyped, visitor: T.proc.params(node: T.untyped).void).void }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -346,8 +347,9 @@ module AST
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
   EACH_LOCATABLE_MEMBERS_CACHE = T.let({}, T::Hash[T.untyped, T::Array[Symbol]])
-  GENERATED_WALK_MEMBER_PATTERN = /token|drops/i.freeze
+  GENERATED_WALK_MEMBER_PATTERN = T.let(/token|drops/i.freeze, Regexp)
 
+  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
   def self.each_locatable(root, descend_functions: false, &visitor)
     stack = root.is_a?(Array) ? root.reverse : [root]
     until stack.empty?
@@ -387,9 +389,10 @@ module AST
         stack << node.target if node.target
       when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode, FreezeNode, CapabilityWrap
         stack << node.value if node.value
-      when ReturnNode, ThrowNode, DieNode
-        stack << node.value if node.respond_to?(:value) && node.value
-        stack << node.status if node.respond_to?(:status) && node.status
+      when ReturnNode, ThrowNode
+        stack << node.value if node.value
+      when DieNode
+        stack << node.status if node.status
       when Raise
         stack << node.message_expr if node.message_expr
       when Assert
@@ -828,7 +831,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], block: T.proc.params(analysis: T.untyped).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -893,103 +896,103 @@ module AST
     def token_value; token.value; end
 
     sig { returns(T.nilable(Type)) }
-    def coerced_type_object; @coerced_type_object; end
+    def coerced_type_object; T.cast(instance_variable_get(:@coerced_type_object), T.nilable(Type)); end
     sig { returns(T.nilable(Type)) }
-    def type_object; @type_object; end
+    def type_object; T.cast(instance_variable_get(:@type_object), T.nilable(Type)); end
 
     sig { returns(T.untyped) }
-    def zig_pattern; @zig_pattern; end
+    def zig_pattern; instance_variable_get(:@zig_pattern); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def zig_pattern=(val); @zig_pattern = val; end
+    def zig_pattern=(val); instance_variable_set(:@zig_pattern, val); end
 
     sig { returns(T.untyped) }
-    def matched_stdlib_def; @matched_stdlib_def; end
+    def matched_stdlib_def; instance_variable_get(:@matched_stdlib_def); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val)
       fs = IntrinsicRegistry.fs(val)
-      @matched_stdlib_def = fs
+      instance_variable_set(:@matched_stdlib_def, fs)
       self.matched_signature = fs
     end
 
     sig { returns(T.untyped) }
-    def matched_signature; @matched_signature; end
+    def matched_signature; instance_variable_get(:@matched_signature); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def matched_signature=(val); @matched_signature = val; end
+    def matched_signature=(val); instance_variable_set(:@matched_signature, val); end
 
     sig { void }
-    def stdlib_allocates; @stdlib_allocates; end
+    def stdlib_allocates; instance_variable_get(:@stdlib_allocates); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def stdlib_allocates=(val); @stdlib_allocates = val; end
+    def stdlib_allocates=(val); instance_variable_set(:@stdlib_allocates, val); end
 
     sig { returns(T.untyped) }
-    def mutates_receiver; @mutates_receiver; end
+    def mutates_receiver; instance_variable_get(:@mutates_receiver); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def mutates_receiver=(val); @mutates_receiver = val; end
+    def mutates_receiver=(val); instance_variable_set(:@mutates_receiver, val); end
 
     sig { returns(T.untyped) }
-    def was_moved; @was_moved; end
+    def was_moved; instance_variable_get(:@was_moved); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def was_moved=(val); @was_moved = val; end
+    def was_moved=(val); instance_variable_set(:@was_moved, val); end
 
     sig { returns(T.untyped) }
-    def container_borrow; @container_borrow; end
+    def container_borrow; instance_variable_get(:@container_borrow); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def container_borrow=(val); @container_borrow = val; end
+    def container_borrow=(val); instance_variable_set(:@container_borrow, val); end
 
     sig { returns(T.untyped) }
-    def needs_mut_ref; @needs_mut_ref; end
+    def needs_mut_ref; instance_variable_get(:@needs_mut_ref); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_mut_ref=(val); @needs_mut_ref = val; end
+    def needs_mut_ref=(val); instance_variable_set(:@needs_mut_ref, val); end
 
     sig { returns(T.untyped) }
-    def needs_heap_create; @needs_heap_create; end
+    def needs_heap_create; instance_variable_get(:@needs_heap_create); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_heap_create=(val); @needs_heap_create = val; end
+    def needs_heap_create=(val); instance_variable_set(:@needs_heap_create, val); end
 
     sig { void }
-    def collection_return; @collection_return; end
+    def collection_return; instance_variable_get(:@collection_return); end
     sig { params(val: T.untyped).void }
-    def collection_return=(val); @collection_return = val; end
+    def collection_return=(val); instance_variable_set(:@collection_return, val); end
 
     sig { returns(T.nilable(Integer)) }
-    def slot_size; @slot_size; end
+    def slot_size; T.cast(instance_variable_get(:@slot_size), T.nilable(Integer)); end
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
-    def slot_size=(val); @slot_size = val; end
+    def slot_size=(val); instance_variable_set(:@slot_size, val); end
 
     sig { returns(T.untyped) }
-    def resource_close_zig; @resource_close_zig; end
+    def resource_close_zig; instance_variable_get(:@resource_close_zig); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def resource_close_zig=(val); @resource_close_zig = val; end
+    def resource_close_zig=(val); instance_variable_set(:@resource_close_zig, val); end
 
     sig { returns(T.untyped) }
-    def can_fail; @can_fail; end
+    def can_fail; instance_variable_get(:@can_fail); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def can_fail=(val); @can_fail = val; end
+    def can_fail=(val); instance_variable_set(:@can_fail, val); end
 
     sig { returns(T.untyped) }
-    def error_kind; @error_kind; end
+    def error_kind; instance_variable_get(:@error_kind); end
     sig { params(val: T.untyped).void }
-    def error_kind=(val); @error_kind = val; end
+    def error_kind=(val); instance_variable_set(:@error_kind, val); end
 
     sig { returns(T.untyped) }
-    def error_type; @error_type; end
+    def error_type; instance_variable_get(:@error_type); end
     sig { params(val: T.untyped).void }
-    def error_type=(val); @error_type = val; end
+    def error_type=(val); instance_variable_set(:@error_type, val); end
 
     sig { returns(T.untyped) }
-    def var_used; @var_used; end
+    def var_used; instance_variable_get(:@var_used); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def var_used=(val); @var_used = val; end
+    def var_used=(val); instance_variable_set(:@var_used, val); end
 
     sig { returns(T.untyped) }
-    def var_mutated; @var_mutated; end
+    def var_mutated; instance_variable_get(:@var_mutated); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def var_mutated=(val); @var_mutated = val; end
+    def var_mutated=(val); instance_variable_set(:@var_mutated, val); end
 
     sig { returns(T.untyped) }
-    def symbol; @symbol; end
+    def symbol; instance_variable_get(:@symbol); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def symbol=(val); @symbol = val; end
+    def symbol=(val); instance_variable_set(:@symbol, val); end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).

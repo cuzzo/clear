@@ -1140,6 +1140,7 @@ module EffectTracker
 
   sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange), fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T.untyped) }
   def validate_tight_node!(node, loop_node, fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
     return if node.nil?
     case node
     when Symbol, String, Integer, Float, TrueClass, FalseClass, Type

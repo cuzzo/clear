@@ -249,8 +249,9 @@ module Annotator
           when :message
             # value is the parsed STRING expression. Visit so the string
             # literal gets its Type stamped for downstream lowering.
-            visit(f.value)
-            filter_messages << T.cast(f.value, AST::Locatable)
+            message_expr = T.cast(f.value, AST::Locatable)
+            visit(message_expr)
+            filter_messages << message_expr
           end
         end
         clause.filter_types    = filter_types.uniq

@@ -845,7 +845,7 @@ module MIRLoweringConcurrency
       end
 
       block = MIR::BlockExpr.new(blk_label, [
-        MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
+        MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, Type.new("anytype"), nil),
         *run_body,
         MIR::BreakStmt.new(blk_label, MIR::Ident.new(local_stream))
       ])
@@ -1120,12 +1120,14 @@ module MIRLoweringConcurrency
       @tmp_counter += 1
       label = "__next_recv_#{@tmp_counter}"
       temp = "__next_source_#{@tmp_counter}"
-      return MIR::BlockExpr.new(label, [
+      block = MIR::BlockExpr.new(label, [
         MIR::Let.new(temp, receiver, true, nil, nil),
         MIR::BreakStmt.new(label,
           MIR::MethodCall.new(MIR::Ident.new(temp), "next", [], true,
             MIR::CallableContract.no_ownership(0), plan.result_alloc)),
       ])
+      block.result_type = Type.new(result_t)
+      return block
     end
 
     MIR::MethodCall.new(receiver, "next", [], true, MIR::CallableContract.no_ownership(0),

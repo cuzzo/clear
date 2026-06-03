@@ -53,7 +53,7 @@ class Scope
 
     sig { params(block: T.proc.params(name: String, entry: SymbolEntry).void).void }
     def each(&block)
-      @entries.each(&block)
+      @entries.each { |name, entry| block.call(name, entry) }
       nil
     end
   end
@@ -145,12 +145,12 @@ class Scope
   def initialize_copy(original)
     super
 
-    @parent = T.let(original, T.nilable(Scope))
-    @bindings = T.let(ScopeBindings.new, ScopeBindings)
+    @parent = original
+    @bindings = ScopeBindings.new
     @dependencies = original.dependencies.dup
-    @type_store = T.let(ScopeTypes.new, ScopeTypes)
-    @types = T.let(@type_store.entries, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
-    @owned_names = T.let(Set.new, T::Set[String])
+    @type_store = ScopeTypes.new
+    @types = @type_store.entries
+    @owned_names = Set.new
   end
 
   # Build a {param_name => live SymbolEntry} map from a FunctionDef.
@@ -476,6 +476,7 @@ module ScopeHelper
     names.uniq
   end
 
+  sig { params(scope: T.nilable(Scope), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by

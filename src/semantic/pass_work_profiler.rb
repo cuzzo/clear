@@ -112,6 +112,8 @@ module PassWorkProfiler
       ).returns(T.untyped)
     end
     def measure(label, ast_root: nil, mir_root: nil, token_count: nil, &block)
+      record = T.let(nil, T.nilable(StageRecord))
+      started = T.let(nil, T.nilable(Float))
       record = record_for(label)
       record.calls += 1
       record.input_tokens += token_count if token_count
@@ -119,12 +121,14 @@ module PassWorkProfiler
       record.input_mir_nodes += PassWorkProfiler.count_mir_nodes(mir_root) if mir_root
 
       @stack << label
-      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f
       block.call
     ensure
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-      record.seconds += elapsed
-      @stack.pop
+      if record && started
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - started
+        record.seconds += elapsed
+        @stack.pop
+      end
     end
 
     sig { params(kind: String, yields: Integer, seconds: Float).void }

@@ -468,9 +468,6 @@ module MIRLoweringExpressions
     rhs = node.right
     source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
     mir_result = pipeline_host.lower_pipeline(node)
-    if mir_result.is_a?(MIR::BlockExpr)
-      mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
-    end
     result_type = Type.from_node!(node, context: "pipeline result ownership")
     sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
     return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
@@ -537,15 +534,15 @@ module MIRLoweringExpressions
     collect_var = "__collect_acc_#{@block_expr_counter}"
     val_var = "__collect_val_#{@block_expr_counter}"
     left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
-    observable_alloc = left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap
-    collect_cleanup = CleanupEntry.build(:uniform, alloc: observable_alloc,
+    collect_source_alloc = ft.observable? ? :heap : (left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap)
+    collect_cleanup = CleanupEntry.build(:uniform, alloc: collect_source_alloc,
       has_moved_guard: false, zig_type: acc_zig)
     MIR::BlockExpr.new(label, [
-      MIR::Let.new(collect_var, left, false, acc_zig, nil),
+      MIR::Let.new(collect_var, left, false, ft, nil),
       MIR::Cleanup.new(collect_var, collect_cleanup),
       MIR::Let.new(val_var,
         smooth_collect_call(MIR::Ident.new(collect_var), collect_method, collect_args, collect_type, collect_alloc_fact),
-        false, collect_type.zig_type, nil),
+        false, collect_type, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
     ])
   end
@@ -1553,11 +1550,13 @@ module MIRLoweringExpressions
     s = lower(node.start)
     e = lower(node.finish)
     elem_type = node.full_type!.tense_type&.element_type&.resolved
-    if node.inclusive
+    range = if node.inclusive
       MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")), elem_type)
     else
       MIR::RangeLit.new(s, e, elem_type)
     end
+    range.result_type = Type.new(node.full_type!)
+    range
   end
 
   sig { params(node: AST::Slice).returns(MIR::SliceExpr) }

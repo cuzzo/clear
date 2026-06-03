@@ -422,7 +422,7 @@ module FsmOps
       when AssignField
         MIR::Set.new(state_ref(op.field), lower_expr(op.value), false)
       when LetConst
-        MIR::Let.new(op.name, lower_expr(op.value), false, op.zig_type, nil)
+        MIR::Let.new(op.name, lower_expr(op.value), false, Type.new(op.zig_type), nil)
       when ErrDeferCall
         MIR::ErrDeferStmt.new(
           MIR::Call.new(resolve_fn(T.cast(op.fn, FsmOps::FunctionPath)), op.args.map { |a| lower_expr(a) }, false),

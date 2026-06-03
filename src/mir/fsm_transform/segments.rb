@@ -73,13 +73,13 @@ module FsmTransform
         NextSuspend.new(promise_ast, result_var, index)
       end
 
-      sig { returns(T.untyped) }
+      sig { returns(T.nilable(Type)) }
       def result_type
         promise_ft = promise_ast ? Type.from_node!(promise_ast, context: "FSM NEXT suspend promise") : nil
         return nil unless promise_ft
 
         pt = Type.new(promise_ft)
-        pt.tense_type if pt.respond_to?(:tense_type)
+        pt.tense_type
       end
     end
     # LockSuspend: ONE cap's lock-acquire suspend.

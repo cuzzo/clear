@@ -1200,7 +1200,7 @@ class RegisterBcEmitter
   end
 
   def compile_let(stmt)
-    if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(stmt.annotation))
+    if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(annotation_zig_type(stmt.annotation)))
       bind_value(stmt.name.to_s, compile_struct_list_map_init(struct_type))
       return
     end
@@ -4962,7 +4962,7 @@ class RegisterBcEmitter
       return true if let && let.init.is_a?(MIR::StructInit) &&
                      (int64_string_map_type?(let.init.zig_type.to_s) ||
                       value_string_map_type?(let.init.zig_type.to_s) ||
-                      struct_list_map_type?(let.annotation))
+                      struct_list_map_type?(annotation_zig_type(let.annotation)))
     end
     false
   end
@@ -7402,15 +7402,16 @@ class RegisterBcEmitter
   end
 
   def binding_type(stmt)
-    annotation = stmt.annotation.to_s
-    return inferred_expr_type(stmt.init) if annotation.empty?
+    annotation = annotation_zig_type(stmt.annotation)
+    return inferred_expr_type(stmt.init) unless annotation
     return :bool if annotation == "bool" || annotation == "Bool"
 
     normalize_type(annotation)
   end
 
   def enum_binding_type(stmt)
-    return enum_type_name(stmt.annotation) unless stmt.annotation.to_s.empty?
+    annotation = annotation_zig_type(stmt.annotation)
+    return enum_type_name(annotation) if annotation
 
     if stmt.init.is_a?(MIR::Call)
       function = @functions_by_name[stmt.init.callee.to_s]
@@ -7510,7 +7511,8 @@ class RegisterBcEmitter
       if brk && brk.value.is_a?(MIR::Ident)
         target = expr.body.find { |s| s.is_a?(MIR::Let) && s.name.to_s == brk.value.name.to_s }
         if target
-          return normalize_type(target.annotation) if target.annotation
+          annotation = annotation_zig_type(target.annotation)
+          return normalize_type(annotation) if annotation
           t = inferred_expr_type(target.init)
           return t if t && t != :unsupported
         end
@@ -7557,6 +7559,13 @@ class RegisterBcEmitter
 
   def string_expr?(expr)
     inferred_expr_type(expr) == :string
+  end
+
+  def annotation_zig_type(annotation)
+    return nil unless annotation
+    raise TypeError, "MIR::Let annotation must be Type, got #{annotation.class}" unless annotation.is_a?(Type)
+
+    annotation.zig_type
   end
 
   def normalize_type(type)
