@@ -305,7 +305,21 @@ RSpec.describe MIREmitter do
   it "emits compact repeated default array init" do
     node = MIR::ArrayDefaultInit.new("[]const u8", "256", MIR::Lit.new("\"\""), :frame, Type.array_of(:String, capacity: 256))
     expect(node.result_type.zig_type).to eq("[256][]const u8")
+    expect(node.ownership_effect.produces_owned).to eq(true)
+    expect(node.ownership_effect.alloc).to eq(:frame)
     expect(e.emit(node)).to eq("[_][]const u8{ \"\" } ** 256")
+  end
+
+  it "preserves OR-EXIT bytecode rewrite metadata and child message" do
+    message = MIR::Lit.new("\"fail\"")
+    node = MIR::OrExitBcRewrite.new("Runtime", 3, true, true, 12, message)
+
+    expect(node.kind).to eq("Runtime")
+    expect(node.name_id).to eq(3)
+    expect(node.clear_type).to eq(true)
+    expect(node.has_message).to eq(true)
+    expect(node.line).to eq(12)
+    expect(node.child_exprs).to eq([message])
   end
 
   it "emits slice expression with type coercion" do

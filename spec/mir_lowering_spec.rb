@@ -1447,6 +1447,19 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("(if (@typeInfo(@TypeOf(x)) == .pointer) x.* else x)")
     end
 
+    it "uses symbol type information when COPY source has not been stamped" do
+      inner = AST::Identifier.new(tok, "s")
+      inner.symbol = SymbolEntry.new(reg: "s", type: Type.new(:String), mutable: false, storage: :stack)
+      node = AST::CopyNode.new(tok, inner)
+      node.full_type = Type.new(:String)
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::DeepCopy)
+      expect(result.strategy).to eq(:full_value)
+      expect(result.zig_type).to eq("[]const u8")
+    end
+
     it "lowers COPY of sync values as full-value dupes" do
       locked_type = Type.new(:Counter, sync: :locked)
       inner = make_id("c", full_type: locked_type)
@@ -2081,6 +2094,27 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to include("defer stream.deinit()")
       expect(zig).to include("while (try stream.nextOrNull()) |item|")
+    end
+
+    it "lowers FOR EACH over fixed SOA arrays through indexed get" do
+      soa_type = Type.new(:"Point[4]")
+      soa_type.mark_soa_layout!
+      coll = make_id("points", full_type: soa_type)
+      node = AST::ForEach.new(tok, "point", coll, [AST::BreakNode.new(tok)], nil, false)
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::ScopeBlock)
+      init = result.body.first
+      expect(init).to be_a(MIR::Let)
+      expect(init.name).to start_with("__soa_idx_")
+      loop = result.body[1]
+      expect(loop).to be_a(MIR::WhileStmt)
+      bind = loop.body.first
+      expect(bind).to be_a(MIR::Let)
+      expect(bind.name).to eq("point")
+      expect(bind.init).to be_a(MIR::MethodCall)
+      expect(bind.init.method).to eq("get")
     end
 
     it "uses ItemsAccess for list parameters in FOR EACH" do
@@ -2867,6 +2901,24 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to include("try promise.next()")
     end
+
+    it "temps non-identifier stream receivers before NEXT" do
+      source = AST::StaticCall.new(tok, "Streams", "source", [])
+      source.full_type = Type.new(:"~Int64[INF]")
+      source.zig_pattern = "makeStream()"
+      node = AST::NextExpr.new(tok, source)
+      node.full_type = Type.new(:Int64)
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::BlockExpr)
+      expect(result.label).to start_with("__next_recv_")
+      temp = result.body.first
+      expect(temp).to be_a(MIR::Let)
+      expect(temp.init).to be_a(MIR::InlineZig)
+      expect(result.body.last).to be_a(MIR::BreakStmt)
+      expect(result.result_type).to eq(Type.new(:Int64))
+    end
   end
 
   # =========================================================================
@@ -2969,6 +3021,28 @@ RSpec.describe MIRLowering do
       expect(zig).to include("rt.__error.kind = .Input")
       # Kind-without-type clears the stale type explicitly.
       expect(zig).to include("rt.__error.error_name = 0")
+    end
+
+    it "builds bytecode OR EXIT reassign metadata" do
+      facts = MIRLoweringExpressions::OrExitFacts.new(
+        kind: "Input",
+        error_name: nil,
+        name_id: 9,
+        clear_type: true,
+        has_message: true,
+        line: 44,
+      )
+      message = MIR::Lit.new("\"bad\"")
+
+      result = lowering.send(:or_exit_bc_reassign, facts, message)
+
+      expect(result).to be_a(MIR::OrExitBcRewrite)
+      expect(result.kind).to eq("Input")
+      expect(result.name_id).to eq(9)
+      expect(result.clear_type).to eq(true)
+      expect(result.has_message).to eq(true)
+      expect(result.line).to eq(44)
+      expect(result.message).to eq(message)
     end
 
     it "lowers OR EXIT on fallible expressions to a catch block that rewrites error context" do
@@ -3632,5 +3706,103 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     inner = MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap)
 
     expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :uniform, zig_type: "[]const u8")
+  end
+
+  it "lowers default fixed-array literals structurally" do
+    l = lowering
+    node = AST::DefaultArrayLit.new(tok, Type.array_of(:Int64, capacity: 2), :stack)
+
+    result = l.lower(node)
+
+    expect(result).to be_a(MIR::ArrayDefaultInit)
+    expect(result.elem_type).to eq("i64")
+    expect(result.count).to eq("2")
+    expect(result.default_value).to eq(MIR::Lit.new("0"))
+    expect(result.result_type.resolved).to eq(:"Int64[2]")
+  end
+
+  it "lowers default fixed-array values for supported primitive element types" do
+    l = lowering
+
+    expect(l.lower(AST::DefaultArrayLit.new(tok, Type.array_of(:Float64, capacity: 2), :stack)).default_value)
+      .to eq(MIR::Lit.new("0.0"))
+    expect(l.lower(AST::DefaultArrayLit.new(tok, Type.array_of(:String, capacity: 2), :stack)).default_value)
+      .to eq(MIR::Lit.new("\"\""))
+    expect(l.lower(AST::DefaultArrayLit.new(tok, Type.array_of(:Bool, capacity: 2), :stack)).default_value)
+      .to eq(MIR::Lit.new("false"))
+  end
+
+  it "rejects default fixed-array literals without integer capacity or supported element type" do
+    l = lowering
+
+    expect {
+      l.lower(AST::DefaultArrayLit.new(tok, Type.array_of(:Int64), :stack))
+    }.to raise_error(/integer capacity/)
+
+    expect {
+      l.lower(AST::DefaultArrayLit.new(tok, Type.array_of(:Widget, capacity: 2), :stack))
+    }.to raise_error(/unsupported fixed-array default element type/)
+  end
+
+  it "keeps final void FSM assignment steps as statements" do
+    l = lowering
+    target = AST::Identifier.new(tok, "slot")
+    target.full_type = Type.new(:Int64)
+    value = AST::Literal.new(tok, :INT64, 1, nil)
+    value.full_type = Type.new(:Int64)
+    assignment = AST::Assignment.new(tok, target, value)
+    assignment.full_type = Type.new(:Void)
+
+    body = l.lower_step_stmts([assignment], no_result: false, ctx_id: 3)
+
+    expect(body.length).to eq(1)
+    expect(body.first).to be_a(MIR::Set)
+    expect(body.first.target).to eq(MIR::Ident.new("slot"))
+  end
+
+  it "unwraps cast and try nodes when recording FSM result transfers" do
+    l = lowering
+    entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
+    l.instance_variable_set(:@current_bindings, { "owned" => entry })
+    l.instance_variable_set(:@fn_name_rename_map, {})
+    l.instance_variable_set(:@guarded_cleanup_names, {})
+    ast = AST::Identifier.new(tok, "owned")
+    ast.full_type = Type.new(:String)
+    mir = MIR::Cast.new(MIR::TryExpr.new(MIR::Ident.new("owned")), "[]const u8", :as)
+
+    facts = l.send(:fsm_result_transfer_facts, mir, ast)
+
+    expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
+      .to eq([["owned", :heap, true]])
+    expect(entry.has_moved_guard?).to eq(true)
+    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned" => true)
+  end
+
+  it "guards renamed FSM result cleanups and records consumed owned fields" do
+    l = lowering
+    cleanup = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
+    l.instance_variable_set(:@fn_name_rename_map, { "owned" => "owned_renamed" })
+    l.instance_variable_set(:@guarded_cleanup_names, {})
+
+    l.guard_fsm_result_cleanup!(
+      [MIR::Cleanup.new("owned", cleanup)],
+      [MIR::FsmResultTransferFact.new(name: "owned_renamed", target_alloc: :heap, move_guarded: true)],
+    )
+
+    expect(cleanup.has_moved_guard?).to eq(true)
+    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned_renamed" => true)
+
+    binding = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
+    l.instance_variable_set(:@current_bindings, { "owned" => binding })
+    l.instance_variable_set(:@guarded_cleanup_names, { "owned_renamed" => true })
+    owned = AST::Identifier.new(tok, "owned")
+    owned.full_type = Type.new(:String)
+    ast = AST::StructLit.new(tok, "Box", { "value" => owned }, :heap, [])
+    ast.full_type = Type.new(:Box)
+
+    facts = l.send(:fsm_result_transfer_facts, MIR::Lit.new("box"), ast)
+
+    expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
+      .to eq([["owned_renamed", :heap, true]])
   end
 end

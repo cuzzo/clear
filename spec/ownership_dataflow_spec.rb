@@ -126,8 +126,8 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be true
-      expect(summary["a"][:has_moved_guard]).to be false
+      expect(summary["a"].needs_cleanup).to be true
+      expect(summary["a"].has_moved_guard).to be false
     end
 
     it "reports has_moved_guard for maybe_moved variables" do
@@ -144,8 +144,8 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be true
-      expect(summary["a"][:has_moved_guard]).to be true
+      expect(summary["a"].needs_cleanup).to be true
+      expect(summary["a"].has_moved_guard).to be true
     end
 
     it "reports no cleanup for fully moved variables" do
@@ -159,7 +159,7 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be false
+      expect(summary["a"].needs_cleanup).to be false
     end
   end
 
@@ -207,7 +207,7 @@ RSpec.describe OwnershipDataflow do
               plan_guard = entry[:has_moved_guard] || false
               df_entry = summary[var]
               next unless df_entry
-              df_guard = df_entry[:has_moved_guard]
+              df_guard = df_entry.has_moved_guard
               # Under-guard: dataflow says guard needed but plan says no
               if !plan_guard && df_guard
                 under_guarded << "#{File.basename(f)} #{name}() #{var}"

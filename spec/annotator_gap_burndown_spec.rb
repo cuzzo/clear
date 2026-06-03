@@ -56,6 +56,31 @@ RSpec.describe "annotator branch gap burndown" do
     ann.instance_variable_get(:@direct_errors)
   end
 
+  it "annotates default fixed-array literals with their target type" do
+    ann = quiet_annotator
+    lit = AST::DefaultArrayLit.new(token(:KEYWORD, "DEFAULT"), Type.array_of(:Bool, capacity: 3), :heap)
+
+    result = ann.send(:visit_DefaultArrayLit, lit)
+
+    expect(result).to eq(Type.array_of(:Bool, capacity: 3))
+    expect(lit.full_type).to eq(Type.array_of(:Bool, capacity: 3))
+    expect(lit.storage).to eq(:stack)
+  end
+
+  it "marks sync field WITH aliases as non-escaping" do
+    expect_compile(<<~CLEAR)
+      STRUCT Counter { value: Int64 }
+      STRUCT Env { cell: Counter @locked }
+      FN main() RETURNS Void ->
+        env = Env{ cell: Counter{ value: 0 } @locked };
+        WITH EXCLUSIVE env.cell AS inner {
+          inner.value = inner.value + 1;
+        }
+        RETURN;
+      END
+    CLEAR
+  end
+
   def record_body_summaries(ann, graph, propagating: {}, raises: Set.new, fnptr: Set.new)
     graph.each do |name, callees|
       callee_set = callees.to_set
@@ -1370,6 +1395,7 @@ RSpec.describe "annotator branch gap burndown" do
     union = AST::UnionDef.new(token(:UNION, "UNION"), "Choice", {}, :package)
     union.methods = [
       { token: token(:VAR_ID, "not_a_function"), name: "not_a_function", params: [], return_type: Type.new(:Int64) },
+      { token: token(:VAR_ID, "missing_no_body"), name: "missing_no_body", params: [], return_type: Type.new(:Int64) },
       { token: token(:VAR_ID, "short"), name: "short", params: [{ name: "x", type: Type.new(:Int64) }], return_type: Type.new(:Int64) },
       { token: token(:VAR_ID, "no_return"), name: "no_return", params: [], return_type: nil },
     ]

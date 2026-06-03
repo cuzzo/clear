@@ -557,6 +557,25 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
     end
 
+    it "raises when a TIGHT loop method-call argument calls an @reentrant function" do
+      src = <<~CLEAR
+        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          IF n <= 1 THEN RETURN n; END
+          RETURN fib(n - 1) + fib(n - 2);
+        END
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          MUTABLE vals: Int64[]@list = [];
+          TIGHT WHILE i < 3 DO
+            vals.append(fib(i));
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+    end
+
     it "allows normal (non-reentrant, non-extern) CLEAR calls inside TIGHT" do
       src = <<~CLEAR
         FN square(x: Float64) RETURNS Float64 ->
@@ -1745,6 +1764,34 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("break;")
       expect(zig).not_to include("s.items")
     end
+
+    it "lowers CONCURRENT SELECT over ~T[] variables through the stream helper" do
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+            s: ~Int64[] = 0 ..< 5;
+            vals = s |> CONCURRENT(workers: 2) SELECT _ * 2;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentStreamSelect(i64, i64")
+      expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).not_to include("s.toList(")
+    end
+
+    it "lowers CONCURRENT WHERE over ~T[] variables through the stream helper" do
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+            s: ~Int64[] = 0 ..< 5;
+            vals = s |> CONCURRENT(workers: 2) WHERE _ > 2;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentStreamWhere(i64")
+      expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).not_to include("s.toList(")
+    end
   end
 
   describe "concurrent bounded stream pipelines" do
@@ -1956,6 +2003,7 @@ RSpec.describe ZigTranspiler do
           cnt  = us AS $u |> UNNEST $u.orders |> COUNT TRUE;
           any_ = us AS $u |> UNNEST $u.orders |> ANY _.price > 0.0;
           all_ = us AS $u |> UNNEST $u.orders |> ALL _.qty > 0;
+          found = us AS $u |> UNNEST $u.orders |> FIND _.qty == 1;
           mn   = us AS $u |> UNNEST $u.orders |> MIN _.price;
           mx   = us AS $u |> UNNEST $u.orders |> MAX _.price;
           avg  = us AS $u |> UNNEST $u.orders |> AVERAGE _.price;

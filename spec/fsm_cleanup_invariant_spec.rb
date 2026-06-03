@@ -1,6 +1,8 @@
 require 'bundler/setup'
 require 'set'
 require_relative '../src/mir/fsm_transform/emit'
+require_relative '../src/mir/fsm_transform/liveness'
+require_relative '../src/mir/fsm_transform/recursive_splitter'
 
 # Tests for the FSM cleanup invariant: in any FSM-eligible BG body,
 # `defer NAME.<method>(...)` may NEVER appear in a segment fn where
@@ -117,6 +119,88 @@ RSpec.describe FsmTransform::Emit do
           liveness_double.new([]), { "s" => :stub }, []
         )
       }.to raise_error(/seg 7 /)
+    end
+  end
+
+  describe ".build_recursive cleanup registration" do
+    it "routes resource capture close code through destroyTask" do
+      lowering = Class.new {
+        def capture_inits_fsm(_capture_inits)
+          ""
+        end
+      }.new
+      segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+        segments: [
+          FsmTransform::Segments::Segment.new(
+            0, [], FsmTransform::Segments::Done.new(nil)
+          ),
+        ],
+        synthetic_fields: [],
+        alias_overrides_by_index: {},
+      )
+      ctx = {
+        id: 3,
+        bg_rt: "__rt_bg3",
+        captured: { "resource" => :stub },
+        capture_close_zig: { "resource" => "rt.close({0})" },
+        pointer_captures: Set.new,
+        is_void: true,
+        ctx_type: "__BgCtx3",
+        promise_zig: "CheatHeader.Promise(void)",
+        capture_fields: "resource: i32 = 0,\n",
+        blk_label: "__bg3",
+        rt_name: "rt",
+        ctx_var: "__ctx_3_ptr",
+        promise_var: "__promise_3",
+        alloc_var: "__alloc_3",
+        capture_inits: [],
+        promoted_decls: "",
+        pin_mode: false,
+        parallel: false,
+        extra_ctx_fields: [],
+        recursive_promoted_names: [],
+        fresh_heap_cleanup_names: [],
+        fresh_heap_cleanups: "",
+      }
+
+      result = FsmTransform::Emit.build_recursive(
+        ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
+
+      expect(result).to be_a(MIR::FsmLoweringResult)
+      expect(result.code).to include("__ctx_3.rt.close(__ctx_3.resource);")
+      expect(result.structure.captures).to include(name: "resource", cleanup_at: :finalize)
+    end
+
+    it "registers owned suspend result cleanup once" do
+      descriptor = MIR::SuspendDescriptor.new(
+        [], [], MIR::FsmTailYield.new(1, "next"), [],
+        "payload", "[]const u8", true,
+      )
+      ctx = {}
+
+      FsmTransform::Emit.send(:register_owned_suspend_result_cleanups!,
+        [{ descriptor: descriptor }, { descriptor: descriptor }], ctx, 7)
+
+      lines = ctx.fetch(:fsm_destroy_lines)
+      expect(lines.length).to eq(1)
+      expect(lines.first.kind).to eq(:body)
+      expect(lines.first.name).to eq("payload")
+      expect(lines.first.zig).to include("__ctx_7.__owned_payload_init")
+      expect(lines.first.zig).to include("__ctx_7.payload")
+    end
+
+    it "collects guard fields for cleanup-bearing suspend results" do
+      promise = AST::Identifier.new(nil, "p")
+      promise.full_type = Type.new(:"~String")
+      segment = FsmTransform::Segments::Segment.new(
+        0,
+        [],
+        FsmTransform::Segments::NextSuspend.new(promise, "payload", 1),
+      )
+
+      guards = FsmTransform::Emit.send(:fsm_owned_result_guards, [segment], Object.new)
+
+      expect(guards).to eq("payload" => "__owned_payload_init")
     end
   end
 end

@@ -87,7 +87,12 @@ RSpec.describe FsmTransform::RecursiveSplitter do
   def binop(left, op, right); AST::BinaryOp.new(nil, left, op, right); end
   def while_stmt(cond, body); AST::WhileLoop.new(nil, cond, body, nil); end
   def for_range(var, s, e, body); AST::ForRange.new(nil, var, s, e, false, body, nil, nil); end
+  def for_each(var, collection, body); AST::ForEach.new(nil, var, collection, body, nil, false); end
   def if_stmt(cond, then_b, else_b); AST::IfStatement.new(nil, cond, then_b, else_b); end
+  def segments_for(segment_list)
+    expect(segment_list).not_to be_nil
+    segment_list.segments
+  end
 
   def io_call(name, stdlib_def)
     fc = Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
@@ -98,6 +103,16 @@ RSpec.describe FsmTransform::RecursiveSplitter do
   let(:io_def) { { suspends: true, fsm_setup: [] } }
 
   describe "flat shapes (sanity)" do
+    it "empty body returns a single Done segment without renumbering" do
+      segment_list = FsmTransform::RecursiveSplitter.split([], lowering)
+      segs = segments_for(segment_list)
+
+      expect(segs.length).to eq(1)
+      expect(segs.first.index).to eq(0)
+      expect(segs.first.tail).to be_a(FsmTransform::Segments::Done)
+      expect(segment_list.alias_overrides_by_index).to eq({})
+    end
+
     it "single suspend at top level" do
       stmt = io_call("sleep", io_def)
       # In the AST this would be a stmt-level FuncCall. classify_suspend
@@ -105,8 +120,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # which doesn't match. Test with NEXT instead.
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
-      segs = FsmTransform::RecursiveSplitter.split([next_expr], lowering)
-      expect(segs).not_to be_nil
+      segment_list = FsmTransform::RecursiveSplitter.split([next_expr], lowering)
+      segs = segments_for(segment_list)
       expect(segs.first.tail).to be_a(FsmTransform::Segments::NextSuspend)
       # The suspend's next_index points at the Done segment.
       done_idx = segs.find_index { |s| s.tail.is_a?(FsmTransform::Segments::Done) }
@@ -115,8 +130,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
     it "linear stmts only (no suspend) returns Goto-to-Done" do
       stmts = [lit(1), lit(2)]
-      segs = FsmTransform::RecursiveSplitter.split(stmts, lowering)
-      expect(segs).not_to be_nil
+      segment_list = FsmTransform::RecursiveSplitter.split(stmts, lowering)
+      segs = segments_for(segment_list)
       expect(segs.first.tail).to be_a(FsmTransform::Segments::Goto)
       done_idx = segs.find_index { |s| s.tail.is_a?(FsmTransform::Segments::Done) }
       expect(segs.first.tail.target_index).to eq(done_idx)
@@ -129,8 +144,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       next_expr = AST::NextExpr.new(nil, promise)
       cond = binop(ident("i"), :LESSTHAN, lit(3))
       body = [next_expr]
-      segs = FsmTransform::RecursiveSplitter.split([while_stmt(cond, body)], lowering)
-      expect(segs).not_to be_nil
+      segment_list = FsmTransform::RecursiveSplitter.split([while_stmt(cond, body)], lowering)
+      segs = segments_for(segment_list)
       cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
       expect(cond_seg).not_to be_nil
       expect(cond_seg.tail.cond_ast).to include("i").and include("<")
@@ -146,8 +161,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       stmt = for_range("i", lit(0), lit(3), [next_expr])
-      segs = FsmTransform::RecursiveSplitter.split([stmt], lowering)
-      expect(segs).not_to be_nil
+      segment_list = FsmTransform::RecursiveSplitter.split([stmt], lowering)
+      segs = segments_for(segment_list)
       init_seg = segs.find { |s|
         s.stmts.any? { |st|
           FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("__ctx_9.__for_")
@@ -166,8 +181,40 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       }
       expect(incr_seg).not_to be_nil
       # Synthetic fields registered for the unified emit.
-      expect(segs.synthetic_fields).to include(/__for_\d+: i64/)
-      expect(segs.synthetic_fields).to include(/i: i64/)
+      expect(segment_list.synthetic_fields).to include(/__for_\d+: i64/)
+      expect(segment_list.synthetic_fields).to include(/i: i64/)
+    end
+  end
+
+  describe "ForEach iterator with NEXT" do
+    it "synthesizes iterator state and a condition segment" do
+      promise = ident("p")
+      next_expr = AST::NextExpr.new(nil, promise)
+      coll = AST::Identifier.new(nil, "items")
+      coll.full_type = Type.new(:"Int64[]", collection: :set)
+
+      segment_list = FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)
+      segs = segments_for(segment_list)
+
+      expect(segment_list.synthetic_fields).to include(/v: i64/)
+      expect(segment_list.synthetic_fields).to include(/__feiter_\d+:/)
+      expect(segment_list.synthetic_fields).to include(/__fehas_\d+: bool/)
+      init_seg = segs.find { |s|
+        s.stmts.any? { |st|
+          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("items.keyIterator()")
+        }
+      }
+      expect(init_seg).not_to be_nil
+      cond_seg = segs.find { |s|
+        s.tail.is_a?(FsmTransform::Segments::CondBranch) &&
+          s.stmts.any? { |st|
+            FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?(".next()")
+          }
+      }
+      expect(cond_seg).not_to be_nil
+      sus_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
+      expect(sus_seg.tail.next_index).to eq(cond_seg.index)
     end
   end
 
@@ -177,8 +224,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       next_expr = AST::NextExpr.new(nil, promise)
       cond = ident("flag")
       stmts = [if_stmt(cond, [next_expr], nil)]
-      segs = FsmTransform::RecursiveSplitter.split(stmts, lowering)
-      expect(segs).not_to be_nil
+      segment_list = FsmTransform::RecursiveSplitter.split(stmts, lowering)
+      segs = segments_for(segment_list)
       cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
       expect(cond_seg).not_to be_nil
       # then_index points at a NextSuspend segment
@@ -197,9 +244,9 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       inner_if = if_stmt(ident("flag"), [next_expr], nil)
       while_body = [inner_if]
       cond = binop(ident("i"), :LESSTHAN, lit(3))
-      segs = FsmTransform::RecursiveSplitter.split(
+      segment_list = FsmTransform::RecursiveSplitter.split(
         [while_stmt(cond, while_body)], lowering)
-      expect(segs).not_to be_nil
+      segs = segments_for(segment_list)
       # There should be at least 2 CondBranch tails: the outer
       # while-cond and the inner if-cond.
       cond_segs = segs.select { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
@@ -213,9 +260,9 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     it "produces a LockSuspend segment for a single-cap EXCLUSIVE WITH" do
       cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       with_node = AST::WithBlock.new(nil, [cap], [])
-      segs = FsmTransform::RecursiveSplitter.split(
+      segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
-      expect(segs).not_to be_nil
+      segs = segments_for(segment_list)
       lock_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::LockSuspend) }
       expect(lock_seg).not_to be_nil
       expect(lock_seg.tail.with_node).to equal(with_node)
@@ -229,9 +276,9 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       cap1 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("a"))
       cap2 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("b"))
       with_node = AST::WithBlock.new(nil, [cap1, cap2], [])
-      segs = FsmTransform::RecursiveSplitter.split(
+      segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
-      expect(segs).not_to be_nil
+      segs = segments_for(segment_list)
       lock_segs = segs.select { |s|
         s.tail.is_a?(FsmTransform::Segments::LockSuspend)
       }
@@ -259,9 +306,9 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       next_expr = AST::NextExpr.new(nil, ident("p"))
       with_node = AST::WithBlock.new(nil, [cap], [next_expr])
-      segs = FsmTransform::RecursiveSplitter.split(
+      segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
-      expect(segs).not_to be_nil
+      segs = segments_for(segment_list)
       # Both LockSuspend AND a NextSuspend (in the CS body) appear.
       expect(segs.any? { |s| s.tail.is_a?(FsmTransform::Segments::LockSuspend) }).to be true
       expect(segs.any? { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }).to be true

@@ -53,38 +53,14 @@ module FsmTransform
 
     class SegmentList < T::Struct
       extend T::Sig
-      extend T::Generic
-      include Enumerable
-      Elem = type_member { { fixed: FsmTransform::Segments::Segment } }
 
       const :segments, T::Array[FsmTransform::Segments::Segment]
       const :synthetic_fields, T::Array[String]
       const :alias_overrides_by_index, AliasOverrideTable
 
-      sig { override.params(block: T.proc.params(segment: FsmTransform::Segments::Segment).returns(BasicObject)).returns(T.untyped) }
-      def each(&block)
-        segments.each(&block)
-        nil
-      end
-
       sig { params(index: Integer).returns(T.nilable(AliasOverrideMap)) }
       def alias_overrides_for(index)
         alias_overrides_by_index[index]
-      end
-
-      sig { returns(T::Array[FsmTransform::Segments::Segment]) }
-      def to_a
-        segments.dup
-      end
-
-      sig { params(index: Integer).returns(T.nilable(FsmTransform::Segments::Segment)) }
-      def [](index)
-        segments[index]
-      end
-
-      sig { returns(T::Boolean) }
-      def empty?
-        segments.empty?
       end
     end
 
@@ -103,16 +79,6 @@ module FsmTransform
         @synthetic_fields = T.let([], T::Array[String])
         @alias_overrides_for = T.let({}, AliasOverrideTable)
         @current_alias_overrides = T.let(nil, T.nilable(AliasOverrideMap))
-      end
-
-      # Per-segment alias overrides keyed by segment index. Used by
-      # WITH's recursively-split CS body so the CS-scope identifier
-      # alias (e.g. `inner` -> `(__ctx.c.ctrl.data.*.data)`) is in
-      # the capture_map when each CS segment is rendered.
-      sig { params(idx: Integer).returns(T.nilable(AliasOverrideMap)) }
-      def alias_overrides_for(idx)
-        T.bind(self, T.untyped) rescue nil
-        @alias_overrides_for[idx]
       end
 
       # Push a frame of alias overrides during a recursive emit call.

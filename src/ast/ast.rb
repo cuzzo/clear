@@ -591,8 +591,6 @@ module AST
       (expr.fields&.values || []).compact
     when ListLit
       (expr.items || []).compact
-    when DefaultArrayLit
-      []
     when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
          FreezeNode, CapabilityWrap
       expr.value ? [expr.value] : []
@@ -628,8 +626,6 @@ module AST
       (node.fields&.values || []).compact
     when ListLit
       node.items.compact
-    when DefaultArrayLit
-      []
     when HashLit
       node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
     when ReturnNode

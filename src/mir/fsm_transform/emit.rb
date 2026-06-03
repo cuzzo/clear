@@ -18,6 +18,7 @@ require "sorbet-runtime"
 require "set"
 require_relative "../mir"
 require_relative "../fsm_wrapper_emitter"
+require_relative "suspend_resolvers"
 
 module FsmTransform
   module Emit
@@ -60,17 +61,6 @@ module FsmTransform
       const :kind, Symbol
       const :name, T.nilable(String)
       const :zig, String
-
-      sig { params(key: Symbol).returns(T.any(Symbol, String, NilClass)) }
-      def [](key)
-        case key
-        when :kind then kind
-        when :name then name
-        when :zig then zig
-        else
-          raise KeyError, "unknown FSM destroy line key #{key.inspect}"
-        end
-      end
     end
 
     # ================================================================
@@ -252,11 +242,11 @@ module FsmTransform
       # acquisition order, then captures, then any lifted body
       # cleanups.
       destroy_entries = T.cast(Array(ctx[:fsm_destroy_lines]).select { |entry|
-        fsm_destroy_zig_present?(entry[:zig])
+        entry.is_a?(DestroyLine) && fsm_destroy_zig_present?(entry.zig)
       }, T::Array[DestroyLine])
-      lock_zigs    = destroy_entries.select { |e| e[:kind] == :lock    }.map { |e| e[:zig].to_s }
-      capture_zigs = destroy_entries.select { |e| e[:kind] == :capture }.map { |e| e[:zig].to_s }
-      body_zigs    = destroy_entries.select { |e| e[:kind] == :body    }.map { |e| e[:zig].to_s }
+      lock_zigs    = destroy_entries.select { |e| e.kind == :lock    }.map(&:zig)
+      capture_zigs = destroy_entries.select { |e| e.kind == :capture }.map(&:zig)
+      body_zigs    = destroy_entries.select { |e| e.kind == :body    }.map(&:zig)
       destroy_seq  = lock_zigs.reverse + capture_zigs + body_zigs
       destroy_extra = destroy_seq.empty? ? nil : destroy_seq.join("\n")
       ctx_struct = MIR::FsmGenericCtxStruct.new(
@@ -276,8 +266,8 @@ module FsmTransform
     def build_fsm_structure(ctx, segment_specs, destroy_entries, id)
       T.bind(self, T.untyped) rescue nil
       cleanup_names = destroy_entries.filter_map { |entry|
-        next nil unless entry[:kind] == :capture || entry[:kind] == :body
-        entry[:name]&.to_s
+        next nil unless entry.kind == :capture || entry.kind == :body
+        entry.name&.to_s
       }.uniq
       captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
       capture_names = captured.keys.map(&:to_s)
@@ -575,7 +565,7 @@ module FsmTransform
     sig { params(ctx: FsmContext, segments: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
     def build_recursive(ctx, segments, liveness, lowering)
       T.bind(self, T.untyped) rescue nil
-      return nil if segments.empty?
+      return nil if segments.segments.empty?
 
       id = T.cast(ctx[:id], Integer)
       bg_rt = T.cast(ctx[:bg_rt], String)
@@ -592,7 +582,7 @@ module FsmTransform
 
       ctx_token = "__ctx_#{id}"
       segment_list = segments
-      segments = segments.map do |seg|
+      segments = segment_list.segments.map do |seg|
         new_stmts = seg.stmts.map do |s|
           render_segment_stmt(s, ctx_token)
         end
@@ -750,8 +740,8 @@ module FsmTransform
           prev_fsm_allocs = lowering.instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
           prev_fsm_guards = lowering.instance_variable_get(:@current_fsm_inherited_guarded_names) rescue nil
           inherited_capture_names = Array(ctx[:fsm_destroy_lines]).filter_map do |entry|
-            next nil unless entry[:kind] == :capture || entry[:kind] == :body
-            name = entry[:name]
+            next nil unless entry.is_a?(DestroyLine) && (entry.kind == :capture || entry.kind == :body)
+            name = entry.name
             name ? "__ctx_#{id}.#{name}" : nil
           end.to_set
           captured.keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }

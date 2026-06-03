@@ -229,6 +229,22 @@ RSpec.describe CleanupClassifier do
     end
   end
 
+  describe "optional cleanup classification" do
+    it "classifies optional owned payloads when the node has no initializer value" do
+      entry = CleanupClassifier.send(
+        :classify_optional,
+        Type.new(:"?String"),
+        ->(_name) { nil },
+        node: Object.new,
+      )
+
+      expect(entry).not_to be_nil
+      expect(entry[:kind]).to eq(:uniform)
+      expect(entry[:alloc]).to eq(:frame)
+      expect(entry[:has_moved_guard]).to eq(true)
+    end
+  end
+
   describe "MATCH TAKES binding (move)" do
     context "MATCH TAKES with slice payload" do
       let(:plan) do

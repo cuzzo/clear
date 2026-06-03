@@ -490,6 +490,21 @@ RSpec.describe MIRChecker do
       errors = checker.check_fn!(fn_def("direct_iz", body))
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("items") }).to be true
     end
+
+    it "detects mismatch for allocator-bearing InlineZig wrapped in DiscardOwned" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :heap }
+      iz.target_var = "parts"
+      cleanup = CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })
+      body = [
+        MIR::FrameSave.new("rt"),
+        alloc_mark("parts", :frame),
+        MIR::DiscardOwned.new(iz, cleanup, "void"),
+      ]
+
+      errors = checker.check_fn!(fn_def("discarded_iz", body))
+      expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("parts") }).to be true
+    end
   end
 
   # ===========================================================================

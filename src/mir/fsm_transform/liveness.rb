@@ -37,9 +37,10 @@ module FsmTransform
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
     # fields are added by the emitter, not the body).
-    sig { params(segments: T.untyped, ctx: T.untyped).returns(Result) }
+    sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, Object]).returns(Result) }
     def analyze(segments, ctx)
-      capture_names = (ctx[:captured] || {}).keys.to_set
+      captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
+      capture_names = captured.keys.to_set
 
       defs_by_seg = {}   # seg_index -> { name => type }
       uses_by_seg = {}   # seg_index -> Set<name>
@@ -118,7 +119,7 @@ module FsmTransform
     # tail edges (i.e. members of a non-trivial strongly-connected
     # component, or have a self-loop). Used to widen the live-set
     # for back-edge cases like B2-LOOP's cond+loop_pre+loop_post.
-    sig { params(segments: T.untyped).returns(T::Set[Integer]) }
+    sig { params(segments: T::Array[FsmTransform::Segments::Segment]).returns(T::Set[Integer]) }
     def compute_cyclic_segments(segments)
       adj = {}
       segments.each { |seg| adj[seg.index] = tail_targets(seg) }

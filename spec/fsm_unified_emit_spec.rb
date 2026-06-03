@@ -47,6 +47,19 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
   }
 
+  it "rejects unexpanded lock tails in dispatch assembly" do
+    spec = {
+      index:      0,
+      body_stmts: [],
+      tail:       FsmTransform::Segments::LockSuspend.new(nil, {}, [], 0, 1),
+      descriptor: nil,
+    }
+
+    expect {
+      FsmTransform::Emit.build_dispatch_tail(spec, 0, [spec], 0)
+    }.to raise_error(ArgumentError, /Unsupported segment tail/)
+  end
+
   describe "two-segment IO shape (B2-IO)" do
     # Build the descriptor by hand to exercise the assembly without
     # depending on the IO resolver. Setup = a single ExprStmt; bind

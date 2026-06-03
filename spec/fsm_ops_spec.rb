@@ -149,6 +149,28 @@ RSpec.describe FsmOps do
     end
   end
 
+  describe "MIR lowering" do
+    it "lowers LetConst into a typed MIR let" do
+      lowerer = FsmOps::Lowerer.new(
+        ctx_id: 7,
+        bg_rt: "__rt_bg7",
+        arg_mirs: [MIR::Lit.new("42")],
+      )
+      stmt = FO.let_const("__rf_size", "usize", FO.intcast("usize", FO.arg(0)))
+
+      mir = lowerer.lower_stmt(stmt)
+
+      expect(mir).to be_a(MIR::Let)
+      expect(mir.name).to eq("__rf_size")
+      expect(mir.mutable).to eq(false)
+      expect(mir.annotation).to eq(Type.new("usize"))
+      expect(mir.init).to be_a(MIR::Call)
+      expect(mir.init.callee).to eq("@as")
+      expect(mir.init.args.first).to eq(MIR::Ident.new("usize"))
+      expect(mir.init.args.last).to eq(MIR::Call.new("@intCast", [MIR::Lit.new("42")], false))
+    end
+  end
+
   describe "structure derivation helpers" do
     let(:setup_ops) {
       [

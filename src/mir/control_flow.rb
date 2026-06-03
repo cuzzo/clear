@@ -370,20 +370,8 @@ class OwnershipDataflow
   end
 
   class CleanupDecision < T::Struct
-    extend T::Sig
-
     const :needs_cleanup, T::Boolean
     const :has_moved_guard, T::Boolean
-
-    sig { params(key: Symbol).returns(T::Boolean) }
-    def [](key)
-      case key
-      when :needs_cleanup then needs_cleanup
-      when :has_moved_guard then has_moved_guard
-      else
-        raise KeyError, "unknown cleanup decision key #{key.inspect}"
-      end
-    end
   end
 
   attr_reader :block_in, :block_out
@@ -530,14 +518,14 @@ class OwnershipDataflow
     cleanup_entry_pairs(fn_node, bindings).each do |var, entry|
       next unless entry.needs_cleanup?
       block_entry = block_exit_cleanup_summary(var)
-      df_entry = if block_entry && !block_entry[:needs_cleanup]
+      df_entry = if block_entry && !block_entry.needs_cleanup
         block_entry
       else
         summary[var] || block_entry
       end
       next unless df_entry # variable not tracked by dataflow - keep plan
 
-      if !df_entry[:needs_cleanup]
+      if !df_entry.needs_cleanup
         # Moved on ALL paths -> normally no cleanup needed.
         # Exception: MATCH TAKES unions need the defer with a moved guard.
         if entry.kind == :takes_union || decision_facts.match_takes_vars.include?(var)
@@ -550,10 +538,10 @@ class OwnershipDataflow
           entry[:needs_cleanup] = false
           entry[:has_moved_guard] = false
         end
-      elsif !df_entry[:has_moved_guard] && entry.has_moved_guard?
+      elsif !df_entry.has_moved_guard && entry.has_moved_guard?
         # Never moved on any path -> unconditional cleanup, no guard.
         entry[:has_moved_guard] = false
-      elsif df_entry[:has_moved_guard] && !entry.has_moved_guard?
+      elsif df_entry.has_moved_guard && !entry.has_moved_guard?
         # Moved on at least one path -> guard cleanup and let SuppressCleanup
         # mark the transfer at the consuming statement.
         entry[:has_moved_guard] = true
@@ -747,37 +735,29 @@ class OwnershipDataflow
     preds.drop(1).each do |pred|
       pred_out = T.cast(@block_out[pred.id], T::Hash[String, OwnershipDataflow::OwnerEntry])
       pred_out.each do |var, b|
-        result[var] = T.cast(join_entry(result[var], b), OwnerEntry)
+        result[var] = join_entry(result[var], b)
       end
     end
     result
   end
 
   # Join two OwnerEntry values (or nil for absent variables).
-  sig { params(a: T.nilable(OwnershipDataflow::OwnerEntry), b: T.nilable(OwnershipDataflow::OwnerEntry)).returns(T.any(OwnershipDataflow::OwnerEntry, Symbol)) }
+  sig { params(a: T.nilable(OwnershipDataflow::OwnerEntry), b: T.nilable(OwnershipDataflow::OwnerEntry)).returns(OwnershipDataflow::OwnerEntry) }
   def join_entry(a, b)
     return T.must(b) if a.nil?
     return a if b.nil?
 
-    a_st = a.is_a?(OwnerEntry) ? a.state : a
-    b_st = b.is_a?(OwnerEntry) ? b.state : b
+    a_st = a.state
+    b_st = b.state
 
     joined_state = join_state(a_st, b_st)
 
     # Preserve allocator/needs_cleanup from whichever side has them.
     # These are immutable per-variable properties, so both sides agree
     # (or one side is nil/UNINIT and has no entry).
-    if a.is_a?(OwnerEntry)
-      return a if joined_state == a.state
+    return a if joined_state == a.state
 
-      OwnerEntry.new(state: joined_state, allocator: a.allocator, needs_cleanup: a.needs_cleanup)
-    elsif b.is_a?(OwnerEntry)
-      return b if joined_state == b.state
-
-      OwnerEntry.new(state: joined_state, allocator: b.allocator, needs_cleanup: b.needs_cleanup)
-    else
-      joined_state
-    end
+    OwnerEntry.new(state: joined_state, allocator: a.allocator, needs_cleanup: a.needs_cleanup)
   end
 
   sig { params(a: Symbol, b: Symbol).returns(Symbol) }
