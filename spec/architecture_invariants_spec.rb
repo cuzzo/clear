@@ -203,6 +203,24 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
   end
 
+	  it "does not use regexes or regex-driven text rewriting anywhere in MIR" do
+	    paths = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")]
+
+    offenders = paths.uniq.sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/Regexp|\.match\?|\.match\(|\.scan\(|\.gsub\(\s*\//) ||
+                    line.match?(/\.sub\(\s*\//) ||
+                    line.match?(/=~\s*\//)
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty, offenders.join("\n")
+  end
+
   it "requires structural calls to carry typed callable contracts" do
     expect(source("src/mir/mir.rb")).to include("class CallableContract")
     expect(source("src/mir/mir.rb")).to include("attr_reader :signature")
@@ -1033,7 +1051,8 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
 
   it "fences FSM/thunk memory-safety emission behind typed facts" do
     fsm = File.read(File.join(ARCH_ROOT, "src/mir/fsm_lowering.rb"))
-    expect(fsm).to include("class FsmResultTransferFact < T::Struct")
+    mir = File.read(File.join(ARCH_ROOT, "src/mir/mir.rb"))
+    expect(mir).to include("class FsmResultTransferFact < T::Struct")
     expect(fsm).to include("def fsm_result_transfer_facts")
 
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/fsm_transform/**/*.rb")] +

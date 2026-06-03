@@ -709,7 +709,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include('var resp: []const u8 = @as([]const u8, try rt.heapAlloc().dupe(u8, ""))')
-      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
+      expect(zig).to include("defer if (!resp_moved) CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
     end
 
     it "nested loop-carried string reassignment uses heap allocation because it survives inner loop restore" do

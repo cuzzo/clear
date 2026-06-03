@@ -393,7 +393,7 @@ module TestLowering
       idx = MIR::Ident.new("#{stub_info[:var]}_idx")
       si  = "__stub_si_#{counter}"
       MIR::BlockExpr.new(label, suppress_stmts + [
-        MIR::Let.new(si, idx, false, "usize", nil),
+        MIR::Let.new(si, idx, false, Type.new("usize"), nil),
         MIR::Set.new(idx, MIR::BinOp.new("+", idx, MIR::Lit.new("1")), false),
         MIR::BreakStmt.new(label, MIR::IndexGet.new(seq, MIR::Ident.new(si))),
       ])
@@ -445,7 +445,7 @@ module TestLowering
     when :captures
       cap_name = node.value
       @active_stubs[fn_name] = { kind: :captures, var: cap_name }
-      MIR::Let.new(cap_name, MIR::Lit.new("0"), true, "i64", "_ = &#{cap_name};")
+      MIR::Let.new(cap_name, MIR::Lit.new("0"), true, Type.new("i64"), "_ = &#{cap_name};")
     when :sequence
       values = node.value
       items_mir = if values.respond_to?(:items)
@@ -463,7 +463,7 @@ module TestLowering
         MIR::Let.new(
           "#{stub_var}_idx",
           MIR::Lit.new("0"),
-          true, "usize", "_ = &#{stub_var}_idx;"
+          true, Type.new("usize"), "_ = &#{stub_var}_idx;"
         ),
       ]
     when :with

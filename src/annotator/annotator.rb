@@ -455,7 +455,7 @@ private
     false
   end
 
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { void }
   def setup_builtins
     STD_LIB.each do |name, config|
       current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
@@ -504,9 +504,10 @@ private
                        zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true }
       }
     ))
+    nil
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.nilable(T.any(Symbol, AST::Node))).returns(T.untyped) }
   def visit(node)
     return unless node
     return if node.is_a?(Symbol)
@@ -524,10 +525,10 @@ private
     send(method_name, node)
   end
 
-  # Cached outer scope variable set - avoids O(n) flat_map per loop
+  # Outer scope variable set.
   sig { returns(T::Set[String]) }
   def outer_scope_vars
-    @scope_stack.flat_map { |s| s.locals.keys }.to_set
+    @scope_stack.flat_map(&:visible_names).to_set
   end
 
   sig { params(node: AST::Program).returns(T.untyped) }
@@ -584,7 +585,7 @@ private
     same_dir = (node.kind != :package) && (mod.source_dir == @source_dir)
 
     # Import function signatures that are visible from this call site.
-    mod.global_scope.locals.each do |name, entry|
+    mod.global_scope.visible_entries.each do |name, entry|
       sig = entry.fn_signature
       next unless sig
 
@@ -826,15 +827,13 @@ private
     pop_function_context!
   end
 
-  # Visit a statement body while tracking remaining siblings in @stmts_after.
-  # This lets visit_MatchStatement check whether the match subject is used
-  # after the match (to avoid incorrect auto-TAKES consumption).
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  # Visit a statement body.
+  sig { params(stmts: T.nilable(T::Array[AST::Node])).void }
   def visit_stmts(stmts)
-    return unless stmts.is_a?(Array)
+    return unless stmts
     saved = @stmts_after
-    stmts.each_with_index do |stmt, i|
-      @stmts_after = T.let(stmts[(i + 1)..], T.nilable(T::Array[T.untyped]))
+    @stmts_after = nil
+    stmts.each do |stmt|
       visit(stmt)
     end
     @stmts_after = saved

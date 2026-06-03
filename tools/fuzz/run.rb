@@ -252,6 +252,7 @@ def fuzz_worker_count(entries, env_key, default_workers)
 end
 
 def simplecov_child_command!(name)
+  CoverageBootstrap.isolate_process!(name) if defined?(CoverageBootstrap)
   return unless defined?(SimpleCov)
 
   SimpleCov.command_name("#{name}-#{Process.pid}") if SimpleCov.respond_to?(:command_name)

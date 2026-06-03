@@ -17,9 +17,9 @@ RSpec.describe OwnershipDataflow do
   end
 
   describe "basic ownership" do
-    it "tracks owned variable" do
+    it "does not track copy-like primitive bindings" do
       df = analyze("FN main() RETURNS Void -> x = 42; RETURN; END", "main")
-      expect(df.exit_states["x"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("x")
     end
 
     it "tracks moved variable (heap struct)" do
@@ -36,7 +36,7 @@ RSpec.describe OwnershipDataflow do
       expect(df.exit_states["b"]).to eq(:owned)
     end
 
-    it "does not move Copy types (primitives)" do
+    it "does not track Copy types (primitives)" do
       src = <<~SRC
         FN main() RETURNS Void ->
           x = 42;
@@ -45,11 +45,11 @@ RSpec.describe OwnershipDataflow do
         END
       SRC
       df = analyze(src, "main")
-      expect(df.exit_states["x"]).to eq(:owned)
-      expect(df.exit_states["y"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("x")
+      expect(df.exit_states).not_to have_key("y")
     end
 
-    it "does not move strings (Copy in CLEAR)" do
+    it "does not track ordinary strings (Copy in CLEAR)" do
       src = <<~SRC
         FN main() RETURNS Void ->
           s = "hello";
@@ -58,7 +58,8 @@ RSpec.describe OwnershipDataflow do
         END
       SRC
       df = analyze(src, "main")
-      expect(df.exit_states["s"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("s")
+      expect(df.exit_states).not_to have_key("t")
     end
   end
 
@@ -125,8 +126,8 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be true
-      expect(summary["a"][:has_moved_guard]).to be false
+      expect(summary["a"].needs_cleanup).to be true
+      expect(summary["a"].has_moved_guard).to be false
     end
 
     it "reports has_moved_guard for maybe_moved variables" do
@@ -143,8 +144,8 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be true
-      expect(summary["a"][:has_moved_guard]).to be true
+      expect(summary["a"].needs_cleanup).to be true
+      expect(summary["a"].has_moved_guard).to be true
     end
 
     it "reports no cleanup for fully moved variables" do
@@ -158,7 +159,7 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "main")
       summary = df.cleanup_summary
-      expect(summary["a"][:needs_cleanup]).to be false
+      expect(summary["a"].needs_cleanup).to be false
     end
   end
 
@@ -195,7 +196,7 @@ RSpec.describe OwnershipDataflow do
 
           fn_nodes.each do |name, fn|
             next unless fn.body
-            bindings = CleanupClassifier.classify(fn, fn_nodes: fn_nodes, schema_lookup: schema)
+            bindings = CleanupClassifier.classify(fn, schema_lookup: schema)
             next if bindings.empty?
 
             df = OwnershipDataflow.analyze(fn)
@@ -206,7 +207,7 @@ RSpec.describe OwnershipDataflow do
               plan_guard = entry[:has_moved_guard] || false
               df_entry = summary[var]
               next unless df_entry
-              df_guard = df_entry[:has_moved_guard]
+              df_guard = df_entry.has_moved_guard
               # Under-guard: dataflow says guard needed but plan says no
               if !plan_guard && df_guard
                 under_guarded << "#{File.basename(f)} #{name}() #{var}"

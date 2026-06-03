@@ -59,6 +59,20 @@ RSpec.describe "MIR gap-burn characterization" do
     MIRLowering.new
   end
 
+  def ownership_finalization_context(out: [], guarded_cleanup_names: Set.new, alloc_marks: {}, body_alloc_mark_names: Set.new)
+    MIRLowering::OwnershipFinalizationContext.new(
+      inherited_alloc_names: Set.new,
+      out: out,
+      guarded_cleanup_names: guarded_cleanup_names,
+      alloc_marks: alloc_marks,
+      body_alloc_mark_names: body_alloc_mark_names,
+      transfer_mark_names: Set.new,
+      body_transfer_mark_names: Set.new,
+      move_mark_names: out.filter_map { |node| node.name.to_s if node.is_a?(MIR::MoveMark) }.to_set,
+      cleanup_by_name: {},
+    )
+  end
+
   it "builds CFG edges for every structured body form in one pass" do
     one = lit(1, type: :Int64)
     if_stmt = AST::IfStatement.new(tok, one, [AST::BreakNode.new(tok)], [AST::ContinueNode.new(tok)], nil, nil)
@@ -80,6 +94,44 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(graph.exit_block.predecessors).not_to be_empty
   end
 
+  it "summarizes cleanup decision facts in one body traversal" do
+    subject = id("payload")
+    takes_match = AST::MatchStatement.new(
+      tok, subject,
+      [AST::MatchCase.new(kind: :literal, value: lit(1, type: :Int64), body: [])],
+      nil, nil, nil, false, true
+    )
+    borrowed_match = AST::MatchStatement.new(
+      tok, id("borrowed"),
+      [AST::MatchCase.new(kind: :literal, value: lit(2, type: :Int64), body: [])],
+      nil, nil, nil, false, false
+    )
+    non_identifier_match = AST::MatchStatement.new(
+      tok, AST::StructLit.new(tok, "Box", [], nil),
+      [AST::MatchCase.new(kind: :literal, value: lit(3, type: :Int64), body: [])],
+      nil, nil, nil, false, true
+    )
+    loop_decl = AST::VarDecl.new(tok, "inside_loop", nil, lit(1, type: :Int64), false)
+    outside_decl = AST::VarDecl.new(tok, "outside_loop", nil, lit(1, type: :Int64), false)
+    loop = AST::WhileLoop.new(tok, lit(true, type: :Bool), [loop_decl], nil)
+    fn_node = fn([takes_match, borrowed_match, non_identifier_match, outside_decl, loop])
+    dataflow = OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node)
+
+    facts = dataflow.send(:cleanup_decision_facts, fn_node.body)
+
+    expect(facts.match_takes_vars).to eq(Set["payload"])
+    expect(facts.loop_declared_names).to eq(Set["inside_loop"])
+  end
+
+  it "detects linear moves inside nested lexical bodies" do
+    dataflow = OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([]), schema_lookup: nil)
+    decl = AST::VarDecl.new(tok, "owned", nil, id("source", storage: :heap), false)
+    moved = AST::MoveNode.new(tok, id("owned", storage: :heap))
+    nested = AST::IfStatement.new(tok, lit(true, type: :Bool), [decl, moved], nil, nil, nil)
+
+    expect(dataflow.send(:linear_scope_decl_always_moves?, [nested], "owned")).to eq(true)
+  end
+
   it "tracks ownership transfers for statement categories through one dataflow object" do
     value = id("owned")
     moved_value = id("moved", storage: :heap)
@@ -88,13 +140,13 @@ RSpec.describe "MIR gap-burn characterization" do
     bg = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
     bg.capture_analysis = double(resource_captures: Set["captured"], move_mark_names: Set["given"])
     each_stmt = AST::ForEach.new(tok, "loop_item", id("items"), [], nil, false)
-    each_stmt.full_type = :String
+    each_stmt.full_type = Type.new(:Box, layout: :indirect)
 
     dataflow = OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([]), schema_lookup: nil)
     state = owner_state("owned", "moved", "captured", "given", "items")
 
     decl = AST::VarDecl.new(tok, "declared", nil, value, false)
-    decl.full_type = :String
+    decl.full_type = Type.new(:Box, layout: :indirect)
     dataflow.send(:transfer_stmt, decl, state)
     dataflow.send(:transfer_stmt, AST::Assignment.new(tok, id("slot"), AST::MoveNode.new(tok, id("owned"))), state)
     dataflow.send(:transfer_stmt, call, state)
@@ -198,17 +250,18 @@ RSpec.describe "MIR gap-burn characterization" do
     same.coerced_type = :Int64
     expect(low.send(:apply_lowered_coercion, MIR::Ident.new("n"), same)).to be_a(MIR::Ident)
 
-    plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
-    fact = low.send(:implicit_allocating_result_fact, plain, [])
+    plain = MIR::Let.new("tmp", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, Type.new("[]const u8"), nil)
+    fact = low.send(:implicit_allocating_result_fact, plain, ownership_finalization_context)
     expect(fact.name).to eq("tmp")
     expect(fact.ownership_effect.target_var).to eq("tmp")
 
-    wrapped_alloc = MIR::Let.new("wrapped", MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", nil), false, "[]const u8", nil)
-    expect(low.send(:implicit_allocating_result_fact, wrapped_alloc, []).ownership_effect.target_var).to eq("wrapped")
+    wrapped_alloc = MIR::Let.new("wrapped", MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", nil), false, Type.new("[]const u8"), nil)
+    expect(low.send(:implicit_allocating_result_fact, wrapped_alloc, ownership_finalization_context).ownership_effect.target_var).to eq("wrapped")
 
-    marked = MIR::Let.new("marked", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, "[]const u8", nil)
-    out = [MIR::AllocMark.new("marked", :heap, Type.new(:String), :function)]
-    expect(low.send(:implicit_allocating_result_fact, marked, out)).to be_nil
+    marked = MIR::Let.new("marked", MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false, Type.new("[]const u8"), nil)
+    mark = MIR::AllocMark.new("marked", :heap, Type.new(:String), :function)
+    expect(low.send(:implicit_allocating_result_fact, marked,
+      ownership_finalization_context(alloc_marks: { "marked" => mark }))).to be_nil
   end
 
   it "covers lowering ownership source predicates without lowering syntax" do
@@ -265,6 +318,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
     expect(low.send(:ast_void_type?, Type.new(:Int64))).to eq(false)
     expect(low.send(:zig_format_for_type, Type.new(:String))).to eq("{s}")
+    expect(low.send(:zig_format_for_type, Type.new(:"Byte[4]"))).to eq("{s}")
     expect(low.send(:zig_format_for_type, Type.new(:Int64))).to eq("{d}")
     expect(low.send(:zig_format_for_type, Type.new(:Bool))).to eq("{}")
     expect(low.send(:zig_format_for_type, Type.new(:Any))).to eq("{any}")
@@ -297,7 +351,7 @@ RSpec.describe "MIR gap-burn characterization" do
     nil_lowering = Class.new(MIRLowering) do
       def lower(_stmt) = nil
     end.new
-    expect(nil_lowering.send(:lowered_stmt_packet, AST::PassStmt.new(tok))).to be_nil
+    expect(nil_lowering.send(:lowered_stmt_packet, ownership_finalization_context, AST::PassStmt.new(tok))).to be_nil
     expect(low.send(:lower_body_with_break, [], "__label")).to eq([])
     expect(low.send(:emit_stmts_zig, [MIR::Noop.new("skip")])).to eq("")
 
@@ -357,7 +411,7 @@ RSpec.describe "MIR gap-burn characterization" do
       stdlib_alloc, { alloc: :heap })
     mutating_alloc.result_ownership_bearing = true
     expect(low.send(:implicit_allocating_result_fact,
-      MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), [])).to be_nil
+      MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), ownership_finalization_context)).to be_nil
 
     nested_alloc = Struct.new(:child) do
       include MIR::Expr
@@ -366,7 +420,7 @@ RSpec.describe "MIR gap-burn characterization" do
       def ownership_effect = MIR::OwnershipEffect.none
     end.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))
     nested_fact = low.send(:implicit_allocating_result_fact,
-      MIR::Let.new("nested", nested_alloc, false, Type.new(:String), nil), [])
+      MIR::Let.new("nested", nested_alloc, false, Type.new(:String), nil), ownership_finalization_context)
     expect(nested_fact.ownership_effect.target_var).to eq("nested")
 
     if_bind = MIR::IfBindStmt.new([
@@ -399,7 +453,7 @@ RSpec.describe "MIR gap-burn characterization" do
     end.new
     expect(empty_target_lowering.send(:ownership_transfers_for_node,
       MIR::ExprStmt.new(MIR::Ident.new("x"), false),
-      MIRLowering::OwnershipFinalizationContext.new(inherited_alloc_names: Set.new, out: [], guarded_cleanup_names: Set.new))).to eq([])
+      ownership_finalization_context)).to eq([])
 
     low.instance_variable_set(:@current_bindings, nil)
     expect(low.send(:ownership_consumed_name_operands, ["hidden"], "src", :heap)).to eq([])
@@ -421,7 +475,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:mir_cast, MIR::Ident.new("fn"), Type.new(fn_sig), Type.new(:Any))).to be_a(MIR::Cast)
     expect(low.send(:mir_cast, MIR::Ident.new("err"), Type.new(:Int64), Type.new(:"!String"))).to be_a(MIR::Cast)
     expect(low.send(:ast_void_type?, nil)).to eq(true)
-    expect(low.send(:implicit_allocating_result_fact, MIR::Ident.new("not_let"), [])).to be_nil
+    expect(low.send(:implicit_allocating_result_fact, MIR::Ident.new("not_let"), ownership_finalization_context)).to be_nil
     borrowed_field = AST::GetField.new(tok, id("owner", type: :String, storage: :heap), "field")
     borrowed_field.full_type = Type.new(:String)
     expect(low.send(:return_destination_alloc, AST::ReturnNode.new(tok, borrowed_field))).to eq(:heap)
@@ -534,18 +588,48 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers hardened MIR ownership finalization fallbacks directly" do
     low = lowering
 
-    state = MIRLowering::OwnershipFinalizationContext.new(
-      inherited_alloc_names: Set.new,
+    already_finalized = MIR::Let.new("kept", MIR::Lit.new("1"), false, Type.new(:Int64), nil)
+    already_state = ownership_finalization_context
+    low.send(:mark_ownership_finalized_node!, already_finalized)
+    low.send(:append_ownership_finalized_node!, already_state, already_finalized, [], 4, 2)
+    expect(already_state.out).to eq([already_finalized])
+
+    already_mark = MIR::TransferMark.new("kept", :owned_sink, :heap)
+    already_mark_state = ownership_finalization_context
+    low.send(:mark_ownership_finalized_node!, already_mark)
+    low.send(:append_transfer_marks_to_body!, already_mark_state, [already_mark], 4, 2)
+    expect(already_mark_state.out).to eq([already_mark])
+
+    append_state = ownership_finalization_context
+    finalized_for_append = MIR::TransferMark.new("done", :return, :heap)
+    low.send(:mark_ownership_finalized_node!, finalized_for_append)
+    low.send(:append_transfer_marks!, [finalized_for_append], append_state)
+    expect(append_state.out).to eq([finalized_for_append])
+
+    expect(low.send(:alloc_mark_present?, [MIR::AllocMark.new("owned", :heap, Type.new(:String))], "owned")).to eq(true)
+    expect(low.send(:transfer_mark_present?, [MIR::TransferMark.new("owned", :return, :heap)], "owned")).to eq(true)
+    borrowed = MIR::OwnedBorrow.new("borrowed", "source")
+    expect(low.send(:dedupe_ownership_facts, [borrowed, borrowed])).to eq([borrowed])
+
+    cap_state = ownership_finalization_context(body_alloc_mark_names: Set["cap_src"])
+    cap = MIR::CapWrap.new(MIR::Ident.new("cap_src"), "Box", :own_only, nil, nil, "arcCreate", :heap)
+    targets = low.send(:ownership_transfer_operands_for_node, cap, cap_state)
+    expect(targets.map { |target| [target.name, target.target, target.target_alloc] })
+      .to eq([["cap_src", :owned_sink, :heap]])
+
+    facts = []
+    low.send(:append_ownership_facts_for_owned_result!,
+      facts, "promise", MIR::BgBlock.new("bg", {}, [], nil), Type.new(:String))
+    expect(facts.first).to be_a(MIR::OwnedReturn)
+    expect(facts.first.name).to eq("promise")
+
+    state = ownership_finalization_context(
       out: [MIR::MoveMark.new("owned")],
       guarded_cleanup_names: Set["owned"],
     )
     low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), state)
     expect(state.out.count { |stmt| stmt.is_a?(MIR::MoveMark) && stmt.name == "owned" }).to eq(1)
-    unmarked_state = MIRLowering::OwnershipFinalizationContext.new(
-      inherited_alloc_names: Set.new,
-      out: [],
-      guarded_cleanup_names: Set["owned"],
-    )
+    unmarked_state = ownership_finalization_context(guarded_cleanup_names: Set["owned"])
     low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), unmarked_state)
     expect(unmarked_state.out).to include(an_instance_of(MIR::MoveMark))
 
@@ -652,7 +736,8 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "covers ownership read checks and shard allocation facts" do
-    checker = UseAfterMoveChecker.new(fn([]), double)
+    fn_node = fn([])
+    checker = UseAfterMoveChecker.new(fn_node, OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node))
     moved_state = { "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true) }
     checker.send(:check_identifier_read, "dead", moved_state, tok)
     checker.send(:check_identifier_read, "unknown", moved_state, tok)
@@ -707,6 +792,12 @@ RSpec.describe "MIR gap-burn characterization" do
 
     callee = fn([AST::ReturnNode.new(tok, id("made", type: :String, storage: :heap))], return_type: :String)
     expect(EscapeAnalysis.send(:function_has_owned_return_value?, callee, nil)).to eq(true)
+    return_value = id("returned", type: :String, storage: :heap)
+    ret = AST::ReturnNode.new(tok, return_value)
+    facts = EscapeAnalysis.send(:function_facts_for_body, [ret])
+    expect(facts.fn.name).to eq("__escape_return_probe")
+    expect(facts.return_values).to eq([return_value])
+    expect(EscapeAnalysis.send(:body_has_heap_return_binding?, [ret])).to eq(true)
 
     borrowed = fn([], params: [p], return_type: :String)
     borrowed.return_lifetime = :wildcard
@@ -751,6 +842,11 @@ RSpec.describe "MIR gap-burn characterization" do
     idx = AST::GetIndex.new(tok, id("items", type: Type.new(:"String[]")), lit(0, type: :Int64))
     idx.full_type = Type.new(:Untyped)
     expect(low.send(:copy_source_type_info, idx).resolved).to eq(:String)
+
+    frame_source = SymbolEntry.new(reg: "source", type: Type.new(:String), mutable: false, storage: :frame)
+    lifetime_view = id("view", type: :String, storage: :stack)
+    lifetime_view.symbol.lifetime = [frame_source]
+    expect(low.send(:placement_for_node, lifetime_view)).to eq(:frame)
   end
 
   it "materializes unhoisted owned return values before returning identifiers" do

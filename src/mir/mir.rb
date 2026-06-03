@@ -9,7 +9,8 @@
 # 1. Zig-targeted: each node maps 1:1 to a Zig code pattern
 # 2. All memory explicit: every alloc/dealloc/copy/move is a node
 # 3. Structured control flow: preserves if/while/for/block (Zig requires it)
-# 4. No Type objects: nodes carry Zig type strings, never Type instances
+# 4. Type-bearing verification data carries Type objects; Zig-only templates
+#    carry target strings.
 # 5. Recursive expressions: expression nodes contain sub-expression nodes
 #
 # Old MIR nodes (Drop, Promote, SuppressCleanup, Return,
@@ -18,6 +19,7 @@
 
 require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
+require_relative "../ast/type"
 require_relative "../semantic/pass_state"
 
 module MIR
@@ -166,15 +168,17 @@ module MIR
     const :requires_hoist, T::Boolean
     const :target_var, T.nilable(String)
 
+    NONE = T.let(new(
+      produces_owned: false,
+      alloc: nil,
+      cleanup_kind: nil,
+      requires_hoist: false,
+      target_var: nil,
+    ).freeze, OwnershipEffect)
+
     sig { returns(OwnershipEffect) }
     def self.none
-      new(
-        produces_owned: false,
-        alloc: nil,
-        cleanup_kind: nil,
-        requires_hoist: false,
-        target_var: nil,
-      )
+      NONE
     end
 
     sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol, requires_hoist: T::Boolean, target_var: T.nilable(String)).returns(OwnershipEffect) }
@@ -230,12 +234,30 @@ module MIR
     const :move_guarded, T::Boolean
   end
 
+  class FsmResultTransferFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target_alloc, Symbol
+    const :move_guarded, T::Boolean
+
+    sig { returns(T::Array[MIR::Stmt]) }
+    def marks
+      MIR::OwnershipTransferPlan.new(
+        name: name,
+        target: :owned_sink,
+        target_alloc: target_alloc,
+        move_guarded: move_guarded,
+      ).marks
+    end
+  end
+
   class OwnershipConsumptionFact < T::Struct
     extend T::Sig
 
     const :operands, T::Array[OwnershipOperandFact]
     const :target, Symbol
-    const :target_alloc, T.nilable(Symbol)
+    const :target_alloc, T.nilable(Symbol), default: nil
     const :source, String
     const :covers_consuming_params, T::Boolean, default: false
 
@@ -247,20 +269,22 @@ module MIR
 
   class BodySlot
     extend T::Sig
+    Body = T.type_alias { T::Array[MIR::Emittable] }
+    Writer = T.type_alias { T.proc.params(body: MIR::BodySlot::Body).void }
 
     sig { returns(Symbol) }
     attr_reader :name
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(MIR::BodySlot::Body) }
     attr_reader :body
 
-    sig { params(name: Symbol, body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    sig { params(name: Symbol, body: MIR::BodySlot::Body, writer: MIR::BodySlot::Writer).void }
     def initialize(name, body, writer)
-      @name = name
-      @body = body
-      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+      @name = T.let(name, Symbol)
+      @body = T.let(body, MIR::BodySlot::Body)
+      @writer = T.let(writer, MIR::BodySlot::Writer)
     end
 
-    sig { params(body: T::Array[T.untyped]).void }
+    sig { params(body: MIR::BodySlot::Body).void }
     def replace(body)
       @body = body
       @writer.call(body)
@@ -272,6 +296,9 @@ module MIR
       extend T::Sig
 
     include Kernel
+    EMPTY_CHILD_EXPRS = T.let([].freeze, T::Array[MIR::Emittable])
+    EMPTY_BODY_SLOTS = T.let([].freeze, T::Array[MIR::BodySlot])
+
     sig { returns(TrueClass) }
     def mir?; true; end
     sig { returns(T::Boolean) }
@@ -281,13 +308,13 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect; OwnershipEffect.none; end
     sig { returns(T::Array[Emittable]) }
-    def child_exprs; []; end
+    def child_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[Emittable]) }
-    def ownership_source_exprs; []; end
+    def ownership_source_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[Emittable]) }
-    def owned_position_source_exprs; []; end
+    def owned_position_source_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[BodySlot]) }
-    def body_slots; []; end
+    def body_slots; EMPTY_BODY_SLOTS; end
     sig { returns(Emittable) }
     def without_try; self; end
     sig { returns(T.nilable(OwnershipContract)) }
@@ -297,16 +324,24 @@ module MIR
 
     private
 
-    sig { params(values: T::Array[T.untyped]).returns(T::Array[Emittable]) }
+    sig { params(values: T::Array[Object]).returns(T::Array[Emittable]) }
     def compact_child_exprs(values)
       children = T.let([], T::Array[Emittable])
-      values.flatten.compact.each do |value|
-        children << value if value.is_a?(Emittable)
-      end
+      values.each { |value| append_child_expr(children, value) }
       children
     end
 
-    sig { params(name: Symbol, body: T.nilable(T::Array[T.untyped]), writer: T.proc.params(body: T::Array[T.untyped]).void).returns(BodySlot) }
+    sig { params(children: T::Array[Emittable], value: Object).void }
+    def append_child_expr(children, value)
+      if value.is_a?(Array)
+        value.each { |child| append_child_expr(children, child) }
+      elsif value.is_a?(Emittable)
+        children << value
+      end
+      nil
+    end
+
+    sig { params(name: Symbol, body: T.nilable(T::Array[Emittable]), writer: BodySlot::Writer).returns(BodySlot) }
     def body_slot(name, body, writer)
       BodySlot.new(name, body || [], writer)
     end
@@ -532,6 +567,12 @@ module MIR
     end
   end
 
+  class InlineZigAuditMetadata < T::Struct
+    extend T::Sig
+
+    prop :opaque_ownership_operations, T::Boolean
+  end
+
   sig do
     params(
       alloc: T.nilable(Symbol),
@@ -682,11 +723,25 @@ module MIR
   # Zig: const/var name[: type] = init;
   #
   # mutable: false -> const, true -> var
-  # annotation: optional explicit type string (nil -> Zig infers)
+  # annotation: optional explicit Type (nil -> Zig infers)
   # suppression: optional "_ = &name;" or "_ = name;" for Zig warnings
   Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :alias_safe) do
     extend T::Sig
     include Stmt
+    sig do
+      params(
+        name: T.any(String, Symbol),
+        init: Emittable,
+        mutable: T::Boolean,
+        annotation: T.nilable(Type),
+        suppression: T.nilable(String),
+        alias_safe: T.nilable(T::Boolean),
+      ).void
+    end
+    def initialize(name, init, mutable, annotation = nil, suppression = nil, alias_safe = nil)
+      super(name, init, mutable, annotation, suppression, alias_safe)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
     sig { returns(T.nilable(OwnershipContract)) }
@@ -1068,7 +1123,7 @@ module MIR
 
     sig { returns(RawZig) }
     def without_try
-      RawZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def)
+      RawZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def)
     end
 
     private
@@ -2390,7 +2445,7 @@ module MIR
   OwnedCreate = Struct.new(:name, :alloc, :type_info, :source) do
     extend T::Sig
     include Stmt
-    sig { params(name: String, alloc: Symbol, type_info: T.nilable(T.any(Type, String)), source: String).void }
+    sig { params(name: String, alloc: Symbol, type_info: Type, source: String).void }
     def initialize(name, alloc, type_info, source)
       super(name, alloc, type_info, source)
     end
@@ -2768,6 +2823,33 @@ module MIR
     def ownership_source_exprs = child_exprs
   end
 
+  # Fixed-size array default initialization.
+  # Zig: [_]T{ default } ** N
+  ArrayDefaultInit = Struct.new(:elem_type, :count, :default_value, :alloc) do
+    extend T::Sig
+    include Expr
+
+    sig { params(elem_type: String, count: String, default_value: Emittable, alloc: T.nilable(Symbol), result_type: Type).void }
+    def initialize(elem_type, count, default_value, alloc, result_type)
+      super(elem_type, count, default_value, alloc)
+      @result_type = T.let(result_type, Type)
+    end
+
+    sig { returns(Type) }
+    def result_type
+      @result_type
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([default_value])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = []
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
+  end
+
   # Slice expression.
   # Zig: @as([]const T, target[start..end])
   SliceExpr = Struct.new(:target, :start, :end_expr, :elem_type) do
@@ -3133,6 +3215,15 @@ module MIR
   RangeLit = Struct.new(:start, :end_val, :elem_type) do
     extend T::Sig
     include Expr
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+
+    sig { params(value: T.nilable(Type)).void }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([start, end_val])
     sig { returns(OwnershipEffect) }
@@ -3158,6 +3249,9 @@ module MIR
     # safe: true -> emit @hasField guard, false -> direct .items
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
   end
 
   # Transfer an ArrayList-backed value into an owned slice.
@@ -3281,10 +3375,31 @@ module MIR
       @result_ownership_bearing = T.let(value, T.nilable(T::Boolean))
       value
     end
+    sig { returns(T::Boolean) }
+    def opaque_ownership_operations
+      @audit_metadata.opaque_ownership_operations
+    end
+    sig { void }
+    def mark_opaque_ownership_operations!
+      @audit_metadata.opaque_ownership_operations = true
+      nil
+    end
+    sig { returns(T::Array[String]) }
+    def copied_consumed_bindings
+      @copied_consumed_bindings
+    end
+    sig { params(name: String).void }
+    def mark_copied_consumed_binding!(name)
+      normalized = name.to_s
+      copied_consumed_bindings << normalized unless normalized.empty? || copied_consumed_bindings.include?(normalized)
+      nil
+    end
 
     sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
     def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
       super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
+      @audit_metadata = T.let(InlineZigAuditMetadata.new(opaque_ownership_operations: false), InlineZigAuditMetadata)
+      @copied_consumed_bindings = T.let([], T::Array[String])
     end
 
     sig { params(contract: OwnershipContract).returns(OwnershipContract) }
@@ -3360,10 +3475,12 @@ module MIR
 
     sig { returns(InlineZig) }
     def without_try
-      out = InlineZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def, allocs, target_var)
+      out = InlineZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var)
       owns = result_ownership_bearing
       out.result_ownership_bearing = owns unless owns.nil?
       out.result_type = Type.new(result_type) if result_type
+      out.mark_opaque_ownership_operations! if opaque_ownership_operations
+      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
       out
     end
 
@@ -3391,6 +3508,45 @@ module MIR
   # backend must never see this node.
   InlineBc = Struct.new(:op, :args, :stdlib_def) do
     include Expr
+    extend T::Sig
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs(args)
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      sig = FunctionSignature.unwrap(stdlib_def)
+      return OwnershipEffect.none unless sig&.emits_allocating? || sig&.heap_return_alloc?
+      return OwnershipEffect.none if sig&.fixed_return? && sig.return_type.void?
+      return OwnershipEffect.none if sig&.mutates_receiver? && !sig&.heap_return_alloc?
+
+      OwnershipEffect.owned(alloc: sig&.heap_return_alloc? ? :heap : nil)
+    end
+  end
+
+  # Register/bytecode OR-EXIT error rewrite. This used to ride through
+  # InlineBc as an ad hoc metadata hash, but InlineBc now has one role:
+  # stdlib/function-signature-backed bytecode intrinsic dispatch.
+  OrExitBcRewrite = Struct.new(:kind, :name_id, :clear_type, :has_message, :line, :message) do
+    include Expr
+    extend T::Sig
+
+    sig do
+      params(
+        kind: T.nilable(String),
+        name_id: T.nilable(Integer),
+        clear_type: T::Boolean,
+        has_message: T::Boolean,
+        line: Integer,
+        message: T.nilable(Emittable)
+      ).void
+    end
+    def initialize(kind, name_id, clear_type, has_message, line, message = nil)
+      super
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([message])
   end
 
   # Raw bytecode. Sibling to RawZig for the :bc target. Nothing in
@@ -3531,7 +3687,7 @@ module MIR
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
-    RcDowngrade, WeakUpgrade, MakeList, ConcatStr, OwnedSlice,
+    RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,
     ShardedMapPut, ShardedMapGet,

@@ -2765,7 +2765,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :pub visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.locals["foo"].type)
+        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:pub)
       end
     end
@@ -2779,7 +2779,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :private visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.locals["foo"].type)
+        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:private)
       end
     end
@@ -2793,7 +2793,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :package visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.locals["foo"].type)
+        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:package)
       end
     end

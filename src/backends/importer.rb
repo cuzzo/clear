@@ -116,7 +116,7 @@ class ModuleImporter
 
     reject_auto_in_public_signatures!(T.must(ast), abs_path)
 
-    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
+    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
     annotator.annotate!(T.must(ast))
 
     mod = compile_module_mir(T.must(ast), annotator, source_dir)
@@ -246,7 +246,7 @@ class ModuleImporter
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      entry = annotator.scope_stack.first.locals[stmt.name]
+      entry = annotator.scope_stack.first.resolve_entry(stmt.name)
       sig = entry&.fn_signature
       next unless sig
       FunctionSignature.sync_from_function_def!(sig, stmt)

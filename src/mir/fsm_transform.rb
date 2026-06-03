@@ -95,6 +95,7 @@ module FsmTransform
       RecursiveSplitter.split(bg_block.body, lowering, ctx: ctx)
     end
     return nil if rec_segs.nil?
+    segments = rec_segs.segments
 
     # Phase A's enumerated suspends must match what the splitter
     # found at the segment-graph level. Mismatch means a suspend is
@@ -102,20 +103,20 @@ module FsmTransform
     # doWrite calls writeFile) -- the body must fall back to
     # stackful.
     expected = suspend_points.length
-    io_next_count = rec_segs.count { |s|
+    io_next_count = segments.count { |s|
       s.tail.is_a?(Segments::IoSuspend) ||
         s.tail.is_a?(Segments::NextSuspend)
     }
     # Multi-cap WITH produces N LockSuspend specs (one per cap) but
     # Phase A enumeration counts the WITH as a single :lock suspend.
     # Collapse on with_node identity so the counts align.
-    lock_with_nodes = rec_segs.filter_map { |s|
+    lock_with_nodes = segments.filter_map { |s|
       s.tail.is_a?(Segments::LockSuspend) ? s.tail.with_node : nil
     }.uniq
     actual = io_next_count + lock_with_nodes.length
     return nil if expected != actual
 
-    liveness = Liveness.analyze(rec_segs, ctx)
+    liveness = Liveness.analyze(segments, ctx)
     ext_ctx = (ctx[:extra_ctx_fields] || []) +
               field_locals.map { |p| "#{p[:name]}: #{p[:zig_type]} = undefined," }
     Emit.build_recursive(

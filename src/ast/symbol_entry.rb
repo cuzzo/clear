@@ -1,5 +1,5 @@
 # typed: strict
-# Typed scope entry for Scope.locals.
+# Typed entry stored in a Scope binding table.
 # Each entry tracks a variable/function binding with its type, storage, and metadata.
 # Back-references its owning Scope via `scope` for state operations.
 #
@@ -49,6 +49,7 @@ class SymbolEntry
     extend T::Sig
 
   @next_binding_id = T.let(0, Integer)
+  EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
 
   class BindingFlowFacts < T::Struct
     prop :non_escaping, T::Boolean, default: false
@@ -418,8 +419,8 @@ class SymbolEntry
   sig { params(original: SymbolEntry).void }
   def initialize_copy(original)
     super
-    @flow = original.flow_snapshot
-    @lifetime = original.lifetime.dup
+    @flow = original.instance_variable_get(:@flow).dup
+    @lifetime = original.lifetime.empty? ? EMPTY_LIFETIME : original.lifetime.dup
   end
 
   sig { returns(BindingFlowFacts) }

@@ -289,7 +289,7 @@ module MIRLoweringControlFlow
   def for_each_plan(node)
     T.bind(self, MIRLowering) rescue nil
     @tmp_counter = T.let(@tmp_counter, T.untyped)
-    var = T.must(zig_safe_name(node.var_name))
+    var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)
@@ -403,7 +403,7 @@ module MIRLoweringControlFlow
     elsif ct.soa? && (ct.list_collection? || ct.fixed_soa?)
       @for_counter = (@for_counter || 0) + 1
       idx_var = "__soa_idx_#{@for_counter}"
-      iter_init = MIR::Let.new(idx_var, MIR::Lit.new("0"), true, "i64", nil)
+      iter_init = MIR::Let.new(idx_var, MIR::Lit.new("0"), true, Type.new("i64"), nil)
       value_bind = MIR::Let.new(
         var,
         MIR::MethodCall.new(coll, "get", [MIR::Cast.new(MIR::Ident.new(idx_var), "usize", :intCast)], false, MIR::CallableContract.no_ownership(1)),
@@ -491,7 +491,7 @@ module MIRLoweringControlFlow
     @rt_name = T.let(@rt_name, T.untyped)
     plan = for_range_plan(node)
 
-    var_decl = MIR::Let.new(plan.var, MIR::Ident.new(plan.iter_var), false, "i64", "_ = &#{plan.var};")
+    var_decl = MIR::Let.new(plan.var, MIR::Ident.new(plan.iter_var), false, Type.new("i64"), "_ = &#{plan.var};")
     body = prepend_loop_mark(plan.body, mark_per_iter: plan.mark_per_iter, tight: plan.tight, after_mark: [var_decl])
     if !plan.tight && current_function_has_rt? && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(plan.rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
@@ -499,7 +499,7 @@ module MIRLoweringControlFlow
 
     update = MIR::Set.new(MIR::Ident.new(plan.iter_var), MIR::BinOp.new("+", MIR::Ident.new(plan.iter_var), MIR::Lit.new("1")))
     cond = MIR::BinOp.new(plan.comparison, MIR::Ident.new(plan.iter_var), plan.end_value)
-    iter_init = MIR::Let.new(plan.iter_var, plan.start_value, true, "i64", nil)
+    iter_init = MIR::Let.new(plan.iter_var, plan.start_value, true, Type.new("i64"), nil)
     while_stmt = MIR::WhileStmt.new(cond, body, nil, update, plan.mark_per_iter, plan.tight)
     MIR::ScopeBlock.new([iter_init, while_stmt])
   end
@@ -510,7 +510,7 @@ module MIRLoweringControlFlow
     @for_counter = T.let(@for_counter, T.untyped)
     start_val = lower(node.start_expr)
     end_val = lower(node.end_expr)
-    var = T.must(zig_safe_name(node.var_name))
+    var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)
@@ -549,7 +549,7 @@ module MIRLoweringControlFlow
         if c.binding
           payload = MIR::UnionPayloadGet.new(subject, v.to_s)
           payload = MIR::Deref.new(payload) if c.indirect_payload_as
-          [MIR::Let.new(c.binding, payload, is_mutable, nil, "_ = &#{c.binding};")]
+            [MIR::Let.new(c.binding, payload, is_mutable == true, nil, "_ = &#{c.binding};")]
         elsif c.destructure
           payload = MIR::UnionPayloadGet.new(subject, v.to_s)
           c.destructure.fields.filter_map do |f|
@@ -736,14 +736,14 @@ module MIRLoweringControlFlow
       when AST::MethodCall
         value.name.to_s
       else
-        emit_expr(lower(value)).to_s.sub(/\A\./, "")
+	        emit_expr(lower(value)).to_s.delete_prefix(".")
       end
     end
   end
 
   sig { params(c: T.untyped, payload_name: String, node: AST::MatchStatement).returns(T::Array[T.untyped]) }
   def union_match_payload_bindings(c, payload_name, node)
-    is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+    is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved == true
     payload = MIR::Ident.new(payload_name)
     payload = MIR::Deref.new(payload) if c.indirect_payload_as
     if c.binding
@@ -881,7 +881,7 @@ module MIRLoweringControlFlow
     return value if value.is_a?(MIR::HeapCreate) || value.is_a?(MIR::Call)
     return value if return_value_already_payload_pointer?(node.value)
 
-    bare_ret = payload_zig.sub(/\A\*/, "")
+	    bare_ret = payload_zig.delete_prefix("*")
     with_ownership_consumption(
       MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
       mir_ident_names(value),

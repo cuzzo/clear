@@ -15,7 +15,7 @@ RSpec.describe "annotator completion phases" do
   it "initializes builtin environment during annotator construction" do
     scope = SemanticAnnotator.new.current_scope
 
-    expect(scope.locals.fetch("argv").type.resolved).to eq(:String)
+    expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
     expect(scope.types.fetch(:Range).fetch(:schema)).to be_a(Schemas::StructSchema)
     expect(scope.types.fetch(:File).fetch(:schema)).to be_a(Schemas::ResourceSchema)
     expect(scope.types.fetch(:TCPServer).fetch(:schema)).to be_a(Schemas::ResourceSchema)

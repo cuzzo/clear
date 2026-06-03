@@ -12,6 +12,8 @@ module Annotator
       def finalize_auto_types!(program)
         T.bind(self, SemanticAnnotator)
 
+        source = T.unsafe(self).source_code
+        return if source && !source.include?("Auto")
         return unless program_has_auto?(program)
 
         run_auto_inference!(program)

@@ -53,6 +53,8 @@ module Annotator
         else
           error!(node, :UNSUPPORTED_INDEX)
         end
+
+        nil
       end
 
       sig { params(node: AST::GetField).returns(T.nilable(Object)) }
@@ -456,6 +458,15 @@ module Annotator
           t.mark_frame_allocated!  # makeList uses frameAlloc for backing
           stamp_type!(node, t)
         end
+      end
+
+      sig { params(node: AST::DefaultArrayLit).returns(Type) }
+      def visit_DefaultArrayLit(node)
+        T.bind(self, SemanticAnnotator)
+        type_info = Type.new(node.type_info)
+        stamp_type!(node, type_info)
+        node.storage = :stack
+        type_info
       end
 
       sig { params(node: AST::RangeLit).returns(T.nilable(Type)) }

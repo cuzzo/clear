@@ -129,14 +129,14 @@ module Annotator
         mark_var_mutated(root) if root
       end
 
-      sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node]).returns(T.nilable(Type)) }
-      def visit_IntrinsicFunc(node, args)
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }
+      def visit_IntrinsicFunc(node, args, matched_def: nil)
         T.bind(self, SemanticAnnotator)
 
         definitions = STD_LIB[node.name]
         definitions = [definitions] if definitions.is_a?(Hash)
 
-        matched_def = find_matching_intrinsic(definitions, args)
+        matched_def ||= find_matching_intrinsic(definitions, args)
 
         unless matched_def
           sigs = definitions.map { |definition| format_intrinsic_args(definition[:args]) }.join(" or ")
@@ -206,7 +206,7 @@ module Annotator
         node.arg_families = arg_family_sets
         record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
 
-        sig = FunctionSignature.unwrap(semantic_root_scope.locals[node.name]&.type)
+        sig = FunctionSignature.unwrap(semantic_root_scope.resolve_entry(node.name)&.type)
         if sig && sig.requires && !sig.requires.empty?
           node.collapsed_errors = collapse_errors_for_call(sig, node.args)
         end
@@ -276,9 +276,10 @@ module Annotator
         return false if method_overloads.empty?
 
         ufcs_args = [node.object] + node.args
-        return false unless find_matching_intrinsic(method_overloads, ufcs_args)
+        matched_def = find_matching_intrinsic(method_overloads, ufcs_args)
+        return false unless matched_def
 
-        visit_IntrinsicFunc(node, ufcs_args)
+        visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
         record_predicate_call_site!(node)
         true
       end

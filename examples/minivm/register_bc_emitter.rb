@@ -591,7 +591,6 @@ class RegisterBcEmitter
 
   def runtime_loop_mark?(stmt)
     stmt.is_a?(MIR::Let) &&
-      stmt.name.to_s.start_with?("__loop_mark_") &&
       stmt.init.is_a?(MIR::MethodCall) &&
       stmt.init.receiver.is_a?(MIR::Ident) &&
       stmt.init.receiver.name.to_s == "rt" &&
@@ -659,6 +658,8 @@ class RegisterBcEmitter
       compile_return(stmt)
     when MIR::InlineBc
       compile_inline_bc_stmt(stmt)
+    when MIR::OrExitBcRewrite
+      compile_or_exit(stmt)
     when MIR::InlineZig
       compile_inline_zig_stmt(stmt)
     when MIR::Call
@@ -1063,7 +1064,7 @@ class RegisterBcEmitter
 
     # InlineBc / InlineZig as bare ExprStmt (e.g. `pool.remove(id);`,
     # `sleep(ms);`) -- delegate to the stmt-shaped dispatch.
-    if expr.is_a?(MIR::InlineBc) || expr.is_a?(MIR::InlineZig)
+    if expr.is_a?(MIR::InlineBc) || expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::OrExitBcRewrite)
       return compile_inline_bc_stmt(expr)
     end
 
@@ -1200,7 +1201,7 @@ class RegisterBcEmitter
   end
 
   def compile_let(stmt)
-    if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(stmt.annotation))
+    if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(annotation_zig_type(stmt.annotation)))
       bind_value(stmt.name.to_s, compile_struct_list_map_init(struct_type))
       return
     end
@@ -1755,6 +1756,7 @@ class RegisterBcEmitter
 
   def compile_inline_bc_stmt(stmt)
     return compile_inline_zig_stmt(stmt) if stmt.is_a?(MIR::InlineZig)
+    return compile_or_exit(stmt) if stmt.is_a?(MIR::OrExitBcRewrite)
 
     case stmt.op
     when :append, :insert, :push
@@ -3128,14 +3130,14 @@ class RegisterBcEmitter
   end
 
   # A propagating catch_body re-raises rather than producing a
-  # fallback value: OR EXIT (InlineBc :or_exit) or a bare
+  # fallback value: OR EXIT (OrExitBcRewrite) or a bare
   # RETURN error.CheatError. Distinct from a value-fallback catch.
   def propagating_catch?(cb)
     return false unless cb.is_a?(MIR::ScopeBlock)
 
     semantic_body(cb.body || []).any? do |s|
       returns_cheat_error?(s) ||
-        (s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::InlineBc) && s.expr.op == :or_exit)
+        (s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::OrExitBcRewrite))
     end
   end
 
@@ -3278,35 +3280,34 @@ class RegisterBcEmitter
   end
 
   # OR EXIT: structured partial rewrite of the active error
-  # (InlineBc :or_exit from lower_or_exit's :bc branch). Unset fields
+  # (OrExitBcRewrite from lower_or_exit's :bc branch). Unset fields
   # inherit the error set by the failing call; errored stays set so
   # the following RETURN error.CheatError propagates.
   def compile_or_exit(stmt)
-    meta = stmt.stdlib_def || {}
     mask = 0
     kind_c = add_const(0)
     name_c = add_const(0)
     msg_c = add_const("")
-    if meta[:kind]
-      kind_c = add_const(ERROR_KIND_IDS.fetch(meta[:kind].to_s))
+    if stmt.kind
+      kind_c = add_const(ERROR_KIND_IDS.fetch(stmt.kind.to_s))
       mask |= 1
     end
-    if meta[:name_id]
-      name_c = add_const(meta[:name_id].to_i)
+    if stmt.name_id
+      name_c = add_const(T.must(stmt.name_id).to_i)
       mask |= 2
-    elsif meta[:clear_type]
+    elsif stmt.clear_type
       name_c = add_const(0)
       mask |= 2
     end
-    if meta[:has_message]
-      msg_arg = (stmt.args || []).first
+    if stmt.has_message
+      msg_arg = stmt.message
       unless msg_arg.is_a?(MIR::Lit)
         raise Unsupported, "register emitter OR EXIT supports literal messages in this commit"
       end
       msg_c = add_const(string_lit_text(msg_arg))
       mask |= 4
     end
-    line_c = add_const(meta.fetch(:line, 0).to_i)
+    line_c = add_const(stmt.line.to_i)
     mask |= 8
     emit(EREWRITE, kind_c, name_c, msg_c, line_c, add_const(mask))
   end
@@ -3375,7 +3376,7 @@ class RegisterBcEmitter
 
     call_args = [MIR::Ident.new("rt")] +
                 callable_params(@current_fn).map { |p| MIR::Ident.new(p.name) }
-    call = MIR::Call.new(inner, call_args, false, nil)
+    call = MIR::Call.new(inner, call_args, false, false)
     resreg = case rk
              when :i64, :bool then compile_i64_expr(call)
              when :f64        then compile_f64_expr(call)
@@ -3392,10 +3393,10 @@ class RegisterBcEmitter
     zero = fresh_ireg
     emit(ICONST, zero, add_const(0))
     meta.each_with_index do |cm, i|
-      kinds = cm[:kinds] || []
-      types = cm[:types] || []
-      ftypes = cm[:filter_types] || []
-      fmsgs = cm[:filter_messages] || []
+      kinds = cm.kinds
+      types = cm.types
+      ftypes = cm.filter_types
+      fmsgs = cm.filter_messages
 
       # primary = (any kind matches) OR (any type matches), as a
       # nonzero count. No JT opcode -> accumulate with IADD and
@@ -4962,7 +4963,7 @@ class RegisterBcEmitter
       return true if let && let.init.is_a?(MIR::StructInit) &&
                      (int64_string_map_type?(let.init.zig_type.to_s) ||
                       value_string_map_type?(let.init.zig_type.to_s) ||
-                      struct_list_map_type?(let.annotation))
+                      struct_list_map_type?(annotation_zig_type(let.annotation)))
     end
     false
   end
@@ -7402,15 +7403,16 @@ class RegisterBcEmitter
   end
 
   def binding_type(stmt)
-    annotation = stmt.annotation.to_s
-    return inferred_expr_type(stmt.init) if annotation.empty?
+    annotation = annotation_zig_type(stmt.annotation)
+    return inferred_expr_type(stmt.init) unless annotation
     return :bool if annotation == "bool" || annotation == "Bool"
 
     normalize_type(annotation)
   end
 
   def enum_binding_type(stmt)
-    return enum_type_name(stmt.annotation) unless stmt.annotation.to_s.empty?
+    annotation = annotation_zig_type(stmt.annotation)
+    return enum_type_name(annotation) if annotation
 
     if stmt.init.is_a?(MIR::Call)
       function = @functions_by_name[stmt.init.callee.to_s]
@@ -7510,7 +7512,8 @@ class RegisterBcEmitter
       if brk && brk.value.is_a?(MIR::Ident)
         target = expr.body.find { |s| s.is_a?(MIR::Let) && s.name.to_s == brk.value.name.to_s }
         if target
-          return normalize_type(target.annotation) if target.annotation
+          annotation = annotation_zig_type(target.annotation)
+          return normalize_type(annotation) if annotation
           t = inferred_expr_type(target.init)
           return t if t && t != :unsupported
         end
@@ -7557,6 +7560,13 @@ class RegisterBcEmitter
 
   def string_expr?(expr)
     inferred_expr_type(expr) == :string
+  end
+
+  def annotation_zig_type(annotation)
+    return nil unless annotation
+    raise TypeError, "MIR::Let annotation must be Type, got #{annotation.class}" unless annotation.is_a?(Type)
+
+    annotation.zig_type
   end
 
   def normalize_type(type)

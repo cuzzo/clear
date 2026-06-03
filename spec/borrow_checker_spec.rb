@@ -1,4 +1,5 @@
 require "rspec"
+require "set"
 require_relative "../src/backends/transpiler"
 
 # Tests the BorrowChecker -- AST-walk verification that borrowed variables
@@ -12,6 +13,29 @@ require_relative "../src/backends/transpiler"
 # 3. Defense-in-depth for move-while-borrowed and alias violations
 
 RSpec.describe BorrowChecker do
+  def token(line = 1)
+    Lexer::Token.new(:VAR_ID, "u", line, 1)
+  end
+
+  def borrowed_identifier(name = "u", type: :User)
+    node = AST::Identifier.new(token, name)
+    node.full_type = Type.new(type)
+    node
+  end
+
+  def direct_borrow_errors(body)
+    cap = AST::Capability.new(
+      capability: :BORROWED,
+      var_node: borrowed_identifier("u"),
+      alias: "ref",
+      alias_mutable: false,
+      guard_expr: nil,
+    )
+    with = AST::WithBlock.new(token, [cap], body, nil)
+    fn = AST::FunctionDef.new(token, "main", [], [], Type.new(:Void), nil, [with], [], nil, :private, [], false)
+    BorrowChecker.check(fn, schema_lookup: ->(_name) { nil })
+  end
+
   def check_errors(src, fn_name = "main")
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
@@ -237,6 +261,33 @@ RSpec.describe BorrowChecker do
   # =========================================================================
 
   describe "MOVE_WHILE_BORROWED" do
+    it "catches RETURN GIVE while the source is borrowed" do
+      ret = AST::ReturnNode.new(token, AST::MoveNode.new(token, borrowed_identifier("u")))
+
+      errors = direct_borrow_errors([ret])
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
+    it "catches standalone GIVE while the source is borrowed" do
+      errors = direct_borrow_errors([AST::MoveNode.new(token, borrowed_identifier("u"))])
+
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
+    it "catches BG resource captures while the source is borrowed" do
+      bg = AST::BgBlock.new(token, [], nil, nil, false, false, nil, false)
+      bg.capture_analysis = double(resource_captures: Set["u"])
+
+      errors = direct_borrow_errors([bg])
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
     it "catches GIVE of heap struct inside WITH BORROWED" do
       errors = check_errors(<<~CLEAR)
         FN consume(TAKES u: User @indirect) RETURNS Int64 ->

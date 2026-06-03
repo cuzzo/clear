@@ -175,10 +175,10 @@ module FsmTransform
 
       result_var = next_tail.result_var
       promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
-      sp_zig = promise_ft ? Type.new(promise_ft).zig_type : "anyopaque"
-      inner_type_info = nil
+      sp_zig = Type.new(promise_ft).zig_type
+      inner_type_info = T.let(nil, T.nilable(Type))
       inner_zig =
-        if promise_ft && (pt = Type.new(promise_ft)).respond_to?(:tense_type) && pt.tense_type
+        if (pt = Type.new(promise_ft)).tense_type
           inner_type_info = Type.new(pt.tense_type)
           inner_type_info.zig_type
         else
@@ -203,7 +203,7 @@ module FsmTransform
         if result_var
           res_name = "__res_#{susp_idx}"
           stmts = [
-            MIR::Let.new(res_name, finish_expr, false, inner_zig, nil),
+            MIR::Let.new(res_name, finish_expr, false, Type.new(inner_zig), nil),
             MIR::Set.new(MIR::FieldGet.new(ctx_ident, result_var), MIR::Ident.new(res_name), false),
           ]
           if result_needs_cleanup
@@ -246,13 +246,12 @@ module FsmTransform
       "#{fsm_owned_guard_name(name)}: bool = false,"
     end
 
-    sig { params(type_info: T.untyped, lowering: T.untyped).returns(T::Boolean) }
+    sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }
     def ownership_bearing_result_type?(type_info, lowering)
       return false unless type_info
       schema_lookup = lowering.instance_variable_get(:@schema_lookup) rescue nil
-      ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
-      ti.string? || ti.heap_ptr? || ti.collection_value? ||
-        ti.recursive_cleanup_shape?(schema_lookup)
+      type_info.string? || type_info.heap_ptr? || type_info.collection_value? ||
+        type_info.recursive_cleanup_shape?(schema_lookup)
     rescue StandardError
       false
     end

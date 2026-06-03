@@ -243,6 +243,24 @@ RSpec.describe OwnershipGraph do
       snapshot = graph.fork_lightweight
       expect(snapshot.edge_count).to eq(graph.edges.size)
     end
+
+    it "exposes typed state and move metadata without per-node snapshot objects" do
+      token = Lexer::Token.new(:VAR_ID, "x", 14, 6)
+      graph.declare("x")
+      graph.mark_moved("x", at_token: token, action: :give)
+      snapshot = graph.fork_lightweight
+      yielded = []
+
+      snapshot.each_state { |path, state| yielded << [path, state] }
+
+      expect(snapshot.state_for("x")).to eq(:moved)
+      expect(snapshot.move_line_for("x")).to eq(14)
+      expect(snapshot.move_col_for("x")).to eq(6)
+      expect(snapshot.move_action_for("x")).to eq(:give)
+      expect(snapshot.state_for("missing")).to be_nil
+      expect(snapshot.move_line_for("missing")).to be_nil
+      expect(yielded).to include(["x", :moved])
+    end
   end
 
   describe "#merge" do

@@ -45,6 +45,8 @@ module MIR
 
     sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: AST::Node).void).void }
     def self.each_direct_loop_node(body, &block)
+      raise TypeError, "body must be an Array" unless body.is_a?(Array)
+
       body.each do |node|
         next unless node.is_a?(AST::Locatable)
         yield node
@@ -66,11 +68,6 @@ module MIR
         end
       end
       nil
-    end
-
-    sig { params(stmts: T::Array[T.untyped], var_name: String).returns(T::Boolean) }
-    def self.declared_inside_loop?(stmts, var_name)
-      declared_inside_loop_body?(stmts, var_name, 0)
     end
 
     sig { params(node: AST::Node).returns(T.nilable(String)) }
@@ -108,17 +105,5 @@ module MIR
       true
     end
 
-    sig { params(stmts: T::Array[T.untyped], var_name: String, loop_depth: Integer).returns(T::Boolean) }
-    private_class_method def self.declared_inside_loop_body?(stmts, var_name, loop_depth)
-      stmts.any? do |stmt|
-        node = stmt.is_a?(AST::Locatable) ? stmt : nil
-        return true if node && loop_depth.positive? && binding_decl_name(node) == var_name
-
-        child_loop_depth = loop_depth + (AST.loop_node?(stmt) ? 1 : 0)
-        AST.child_bodies(stmt).any? do |child_body|
-          declared_inside_loop_body?(child_body, var_name, child_loop_depth)
-        end
-      end
-    end
   end
 end

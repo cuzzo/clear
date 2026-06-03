@@ -30,8 +30,8 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
 
     annotator.register_program_signatures(index_for(fn, extern_fn))
 
-    main_sig = FunctionSignature.unwrap(annotator.current_scope.locals.fetch("main").type)
-    puts_sig = FunctionSignature.unwrap(annotator.current_scope.locals.fetch("puts").type)
+    main_sig = FunctionSignature.unwrap(annotator.current_scope.resolve_entry!("main").type)
+    puts_sig = FunctionSignature.unwrap(annotator.current_scope.resolve_entry!("puts").type)
     expect(main_sig.return_type.resolved).to eq(:Int64)
     expect(main_sig.params.map(&:name)).to eq(["x"])
     expect(puts_sig.extern).to eq(true)
@@ -53,8 +53,8 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
 
     parser_schema = annotator.current_scope.types.fetch(:Parser).fetch(:schema)
     expect(parser_schema.methods.fetch("parse")).to be_a(FunctionSignature)
-    expect(annotator.current_scope.locals).not_to have_key("parse")
-    expect(annotator.current_scope.locals).not_to have_key("skip")
+    expect(annotator.current_scope.entry?("parse")).to eq(false)
+    expect(annotator.current_scope.entry?("skip")).to eq(false)
     expect(known.full_type!.resolved).to eq(:Void)
     expect(unknown.full_type!.resolved).to eq(:Void)
   end
@@ -75,7 +75,7 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator.register_program_signatures(index_for(union))
 
     synthetic = annotator.send(:synthetic_function_definitions).fetch(0)
-    sig = FunctionSignature.unwrap(annotator.current_scope.locals.fetch("describe").type)
+    sig = FunctionSignature.unwrap(annotator.current_scope.resolve_entry!("describe").type)
     expect(synthetic.name).to eq("describe")
     expect(synthetic.body.length).to eq(1)
     expect(sig.return_type.resolved).to eq(:String)

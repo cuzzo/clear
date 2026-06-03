@@ -183,7 +183,7 @@ RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
     CHT
 
     ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.scope_stack.first.locals["bumpIt"].type)
+    sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("bumpIt").type)
     expect(sig).to be_a(FunctionSignature)
     # The field is present on the Param struct (defaulting to nil).
     expect(sig.params.first).to be_a(AST::Param)
@@ -200,7 +200,7 @@ RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
     CHT
 
     ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.scope_stack.first.locals["bumpIt"].type)
+    sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("bumpIt").type)
     expect(sig.params.first[:sync]).to be_nil
   end
 end

@@ -73,7 +73,7 @@ module FsmOps
     write: "submitWriteForFsm",
     recv:  "submitRecvForFsm",
     send:  "submitSendForFsm",
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, T::Hash[Symbol, String])
 
   # if (ctx.<field>.<sub> < 0) return <return_fn>(<return_args>);
   # Models the io_uring CQE error-propagation idiom. Specialized
@@ -112,6 +112,35 @@ module FsmOps
   # <fn>(<args>) — call expression. is_try wraps in `try`.
   CallExpr = Struct.new(:fn, :args, :is_try)
 
+  class FunctionPath < T::Struct
+    extend T::Sig
+
+    const :root, Symbol
+    const :parts, T::Array[String]
+
+    sig { params(name: String).returns(FunctionPath) }
+    def self.static(name)
+      new(root: :static, parts: [name])
+    end
+
+    sig { params(parts: T::Array[String]).returns(FunctionPath) }
+    def self.context(parts)
+      new(root: :ctx, parts: parts)
+    end
+
+    sig { params(ctx_name: String).returns(String) }
+    def render(ctx_name)
+      case root
+      when :static
+        parts.join(".")
+      when :ctx
+        ([ctx_name] + parts).join(".")
+      else
+        raise ArgumentError, "unknown FSM function path root #{root.inspect}"
+      end
+    end
+  end
+
   # try ctx.alloc.alloc(<elem_type>, <count_expr>)
   # Modeled separately from CallExpr because the allocator (ctx.alloc)
   # is a fixed reference and the checker validates it against the
@@ -129,6 +158,14 @@ module FsmOps
   # warrant a dedicated node.
   BinOp = Struct.new(:op, :left, :right)
 
+  Expr = T.type_alias do
+    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, ZigLit, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp)
+  end
+  Stmt = T.type_alias do
+    T.any(AssignField, LetConst, ErrDeferCall, ErrDeferFreeField, DeferFreeField, StmtCall, IoSubmit,
+      IfFieldSubLtZeroReturnCall)
+  end
+
   # =====================================================================
   # Convenience constructors (terser to write in std_lib.rb)
   # =====================================================================
@@ -137,29 +174,34 @@ module FsmOps
 
     extend self
 
-    sig { params(field: String, value: T.untyped).returns(FsmOps::AssignField) }
+    sig { params(field: String, value: FsmOps::Expr).returns(FsmOps::AssignField) }
     def assign_field(field, value);          AssignField.new(field, value); end
     sig { params(name: String, zig_type: String, value: FsmOps::IntCast).returns(FsmOps::LetConst) }
     def let_const(name, zig_type, value);    LetConst.new(name, zig_type, value); end
-    sig { params(fn: String, args: T::Array[FsmOps::StateField]).returns(FsmOps::ErrDeferCall) }
+    sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::StateField]).returns(FsmOps::ErrDeferCall) }
     def err_defer_call(fn, args);            ErrDeferCall.new(fn, args); end
     sig { params(field: String).returns(FsmOps::ErrDeferFreeField) }
     def err_defer_free_field(field);         ErrDeferFreeField.new(field); end
     sig { params(field: String).returns(FsmOps::DeferFreeField) }
     def defer_free_field(field);             DeferFreeField.new(field); end
-    sig { params(fn: String, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::StmtCall) }
+    sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::StmtCall) }
     def stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
-    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[T.untyped]).returns(FsmOps::IoSubmit) }
+    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[FsmOps::Expr]).returns(FsmOps::IoSubmit) }
     def io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
       waiter_op = waiter.is_a?(String) ? StateField.new(waiter) : waiter
       IoSubmit.new(verb, waiter_op, extra_args)
     end
-    sig { params(field: String, sub: String, return_fn: String, return_args: T::Array[FsmOps::SubField]).returns(FsmOps::IfFieldSubLtZeroReturnCall) }
+    sig { params(field: String, sub: String, return_fn: FsmOps::FunctionPath, return_args: T::Array[FsmOps::SubField]).returns(FsmOps::IfFieldSubLtZeroReturnCall) }
     def if_neg_return_call(field, sub, return_fn, return_args)
       IfFieldSubLtZeroReturnCall.new(field, sub, return_fn, return_args)
     end
+
+    sig { params(name: String).returns(FsmOps::FunctionPath) }
+    def fn(name);                             FunctionPath.static(name); end
+    sig { params(parts: T::Array[String]).returns(FsmOps::FunctionPath) }
+    def ctx_fn(parts);                        FunctionPath.context(parts); end
 
     sig { params(idx: Integer).returns(FsmOps::ArgRef) }
     def arg(idx);                            ArgRef.new(idx); end
@@ -173,9 +215,9 @@ module FsmOps
     def addr(expr);                          AddrOf.new(expr); end
     sig { params(zig: String).returns(FsmOps::ZigLit) }
     def lit(zig);                            ZigLit.new(zig); end
-    sig { params(zig_type: String, expr: T.untyped).returns(FsmOps::IntCast) }
+    sig { params(zig_type: String, expr: FsmOps::Expr).returns(FsmOps::IntCast) }
     def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
-    sig { params(fn: String, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::CallExpr) }
+    sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::CallExpr) }
     def call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
     sig { params(elem_type: String, count: FsmOps::LocalRef).returns(FsmOps::AllocExpr) }
     def alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
@@ -231,7 +273,7 @@ module FsmOps
 
     # Render a list of statement ops into newline-joined Zig text
     # with each statement properly terminated. Empty list -> "".
-    sig { params(ops: T::Array[T.untyped]).returns(String) }
+    sig { params(ops: T::Array[Stmt]).returns(String) }
     def emit_stmts(ops)
       return "" if false || ops.empty?
       ops.map { |op| emit_stmt(op) }.join("\n")
@@ -245,14 +287,14 @@ module FsmOps
       when LetConst
         "const #{op.name}: #{op.zig_type} = #{emit_expr(op.value)};"
       when ErrDeferCall
-        "errdefer #{resolve_fn(op.fn)}(#{emit_args(op.args)});"
+        "errdefer #{resolve_fn(T.cast(op.fn, FsmOps::FunctionPath))}(#{emit_args(op.args)});"
       when ErrDeferFreeField
         "errdefer #{ctx}.alloc.free(#{ctx}.#{op.field});"
       when DeferFreeField
         "defer #{ctx}.alloc.free(#{ctx}.#{op.field});"
       when StmtCall
         prefix = op.is_try ? "try " : ""
-        "#{prefix}#{resolve_fn(op.fn)}(#{emit_args(op.args)});"
+        "#{prefix}#{resolve_fn(T.cast(op.fn, FsmOps::FunctionPath))}(#{emit_args(op.args)});"
       when IoSubmit
         verb_fn = IO_SUBMIT_VERBS[op.verb] or
           raise ArgumentError, "FsmOps::IoSubmit unknown verb #{op.verb.inspect}"
@@ -260,21 +302,15 @@ module FsmOps
         "try #{ctx}.rt.getSched().#{verb_fn}(#{emit_args(all_args)});"
       when IfFieldSubLtZeroReturnCall
         cond = "#{ctx}.#{op.field}.#{op.sub} < 0"
-        "if (#{cond}) {\n    return #{resolve_fn(op.return_fn)}(#{emit_args(op.return_args)});\n}"
+        "if (#{cond}) {\n    return #{resolve_fn(T.cast(op.return_fn, FsmOps::FunctionPath))}(#{emit_args(op.return_args)});\n}"
       else
         raise ArgumentError, "FsmOps::Emitter unknown statement op #{op.class}"
       end
     end
 
-    # Function path resolution. Function references are static text
-    # (Zig identifiers and method paths) — but a few stable
-    # placeholders must be substituted: __FSM_CTX -> __ctx_<id> for
-    # method paths rooted at the FSM ctx (e.g.
-    # `__FSM_CTX.rt.getSched().fsmSleepTask`). Limited to the fn
-    # field; expression args use structured ops, not placeholders.
-    sig { params(fn_str: String).returns(String) }
-    def resolve_fn(fn_str)
-      fn_str.gsub("__FSM_CTX", ctx)
+    sig { params(fn_path: FsmOps::FunctionPath).returns(String) }
+    def resolve_fn(fn_path)
+      fn_path.render(ctx)
     end
 
     sig { params(expr: T.untyped).returns(T.nilable(String)) }
@@ -300,7 +336,7 @@ module FsmOps
         "@as(#{expr.zig_type}, @intCast(#{emit_expr(expr.expr)}))"
       when CallExpr
         prefix = expr.is_try ? "try " : ""
-        "#{prefix}#{resolve_fn(expr.fn)}(#{emit_args(expr.args)})"
+        "#{prefix}#{resolve_fn(T.cast(expr.fn, FsmOps::FunctionPath))}(#{emit_args(expr.args)})"
       when AllocExpr
         "try #{ctx}.alloc.alloc(#{expr.elem_type}, #{emit_expr(expr.count)})"
       when SliceUntilIntCast
@@ -368,15 +404,13 @@ module FsmOps
   #   SliceUntilIntCast  -> MIR::SliceExpr(base, Lit("0"), IntCast(usize, end_expr))
   #   BinOp              -> MIR::BinOp
   #
-  # All function paths starting with "__FSM_CTX." are resolved to
-  # the literal "__ctx_<id>." prefix at lowering time -- the MIR
-  # node's callee field is the resolved string. Nothing in the MIR
-  # tree carries unsubstituted placeholders.
+  # Function paths render from FunctionPath nodes at lowering time.
+  # Nothing in the MIR tree carries unsubstituted placeholders.
 
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[T.untyped]).void }
+    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[Object]).void }
     def initialize(ctx_id:, bg_rt:, arg_mirs:)
       @ctx_id = ctx_id
       @bg_rt = bg_rt
@@ -384,22 +418,22 @@ module FsmOps
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
-    sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[Object]) }
     def lower_stmts(ops)
       return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 
-    sig { params(op: T.untyped).returns(T.untyped) }
+    sig { params(op: Stmt).returns(Object) }
     def lower_stmt(op)
       case op
       when AssignField
         MIR::Set.new(state_ref(op.field), lower_expr(op.value), false)
       when LetConst
-        MIR::Let.new(op.name, lower_expr(op.value), false, op.zig_type, nil)
+        MIR::Let.new(op.name, lower_expr(op.value), false, Type.new(op.zig_type), nil)
       when ErrDeferCall
         MIR::ErrDeferStmt.new(
-          MIR::Call.new(resolve_fn(op.fn), op.args.map { |a| lower_expr(a) }, false),
+          MIR::Call.new(resolve_fn(T.cast(op.fn, FsmOps::FunctionPath)), op.args.map { |a| lower_expr(a) }, false),
         )
       when ErrDeferFreeField
         MIR::ErrDeferStmt.new(free_call(op.field))
@@ -407,7 +441,7 @@ module FsmOps
         MIR::DeferStmt.new(free_call(op.field))
       when StmtCall
         MIR::ExprStmt.new(
-          MIR::Call.new(resolve_fn(op.fn), op.args.map { |a| lower_expr(a) }, op.is_try),
+          MIR::Call.new(resolve_fn(T.cast(op.fn, FsmOps::FunctionPath)), op.args.map { |a| lower_expr(a) }, op.is_try),
           false,
         )
       when IoSubmit
@@ -430,7 +464,7 @@ module FsmOps
           MIR::Lit.new("0"),
         )
         ret = MIR::ReturnStmt.new(
-          MIR::Call.new(resolve_fn(op.return_fn), op.return_args.map { |a| lower_expr(a) }, false),
+          MIR::Call.new(resolve_fn(T.cast(op.return_fn, FsmOps::FunctionPath)), op.return_args.map { |a| lower_expr(a) }, false),
         )
         MIR::IfStmt.new(cond, [ret], [])
       else
@@ -467,7 +501,7 @@ module FsmOps
         )
       when CallExpr
         MIR::Call.new(
-          resolve_fn(expr.fn),
+          resolve_fn(T.cast(expr.fn, FsmOps::FunctionPath)),
           expr.args.map { |a| lower_expr(a) },
           expr.is_try,
         )
@@ -522,9 +556,9 @@ module FsmOps
       )
     end
 
-    sig { params(fn_str: String).returns(String) }
-    def resolve_fn(fn_str)
-      fn_str.gsub("__FSM_CTX", "__ctx_#{@ctx_id}")
+    sig { params(fn_path: FsmOps::FunctionPath).returns(String) }
+    def resolve_fn(fn_path)
+      fn_path.render("__ctx_#{@ctx_id}")
     end
   end
 
@@ -539,8 +573,8 @@ module FsmOps
   # The lowering composes these per step to populate FsmStructure
   # without a textual scan of the rendered Zig.
 
-  sig { params(ops_or_expr: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.referenced_state_fields(ops_or_expr)
+    sig { params(ops_or_expr: T::Array[T.any(Stmt, Expr)]).returns(T::Array[String]) }
+    def self.referenced_state_fields(ops_or_expr)
     out = []
     walk(ops_or_expr) do |node|
       out << node.name if node.is_a?(StateField)
@@ -548,8 +582,8 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.alloc_state_fields(ops)
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+    def self.alloc_state_fields(ops)
     out = []
     Array(ops).each do |op|
       if op.is_a?(AssignField) && op.value.is_a?(AllocExpr)
@@ -559,8 +593,8 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.free_state_fields(ops)
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+    def self.free_state_fields(ops)
     out = []
     Array(ops).each do |op|
       case op

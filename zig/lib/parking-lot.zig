@@ -1505,7 +1505,7 @@ pub const ParkingRwLock = struct {
         if (after_or == HAS_WAITERS_BIT and self.waiters.isEmpty()) {
             // CAS to HAS_WAITERS + 1 reader. Strong CAS so a concurrent
             // fast-path reader cannot race us into a corrupt state.
-            const target: u64 = HAS_WAITERS_BIT | 1;
+            const target: u32 = HAS_WAITERS_BIT | 1;
             if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
                 self.spinReleaseQueue();
                 if (rt_profile.CLEAR_PROFILE) {

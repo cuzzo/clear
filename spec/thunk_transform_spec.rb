@@ -18,6 +18,15 @@ RSpec.describe "ThunkTransform module wiring" do
       expect(ZigType.new("!i64").cast_target_type).to eq("anyerror!i64")
       expect(ZigType.new("!i64").cleanup_storage_type).to eq("i64")
     end
+
+    it "classifies primitive Zig numeric identifiers without regex parsing" do
+      expect(ZigType.primitive_numeric_identifier?("i64")).to eq(true)
+      expect(ZigType.primitive_numeric_identifier?("f32")).to eq(true)
+      expect(ZigType.integer_identifier?("u8")).to eq(true)
+      expect(ZigType.float_identifier?("f64")).to eq(true)
+      expect(ZigType.integer_identifier?("usize")).to eq(false)
+      expect(ZigType.primitive_numeric_identifier?("Int64")).to eq(false)
+    end
   end
 
   describe "module structure" do
@@ -99,6 +108,17 @@ RSpec.describe "ThunkTransform emit coverage" do
       when MIR::Ident then mir.name
       when MIR::Lit then mir.value
       when MIR::BinOp then "#{emit_expr(mir.left)} #{mir.op} #{emit_expr(mir.right)}"
+      when MIR::UnaryOp then "#{mir.op}#{emit_expr(mir.operand)}"
+      when MIR::FieldGet then "#{emit_expr(mir.object)}.#{mir.field}"
+      when MIR::IndexGet then "#{emit_expr(mir.object)}[#{emit_expr(mir.index)}]"
+      when MIR::MethodCall then "#{emit_expr(mir.receiver)}.#{mir.method}(#{mir.args.map { |arg| emit_expr(arg) }.join(", ")})"
+      when MIR::Call then "#{mir.callee}(#{mir.args.map { |arg| emit_expr(arg) }.join(", ")})"
+      when MIR::Cast then "@as(#{mir.target_type}, #{emit_expr(mir.expr)})"
+      when MIR::TryExpr then "try #{emit_expr(mir.expr)}"
+      when MIR::TryCatch then "#{emit_expr(mir.expr)} catch #{emit_expr(mir.catch_body)}"
+      when MIR::AddressOf then "&#{emit_expr(mir.expr)}"
+      when MIR::Deref then "#{emit_expr(mir.expr)}.*"
+      when MIR::OptionalUnwrap then "#{emit_expr(mir.expr)}.?"
       else mir.to_s
       end
     end
@@ -117,18 +137,28 @@ RSpec.describe "ThunkTransform emit coverage" do
   end
 
   def fn(name, params:, return_type: "i64", plan: nil, mutual_plan: nil, tight: false)
-    OpenStruct.new(
-      name: name,
-      params: params,
-      return_type: return_type,
-      thunk_plan: plan,
-      mutual_thunk_plan: mutual_plan,
-      tight_reentrance: tight
+    node = AST::FunctionDef.new(
+      tok,
+      name,
+      params,
+      nil,
+      return_type,
+      nil,
+      [],
+      [],
+      nil,
+      :pub,
+      nil,
+      false,
     )
+    node.thunk_plan = plan
+    node.mutual_thunk_plan = mutual_plan
+    node.tight_reentrance = tight
+    node
   end
 
   def param(name, type = "i64")
-    { name: name, type: type }
+    AST::Param.new(name: name, type: type)
   end
 
   it "builds and renders heap-CPS trampoline MIR for simple recursive thunks" do
@@ -191,11 +221,54 @@ RSpec.describe "ThunkTransform emit coverage" do
     }.to raise_error(/arg\/param count mismatch/)
   end
 
-  it "qualifies only bare frame parameters" do
-    fn_node = fn("sample", params: [param("n"), param("name")])
+  it "binds thunk frame params structurally before emitting Zig" do
+    context = ThunkTransform::Emit.current_frame_context(fn("sample", params: [param("n"), param("name")]))
+    mir = MIR::BinOp.new(
+      "+",
+      MIR::Ident.new("n"),
+      MIR::BinOp.new(
+        "+",
+        MIR::FieldGet.new(MIR::Ident.new("obj"), "n"),
+        MIR::Ident.new("name_extra")
+      )
+    )
 
-    expect(ThunkTransform::Emit.qualify_params("n + obj.n + name_extra + name", fn_node)).
-      to eq("current.n + obj.n + name_extra + current.name")
+    rebound = ThunkTransform::Emit.bind_frame_refs(mir, context)
+
+    expect(FakeThunkLowering.new.emit_expr(rebound)).to eq("current.n + obj.n + name_extra")
+  end
+
+  it "binds nested thunk call, method, index, and wrapper expressions structurally" do
+    context = ThunkTransform::Emit.mutual_frame_context(fn("sample", params: [param("n"), param("items")]))
+    call = MIR::Call.new(
+      "next",
+      [
+        MIR::MethodCall.new(
+          MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Ident.new("n")),
+          "value",
+          [MIR::AddressOf.new(MIR::OptionalUnwrap.new(MIR::Ident.new("n")))],
+          false,
+          MIR::CallableContract.no_ownership(1)
+        )
+      ],
+      true,
+      false,
+      MIR::CallableContract.no_ownership(1)
+    )
+
+    rebound = ThunkTransform::Emit.bind_frame_refs(
+      MIR::TryCatch.new(MIR::TryExpr.new(call), MIR::Deref.new(MIR::Ident.new("items")), nil),
+      context
+    )
+
+    expect(FakeThunkLowering.new.emit_expr(rebound)).
+      to eq("try next(f.items[f.n].value(&f.n.?)) catch f.items.*")
+
+    casted = ThunkTransform::Emit.bind_frame_refs(
+      MIR::Cast.new(MIR::UnaryOp.new("-", MIR::Ident.new("n")), "i64", :as),
+      context
+    )
+    expect(FakeThunkLowering.new.emit_expr(casted)).to eq("@as(i64, -f.n)")
   end
 
   it "builds and renders mutual-recursion trampoline MIR with tagged frame variants" do

@@ -144,6 +144,7 @@ class MIREmitter
     when MIR::FnRef            then "&#{node.name}"
     when MIR::StructInit       then emit_struct_init(node)
     when MIR::ArrayInit        then emit_array_init(node)
+    when MIR::ArrayDefaultInit then emit_array_default_init(node)
     when MIR::SliceExpr        then emit_slice_expr(node)
     when MIR::BlockExpr        then emit_block_expr(node)
     when MIR::ConcatStr        then emit_concat(node)
@@ -613,7 +614,7 @@ class MIREmitter
       return "const #{buf} = #{emit(node.init)};\n#{kw} #{node.name} = #{buf}._root;#{sup}"
     end
     kw = node.mutable ? "var" : "const"
-    ann = node.annotation ? ": #{node.annotation}" : ""
+    ann = node.annotation ? ": #{node.annotation.zig_type}" : ""
     init = emit(node.init)
     sup = node.suppression ? " #{node.suppression}" : ""
     "#{kw} #{node.name}#{ann} = #{init};#{sup}"
@@ -1313,6 +1314,11 @@ class MIREmitter
     "[#{node.count}]#{node.elem_type}{ #{items} }"
   end
 
+  sig { params(node: MIR::ArrayDefaultInit).returns(String) }
+  def emit_array_default_init(node)
+    "[_]#{node.elem_type}{ #{emit(node.default_value)} } ** #{node.count}"
+  end
+
   sig { params(node: MIR::SliceExpr).returns(String) }
   def emit_slice_expr(node)
     target = emit(node.target)
@@ -1451,14 +1457,14 @@ class MIREmitter
     t = node.zig_type.to_s
     case node.extreme
     when :max
-      if t =~ /\Af/         then "std.math.floatMax(#{t})"
-      elsif t =~ /\A(u|i)\d+/ then "std.math.maxInt(#{t})"
-      else                       "std.math.floatMax(f64)"
+      if ZigType.float_identifier?(t) then "std.math.floatMax(#{t})"
+      elsif ZigType.integer_identifier?(t) then "std.math.maxInt(#{t})"
+      else "std.math.floatMax(f64)"
       end
     when :min
-      if t =~ /\Af/         then "-std.math.floatMax(#{t})"
-      elsif t =~ /\A(u|i)\d+/ then "std.math.minInt(#{t})"
-      else                       "-std.math.floatMax(f64)"
+      if ZigType.float_identifier?(t) then "-std.math.floatMax(#{t})"
+      elsif ZigType.integer_identifier?(t) then "std.math.minInt(#{t})"
+      else "-std.math.floatMax(f64)"
       end
     end
   end

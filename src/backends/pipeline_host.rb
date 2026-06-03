@@ -446,9 +446,16 @@ class PipelineHost
   end
 
   # Delegate task_config_zig to MIRLowering (used by CONCURRENT pipeline operators)
-  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.untyped).returns(String) }
+  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
   def task_config_zig(stack_size, computed_tier = nil)
     @lowering.task_config_zig(stack_size, computed_tier)
+  end
+
+  sig { params(label: String, body: T::Array[MIR::Node], result_type: Type).returns(MIR::BlockExpr) }
+  def typed_block_expr(label, body, result_type)
+    block = MIR::BlockExpr.new(label, body)
+    block.result_type = result_type
+    block
   end
 
   # Route AST node -> Zig string, handling pipeline-specific nodes
@@ -745,7 +752,7 @@ class PipelineHost
     entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
     [
       mark,
-      MIR::Let.new(name, MIR::DeepCopy.new(source, zig_type, nil, :full_value, alloc), false, zig_type, nil),
+      MIR::Let.new(name, MIR::DeepCopy.new(source, zig_type, nil, :full_value, alloc), false, Type.new(zig_type), nil),
       MIR::ErrCleanup.new(name, entry),
     ]
   end
@@ -1058,17 +1065,17 @@ class PipelineHost
 
     case fold_node
     when AST::CountOp
-      init_stmts << MIR::Let.new("count_result", MIR::Lit.new("0"), true, "i64", nil)
+      init_stmts << MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil)
       loop_body << MIR::IfStmt.new(expr_mir, [
         MIR::Set.new(MIR::Ident.new("count_result"), MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1")))
       ], nil)
       final_expr = MIR::Ident.new("count_result")
     when AST::SumOp
-      init_stmts << MIR::Let.new("sum_result", MIR::Lit.new("0"), true, result_type, nil)
+      init_stmts << MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new(result_type), nil)
       loop_body << MIR::Set.new(MIR::Ident.new("sum_result"), MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir))
       final_expr = MIR::Ident.new("sum_result")
     when AST::AverageOp
-      init_stmts << MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, "f64", nil)
+      init_stmts << MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil)
       init_stmts << MIR::Let.new("avg_count", len_expr, false, nil, nil)
       loop_body << MIR::Set.new(MIR::Ident.new("avg_sum"), MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir))
       final_expr = MIR::Conditional.new(
@@ -1078,14 +1085,14 @@ class PipelineHost
           MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("avg_count"), nil, :floatFromInt), "f64", :as)))
     when AST::MinOp
       init_stmts << MIR::IfStmt.new(MIR::BinOp.new("==", len_expr, MIR::Lit.new("0")), [MIR::Panic.new("MIN applied to empty list")], nil)
-      init_stmts << MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, result_type), true, result_type, nil)
+      init_stmts << MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, result_type), true, Type.new(result_type), nil)
       loop_body << MIR::Let.new("min_val", expr_mir, false, nil, nil)
       loop_body << MIR::IfStmt.new(MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
         [MIR::Set.new(MIR::Ident.new("min_result"), MIR::Ident.new("min_val"))], nil)
       final_expr = MIR::Ident.new("min_result")
     when AST::MaxOp
       init_stmts << MIR::IfStmt.new(MIR::BinOp.new("==", len_expr, MIR::Lit.new("0")), [MIR::Panic.new("MAX applied to empty list")], nil)
-      init_stmts << MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, result_type), true, result_type, nil)
+      init_stmts << MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, result_type), true, Type.new(result_type), nil)
       loop_body << MIR::Let.new("max_val", expr_mir, false, nil, nil)
       loop_body << MIR::IfStmt.new(MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
         [MIR::Set.new(MIR::Ident.new("max_result"), MIR::Ident.new("max_val"))], nil)
@@ -1106,7 +1113,7 @@ class PipelineHost
       final_expr = MIR::Ident.new("all_result")
     when AST::FindOp
       elem_zig_type = transpile_type(list_node.full_type!.element_type.resolved.to_s)
-      init_stmts << MIR::Let.new("find_result", MIR::Undef.new(nil), true, elem_zig_type, nil)
+      init_stmts << MIR::Let.new("find_result", MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil)
       init_stmts << MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil)
       loop_body << MIR::Let.new("find_matches", expr_mir, false, nil, nil)
       loop_body << MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
@@ -1138,7 +1145,7 @@ class PipelineHost
     pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::Let.new("count_result", MIR::Lit.new("0"), true, "i64", nil),
+        MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::IfStmt.new(pred_mir, [
             MIR::Set.new(MIR::Ident.new("count_result"),
@@ -1156,7 +1163,7 @@ class PipelineHost
     expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::Let.new("sum_result", MIR::Lit.new("0"), true, "f64", nil),
+        MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("sum_result"),
             MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir))
@@ -1172,7 +1179,7 @@ class PipelineHost
     expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, "f64", nil),
+        MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("avg_sum"),
@@ -1201,7 +1208,7 @@ class PipelineHost
           [MIR::Panic.new("MIN applied to empty list")],
           nil),
         MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, "f64"),
-          true, "f64", nil),
+          true, Type.new("f64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("min_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
@@ -1227,7 +1234,7 @@ class PipelineHost
           [MIR::Panic.new("MAX applied to empty list")],
           nil),
         MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, "f64"),
-          true, "f64", nil),
+          true, Type.new("f64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("max_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
@@ -1284,7 +1291,7 @@ class PipelineHost
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("find_result",
-          MIR::Undef.new(nil), true, elem_zig_type, nil),
+          MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil),
         MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("find_matches", pred_mir, false, nil, nil),
@@ -1599,7 +1606,7 @@ class PipelineHost
     }
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+        MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("acc"), expr_mir)
         ], nil),
@@ -1631,7 +1638,7 @@ class PipelineHost
               MIR::FieldGet.new(MIR::Ident.new(items), "len"),
               MIR::Ident.new("__w_size")),
             [
-              MIR::Let.new("__wi", MIR::Lit.new("0"), true, "usize", nil),
+              MIR::Let.new("__wi", MIR::Lit.new("0"), true, Type.new("usize"), nil),
               MIR::WhileStmt.new(
                 MIR::BinOp.new("<=",
                   MIR::Ident.new("__wi"),
@@ -1737,19 +1744,19 @@ class PipelineHost
         ], nil),
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::Let.new("__bw_size", size_mir, false, "i64", nil),
+        MIR::Let.new("__bw_size", size_mir, false, Type.new("i64"), nil),
         MIR::Let.new("__bw_total",
           MIR::Cast.new(
             MIR::FieldGet.new(MIR::Ident.new("__bw_drained"), "len"),
             "i64", :intCast),
-          false, "i64", nil),
+          false, Type.new("i64"), nil),
         MIR::Let.new("__bw_step",
           MIR::Conditional.new(
             MIR::BinOp.new(">", MIR::Ident.new("__bw_size"), MIR::Lit.new("0")),
             MIR::Ident.new("__bw_size"),
             MIR::Ident.new("__bw_total")),
-          false, "i64", nil),
-        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, "i64", nil),
+          false, Type.new("i64"), nil),
+        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, Type.new("i64"), nil),
         MIR::WhileStmt.new(
           MIR::BinOp.new("<", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_total")),
           [
@@ -1760,7 +1767,7 @@ class PipelineHost
                   MIR::Ident.new("__bw_total")),
                 MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
                 MIR::Ident.new("__bw_total")),
-              false, "i64", nil),
+              false, Type.new("i64"), nil),
             MIR::Let.new(placeholder_var,
               MIR::SliceExpr.new(MIR::Ident.new("__bw_drained"),
                 MIR::Cast.new(MIR::Ident.new("__bw_offset"), "usize", :intCast),
@@ -1789,12 +1796,12 @@ class PipelineHost
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::Let.new("__bw_size", size_mir, false, "i64", nil),
+        MIR::Let.new("__bw_size", size_mir, false, Type.new("i64"), nil),
         MIR::Let.new("__bw_total",
           MIR::Cast.new(
             MIR::FieldGet.new(MIR::Ident.new(items), "len"),
             "i64", :intCast),
-          false, "i64", nil),
+          false, Type.new("i64"), nil),
         # If size <= 0 (time-only), treat the whole list as one batch by
         # bumping size to total. The final-flush logic isn't needed: the
         # while loop emits the single full batch.
@@ -1803,8 +1810,8 @@ class PipelineHost
             MIR::BinOp.new(">", MIR::Ident.new("__bw_size"), MIR::Lit.new("0")),
             MIR::Ident.new("__bw_size"),
             MIR::Ident.new("__bw_total")),
-          false, "i64", nil),
-        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, "i64", nil),
+          false, Type.new("i64"), nil),
+        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, Type.new("i64"), nil),
         MIR::WhileStmt.new(
           MIR::BinOp.new("<", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_total")),
           [
@@ -1815,7 +1822,7 @@ class PipelineHost
                   MIR::Ident.new("__bw_total")),
                 MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
                 MIR::Ident.new("__bw_total")),
-              false, "i64", nil),
+              false, Type.new("i64"), nil),
             MIR::Let.new(placeholder_var,
               MIR::SliceExpr.new(MIR::Ident.new(items),
                 MIR::Cast.new(MIR::Ident.new("__bw_offset"), "usize", :intCast),
@@ -1984,7 +1991,7 @@ class PipelineHost
       [
         MIR::Let.new("idx_result",
           MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(alloc)}]),
-          true, map_type, nil),
+          true, Type.new(map_type), nil),
         MIR::ForStmt.new(
           MIR::Ident.new(items),
           "it",
@@ -2096,7 +2103,7 @@ class PipelineHost
           *p[:outer_stmts],
           MIR::Let.new("idx_result",
             MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
-            true, map_type, nil),
+            true, Type.new(map_type), nil),
           MIR::ForStmt.new(iter, p[:initial_capture], [
             *p[:stage_stmts],
             *build_index_gop_body(expr_mir, :heap, item_var,
@@ -2115,7 +2122,7 @@ class PipelineHost
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("idx_result",
         MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
-        true, map_type, nil),
+        true, Type.new(map_type), nil),
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next, [
         *p[:stage_stmts],
@@ -2196,7 +2203,7 @@ class PipelineHost
         MIR::ContainerInit.new("std.ArrayListUnmanaged(#{result_zig})",
           :list_empty, alloc, nil), true, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
-        MIR::Let.new("__match", MIR::Lit.new("null"), true, "?#{right_zig}", nil),
+        MIR::Let.new("__match", MIR::Lit.new("null"), true, Type.new("?#{right_zig}"), nil),
         *(right_owns ? [
           MIR::ErrCleanup.new("__match",
             CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: "?#{right_zig}")),
@@ -2683,17 +2690,23 @@ class PipelineHost
                 val: "__bc_val", result: "__bc_result", found: "__bc_found" }
     acc_n, sum_n, cnt_n, val_n, result_n, found_n =
       names[:acc], names[:sum], names[:cnt], names[:val], names[:result], names[:found]
+    acc_n = T.must(acc_n)
+    sum_n = T.must(sum_n)
+    cnt_n = T.must(cnt_n)
+    val_n = T.must(val_n)
+    result_n = T.must(result_n)
+    found_n = T.must(found_n)
     case fold
     when AST::SumOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init   = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, "f64", nil)]
+      init   = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, Type.new("f64"), nil)]
       accum  = [MIR::Set.new(MIR::Ident.new(acc_n),
                   MIR::BinOp.new("+", MIR::Ident.new(acc_n), expr))]
       [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::CountOp
       pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, "i64", nil)]
+      init  = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, Type.new("i64"), nil)]
       accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new(acc_n),
                  MIR::BinOp.new("+", MIR::Ident.new(acc_n), MIR::Lit.new("1")))], nil)]
       [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
@@ -2701,8 +2714,8 @@ class PipelineHost
     when AST::AverageOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       # Use f64 for count to avoid @floatFromInt in the division.
-      init = [MIR::Let.new(sum_n, MIR::Lit.new("0"), true, "f64", nil),
-              MIR::Let.new(cnt_n, MIR::Lit.new("0.0"), true, "f64", nil)]
+      init = [MIR::Let.new(sum_n, MIR::Lit.new("0"), true, Type.new("f64"), nil),
+              MIR::Let.new(cnt_n, MIR::Lit.new("0.0"), true, Type.new("f64"), nil)]
       accum = [MIR::Set.new(MIR::Ident.new(sum_n),
                  MIR::BinOp.new("+", MIR::Ident.new(sum_n), expr)),
                MIR::Set.new(MIR::Ident.new(cnt_n),
@@ -2716,7 +2729,7 @@ class PipelineHost
     when AST::MinOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       init  = [MIR::Let.new(acc_n,
-                 MIR::TypeSentinel.new(:max, "f64"), true, "f64", nil)]
+                 MIR::TypeSentinel.new(:max, "f64"), true, Type.new("f64"), nil)]
       accum = [MIR::Let.new(val_n, expr, false, nil, nil),
                MIR::IfStmt.new(
                  MIR::BinOp.new("<", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
@@ -2726,7 +2739,7 @@ class PipelineHost
     when AST::MaxOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       init  = [MIR::Let.new(acc_n,
-                 MIR::TypeSentinel.new(:min, "f64"), true, "f64", nil)]
+                 MIR::TypeSentinel.new(:min, "f64"), true, Type.new("f64"), nil)]
       accum = [MIR::Let.new(val_n, expr, false, nil, nil),
                MIR::IfStmt.new(
                  MIR::BinOp.new(">", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
@@ -2754,7 +2767,7 @@ class PipelineHost
       result_ft = Type.new(T.must(smooth_node).full_type!)
       find_zig  = result_ft.optional? ? transpile_type(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init = [MIR::Let.new(result_n, MIR::Undef.new(nil), true, find_zig, nil),
+      init = [MIR::Let.new(result_n, MIR::Undef.new(nil), true, Type.new(find_zig), nil),
               MIR::Let.new(found_n, MIR::Lit.new("false"), true, nil, nil)]
       accum = [MIR::IfStmt.new(pred, [
                  MIR::Set.new(MIR::Ident.new(result_n), MIR::Ident.new(placeholder)),
@@ -3081,10 +3094,10 @@ class PipelineHost
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],
       acc_alloc_mark,
-      MIR::Let.new("__obs_acc", acc_alloc, false, obs_zig, nil),
+      MIR::Let.new("__obs_acc", acc_alloc, false, Type.new(obs_zig), nil),
       wg_alloc_mark,
       MIR::Let.new("__obs_wg", wg_init,
-        false, "*CheatHeader.WaitGroup", nil),
+        false, Type.new("*CheatHeader.WaitGroup"), nil),
       MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("__obs_wg"), "add", [MIR::Lit.new("1")], false,
         MIR::CallableContract.no_ownership(1)), nil),
       MIR::ExprStmt.new(set_completion, nil),
@@ -3502,7 +3515,7 @@ class PipelineHost
     case fold_op
     when AST::CountOp
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
-      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, "i64", nil)
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, Type.new("i64"), nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
         MIR::Set.new(MIR::Ident.new(fold_acc),
           MIR::BinOp.new("+", MIR::Ident.new(fold_acc), MIR::Lit.new("1")))
@@ -3512,15 +3525,15 @@ class PipelineHost
     when AST::SumOp
       acc_zig  = transpile_type(smooth_node.full_type!.to_s)  # already upsized by pipe_analysis
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
-      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, acc_zig, nil)
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, Type.new(acc_zig), nil)
       loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_acc),
         MIR::BinOp.new("+", MIR::Ident.new(fold_acc), expr_mir))
       result_expr = MIR::Ident.new(fold_acc)
 
     when AST::AverageOp
       expr_f64 = numeric_fold_expr_typed(fold_op.expression, item_var, "f64")
-      acc_init_stmts << MIR::Let.new(fold_sum, MIR::Lit.new("0"), true, "f64", nil)
-      acc_init_stmts << MIR::Let.new(fold_cnt, MIR::Lit.new("0"), true, "i64", nil)
+      acc_init_stmts << MIR::Let.new(fold_sum, MIR::Lit.new("0"), true, Type.new("f64"), nil)
+      acc_init_stmts << MIR::Let.new(fold_cnt, MIR::Lit.new("0"), true, Type.new("i64"), nil)
       loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_sum),
         MIR::BinOp.new("+", MIR::Ident.new(fold_sum), expr_f64))
       loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_cnt),
@@ -3536,7 +3549,7 @@ class PipelineHost
       acc_zig  = transpile_type(smooth_node.full_type!.to_s)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new(fold_acc,
-        MIR::TypeSentinel.new(:max, acc_zig), true, acc_zig, nil)
+        MIR::TypeSentinel.new(:max, acc_zig), true, Type.new(acc_zig), nil)
       acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::Let.new(fold_val, expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
@@ -3553,7 +3566,7 @@ class PipelineHost
       acc_zig  = transpile_type(smooth_node.full_type!.to_s)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new(fold_acc,
-        MIR::TypeSentinel.new(:min, acc_zig), true, acc_zig, nil)
+        MIR::TypeSentinel.new(:min, acc_zig), true, Type.new(acc_zig), nil)
       acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::Let.new(fold_val, expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
@@ -3589,7 +3602,7 @@ class PipelineHost
       find_zig  = result_ft.optional? ? transpile_type(T.must(result_ft.wrapped_type).resolved.to_s) : elem_zig
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
       acc_init_stmts << MIR::Let.new(fold_result,
-        MIR::Undef.new(nil), true, find_zig, nil)
+        MIR::Undef.new(nil), true, Type.new(find_zig), nil)
       acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
         MIR::Set.new(MIR::Ident.new(fold_result), MIR::Ident.new(item_var)),
@@ -3669,7 +3682,7 @@ class PipelineHost
       iter, cap = bc_for_iter_range(range_lit, p[:initial_capture])
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts],
-        MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+        MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
         MIR::ForStmt.new(iter, cap,
           [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
@@ -3678,7 +3691,7 @@ class PipelineHost
     if bc_target? && range_lit.is_a?(AST::Identifier) && source_ti&.runtime_stream?
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts],
-        MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+        MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
         MIR::ForStmt.new(visit_mir(range_lit), p[:initial_capture],
           [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
@@ -3687,7 +3700,7 @@ class PipelineHost
 
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
-      MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+      MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next,
         [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)],
@@ -3887,7 +3900,6 @@ class PipelineHost
     ctx = conc_op.shard_context
     each_op = conc_op.op
     range_node = ctx[:auto_detected] ? lhs : lhs.left
-    is_bc = bc_target?
 
     @sh_counter ||= 0
     id = (@sh_counter += 1)
@@ -3925,7 +3937,7 @@ class PipelineHost
     end
 
     inner = []
-    if !is_bc && ctx[:key_allocates_frame]
+    if ctx[:key_allocates_frame]
       # The key expression allocates from the frame arena (e.g. a string
       # concat). Save/restore per iteration so successive iterations
       # don't accumulate frame memory.
@@ -4240,12 +4252,12 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *bounded_callback_context_stmts(cb),
       *setup_stmts,
       *source_move,
       MIR::BreakStmt.new(label, call),
-    ].compact)
+    ].compact, Type.from_node!(conc_op, context: "bounded concurrent SELECT result"))
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::WhereOp).returns(MIR::BlockExpr) }
@@ -4270,12 +4282,12 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *bounded_callback_context_stmts(cb),
       *setup_stmts,
       *source_move,
       MIR::BreakStmt.new(label, call),
-    ].compact)
+    ].compact, Type.from_node!(conc_op, context: "bounded concurrent WHERE result"))
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::EachOp).returns(MIR::ScopeBlock) }
@@ -4378,11 +4390,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *bounded_callback_context_stmts(cb),
       *setup_stmts,
       MIR::BreakStmt.new(label, call),
-    ])
+    ], Type.from_node!(conc_op, context: "stream concurrent SELECT result"))
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::WhereOp).returns(MIR::BlockExpr) }
@@ -4413,11 +4425,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *bounded_callback_context_stmts(cb),
       *setup_stmts,
       MIR::BreakStmt.new(label, call),
-    ])
+    ], Type.from_node!(conc_op, context: "stream concurrent WHERE result"))
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }
@@ -4529,11 +4541,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *setup_stmts,
       *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
-    ])
+    ], Type.from_node!(conc_op, context: "list concurrent SELECT result"))
   end
 
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: T.untyped).returns(MIR::BlockExpr) }
@@ -4556,11 +4568,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *setup_stmts,
       *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
-    ])
+    ], Type.from_node!(conc_op, context: "list concurrent WHERE result"))
   end
 
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::CountOp).returns(MIR::BlockExpr) }
@@ -4582,11 +4594,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *setup_stmts,
       *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
-    ])
+    ], Type.from_node!(conc_op, context: "list concurrent COUNT result"))
   end
 
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: T.untyped, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
@@ -4630,11 +4642,11 @@ class PipelineHost
     ])
 
     label = next_pipe_label
-    MIR::BlockExpr.new(label, [
+    typed_block_expr(label, [
       *setup_stmts,
       *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
-    ])
+    ], result_t)
   end
 
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }

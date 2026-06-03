@@ -118,6 +118,40 @@ RSpec.describe "Type#zig_type gap coverage" do
     expect(type.collection).to be_nil
   end
 
+  it "keeps plain type construction affine without extra capability metadata" do
+    type = Type.new(:Int64)
+
+    expect(type.resolved).to eq(:Int64)
+    expect(type.ownership).to eq(:affine)
+    expect(type.sync).to be_nil
+    expect(type.collection).to be_nil
+    expect(type.provenance).to be_nil
+  end
+
+  it "normalizes Number aliases on bare and nested type names" do
+    expect(Type.new(:Number).resolved).to eq(:Float64)
+    expect(T.must(Type.new(:"HashMap<Number>").value_type).resolved).to eq(:Float64)
+  end
+
+  it "keeps suffix and constructor capability overrides after parsing defaults" do
+    suffixed = Type.new(:"String@shared:locked")
+    constructed = Type.new(:Counter, sync: :locked)
+
+    expect(suffixed.ownership).to eq(:shared)
+    expect(suffixed.sync).to eq(:locked)
+    expect(constructed.ownership).to eq(:affine)
+    expect(constructed.sync).to eq(:locked)
+  end
+
+  it "keeps function-signature type wrappers affine" do
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+    type = Type.new(sig)
+
+    expect(type.fn_type?).to be true
+    expect(type.ownership).to eq(:affine)
+    expect(type.sync).to be_nil
+  end
+
   it "applies observable terminal constructor metadata and surface names" do
     plain = Type.new(:Int64)
     observable = Type.new(:"~Int64", observable: true, observable_terminal: :sum)
@@ -197,6 +231,15 @@ RSpec.describe "Type#zig_type gap coverage" do
     expect(payload.layout).to eq(:indirect)
     expect(payload.ownership).to eq(:shared)
     expect(payload.sync).to eq(:locked)
+  end
+
+  it "exposes wrapper payloads and generic type parameters without string parsing" do
+    fallible_optional = Type.new(:"!?Mode")
+
+    expect(fallible_optional.success_type).to be_optional
+    expect(fallible_optional.value_payload_type.resolved).to eq(:Mode)
+    expect(Type.new(:T)).to be_generic_type_parameter
+    expect(Type.new(:Result)).not_to be_generic_type_parameter
   end
 
   it "raises a compiler error for observable wrappers without terminal stamps" do

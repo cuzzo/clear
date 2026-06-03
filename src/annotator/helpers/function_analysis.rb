@@ -110,7 +110,7 @@ module FunctionAnalysis
     end
 
     func_type = scope.resolve_type(func_name)
-    entry = scope.locals[func_name]
+    entry = scope.resolve_entry(func_name)
     fsig = FunctionSignature.unwrap(func_type)
     call_node = args.equal?(node.args) ? node : Struct.new(:token, :name, :args).new(node.token, func_name, args)
 
@@ -583,7 +583,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    sym&.atomic? && !sym.indirect?
+    !!(sym&.atomic? && !sym.indirect?)
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }
@@ -801,7 +801,7 @@ module FunctionAnalysis
       )
       # Stash the SymbolEntry on the Param so downstream passes don't
       # need to find an Identifier reference in the body.
-      param.symbol = current_scope.locals[param.name]
+      param.symbol = current_scope.local_entry!(param.name)
       param.symbol.is_param = true
       param.symbol.param_decl_token = param.name_token
       # Preserve REQUIRES disjunctions for call-site effect resolution.
@@ -810,8 +810,8 @@ module FunctionAnalysis
         param.symbol.sync_families = fams if fams.is_a?(Set) && !fams.empty?
       end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
-      current_scope.locals[param.name].takes = true if param.takes
-      classify_ownership!(current_scope.locals[param.name])
+      current_scope.local_entry!(param.name).takes = true if param.takes
+      classify_ownership!(current_scope.local_entry!(param.name))
       og_declare(param.name, nil, param.type)
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
@@ -837,7 +837,7 @@ module FunctionAnalysis
         error!(node, :CAPTURE_NO_DEFAULT, name: cap_name)
       end
 
-      if !current_scope.locals.key?(cap_name)
+      if !current_scope.entry?(cap_name)
         # Check if it's in a higher scope
         owner_scope = lookup_scope_for(cap_name)
         if owner_scope.nil?
@@ -849,7 +849,7 @@ module FunctionAnalysis
         owner_scope = current_scope
       end
 
-      entry = owner_scope.locals[cap_name]
+      entry = owner_scope.entry_for_write!(cap_name)
 
       if cap.mutable && !entry.mutable && node.is_a?(AST::FunctionDef)
         emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
@@ -989,7 +989,7 @@ module FunctionAnalysis
       # the caller controls their lifetime. Only flag variables explicitly assigned
       # from a collection index borrow (BindExpr with container_borrow=true).
       scope = lookup_scope_for(node.name)
-      reg = scope&.locals&.[](node.name)&.reg
+      reg = scope&.resolve_entry(node.name)&.reg
       return reg&.container_borrow == true
     end
     return true if node.is_a?(AST::GetIndex)
@@ -1043,18 +1043,36 @@ module FunctionAnalysis
         spec = config[:args][i]
         if spec.is_a?(Hash)
           expected = spec[:type]
-          next false unless is_safe_autocast?(arg.resolved_type, expected)
+          next true if expected == :Any && !spec[:sync] && !spec[:ownership]
+          next false unless expected == :Any || is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
           arg_type = arg.full_type!(context: "intrinsic capability argument")
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true
         else
+          next true if spec == :Any
+          next true if spec.is_a?(Symbol) && any_array_intrinsic_arg?(spec, arg)
           is_safe_autocast?(arg.resolved_type, spec)
         end
       end
     end
     matched && IntrinsicRegistry.fs(matched)
+  end
+
+  sig { params(spec: Symbol, arg: Object).returns(T::Boolean) }
+  def any_array_intrinsic_arg?(spec, arg)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return false unless spec == :"Any[]"
+    return false unless arg.respond_to?(:full_type!)
+
+    type = arg.send(:full_type!, context: "intrinsic Any[] argument")
+    return false unless type.is_a?(Type)
+    return true if type.array?
+    return false unless type.future?
+
+    type.dynamic_stream? || type.promise_list? || type.bounded_stream? ||
+      type.open_stream? || type.inf_stream?
   end
 
   # Formats intrinsic args for error messages

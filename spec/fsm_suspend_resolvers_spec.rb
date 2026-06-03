@@ -35,7 +35,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
         suspends: true,
         fsm_setup: [
           FsmOps::StmtCall.new(
-            "__FSM_CTX.rt.getSched().fsmSleepTask",
+            FsmOps::FunctionPath.context(["rt", "getSched()", "fsmSleepTask"]),
             [
               FsmOps::AddrOf.new(FsmOps::SubField.new(FsmOps::StateField.new("task"), "task")),
               FsmOps::ArgRef.new(0),

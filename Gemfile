@@ -1,5 +1,6 @@
 source 'https://rubygems.org'
 
+gem 'csv'
 gem 'msgpack', '~> 1.7', '>= 1.7.2'
 
 group :development do
@@ -41,3 +42,5 @@ group :development do
   gem 'rubocop', require: false
   gem 'rubocop-sorbet', require: false
 end
+
+gem "stackprof", "~> 0.2.28"

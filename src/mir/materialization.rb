@@ -53,7 +53,7 @@ module MIR
     const :alloc, Symbol
     const :type_info, Type
     const :mutable, T::Boolean
-    const :annotation, T.nilable(String), default: nil
+    const :annotation, T.nilable(Type), default: nil
     const :suppression, T.nilable(String), default: nil
     const :cleanup_entry, T.nilable(CleanupEntry), default: nil
     const :cleanup_mode, Symbol, default: :normal

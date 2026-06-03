@@ -73,13 +73,13 @@ module FsmTransform
         NextSuspend.new(promise_ast, result_var, index)
       end
 
-      sig { returns(T.untyped) }
+      sig { returns(T.nilable(Type)) }
       def result_type
         promise_ft = promise_ast ? Type.from_node!(promise_ast, context: "FSM NEXT suspend promise") : nil
         return nil unless promise_ft
 
         pt = Type.new(promise_ft)
-        pt.tense_type if pt.respond_to?(:tense_type)
+        pt.tense_type
       end
     end
     # LockSuspend: ONE cap's lock-acquire suspend.
@@ -131,7 +131,38 @@ module FsmTransform
     # A segment is a list of AST::Stmt nodes followed by a Tail.
     Segment = Struct.new(:index, :stmts, :tail)
 
+    class CtxFieldRef < T::Struct
+      extend T::Sig
+
+      const :name, String
+
+      sig { params(ctx_name: String).returns(String) }
+      def render(ctx_name)
+        "#{ctx_name}.#{name}"
+      end
+    end
+
+    SyntheticZigPart = T.type_alias { T.any(String, CtxFieldRef) }
+
+    class SyntheticZig < T::Struct
+      extend T::Sig
+
+      const :parts, T::Array[SyntheticZigPart]
+
+      sig { params(ctx_name: String).returns(String) }
+      def render(ctx_name)
+        parts.map { |part|
+          part.is_a?(CtxFieldRef) ? part.render(ctx_name) : part
+        }.join
+      end
+    end
+
     module_function
+
+    sig { params(stmt: T.any(String, SyntheticZig), ctx_name: String).returns(String) }
+    def render_synthetic_zig(stmt, ctx_name)
+      stmt.is_a?(SyntheticZig) ? stmt.render(ctx_name) : stmt
+    end
 
     sig { params(tail: T.untyped).returns(T::Boolean) }
     def suspend_tail?(tail)

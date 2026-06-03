@@ -178,7 +178,7 @@ module MIRLoweringExpressions
     # before reaching the MIR lowering. If one arrives here it means it was
     # used outside its pipeline context (after the pipeline expression ended,
     # or in a pipeline that doesn't have a matching AS declaration).
-    if node.name.match?(/\A\$[a-z]/)
+    if synthetic_pipeline_binding_name?(node.name)
       line = node.token&.line || "?"
       raise "line #{line}: Undefined pipeline binding '#{node.name}'. " \
             "Pipeline bindings must be declared with 'AS #{node.name}' " \
@@ -231,6 +231,15 @@ module MIRLoweringExpressions
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def synthetic_pipeline_binding_name?(name)
+    return false unless name.start_with?("$")
+    return false if name.length < 2
+
+    codepoint = T.must(name[1]).ord
+    codepoint >= 97 && codepoint <= 122
   end
 
   sig { params(node: AST::Identifier).returns(T::Boolean) }
@@ -459,9 +468,6 @@ module MIRLoweringExpressions
     rhs = node.right
     source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
     mir_result = pipeline_host.lower_pipeline(node)
-    if mir_result.is_a?(MIR::BlockExpr)
-      mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
-    end
     result_type = Type.from_node!(node, context: "pipeline result ownership")
     sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
     return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
@@ -528,15 +534,15 @@ module MIRLoweringExpressions
     collect_var = "__collect_acc_#{@block_expr_counter}"
     val_var = "__collect_val_#{@block_expr_counter}"
     left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
-    observable_alloc = left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap
-    collect_cleanup = CleanupEntry.build(:uniform, alloc: observable_alloc,
+    collect_source_alloc = ft.observable? ? :heap : (left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap)
+    collect_cleanup = CleanupEntry.build(:uniform, alloc: collect_source_alloc,
       has_moved_guard: false, zig_type: acc_zig)
     MIR::BlockExpr.new(label, [
-      MIR::Let.new(collect_var, left, false, acc_zig, nil),
+      MIR::Let.new(collect_var, left, false, ft, nil),
       MIR::Cleanup.new(collect_var, collect_cleanup),
       MIR::Let.new(val_var,
         smooth_collect_call(MIR::Ident.new(collect_var), collect_method, collect_args, collect_type, collect_alloc_fact),
-        false, collect_type.zig_type, nil),
+        false, collect_type, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
     ])
   end
@@ -923,15 +929,16 @@ module MIRLoweringExpressions
     stmts
   end
 
-  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::InlineBc) }
+  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::OrExitBcRewrite) }
   def or_exit_bc_reassign(facts, msg_mir)
-    MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-      kind: facts.kind,
-      name_id: facts.name_id,
-      clear_type: facts.clear_type,
-      has_message: facts.has_message,
-      line: facts.line,
-    })
+    MIR::OrExitBcRewrite.new(
+      facts.kind,
+      facts.name_id,
+      facts.clear_type,
+      facts.has_message,
+      facts.line,
+      msg_mir,
+    )
   end
 
   sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node), return_value: MIR::Node).returns(MIR::ScopeBlock) }
@@ -1520,7 +1527,7 @@ module MIRLoweringExpressions
       transfer_name = zig_safe_name(raw_name)
       if entry&.needs_cleanup?
         entry[:has_moved_guard] = true
-        (@guarded_cleanup_names ||= {})[T.must(transfer_name)] = true
+        (@guarded_cleanup_names ||= {})[transfer_name] = true
       end
     end
     body = lower_body(node.body)
@@ -1544,11 +1551,13 @@ module MIRLoweringExpressions
     s = lower(node.start)
     e = lower(node.finish)
     elem_type = node.full_type!.tense_type&.element_type&.resolved
-    if node.inclusive
+    range = if node.inclusive
       MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")), elem_type)
     else
       MIR::RangeLit.new(s, e, elem_type)
     end
+    range.result_type = Type.new(node.full_type!)
+    range
   end
 
   sig { params(node: AST::Slice).returns(MIR::SliceExpr) }
@@ -1794,7 +1803,7 @@ module MIRLoweringExpressions
     end
 
     sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
-      source.symbol.type
+      T.must(source.symbol).type
     end
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
 
@@ -1969,8 +1978,7 @@ module MIRLoweringExpressions
   def lower_freeze(node)
     T.bind(self, MIRLowering) rescue nil
     ti = node.value.full_type!
-    base = ti.resolved.to_s.sub(/^\?/, '')
-    zig_base = transpile_type(base)
+    zig_base = transpile_type(ti.non_optional_type.resolved)
     inner = lower(node.value)
     # Dereference Rc data pointer to get *const T for freeze()
     rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
@@ -1980,7 +1988,7 @@ module MIRLoweringExpressions
   sig { params(ti: Type).returns(String) }
   def rc_payload_zig_type(ti)
     T.bind(self, MIRLowering) rescue nil
-    if ti.resolved.to_s.match?(/\A[A-Z]\z/) && ti.shared?
+    if ti.generic_type_parameter? && ti.shared?
       return ti.resolved.to_s
     end
     ::FiberCtxBuilder.rc_payload_zig_type(ti)

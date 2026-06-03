@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "lexer"
 require_relative "../backends/zig_type"
 
 # Result struct for binary operation type resolution
@@ -77,21 +78,36 @@ class TypeCapabilities < T::Struct
     observable_token: UNSET,
     polymorphic_shared: UNSET
   )
+    next_ownership = T.let(ownership.equal?(UNSET) ? self.ownership : T.cast(ownership, T.nilable(Symbol)), T.nilable(Symbol))
+    next_sync = T.let(sync.equal?(UNSET) ? self.sync : T.cast(sync, T.nilable(Symbol)), T.nilable(Symbol))
+    next_layout = T.let(layout.equal?(UNSET) ? self.layout : T.cast(layout, T.nilable(Symbol)), T.nilable(Symbol))
+    next_lock_rank = T.let(lock_rank.equal?(UNSET) ? self.lock_rank : T.cast(lock_rank, T.nilable(Integer)), T.nilable(Integer))
+    next_collection = T.let(collection.equal?(UNSET) ? self.collection : T.cast(collection, T.nilable(Symbol)), T.nilable(Symbol))
+    next_shard_count = T.let(shard_count.equal?(UNSET) ? self.shard_count : T.cast(shard_count, T.nilable(Integer)), T.nilable(Integer))
+    next_soa = T.let(soa.equal?(UNSET) ? self.soa : T.cast(soa, T::Boolean), T::Boolean)
+    next_elem_ownership = T.let(elem_ownership.equal?(UNSET) ? self.elem_ownership : T.cast(elem_ownership, T.nilable(Symbol)), T.nilable(Symbol))
+    next_elem_sync = T.let(elem_sync.equal?(UNSET) ? self.elem_sync : T.cast(elem_sync, T.nilable(Symbol)), T.nilable(Symbol))
+    next_link_source = T.let(link_source.equal?(UNSET) ? self.link_source : T.cast(link_source, T.nilable(Symbol)), T.nilable(Symbol))
+    next_observable = T.let(observable.equal?(UNSET) ? self.observable : T.cast(observable, T::Boolean), T::Boolean)
+    next_observable_terminal = T.let(observable_terminal.equal?(UNSET) ? self.observable_terminal : T.cast(observable_terminal, T.nilable(Symbol)), T.nilable(Symbol))
+    next_observable_token = T.let(observable_token.equal?(UNSET) ? self.observable_token : observable_token, T.nilable(Object))
+    next_polymorphic_shared = T.let(polymorphic_shared.equal?(UNSET) ? self.polymorphic_shared : T.cast(polymorphic_shared, T::Boolean), T::Boolean)
+
     TypeCapabilities.new(
-      ownership: ownership.is_a?(TypeCapabilityUnset) ? self.ownership : ownership,
-      sync: sync.is_a?(TypeCapabilityUnset) ? self.sync : sync,
-      layout: layout.is_a?(TypeCapabilityUnset) ? self.layout : layout,
-      lock_rank: lock_rank.is_a?(TypeCapabilityUnset) ? self.lock_rank : lock_rank,
-      collection: collection.is_a?(TypeCapabilityUnset) ? self.collection : collection,
-      shard_count: shard_count.is_a?(TypeCapabilityUnset) ? self.shard_count : shard_count,
-      soa: soa.is_a?(TypeCapabilityUnset) ? self.soa : soa,
-      elem_ownership: elem_ownership.is_a?(TypeCapabilityUnset) ? self.elem_ownership : elem_ownership,
-      elem_sync: elem_sync.is_a?(TypeCapabilityUnset) ? self.elem_sync : elem_sync,
-      link_source: link_source.is_a?(TypeCapabilityUnset) ? self.link_source : link_source,
-      observable: observable.is_a?(TypeCapabilityUnset) ? self.observable : observable,
-      observable_terminal: observable_terminal.is_a?(TypeCapabilityUnset) ? self.observable_terminal : observable_terminal,
-      observable_token: observable_token.is_a?(TypeCapabilityUnset) ? self.observable_token : observable_token,
-      polymorphic_shared: polymorphic_shared.is_a?(TypeCapabilityUnset) ? self.polymorphic_shared : polymorphic_shared
+      ownership: next_ownership,
+      sync: next_sync,
+      layout: next_layout,
+      lock_rank: next_lock_rank,
+      collection: next_collection,
+      shard_count: next_shard_count,
+      soa: next_soa,
+      elem_ownership: next_elem_ownership,
+      elem_sync: next_elem_sync,
+      link_source: next_link_source,
+      observable: next_observable,
+      observable_terminal: next_observable_terminal,
+      observable_token: next_observable_token,
+      polymorphic_shared: next_polymorphic_shared
     )
   end
 
@@ -120,8 +136,10 @@ class TypePlacement < T::Struct
 
   sig { params(provenance: MaybeSymbol).returns(TypePlacement) }
   def with(provenance: TypePlacement::UNSET)
+    next_provenance = T.let(provenance.equal?(UNSET) ? self.provenance : T.cast(provenance, T.nilable(Symbol)), T.nilable(Symbol))
+
     TypePlacement.new(
-      provenance: provenance.is_a?(TypePlacementUnset) ? self.provenance : provenance
+      provenance: next_provenance
     )
   end
 
@@ -333,6 +351,7 @@ class Type
   attr_reader :capabilities
   sig { returns(TypePlacement) }
   attr_reader :placement
+  sig { params(is_resource: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   attr_writer :is_resource      # set by annotator; read internally as @is_resource in #resource?
 
   # Unified provenance: where was this data allocated?
@@ -370,6 +389,11 @@ class Type
     always_mutable: "alwaysMutable",
     local: "local",
   }.freeze, T::Hash[Symbol, String])
+
+  DEFAULT_SHAPE = T.let(TypeShape.new(raw: :Any).freeze, TypeShape)
+  DEFAULT_CAPABILITIES = T.let(TypeCapabilities.new.freeze, TypeCapabilities)
+  AFFINE_CAPABILITIES = T.let(TypeCapabilities.new(ownership: :affine).freeze, TypeCapabilities)
+  DEFAULT_PLACEMENT = T.let(TypePlacement.new.freeze, TypePlacement)
 
   class ObservablePublishSpec < T::Struct
     const :publish_method, String
@@ -603,36 +627,55 @@ class Type
 
   public
 
-  sig { params(raw_input: Object, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.nilable(Integer), observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
+  sig do
+    params(
+      raw_input: Object,
+      ownership: T.nilable(Symbol),
+      sync: T.nilable(Symbol),
+      layout: T.nilable(Symbol),
+      location: T.nilable(Symbol),
+      collection: T.nilable(Symbol),
+      shard_count: T.nilable(Integer),
+      stripe_count: T.nilable(Integer),
+      observable: T.nilable(T::Boolean),
+      observable_terminal: T.nilable(Symbol),
+      auto: T::Boolean
+    ).void
+  end
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
-    @shape              = T.let(TypeShape.new(raw: :Any), TypeShape)
-    @capabilities       = T.let(TypeCapabilities.new, TypeCapabilities)
-    @placement          = T.let(TypePlacement.new, TypePlacement)
+    @shape              = T.let(DEFAULT_SHAPE, TypeShape)
+    @capabilities       = T.let(DEFAULT_CAPABILITIES, TypeCapabilities)
+    @placement          = T.let(DEFAULT_PLACEMENT, TypePlacement)
     @is_resource        = T.let(nil, T.nilable(T::Boolean))
-    @auto_token          = T.let(nil, T.untyped)
-    @zig_type_cache     = T.let(nil, T.untyped)
+    @auto_token         = T.let(nil, T.nilable(Lexer::Token))
+    @zig_type_cache     = T.let(nil, T.nilable(String))
     @generic_payload_type_arg = T.let(false, T::Boolean)
     if raw_input.is_a?(Type)
       other = raw_input
-      @shape              = auto ? other.shape.with(auto: true) : other.shape.copy
-      @capabilities       = other.capabilities.copy
-      @placement             = TypePlacement.new(provenance: other.provenance)
+      @shape              = auto ? other.shape.with(auto: true) : other.shape
+      @capabilities       = other.capabilities
+      @placement          = other.placement
       @generic_payload_type_arg = other.generic_payload_type_arg?
     else
       parse_raw_input(raw_input, auto: auto)
     end
 
-    # Capability fields — set after parse/copy so they can override.
+    # Capability fields — set after parse/copy so explicit constructor
+    # overrides can replace the parsed/default capability state. Most Type
+    # construction uses the parsed default, so avoid the generic merge path
+    # unless there is an actual override.
     apply_declared_location!(location)
-    apply_capabilities!(
-      ownership: ownership || TypeCapabilities::UNSET,
-      sync: sync || TypeCapabilities::UNSET,
-      layout: layout || TypeCapabilities::UNSET,
-      collection: collection || TypeCapabilities::UNSET,
-      shard_count: shard_count || TypeCapabilities::UNSET,
-      observable: observable ? true : TypeCapabilities::UNSET,
-      observable_terminal: observable_terminal || TypeCapabilities::UNSET
-    )
+    if ownership || sync || layout || collection || shard_count || observable || observable_terminal
+      apply_capabilities!(
+        ownership: ownership || TypeCapabilities::UNSET,
+        sync: sync || TypeCapabilities::UNSET,
+        layout: layout || TypeCapabilities::UNSET,
+        collection: collection || TypeCapabilities::UNSET,
+        shard_count: shard_count || TypeCapabilities::UNSET,
+        observable: observable ? true : TypeCapabilities::UNSET,
+        observable_terminal: observable_terminal || TypeCapabilities::UNSET
+      )
+    end
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
     pin_heap_for_sync_wrapper! if sync_requires_heap_provenance?
@@ -1278,6 +1321,12 @@ class Type
   end
 
   sig { returns(T::Boolean) }
+  def generic_type_parameter?
+    raw = shape.raw
+    raw.is_a?(Symbol) && raw.to_s.length == 1 && raw.to_s >= "A" && raw.to_s <= "Z"
+  end
+
+  sig { returns(T::Boolean) }
   def primitive?
     AST::PRIMITIVE_TYPES.include?(resolved)
   end
@@ -1411,7 +1460,11 @@ class Type
   # replacing `Auto` with the resolved concrete type.
   # Nil for implicit-Auto (omitted annotation under `--gradual`),
   # which has no source token to point at.
-  attr_accessor :auto_token
+  sig { returns(T.nilable(Lexer::Token)) }
+  attr_reader :auto_token
+
+  sig { params(auto_token: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
+  attr_writer :auto_token
 
   sig { returns(T::Boolean) }
   def fn_type?
@@ -2114,6 +2167,11 @@ class Type
     t.optional? ? T.must(t.wrapped_type) : t
   end
 
+  sig { returns(Type) }
+  def non_optional_type
+    optional? ? T.must(wrapped_type) : self
+  end
+
   # Tense (Promise) types: ~T — a background task that will produce T
   sig { returns(T::Boolean) }
   def tense?
@@ -2788,7 +2846,7 @@ class Type
   def plain_return_payload_type
     return nil unless error_union?
 
-    payload_type
+    error_union_payload_with_outer_capabilities
   end
 
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
@@ -3021,19 +3079,34 @@ class Type
   def parse_raw_input(raw_input, auto: false)
     if raw_input.is_a?(FunctionSignature) || raw_input.is_a?(Array)
       @shape = TypeShape.new(raw: raw_input, auto: auto)
-      apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
+      @capabilities = AFFINE_CAPABILITIES
       return
     end
 
-    normalized_str = raw_input.to_s.gsub(/\bNumber\b/, 'Float64')
+    raw_str = raw_input.to_s
+    normalized_str = if raw_input == :Number || raw_str == "Number"
+      "Float64"
+    elsif raw_str.include?("Number")
+      raw_str.gsub(/\bNumber\b/, 'Float64')
+    else
+      raw_str
+    end
+
     suffix = normalized_str.include?("<") ? TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil) : self.class.strip_capability_suffix_from(normalized_str)
     @shape = TypeShape.from_core(suffix.base, auto: auto)
-    apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
+    if suffix.ownership || suffix.sync
+      @capabilities = AFFINE_CAPABILITIES
+      apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
+    else
+      @capabilities = AFFINE_CAPABILITIES
+    end
   end
 
   sig { params(str: String).returns(TypeCapabilitySuffix) }
   def self.strip_capability_suffix_from(str)
-    return TypeCapabilitySuffix.new(base: str, ownership: nil, sync: nil) unless str.include?("@")
+    unless str.include?("@")
+      return TypeCapabilitySuffix.new(base: str, ownership: nil, sync: nil)
+    end
 
     base, *caps = str.gsub(/\s+/, "").split("@")
     ownership = T.let(nil, T.nilable(Symbol))

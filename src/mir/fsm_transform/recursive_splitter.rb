@@ -39,11 +39,31 @@
 
 require "sorbet-runtime"
 
+require_relative "../../ast/ast"
 require_relative "segments"
 
 module FsmTransform
   module RecursiveSplitter
     extend T::Sig
+
+    SegmentStmt = T.type_alias { T.any(AST::Node, String, FsmTransform::Segments::SyntheticZig) }
+    AliasOverrideMap = T.type_alias { T::Hash[String, String] }
+    AliasOverrideTable = T.type_alias { T::Hash[Integer, AliasOverrideMap] }
+    SegmentSlot = T.type_alias { T.any(FsmTransform::Segments::Segment, Symbol) }
+
+    class SegmentList < T::Struct
+      extend T::Sig
+
+      const :segments, T::Array[FsmTransform::Segments::Segment]
+      const :synthetic_fields, T::Array[String]
+      const :alias_overrides_by_index, AliasOverrideTable
+
+      sig { params(index: Integer).returns(T.nilable(AliasOverrideMap)) }
+      def alias_overrides_for(index)
+        alias_overrides_by_index[index]
+      end
+    end
+
     # The Builder owns the linear segment array and the next-index
     # counter. Segments are filled in any order (forward refs are
     # resolved by reserving an index, then filling later).
@@ -55,26 +75,16 @@ module FsmTransform
       sig { void }
       def initialize
         T.bind(self, T.untyped) rescue nil
-        @segments = T.let([], T::Array[T.untyped])
-        @synthetic_fields = T.let([], T::Array[T.untyped])
-        @alias_overrides_for = T.let({}, T::Hash[T.untyped, T.untyped])
-        @current_alias_overrides = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-      end
-
-      # Per-segment alias overrides keyed by segment index. Used by
-      # WITH's recursively-split CS body so the CS-scope identifier
-      # alias (e.g. `inner` -> `(__ctx.c.ctrl.data.*.data)`) is in
-      # the capture_map when each CS segment is rendered.
-      sig { params(idx: Integer).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-      def alias_overrides_for(idx)
-        T.bind(self, T.untyped) rescue nil
-        @alias_overrides_for[idx]
+        @segments = T.let([], T::Array[FsmTransform::RecursiveSplitter::SegmentSlot])
+        @synthetic_fields = T.let([], T::Array[String])
+        @alias_overrides_for = T.let({}, AliasOverrideTable)
+        @current_alias_overrides = T.let(nil, T.nilable(AliasOverrideMap))
       end
 
       # Push a frame of alias overrides during a recursive emit call.
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
-      sig { params(overrides: T::Hash[String, String], blk: T.untyped).returns(T.untyped) }
+      sig { params(overrides: AliasOverrideMap, blk: T.proc.returns(Object)).returns(Object) }
       def with_alias_overrides(overrides, &blk)
         T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides
@@ -84,7 +94,7 @@ module FsmTransform
         @current_alias_overrides = prev
       end
 
-      sig { params(idx: Integer).returns(T.nilable(T::Hash[String, String])) }
+      sig { params(idx: Integer).void }
       def stamp_overrides(idx)
         T.bind(self, T.untyped) rescue nil
         return if @current_alias_overrides.nil? || @current_alias_overrides.empty?
@@ -94,10 +104,11 @@ module FsmTransform
       # Synthetic ctx field decls produced by control-flow-form
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
-      sig { params(decl: String).returns(T.nilable(T::Array[String])) }
+      sig { params(decl: String).void }
       def add_synthetic_field(decl)
         T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)
+        nil
       end
 
       # Reserve a segment index for later filling. Returns the
@@ -112,7 +123,7 @@ module FsmTransform
       end
 
       # Fill a previously-reserved index with the actual segment.
-      sig { params(idx: Integer, stmts: T::Array[T.untyped], tail: T.untyped).returns(Integer) }
+      sig { params(idx: Integer, stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
       def fill(idx, stmts, tail)
         T.bind(self, T.untyped) rescue nil
         @segments[idx] = Segments::Segment.new(idx, stmts, tail)
@@ -121,7 +132,7 @@ module FsmTransform
       end
 
       # Allocate + fill in one step. Returns the index.
-      sig { params(stmts: T::Array[T.untyped], tail: T.untyped).returns(Integer) }
+      sig { params(stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
       def push(stmts, tail)
         T.bind(self, T.untyped) rescue nil
         idx = reserve_index
@@ -137,7 +148,7 @@ module FsmTransform
           raise "RecursiveSplitter: unfilled segments at indices " \
                 "#{unfilled.map(&:last).inspect}"
         end
-        @segments
+        T.cast(@segments, T::Array[FsmTransform::Segments::Segment])
       end
     end
 
@@ -149,7 +160,7 @@ module FsmTransform
     # `lowering` is used inside emit_*_fragment for cond-rendering
     # (loop / if conditions are lowered to Zig text at split time
     # since they appear in CondBranch tails as raw Zig).
-    sig { params(body: T.untyped, lowering: T.untyped, ctx: BasicObject).returns(T.nilable(T::Array[T.untyped])) }
+    sig { params(body: T::Array[AST::Node], lowering: Object, ctx: T.nilable(T::Hash[Symbol, Object])).returns(T.nilable(SegmentList)) }
     def split(body, lowering, ctx: nil)
       T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
@@ -176,7 +187,6 @@ module FsmTransform
         segments, mapping = renumber_with_entry(segments, entry)
       end
       synth = builder.synthetic_fields.dup
-      segments.define_singleton_method(:synthetic_fields) { synth }
       alias_table =
         if mapping
           pre_renumber_overrides.each_with_object({}) { |(orig, ov), h|
@@ -186,8 +196,11 @@ module FsmTransform
         else
           pre_renumber_overrides
         end
-      segments.define_singleton_method(:alias_overrides_for) { |i| alias_table[i] }
-      segments
+      SegmentList.new(
+        segments: segments,
+        synthetic_fields: synth,
+        alias_overrides_by_index: alias_table,
+      )
     rescue UnsupportedShape
       nil
     end
@@ -406,7 +419,7 @@ module FsmTransform
     #
     #   cond_seg: [], CondBranch(cond_zig, body_entry, after_idx)
     #   body_segs (recursive): exit to cond_seg's index
-    sig { params(while_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
+    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: Object).returns(Integer) }
     def emit_while_fragment(while_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       cond_idx = builder.reserve_index
@@ -441,9 +454,6 @@ module FsmTransform
       iter_var = "__for_#{builder.segments.length}"
       type_zig = "i64"
 
-      # ctx_id is unknown at split time. The synthesized stmts use
-      # the placeholder token __FSM_CTX which the unified emit
-      # substitutes with __ctx_<id> before rendering.
       builder.add_synthetic_field("#{iter_var}: #{type_zig} = undefined,")
       builder.add_synthetic_field("#{var_name}: #{type_zig} = undefined,")
 
@@ -452,11 +462,11 @@ module FsmTransform
       end_zig = lower_to_zig(for_stmt.end_expr, lowering) or
         raise UnsupportedShape, "ForRange end did not lower"
 
-      ctx_iter = "__FSM_CTX.#{iter_var}"
-      ctx_var  = "__FSM_CTX.#{var_name}"
+      ctx_iter = Segments::CtxFieldRef.new(name: iter_var)
+      ctx_var  = Segments::CtxFieldRef.new(name: var_name)
 
       cond_op = for_stmt.inclusive ? "<=" : "<"
-      cond_zig = "#{ctx_iter} #{cond_op} #{end_zig}"
+      cond_zig = Segments::SyntheticZig.new(parts: [ctx_iter, " #{cond_op} #{end_zig}"])
 
       cond_idx = builder.reserve_index
       incr_idx = builder.reserve_index
@@ -464,13 +474,17 @@ module FsmTransform
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
       body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
 
-      init_zig = "#{ctx_iter} = #{start_zig};\n#{ctx_var} = #{ctx_iter};"
+      init_zig = Segments::SyntheticZig.new(parts: [
+        ctx_iter, " = #{start_zig};\n", ctx_var, " = ", ctx_iter, ";",
+      ])
       init_idx = builder.push([init_zig], Segments::Goto.new(cond_idx))
 
       builder.fill(cond_idx, [],
         Segments::CondBranch.new(cond_zig, body_entry, after_idx))
       builder.fill(incr_idx,
-        ["#{ctx_iter} = #{ctx_iter} + 1;\n#{ctx_var} = #{ctx_iter};"],
+        [Segments::SyntheticZig.new(parts: [
+          ctx_iter, " = ", ctx_iter, " + 1;\n", ctx_var, " = ", ctx_iter, ";",
+        ])],
         Segments::Goto.new(cond_idx))
 
       init_idx
@@ -502,7 +516,7 @@ module FsmTransform
       # Per-shape var type comes from the descriptor (e.g. map's
       # bound var is the KEY type, not the element/value type).
       elem_zig = desc.var_zig_type
-      ctx_var = "__FSM_CTX.#{var_name}"
+      ctx_var = Segments::CtxFieldRef.new(name: var_name)
 
       case desc.kind
       when :indexed_slice
@@ -521,7 +535,7 @@ module FsmTransform
       end
     end
 
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: Object, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
     def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
@@ -542,34 +556,34 @@ module FsmTransform
       builder.add_synthetic_field("#{iter_field}: #{iter_type_zig} = undefined,")
       builder.add_synthetic_field("#{has_field}: bool = false,")
 
-      ctx_iter = "__FSM_CTX.#{iter_field}"
-      ctx_has  = "__FSM_CTX.#{has_field}"
+      ctx_iter = Segments::CtxFieldRef.new(name: iter_field)
+      ctx_has  = Segments::CtxFieldRef.new(name: has_field)
 
       cond_idx = builder.reserve_index
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
       body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering)
 
       bind_zig = desc.deref ? "__nxt_#{counter}.*" : "__nxt_#{counter}"
-      cond_pre = [
-        "if (#{ctx_iter}.#{advance_method}()) |__nxt_#{counter}| {",
-        "    #{ctx_var} = #{bind_zig};",
-        "    #{ctx_has} = true;",
-        "} else {",
-        "    #{ctx_has} = false;",
+      cond_pre = Segments::SyntheticZig.new(parts: [
+        "if (", ctx_iter, ".#{advance_method}()) |__nxt_#{counter}| {\n",
+        "    ", ctx_var, " = #{bind_zig};\n",
+        "    ", ctx_has, " = true;\n",
+        "} else {\n",
+        "    ", ctx_has, " = false;\n",
         "}",
-      ].join("\n")
+      ])
       builder.fill(cond_idx, [cond_pre],
         Segments::CondBranch.new(ctx_has, body_entry, after_idx))
 
       builder.push(
-        ["#{ctx_iter} = #{coll_zig}.#{init_method}();"],
+        [Segments::SyntheticZig.new(parts: [ctx_iter, " = #{coll_zig}.#{init_method}();"])],
         Segments::Goto.new(cond_idx),
       )
     end
 
     # Indexed slice: list / array. ctx.__feidx walks 0..len; body_init
     # assigns ctx.var from the slice; incr bumps the idx.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, slice_suffix: T.untyped).returns(Integer) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: Segments::CtxFieldRef, elem_zig: T.untyped, counter: Integer, slice_suffix: T.untyped).returns(Integer) }
     def emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
                               coll_zig, var_name, ctx_var, elem_zig,
                               counter, slice_suffix)
@@ -579,7 +593,7 @@ module FsmTransform
       builder.add_synthetic_field("#{var_name}: #{elem_zig} = undefined,")
 
       slice_zig = "#{coll_zig}#{slice_suffix}"
-      ctx_iter = "__FSM_CTX.#{iter_var}"
+      ctx_iter = Segments::CtxFieldRef.new(name: iter_var)
 
       cond_idx = builder.reserve_index
       incr_idx = builder.reserve_index
@@ -587,22 +601,22 @@ module FsmTransform
       body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
 
       body_init_idx = builder.push(
-        ["#{ctx_var} = #{slice_zig}[#{ctx_iter}];"],
+        [Segments::SyntheticZig.new(parts: [ctx_var, " = #{slice_zig}[", ctx_iter, "];"])],
         Segments::Goto.new(body_entry),
       )
       builder.fill(cond_idx, [],
-        Segments::CondBranch.new("#{ctx_iter} < #{slice_zig}.len",
+        Segments::CondBranch.new(Segments::SyntheticZig.new(parts: [ctx_iter, " < #{slice_zig}.len"]),
                                  body_init_idx, after_idx))
       builder.fill(incr_idx,
-        ["#{ctx_iter} = #{ctx_iter} + 1;"],
+        [Segments::SyntheticZig.new(parts: [ctx_iter, " = ", ctx_iter, " + 1;"])],
         Segments::Goto.new(cond_idx))
-      builder.push(["#{ctx_iter} = 0;"], Segments::Goto.new(cond_idx))
+      builder.push([Segments::SyntheticZig.new(parts: [ctx_iter, " = 0;"])], Segments::Goto.new(cond_idx))
     end
 
     # Pool indexed: like :indexed_slice but body_init has a skip-dead
     # branch that Gotos straight to incr when the slot's `alive` flag
     # is false.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer).returns(Integer) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: Segments::CtxFieldRef, elem_zig: T.untyped, counter: Integer).returns(Integer) }
     def emit_for_each_pool(for_stmt, after_idx, builder, lowering,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
       T.bind(self, T.untyped) rescue nil
@@ -611,7 +625,7 @@ module FsmTransform
       builder.add_synthetic_field("#{var_name}: #{elem_zig} = undefined,")
 
       slots_zig = "#{coll_zig}.slots"
-      ctx_iter = "__FSM_CTX.#{iter_var}"
+      ctx_iter = Segments::CtxFieldRef.new(name: iter_var)
 
       cond_idx = builder.reserve_index
       incr_idx = builder.reserve_index
@@ -619,22 +633,22 @@ module FsmTransform
       body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
 
       assign_idx = builder.push(
-        ["#{ctx_var} = #{slots_zig}[#{ctx_iter}].value;"],
+        [Segments::SyntheticZig.new(parts: [ctx_var, " = #{slots_zig}[", ctx_iter, "].value;"])],
         Segments::Goto.new(body_entry),
       )
       skip_check_idx = builder.reserve_index
       builder.fill(skip_check_idx, [],
         Segments::CondBranch.new(
-          "!#{slots_zig}[#{ctx_iter}].alive",
+          Segments::SyntheticZig.new(parts: ["!#{slots_zig}[", ctx_iter, "].alive"]),
           incr_idx, assign_idx,
         ))
       builder.fill(cond_idx, [],
-        Segments::CondBranch.new("#{ctx_iter} < #{slots_zig}.len",
+        Segments::CondBranch.new(Segments::SyntheticZig.new(parts: [ctx_iter, " < #{slots_zig}.len"]),
                                  skip_check_idx, after_idx))
       builder.fill(incr_idx,
-        ["#{ctx_iter} = #{ctx_iter} + 1;"],
+        [Segments::SyntheticZig.new(parts: [ctx_iter, " = ", ctx_iter, " + 1;"])],
         Segments::Goto.new(cond_idx))
-      builder.push(["#{ctx_iter} = 0;"], Segments::Goto.new(cond_idx))
+      builder.push([Segments::SyntheticZig.new(parts: [ctx_iter, " = 0;"])], Segments::Goto.new(cond_idx))
     end
 
 

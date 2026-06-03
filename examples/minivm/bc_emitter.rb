@@ -9,6 +9,7 @@
 # Only compiles main/cheatMain. Non-main functions raise Unimplemented.
 
 require_relative "../../src/mir/mir"
+require_relative "../../src/ast/error_registry"
 
 class BcEmitter
   class Unimplemented < StandardError; end
@@ -573,10 +574,9 @@ class BcEmitter
     # try/catch and union-arm handlers (`__caseA_body`, `__processUser_body`,
     # `__handleWithCatch_body`, etc.). The Zig backend specializes them at
     # call sites; the VM has no comptime, so just drop them — call sites
-    # that try to BC_CALL them won't find an entry in @fn_start_ips and
-    # fall through to the LOAD_NAME slow path (which is also dead because
-    # these names don't exist at runtime). Tests that *actually* call the
-    # generic at runtime will fail later with a clear error.
+    # that try to BC_CALL them won't find an entry in @fn_start_ips. These
+    # names do not exist at runtime, so tests that actually call the generic
+    # will fail later with a clear error.
     ast_fn = mir_fn.instance_variable_get(:@ast_fn) if mir_fn.respond_to?(:instance_variable_get)
     ast_fn ||= lookup_ast_fn(name)
     # Synthesized workers (e.g. "__BoundedConcurrentCtx1.apply" emitted
@@ -891,6 +891,9 @@ class BcEmitter
     return :structural_noop if n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::MethodCall) &&
       n.expr.receiver.is_a?(MIR::Ident) && n.expr.receiver.name.to_s == "rt" &&
       n.expr.method.to_s == "checkYield"
+    return :structural_noop if n.is_a?(MIR::Let) && n.init.is_a?(MIR::MethodCall) &&
+      n.init.receiver.is_a?(MIR::Ident) && n.init.receiver.name.to_s == "rt" &&
+      n.init.method.to_s == "saveLoopMark"
     return :structural_noop if n.is_a?(MIR::ReturnStmt) && (n.value.nil? || void_expr?(n.value))
 
     :compiled
@@ -985,6 +988,8 @@ class BcEmitter
       end
     when MIR::InlineBc
       compile_inline_bc(mir_node)
+    when MIR::OrExitBcRewrite
+      compile_or_exit_bc_rewrite(mir_node)
     when MIR::ShardedMapPut
       # Statement-position sharded HashMap put -- emit MAP_PUT (the VM
       # has no shard routing; sharded maps share a single MapRef).
@@ -1586,15 +1591,18 @@ class BcEmitter
 
   def annotation_to_vm_type(ann)
     return :any if ann.nil?
-    return :i64  if ann == "i64"
-    return :f64  if ann == "f64"
-    return :bool if ann == "bool"
-    return :str  if ann == "[]const u8"
-    return :map  if ann.include?("StringMap") || ann.include?("NumericMapType") ||
-                    ann.include?("PartitionedStringMap") || ann.include?("ShardedStringMap") ||
-                    ann.include?("PartitionedNumericMap") || ann.include?("StripedNumericMap") ||
-                    ann.include?("MutexShardedStringMap")
-    return :set  if ann.include?("CheatLib.Set(")
+    raise TypeError, "MIR::Let annotation must be Type, got #{ann.class}" unless ann.is_a?(Type)
+
+    zig_type = ann.zig_type
+    return :i64  if zig_type == "i64"
+    return :f64  if zig_type == "f64"
+    return :bool if zig_type == "bool"
+    return :str  if zig_type == "[]const u8"
+    return :map  if zig_type.include?("StringMap") || zig_type.include?("NumericMapType") ||
+                    zig_type.include?("PartitionedStringMap") || zig_type.include?("ShardedStringMap") ||
+                    zig_type.include?("PartitionedNumericMap") || zig_type.include?("StripedNumericMap") ||
+                    zig_type.include?("MutexShardedStringMap")
+    return :set  if zig_type.include?("CheatLib.Set(")
     :any
   end
 
@@ -2765,6 +2773,8 @@ class BcEmitter
       raise Unimplemented, "InlineZig/RawZig in expression position (no bc template in stdlib)"
     when MIR::InlineBc
       compile_inline_bc(node)
+    when MIR::OrExitBcRewrite
+      compile_or_exit_bc_rewrite(node)
     when MIR::ShardedMapPut
       compile_sharded_map_put(node)
     when MIR::ShardedMapGet
@@ -4739,10 +4749,10 @@ class BcEmitter
       matched_jumps
     }
     meta.each_with_index do |m, ci|
-      kinds           = m[:kinds] || []
-      types           = m[:types] || []
-      filter_types    = m[:filter_types] || []
-      filter_messages = m[:filter_messages] || []
+      kinds           = m.kinds
+      types           = m.types
+      filter_types    = m.filter_types
+      filter_messages = m.filter_messages
 
       # Items: kinds (errKind) and types (errType) — any match passes.
       item_match_jumps = []
@@ -4834,6 +4844,50 @@ class BcEmitter
   #     ExprStmt(RawZig("rt.__error.clear_line = N", "or_exit_line")),
   #     ReturnStmt(Ident("__exit_err"))
   #   ])
+  # OR EXIT structural rewrite in expression position. The normal
+  # `call OR EXIT ...` lowering is handled by compile_or_exit_catch_body;
+  # this typed node keeps expression-position lowering independent from
+  # RawZig pattern matching.
+  def compile_or_exit_bc_rewrite(node)
+    emit_op(PUSH_ERR)
+    emit_or_exit_rewrite_fields(node)
+    push_type(:any)
+  end
+
+  def emit_or_exit_rewrite_fields(node)
+    if node.kind
+      emit_op(LOAD_CONST, add_const([:str, node.kind.to_s]))
+      emit_op(ERR_SET_KIND)
+    end
+    if node.name_id
+      emit_op(LOAD_CONST, add_const([:str, error_name_for_id(node.name_id.to_i)]))
+      emit_op(ERR_SET_TYPE)
+    elsif node.clear_type
+      emit_op(LOAD_CONST, add_const([:str, ""]))
+      emit_op(ERR_SET_TYPE)
+    end
+    if node.has_message
+      msg_arg = node.message
+      return unless msg_arg.is_a?(MIR::Lit)
+      emit_op(LOAD_CONST, add_const([:str, string_lit_text(msg_arg)]))
+      emit_op(ERR_SET_MSG)
+    end
+  end
+
+  def error_name_for_id(id)
+    pair = AST::ERROR_TYPES.find { |_sym, meta| meta[:id].to_i == id }
+    return pair.first.to_s if pair
+
+    ""
+  end
+
+  def string_lit_text(lit)
+    text = lit.is_a?(MIR::Lit) ? lit.value.to_s : lit.to_s
+    return text[1...-1].gsub('\\"', '"').gsub("\\n", "\n") if text.start_with?('"') && text.end_with?('"')
+
+    text
+  end
+
   # On match, emit ERR_SET_* opcodes against the error stashed in tmp,
   # then BC_RET the mutated error. Returns true on match, false otherwise.
   def compile_or_exit_catch_body(node, tmp)
@@ -4843,14 +4897,22 @@ class BcEmitter
     return false unless stmts.is_a?(Array) && stmts.length >= 2
     last = stmts.last
     return false unless last.is_a?(MIR::ReturnStmt)
-    # All non-Return stmts must be ExprStmt(RawZig with or_exit_* reason).
-    rawzigs = stmts[0...-1].map do |s|
-      return false unless s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::RawZig)
-      s.expr
+    rewrites = []
+    rawzigs = []
+    stmts[0...-1].each do |s|
+      return false unless s.is_a?(MIR::ExprStmt)
+      if s.expr.is_a?(MIR::OrExitBcRewrite)
+        rewrites << s.expr
+      elsif s.expr.is_a?(MIR::RawZig)
+        rawzigs << s.expr
+      else
+        return false
+      end
     end
     return false unless rawzigs.all? { |rz| rz.reason.to_s.start_with?("or_exit_") }
     # Load the error sentinel and mutate fields in-place.
     emit_op(LOAD_SLOT, @slots[tmp])
+    rewrites.each { |rewrite| emit_or_exit_rewrite_fields(rewrite) }
     rawzigs.each do |rz|
       case rz.reason.to_s
       when "or_exit_kind", "or_exit_kind_from_type"

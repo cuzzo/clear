@@ -227,7 +227,7 @@ module WithMatchCheck
 
   # At every FuncCall in `fn`, verify each REQUIRES'd arg's binding belongs to
   # one of the families in the callee's disjunction.
-  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).void }
   def self.check_call_sites!(fn, sig_lookup, error_handler)
     return unless fn.respond_to?(:body) && fn.body
 

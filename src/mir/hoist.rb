@@ -497,10 +497,9 @@ module MIRHoistLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_produces_owned_result?(node)
     return false unless node
-    return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
-
     effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
     return true if effect.produces_owned && effect.requires_hoist
+    return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
     return true if node.is_a?(MIR::BgBlock)
 
     false
@@ -639,9 +638,9 @@ module MIRHoistLowering
       raise "#{context}: allocating #{mir.class} has no callable return type" unless sig
 
       Type.new(sig.return_type)
-    when MIR::InlineZig
+    when MIR::InlineZig, MIR::InlineBc
       sig = FunctionSignature.unwrap(mir.stdlib_def)
-      raise "#{context}: allocating MIR::InlineZig has no typed stdlib return" unless sig
+      raise "#{context}: allocating #{mir.class} has no typed stdlib return" unless sig
 
       Type.new(sig.return_type)
     when MIR::BgBlock
@@ -770,7 +769,6 @@ module MIRHoistLowering
   def normalize_allocating_mir_body(body)
     out = T.let([], T::Array[T.untyped])
     body.each do |stmt|
-      normalize_nested_mir_bodies!(stmt)
       prefix = normalize_allocating_mir_stmt!(stmt)
       out.concat(prefix)
       out << stmt
@@ -1180,7 +1178,7 @@ module MIRHoistLowering
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr, MIR::InlineZig, MIR::BgBlock
+    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr, MIR::InlineZig, MIR::InlineBc, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||
         typed_cleanup_entry_for_mir_result(mir, alloc: alloc) ||
         cleanup_entry_for_ownership_effect(mir, alloc: alloc)
@@ -1223,7 +1221,7 @@ module MIRHoistLowering
       T.unsafe(mir).result_type
     elsif mir.respond_to?(:callable_contract)
       T.unsafe(mir).callable_contract&.signature&.return_type
-    elsif mir.is_a?(MIR::InlineZig)
+    elsif mir.is_a?(MIR::InlineZig) || mir.is_a?(MIR::InlineBc)
       FunctionSignature.unwrap(mir.stdlib_def)&.return_type
     end
 

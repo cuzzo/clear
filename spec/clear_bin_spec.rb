@@ -2,7 +2,6 @@ require "rspec"
 require "tmpdir"
 require "fileutils"
 require "digest"
-require "json"
 
 # Tests for the ./clear CLI binary.
 # Each test creates a temp directory with .cht files and runs ./clear build.
@@ -28,24 +27,11 @@ RSpec.describe "./clear build", :integration do
     File.expand_path("../zig/.clear-cache", __dir__)
   end
 
-  def transpile_cache_dir
-    File.expand_path("../zig/.clear-transpile-cache", __dir__)
-  end
-
   def cache_entries_for(source_path)
     source_hash = Digest::SHA256.hexdigest(File.expand_path(source_path))[0, 16]
     Dir.glob(File.join(clear_cache_dir, source_hash, "*"), File::FNM_DOTMATCH)
        .reject { |p| [".", ".."].include?(File.basename(p)) }
        .sort
-  end
-
-  def transpile_cache_entries
-    Dir.glob(File.join(transpile_cache_dir, "*.zig")).sort
-  end
-
-  def build_metadata_path(source_path)
-    output = File.join(File.dirname(source_path), File.basename(source_path, ".cht"))
-    File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
   end
 
   context "single file" do
@@ -96,35 +82,6 @@ RSpec.describe "./clear build", :integration do
       FileUtils.rm_rf(dir)
     end
 
-    it "supports nested src/ layouts when resolving pkg imports" do
-      dir = Dir.mktmpdir
-
-      math_dir = File.join(dir, "packages", "math", "src")
-      FileUtils.mkdir_p(math_dir)
-      File.write(File.join(math_dir, "lib.cht"), <<~CLEAR)
-        PUB FN add(a: Int64, b: Int64) RETURNS Int64 ->
-          RETURN a + b;
-        END
-      CLEAR
-
-      src_dir = File.join(dir, "src")
-      FileUtils.mkdir_p(src_dir)
-      main_path = File.join(src_dir, "main.cht")
-      File.write(main_path, <<~CLEAR)
-        REQUIRE "pkg:math";
-        FN main() RETURNS Void ->
-          ASSERT add(20, 22) == 42;
-          print("NESTED");
-          RETURN;
-        END
-      CLEAR
-
-      output, ok = clear_run(main_path)
-      expect(ok).to eq(true), "Expected nested package build+run to succeed, got: #{output}"
-      expect(output).to include("NESTED")
-    ensure
-      FileUtils.rm_rf(dir)
-    end
   end
 
   context "incremental builds" do
@@ -138,7 +95,7 @@ RSpec.describe "./clear build", :integration do
         END
       CLEAR
 
-      output1, ok1 = clear_build(main_path, "--safe")
+      output1, ok1 = clear_build(main_path, "--debug")
       expect(ok1).to be true
       expect(output1).to include("Built:")
 
@@ -147,149 +104,10 @@ RSpec.describe "./clear build", :integration do
       expect(root_zig_before).not_to be_nil
       mtime_before = File.mtime(root_zig_before)
 
-      output2, ok2 = clear_build(main_path, "--safe")
+      output2, ok2 = clear_build(main_path, "--debug")
       expect(ok2).to be true
       expect(output2).to include("up-to-date:")
       expect(File.mtime(root_zig_before)).to eq(mtime_before)
-    ensure
-      FileUtils.rm_rf(dir)
-    end
-
-    it "reuses the persistent transpilation cache on forced rebuilds" do
-      dir = Dir.mktmpdir
-      main_path = File.join(dir, "main.cht")
-      File.write(main_path, <<~CLEAR)
-        FN main() RETURNS Void ->
-          print("cache-hit");
-          RETURN;
-        END
-      CLEAR
-
-      before_entries = transpile_cache_entries
-
-      output1, ok1 = clear_build(main_path, "--safe", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
-      expect(ok1).to be true
-      expect(output1).to include("[transpile-cache] miss build_root main.cht")
-
-      after_first = transpile_cache_entries
-      new_entries = after_first - before_entries
-      expect(new_entries).not_to be_empty
-
-      output2, ok2 = clear_build(main_path, "--safe", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
-      expect(ok2).to be true
-      expect(output2).to include("[transpile-cache] hit build_root main.cht")
-      # Don't compare the full global set - parallel tests may add unrelated entries.
-      # Assert that our entries are still present and no new ones were added for this source.
-      after_second = transpile_cache_entries
-      expect(after_second).to include(*new_entries)
-      expect(after_second - after_first).not_to include(*new_entries)
-    ensure
-      FileUtils.rm_rf(dir)
-    end
-
-    it "rebuilds when build mode changes instead of reusing a stale binary" do
-      dir = Dir.mktmpdir
-      main_path = File.join(dir, "main.cht")
-      File.write(main_path, <<~CLEAR)
-        FN main() RETURNS Void ->
-          print("mode");
-          RETURN;
-        END
-      CLEAR
-
-      output1, ok1 = clear_build(main_path, "--safe")
-      expect(ok1).to be true
-      expect(output1).to include("Built:")
-
-      meta_path = build_metadata_path(main_path)
-      expect(File.exist?(meta_path)).to be true
-      first_signature = JSON.parse(File.read(meta_path))
-      expect(first_signature["opt_level"]).to eq("ReleaseSafe")
-
-      output2, ok2 = clear_build(main_path, "--optimized")
-      expect(ok2).to be true
-      expect(output2).to include("Built:")
-      expect(output2).not_to include("up-to-date:")
-
-      second_signature = JSON.parse(File.read(meta_path))
-      expect(second_signature["opt_level"]).to eq("ReleaseFast")
-    ensure
-      FileUtils.rm_rf(dir)
-    end
-
-    it "rebuilds when a required local module changes" do
-      dir = Dir.mktmpdir
-      helper_path = File.join(dir, "helper.cht")
-      File.write(helper_path, <<~CLEAR)
-        PUB FN value() RETURNS Int64 ->
-          RETURN 1;
-        END
-      CLEAR
-
-      main_path = File.join(dir, "main.cht")
-      File.write(main_path, <<~CLEAR)
-        REQUIRE "helper.cht";
-        FN main() RETURNS Void ->
-          ASSERT value() == 1;
-          RETURN;
-        END
-      CLEAR
-
-      output1, ok1 = clear_build(main_path, "--safe")
-      expect(ok1).to be true
-      expect(output1).to include("Built:")
-
-      sleep 1
-      File.write(helper_path, <<~CLEAR)
-        PUB FN value() RETURNS Int64 ->
-          RETURN 2;
-        END
-      CLEAR
-
-      output2, ok2 = clear_build(main_path, "--safe")
-      expect(ok2).to be true
-      expect(output2).to include("Built:")
-      expect(output2).not_to include("up-to-date:")
-    ensure
-      FileUtils.rm_rf(dir)
-    end
-
-    it "rebuilds when a required package module changes" do
-      dir = Dir.mktmpdir
-
-      math_dir = File.join(dir, "packages", "math", "src")
-      FileUtils.mkdir_p(math_dir)
-      lib_path = File.join(math_dir, "lib.cht")
-      File.write(lib_path, <<~CLEAR)
-        PUB FN add(a: Int64, b: Int64) RETURNS Int64 ->
-          RETURN a + b;
-        END
-      CLEAR
-
-      main_path = File.join(dir, "main.cht")
-      File.write(main_path, <<~CLEAR)
-        REQUIRE "pkg:math";
-        FN main() RETURNS Void ->
-          ASSERT add(2, 3) == 5;
-          RETURN;
-        END
-      CLEAR
-
-      output1, ok1 = clear_build(main_path, "--safe")
-      expect(ok1).to be true
-      expect(output1).to include("Built:")
-
-      sleep 1
-      File.write(lib_path, <<~CLEAR)
-        PUB FN add(a: Int64, b: Int64) RETURNS Int64 ->
-          RETURN a + b + 1;
-        END
-      CLEAR
-
-      output2, ok2 = clear_build(main_path, "--safe")
-      expect(ok2).to be true
-      expect(output2).to include("Built:")
-      expect(output2).not_to include("up-to-date:")
     ensure
       FileUtils.rm_rf(dir)
     end

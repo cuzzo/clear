@@ -30,7 +30,6 @@ RSpec.describe CleanupClassifier do
 
     CleanupClassifier.classify(
       fn_node,
-      fn_nodes: result.fn_nodes,
       schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
   end
@@ -227,6 +226,22 @@ RSpec.describe CleanupClassifier do
         expect(entry[:kind]).to eq(:uniform)
         expect(entry[:match_as]).to eq(true)
       end
+    end
+  end
+
+  describe "optional cleanup classification" do
+    it "classifies optional owned payloads when the node has no initializer value" do
+      entry = CleanupClassifier.send(
+        :classify_optional,
+        Type.new(:"?String"),
+        ->(_name) { nil },
+        node: Object.new,
+      )
+
+      expect(entry).not_to be_nil
+      expect(entry[:kind]).to eq(:uniform)
+      expect(entry[:alloc]).to eq(:frame)
+      expect(entry[:has_moved_guard]).to eq(true)
     end
   end
 

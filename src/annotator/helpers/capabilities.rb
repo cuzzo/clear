@@ -177,7 +177,7 @@ module CapabilityHelper
       end
 
     when :RESTRICT
-      if var_node.is_a?(AST::Identifier) && var_node.symbol && !var_node.symbol.mutable
+      if var_node.is_a?(AST::Identifier) && var_node.symbol && !T.must(var_node.symbol).mutable
         emit_with_restrict_immutable_error!(node, var_node)
       end
 
@@ -426,7 +426,7 @@ module CapabilityHelper
     return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
     if call.matched_stdlib_def
-      md = call.matched_stdlib_def
+      md = T.must(call.matched_stdlib_def)
       return "allocates" if md.emit&.allocates
       return "can fail" if md.can_fail
       return "suspends" if md.emit&.suspends
@@ -593,7 +593,7 @@ module CapabilityHelper
 
     param_names = fn_node.params.map { |p| p.name.to_s }
     rejected = fn_node.params.filter_map do |p|
-      sym = current_scope.locals[p.name.to_s]
+      sym = current_scope.resolve_entry(p.name.to_s)
       next unless sym && %i[locked write_locked versioned atomic].include?(sym.sync)
       p.name.to_s
     end.to_set
@@ -669,7 +669,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     scope = lookup_scope_for(alias_name)
     return false unless scope
-    !!scope.locals[alias_name]&.mutated
+    !!scope.resolve_entry(alias_name)&.mutated
   end
 
   # Resolve and validate a single capability entry from a WITH block.
@@ -809,7 +809,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @og = T.let(@og, T.untyped)
     var_name = cap_var_name(cap[:var_node])
-    source_entry = cap[:old_scope]&.locals&.[](var_name)
+    source_entry = cap[:old_scope]&.resolve_entry(var_name)
     # Sync may live on the binding (Identifier path) or on the field's
     # declared type (GetField path) — cap_var_sync covers both.
     syn = cap_var_sync(cap[:var_node])
@@ -830,7 +830,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].mark_non_escaping!
+      current_scope.local_entry!(alias_name).mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -849,7 +849,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      current_scope.locals[alias_name].mark_non_escaping!
+      current_scope.local_entry!(alias_name).mark_non_escaping!
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
         error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
@@ -876,7 +876,7 @@ module CapabilityHelper
         resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         record_capture_local!(alias_name)
-        sym = current_scope.locals[alias_name]
+        sym = current_scope.local_entry!(alias_name)
         sym.mark_non_escaping!
         sym.mark_borrowed_alias!  # RESTRICT alias: fiber capture is stack-UAF
         og_declare(alias_name, nil, resolved_type)
@@ -894,7 +894,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
       record_capture_local!(alias_name)
-      sym = current_scope.locals[alias_name]
+      sym = current_scope.local_entry!(alias_name)
       if cap[:capability] == :VIEW
         sym.mark_non_escaping!
         sym.mark_borrowed_alias!
@@ -925,7 +925,7 @@ module CapabilityHelper
       is_mutable = !!cap[:alias_mutable]
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
       record_capture_local!(alias_name)
-      sym = current_scope.locals[alias_name]
+      sym = current_scope.local_entry!(alias_name)
       sym.mark_non_escaping!
       sym.mark_borrowed_alias!
       og_declare(alias_name, nil, inner_type)
@@ -933,7 +933,7 @@ module CapabilityHelper
       # BORROWED guarantees the aliased data is stable for the borrow duration.
       # @shared/@locked/@multiowned types can be concurrently written — the
       # stability guarantee cannot be upheld. Reject them at the borrow site.
-      source_sym = cap[:old_scope]&.locals&.[](var_name)
+      source_sym = cap[:old_scope]&.resolve_entry(var_name)
       if source_sym
         bad_storage = source_sym.rc_stored?
         bad_sync    = source_sym.locked? || source_sym.write_locked?
@@ -952,7 +952,7 @@ module CapabilityHelper
       resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
-      sym = current_scope.locals[alias_name]
+      sym = current_scope.local_entry!(alias_name)
       sym.mark_non_escaping!
       sym.mark_borrowed_alias!  # BORROWED alias: fiber capture is stack-UAF
       og_declare(alias_name, nil, resolved_type)
@@ -1058,7 +1058,7 @@ module CapabilityHelper
     return unless ctx
     name = node.name
     return if ctx.locals.include?(name) || %w[TRUE FALSE VOID _].include?(name)
-    info = ctx.outer_scope.locals[name]
+    info = ctx.outer_scope.resolve_entry(name)
     resolved_sym = info || node.symbol
     ctx.analysis.has_non_escaping_capture = true if non_escaping_fiber_capture?(resolved_sym)
     if info
@@ -1205,7 +1205,7 @@ module CapabilityAudit
     T.bind(self, SemanticAnnotator) rescue nil
     return unless current_fn_ctx&.name
 
-    info = current_scope.locals[var_name]
+    info = current_scope.resolve_entry(var_name)
     sync = info&.sync
     own  = storage if storage == :multiowned || storage == :shared
     return unless sync || own

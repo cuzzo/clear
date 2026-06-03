@@ -18,11 +18,20 @@ rescue LoadError
   # (e.g., installed at the system level or via a wrapper script).
 end
 
+# Compiler runtime type wrappers are useful while debugging compiler internals,
+# but they dominate normal build time if enabled before src/ is loaded.
+begin
+  require "sorbet-runtime"
+  T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
+rescue LoadError
+end
+
 require 'fileutils'
 require 'optparse'
 require 'digest'
 require 'set'
 require 'json'
+require_relative 'src/tools/clear_build_support'
 
 # Coverage bootstrap MUST run before any src/ require so SimpleCov can
 # instrument every file the subcommand loads. No-op unless COVERAGE=1.
@@ -44,6 +53,15 @@ ZIG = [
   File.join(ZIG_DIR, 'zig', 'zig'),
   `which zig 2>/dev/null`.strip
 ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+
+BUILD_SUPPORT_CONFIG = ClearBuildSupport::Config.new(
+  src_dir: SRC_DIR,
+  zig_dir: ZIG_DIR,
+  script_path: __FILE__,
+  zig_path: ZIG,
+  transpiler_path: TRANSPILER,
+  transpiler_cache_dir: TRANSPILER_CACHE_DIR
+)
 
 # Runtime files needed for linking
 RUNTIME_FILES = %w[runtime/switch.S runtime/onRoot.S].map { |f| File.join(ZIG_DIR, f) }
@@ -97,71 +115,6 @@ def run_with_fix_retry(binary, cmd, sub_args, source, fix_mode)
   exec(binary, cmd, *sub_args)
 end
 
-def describe_finding(finding)
-  line = finding.token&.line
-  col  = finding.token&.column
-  puts "\n[#{finding.category}] #{finding.message} (line #{line}, col #{col})"
-  finding.fixes.each_with_index do |fx, i|
-    marker = fx.confidence == :auto ? '*' : ' '
-    puts "  #{marker} [#{i + 1}] #{fx.description}"
-  end
-end
-
-def prompt_choice(finding)
-  $stderr.print "Apply which fix? [1-#{finding.fixes.length}, 0 to skip]: "
-  input = $stdin.gets&.strip
-  return nil if input.nil? || input.empty?
-  idx = input.to_i
-  return nil if idx == 0
-  finding.fixes[idx - 1]
-end
-
-# Apply edits to `text`. Edits are pre-sorted last-to-first (line, col)
-# so earlier application doesn't shift later byte positions.
-# Drop edits whose span starts inside another edit's span. Keeps the
-# first (earlier in the sorted list) when spans overlap. This handles
-# the case where multiple fixable sources fire for the same syntax
-# mistake (e.g., both the operator-typo scanner and the parser
-# expected-token handler flag the same `=>`).
-def dedupe_overlapping_edits(edits)
-  kept = []
-  edits.each do |e|
-    start_col = e.span.col
-    end_col   = start_col + e.span.length
-    conflict = kept.find do |prev|
-      next false if prev.span.line != e.span.line
-      prev_start = prev.span.col
-      prev_end   = prev_start + prev.span.length
-      # An edit conflicts with a kept one if its insertion point falls
-      # within the kept edit's range, OR its replacement range
-      # overlaps the kept range. Also catches two zero-length
-      # insertions at the same column.
-      within_prev = start_col >= prev_start && start_col <= prev_end
-      ranges_overlap = start_col < prev_end && prev_start < end_col
-      within_prev || ranges_overlap
-    end
-    kept << e unless conflict
-  end
-  kept
-end
-
-def apply_edits(text, edits)
-  lines = text.split("\n", -1)
-  edits.each do |e|
-    sp = e.span
-    idx = sp.line - 1
-    next if idx < 0 || idx >= lines.length
-    ln = lines[idx]
-    start_col = sp.col - 1
-    start_col = 0 if start_col < 0
-    start_col = ln.length if start_col > ln.length
-    end_col = start_col + sp.length
-    end_col = ln.length if end_col > ln.length
-    lines[idx] = ln[0...start_col] + e.replacement.to_s + ln[end_col..]
-  end
-  lines.join("\n")
-end
-
 def find_alloc_preload
   Dir.glob('/lib/x86_64-linux-gnu/libjemalloc.so*').first ||
     Dir.glob('/usr/lib/libjemalloc.so*').first ||
@@ -176,175 +129,6 @@ end
 def error(msg)
   $stderr.puts "\e[31merror:\e[0m #{msg}"
   exit 1
-end
-
-def debug_cache(msg)
-  $stderr.puts("[transpile-cache] #{msg}") if ENV['CLEAR_DEBUG_CACHE'] == '1'
-end
-
-def write_if_changed(path, content)
-  FileUtils.mkdir_p(File.dirname(path))
-  return false if File.exist?(path) && File.read(path) == content
-  File.write(path, content)
-  true
-end
-
-def ensure_symlink(link_path, target_path)
-  if File.symlink?(link_path)
-    return if File.readlink(link_path) == target_path
-    File.delete(link_path)
-  elsif File.exist?(link_path)
-    FileUtils.rm_rf(link_path)
-  end
-  File.symlink(target_path, link_path)
-end
-
-def build_metadata_path(output)
-  File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
-end
-
-def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil, use_debug_allocator: false, profile_max: nil)
-  {
-    "source" => File.expand_path(source),
-    "output" => File.expand_path(output),
-    "opt_level" => opt_level,
-    "extra_flags" => Array(extra_flags),
-    "module_mode" => module_mode,
-    "profile" => profile,
-    "profile_max" => profile_max,
-    "use_c_allocator" => use_c_allocator,
-    "use_debug_allocator" => use_debug_allocator,
-    "default_stack" => default_stack,
-    "strict_test" => strict_test,
-    "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
-    "main_tier" => main_tier,
-    "zig" => ZIG
-  }
-end
-
-def read_build_signature(output)
-  meta_path = build_metadata_path(output)
-  return nil unless File.exist?(meta_path)
-  JSON.parse(File.read(meta_path))
-rescue JSON::ParserError
-  nil
-end
-
-def write_build_signature(output, signature)
-  write_if_changed(build_metadata_path(output), JSON.pretty_generate(signature))
-end
-
-def find_package_source(pkg_name, start_dir:)
-  dir = File.expand_path(start_dir)
-  loop do
-    candidate = File.join(dir, "packages", pkg_name, "src", "lib.cht")
-    return candidate if File.exist?(candidate)
-    parent = File.dirname(dir)
-    break if parent == dir
-    dir = parent
-  end
-  nil
-end
-
-def resolve_clear_require(raw, caller_dir:)
-  if raw.start_with?('pkg:')
-    pkg_name = raw.sub(/\Apkg:/, '')
-    pkg_path = find_package_source(pkg_name, start_dir: caller_dir)
-    error "Package '#{pkg_name}' not found from #{caller_dir}" unless pkg_path
-    pkg_path
-  else
-    File.expand_path(raw, caller_dir)
-  end
-end
-
-def collect_clear_dependencies(path, seen: Set.new)
-  abs_path = File.expand_path(path)
-  return seen if seen.include?(abs_path)
-  error "File not found: #{abs_path}" unless File.exist?(abs_path)
-
-  seen.add(abs_path)
-  source = File.read(abs_path)
-  caller_dir = File.dirname(abs_path)
-  source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
-    dep_path = resolve_clear_require(raw, caller_dir: caller_dir)
-    collect_clear_dependencies(dep_path, seen: seen)
-  end
-  seen
-end
-
-def newest_build_dependency_mtime(source)
-  dep_paths = collect_clear_dependencies(source).to_a
-  compiler_paths = Dir.glob(File.join(SRC_DIR, '**', '*.rb'))
-  runtime_paths = Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.zig')) +
-                  Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.S')) +
-                  Dir.glob(File.join(ZIG_DIR, 'lib', '**', '*.zig'))
-  tracked = dep_paths + compiler_paths + runtime_paths + [__FILE__]
-  tracked.filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max || Time.at(0)
-end
-
-def compiler_signature
-  @compiler_signature ||= begin
-    tracked = Dir.glob(File.join(SRC_DIR, '**', '*.rb')).sort +
-              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-footer.zig')).sort +
-              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-header.zig')).sort
-    digest = Digest::SHA256.new
-    tracked.each do |path|
-      digest << path
-      digest << File.read(path)
-    end
-    digest.hexdigest
-  end
-end
-
-def transpile_dependency_signature(source_path)
-  digest = Digest::SHA256.new
-  collect_clear_dependencies(source_path).to_a.sort.each do |path|
-    digest << File.expand_path(path)
-    digest << File.read(path)
-  end
-  digest.hexdigest
-end
-
-def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
-  Digest::SHA256.hexdigest([
-    mode,
-    transpile_flag,
-    compiler_signature,
-    transpile_dependency_signature(source_path),
-    File.expand_path(source_path),
-    source_text
-  ].join("\0"))
-end
-
-def transpile_cached(source_path:, mode:, transpile_flag:, source_text:)
-  # The transpile cache is content-addressed: cache_key includes the
-  # compiler signature, dependency signatures, full source path and
-  # source text. If the key hits, the output is bit-identical with
-  # what re-running the transpiler would produce, so `--force`
-  # (which forces re-EMIT of the final binary, not re-TRANSPILE)
-  # still benefits from this cache. clear_bin_spec asserts this.
-  cache_key = transpile_cache_key(
-    source_path: source_path,
-    mode: mode,
-    transpile_flag: transpile_flag,
-    source_text: source_text
-  )
-  cache_file = File.join(TRANSPILER_CACHE_DIR, "#{cache_key}.zig")
-
-  if File.exist?(cache_file)
-    debug_cache("hit #{mode} #{File.basename(source_path)}")
-    return [File.read(cache_file), cache_file]
-  end
-
-  debug_cache("miss #{mode} #{File.basename(source_path)}")
-  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source_path} 2>/dev/null`
-  unless $?.success?
-    system("ruby #{TRANSPILER} #{transpile_flag} #{source_path} > /dev/null")
-    error "Transpilation failed"
-  end
-
-  write_if_changed(cache_file, zig_code)
-  [zig_code, cache_file]
 end
 
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
@@ -363,7 +147,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -371,7 +155,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
-  signature = build_signature(
+  signature = ClearBuildSupport.build_signature(
+    config: BUILD_SUPPORT_CONFIG,
     source: source,
     output: output,
     opt_level: opt_level,
@@ -388,15 +173,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
-  unless force || module_mode || profile
-    if File.exist?(output)
-      out_mtime = File.mtime(output)
-      newest_dep = newest_build_dependency_mtime(source)
-      if out_mtime >= newest_dep && read_build_signature(output) == signature
-        $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
-        return :up_to_date
-      end
-    end
+  begin
+    up_to_date = ClearBuildSupport.build_up_to_date?(
+      source: source,
+      output: output,
+      signature: signature,
+      config: BUILD_SUPPORT_CONFIG,
+      force: force,
+      module_mode: module_mode,
+      profile: profile
+    )
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
+
+  if up_to_date
+    $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
+    return :up_to_date
   end
 
   # Transpile
@@ -414,7 +207,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   source_text = File.read(source)
   pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
   pkg_flags = pkg_requires.map do |pkg_name|
-    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
@@ -424,21 +217,28 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   cache_key = Digest::SHA256.hexdigest(source)[0, 16]
   build_dir = File.join(ZIG_DIR, ".clear-cache", cache_key)
   FileUtils.mkdir_p(build_dir)
-  ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-  ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-  ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
   cache_dir = File.join(build_dir, '.zig-cache')
   global_cache_dir = File.join(build_dir, '.global-zig-cache')
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
 
-  zig_code, _cache_file = transpile_cached(
-    source_path: source,
-    mode: module_mode ? :test_root : :build_root,
-    transpile_flag: transpile_flag,
-    source_text: source_text
-  )
+  begin
+    zig_code, _cache_file = ClearBuildSupport.transpile_cached(
+      config: BUILD_SUPPORT_CONFIG,
+      source_path: source,
+      mode: module_mode ? :test_root : :build_root,
+      transpile_flag: transpile_flag,
+      source_text: source_text,
+      bypass: bypass_transpile_cache,
+      debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1'
+    )
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
   # with zero overhead in production builds.
@@ -466,7 +266,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # the file path so EXTERN against the runtime works without needing a
   # multi-package build.zig.
   zig_code = zig_code.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
-  write_if_changed(tmp_zig, zig_code)
+  ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
   # and check if a matching .zig file exists in the source directory.
@@ -481,22 +281,29 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Transpile package modules to .zig files
   pkg_modules = pkg_requires.map do |pkg_name|
-    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     # Collect transitive package deps for nested REQUIRE "pkg:..."
     pkg_src = File.read(pkg_path)
     nested_pkgs = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
     nested_flags = nested_pkgs.map { |np|
-      np_path = find_package_source(np, start_dir: File.dirname(pkg_path))
+      np_path = ClearBuildSupport.find_package_source(np, start_dir: File.dirname(pkg_path))
       error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
       "--pkg #{np}=#{np_path}"
     }.join(" ")
-    pkg_zig, _pkg_cache_file = transpile_cached(
-      source_path: pkg_path,
-      mode: :module,
-      transpile_flag: "--module #{nested_flags}".strip,
-      source_text: pkg_src
-    )
+    begin
+      pkg_zig, _pkg_cache_file = ClearBuildSupport.transpile_cached(
+        config: BUILD_SUPPORT_CONFIG,
+        source_path: pkg_path,
+        mode: :module,
+        transpile_flag: "--module #{nested_flags}".strip,
+        source_text: pkg_src,
+        bypass: bypass_transpile_cache,
+        debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1'
+      )
+    rescue ClearBuildSupport::BuildError => e
+      error e.message
+    end
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
     pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
@@ -504,7 +311,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
-    write_if_changed(pkg_zig_file, pkg_zig)
+    ClearBuildSupport.write_if_changed(pkg_zig_file, pkg_zig)
     pkg_name
   end
 
@@ -541,7 +348,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     zig_binary = File.join(build_dir, "#{File.basename(output)}-#{$$}")
     if File.exist?(zig_binary)
       FileUtils.mv(zig_binary, output)
-      write_build_signature(output, signature)
+      ClearBuildSupport.write_build_signature(output, signature)
     end
   end
 
@@ -595,6 +402,7 @@ when 'build'
   extra_flags = ['-fno-llvm', '-fno-lld']
   use_c_allocator = false
   use_debug_allocator = false
+  bypass_transpile_cache = false
 
   # Parse build flags
   remaining = []
@@ -624,8 +432,12 @@ when 'build'
     when '--no-stack-check'
       stack_check = false  # explicit override
       i += 1
-    when '--force', '--no-cache'
+    when '--force'
       @force_build = true
+      i += 1
+    when '--no-cache'
+      @force_build = true
+      bypass_transpile_cache = true
       i += 1
     when '--mir'
       # No-op: MIR is the only pipeline. Flag kept for backward compat.
@@ -679,7 +491,7 @@ when 'build'
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
@@ -862,7 +674,7 @@ when 'run'
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.cht'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache)
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
 
   # Hints
   unless ENV['CLEAR_THREADS']
@@ -1021,9 +833,9 @@ when 'test'
     base_name = File.basename(source, '.cht')
     build_dir = File.join(ZIG_DIR, ".build-#{$$}")
     FileUtils.mkdir_p(build_dir)
-    ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-    ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-    ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
     source_dir = File.dirname(File.expand_path(source))
     extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
     ffi_modules = extern_modules.select { |m|
@@ -1248,257 +1060,12 @@ when 'doctor'
   Doctor.run(positional.first, **doctor_opts)
 
 when 'fix'
-  require_relative 'src/ast/lexer'
-  require_relative 'src/ast/parser'
-  require_relative 'src/ast/fixable_error'
-  require_relative 'src/ast/syntax_typo_scanner'
-  require_relative 'src/tools/predicate_rewriter'
-  require_relative 'src/tools/multi_statement_linter'
-  require_relative 'src/backends/importer'
-  require_relative 'src/annotator'
+  require_relative 'src/tools/clear_fix_support'
 
-  args = ARGV[1..] || []
-  dry_run       = false
-  take_first    = false
-  only_set      = nil
-  loop_until_clean = false
-  loop_max      = 20
-  paths         = []
-
-  args.each do |a|
-    case a
-    when '--dry-run' then dry_run = true
-    when '--yes'     then take_first = true
-    when '--loop'    then loop_until_clean = true; take_first = true  # loop implies --yes
-    when /\A--loop=(\d+)/ then loop_until_clean = true; take_first = true; loop_max = $1.to_i
-    when /\A--only=(.+)/ then only_set = $1.split(',').map(&:to_sym).to_set
-    when /\A-/       then error "Unknown flag for fix: #{a}"
-    else paths << a
-    end
-  end
-
-  error "Usage: clear fix [--dry-run|--yes|--loop[=N]|--only=cat1,cat2] <file.cht|file.rb>..." if paths.empty?
-  error "--loop and --dry-run are mutually exclusive" if loop_until_clean && dry_run
-
-  # Run the compiler in collector mode on a single source string and
-  # return the captured FixableFindings. The parser/annotator may
-  # raise on unrecoverable errors; we swallow so partial findings
-  # still surface.
-  run_compiler_and_drain = lambda do |src|
-    FixCollector.enable!
-    findings = []
-    begin
-      SyntaxTypoScanner.scan!(src)
-      PredicateRewriter.lint!(src)
-      MultiStatementLinter.lint!(src)
-      begin
-        tokens = Lexer.new(src).tokenize
-        ast    = Parser.new(tokens, src).parse
-        annotator = SemanticAnnotator.new
-        annotator.source_code = src
-        annotator.annotate!(ast)
-      rescue CompilerError, ParserError
-      end
-      findings = FixCollector.drain
-    ensure
-      FixCollector.disable!
-    end
-    findings
-  end
-
-  # Extract `<<~MARKER` / `<<-MARKER` / `<<MARKER` heredocs whose
-  # marker is one of the CLEAR-source markers (CLEAR, FLUX, CHT,
-  # RUBY-but-only-when-the-spec-comment-says-so). Returns an Array
-  # of `{ content:, start_line:, indent: }` describing each heredoc.
-  # The `indent` is the amount of leading whitespace `<<~` strips
-  # from the body — used to translate column offsets when applying
-  # edits back to the .rb file.
-  CLEAR_HEREDOC_MARKERS = %w[CLEAR FLUX CHT].freeze
-  extract_clear_heredocs = lambda do |rb_source|
-    out = []
-    lines = rb_source.lines
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      m = line.match(/<<(~|-)?(#{CLEAR_HEREDOC_MARKERS.join('|')})\b/)
-      if m
-        squiggle = m[1] == '~'
-        marker   = m[2]
-        body_start_idx = i + 1
-        # Find the closing marker line.
-        end_idx = nil
-        (body_start_idx...lines.length).each do |j|
-          if squiggle || m[1] == '-'
-            # Indented end-marker allowed.
-            end_idx = j and break if lines[j] =~ /\A\s*#{marker}\b/
-          else
-            end_idx = j and break if lines[j] =~ /\A#{marker}\b/
-          end
-        end
-        if end_idx
-          body_lines = lines[body_start_idx...end_idx]
-          # Compute strip indent for `<<~`: the common leading whitespace
-          # across non-blank body lines.
-          indent = 0
-          if squiggle
-            non_blank = body_lines.reject { |bl| bl.strip.empty? }
-            unless non_blank.empty?
-              indent = non_blank.map { |bl| bl[/\A[ \t]*/].length }.min || 0
-            end
-          end
-          stripped = body_lines.map { |bl|
-            squiggle && bl.length >= indent ? bl[indent..] : bl
-          }.join
-          out << {
-            content:    stripped,
-            start_line: body_start_idx + 1,  # 1-indexed
-            indent:     indent,
-          }
-          i = end_idx + 1
-        else
-          i += 1
-        end
-      else
-        i += 1
-      end
-    end
-    out
-  end
-
-  # Translate every Edit in a Fix's edits[] from heredoc-local
-  # coordinates to .rb file coordinates.
-  translate_fixes_for_heredoc = lambda do |fixes, hd, rb_path|
-    fixes.map do |fx|
-      translated = fx.edits.map do |e|
-        Edit.new(
-          span: Span.new(
-            file:   rb_path,
-            line:   e.span.line + hd[:start_line] - 1,
-            col:    e.span.col + hd[:indent],
-            length: e.span.length,
-          ),
-          replacement: e.replacement,
-        )
-      end
-      Fix.new(description: fx.description, confidence: fx.confidence, edits: translated)
-    end
-  end
-
-  # Wrap the per-path loop so we can iterate until no more edits apply.
-  # `--loop` runs at most loop_max passes; each pass applies every
-  # auto-fix it finds across all paths, then re-runs from scratch
-  # because earlier fixes can unlock new findings (e.g. a caller
-  # becomes fallible once its callee is migrated to !T).
-  run_one_pass = lambda do
-  pass_applied = 0
-  paths.each do |path|
-    error "No such file: #{path}" unless File.file?(path)
-    source = File.read(path)
-
-    # Per-path: (1) get findings (either from a single .cht compile or
-    # from N heredocs in a .rb file), (2) apply.
-    findings = []
-    if path.end_with?('.rb')
-      heredocs = extract_clear_heredocs.call(source)
-      if heredocs.empty?
-        puts "#{path}: no CLEAR heredocs found"
-        next
-      end
-      heredocs.each do |hd|
-        compile_findings = run_compiler_and_drain.call(hd[:content])
-        compile_findings.each do |f|
-          translated = translate_fixes_for_heredoc.call(f.fixes, hd, path)
-          new_token = if f.token
-                        line = f.token.line + hd[:start_line] - 1
-                        col  = (f.token.respond_to?(:column) ? f.token.column : 0) + hd[:indent]
-                        t = Object.new
-                        t.define_singleton_method(:line)   { line }
-                        t.define_singleton_method(:column) { col }
-                        t
-                      end
-          findings << FixableFinding.new(
-            level: f.level, message: f.message, token: new_token,
-            category: f.category, fixes: translated,
-          )
-        end
-      end
-    else
-      findings = run_compiler_and_drain.call(source)
-    end
-
-    findings = findings.select { |f| only_set.nil? || only_set.include?(f.category) }
-
-    if findings.empty?
-      puts "#{path}: no fixable findings"
-      next
-    end
-
-    # Order findings by position, then dedupe by (line, col, message).
-    findings = findings.sort_by { |f| [f.token&.line || 0, f.token&.column || 0] }
-
-    queued_edits = []
-    findings.each do |f|
-      auto_fix = f.fixes.find { |fx| fx.confidence == :auto }
-
-      if dry_run
-        describe_finding(f)
-        next
-      end
-
-      chosen =
-        if auto_fix
-          auto_fix
-        elsif take_first
-          f.fixes.first
-        else
-          describe_finding(f)
-          prompt_choice(f)
-        end
-
-      if chosen
-        puts "  #{path}:#{f.token&.line}:#{f.token&.column}  [#{f.category}]  #{f.message}"
-        puts "    -> #{chosen.description}"
-        queued_edits.concat(chosen.edits.map { |e| [path, e] })
-      end
-    end
-
-    next if dry_run || queued_edits.empty?
-
-    # Group edits by file, apply right-to-left by (line, col) within each
-    # file so earlier edits don't shift later byte offsets.
-    by_file = queued_edits.group_by(&:first)
-    applied_count = 0
-    by_file.each do |file_key, rows|
-      target_path = file_key || path
-      text = File.read(target_path)
-      edits = rows.map { |(_, e)| e }
-               .sort_by { |e| [e.span.line, e.span.col] }
-      edits = dedupe_overlapping_edits(edits)
-      edits = edits.reverse  # right-to-left application keeps offsets stable
-      text = apply_edits(text, edits)
-      File.write(target_path, text)
-      applied_count += edits.length
-    end
-    puts "#{path}: applied #{applied_count} edit(s)"
-    pass_applied += applied_count
-  end
-  pass_applied
-  end  # run_one_pass
-
-  iter = 0
-  loop do
-    iter += 1
-    n = run_one_pass.call
-    break unless loop_until_clean
-    if n.zero?
-      puts "[fix --loop] converged after #{iter} pass(es)"
-      break
-    end
-    if iter >= loop_max
-      puts "[fix --loop] hit loop_max=#{loop_max}; stopping (#{n} edits in last pass)"
-      break
-    end
-    puts "[fix --loop] pass #{iter}: #{n} edit(s); re-running"
+  begin
+    ClearFixSupport.run_args(ARGV[1..] || [])
+  rescue ClearFixSupport::UsageError, ClearFixSupport::FileMissingError => e
+    error e.message
   end
 
 when 'fmt', 'format'

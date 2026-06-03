@@ -866,9 +866,9 @@ class BindExpr
 end
 
 class BodySlot
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(MIR::BodySlot::Body) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def name; end
 end
 
@@ -878,9 +878,9 @@ class BorrowChecker
 end
 
 class Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -898,6 +898,13 @@ class CapabilityWrap
   def lock_rank; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def lock_rank=(value); end
+end
+
+class ClearFixSupport::LocationToken
+  sig { returns(T.untyped) }
+  def column; end
+  sig { returns(T.untyped) }
+  def line; end
 end
 
 class ConcurrentOp
@@ -1022,16 +1029,16 @@ class ForRange
 end
 
 class FsmTransform::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -1303,6 +1310,15 @@ class FunctionDef
   def uses_rt=(value); end
 end
 
+class FunctionReturn
+  sig { returns(T.nilable(Type)) }
+  def fixed; end
+  sig { returns(T.nilable(Symbol)) }
+  def infer; end
+  sig { returns(Kind) }
+  def kind; end
+end
+
 class FunctionSignature
   sig { returns(T.untyped) }
   def alloc_fault; end
@@ -1486,10 +1502,17 @@ class LinearOwnershipState
   def terminated=(value); end
 end
 
+class LocationToken
+  sig { returns(T.untyped) }
+  def column; end
+  sig { returns(T.untyped) }
+  def line; end
+end
+
 class MIR::BodySlot
-  sig { returns(T.untyped) }
+  sig { returns(MIR::BodySlot::Body) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def name; end
 end
 
@@ -1579,7 +1602,7 @@ class MIREmitter
 end
 
 class MIRLowering
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(FnSigMap) }
   def fn_sigs; end
   sig { returns(T.untyped) }
   def shard_context; end
@@ -1675,12 +1698,10 @@ class OwnershipContract
 end
 
 class OwnershipDataflow
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Integer, T::Hash[String, OwnerEntry]]) }
   def block_in; end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Integer, T.nilable(T::Hash[String, OwnerEntry])]) }
   def block_out; end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
-  def point_states; end
 end
 
 class OwnershipGraph
@@ -1725,9 +1746,9 @@ class Program
 end
 
 class RecursiveSplitter::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -1818,16 +1839,34 @@ class Scope
   def depth; end
   sig { params(value: Integer).returns(Integer) }
   def depth=(value); end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
-  def locals; end
-  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
-  def locals=(value); end
-  sig { returns(T::Set[T.untyped]) }
+  sig { returns(T::Set[String]) }
   def owned_names; end
-  sig { params(value: T::Set[T.untyped]).returns(T::Set[T.untyped]) }
+  sig { params(value: T::Set[String]).returns(T::Set[String]) }
   def owned_names=(value); end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T.nilable(Scope)) }
+  def parent; end
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
   def types; end
+end
+
+class Scope::ScopeBindings
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def entries; end
+end
+
+class Scope::ScopeTypes
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
+  def entries; end
+end
+
+class ScopeBindings
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def entries; end
+end
+
+class ScopeTypes
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
+  def entries; end
 end
 
 class SemanticAnnotator
@@ -2038,9 +2077,9 @@ class TestThat
 end
 
 class Type
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Lexer::Token)) }
   def auto_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
   def auto_token=(value); end
   sig { returns(TypeCapabilities) }
   def capabilities; end
@@ -2073,7 +2112,7 @@ class UnionSchema
 end
 
 class UseAfterMoveChecker
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def errors; end
 end
 

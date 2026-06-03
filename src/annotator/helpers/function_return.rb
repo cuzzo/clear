@@ -22,7 +22,7 @@
 require "sorbet-runtime"
 require_relative "../../ast/type"
 
-class FunctionReturn < T::Struct
+class FunctionReturn
   extend T::Sig
 
   class Kind < T::Enum
@@ -38,14 +38,19 @@ class FunctionReturn < T::Struct
     end
   end
 
-  const :kind,  Kind
-  # Payload for Fixed only (the concrete return Type). For every
-  # parametric variant this is nil because the Type is computed from
-  # the receiver at resolve time -- that is the variant's whole point,
-  # not an "untyped" hole.
-  const :fixed, T.nilable(Type),  default: nil
-  # Payload for Infer only: the host inference method name (bounded).
-  const :infer, T.nilable(Symbol), default: nil
+  sig { returns(Kind) }
+  attr_reader :kind
+  sig { returns(T.nilable(Type)) }
+  attr_reader :fixed
+  sig { returns(T.nilable(Symbol)) }
+  attr_reader :infer
+
+  sig { params(kind: Kind, fixed: T.nilable(Type), infer: T.nilable(Symbol)).void }
+  def initialize(kind:, fixed: nil, infer: nil)
+    @kind = T.let(kind, Kind)
+    @fixed = T.let(fixed, T.nilable(Type))
+    @infer = T.let(infer, T.nilable(Symbol))
+  end
 
   sig { params(t: Type).returns(FunctionReturn) }
   def self.fixed(t) = new(kind: Kind::Fixed, fixed: t)

@@ -8,16 +8,99 @@ require_relative "./schemas"
 class Scope
     extend T::Sig
 
-  attr_accessor :locals, :dependencies, :owned_names
+  EMPTY_CAPABILITIES = T.let(Set.new.freeze, T::Set[Symbol])
+  ScopeTypeSchema = T.type_alias do
+    T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
+  end
+  ScopeTypeEntry = T.type_alias { T::Hash[Symbol, ScopeTypeSchema] }
+
+  class ScopeBindings
+    extend T::Sig
+
+    sig { void }
+    def initialize
+      @entries = T.let({}, T::Hash[String, SymbolEntry])
+    end
+
+    sig { returns(T::Hash[String, SymbolEntry]) }
+    attr_reader :entries
+
+    sig { params(name: String).returns(T.nilable(SymbolEntry)) }
+    def [](name)
+      @entries[name]
+    end
+
+    sig { params(name: String, entry: SymbolEntry).returns(SymbolEntry) }
+    def []=(name, entry)
+      @entries[name] = entry
+    end
+
+    sig { params(name: String).returns(T::Boolean) }
+    def key?(name)
+      @entries.key?(name)
+    end
+
+    sig { returns(T::Array[String]) }
+    def keys
+      @entries.keys
+    end
+
+    sig { returns(Integer) }
+    def length
+      @entries.length
+    end
+
+    sig { returns(T::Array[[String, SymbolEntry]]) }
+    def pairs
+      @entries.to_a
+    end
+
+    sig { params(block: T.proc.params(name: String, entry: SymbolEntry).void).void }
+    def each(&block)
+      @entries.each { |name, entry| block.call(name, entry) }
+      nil
+    end
+  end
+
+  class ScopeTypes
+    extend T::Sig
+
+    sig { void }
+    def initialize
+      @entries = T.let({}, T::Hash[Symbol, Scope::ScopeTypeEntry])
+    end
+
+    sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
+    attr_reader :entries
+
+    sig { params(name: Symbol, schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeEntry) }
+    def declare(name, schema)
+      @entries[name] = { schema: schema }
+    end
+
+    sig { params(name: Symbol).returns(T.nilable(Scope::ScopeTypeEntry)) }
+    def [](name)
+      @entries[name]
+    end
+
+    sig { returns(T::Array[Symbol]) }
+    def keys
+      @entries.keys
+    end
+  end
+
+  attr_accessor :dependencies, :owned_names
   attr_accessor :depth   # stack depth at scope creation; 0 for root
-  attr_reader   :types
+  attr_reader   :types, :parent
 
   sig { void }
   def initialize
-    @locals = T.let({}, T::Hash[T.untyped, T.untyped])
+    @parent = T.let(nil, T.nilable(Scope))
+    @bindings = T.let(ScopeBindings.new, ScopeBindings)
     @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
-    @types = T.let({}, T::Hash[T.untyped, T.untyped])
-    @owned_names = T.let(Set.new, T::Set[T.untyped])  # Variables declared in THIS scope (not inherited from parent)
+    @type_store = T.let(ScopeTypes.new, ScopeTypes)
+    @types = T.let(@type_store.entries, T::Hash[Symbol, Scope::ScopeTypeEntry])
+    @owned_names = T.let(Set.new, T::Set[String])  # Variables declared in THIS scope (not inherited from parent)
     @depth = T.let(0, Integer)
   end
 
@@ -41,63 +124,37 @@ class Scope
     # Stamp declaring depth so escape checks can compare source and destination
     # lifetimes by scope nesting.
     entry.scope_depth = @depth
-    @locals[name] = entry
+    @bindings[name] = entry
   end
 
-  # Deep-copy contract (read before adding a pass that mutates SymbolEntry):
+  sig { params(name: String, entry: SymbolEntry, owned: T::Boolean).returns(SymbolEntry) }
+  def install_entry(name, entry, owned: true)
+    @owned_names.add(name) if owned
+    entry.scope = self
+    entry.scope_depth = @depth
+    @bindings[name] = entry
+  end
+
+  # Composed-scope contract (read before adding a pass that mutates SymbolEntry):
   #
-  # `Scope.dup` deep-copies every entry in @locals. This is intentional --
-  # nested scopes mutate scope-local fields like `live`, `moved`,
-  # `borrowed_alias`, `valid` independently of the parent. Without the
-  # deep copy, an `if`/`with`/`bg` body would scribble its borrow state
-  # back onto the function-level entry, and ownership analysis would
-  # blow up.
+  # `Scope.dup` creates a child scope with a parent link and an empty local
+  # binding table. Reads walk the parent chain. Mutations that need branch-local
+  # state MUST use `entry_for_write`, which materializes a local SymbolEntry
+  # copy on demand. This keeps branch scopes from eagerly copying every visible
+  # local in large branch-heavy functions.
   #
-  # The cost: storage / sync / type changes that happen AFTER the body
-  # has been visited (notably `EscapeAnalysis.propagate_caller_sync!`,
-  # which mutates `param.symbol`) do NOT propagate to the deep-copied
-  # entries inside nested scopes. A pass that reads `node.symbol.storage`
-  # off an Identifier inside a nested scope sees the pre-propagation
-  # value.
-  #
-  # The rule for any post-annotation pass that needs a param's CURRENT
-  # storage / sync:
-  #
-  #   * mutate `param.symbol` (the function-level entry)
-  #   * read against `Scope.live_param_syms(fn)` to refresh stale
-  #     references
-  #
-  # See `BgCaptureClassifier.classify_one!` for the canonical example
-  # (refreshes `capture_analysis.capture_symbols` against the live param
-  # entries before reading sync/storage). See
-  # `docs/agents/sync-boundary-unification.md` Gap C for the full
-  # rationale and alternative options (B: shared boxed entries, C:
-  # split scope-local vs global fields). Option A (this contract +
-  # helper) is the current choice.
+  # This is a migration step toward splitting SymbolEntry declaration metadata
+  # from mutable branch flow facts. Do not add new callers of `locals`.
   sig { params(original: Scope).void }
   def initialize_copy(original)
     super
 
-    # 1. Deep Copy Locals
-    # We must dup the Hash AND the values inside it (the entries)
-    # AND mutable objects inside the entries (like the capabilities Set)
-    @locals = original.locals.transform_values do |entry|
-      new_entry = entry.dup
-      # Sets/Arrays inside the entry must be duped too, or they remain shared
-      new_entry.capabilities = entry.capabilities.dup
-      new_entry.scope = self  # Point to the new (copied) scope
-      new_entry
-    end
-
-    # 2. Copy State Maps (var state lives on entries, already duped above)
+    @parent = original
+    @bindings = ScopeBindings.new
     @dependencies = original.dependencies.dup
-    @types = original.types.dup
-    # Child scopes inherit variables but don't own them — start with empty owned_names.
-    # Only variables declared in this scope (via `declare`) are in @owned_names.
+    @type_store = ScopeTypes.new
+    @types = @type_store.entries
     @owned_names = Set.new
-
-    # 3. Types are usually static definitions, so a shallow copy is fine
-    @types = original.instance_variable_get(:@types).dup
   end
 
   # Build a {param_name => live SymbolEntry} map from a FunctionDef.
@@ -119,24 +176,148 @@ class Scope
     end
   end
 
-  sig { params(name: Symbol, schema: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(name: Symbol, schema: ScopeTypeSchema).returns(ScopeTypeEntry) }
   def declare_type(name, schema)
-    @types[name] = {
-      schema: schema,
-      # Might add metadata here later (e.g., is_packed, alignment)
-    }
+    @type_store.declare(name, schema)
   end
 
   sig { params(name: Symbol).returns(T.untyped) }
   def resolve_type_definition(name)
-    entry = @types[name]
+    entry = @type_store[name] || @parent&.resolve_type_entry(name)
     entry ? entry[:schema] : nil
+  end
+
+  sig { params(name: Symbol).returns(T.nilable(ScopeTypeEntry)) }
+  def resolve_type_entry(name)
+    @type_store[name] || @parent&.resolve_type_entry(name)
+  end
+
+  sig { returns(T::Hash[Symbol, ScopeTypeEntry]) }
+  def visible_types
+    inherited = @parent ? @parent.visible_types : {}
+    inherited.merge(@types)
+  end
+
+  sig { params(name: String).returns(T.nilable(SymbolEntry)) }
+  def local_entry(name)
+    @bindings[name]
+  end
+
+  sig { params(name: String).returns(SymbolEntry) }
+  def local_entry!(name)
+    T.must(local_entry(name))
+  end
+
+  sig { params(name: String).returns(T.nilable(SymbolEntry)) }
+  def resolve_entry(name)
+    @bindings[name] || @parent&.resolve_entry(name)
+  end
+
+  sig { params(name: String).returns(SymbolEntry) }
+  def resolve_entry!(name)
+    T.must(resolve_entry(name))
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def local_entry?(name)
+    @bindings.key?(name)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def entry?(name)
+    local_entry?(name) || !!@parent&.entry?(name)
+  end
+
+  sig { params(name: String).returns(T.nilable(SymbolEntry)) }
+  def entry_for_write(name)
+    entry = @bindings[name]
+    return entry if entry
+
+    inherited = @parent&.resolve_entry(name)
+    return nil unless inherited
+
+    materialized = clone_entry_for_scope(inherited)
+    @bindings[name] = materialized
+  end
+
+  sig { params(name: String).returns(SymbolEntry) }
+  def entry_for_write!(name)
+    T.must(entry_for_write(name))
+  end
+
+  sig { params(entry: SymbolEntry).returns(SymbolEntry) }
+  def clone_entry_for_scope(entry)
+    new_entry = entry.dup
+    new_entry.capabilities = entry.capabilities.empty? ? EMPTY_CAPABILITIES : entry.capabilities.dup
+    new_entry.scope = self
+    new_entry
+  end
+
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def local_entries
+    @bindings.entries
+  end
+
+  sig { returns(Integer) }
+  def local_entry_count
+    @bindings.length
+  end
+
+  sig { returns(Integer) }
+  def visible_entry_count
+    count_visible_entries!(Set.new)
+  end
+
+  sig { params(seen: T::Set[String]).returns(Integer) }
+  def count_visible_entries!(seen)
+    count = @parent&.count_visible_entries!(seen) || 0
+    @bindings.keys.each do |name|
+      next if seen.include?(name)
+
+      seen << name
+      count += 1
+    end
+    count
+  end
+
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def visible_entries
+    inherited = @parent ? @parent.visible_entries : {}
+    inherited.merge(@bindings.entries)
+  end
+
+  sig { returns(T::Array[String]) }
+  def visible_names
+    names = T.let([], T::Array[String])
+    seen = T.let(Set.new, T::Set[String])
+    append_visible_names!(names, seen)
+    names
+  end
+
+  sig { params(names: T::Array[String], seen: T::Set[String]).void }
+  def append_visible_names!(names, seen)
+    @parent&.append_visible_names!(names, seen)
+    @bindings.keys.each do |name|
+      next if seen.include?(name)
+
+      seen << name
+      names << name
+    end
+    nil
+  end
+
+  sig { returns(T::Array[[String, SymbolEntry]]) }
+  def owned_entries
+    @owned_names.filter_map do |name|
+      entry = @bindings[name]
+      entry ? [name, entry] : nil
+    end
   end
 
   # Returns a Type carrying the variable's base type plus storage-derived capabilities.
   sig { params(name: String).returns(Type) }
   def resolve_full_type(name)
-    entry = @locals[name]
+    entry = resolve_entry(name)
     return Type.new(:Any) if entry.nil?
 
     base_type = entry.type
@@ -160,13 +341,13 @@ class Scope
 
   sig { params(name: String).returns(T.any(Type, Symbol)) }
   def resolve_type(name)
-    entry = @locals[name]
+    entry = resolve_entry(name)
     entry ? entry.type : :Any
   end
 
   sig { params(name: String).returns(T.untyped) }
   def is_mutable?(name)
-    entry = @locals[name]
+    entry = resolve_entry(name)
     entry ? entry.mutable : true
   end
 
@@ -177,13 +358,13 @@ class Scope
 
   sig { params(name: String).returns(T::Boolean) }
   def is_restricted?(name)
-    @locals[name]&.capabilities&.include?(:RESTRICT)
+    !!resolve_entry(name)&.capabilities&.include?(:RESTRICT)
   end
 
   # Mark a variable as read (used as an r-value in user code).
   sig { params(name: String).returns(T.untyped) }
   def mark_read(name)
-    entry = @locals[name]
+    entry = entry_for_write(name)
     return unless entry
     entry.mark_read!
   end
@@ -193,13 +374,15 @@ class Scope
   sig { params(capability: AST::Capability).returns(T.nilable(SymbolEntry)) }
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
-    local = capability[:old_scope].locals[name]
+    local = capability[:old_scope].resolve_entry(name)
     return nil if local.nil?
     local = local.dup
+    local.capabilities = local.capabilities.dup
     # Whole-variable or field restriction: add capability marker.
     # Borrow conflict detection is handled by the OwnershipGraph.
     local.capabilities << capability[:capability]
-    @locals[name] = local
+    local.scope = self
+    @bindings[name] = local
   end
 
   sig { params(node: T.untyped).returns(T::Array[Symbol]) }
@@ -220,7 +403,7 @@ class Scope
 
   sig { params(name: String).void }
   def check_validity!(name)
-    entry = @locals[name]
+    entry = resolve_entry(name)
     return unless entry
 
     if entry.valid == false
@@ -253,7 +436,7 @@ module ScopeHelper
   def lookup_scope_for(name)
     # Search from Top (last) to Bottom (first)
     scope_stack.reverse_each do |scope|
-      return scope if scope.resolve_type(name) != :Any || scope.locals.key?(name)
+      return scope if scope.resolve_type(name) != :Any || scope.entry?(name)
     end
     nil
   end
@@ -265,7 +448,7 @@ module ScopeHelper
   sig { params(name: String).returns(T.nilable(Scope)) }
   def resolve_variable_scope(name)
     scope = current_scope
-    if scope.locals.key?(name)
+    if scope.entry?(name)
       scope
     else
       fn_scope = lookup_scope_for(name)
@@ -297,7 +480,7 @@ module ScopeHelper
     names.uniq
   end
 
-  sig { params(scope: T.nilable(Scope), blk: T.untyped).returns(T.nilable(Scope)) }
+  sig { params(scope: T.nilable(Scope), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by

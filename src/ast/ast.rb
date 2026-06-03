@@ -32,6 +32,8 @@ module AST
   end
 
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
+  CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
+  CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
 
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
   def self.stamp_synthetic_type!(node, value, context:)
@@ -333,7 +335,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: T::Array[T.untyped], visitor: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.untyped, visitor: T.proc.params(node: T.untyped).void).void }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -346,9 +348,9 @@ module AST
   # Walk every AST Locatable reachable from a root object. This is the
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
-  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.untyped).void }
+  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
   def self.each_locatable(root, descend_functions: false, &visitor)
-    stack = T.let(root.is_a?(Array) ? root.reverse : [root], T::Array[T.untyped])
+    stack = root.is_a?(Array) ? root.reverse : [root]
     until stack.empty?
       node = stack.pop
       next unless node
@@ -749,7 +751,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[Object], block: T.proc.params(analysis: Object).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -814,103 +816,103 @@ module AST
     def token_value; token.value; end
 
     sig { returns(T.nilable(Type)) }
-    def coerced_type_object; @coerced_type_object = T.let(@coerced_type_object, T.nilable(Type)); end
+    def coerced_type_object; T.cast(instance_variable_get(:@coerced_type_object), T.nilable(Type)); end
     sig { returns(T.nilable(Type)) }
-    def type_object; @type_object = T.let(@type_object, T.nilable(Type)); end
+    def type_object; T.cast(instance_variable_get(:@type_object), T.nilable(Type)); end
 
-    sig { returns(T.untyped) }
-    def zig_pattern; @zig_pattern = T.let(@zig_pattern, T.nilable(T.any(String, Symbol))); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def zig_pattern=(val); @zig_pattern = T.let(val, T.nilable(T.any(String, Symbol))); end
+    sig { returns(T.nilable(T.any(String, Symbol))) }
+    def zig_pattern; T.cast(instance_variable_get(:@zig_pattern), T.nilable(T.any(String, Symbol))); end
+    sig { params(val: T.nilable(T.any(String, Symbol))).returns(T.nilable(T.any(String, Symbol))) }
+    def zig_pattern=(val); instance_variable_set(:@zig_pattern, val); end
 
-    sig { returns(T.untyped) }
-    def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.nilable(FunctionSignature)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(FunctionSignature)) }
+    def matched_stdlib_def; T.cast(instance_variable_get(:@matched_stdlib_def), T.nilable(FunctionSignature)); end
+    sig { params(val: T.nilable(FunctionSignature)).returns(T.nilable(FunctionSignature)) }
     def matched_stdlib_def=(val)
       fs = IntrinsicRegistry.fs(val)
-      @matched_stdlib_def = T.let(fs, T.untyped)
+      instance_variable_set(:@matched_stdlib_def, fs)
       self.matched_signature = fs
     end
 
-    sig { returns(T.untyped) }
-    def matched_signature; @matched_signature = T.let(@matched_signature, T.nilable(FunctionSignature)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def matched_signature=(val); @matched_signature = T.let(val, T.untyped); end
+    sig { returns(T.nilable(FunctionSignature)) }
+    def matched_signature; T.cast(instance_variable_get(:@matched_signature), T.nilable(FunctionSignature)); end
+    sig { params(val: T.nilable(FunctionSignature)).returns(T.nilable(FunctionSignature)) }
+    def matched_signature=(val); instance_variable_set(:@matched_signature, val); end
 
-    sig { void }
-    def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def stdlib_allocates=(val); @stdlib_allocates = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def stdlib_allocates; T.cast(instance_variable_get(:@stdlib_allocates), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def stdlib_allocates=(val); instance_variable_set(:@stdlib_allocates, val); end
 
-    sig { returns(T.untyped) }
-    def mutates_receiver; @mutates_receiver = T.let(@mutates_receiver, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def mutates_receiver=(val); @mutates_receiver = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def mutates_receiver; T.cast(instance_variable_get(:@mutates_receiver), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def mutates_receiver=(val); instance_variable_set(:@mutates_receiver, val); end
 
-    sig { returns(T.untyped) }
-    def was_moved; @was_moved = T.let(@was_moved, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def was_moved=(val); @was_moved = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def was_moved; T.cast(instance_variable_get(:@was_moved), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def was_moved=(val); instance_variable_set(:@was_moved, val); end
 
-    sig { returns(T.untyped) }
-    def container_borrow; @container_borrow = T.let(@container_borrow, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def container_borrow=(val); @container_borrow = T.let(val, T.nilable(T::Boolean)); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def container_borrow; T.cast(instance_variable_get(:@container_borrow), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def container_borrow=(val); instance_variable_set(:@container_borrow, val); end
 
-    sig { returns(T.untyped) }
-    def needs_mut_ref; @needs_mut_ref = T.let(@needs_mut_ref, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def needs_mut_ref; T.cast(instance_variable_get(:@needs_mut_ref), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def needs_mut_ref=(val); instance_variable_set(:@needs_mut_ref, val); end
 
-    sig { returns(T.untyped) }
-    def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def needs_heap_create; T.cast(instance_variable_get(:@needs_heap_create), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def needs_heap_create=(val); instance_variable_set(:@needs_heap_create, val); end
 
-    sig { void }
-    def collection_return; @collection_return = T.let(@collection_return, T.untyped); end
-    sig { params(val: T.untyped).void }
-    def collection_return=(val); @collection_return = T.let(val, T.untyped); end
+    sig { returns(T.nilable(Type)) }
+    def collection_return; T.cast(instance_variable_get(:@collection_return), T.nilable(Type)); end
+    sig { params(val: T.nilable(Type)).void }
+    def collection_return=(val); instance_variable_set(:@collection_return, val); end
 
     sig { returns(T.nilable(Integer)) }
-    def slot_size; @slot_size = T.let(@slot_size, T.nilable(Integer)); end
+    def slot_size; T.cast(instance_variable_get(:@slot_size), T.nilable(Integer)); end
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
-    def slot_size=(val); @slot_size = T.let(val, T.nilable(Integer)); end
+    def slot_size=(val); instance_variable_set(:@slot_size, val); end
 
-    sig { returns(T.untyped) }
-    def resource_close_zig; @resource_close_zig = T.let(@resource_close_zig, T.nilable(String)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def resource_close_zig=(val); @resource_close_zig = T.let(val, T.nilable(String)); end
+    sig { returns(T.nilable(String)) }
+    def resource_close_zig; T.cast(instance_variable_get(:@resource_close_zig), T.nilable(String)); end
+    sig { params(val: T.nilable(String)).returns(T.nilable(String)) }
+    def resource_close_zig=(val); instance_variable_set(:@resource_close_zig, val); end
 
-    sig { returns(T.untyped) }
-    def can_fail; @can_fail = T.let(@can_fail, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def can_fail=(val); @can_fail = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def can_fail; T.cast(instance_variable_get(:@can_fail), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def can_fail=(val); instance_variable_set(:@can_fail, val); end
 
-    sig { returns(T.untyped) }
-    def error_kind; @error_kind = T.let(@error_kind, T.untyped); end
-    sig { params(val: T.untyped).void }
-    def error_kind=(val); @error_kind = T.let(val, T.nilable(Symbol)); end
+    sig { returns(T.nilable(Symbol)) }
+    def error_kind; T.cast(instance_variable_get(:@error_kind), T.nilable(Symbol)); end
+    sig { params(val: T.nilable(Symbol)).void }
+    def error_kind=(val); instance_variable_set(:@error_kind, val); end
 
-    sig { returns(T.untyped) }
-    def error_type; @error_type = T.let(@error_type, T.untyped); end
-    sig { params(val: T.untyped).void }
-    def error_type=(val); @error_type = T.let(val, T.nilable(Symbol)); end
+    sig { returns(T.nilable(Symbol)) }
+    def error_type; T.cast(instance_variable_get(:@error_type), T.nilable(Symbol)); end
+    sig { params(val: T.nilable(Symbol)).void }
+    def error_type=(val); instance_variable_set(:@error_type, val); end
 
-    sig { returns(T.untyped) }
-    def var_used; @var_used = T.let(@var_used, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def var_used=(val); @var_used = T.let(val, T.nilable(T::Boolean)); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def var_used; T.cast(instance_variable_get(:@var_used), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def var_used=(val); instance_variable_set(:@var_used, val); end
 
-    sig { returns(T.untyped) }
-    def var_mutated; @var_mutated = T.let(@var_mutated, T.nilable(T::Boolean)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def var_mutated=(val); @var_mutated = T.let(val, T.untyped); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def var_mutated; T.cast(instance_variable_get(:@var_mutated), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def var_mutated=(val); instance_variable_set(:@var_mutated, val); end
 
-    sig { returns(T.untyped) }
-    def symbol; @symbol = T.let(@symbol, T.nilable(SymbolEntry)); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def symbol=(val); @symbol = T.let(val, T.nilable(SymbolEntry)); end
+    sig { returns(T.nilable(SymbolEntry)) }
+    def symbol; T.cast(instance_variable_get(:@symbol), T.nilable(SymbolEntry)); end
+    sig { params(val: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
+    def symbol=(val); instance_variable_set(:@symbol, val); end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).
@@ -966,7 +968,7 @@ module AST
     # @param declared_type [Symbol, nil] The explicitly declared type (or nil/:Any for inference)
     # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
-    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
       # fn_type must not be flattened to its return type — preserve the full Type object.
       return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
@@ -1542,7 +1544,7 @@ module AST
     extend T::Sig
     include Locatable 
 
-    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
       res, error = super(declared_type)
       return [nil, error] if error
@@ -1557,6 +1559,23 @@ module AST
       [res, nil]
     end
   }
+  DefaultArrayLit = Struct.new(:token, :type_info, :storage) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(Type) }
+    def full_type
+      Type.new(type_info)
+    end
+
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
+    def coerce!(declared_type)
+      target = Type.new(declared_type)
+      return [nil, "Cannot initialize array of size #{target.capacity} with #{type_info.capacity} elements"] unless target.accepts?(type_info)
+
+      [target.resolved, nil]
+    end
+  end
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   DefaultLit   = Struct.new(:token) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do

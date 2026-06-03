@@ -90,7 +90,7 @@ class MIRPass
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
     @fn_nodes.each do |name, fn|
-      @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
+      @cleanup_bindings[name] = CleanupClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
     pass_state.mark!(:cleanup_classified)
 
@@ -292,7 +292,10 @@ class MIRPass
   sig { params(node: T.untyped, acc: T::Set[String]).void }
   def collect_callees(node, acc)
     AST.each_locatable(node) do |child|
-      acc << child.name.to_s if AST.call?(child) && child.name
+      case child
+      when AST::FuncCall, AST::MethodCall
+        acc << child.name.to_s if child.name
+      end
     end
   end
 

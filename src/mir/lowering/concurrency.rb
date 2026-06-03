@@ -255,6 +255,7 @@ module MIRLoweringConcurrency
       if analysis
         AST.each_capture_analysis(branch[:body]) do |nested|
           next if nested.equal?(analysis)
+          nested = T.cast(nested, CapabilityHelper::CaptureAnalysis)
           analysis.captures ||= {}
           analysis.capture_symbols ||= {}
           analysis.close_patterns ||= {}
@@ -440,7 +441,7 @@ module MIRLoweringConcurrency
                 # @TypeOf(<outer_ref>) so the field type resolves under the
                 # rewritten scope (e.g. @TypeOf(__ctx_0.x) instead of
                 # @TypeOf(x)).
-                s.field_type_zig.sub(/\(#{Regexp.escape(s.name)}\)/, "(#{outer_capture_map[s.name]})")
+	                s.field_type_zig.sub("(#{s.name})", "(#{outer_capture_map[s.name]})")
       end
       "#{s.name}: #{ftype},"
     }
@@ -716,7 +717,7 @@ module MIRLoweringConcurrency
     body_mir.concat(last_pending)
     result_code = T.cast(emit_expr(last_mir), String)
     pending_code = bg_pending_code(last_pending).join("\n            ")
-    result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+    result_code = result_code.delete_prefix("try ")
     result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
     body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
     body_mir << MIR::Set.new(result_target, last_mir)
@@ -845,7 +846,7 @@ module MIRLoweringConcurrency
       end
 
       block = MIR::BlockExpr.new(blk_label, [
-        MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
+        MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, Type.new("anytype"), nil),
         *run_body,
         MIR::BreakStmt.new(blk_label, MIR::Ident.new(local_stream))
       ])
@@ -1120,12 +1121,14 @@ module MIRLoweringConcurrency
       @tmp_counter += 1
       label = "__next_recv_#{@tmp_counter}"
       temp = "__next_source_#{@tmp_counter}"
-      return MIR::BlockExpr.new(label, [
+      block = MIR::BlockExpr.new(label, [
         MIR::Let.new(temp, receiver, true, nil, nil),
         MIR::BreakStmt.new(label,
           MIR::MethodCall.new(MIR::Ident.new(temp), "next", [], true,
             MIR::CallableContract.no_ownership(0), plan.result_alloc)),
       ])
+      block.result_type = Type.new(result_t)
+      return block
     end
 
     MIR::MethodCall.new(receiver, "next", [], true, MIR::CallableContract.no_ownership(0),
