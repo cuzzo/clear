@@ -27,7 +27,7 @@ class Span
 
   attr_reader :file, :line, :col, :length
 
-  sig { params(file: NilClass, line: Integer, col: Integer, length: Integer).void }
+  sig { params(file: T.nilable(String), line: Integer, col: Integer, length: Integer).void }
   def initialize(file:, line:, col:, length:)
     @file = file
     @line = line
