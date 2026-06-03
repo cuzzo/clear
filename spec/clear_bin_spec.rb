@@ -187,6 +187,29 @@ RSpec.describe "./clear build", :integration do
       FileUtils.rm_rf(dir)
     end
 
+    it "bypasses the persistent transpilation cache when --no-cache is requested" do
+      dir = Dir.mktmpdir
+      main_path = File.join(dir, "main.cht")
+      File.write(main_path, <<~CLEAR)
+        FN main() RETURNS Void ->
+          print("cache-bypass");
+          RETURN;
+        END
+      CLEAR
+
+      output1, ok1 = clear_build(main_path, "--safe", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      expect(ok1).to be true
+      expect(output1).to include("[transpile-cache] bypass build_root main.cht")
+      expect(output1).not_to include("[transpile-cache] hit build_root main.cht")
+
+      output2, ok2 = clear_build(main_path, "--safe", "--no-cache", env: { "CLEAR_DEBUG_CACHE" => "1" })
+      expect(ok2).to be true
+      expect(output2).to include("[transpile-cache] bypass build_root main.cht")
+      expect(output2).not_to include("[transpile-cache] hit build_root main.cht")
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+
     it "rebuilds when build mode changes instead of reusing a stale binary" do
       dir = Dir.mktmpdir
       main_path = File.join(dir, "main.cht")

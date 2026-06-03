@@ -30,7 +30,7 @@ module UnionAnalysis
       req_vis = req[:visibility] || :package
 
       scope = lookup_scope_for(fn_name)
-      local = scope&.locals&.[](fn_name)
+      local = scope&.resolve_entry(fn_name)
 
       if local.nil?
         if req[:body]

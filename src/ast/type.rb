@@ -60,7 +60,7 @@ class TypeCapabilities < Struct.new(
 
   sig { returns(TypeCapabilities) }
   def copy
-    with
+    self
   end
 
   sig do
@@ -97,20 +97,35 @@ class TypeCapabilities < Struct.new(
     observable_token: UNSET,
     polymorphic_shared: UNSET
   )
-    next_ownership = ownership.is_a?(TypeCapabilityUnset) ? self.ownership : ownership
-    next_sync = sync.is_a?(TypeCapabilityUnset) ? self.sync : sync
-    next_layout = layout.is_a?(TypeCapabilityUnset) ? self.layout : layout
-    next_lock_rank = lock_rank.is_a?(TypeCapabilityUnset) ? self.lock_rank : lock_rank
-    next_collection = collection.is_a?(TypeCapabilityUnset) ? self.collection : collection
-    next_shard_count = shard_count.is_a?(TypeCapabilityUnset) ? self.shard_count : shard_count
-    next_soa = soa.is_a?(TypeCapabilityUnset) ? self.soa : soa
-    next_elem_ownership = elem_ownership.is_a?(TypeCapabilityUnset) ? self.elem_ownership : elem_ownership
-    next_elem_sync = elem_sync.is_a?(TypeCapabilityUnset) ? self.elem_sync : elem_sync
-    next_link_source = link_source.is_a?(TypeCapabilityUnset) ? self.link_source : link_source
-    next_observable = observable.is_a?(TypeCapabilityUnset) ? self.observable : observable
-    next_observable_terminal = observable_terminal.is_a?(TypeCapabilityUnset) ? self.observable_terminal : observable_terminal
-    next_observable_token = observable_token.is_a?(TypeCapabilityUnset) ? self.observable_token : observable_token
-    next_polymorphic_shared = polymorphic_shared.is_a?(TypeCapabilityUnset) ? self.polymorphic_shared : polymorphic_shared
+    return self if ownership.equal?(UNSET) &&
+                   sync.equal?(UNSET) &&
+                   layout.equal?(UNSET) &&
+                   lock_rank.equal?(UNSET) &&
+                   collection.equal?(UNSET) &&
+                   shard_count.equal?(UNSET) &&
+                   soa.equal?(UNSET) &&
+                   elem_ownership.equal?(UNSET) &&
+                   elem_sync.equal?(UNSET) &&
+                   link_source.equal?(UNSET) &&
+                   observable.equal?(UNSET) &&
+                   observable_terminal.equal?(UNSET) &&
+                   observable_token.equal?(UNSET) &&
+                   polymorphic_shared.equal?(UNSET)
+
+    next_ownership = ownership.equal?(UNSET) ? self.ownership : ownership
+    next_sync = sync.equal?(UNSET) ? self.sync : sync
+    next_layout = layout.equal?(UNSET) ? self.layout : layout
+    next_lock_rank = lock_rank.equal?(UNSET) ? self.lock_rank : lock_rank
+    next_collection = collection.equal?(UNSET) ? self.collection : collection
+    next_shard_count = shard_count.equal?(UNSET) ? self.shard_count : shard_count
+    next_soa = soa.equal?(UNSET) ? self.soa : soa
+    next_elem_ownership = elem_ownership.equal?(UNSET) ? self.elem_ownership : elem_ownership
+    next_elem_sync = elem_sync.equal?(UNSET) ? self.elem_sync : elem_sync
+    next_link_source = link_source.equal?(UNSET) ? self.link_source : link_source
+    next_observable = observable.equal?(UNSET) ? self.observable : observable
+    next_observable_terminal = observable_terminal.equal?(UNSET) ? self.observable_terminal : observable_terminal
+    next_observable_token = observable_token.equal?(UNSET) ? self.observable_token : observable_token
+    next_polymorphic_shared = polymorphic_shared.equal?(UNSET) ? self.polymorphic_shared : polymorphic_shared
 
     return self if next_ownership == self.ownership &&
                    next_sync == self.sync &&
@@ -172,7 +187,7 @@ class TypePlacement < Struct.new(:provenance, keyword_init: true)
 
   sig { params(provenance: MaybeSymbol).returns(TypePlacement) }
   def with(provenance: TypePlacement::UNSET)
-    next_provenance = provenance.is_a?(TypePlacementUnset) ? self.provenance : provenance
+    next_provenance = provenance.equal?(UNSET) ? self.provenance : provenance
     return self if next_provenance == self.provenance
 
     TypePlacement.new(
@@ -345,7 +360,7 @@ class TypeShape < T::Struct
 
   sig { returns(TypeShape) }
   def copy
-    with(generic_args_raw: generic_args_raw.dup)
+    self
   end
 
   sig { returns(T::Boolean) }
@@ -685,9 +700,9 @@ class Type
     @generic_payload_type_arg = false
     if raw_input.is_a?(Type)
       other = raw_input
-      @shape              = auto ? other.shape.with(auto: true) : other.shape.copy
-      @capabilities       = other.capabilities.copy
-      @placement             = TypePlacement.new(provenance: other.provenance)
+      @shape              = auto ? other.shape.with(auto: true) : other.shape
+      @capabilities       = other.capabilities
+      @placement          = other.placement
       @generic_payload_type_arg = other.generic_payload_type_arg?
     else
       parse_raw_input(raw_input, auto: auto)

@@ -307,7 +307,7 @@ module FixableHelper
     end
 
     scope = lookup_scope_for(name)
-    decl = scope&.locals&.[](name)&.reg
+    decl = scope&.resolve_entry(name)&.reg
     src = @source_code
     if decl && decl.token && src
       dline = decl.token.line
@@ -997,7 +997,7 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
     scope = lookup_scope_for(name)
-    decl = scope&.locals&.[](name)&.reg
+    decl = scope&.resolve_entry(name)&.reg
     src = @source_code
     fix = nil
     if decl && src
@@ -1203,7 +1203,7 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.nilable(String))
     scope = lookup_scope_for(name)
-    decl = scope&.locals&.[](name)&.reg
+    decl = scope&.resolve_entry(name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
     return nil unless @source_code
     dline = decl.token.line
@@ -1231,7 +1231,7 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
     scope = lookup_scope_for(name)
-    decl = scope&.locals&.[](name)&.reg
+    decl = scope&.resolve_entry(name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
     return nil unless @source_code
     dline = decl.token.line
@@ -1274,7 +1274,7 @@ module FixableHelper
   sig { params(name: String, scope: Scope).returns(T.nilable(Fix)) }
   def build_declare_mutable_fix(name, scope)
     T.bind(self, SemanticAnnotator) rescue nil
-    info = scope.locals[name]
+    info = scope.resolve_entry(name)
     return nil unless info
     # Locals carry a reg whose token is the binding's first source position.
     # Parameters have reg=nil but stash the VAR_ID token at decl time as

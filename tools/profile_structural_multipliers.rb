@@ -62,7 +62,44 @@ class Scope
     start = now
     __structural_profile_initialize_copy(original)
   ensure
-    add_count("Scope#dup entries", src_caller, original.locals.length, now - start)
+    add_count("Scope#dup visible entries", src_caller, original.visible_entry_count, now - start)
+    add_count("Scope#dup local copied entries", src_caller, local_entry_count, now - start)
+  end
+
+  def resolve_entry(name)
+    start = now
+    hops = 0
+    scope = self
+    found = nil
+    while scope
+      hops += 1
+      bindings = scope.instance_variable_get(:@bindings)
+      found = bindings[name]
+      break if found
+      scope = scope.parent
+    end
+    found
+  ensure
+    add_count("Scope#resolve_entry hops", src_caller, hops, now - start)
+  end
+
+  def entry?(name)
+    start = now
+    hops = 0
+    scope = self
+    found = false
+    while scope
+      hops += 1
+      bindings = scope.instance_variable_get(:@bindings)
+      if bindings.key?(name)
+        found = true
+        break
+      end
+      scope = scope.parent
+    end
+    found
+  ensure
+    add_count("Scope#entry? hops", src_caller, hops, now - start)
   end
 end
 
@@ -92,7 +129,7 @@ class OwnershipGraph
     start = now
     __structural_profile_restore_lightweight(snapshot)
   ensure
-    add_count("OwnershipGraph#restore states", src_caller, snapshot ? snapshot.node_states.length : 0, now - start)
+    add_count("OwnershipGraph#restore states", src_caller, snapshot ? snapshot.states.length : 0, now - start)
   end
 end
 
@@ -110,13 +147,33 @@ end
 
 module ScopeHelper
   alias_method :__structural_profile_with_new_scope, :with_new_scope
+  alias_method :__structural_profile_lookup_scope_for, :lookup_scope_for
+  alias_method :__structural_profile_resolve_variable_scope, :resolve_variable_scope
+
+  def lookup_scope_for(name)
+    depth = scope_stack.length
+    start = now
+    __structural_profile_lookup_scope_for(name)
+  ensure
+    add_count("ScopeHelper#lookup_scope_for stack depth", src_caller, depth, now - start)
+  end
+
+  def resolve_variable_scope(name)
+    depth = scope_stack.length
+    start = now
+    __structural_profile_resolve_variable_scope(name)
+  ensure
+    add_count("ScopeHelper#resolve_variable_scope stack depth", src_caller, depth, now - start)
+  end
 
   def with_new_scope(scope = nil, &blk)
-    copied_locals = scope ? scope.locals.length : 0
+    visible_entries = scope ? scope.visible_entry_count : 0
+    local_entries = scope ? scope.local_entry_count : 0
     start = now
     __structural_profile_with_new_scope(scope, &blk)
   ensure
-    add_count("ScopeHelper#with_new_scope copied locals", src_caller, copied_locals, now - start)
+    add_count("ScopeHelper#with_new_scope visible entries", src_caller, visible_entries, now - start)
+    add_count("ScopeHelper#with_new_scope local entries", src_caller, local_entries, now - start)
   end
 end
 

@@ -806,7 +806,8 @@ RSpec.describe "annotator branch gap burndown" do
     struct_target = AST::Identifier.new(token, "structish")
     struct_target.full_type = struct_type
     struct_get = AST::GetIndex.new(token(:LBRACKET, "["), struct_target, idx)
-    expect { index_ann.send(:visit_GetIndex, struct_get) }.to raise_error(TypeError)
+    index_ann.send(:visit_GetIndex, struct_get)
+    expect(struct_get.resolved_type).to eq(:String)
     expect(struct_get.container_borrow).to eq(true)
 
     next_ann = quiet_annotator
@@ -887,7 +888,7 @@ RSpec.describe "annotator branch gap burndown" do
     source_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym.instance_variable_set(:@lifetime, [source_sym])
-    tied_ann.current_scope.locals["source"] = source_sym
+    tied_ann.current_scope.install_entry("source", source_sym)
     tied_ann.instance_variable_set(:@fn_nodes, {
       "tied" => AST::FunctionDef.new(token, "tied", [], [], Type.new(:String), nil, [], [], nil, :package)
     })
@@ -1320,7 +1321,7 @@ RSpec.describe "annotator branch gap burndown" do
     decl_tok.column = 1
     cell_decl = AST::VarDecl.new(decl_tok, "cell", Type.new(:Int64), nil, true)
     cell_sym = SymbolEntry.new(reg: cell_decl, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :atomic)
-    scope.locals["cell"] = cell_sym
+    scope.install_entry("cell", cell_sym)
     expect(ann.send(:build_declare_mutable_fix, "missing", scope)).to be_nil
     expect(ann.send(:build_atomic_escape_migration_fix, cell_sym, "cell")).not_to be_nil
 
@@ -1360,11 +1361,11 @@ RSpec.describe "annotator branch gap burndown" do
     scope = Scope.new
     ann.define_singleton_method(:lookup_scope_for) { |_name| scope }
 
-    scope.locals["not_a_function"] = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: false, storage: :stack)
+    scope.install_entry("not_a_function", SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: false, storage: :stack))
     short_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    scope.locals["short"] = SymbolEntry.new(reg: nil, type: short_sig, mutable: false, storage: :stack)
+    scope.install_entry("short", SymbolEntry.new(reg: nil, type: short_sig, mutable: false, storage: :stack))
     no_return_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
-    scope.locals["no_return"] = SymbolEntry.new(reg: nil, type: no_return_sig, mutable: false, storage: :stack)
+    scope.install_entry("no_return", SymbolEntry.new(reg: nil, type: no_return_sig, mutable: false, storage: :stack))
 
     union = AST::UnionDef.new(token(:UNION, "UNION"), "Choice", {}, :package)
     union.methods = [
@@ -1844,15 +1845,15 @@ RSpec.describe "annotator branch gap burndown" do
     decl_d_tok = token(:VAR_ID, "d")
     decl_d_tok.line = 4
     decl_d_tok.column = 1
-    scope.locals["c"] = SymbolEntry.new(reg: AST::VarDecl.new(decl_c_tok, "c", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack)
-    scope.locals["d"] = SymbolEntry.new(reg: AST::VarDecl.new(decl_d_tok, "d", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack)
+    scope.install_entry("c", SymbolEntry.new(reg: AST::VarDecl.new(decl_c_tok, "c", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack))
+    scope.install_entry("d", SymbolEntry.new(reg: AST::VarDecl.new(decl_d_tok, "d", Type.new(:Int64), nil, false), type: Type.new(:Int64), mutable: false, storage: :stack))
     ann.define_singleton_method(:lookup_scope_for) { |_name| scope }
     expect(ann.send(:build_decl_cap_insert_fix, "c", "@locked")).to be_nil
     expect(ann.send(:build_decl_cap_insert_fix, "d", "@locked")).to be_nil
     mutable_tok = token(:MUTABLE, "MUTABLE")
     mutable_tok.line = 1
     mutable_tok.column = 1
-    scope.locals["m"] = SymbolEntry.new(reg: AST::VarDecl.new(mutable_tok, "m", Type.new(:Int64), nil, true), type: Type.new(:Int64), mutable: true, storage: :stack)
+    scope.install_entry("m", SymbolEntry.new(reg: AST::VarDecl.new(mutable_tok, "m", Type.new(:Int64), nil, true), type: Type.new(:Int64), mutable: true, storage: :stack))
     expect(ann.send(:build_declare_mutable_fix, "m", scope)).to be_nil
   end
 end

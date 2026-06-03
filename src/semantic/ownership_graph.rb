@@ -18,15 +18,39 @@ require "sorbet-runtime"
 class OwnershipGraph
     extend T::Sig
 
-  class LightweightNodeState < Struct.new(:state, :move_line, :move_col, :move_action, keyword_init: true)
-    def initialize(state:, move_line: nil, move_col: nil, move_action: nil)
-      super
-    end
-  end
+  class LightweightSnapshot < T::Struct
+    extend T::Sig
 
-  class LightweightSnapshot < Struct.new(:node_states, :edge_count, keyword_init: true)
-    def initialize(node_states:, edge_count:)
-      super
+    const :states, T::Hash[String, Symbol]
+    const :move_lines, T::Hash[String, Integer]
+    const :move_cols, T::Hash[String, Integer]
+    const :move_actions, T::Hash[String, Symbol]
+    const :edge_count, Integer
+
+    sig { params(path: String).returns(T.nilable(Symbol)) }
+    def state_for(path)
+      states[path]
+    end
+
+    sig { params(path: String).returns(T.nilable(Integer)) }
+    def move_line_for(path)
+      move_lines[path]
+    end
+
+    sig { params(path: String).returns(T.nilable(Integer)) }
+    def move_col_for(path)
+      move_cols[path]
+    end
+
+    sig { params(path: String).returns(T.nilable(Symbol)) }
+    def move_action_for(path)
+      move_actions[path]
+    end
+
+    sig { params(block: T.proc.params(path: String, state: Symbol).void).void }
+    def each_state(&block)
+      states.each(&block)
+      nil
     end
   end
 
@@ -231,29 +255,37 @@ class OwnershipGraph
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
   sig { returns(LightweightSnapshot) }
   def fork_lightweight
-    states = T.let({}, T::Hash[String, LightweightNodeState])
+    states = T.let({}, T::Hash[String, Symbol])
+    move_lines = T.let({}, T::Hash[String, Integer])
+    move_cols = T.let({}, T::Hash[String, Integer])
+    move_actions = T.let({}, T::Hash[String, Symbol])
     @nodes.each do |k, v|
-      states[k] = LightweightNodeState.new(
-        state: v.state,
-        move_line: v.move_line,
-        move_col: v.move_col,
-        move_action: v.move_action,
-      )
+      key = k.to_s
+      states[key] = v.state
+      move_lines[key] = v.move_line if v.move_line
+      move_cols[key] = v.move_col if v.move_col
+      move_actions[key] = v.move_action if v.move_action
     end
-    LightweightSnapshot.new(node_states: states, edge_count: @edges.size)
+    LightweightSnapshot.new(
+      states: states,
+      move_lines: move_lines,
+      move_cols: move_cols,
+      move_actions: move_actions,
+      edge_count: @edges.size,
+    )
   end
 
   # Restore from lightweight snapshot: reset states and truncate edges.
   sig { params(snapshot: LightweightSnapshot).void }
   def restore_lightweight(snapshot)
-    snapshot.node_states.each do |path, saved|
+    snapshot.each_state do |path, state|
       node = @nodes[path]
       next unless node
 
-      node.state = saved.state
-      node.move_line = saved.move_line
-      node.move_col = saved.move_col
-      node.move_action = saved.move_action
+      node.state = state
+      node.move_line = snapshot.move_line_for(path)
+      node.move_col = snapshot.move_col_for(path)
+      node.move_action = snapshot.move_action_for(path)
     end
     target_count = snapshot.edge_count
     while @edges.size > target_count

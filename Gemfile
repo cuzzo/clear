@@ -1,5 +1,6 @@
 source 'https://rubygems.org'
 
+gem 'csv'
 gem 'msgpack', '~> 1.7', '>= 1.7.2'
 
 group :development do

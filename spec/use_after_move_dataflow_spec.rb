@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/backends/transpiler"
 
 # Tests the UseAfterMoveChecker -- the dataflow-based use-after-move checker
-# that operates on CFG per-statement snapshots.
+# that replays CFG transfer from block-entry states.
 #
 # The annotator's OwnershipGraph already catches most use-after-move errors
 # before the dataflow stage. These specs verify:
@@ -184,11 +184,11 @@ RSpec.describe UseAfterMoveChecker do
   end
 
   # =========================================================================
-  # Per-statement state tracking (foundation for Phase 3/4)
+  # Block-entry state replay (foundation for Phase 3/4)
   # =========================================================================
 
-  describe "per-statement state tracking" do
-    it "tracks point_states for each statement" do
+  describe "block-entry state replay" do
+    it "does not materialize per-statement point state snapshots" do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
@@ -197,7 +197,22 @@ RSpec.describe UseAfterMoveChecker do
           RETURN;
         END
       CLEAR
-      expect(df.point_states).not_to be_empty
+      expect(df.block_in).not_to be_empty
+      expect(df.block_out).not_to be_empty
+      expect(df).not_to respond_to(:point_states)
+    end
+
+    it "does not track copy-like primitive bindings in ownership state" do
+      df = analyze_state(<<~CLEAR)
+        FN main() RETURNS Void ->
+          x = 1_i64;
+          y = x;
+          RETURN;
+        END
+      CLEAR
+
+      expect(df.exit_states).not_to have_key("x")
+      expect(df.exit_states).not_to have_key("y")
     end
 
     it "enriched entry has allocator and needs_cleanup" do
@@ -226,7 +241,7 @@ RSpec.describe UseAfterMoveChecker do
       expect(df.exit_states["b"]).to eq(:owned)
     end
 
-    it "exit_states preserve owned for Copy types" do
+    it "exit_states omit Copy types" do
       df = analyze_state(<<~CLEAR)
         FN main() RETURNS Void ->
           x = 42;
@@ -234,8 +249,8 @@ RSpec.describe UseAfterMoveChecker do
           RETURN;
         END
       CLEAR
-      expect(df.exit_states["x"]).to eq(:owned)
-      expect(df.exit_states["y"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("x")
+      expect(df.exit_states).not_to have_key("y")
     end
 
     it "exit_states show moved after heap struct assignment" do
@@ -274,7 +289,7 @@ RSpec.describe UseAfterMoveChecker do
         END
       CLEAR
       expect(df.exit_states["b"]).to eq(:moved)
-      expect(df.exit_states["s"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("s")
     end
 
     it "exit_states preserve source ownership when SHARE wraps COPY" do
@@ -287,7 +302,7 @@ RSpec.describe UseAfterMoveChecker do
         END
       CLEAR
       expect(df.exit_states["b"]).to eq(:owned)
-      expect(df.exit_states["s"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("s")
     end
 
     it "exit_states show moved for nested affine values in complex SHARE expressions" do
@@ -301,7 +316,7 @@ RSpec.describe UseAfterMoveChecker do
         END
       CLEAR
       expect(df.exit_states["inner"]).to eq(:moved)
-      expect(df.exit_states["s"]).to eq(:owned)
+      expect(df.exit_states).not_to have_key("s")
     end
   end
 

@@ -1151,7 +1151,7 @@ module PipeAnalysis
   def emit_multi_map_warning(conc, sharded_names)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|
-      sc = lookup_scope_for(name)&.locals&.[](name)&.type
+      sc = lookup_scope_for(name)&.resolve_entry(name)&.type
       t = sc.is_a?(Type) ? sc : Type.new(sc)
       t.shard_count
     end.compact.uniq
@@ -1238,7 +1238,7 @@ module PipeAnalysis
     # Find the map's scope entry to get shard_count
     scope = lookup_scope_for(map_name)
     return unless scope
-    entry = scope.locals[map_name]
+    entry = scope.resolve_entry(map_name)
     map_type = entry&.type
     map_type = Type.new(map_type) unless map_type.is_a?(Type)
     return unless map_type.sharded? && entry&.sync.nil?
@@ -1319,7 +1319,7 @@ module PipeAnalysis
   sig { params(node: AST::Identifier).returns(T::Boolean) }
   def sharded_unsynced_identifier?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.locals&.[](node.name))
+    sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.resolve_entry(node.name))
   end
 
   sig { params(node: T.untyped, context: String).returns(T.nilable(T::Hash[Symbol, T.untyped])) }

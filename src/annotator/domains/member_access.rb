@@ -53,6 +53,8 @@ module Annotator
         else
           error!(node, :UNSUPPORTED_INDEX)
         end
+
+        nil
       end
 
       sig { params(node: AST::GetField).returns(T.nilable(Object)) }

@@ -30,7 +30,6 @@ RSpec.describe CleanupClassifier do
 
     CleanupClassifier.classify(
       fn_node,
-      fn_nodes: result.fn_nodes,
       schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
   end

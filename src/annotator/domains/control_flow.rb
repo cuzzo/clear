@@ -50,16 +50,15 @@ module Annotator
             snap = branch_result.snapshot
             next unless snap
             # Lightweight merge: just apply moved states
-            snap.node_states.each do |path, saved|
-              state = saved.state
+            snap.each_state do |path, state|
               node = @og.nodes[path]
               next unless node
               if node.state != state
                 if state == :moved
                   node.state = :moved
-                  node.move_line = saved.move_line
-                  node.move_col = saved.move_col
-                  node.move_action = saved.move_action
+                  node.move_line = snap.move_line_for(path)
+                  node.move_col = snap.move_col_for(path)
+                  node.move_action = snap.move_action_for(path)
                 end
               end
             end
@@ -141,7 +140,7 @@ module Annotator
               unwrapped = b.unwrapped_type  # always a Type (never nil)
               sym = unwrapped.resolved
               current_scope.declare(b.name, nil, unwrapped, false, false, nil, :stack)
-              entry = current_scope.locals[b.name]
+              entry = current_scope.local_entry!(b.name)
               b.symbol = entry
               # Propagate non_escaping when the source is borrow-derived from a
               # non_escaping binding (a WITH alias or another transitive borrow
@@ -426,7 +425,7 @@ module Annotator
                       synthetic_type = :"#{type_name}_#{variant_name}"
                       current_scope.declare(c.binding, nil, Type.new(synthetic_type), false, false, nil, :stack)
                       og_declare(c.binding, nil, Type.new(synthetic_type))
-                      classify_ownership!(current_scope.locals[c.binding])
+                      classify_ownership!(current_scope.local_entry!(c.binding))
                     elsif raw_payload.is_a?(Type) && raw_payload.indirect?
                       # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                       inner_type = raw_payload.dup
@@ -434,19 +433,19 @@ module Annotator
                       inner_type = apply_type_subst(inner_type, union_subst)
                       current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
                       og_declare(c.binding, nil, inner_type)
-                      classify_ownership!(current_scope.locals[c.binding])
+                      classify_ownership!(current_scope.local_entry!(c.binding))
                       c.indirect_payload_as = true  # transpiler must emit subject.Variant.* (deref *T)
                     else
                       payload_type = apply_type_subst(raw_payload, union_subst)
                       current_scope.declare(c.binding, nil, payload_type, false, false, nil, :stack)
                       og_declare(c.binding, nil, payload_type)
-                      classify_ownership!(current_scope.locals[c.binding])
+                      classify_ownership!(current_scope.local_entry!(c.binding))
                     end
                     # MATCH AS: borrow view into the source union's payload.
                     # MATCH TAKES: owned extraction - source is consumed.
                     unless node.takes
                       @og[c.binding].kind = :borrowed
-                      current_scope.locals[c.binding].storage = :borrow
+                      current_scope.entry_for_write!(c.binding).storage = :borrow
                     end
                   end
                 end
@@ -606,7 +605,7 @@ module Annotator
           proc {
             current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
-            node.symbol = current_scope.locals[node.var_name]
+            node.symbol = current_scope.local_entry!(node.var_name)
             classify_ownership!(node.symbol)
             visit_stmts(node.body)
             finalize_scope(node)
@@ -654,7 +653,7 @@ module Annotator
           proc {
             current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
-            node.symbol = current_scope.locals[node.var_name]
+            node.symbol = current_scope.local_entry!(node.var_name)
             classify_ownership!(node.symbol)
             visit_stmts(node.body)
             finalize_scope(node)
@@ -705,9 +704,8 @@ module Annotator
             # Variables not referenced in the loop body are also exempt — they were moved before the
             # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
             loop_body_names = collect_body_identifier_names(node.do_branch)
-            current_scope.locals.each do |name, _entry|
-              saved = pre_loop_states&.node_states&.fetch(name, nil)
-              was_live = saved&.state == :live
+            loop_body_names.each do |name|
+              was_live = pre_loop_states&.state_for(name) == :live
               is_moved = @og&.moved?(name)
               if was_live && is_moved
                 if @og&.[](name)&.move_action == :capture &&
@@ -715,7 +713,7 @@ module Annotator
                   next
                 end
                 next unless loop_body_names.include?(name)
-                var_type = current_scope.locals[name]&.type
+                var_type = current_scope.resolve_entry(name)&.type
                 type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
                 is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
                 unless is_copy
@@ -778,7 +776,7 @@ module Annotator
           proc {
             current_scope.declare(node.binding_name, nil, unwrapped, false, false, nil, :stack)
             record_capture_local!(node.binding_name.to_s)
-            entry = current_scope.locals[node.binding_name]
+            entry = current_scope.local_entry!(node.binding_name)
             classify_ownership!(entry)
             og_declare(node.binding_name.to_s, nil, unwrapped)
 
@@ -786,10 +784,9 @@ module Annotator
             finalize_scope(node)
 
             loop_body_names = collect_body_identifier_names(node.do_branch)
-            current_scope.locals.each do |name, _entry|
+            loop_body_names.each do |name|
               next if name == node.binding_name
-              saved = pre_loop_states&.node_states&.fetch(name, nil)
-              was_live = saved&.state == :live
+              was_live = pre_loop_states&.state_for(name) == :live
               is_moved = @og&.moved?(name)
               if was_live && is_moved
                 if @og&.[](name)&.move_action == :capture &&
@@ -797,7 +794,7 @@ module Annotator
                   next
                 end
                 next unless loop_body_names.include?(name)
-                var_type = current_scope.locals[name]&.type
+                var_type = current_scope.resolve_entry(name)&.type
                 type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
                 is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
                 unless is_copy

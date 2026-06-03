@@ -27,6 +27,7 @@ GEM
     commander (5.0.0)
       highline (~> 3.0.0)
     concurrent-ruby (1.3.6)
+    csv (3.3.5)
     debride (1.15.2)
       path_expander (~> 2.0)
       prism (~> 1.7)
@@ -236,6 +237,7 @@ PLATFORMS
 
 DEPENDENCIES
   byebug (~> 12.0)
+  csv
   debride
   flay
   flog

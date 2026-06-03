@@ -9,7 +9,7 @@ options = {
   out: "/tmp/cheat-stackprof.dump",
   mode: :wall,
   interval: 1000,
-  checked: true,
+  checked: false,
 }
 
 OptionParser.new do |opts|
@@ -18,7 +18,8 @@ OptionParser.new do |opts|
   opts.on("-o", "--out PATH", "StackProf dump path") { |v| options[:out] = v }
   opts.on("--mode MODE", "wall, cpu, object") { |v| options[:mode] = v.to_sym }
   opts.on("--interval USEC", Integer, "Sampling interval in microseconds") { |v| options[:interval] = v }
-  opts.on("--unchecked", "Disable Sorbet runtime checks before loading compiler") { options[:checked] = false }
+  opts.on("--checked", "Enable Sorbet runtime checks before loading compiler") { options[:checked] = true }
+  opts.on("--unchecked", "Disable Sorbet runtime checks before loading compiler (default)") { options[:checked] = false }
 end.parse!
 
 unless options[:checked]

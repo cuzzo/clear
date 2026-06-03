@@ -16,7 +16,7 @@ $LOAD_PATH.unshift(File.join(SRC_ROOT, "annotator-helpers"))
 options = {
   interval: 0.001,
   output: "/tmp/cheat-stack-samples.json",
-  checked: true,
+  checked: false,
   mode: "full",
   top: 40,
 }
@@ -25,7 +25,8 @@ OptionParser.new do |opts|
   opts.banner = "Usage: ruby tools/sample_compile_stacks.rb [options] path/to/file.cht"
   opts.on("--interval SECONDS", Float, "Sampling interval, default 0.001") { |v| options[:interval] = v }
   opts.on("-o", "--output PATH", "Write JSON report") { |v| options[:output] = v }
-  opts.on("--unchecked", "Disable Sorbet runtime call validation before loading compiler") { options[:checked] = false }
+  opts.on("--checked", "Enable Sorbet runtime call validation before loading compiler") { options[:checked] = true }
+  opts.on("--unchecked", "Disable Sorbet runtime call validation before loading compiler (default)") { options[:checked] = false }
   opts.on("--mode MODE", "full or frontend-only") { |v| options[:mode] = v }
   opts.on("--top N", Integer, "Rows to print per section") { |v| options[:top] = v }
 end.parse!
@@ -46,6 +47,8 @@ require "mir/mir_pass"
 require "mir_lowering"
 require "mir_checker"
 require "mir_emitter"
+
+T::Private::Methods.run_all_sig_blocks if !options[:checked] && defined?(T::Private::Methods)
 
 source_path = File.expand_path(ARGV.fetch(0) do
   warn "missing source path"
@@ -194,7 +197,7 @@ begin
   ast.statements.each do |stmt|
     fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
   end
-  annotator.scope_stack.first.locals.each do |name, entry|
+  annotator.scope_stack.first.visible_entries.each do |name, entry|
     next if fn_sigs.key?(name)
     sig = entry.fn_signature
     fn_sigs[name] = sig if sig && sig.module_alias

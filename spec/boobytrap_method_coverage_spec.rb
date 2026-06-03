@@ -53,13 +53,13 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       value: AST::CopyNode.new(tok, id("s")),
       symbol: SymbolEntry.new(reg: "s", type: Type.new(:String), mutable: false, storage: :heap),
     )
-    expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), copy_string, Set.new, schema_lookup)).to include(kind: :heap_string)
+    expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), copy_string, schema_lookup)).to include(kind: :heap_string)
 
     borrowed_string = OpenStruct.new(
       value: lit,
       symbol: SymbolEntry.new(reg: "b", type: Type.new(:String), mutable: false, storage: :rodata),
     )
-    expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), borrowed_string, Set.new, schema_lookup)).to be_nil
+    expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), borrowed_string, schema_lookup)).to be_nil
 
     field = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: true)
     schema = OpenStruct.new(fields: { "name" => field }, borrowed_fields: Set.new)

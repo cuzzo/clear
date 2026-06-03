@@ -35,12 +35,15 @@ module MIR
       (node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr) || node.is_a?(MIR::TryCatch))
   end
 
-  class OwnershipOperandFact < Struct.new(:kind, :name, :borrowed, :type_info, :source, :target_alloc, keyword_init: true)
+  class OwnershipOperandFact < T::Struct
     extend T::Sig
 
-    def initialize(kind:, name:, borrowed:, type_info:, source:, target_alloc: nil)
-      super
-    end
+    const :kind, Symbol
+    const :name, T.nilable(String)
+    const :borrowed, T::Boolean
+    const :type_info, Type
+    const :source, String
+    const :target_alloc, T.nilable(Symbol), default: nil
 
     sig { params(name: String, type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
     def self.owned_binding(name, type_info, source, target_alloc = nil)
@@ -226,12 +229,14 @@ module MIR
     end
   end
 
-  class OwnershipConsumptionFact < Struct.new(:operands, :target, :target_alloc, :source, :covers_consuming_params, keyword_init: true)
+  class OwnershipConsumptionFact < T::Struct
     extend T::Sig
 
-    def initialize(operands:, target:, target_alloc:, source:, covers_consuming_params: false)
-      super
-    end
+    const :operands, T::Array[OwnershipOperandFact]
+    const :target, Symbol
+    const :target_alloc, T.nilable(Symbol), default: nil
+    const :source, String
+    const :covers_consuming_params, T::Boolean, default: false
 
     sig { returns(T::Array[String]) }
     def names
@@ -266,6 +271,9 @@ module MIR
       extend T::Sig
 
     include Kernel
+    EMPTY_CHILD_EXPRS = T.let([].freeze, T::Array[MIR::Emittable])
+    EMPTY_BODY_SLOTS = T.let([].freeze, T::Array[MIR::BodySlot])
+
     sig { returns(TrueClass) }
     def mir?; true; end
     sig { returns(T::Boolean) }
@@ -275,13 +283,13 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect; OwnershipEffect.none; end
     sig { returns(T::Array[Emittable]) }
-    def child_exprs; []; end
+    def child_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[Emittable]) }
-    def ownership_source_exprs; []; end
+    def ownership_source_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[Emittable]) }
-    def owned_position_source_exprs; []; end
+    def owned_position_source_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[BodySlot]) }
-    def body_slots; []; end
+    def body_slots; EMPTY_BODY_SLOTS; end
     sig { returns(Emittable) }
     def without_try; self; end
     sig { returns(T.nilable(OwnershipContract)) }
@@ -294,10 +302,18 @@ module MIR
     sig { params(values: T::Array[T.untyped]).returns(T::Array[Emittable]) }
     def compact_child_exprs(values)
       children = T.let([], T::Array[Emittable])
-      values.flatten.compact.each do |value|
-        children << value if value.is_a?(Emittable)
-      end
+      values.each { |value| append_child_expr(children, value) }
       children
+    end
+
+    sig { params(children: T::Array[Emittable], value: T.untyped).void }
+    def append_child_expr(children, value)
+      if value.is_a?(Array)
+        value.each { |child| append_child_expr(children, child) }
+      elsif value.is_a?(Emittable)
+        children << value
+      end
+      nil
     end
 
     sig { params(name: Symbol, body: T.nilable(T::Array[T.untyped]), writer: T.proc.params(body: T::Array[T.untyped]).void).returns(BodySlot) }

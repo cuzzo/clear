@@ -206,7 +206,7 @@ module Annotator
         node.arg_families = arg_family_sets
         record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
 
-        sig = FunctionSignature.unwrap(semantic_root_scope.locals[node.name]&.type)
+        sig = FunctionSignature.unwrap(semantic_root_scope.resolve_entry(node.name)&.type)
         if sig && sig.requires && !sig.requires.empty?
           node.collapsed_errors = collapse_errors_for_call(sig, node.args)
         end

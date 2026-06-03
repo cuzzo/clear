@@ -324,7 +324,7 @@ def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
   ].join("\0"))
 end
 
-def transpile_cached(source_path:, mode:, transpile_flag:, source_text:)
+def transpile_cached(source_path:, mode:, transpile_flag:, source_text:, bypass: false)
   # The transpile cache is content-addressed: cache_key includes the
   # compiler signature, dependency signatures, full source path and
   # source text. If the key hits, the output is bit-identical with
@@ -339,12 +339,12 @@ def transpile_cached(source_path:, mode:, transpile_flag:, source_text:)
   )
   cache_file = File.join(TRANSPILER_CACHE_DIR, "#{cache_key}.zig")
 
-  if File.exist?(cache_file)
+  if !bypass && File.exist?(cache_file)
     debug_cache("hit #{mode} #{File.basename(source_path)}")
     return [File.read(cache_file), cache_file]
   end
 
-  debug_cache("miss #{mode} #{File.basename(source_path)}")
+  debug_cache("#{bypass ? 'bypass' : 'miss'} #{mode} #{File.basename(source_path)}")
   zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source_path} 2>/dev/null`
   unless $?.success?
     system("ruby #{TRANSPILER} #{transpile_flag} #{source_path} > /dev/null")
@@ -371,7 +371,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -445,7 +445,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     source_path: source,
     mode: module_mode ? :test_root : :build_root,
     transpile_flag: transpile_flag,
-    source_text: source_text
+    source_text: source_text,
+    bypass: bypass_transpile_cache
   )
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
@@ -503,7 +504,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       source_path: pkg_path,
       mode: :module,
       transpile_flag: "--module #{nested_flags}".strip,
-      source_text: pkg_src
+      source_text: pkg_src,
+      bypass: bypass_transpile_cache
     )
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
@@ -603,6 +605,7 @@ when 'build'
   extra_flags = ['-fno-llvm', '-fno-lld']
   use_c_allocator = false
   use_debug_allocator = false
+  bypass_transpile_cache = false
 
   # Parse build flags
   remaining = []
@@ -632,8 +635,12 @@ when 'build'
     when '--no-stack-check'
       stack_check = false  # explicit override
       i += 1
-    when '--force', '--no-cache'
+    when '--force'
       @force_build = true
+      i += 1
+    when '--no-cache'
+      @force_build = true
+      bypass_transpile_cache = true
       i += 1
     when '--mir'
       # No-op: MIR is the only pipeline. Flag kept for backward compat.
@@ -687,7 +694,7 @@ when 'build'
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
@@ -870,7 +877,7 @@ when 'run'
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.cht'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache)
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator, force: no_cache, bypass_transpile_cache: no_cache)
 
   # Hints
   unless ENV['CLEAR_THREADS']

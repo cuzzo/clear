@@ -18,7 +18,7 @@ options = {
   phase: "full",
   output: "/tmp/cheat-method-times.csv",
   limit: 80,
-  checked: true,
+  checked: false,
   targets: [src_root],
 }
 
@@ -27,7 +27,8 @@ OptionParser.new do |opts|
   opts.on("--phase NAME", "full, frontend, lower, checker, emit") { |v| options[:phase] = v }
   opts.on("-o", "--output PATH", "CSV output path") { |v| options[:output] = v }
   opts.on("--limit N", Integer, "Rows printed per sort") { |v| options[:limit] = v }
-  opts.on("--unchecked", "Disable Sorbet runtime checks before loading compiler") { options[:checked] = false }
+  opts.on("--checked", "Enable Sorbet runtime checks before loading compiler") { options[:checked] = true }
+  opts.on("--unchecked", "Disable Sorbet runtime checks before loading compiler (default)") { options[:checked] = false }
   opts.on("--target PATH", "Trace methods whose source file is under PATH; repeatable") do |path|
     options[:targets] << File.expand_path(path, root)
   end
@@ -139,9 +140,15 @@ class MethodTimeTrace
     @stacks[Thread.current.object_id] << Frame.new(key: key, start: now, child: 0.0)
   end
 
-  def on_return(_tp)
+  def on_return(tp)
+    path = File.expand_path(tp.path)
+    return unless target_path?(path)
+
     stack = @stacks[Thread.current.object_id]
     return if stack.empty?
+
+    key = [owner_name(tp.defined_class), tp.method_id.to_s, path, tp.lineno]
+    return unless stack.last&.key == key
 
     frame = stack.pop
     elapsed = now - frame.start

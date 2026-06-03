@@ -94,6 +94,35 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(graph.exit_block.predecessors).not_to be_empty
   end
 
+  it "summarizes cleanup decision facts in one body traversal" do
+    subject = id("payload")
+    takes_match = AST::MatchStatement.new(
+      tok, subject,
+      [AST::MatchCase.new(kind: :literal, value: lit(1, type: :Int64), body: [])],
+      nil, nil, nil, false, true
+    )
+    borrowed_match = AST::MatchStatement.new(
+      tok, id("borrowed"),
+      [AST::MatchCase.new(kind: :literal, value: lit(2, type: :Int64), body: [])],
+      nil, nil, nil, false, false
+    )
+    non_identifier_match = AST::MatchStatement.new(
+      tok, AST::StructLit.new(tok, "Box", [], nil),
+      [AST::MatchCase.new(kind: :literal, value: lit(3, type: :Int64), body: [])],
+      nil, nil, nil, false, true
+    )
+    loop_decl = AST::VarDecl.new(tok, "inside_loop", nil, lit(1, type: :Int64), false)
+    outside_decl = AST::VarDecl.new(tok, "outside_loop", nil, lit(1, type: :Int64), false)
+    loop = AST::WhileLoop.new(tok, lit(true, type: :Bool), [loop_decl], nil)
+    fn_node = fn([takes_match, borrowed_match, non_identifier_match, outside_decl, loop])
+    dataflow = OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node)
+
+    facts = dataflow.send(:cleanup_decision_facts, fn_node.body)
+
+    expect(facts.match_takes_vars).to eq(Set["payload"])
+    expect(facts.loop_declared_names).to eq(Set["inside_loop"])
+  end
+
   it "tracks ownership transfers for statement categories through one dataflow object" do
     value = id("owned")
     moved_value = id("moved", storage: :heap)
@@ -102,13 +131,13 @@ RSpec.describe "MIR gap-burn characterization" do
     bg = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
     bg.capture_analysis = double(resource_captures: Set["captured"], move_mark_names: Set["given"])
     each_stmt = AST::ForEach.new(tok, "loop_item", id("items"), [], nil, false)
-    each_stmt.full_type = :String
+    each_stmt.full_type = Type.new(:Box, layout: :indirect)
 
     dataflow = OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([]), schema_lookup: nil)
     state = owner_state("owned", "moved", "captured", "given", "items")
 
     decl = AST::VarDecl.new(tok, "declared", nil, value, false)
-    decl.full_type = :String
+    decl.full_type = Type.new(:Box, layout: :indirect)
     dataflow.send(:transfer_stmt, decl, state)
     dataflow.send(:transfer_stmt, AST::Assignment.new(tok, id("slot"), AST::MoveNode.new(tok, id("owned"))), state)
     dataflow.send(:transfer_stmt, call, state)

@@ -529,7 +529,7 @@ private
   # Cached outer scope variable set - avoids O(n) flat_map per loop
   sig { returns(T::Set[String]) }
   def outer_scope_vars
-    @scope_stack.flat_map { |s| s.locals.keys }.to_set
+    @scope_stack.flat_map(&:visible_names).to_set
   end
 
   sig { params(node: AST::Program).returns(T.untyped) }
@@ -586,7 +586,7 @@ private
     same_dir = (node.kind != :package) && (mod.source_dir == @source_dir)
 
     # Import function signatures that are visible from this call site.
-    mod.global_scope.locals.each do |name, entry|
+    mod.global_scope.visible_entries.each do |name, entry|
       sig = entry.fn_signature
       next unless sig
 

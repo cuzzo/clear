@@ -110,7 +110,7 @@ module FunctionAnalysis
     end
 
     func_type = scope.resolve_type(func_name)
-    entry = scope.locals[func_name]
+    entry = scope.resolve_entry(func_name)
     fsig = FunctionSignature.unwrap(func_type)
     call_node = args.equal?(node.args) ? node : Struct.new(:token, :name, :args).new(node.token, func_name, args)
 
@@ -801,7 +801,7 @@ module FunctionAnalysis
       )
       # Stash the SymbolEntry on the Param so downstream passes don't
       # need to find an Identifier reference in the body.
-      param.symbol = current_scope.locals[param.name]
+      param.symbol = current_scope.local_entry!(param.name)
       param.symbol.is_param = true
       param.symbol.param_decl_token = param.name_token
       # Preserve REQUIRES disjunctions for call-site effect resolution.
@@ -810,8 +810,8 @@ module FunctionAnalysis
         param.symbol.sync_families = fams if fams.is_a?(Set) && !fams.empty?
       end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
-      current_scope.locals[param.name].takes = true if param.takes
-      classify_ownership!(current_scope.locals[param.name])
+      current_scope.local_entry!(param.name).takes = true if param.takes
+      classify_ownership!(current_scope.local_entry!(param.name))
       og_declare(param.name, nil, param.type)
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
@@ -837,7 +837,7 @@ module FunctionAnalysis
         error!(node, :CAPTURE_NO_DEFAULT, name: cap_name)
       end
 
-      if !current_scope.locals.key?(cap_name)
+      if !current_scope.entry?(cap_name)
         # Check if it's in a higher scope
         owner_scope = lookup_scope_for(cap_name)
         if owner_scope.nil?
@@ -849,7 +849,7 @@ module FunctionAnalysis
         owner_scope = current_scope
       end
 
-      entry = owner_scope.locals[cap_name]
+      entry = owner_scope.entry_for_write!(cap_name)
 
       if cap.mutable && !entry.mutable && node.is_a?(AST::FunctionDef)
         emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
@@ -989,7 +989,7 @@ module FunctionAnalysis
       # the caller controls their lifetime. Only flag variables explicitly assigned
       # from a collection index borrow (BindExpr with container_borrow=true).
       scope = lookup_scope_for(node.name)
-      reg = scope&.locals&.[](node.name)&.reg
+      reg = scope&.resolve_entry(node.name)&.reg
       return reg&.container_borrow == true
     end
     return true if node.is_a?(AST::GetIndex)

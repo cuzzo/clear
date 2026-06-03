@@ -402,7 +402,7 @@ module Annotator
         return unless node.value.is_a?(AST::Identifier)
         rhs_name = node.value.name
         rhs_type = current_scope.resolve_type(rhs_name)
-        rhs_info = current_scope.locals[rhs_name]
+        rhs_info = current_scope.resolve_entry(rhs_name)
         return if rhs_info&.rc_stored? || rhs_info&.sync
 
         type_obj = Type.new(rhs_type)
@@ -522,7 +522,7 @@ module Annotator
 
         drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.owned_names.each do |name|
-          info = current_scope.locals[name]
+          info = current_scope.local_entry(name)
           next unless info
           # TAKES params always need cleanup guards even if moved (the _moved
           # flag controls whether cleanup runs at runtime).
@@ -553,7 +553,7 @@ module Annotator
         # Unused variable warnings (function-level finalize only)
         if branch.nil?
           current_scope.owned_names.each do |name|
-            info = current_scope.locals[name]
+            info = current_scope.local_entry(name)
             next unless info
             next if name.start_with?('_')
             next if info.read
@@ -570,7 +570,7 @@ module Annotator
 
           # MUTABLE-never-reassigned warnings
           current_scope.owned_names.each do |name|
-            info = current_scope.locals[name]
+            info = current_scope.local_entry(name)
             next unless info
             next if name.start_with?('_')
             next unless info.mutable
@@ -598,7 +598,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         drops = T.let([], T::Array[AST::DeferredDrop])
-        current_scope.locals.each do |name, info|
+        current_scope.owned_entries.each do |name, info|
           next unless @og.live?(name)
           classify_ownership!(info) unless info.ownership_kind
           case info.ownership_kind
@@ -725,10 +725,8 @@ module Annotator
         end
 
         source_names = sources.map do |s|
-          # Find the binding name: walk @fn_nodes' params + locally-named
-          # decls. Source is a SymbolEntry whose .reg may be the
-          # declaring AST node, but the cleaner path: look at scope.locals
-          # and find the entry by identity.
+          # Find the binding name by comparing the source entry with visible
+          # scope entries by identity.
           lookup_source_name(s)
         end.compact
 
@@ -766,7 +764,7 @@ module Annotator
         end
       end
 
-      # Look up the binding name of a SymbolEntry by scanning scope.locals.
+        # Look up the binding name of a SymbolEntry by scanning visible scope entries.
       # Returns the String name or nil if not found.
       sig { params(sym: SymbolEntry).returns(T.nilable(String)) }
       def lookup_source_name(sym)
@@ -774,7 +772,7 @@ module Annotator
 
         sc = sym.scope
         return nil unless sc
-        sc.locals.each do |name, entry|
+        sc.visible_entries.each do |name, entry|
           return name if entry.equal?(sym)
         end
         # Param symbols may have been refreshed via Scope.live_param_syms;
@@ -836,7 +834,7 @@ module Annotator
 
         if target_node.is_a?(AST::Identifier)
           sym = target_node.symbol
-          sym ||= lookup_scope_for(target_node.name)&.locals&.[](target_node.name)
+          sym ||= lookup_scope_for(target_node.name)&.resolve_entry(target_node.name)
           return sym&.scope_depth
         end
         if target_node.is_a?(AST::GetField) || target_node.is_a?(AST::GetIndex)
@@ -1142,7 +1140,7 @@ module Annotator
       def og_declare(name, node, type_info)
         T.bind(self, SemanticAnnotator)
 
-        entry = current_scope.locals[name] rescue nil
+        entry = current_scope.resolve_entry(name) rescue nil
         kind = classify_og_kind(type_info, sync: entry&.sync)
         ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
         @og.declare(name, kind: kind, type_info: ti,

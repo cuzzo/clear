@@ -395,7 +395,7 @@ module EffectTracker
         next if needs_rt.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
+        sig = FunctionSignature.unwrap(scope.resolve_entry(c)&.type)
         needs_rt[c] = true if sig&.needs_rt
       end
     end
@@ -463,7 +463,7 @@ module EffectTracker
         next if error_fallible.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
+        sig = FunctionSignature.unwrap(scope.resolve_entry(c)&.type)
         next unless sig
         ef = sig.error_fallible.nil? ? sig.can_fail : sig.error_fallible
         error_fallible[c] = true if ef
@@ -545,7 +545,7 @@ module EffectTracker
         next if alloc_fault.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.locals[c]&.type
+        sig = scope.resolve_entry(c)&.type
         sig = sig.is_a?(FunctionSignature) ? sig : nil
         alloc_fault[c] = true if sig&.alloc_fault
       end

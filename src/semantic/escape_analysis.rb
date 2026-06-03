@@ -24,6 +24,8 @@ module EscapeAnalysis
     const :fn, AST::FunctionDef
     const :symbols, T::Hash[String, SymbolEntry]
     const :binding_values, T::Hash[String, T::Array[AST::Locatable]]
+    const :return_values, T::Array[T.untyped]
+    const :assignment_nodes, T::Array[T.untyped]
 
     sig { returns(Integer) }
     def heap_symbol_count
@@ -38,6 +40,7 @@ module EscapeAnalysis
     const :fn, AST::FunctionDef
     const :facts, T.nilable(FunctionFacts)
     const :fn_nodes, FnNodes
+    const :facts_by_name, T::Hash[String, FunctionFacts]
     const :bg_heap, T::Set[String]
     const :schema_lookup, T.nilable(Proc)
   end
@@ -113,9 +116,9 @@ module EscapeAnalysis
       next unless fn.body
       facts = T.must(facts_by_name[name])
       before = facts.heap_symbol_count
-      mark_body_escapes!(facts, fn_nodes, bg_heap, schema_lookup)
+      mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
       mark_loop_receiver_allocations_heap!(fn.body)
-      propagate_assignment_ownership!(facts, fn_nodes, schema_lookup)
+      propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
       propagate_hoist_dependencies!(facts)
       heap_fns << name if facts.heap_symbol_count > before
     end
@@ -287,9 +290,9 @@ module EscapeAnalysis
     families.include?(:ATOMIC) || families.include?(:SNAPSHOTTED)
   end
 
-  sig { params(facts: FunctionFacts, fn_nodes: FnNodes, bg_heap: T::Set[String], schema_lookup: T.nilable(Proc)).void }
-  private_class_method def self.mark_body_escapes!(facts, fn_nodes, bg_heap, schema_lookup)
-    context = EscapeContext.new(fn: facts.fn, facts: facts, fn_nodes: fn_nodes, bg_heap: bg_heap, schema_lookup: schema_lookup)
+  sig { params(facts: FunctionFacts, fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], bg_heap: T::Set[String], schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
+    context = EscapeContext.new(fn: facts.fn, facts: facts, fn_nodes: fn_nodes, facts_by_name: facts_by_name, bg_heap: bg_heap, schema_lookup: schema_lookup)
     walk_body(facts.fn.body) do |node|
       ESCAPE_SINKS.each { |sink| apply_escape_sink!(sink, node, context) if sink.matches?(node) }
     end
@@ -318,7 +321,7 @@ module EscapeAnalysis
   private_class_method def self.apply_binding_escape_sink!(node, context)
     if borrow_return_expr?(node.value)
       mark_symbol_borrow!(node.symbol)
-    elsif call_result_is_heap?(node.value, context.fn_nodes, context.schema_lookup)
+    elsif call_result_is_heap?(node.value, context.fn_nodes, context.schema_lookup, facts_by_name: context.facts_by_name)
       mark_symbol_heap!(node.symbol)
     end
   end
@@ -341,7 +344,7 @@ module EscapeAnalysis
 
   sig { params(node: AST::MethodCall, context: EscapeContext).void }
   private_class_method def self.apply_method_call_escape_sink!(node, context)
-    mark_method_takes_heap!(node, params_for_method_call(node), context.fn_nodes, context.schema_lookup)
+    mark_method_takes_heap!(node, params_for_method_call(node), context.fn_nodes, context.facts_by_name, context.schema_lookup)
   end
 
   sig { params(body: T::Array[T.untyped]).void }
@@ -556,8 +559,8 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(call: AST::MethodCall, params: T::Array[AST::Param], fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
-  private_class_method def self.mark_method_takes_heap!(call, params, fn_nodes, schema_lookup)
+  sig { params(call: AST::MethodCall, params: T::Array[AST::Param], fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_method_takes_heap!(call, params, fn_nodes, facts_by_name, schema_lookup)
     receiver_param = params.first
     if receiver_is_param?(call.object) && symbol_heap?(receiver_param&.symbol)
       mark_expr_roots_heap!(call.object)
@@ -565,12 +568,12 @@ module EscapeAnalysis
 
     value_params = params.drop(1)
     mark_takes_args_heap!(call.args, value_params, schema_lookup)
-    mark_receiver_for_owned_sink!(call.object, call.args, value_params, fn_nodes, schema_lookup)
+    mark_receiver_for_owned_sink!(call.object, call.args, value_params, fn_nodes, facts_by_name, schema_lookup)
     mark_receiver_scope_escapes!(call.object, call.args, value_params)
   end
 
-  sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param], fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
-  private_class_method def self.mark_receiver_for_owned_sink!(receiver, args, params, fn_nodes, schema_lookup)
+  sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param], fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_receiver_for_owned_sink!(receiver, args, params, fn_nodes, facts_by_name, schema_lookup)
     receiver_root = AST.root_identifier(receiver)
     receiver_sym = receiver_root&.symbol
     return unless receiver_sym
@@ -579,7 +582,7 @@ module EscapeAnalysis
       next unless param.takes
       arg = args[idx]
       next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||
-                  call_result_is_heap?(arg, fn_nodes, schema_lookup)
+                  call_result_is_heap?(arg, fn_nodes, schema_lookup, facts_by_name: facts_by_name)
       mark_symbol_heap!(receiver_sym)
       return
     end
@@ -652,17 +655,17 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(facts: FunctionFacts, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
-  private_class_method def self.propagate_assignment_ownership!(facts, fn_nodes, schema_lookup)
+  sig { params(facts: FunctionFacts, fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      walk_body(facts.fn.body) do |node|
+      facts.assignment_nodes.each do |node|
         target = assigned_binding_name(node)
         next unless target
         sym = facts.symbols[target]
         next unless sym
-        next unless assignment_value_is_owned?(node, fn_nodes, schema_lookup)
+        next unless assignment_value_is_owned?(node, fn_nodes, facts_by_name, schema_lookup)
         changed = true if mark_reassigned_symbol_heap!(sym)
       end
     end
@@ -679,14 +682,14 @@ module EscapeAnalysis
     nil
   end
 
-  sig { params(node: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.assignment_value_is_owned?(node, fn_nodes, schema_lookup)
+  sig { params(node: T.untyped, fn_nodes: FnNodes, facts_by_name: T::Hash[String, FunctionFacts], schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.assignment_value_is_owned?(node, fn_nodes, facts_by_name, schema_lookup)
     return false unless node.respond_to?(:value)
     value = node.value
     return true if ownership_transferring_expr?(value, include_allocating_expr: false)
     return false if string_concat_expr?(unwrap_value(value))
     return true if expr_has_owned_inline_value?(value)
-    call_result_is_heap?(value, fn_nodes, schema_lookup)
+    call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: facts_by_name)
   end
 
   sig { params(expr: T.untyped, include_allocating_expr: T::Boolean).returns(T::Boolean) }
@@ -769,6 +772,8 @@ module EscapeAnalysis
   private_class_method def self.function_facts(fn)
     symbols = T.let({}, T::Hash[String, SymbolEntry])
     binding_values = T.let({}, T::Hash[String, T::Array[AST::Locatable]])
+    return_values = T.let([], T::Array[T.untyped])
+    assignment_nodes = T.let([], T::Array[T.untyped])
     fn.params.each do |param|
       sym = param.symbol
       symbols[param.name.to_s] = sym if sym
@@ -776,12 +781,20 @@ module EscapeAnalysis
     walk_body(fn.body) do |node|
       sym = symbol_for_binding_node(node)
       symbols[node.name.to_s] = sym if sym && node.respond_to?(:name)
+      return_values << node.value if node.is_a?(AST::ReturnNode) && node.value
+      assignment_nodes << node if node.is_a?(AST::Assignment) || (node.is_a?(AST::BindExpr) && node.mode == :assign)
       next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
       value = node.value
       next unless value.is_a?(AST::Locatable)
       (binding_values[node.name.to_s] ||= []) << value
     end
-    FunctionFacts.new(fn: fn, symbols: symbols, binding_values: binding_values)
+    FunctionFacts.new(
+      fn: fn,
+      symbols: symbols,
+      binding_values: binding_values,
+      return_values: return_values,
+      assignment_nodes: assignment_nodes,
+    )
   end
 
   sig { params(receiver: T.untyped).returns(T::Boolean) }
@@ -933,14 +946,15 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(value: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup)
+  sig { params(value: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T.nilable(T::Hash[String, FunctionFacts])).returns(T::Boolean) }
+  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: nil)
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
     return false unless AST.call?(call)
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
-    return call_result_is_heap_for_callee?(call, callee, schema_lookup) if callee
+    callee_facts = facts_by_name&.[](call.name.to_s)
+    return call_result_is_heap_for_callee?(call, callee, schema_lookup, facts: callee_facts) if callee
 
     sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil
     return false unless sig
@@ -953,14 +967,15 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(call: T.untyped, callee: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.call_result_is_heap_for_callee?(call, callee, schema_lookup)
+  sig { params(call: T.untyped, callee: AST::FunctionDef, schema_lookup: T.nilable(Proc), facts: T.nilable(FunctionFacts)).returns(T::Boolean) }
+  private_class_method def self.call_result_is_heap_for_callee?(call, callee, schema_lookup, facts: nil)
     dep = heap_return_from_args?(call.args, callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup)
     return dep unless dep.nil?
 
+    callee_facts = facts || function_facts(callee)
     callee.heap_carry_return == true ||
-      function_has_owned_return_value?(callee, schema_lookup) ||
-      body_has_heap_return_binding?(callee.body)
+      function_facts_have_owned_return_value?(callee_facts, schema_lookup) ||
+      function_facts_have_heap_return_binding?(callee_facts)
   end
 
   sig { params(call: T.untyped, sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
@@ -1018,22 +1033,39 @@ module EscapeAnalysis
 
   sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
   private_class_method def self.body_has_heap_return_binding?(body)
-    found = T.let(false, T::Boolean)
-    walk_body(body) do |node|
-      next unless node.is_a?(AST::ReturnNode)
-      found = true if expr_has_heap_identifier?(node.value)
-    end
-    found
+    function_facts_have_heap_return_binding?(function_facts_for_body(body))
   end
 
   sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.function_has_owned_return_value?(fn, schema_lookup)
-    found = T.let(false, T::Boolean)
-    walk_body(fn.body) do |node|
-      next unless node.is_a?(AST::ReturnNode) && node.value
-      found = true if owning_return_needs_heap_placement?(fn, node.value, schema_lookup)
+    function_facts_have_owned_return_value?(function_facts(fn), schema_lookup)
+  end
+
+  sig { params(facts: FunctionFacts, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.function_facts_have_owned_return_value?(facts, schema_lookup)
+    facts.return_values.any? do |value|
+      owning_return_needs_heap_placement?(facts.fn, value, schema_lookup)
     end
-    found
+  end
+
+  sig { params(facts: FunctionFacts).returns(T::Boolean) }
+  private_class_method def self.function_facts_have_heap_return_binding?(facts)
+    facts.return_values.any? { |value| expr_has_heap_identifier?(value) }
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(FunctionFacts) }
+  private_class_method def self.function_facts_for_body(body)
+    values = T.let([], T::Array[T.untyped])
+    walk_body(body) do |node|
+      values << node.value if node.is_a?(AST::ReturnNode) && node.value
+    end
+    FunctionFacts.new(
+      fn: AST::FunctionDef.new(nil, "__escape_return_probe", [], [], Type.new(:Void), nil, body, [], nil, :private, [], false),
+      symbols: {},
+      binding_values: {},
+      return_values: values,
+      assignment_nodes: [],
+    )
   end
 
   sig { params(node: T.untyped).returns(T.nilable(SymbolEntry)) }

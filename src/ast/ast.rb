@@ -364,6 +364,77 @@ module AST
       yield node if node.is_a?(Locatable)
       next if node.is_a?(FunctionDef) && !descend_functions
       next if defined?(Lexer::Token) && node.is_a?(Lexer::Token)
+      handled = true
+      case node
+      when Identifier, Literal, BreakNode, ContinueNode, OrRaise, OrBreak, OrPass, OrPrune
+        # leaf
+      when UnaryOp
+        stack << node.right if node.right
+      when BinaryOp
+        stack << node.right if node.right
+        stack << node.left if node.left
+      when FuncCall
+        stack << node.args
+      when MethodCall
+        stack << node.args
+        stack << node.object if node.object
+      when StaticCall
+        stack << node.args
+      when GetField
+        stack << node.target if node.target
+      when GetIndex
+        stack << node.index if node.index
+        stack << node.target if node.target
+      when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode, FreezeNode, CapabilityWrap
+        stack << node.value if node.value
+      when ReturnNode, ThrowNode, DieNode
+        stack << node.value if node.respond_to?(:value) && node.value
+        stack << node.status if node.respond_to?(:status) && node.status
+      when Raise
+        stack << node.message_expr if node.message_expr
+      when Assert
+        stack << node.message if node.message
+        stack << node.condition if node.condition
+      when Assignment
+        stack << node.value if node.value
+        stack << node.name if node.name.is_a?(Struct)
+      when VarDecl, BindExpr
+        stack << node.value if node.value
+      when StructLit, UnionVariantLit
+        stack << node.fields if node.fields
+      when ListLit
+        stack << node.items
+      when HashLit
+        stack << node.pairs
+      when IfStatement
+        stack << node.else_branch if node.else_branch
+        stack << node.then_branch if node.then_branch
+        stack << node.condition if node.condition
+      when IfBind
+        stack << node.else_branch if node.else_branch
+        stack << node.then_branch if node.then_branch
+        stack << node.bindings
+      when WhileLoop
+        stack << node.do_branch if node.do_branch
+        stack << node.condition if node.condition
+      when WhileBindLoop
+        stack << node.do_branch if node.do_branch
+        stack << node.condition if node.condition
+      when MatchStatement
+        stack << node.default_case if node.default_case
+        stack << node.cases
+        stack << node.expr if node.expr
+      when ForRange
+        stack << node.body if node.body
+        stack << node.end_expr if node.end_expr
+        stack << node.start_expr if node.start_expr
+      when ForEach
+        stack << node.body if node.body
+        stack << node.collection if node.collection
+      else
+        handled = false
+      end
+      next if handled
       next unless node.is_a?(Struct)
 
       members = EACH_LOCATABLE_MEMBERS_CACHE[node.class] ||=
@@ -822,103 +893,103 @@ module AST
     def token_value; token.value; end
 
     sig { returns(T.nilable(Type)) }
-    def coerced_type_object; @coerced_type_object = T.let(@coerced_type_object, T.nilable(Type)); end
+    def coerced_type_object; @coerced_type_object; end
     sig { returns(T.nilable(Type)) }
-    def type_object; @type_object = T.let(@type_object, T.nilable(Type)); end
+    def type_object; @type_object; end
 
     sig { returns(T.untyped) }
-    def zig_pattern; @zig_pattern = T.let(@zig_pattern, T.nilable(T.any(String, Symbol))); end
+    def zig_pattern; @zig_pattern; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def zig_pattern=(val); @zig_pattern = T.let(val, T.nilable(T.any(String, Symbol))); end
+    def zig_pattern=(val); @zig_pattern = val; end
 
     sig { returns(T.untyped) }
-    def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.nilable(FunctionSignature)); end
+    def matched_stdlib_def; @matched_stdlib_def; end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val)
       fs = IntrinsicRegistry.fs(val)
-      @matched_stdlib_def = T.let(fs, T.untyped)
+      @matched_stdlib_def = fs
       self.matched_signature = fs
     end
 
     sig { returns(T.untyped) }
-    def matched_signature; @matched_signature = T.let(@matched_signature, T.nilable(FunctionSignature)); end
+    def matched_signature; @matched_signature; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def matched_signature=(val); @matched_signature = T.let(val, T.untyped); end
+    def matched_signature=(val); @matched_signature = val; end
 
     sig { void }
-    def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
+    def stdlib_allocates; @stdlib_allocates; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def stdlib_allocates=(val); @stdlib_allocates = T.let(val, T.untyped); end
+    def stdlib_allocates=(val); @stdlib_allocates = val; end
 
     sig { returns(T.untyped) }
-    def mutates_receiver; @mutates_receiver = T.let(@mutates_receiver, T.nilable(T::Boolean)); end
+    def mutates_receiver; @mutates_receiver; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def mutates_receiver=(val); @mutates_receiver = T.let(val, T.untyped); end
+    def mutates_receiver=(val); @mutates_receiver = val; end
 
     sig { returns(T.untyped) }
-    def was_moved; @was_moved = T.let(@was_moved, T.nilable(T::Boolean)); end
+    def was_moved; @was_moved; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def was_moved=(val); @was_moved = T.let(val, T.untyped); end
+    def was_moved=(val); @was_moved = val; end
 
     sig { returns(T.untyped) }
-    def container_borrow; @container_borrow = T.let(@container_borrow, T.nilable(T::Boolean)); end
+    def container_borrow; @container_borrow; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def container_borrow=(val); @container_borrow = T.let(val, T.nilable(T::Boolean)); end
+    def container_borrow=(val); @container_borrow = val; end
 
     sig { returns(T.untyped) }
-    def needs_mut_ref; @needs_mut_ref = T.let(@needs_mut_ref, T.nilable(T::Boolean)); end
+    def needs_mut_ref; @needs_mut_ref; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
+    def needs_mut_ref=(val); @needs_mut_ref = val; end
 
     sig { returns(T.untyped) }
-    def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.nilable(T::Boolean)); end
+    def needs_heap_create; @needs_heap_create; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
+    def needs_heap_create=(val); @needs_heap_create = val; end
 
     sig { void }
-    def collection_return; @collection_return = T.let(@collection_return, T.untyped); end
+    def collection_return; @collection_return; end
     sig { params(val: T.untyped).void }
-    def collection_return=(val); @collection_return = T.let(val, T.untyped); end
+    def collection_return=(val); @collection_return = val; end
 
     sig { returns(T.nilable(Integer)) }
-    def slot_size; @slot_size = T.let(@slot_size, T.nilable(Integer)); end
+    def slot_size; @slot_size; end
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
-    def slot_size=(val); @slot_size = T.let(val, T.nilable(Integer)); end
+    def slot_size=(val); @slot_size = val; end
 
     sig { returns(T.untyped) }
-    def resource_close_zig; @resource_close_zig = T.let(@resource_close_zig, T.nilable(String)); end
+    def resource_close_zig; @resource_close_zig; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def resource_close_zig=(val); @resource_close_zig = T.let(val, T.nilable(String)); end
+    def resource_close_zig=(val); @resource_close_zig = val; end
 
     sig { returns(T.untyped) }
-    def can_fail; @can_fail = T.let(@can_fail, T.nilable(T::Boolean)); end
+    def can_fail; @can_fail; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def can_fail=(val); @can_fail = T.let(val, T.untyped); end
+    def can_fail=(val); @can_fail = val; end
 
     sig { returns(T.untyped) }
-    def error_kind; @error_kind = T.let(@error_kind, T.untyped); end
+    def error_kind; @error_kind; end
     sig { params(val: T.untyped).void }
-    def error_kind=(val); @error_kind = T.let(val, T.nilable(Symbol)); end
+    def error_kind=(val); @error_kind = val; end
 
     sig { returns(T.untyped) }
-    def error_type; @error_type = T.let(@error_type, T.untyped); end
+    def error_type; @error_type; end
     sig { params(val: T.untyped).void }
-    def error_type=(val); @error_type = T.let(val, T.nilable(Symbol)); end
+    def error_type=(val); @error_type = val; end
 
     sig { returns(T.untyped) }
-    def var_used; @var_used = T.let(@var_used, T.nilable(T::Boolean)); end
+    def var_used; @var_used; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def var_used=(val); @var_used = T.let(val, T.nilable(T::Boolean)); end
+    def var_used=(val); @var_used = val; end
 
     sig { returns(T.untyped) }
-    def var_mutated; @var_mutated = T.let(@var_mutated, T.nilable(T::Boolean)); end
+    def var_mutated; @var_mutated; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def var_mutated=(val); @var_mutated = T.let(val, T.untyped); end
+    def var_mutated=(val); @var_mutated = val; end
 
     sig { returns(T.untyped) }
-    def symbol; @symbol = T.let(@symbol, T.nilable(SymbolEntry)); end
+    def symbol; @symbol; end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def symbol=(val); @symbol = T.let(val, T.nilable(SymbolEntry)); end
+    def symbol=(val); @symbol = val; end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).

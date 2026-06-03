@@ -216,7 +216,7 @@ module Annotator
           close_zig: resource_close
         )
         record_capture_local!(node.name.to_s)
-        node.symbol = current_scope.locals[node.name]
+        node.symbol = current_scope.local_entry!(node.name)
         node.symbol.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
         # (The late-provenance fold now happens BEFORE declare, above, so the
         # symbol is born with the correct storage -- no post-declare write.)
@@ -298,7 +298,7 @@ module Annotator
         scope = current_scope
         # `_` is a discard sink: every `_ = expr;` is an independent
         # declaration, never a reassignment.
-        if !scope.locals.key?(node.name) || node.name == "_"
+        if !scope.entry?(node.name) || node.name == "_"
           # Declaration path
           promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
           promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
@@ -330,7 +330,7 @@ module Annotator
 
           # Atomic compound assignments must become fetch ops; load+add+store
           # would lose atomicity.
-          target_sync = scope.locals[node.name]&.sync
+          target_sync = scope.resolve_entry(node.name)&.sync
           if target_sync == :atomic
             op = case node.compound_op
                  when nil  then :store
@@ -404,7 +404,7 @@ module Annotator
         # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.
         owner = lookup_scope_for(node.name)
         owner&.mark_read(node.name)
-        node.symbol = owner&.locals&.[](node.name)
+        node.symbol = owner&.entry_for_write(node.name)
         record_capture_identifier!(node)
         node.symbol
       end
@@ -500,7 +500,7 @@ module Annotator
 
         scope = lookup_scope_for(name)
         return unless scope
-        entry = scope.locals[name]
+        entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated!(touch_declaration: true)
       end
@@ -522,7 +522,7 @@ module Annotator
 
         scope = lookup_scope_for(name)
         return unless scope
-        entry = scope.locals[name]
+        entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated_via_reference!
       end
@@ -565,7 +565,7 @@ module Annotator
           # the binding's sync from the scope directly.
           tname = target.target.name
           tscope = lookup_scope_for(tname)
-          tsym = tscope&.locals&.[](tname)
+          tsym = tscope&.resolve_entry(tname)
           if tsym&.locked? || tsym&.write_locked? || tsym&.atomic_ptr?
             @in_auto_locked_assign = tname
           end
@@ -607,7 +607,7 @@ module Annotator
 
         var_name = identifier.name
         scope = current_scope
-        if !scope.locals.key?(var_name)
+        if !scope.entry?(var_name)
           error!(node, :ASSIGN_UNDEFINED_VAR, name: var_name)
         end
 

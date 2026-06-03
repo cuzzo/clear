@@ -304,6 +304,22 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::HeapCreate)
       expect(result.zig_type).to eq("Payload")
     end
+
+    it "uses direct ownership-bearing values for escaping allocation decisions" do
+      low = lowering
+
+      expect(low.send(:escaping_value_alloc, Type.new(:String))).to eq(:heap)
+      expect(low.send(:escaping_value_alloc, Type.error_union_of(:String))).to eq(:heap)
+      expect(low.send(:escaping_value_alloc, Type.new(:Int64))).to be_nil
+    end
+
+    it "heap-boxes indirect fallible return payloads at the return site" do
+      program = lower_fixture_program("transpile-tests/06_heap_return.cht")
+
+      expect(program).to include("fn makeUser(rt: *Runtime) !*User")
+      expect(program).to include("try rt.heapAlloc().create(User)")
+      expect(program).not_to include("return u;")
+    end
   end
 
   # =========================================================================
@@ -1425,7 +1441,7 @@ RSpec.describe MIRLowering do
                                 nil, nil, nil, nil, false)
       low = lowering
       low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
 
       result = low.lower(node)
       expect(result).to be_a(Array)
@@ -2586,7 +2602,7 @@ RSpec.describe MIRLowering do
                                 nil, nil, nil, nil, false)
       low = lowering
       low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
 
       zig = emit(low.lower(node))
       expect(zig).to include("blk_copy_")

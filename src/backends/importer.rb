@@ -246,7 +246,7 @@ class ModuleImporter
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      entry = annotator.scope_stack.first.locals[stmt.name]
+      entry = annotator.scope_stack.first.resolve_entry(stmt.name)
       sig = entry&.fn_signature
       next unless sig
       FunctionSignature.sync_from_function_def!(sig, stmt)

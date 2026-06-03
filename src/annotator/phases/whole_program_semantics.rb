@@ -43,7 +43,7 @@ module Annotator
           error!(node, :EFFECT_INFERENCE_VIOLATION, message: message)
         }
         warning_handler = lambda { |node, message| note!(node, message) }
-        signature_lookup = lambda { |name| root_scope.locals[name]&.type }
+        signature_lookup = lambda { |name| root_scope.resolve_entry(name)&.type }
         policy_handlers = whole_program_node&.sync_policy
 
         fn_nodes.each_value do |fn|
@@ -74,7 +74,7 @@ module Annotator
 
         root_scope = whole_program_root_scope
         whole_program_fn_nodes.each do |name, fn|
-          signature = FunctionSignature.unwrap(root_scope.locals[name]&.type)
+          signature = FunctionSignature.unwrap(root_scope.resolve_entry(name)&.type)
           signature.requires = fn.requires if signature
         end
       end

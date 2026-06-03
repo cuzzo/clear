@@ -1,5 +1,5 @@
 # typed: strict
-# Typed scope entry for Scope.locals.
+# Typed entry stored in a Scope binding table.
 # Each entry tracks a variable/function binding with its type, storage, and metadata.
 # Back-references its owning Scope via `scope` for state operations.
 #
