@@ -1121,12 +1121,8 @@ module PipeAnalysis
     each_op = conc.op
 
     # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
-    key_type = if shard_node
-      ti = shard_node.target_map.full_type!(context: "shard target map")
-      (ti.numeric_map? && ti.key_type&.resolved) || :String
-    else
-      :String
-    end
+    ti = shard_node.target_map.full_type!(context: "shard target map")
+    key_type = (ti.numeric_map? && ti.key_type&.resolved) || :String
 
     with_new_scope do
       current_scope.declare("_", nil, key_type, true, false, nil, :stack)

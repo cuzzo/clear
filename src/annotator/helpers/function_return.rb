@@ -100,7 +100,7 @@ class FunctionReturn
       r = host.send(T.must(infer), args, nil)
       r.is_a?(Type) ? r : Type.new(r || :Any)
     else
-      Type.new(:Any)
+      raise "unknown FunctionReturn kind: #{kind.inspect}"
     end
   end
 end

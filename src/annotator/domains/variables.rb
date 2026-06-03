@@ -77,18 +77,6 @@ module Annotator
           # emitted Zig wrapper would default-or-raise. Same mismatch
           # check as above.
           stamp_type!(node, target_t)
-          node_type = target_t
-          if node_type.observable?
-            if node_type.observable_terminal && node_type.observable_terminal != pipe_terminal
-              raise CompilerError.new(
-                node.token,
-                "Observable terminal mismatch on full_type: stamped " \
-                "#{node_type.observable_terminal.inspect}, pipe produced #{pipe_terminal.inspect}",
-                nil,
-              )
-            end
-            node_type.stamp_observable_terminal!(pipe_terminal)
-          end
         end
         stamp_type!(pipe, node.type)
       end

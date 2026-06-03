@@ -492,6 +492,7 @@ module Annotator
                         else
                           error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f.name, variant: variant_name)
                         end
+                        next
                       end
                       field_def = payload_schema.fields[f.name]
                       field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def

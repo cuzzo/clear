@@ -771,9 +771,10 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         sc = sym.scope
-        return nil unless sc
-        sc.visible_entries.each do |name, entry|
-          return name if entry.equal?(sym)
+        if sc
+          sc.visible_entries.each do |name, entry|
+            return name if entry.equal?(sym)
+          end
         end
         # Param symbols may have been refreshed via Scope.live_param_syms;
         # fall back to a function-level scan.

@@ -268,6 +268,8 @@ class FunctionSignature
     ).tap do |s|
       s.needs_rt = @needs_rt
       s.can_fail = @can_fail
+      s.alloc_fault = @alloc_fault
+      s.error_fallible = @error_fallible
       s.effects = @effects
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier

@@ -957,8 +957,9 @@ module FunctionAnalysis
     return true if node.is_a?(AST::Identifier)
 
     actual_path = get_path_to_root(node)
-    if actual_path.nil?
+    unless actual_path
       error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
+      return
     end
 
     # Multi-source semantics: returned value derives from EXACTLY one
@@ -968,7 +969,7 @@ module FunctionAnalysis
     # of: ..." diagnostic when none match.
     matched = lifetime_paths.any? do |p|
       lifetime_syms = p.to_s.split(".").map(&:to_sym)
-      T.must(actual_path)[0...lifetime_syms.size] == lifetime_syms
+      actual_path[0...lifetime_syms.size] == lifetime_syms
     end
 
     unless matched
@@ -976,7 +977,7 @@ module FunctionAnalysis
         "derived from: #{lifetime_paths.first}" :
         "derived from one of: #{lifetime_paths.join(' | ')}"
       error!(node, :RETURN_LIFETIME_MISMATCH,
-        sources_msg: sources_msg, actual: T.must(actual_path).join('.'))
+        sources_msg: sources_msg, actual: actual_path.join('.'))
     end
   end
 

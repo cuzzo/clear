@@ -62,6 +62,74 @@ Annotation decides whether source-level operations are valid; MIR decides how
 valid operations become runtime state, cleanup, FSMs, thunks, and Zig-shaped
 control flow.
 
+## Facts and Work Products Strategy
+
+Annotation is a fact-producing pass. It should resolve source-language
+semantics once, attach the result to stable AST, symbol, type, or function
+objects, and leave MIR with explicit facts instead of syntax to reinterpret.
+The names in this area are less uniform than MIR's plan/fact vocabulary, so the
+useful distinction is lifetime:
+
+* A **fact** survives the local visitor that produced it. It is attached to an
+  AST node, `SymbolEntry`, `Type`, `FunctionSignature`, schema registry, or
+  shared semantic analysis object for later phases to consume.
+* A **work product** is local to one phase or visitor shape. It gathers inputs,
+  validates a source construct, and is immediately turned into facts or errors.
+
+The target shape is simple: local visitors stamp local facts, whole-program
+phase objects compute transitive facts, and later compiler stages consume those
+facts mechanically. If MIR, the emitter, or a lint fixer has to rediscover
+source-level intent by walking raw syntax or rendered Zig text, the boundary has
+leaked.
+
+### Persistent Facts
+
+| Fact object | Created by | Used by | Problem solved |
+| --- | --- | --- | --- |
+| `full_type` stamps on AST nodes | Visitor/domain methods through `stamp_type!` | Every annotator post-pass, `PreMirTypeCheck`, MIR lowering, diagnostics | Gives every expression-like node one authoritative type and rejects `:Untyped` before MIR. |
+| `Scope` and `SymbolEntry` | Builtin setup, declaration visitors, parameter/capture registration | Name resolution, ownership/lifetime checks, escape analysis, MIR cleanup/storage decisions | Records binding identity, type, mutability, storage, sync, ownership, lifetime, and flow facts. |
+| Type/schema registries | Type declaration and builtin phases | Expression visitors, generic validation, union/member access, MIR lowering | Makes structs, unions, resources, aliases, and extern/native shapes available before bodies are analyzed. |
+| `FunctionSignature` and `@fn_nodes` | Signature registration and function body analysis | Call resolution, Auto inference, effects/fallibility, reentrance checks, MIR call lowering | Lets calls resolve before bodies run and carries final return/effect/capability metadata. |
+| `FunctionContext` | Routine analysis | Return checking, loop/control-flow validation, stack/runtime metadata | Keeps per-routine state out of global variables while a body is being visited. |
+| `AST::ReturnFact` | Return visitors | Function return finalization, fallibility checks, diagnostics | Preserves return type/value evidence for later declared/inferred return validation. |
+| Auto slot/evidence maps | `AutoConstraintCollector`, shape/operator collectors, `AutoUnifier` | Auto finalization and fix generation | Defers `Auto` decisions until enough initializer, call, shape, return, and operator evidence exists. |
+| Capability and held-lock facts | `WITH`/capability visitors, lock helpers, deferred validation | Whole-program lock checks, call-site requirement checks, MIR capability lowering | Separates source-level permission validation from runtime lock/snapshot emission. |
+| BG capture and execution-boundary facts | Annotation visitors plus `BgCaptureClassifier` and shared semantic analyses | MIR concurrency lowering, diagnostics, scheduler/runtime decisions | Records what source-level capture forms are legal and what strategy each boundary should use. |
+| Effect, fallibility, stack, and reentrance facts | Whole-program semantic phases | Call-site validation, MIR function metadata, thunk/FSM eligibility | Computes transitive metadata once from the call graph instead of re-checking at every call. |
+| Lifetime and ownership-flow facts | Lifetime domain and `OwnershipGraph` | Use-after-move checks, cleanup classification, MIR ownership facts | Gives move/borrow/resource behavior one semantic source before lowering. |
+| `MIRPassState` mark `:annotated` | Annotation boundary phase | MIR pass ordering checks | Prevents downstream passes from consuming AST before annotation facts are complete. |
+
+### Short-Lived Work Products
+
+| Work product | Created by | Consumed by | Problem solved |
+| --- | --- | --- | --- |
+| `BranchAnalysisResult` | Control-flow branch analysis | Immediate branch merge logic | Keeps branch scope, ownership graph, return status, and result type together while merging. |
+| Declaration metadata helpers | Variable/generic analysis | Declaration visitors | Copies shape, capabilities, placement, async result, storage, and resource cleanup facts from value/type evidence to the binding. |
+| Auto collection/unification results | Auto inference helper classes | Auto finalization | Turns many weak evidence sources into one concrete type per slot or a fixable diagnostic. |
+| `DeferredWithValidation` | `WITH` visitors | Deferred validation phase | Delays parameter/caller-sensitive capability checks until sync propagation is complete. |
+| Lock graph records (`LockEdge`, `LockHeldCallSite`, `LockClauseSite`) | Lock helper | Whole-program deadlock checks | Builds a structural lock-order graph instead of inferring lock hazards from nested syntax later. |
+| Capability request/audit records | Capability helpers | Immediate validation and final audit | Keeps `WITH`, `REQUIRES`, predicate, snapshot, and alias decisions explicit while stamping types. |
+| Pipeline aggregation descriptors | Pipeline helper | Pipeline expression visitors | Centralizes aggregate typing and pipeline-specific validation before MIR sees a typed pipeline node. |
+| Intrinsic registry entries | Intrinsic registry setup | Call validation and intrinsic emission helpers | Gives intrinsic calls one typed contract for argument checks, return type, and lowering metadata. |
+| Reentrance/thunk candidates | Reentrance helper | Whole-program reentrance validation and MIR thunk transform | Records recognized recursion shapes without making MIR rediscover them from source syntax. |
+
+### Rules of Thumb
+
+* If a decision is needed after the current visitor returns, attach it as a
+  typed fact to the AST, `SymbolEntry`, `Type`, `FunctionSignature`, or a
+  shared semantic result object.
+* If a decision only helps lower or validate one source shape, keep it as a
+  short-lived work product and immediately materialize facts or diagnostics.
+* `stamp_type!` is the only normal way to finalize expression type facts.
+  Direct `full_type=` writes should be rare and justified by low-level AST
+  construction or test setup.
+* Capability, ownership, and lifetime decisions should have one writer. If a
+  later phase needs to modify them, prefer a named semantic operation over
+  open-coded field mutation.
+* Raw hashes are acceptable only at integration edges or while replacing legacy
+  code. New cross-phase data should be a typed struct, class, or existing
+  semantic object.
+
 ## Phase Flow
 
 ### 0. Annotator Construction

@@ -69,6 +69,7 @@ module Annotator
 
         unless schema
           error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
+          return
         end
 
         unless schema.kind == :resource
@@ -122,11 +123,6 @@ module Annotator
         node.error_kind = emit.error_kind if emit&.error_kind
         node.error_type = emit.error_type if emit&.error_type
         current_fn_ctx&.record_alloc_use! if emit&.allocates || method_def.can_fail
-
-        return unless emit&.mutates_receiver && node.is_a?(AST::MethodCall)
-
-        root = chain_root_name(node.object)
-        mark_var_mutated(root) if root
       end
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }

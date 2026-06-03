@@ -1035,12 +1035,14 @@ module EffectTracker
       # Promote tier if stack-local variables alone exceed the tier budget.
       budget = T.must(STACK_TIER_BUDGET[tier])
       while stack_bytes > budget / 2 && tier != :xl
-        tier = case tier
-               when :micro    then :standard
-               when :standard then :large
-               when :large    then :xl
-               else :xl
-               end
+        tier =
+          if tier == :micro
+            :standard
+          elsif tier == :standard
+            :large
+          else
+            :xl
+          end
         budget = T.must(STACK_TIER_BUDGET[tier])
       end
 

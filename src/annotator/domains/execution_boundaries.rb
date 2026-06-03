@@ -218,22 +218,6 @@ module Annotator
         !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
       end
 
-      FallibleWalkValue = T.type_alias do
-        T.any(
-          AST::Node,
-          T::Array[BasicObject],
-          T::Hash[BasicObject, BasicObject],
-          NilClass,
-          String,
-          Symbol,
-          Integer,
-          Float,
-          TrueClass,
-          FalseClass,
-          Type,
-        )
-      end
-
       sig { params(node: AST::WithBlock, fn_ctx: FunctionContext).void }
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
         T.bind(self, SemanticAnnotator)
@@ -808,7 +792,7 @@ module Annotator
         analysis = (!node.pinned && !node.parallel && full_analysis.has_shared) ? full_analysis : nil
 
         # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
-        if @current_bg_pinned && !node.pinned && full_analysis.has_outer_ref
+        if prev_bg_pinned && !node.pinned && full_analysis.has_outer_ref
           error!(node, :BG_PINNED_CAPTURE_MISMATCH, hint: "Thread-local memory cannot escape to a stealable fiber. " \
                  "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
         end

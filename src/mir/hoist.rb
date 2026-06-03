@@ -631,7 +631,7 @@ module MIRHoistLowering
 
       Type.new(sig.return_type)
     when MIR::BgBlock
-      raise "#{context}: allocating MIR::BgBlock has no result type" unless mir.result_type
+      raise "#{context}: allocating MIR::BgBlock has no result type"
     when MIR::Pipeline
       if mir.ast_node
         Type.from_node!(mir.ast_node, context: context)
@@ -641,7 +641,7 @@ module MIRHoistLowering
         raise "#{context}: allocating MIR::Pipeline has no typed result"
       end
     when MIR::TryCatch
-      raise "#{context}: allocating MIR::TryCatch has no result type" unless mir.result_type
+      raise "#{context}: allocating MIR::TryCatch has no result type"
     when MIR::BlockExpr
       inferred = block_expr_result_type(mir)
       return inferred if inferred

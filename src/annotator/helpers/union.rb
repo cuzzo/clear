@@ -136,8 +136,6 @@ module UnionAnalysis
       stamp_type!(node, type_name)
       return true
     end
-
-    false
   end
 
   # Validate that a union type and variant exist, and that the variant

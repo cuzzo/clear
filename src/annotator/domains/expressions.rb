@@ -124,6 +124,7 @@ module Annotator
           when :NIL then Type.new(:NIL)
           else
             error!(node, :UNKNOWN_LITERAL)
+            Type.new(:Any)
           end
         stamp_type!(node, literal_type)
       end
@@ -378,6 +379,12 @@ module Annotator
             error!(if_node, :IF_EXPR_ELSE_NEEDS_VALUE)
           end
         end
+        unless then_result && else_result
+          fallback = Type.new(:Any)
+          if_node.expr_mode = true
+          stamp_type!(if_node, fallback)
+          return fallback
+        end
 
         t1 = then_result.string? ? :String : then_result.resolved
         t2 = else_result.string? ? :String : else_result.resolved
@@ -423,6 +430,10 @@ module Annotator
 
         if all_types.empty?
           error!(match_node, :MATCH_EXPR_NEEDS_CASE)
+          fallback = Type.new(:Any)
+          match_node.expr_mode = true
+          stamp_type!(match_node, fallback)
+          return fallback
         end
 
         resolved_types = all_types.map { |t| t.string? ? :String : t.resolved }.uniq.reject { |t| t == :Any }
