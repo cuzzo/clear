@@ -900,6 +900,13 @@ class CapabilityWrap
   def lock_rank=(value); end
 end
 
+class ClearFixSupport::LocationToken
+  sig { returns(T.untyped) }
+  def column; end
+  sig { returns(T.untyped) }
+  def line; end
+end
+
 class ConcurrentOp
   sig { returns(T.untyped) }
   def capture_analysis; end
@@ -1493,6 +1500,13 @@ class LinearOwnershipState
   def terminated; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def terminated=(value); end
+end
+
+class LocationToken
+  sig { returns(T.untyped) }
+  def column; end
+  sig { returns(T.untyped) }
+  def line; end
 end
 
 class MIR::BodySlot
