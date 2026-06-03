@@ -213,6 +213,8 @@ const WriterCtx = struct {
 
     fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
         const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+        const shared = ctx.shared;
+        defer _ = shared.done_writers.fetchAdd(1, .release);
         defer ctx.bg_alloc.destroy(ctx);
         defer ctx.inner.wg.done();
 
@@ -235,7 +237,6 @@ const WriterCtx = struct {
             ctx.shared.rw.unlock();
             i += 1;
         }
-        _ = ctx.shared.done_writers.fetchAdd(1, .release);
         ctx.inner.result = op;
     }
 };
@@ -248,6 +249,8 @@ const ReaderCtx = struct {
 
     fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
         const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+        const shared = ctx.shared;
+        defer _ = shared.done_readers.fetchAdd(1, .release);
         defer ctx.bg_alloc.destroy(ctx);
         defer ctx.inner.wg.done();
 
@@ -263,7 +266,6 @@ const ReaderCtx = struct {
             }
             ctx.shared.rw.unlockShared();
         }
-        _ = ctx.shared.done_readers.fetchAdd(1, .release);
         ctx.inner.result = op;
     }
 };
@@ -314,6 +316,10 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
 
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
+    defer {
+        fp.global_registry.deinit(test_alloc);
+        global_ebr.deinit(test_alloc);
+    }
 
     const workers = if (build_options.coverage) 1 else 4;
     try withMainRuntimeN(workers, struct {

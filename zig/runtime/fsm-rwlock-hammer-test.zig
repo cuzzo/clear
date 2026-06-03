@@ -317,6 +317,10 @@ test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeu
 
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
+    defer {
+        fp.global_registry.deinit(test_alloc);
+        global_ebr.deinit(test_alloc);
+    }
 
     const workers = if (build_options.coverage) 1 else 4;
     try withMainRuntimeN(workers, struct {
