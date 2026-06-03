@@ -424,7 +424,7 @@ RSpec.describe MIRLowering do
       # charAt(s, i) == "\\"
       charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
       charat.full_type = :String
-      charat.matched_stdlib_def = STD_LIB["charAt"].first
+      charat.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "charAt").first
       charat.zig_pattern = charat.matched_stdlib_def.emit.zig
       eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
       eq_node.full_type = :Boolean
@@ -1120,6 +1120,51 @@ RSpec.describe MIRLowering do
       each_mir_node(result) { |node| nodes << node }
       expect(nodes).to include(a_kind_of(MIR::BlockExpr))
       expect(inline_bc_ops).to include(:is_error)
+    end
+
+    it "adds loop restore to BC SHARD producer when the key expression frame-allocates" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          n = 4_i64;
+          MUTABLE map: HashMap<Int64>@sharded(4) = {};
+
+          (0..<n) |> SHARD("k:${toString(_)}", map) |> CONCURRENT EACH {
+            map[_] = 1_i64;
+          };
+
+          RETURN;
+        END
+      CLEAR
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+      low = lowering(
+        struct_schemas: result.struct_schemas,
+        enum_schemas: result.enum_schemas,
+        union_schemas: result.union_schemas,
+        fn_sigs: result.fn_sigs,
+        moved_guard_info: result.moved_guard_info,
+        importer: importer,
+        source_dir: Dir.pwd,
+        target: :bc
+      )
+
+      program = low.lower_program(result.ast)
+
+      expect_checker_clean(program)
+      shard_loop = collect_mir_nodes(program, MIR::ForStmt).find do |loop|
+        loop.body.any? { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == "__sh1_key" }
+      end
+      expect(shard_loop).not_to be_nil
+      expect(shard_loop.body).to include(satisfy { |stmt|
+        stmt.is_a?(MIR::Let) &&
+          stmt.init.is_a?(MIR::MethodCall) &&
+          stmt.init.method == "saveLoopMark"
+      })
+      expect(shard_loop.body).to include(satisfy { |stmt|
+        stmt.is_a?(MIR::DeferStmt) &&
+          stmt.body.is_a?(MIR::MethodCall) &&
+          stmt.body.method == "restoreLoopMark"
+      })
     end
   end
 
@@ -2196,7 +2241,9 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "toString", [arg])
       node.full_type = :String
       node.zig_pattern = "try CheatLib.intToString({alloc}, {0})"
-      node.matched_stdlib_def = { alloc: :frame }
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(alloc: :frame)
+      node.matched_stdlib_def = sig
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
       zig = emit(result)

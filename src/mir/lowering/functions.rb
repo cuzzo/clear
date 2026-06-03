@@ -417,7 +417,7 @@ module MIRLoweringFunctions
       fn_name_rename_map: {},
       has_rt: fn_needs_rt,
       tail_call: node.tail_call == true,
-      zig_name: T.must(zig_safe_name(node.name)),
+      zig_name: zig_safe_name(node.name),
       return_payload_zig: return_payload ? return_payload.zig_type : final_type,
       return_type: return_type_info,
       heap_carry_return: node.respond_to?(:heap_carry_return) && node.heap_carry_return == true,
@@ -701,7 +701,7 @@ module MIRLoweringFunctions
       mark = MIR::AllocMark.new(p.name.to_s, alloc, ti, scope)
       if entry.needs_cleanup?
         build_drop_entry!(drop_entry, ti, nil)
-        (@guarded_cleanup_names ||= {})[T.must(zig_safe_name(p.name.to_s))] = true if drop_entry.has_moved_guard?
+        (@guarded_cleanup_names ||= {})[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
         out.concat(MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)).statements)
       else
         out.concat(MIR::MaterializationPacket.markers(mark).statements)
@@ -1607,7 +1607,7 @@ module MIRLoweringFunctions
     # Template-based intrinsics: resolve destination allocator before lowering
     # TAKES args. COPY inside append/put/etc. must be constructed in the
     # receiver/container allocator so cleanup remains one-allocator-per-owner.
-    pattern = node.zig_pattern.dup
+    pattern = T.cast(node.zig_pattern, String).dup
     pre_resolved_alloc = nil
     if pattern.include?("{alloc}")
       alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
@@ -1657,8 +1657,9 @@ module MIRLoweringFunctions
     # the BC dispatch key is decoupled from CLEAR's surface naming
     # (e.g. fileReadAll -> :file_read_all).
     if @target == :bc && node.matched_stdlib_def&.emit&.bc
-      op_name = node.matched_stdlib_def.emit&.bc_op || node.name.to_s.to_sym
-      return MIR::InlineBc.new(op_name, mir_args, node.matched_stdlib_def)
+      stdlib_def = T.must(node.matched_stdlib_def)
+      op_name = stdlib_def.emit&.bc_op || node.name.to_s.to_sym
+      return MIR::InlineBc.new(op_name, mir_args, stdlib_def)
     end
 
     # Resolve {alloc} to a symbol. The {alloc} PLACEHOLDER stays in the

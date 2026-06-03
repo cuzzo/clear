@@ -446,12 +446,12 @@ class PipelineHost
   end
 
   # Delegate task_config_zig to MIRLowering (used by CONCURRENT pipeline operators)
-  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.untyped).returns(String) }
+  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
   def task_config_zig(stack_size, computed_tier = nil)
     @lowering.task_config_zig(stack_size, computed_tier)
   end
 
-  sig { params(label: String, body: T::Array[T.untyped], result_type: Type).returns(MIR::BlockExpr) }
+  sig { params(label: String, body: T::Array[MIR::Node], result_type: Type).returns(MIR::BlockExpr) }
   def typed_block_expr(label, body, result_type)
     block = MIR::BlockExpr.new(label, body)
     block.result_type = result_type
@@ -3900,7 +3900,6 @@ class PipelineHost
     ctx = conc_op.shard_context
     each_op = conc_op.op
     range_node = ctx[:auto_detected] ? lhs : lhs.left
-    is_bc = bc_target?
 
     @sh_counter ||= 0
     id = (@sh_counter += 1)
@@ -3938,7 +3937,7 @@ class PipelineHost
     end
 
     inner = []
-    if !is_bc && ctx[:key_allocates_frame]
+    if ctx[:key_allocates_frame]
       # The key expression allocates from the frame arena (e.g. a string
       # concat). Save/restore per iteration so successive iterations
       # don't accumulate frame memory.

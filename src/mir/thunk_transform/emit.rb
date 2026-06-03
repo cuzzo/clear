@@ -156,17 +156,18 @@ module ThunkTransform
 
     # Lower an AST expression through the surrounding MIRLowering, rewrite
     # frame-bound param references structurally, then emit Zig from MIR.
-    sig { params(ast_expr: T.untyped, lowering: T.untyped, context: FrameBindingContext).returns(String) }
+    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(String) }
     def render_expr(ast_expr, lowering, context)
+      lowering_api = T.unsafe(lowering)
       mir =
-        if lowering.respond_to?(:with_fiber_capture_map)
-          lowering.with_fiber_capture_map(context.capture_map) do
-            lowering.lower(ast_expr)
+        if lowering_api.respond_to?(:with_fiber_capture_map)
+          lowering_api.with_fiber_capture_map(context.capture_map) do
+            lowering_api.lower(ast_expr)
           end
         else
-          lowering.lower(ast_expr)
+          lowering_api.lower(ast_expr)
         end
-      lowering.send(:emit_expr, bind_frame_refs(mir, context)).to_s
+      lowering_api.send(:emit_expr, bind_frame_refs(mir, context)).to_s
     end
 
     sig { params(fn_node: AST::FunctionDef).returns(FrameBindingContext) }

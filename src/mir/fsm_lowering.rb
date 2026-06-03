@@ -32,27 +32,13 @@ require_relative 'fsm_wrapper_emitter'
 module FsmLowering
     extend T::Sig
 
+  FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, AST::Capability) }
+  FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
+  FsmMirRenderable = T.type_alias { T.any(MIR::Node, String) }
+
   class FsmLockErrorArmSplit < T::Struct
     const :body_zig, String
     const :exit_kind, Symbol
-  end
-
-  class FsmResultTransferFact < T::Struct
-    extend T::Sig
-
-    const :name, String
-    const :target_alloc, Symbol
-    const :move_guarded, T::Boolean
-
-    sig { returns(T::Array[MIR::Stmt]) }
-    def marks
-      MIR::OwnershipTransferPlan.new(
-        name: name,
-        target: :owned_sink,
-        target_alloc: target_alloc,
-        move_guarded: move_guarded,
-      ).marks
-    end
   end
 
   # The stackful capture_inits string starts with `.inner = ..., .alloc = ...`
@@ -149,7 +135,12 @@ module FsmLowering
           result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
           result_set = MIR::Set.new(target, result_value, false)
           transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
-          (@last_fsm_result_transfer_facts ||= []).concat(transfer_facts)
+          last_facts = T.cast(
+            instance_variable_get(:@last_fsm_result_transfer_facts),
+            T.nilable(T::Array[MIR::FsmResultTransferFact]),
+          ) || []
+          last_facts.concat(transfer_facts)
+          instance_variable_set(:@last_fsm_result_transfer_facts, last_facts)
           guard_fsm_result_cleanup!(result_mir, transfer_facts)
           transfer_names = transfer_facts.map(&:name).uniq
           if transfer_names.any?
@@ -181,7 +172,7 @@ module FsmLowering
     end
   end
 
-  sig { params(facts: T::Array[FsmResultTransferFact]).returns(T.nilable(Symbol)) }
+  sig { params(facts: T::Array[MIR::FsmResultTransferFact]).returns(T.nilable(Symbol)) }
   def uniform_fsm_result_target_alloc(facts)
     allocs = facts.map(&:target_alloc).uniq
     allocs.length == 1 ? allocs.first : nil
@@ -195,7 +186,7 @@ module FsmLowering
     MIR::Cast.new(value, result_type.zig_type, :intCast)
   end
 
-  sig { params(body: T::Array[T.untyped], facts: T::Array[FsmResultTransferFact]).void }
+  sig { params(body: T::Array[MIR::Node], facts: T::Array[MIR::FsmResultTransferFact]).void }
   def guard_fsm_result_cleanup!(body, facts)
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     facts.each do |fact|
@@ -218,13 +209,13 @@ module FsmLowering
     fsm_result_transfer_facts(result_mir, ast_node).flat_map(&:marks)
   end
 
-  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[FsmResultTransferFact]) }
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[MIR::FsmResultTransferFact]) }
   def fsm_result_transfer_facts(result_mir, ast_node)
     T.bind(self, MIRLowering) rescue nil
     @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     @current_bindings = T.let(@current_bindings, T.untyped)
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    facts = T.let([], T::Array[FsmResultTransferFact])
+    facts = T.let([], T::Array[MIR::FsmResultTransferFact])
     result_owner = T.let(result_mir, T.untyped)
     while result_owner.respond_to?(:expr) &&
         (result_owner.is_a?(MIR::TryExpr) || result_owner.is_a?(MIR::Cast))
@@ -239,7 +230,7 @@ module FsmLowering
         mir_entry[:has_moved_guard] = true
         (@guarded_cleanup_names ||= {})[owner_name] = true
       end
-      facts << FsmResultTransferFact.new(
+      facts << MIR::FsmResultTransferFact.new(
         name: owner_name,
         target_alloc: mir_entry.present? ? mir_entry.alloc : :heap,
         move_guarded: true,
@@ -256,7 +247,7 @@ module FsmLowering
       )
       next unless binding_entry.present?
       guarded = binding_entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s) == true
-      facts << FsmResultTransferFact.new(
+      facts << MIR::FsmResultTransferFact.new(
         name: safe.to_s,
         target_alloc: binding_entry.alloc,
         move_guarded: guarded,
@@ -349,10 +340,10 @@ module FsmLowering
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[T.untyped]) }
+  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Node]) }
   def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
-    @last_fsm_result_transfer_facts = T.let([], T.untyped)
+    instance_variable_set(:@last_fsm_result_transfer_facts, [])
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
     inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
     inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
@@ -361,11 +352,11 @@ module FsmLowering
 
   # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
   # finalizes ownership once, then renders through MIREmitter.
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
+  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     render_mir_list(lower_finalized_fsm_step_mir(stmts, no_result: no_result, ctx_id: ctx_id))
   end
-  sig { params(mir_list: T::Array[T.untyped]).returns(String) }
+  sig { params(mir_list: T::Array[FsmMirRenderable]).returns(String) }
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
     return "" if false || mir_list.empty?
@@ -407,7 +398,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: AST::Capability, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
+  sig { params(cap: AST::Capability, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Object]).returns(T.nilable(FsmCapMetadata)) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||

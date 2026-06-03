@@ -866,9 +866,9 @@ class BindExpr
 end
 
 class BodySlot
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(MIR::BodySlot::Body) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def name; end
 end
 
@@ -878,9 +878,9 @@ class BorrowChecker
 end
 
 class Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -1022,16 +1022,16 @@ class ForRange
 end
 
 class FsmTransform::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -1304,11 +1304,11 @@ class FunctionDef
 end
 
 class FunctionReturn
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def fixed; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def infer; end
-  sig { returns(T.untyped) }
+  sig { returns(Kind) }
   def kind; end
 end
 
@@ -1496,9 +1496,9 @@ class LinearOwnershipState
 end
 
 class MIR::BodySlot
-  sig { returns(T.untyped) }
+  sig { returns(MIR::BodySlot::Body) }
   def body; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def name; end
 end
 
@@ -1588,7 +1588,7 @@ class MIREmitter
 end
 
 class MIRLowering
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(FnSigMap) }
   def fn_sigs; end
   sig { returns(T.untyped) }
   def shard_context; end
@@ -1684,9 +1684,9 @@ class OwnershipContract
 end
 
 class OwnershipDataflow
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Integer, T::Hash[String, OwnerEntry]]) }
   def block_in; end
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Integer, T.nilable(T::Hash[String, OwnerEntry])]) }
   def block_out; end
 end
 
@@ -1732,9 +1732,9 @@ class Program
 end
 
 class RecursiveSplitter::Builder
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def synthetic_fields; end
 end
 
@@ -1831,7 +1831,7 @@ class Scope
   def owned_names=(value); end
   sig { returns(T.nilable(Scope)) }
   def parent; end
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
   def types; end
 end
 
@@ -1841,7 +1841,7 @@ class Scope::ScopeBindings
 end
 
 class Scope::ScopeTypes
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
   def entries; end
 end
 
@@ -1851,7 +1851,7 @@ class ScopeBindings
 end
 
 class ScopeTypes
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
   def entries; end
 end
 
@@ -2098,7 +2098,7 @@ class UnionSchema
 end
 
 class UseAfterMoveChecker
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def errors; end
 end
 

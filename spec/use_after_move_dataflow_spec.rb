@@ -46,6 +46,11 @@ RSpec.describe UseAfterMoveChecker do
     OwnershipDataflow.analyze(fn_node, schema_lookup: schema_lookup)
   end
 
+  def empty_function_node(name = "main")
+    token = Lexer::Token.new(:FN, "FN", 1, 1)
+    AST::FunctionDef.new(token, name, [], [], :Void, nil, [], [], nil, :private, [], false)
+  end
+
   # =========================================================================
   # No false positives on valid programs
   # =========================================================================
@@ -353,7 +358,8 @@ RSpec.describe UseAfterMoveChecker do
       ident = AST::Identifier.new(token, "shared")
       ident.full_type = Type.new(:Box, ownership: :shared)
       share = AST::ShareNode.new(token, ident)
-      checker = UseAfterMoveChecker.new(double(name: "main"), double)
+      fn_node = empty_function_node
+      checker = UseAfterMoveChecker.new(fn_node, OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node))
       state = {
         "shared" => OwnershipDataflow::OwnerEntry.new(state: :moved, allocator: :heap, needs_cleanup: true)
       }

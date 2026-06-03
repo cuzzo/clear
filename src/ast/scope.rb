@@ -9,6 +9,10 @@ class Scope
     extend T::Sig
 
   EMPTY_CAPABILITIES = T.let(Set.new.freeze, T::Set[Symbol])
+  ScopeTypeSchema = T.type_alias do
+    T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
+  end
+  ScopeTypeEntry = T.type_alias { T::Hash[Symbol, ScopeTypeSchema] }
 
   class ScopeBindings
     extend T::Sig
@@ -63,18 +67,18 @@ class Scope
 
     sig { void }
     def initialize
-      @entries = T.let({}, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
+      @entries = T.let({}, T::Hash[Symbol, Scope::ScopeTypeEntry])
     end
 
-    sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+    sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
     attr_reader :entries
 
-    sig { params(name: Symbol, schema: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
+    sig { params(name: Symbol, schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeEntry) }
     def declare(name, schema)
       @entries[name] = { schema: schema }
     end
 
-    sig { params(name: Symbol).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+    sig { params(name: Symbol).returns(T.nilable(Scope::ScopeTypeEntry)) }
     def [](name)
       @entries[name]
     end
@@ -95,7 +99,7 @@ class Scope
     @bindings = T.let(ScopeBindings.new, ScopeBindings)
     @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
     @type_store = T.let(ScopeTypes.new, ScopeTypes)
-    @types = T.let(@type_store.entries, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
+    @types = T.let(@type_store.entries, T::Hash[Symbol, Scope::ScopeTypeEntry])
     @owned_names = T.let(Set.new, T::Set[String])  # Variables declared in THIS scope (not inherited from parent)
     @depth = T.let(0, Integer)
   end
@@ -172,7 +176,7 @@ class Scope
     end
   end
 
-  sig { params(name: Symbol, schema: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(name: Symbol, schema: ScopeTypeSchema).returns(ScopeTypeEntry) }
   def declare_type(name, schema)
     @type_store.declare(name, schema)
   end
@@ -183,12 +187,12 @@ class Scope
     entry ? entry[:schema] : nil
   end
 
-  sig { params(name: Symbol).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(name: Symbol).returns(T.nilable(ScopeTypeEntry)) }
   def resolve_type_entry(name)
     @type_store[name] || @parent&.resolve_type_entry(name)
   end
 
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { returns(T::Hash[Symbol, ScopeTypeEntry]) }
   def visible_types
     inherited = @parent ? @parent.visible_types : {}
     inherited.merge(@types)

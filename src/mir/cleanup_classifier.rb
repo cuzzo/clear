@@ -248,7 +248,7 @@ module CleanupClassifier
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
-  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[T.untyped]) }
+  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[CleanupEntry]) }
   private_class_method def self.walk_bindings(body, schema_lookup, bindings)
     classify_in_body = ->(b) {
       AST.each_locatable(b) do |node|
@@ -405,7 +405,7 @@ module CleanupClassifier
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
@@ -467,7 +467,7 @@ module CleanupClassifier
   # expression whose successful capture creates a new owner. Plain
   # variable/field optional access is a borrow and remains the source owner's
   # cleanup responsibility.
-  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless capture_expr_owns_result?(expr)
@@ -492,7 +492,7 @@ module CleanupClassifier
     AST.call?(expr) || expr.is_a?(AST::MethodCall) || expr.is_a?(AST::ResolveNode)
   end
 
-  sig { params(expr: T.untyped, schema_lookup: Proc).returns(T::Boolean) }
+  sig { params(expr: AST::Node, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.capture_expr_heap?(expr, schema_lookup)
     case expr
     when AST::ResolveNode
@@ -559,10 +559,10 @@ module CleanupClassifier
   # non_copy_union) inline here; complex ones (collection, optional,
   # heap_storage, struct_cleanup_fields, rc_or_link, heap_struct_plain,
   # array_struct_strings) stay as separate methods due to their size.
-  sig { params(name: String, ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  sig { params(name: String, ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, schema_lookup)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    value = node.respond_to?(:value) ? node.value : nil
+    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
     return nil if binding_container_borrow?(node)
     return nil if ti.optional? && optional_empty_initializer?(value) &&
                   !(node.is_a?(AST::VarDecl) && node.mutable == true &&
@@ -623,7 +623,7 @@ module CleanupClassifier
   private_class_method def self.binding_container_borrow?(node)
     return true if node.respond_to?(:container_borrow) && node.container_borrow
 
-    value = node.respond_to?(:value) ? node.value : nil
+    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
     return true if value.respond_to?(:container_borrow) && value.container_borrow
     if value.is_a?(AST::BinaryOp) && (value.op == :OR || value.op == :OR_RESCUE)
       return true if value.left.respond_to?(:container_borrow) && value.left.container_borrow
@@ -814,7 +814,7 @@ module CleanupClassifier
     # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
     # skips frame, not rodata) is an invalid free. No cleanup needed.
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    value = node.respond_to?(:value) ? node.value : nil
+    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
     return nil if optional_empty_initializer?(value)
     is_rodata = !!node_sym&.rodata_provenance?
     is_borrow = !!node_sym&.borrow_provenance?
@@ -851,10 +851,10 @@ module CleanupClassifier
     false
   end
 
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_owned_string(ti, node, schema_lookup)
     return nil unless ti.string?
-    value = node.respond_to?(:value) ? node.value : nil
+    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil if !node_sym&.heap_storage? &&
                   (node_sym&.rodata_provenance? || node_sym&.borrow_provenance?)

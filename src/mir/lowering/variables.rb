@@ -384,7 +384,7 @@ module MIRLoweringVariables
       @fn_name_rename_map[original_safe] = safe_name if @fn_name_rename_map
     end
 
-    T.must(safe_name)
+    safe_name
   end
 
   sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: T.untyped).returns(T.nilable(String)) }

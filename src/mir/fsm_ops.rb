@@ -73,7 +73,7 @@ module FsmOps
     write: "submitWriteForFsm",
     recv:  "submitRecvForFsm",
     send:  "submitSendForFsm",
-  }.freeze, T::Hash[T.untyped, T.untyped])
+  }.freeze, T::Hash[Symbol, String])
 
   # if (ctx.<field>.<sub> < 0) return <return_fn>(<return_args>);
   # Models the io_uring CQE error-propagation idiom. Specialized
@@ -158,6 +158,14 @@ module FsmOps
   # warrant a dedicated node.
   BinOp = Struct.new(:op, :left, :right)
 
+  Expr = T.type_alias do
+    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, ZigLit, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp)
+  end
+  Stmt = T.type_alias do
+    T.any(AssignField, LetConst, ErrDeferCall, ErrDeferFreeField, DeferFreeField, StmtCall, IoSubmit,
+      IfFieldSubLtZeroReturnCall)
+  end
+
   # =====================================================================
   # Convenience constructors (terser to write in std_lib.rb)
   # =====================================================================
@@ -166,7 +174,7 @@ module FsmOps
 
     extend self
 
-    sig { params(field: String, value: T.untyped).returns(FsmOps::AssignField) }
+    sig { params(field: String, value: FsmOps::Expr).returns(FsmOps::AssignField) }
     def assign_field(field, value);          AssignField.new(field, value); end
     sig { params(name: String, zig_type: String, value: FsmOps::IntCast).returns(FsmOps::LetConst) }
     def let_const(name, zig_type, value);    LetConst.new(name, zig_type, value); end
@@ -176,9 +184,9 @@ module FsmOps
     def err_defer_free_field(field);         ErrDeferFreeField.new(field); end
     sig { params(field: String).returns(FsmOps::DeferFreeField) }
     def defer_free_field(field);             DeferFreeField.new(field); end
-    sig { params(fn: FsmOps::FunctionPath, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::StmtCall) }
+    sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::StmtCall) }
     def stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
-    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[T.untyped]).returns(FsmOps::IoSubmit) }
+    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[FsmOps::Expr]).returns(FsmOps::IoSubmit) }
     def io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
@@ -207,9 +215,9 @@ module FsmOps
     def addr(expr);                          AddrOf.new(expr); end
     sig { params(zig: String).returns(FsmOps::ZigLit) }
     def lit(zig);                            ZigLit.new(zig); end
-    sig { params(zig_type: String, expr: T.untyped).returns(FsmOps::IntCast) }
+    sig { params(zig_type: String, expr: FsmOps::Expr).returns(FsmOps::IntCast) }
     def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
-    sig { params(fn: FsmOps::FunctionPath, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::CallExpr) }
+    sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::CallExpr) }
     def call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
     sig { params(elem_type: String, count: FsmOps::LocalRef).returns(FsmOps::AllocExpr) }
     def alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
@@ -265,7 +273,7 @@ module FsmOps
 
     # Render a list of statement ops into newline-joined Zig text
     # with each statement properly terminated. Empty list -> "".
-    sig { params(ops: T::Array[T.untyped]).returns(String) }
+    sig { params(ops: T::Array[Stmt]).returns(String) }
     def emit_stmts(ops)
       return "" if false || ops.empty?
       ops.map { |op| emit_stmt(op) }.join("\n")
@@ -402,7 +410,7 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[T.untyped]).void }
+    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[Object]).void }
     def initialize(ctx_id:, bg_rt:, arg_mirs:)
       @ctx_id = ctx_id
       @bg_rt = bg_rt
@@ -410,13 +418,13 @@ module FsmOps
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
-    sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[Object]) }
     def lower_stmts(ops)
       return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 
-    sig { params(op: T.untyped).returns(T.untyped) }
+    sig { params(op: Stmt).returns(Object) }
     def lower_stmt(op)
       case op
       when AssignField
@@ -565,8 +573,8 @@ module FsmOps
   # The lowering composes these per step to populate FsmStructure
   # without a textual scan of the rendered Zig.
 
-  sig { params(ops_or_expr: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.referenced_state_fields(ops_or_expr)
+    sig { params(ops_or_expr: T::Array[T.any(Stmt, Expr)]).returns(T::Array[String]) }
+    def self.referenced_state_fields(ops_or_expr)
     out = []
     walk(ops_or_expr) do |node|
       out << node.name if node.is_a?(StateField)
@@ -574,8 +582,8 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.alloc_state_fields(ops)
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+    def self.alloc_state_fields(ops)
     out = []
     Array(ops).each do |op|
       if op.is_a?(AssignField) && op.value.is_a?(AllocExpr)
@@ -585,8 +593,8 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.free_state_fields(ops)
+    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+    def self.free_state_fields(ops)
     out = []
     Array(ops).each do |op|
       case op

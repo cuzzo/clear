@@ -177,7 +177,7 @@ module CapabilityHelper
       end
 
     when :RESTRICT
-      if var_node.is_a?(AST::Identifier) && var_node.symbol && !var_node.symbol.mutable
+      if var_node.is_a?(AST::Identifier) && var_node.symbol && !T.must(var_node.symbol).mutable
         emit_with_restrict_immutable_error!(node, var_node)
       end
 
@@ -426,7 +426,7 @@ module CapabilityHelper
     return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
     if call.matched_stdlib_def
-      md = call.matched_stdlib_def
+      md = T.must(call.matched_stdlib_def)
       return "allocates" if md.emit&.allocates
       return "can fail" if md.can_fail
       return "suspends" if md.emit&.suspends

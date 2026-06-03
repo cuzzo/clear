@@ -1051,7 +1051,8 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
 
   it "fences FSM/thunk memory-safety emission behind typed facts" do
     fsm = File.read(File.join(ARCH_ROOT, "src/mir/fsm_lowering.rb"))
-    expect(fsm).to include("class FsmResultTransferFact < T::Struct")
+    mir = File.read(File.join(ARCH_ROOT, "src/mir/mir.rb"))
+    expect(mir).to include("class FsmResultTransferFact < T::Struct")
     expect(fsm).to include("def fsm_result_transfer_facts")
 
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/fsm_transform/**/*.rb")] +

@@ -39,11 +39,55 @@
 
 require "sorbet-runtime"
 
+require_relative "../../ast/ast"
 require_relative "segments"
 
 module FsmTransform
   module RecursiveSplitter
     extend T::Sig
+
+    SegmentStmt = T.type_alias { T.any(AST::Node, String, FsmTransform::Segments::SyntheticZig) }
+    AliasOverrideMap = T.type_alias { T::Hash[String, String] }
+    AliasOverrideTable = T.type_alias { T::Hash[Integer, AliasOverrideMap] }
+    SegmentSlot = T.type_alias { T.any(FsmTransform::Segments::Segment, Symbol) }
+
+    class SegmentList < T::Struct
+      extend T::Sig
+      extend T::Generic
+      include Enumerable
+      Elem = type_member { { fixed: FsmTransform::Segments::Segment } }
+
+      const :segments, T::Array[FsmTransform::Segments::Segment]
+      const :synthetic_fields, T::Array[String]
+      const :alias_overrides_by_index, AliasOverrideTable
+
+      sig { override.params(block: T.proc.params(segment: FsmTransform::Segments::Segment).returns(BasicObject)).returns(T.untyped) }
+      def each(&block)
+        segments.each(&block)
+        nil
+      end
+
+      sig { params(index: Integer).returns(T.nilable(AliasOverrideMap)) }
+      def alias_overrides_for(index)
+        alias_overrides_by_index[index]
+      end
+
+      sig { returns(T::Array[FsmTransform::Segments::Segment]) }
+      def to_a
+        segments.dup
+      end
+
+      sig { params(index: Integer).returns(T.nilable(FsmTransform::Segments::Segment)) }
+      def [](index)
+        segments[index]
+      end
+
+      sig { returns(T::Boolean) }
+      def empty?
+        segments.empty?
+      end
+    end
+
     # The Builder owns the linear segment array and the next-index
     # counter. Segments are filled in any order (forward refs are
     # resolved by reserving an index, then filling later).
@@ -55,17 +99,17 @@ module FsmTransform
       sig { void }
       def initialize
         T.bind(self, T.untyped) rescue nil
-        @segments = T.let([], T::Array[T.untyped])
-        @synthetic_fields = T.let([], T::Array[T.untyped])
-        @alias_overrides_for = T.let({}, T::Hash[T.untyped, T.untyped])
-        @current_alias_overrides = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+        @segments = T.let([], T::Array[FsmTransform::RecursiveSplitter::SegmentSlot])
+        @synthetic_fields = T.let([], T::Array[String])
+        @alias_overrides_for = T.let({}, AliasOverrideTable)
+        @current_alias_overrides = T.let(nil, T.nilable(AliasOverrideMap))
       end
 
       # Per-segment alias overrides keyed by segment index. Used by
       # WITH's recursively-split CS body so the CS-scope identifier
       # alias (e.g. `inner` -> `(__ctx.c.ctrl.data.*.data)`) is in
       # the capture_map when each CS segment is rendered.
-      sig { params(idx: Integer).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+      sig { params(idx: Integer).returns(T.nilable(AliasOverrideMap)) }
       def alias_overrides_for(idx)
         T.bind(self, T.untyped) rescue nil
         @alias_overrides_for[idx]
@@ -74,7 +118,7 @@ module FsmTransform
       # Push a frame of alias overrides during a recursive emit call.
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
-      sig { params(overrides: T::Hash[String, String], blk: T.untyped).returns(T.untyped) }
+      sig { params(overrides: AliasOverrideMap, blk: T.proc.returns(Object)).returns(Object) }
       def with_alias_overrides(overrides, &blk)
         T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides
@@ -84,7 +128,7 @@ module FsmTransform
         @current_alias_overrides = prev
       end
 
-      sig { params(idx: Integer).returns(T.nilable(T::Hash[String, String])) }
+      sig { params(idx: Integer).void }
       def stamp_overrides(idx)
         T.bind(self, T.untyped) rescue nil
         return if @current_alias_overrides.nil? || @current_alias_overrides.empty?
@@ -94,10 +138,11 @@ module FsmTransform
       # Synthetic ctx field decls produced by control-flow-form
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
-      sig { params(decl: String).returns(T.nilable(T::Array[String])) }
+      sig { params(decl: String).void }
       def add_synthetic_field(decl)
         T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)
+        nil
       end
 
       # Reserve a segment index for later filling. Returns the
@@ -112,7 +157,7 @@ module FsmTransform
       end
 
       # Fill a previously-reserved index with the actual segment.
-      sig { params(idx: Integer, stmts: T::Array[T.untyped], tail: T.untyped).returns(Integer) }
+      sig { params(idx: Integer, stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
       def fill(idx, stmts, tail)
         T.bind(self, T.untyped) rescue nil
         @segments[idx] = Segments::Segment.new(idx, stmts, tail)
@@ -121,7 +166,7 @@ module FsmTransform
       end
 
       # Allocate + fill in one step. Returns the index.
-      sig { params(stmts: T::Array[T.untyped], tail: T.untyped).returns(Integer) }
+      sig { params(stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
       def push(stmts, tail)
         T.bind(self, T.untyped) rescue nil
         idx = reserve_index
@@ -137,7 +182,7 @@ module FsmTransform
           raise "RecursiveSplitter: unfilled segments at indices " \
                 "#{unfilled.map(&:last).inspect}"
         end
-        @segments
+        T.cast(@segments, T::Array[FsmTransform::Segments::Segment])
       end
     end
 
@@ -149,7 +194,7 @@ module FsmTransform
     # `lowering` is used inside emit_*_fragment for cond-rendering
     # (loop / if conditions are lowered to Zig text at split time
     # since they appear in CondBranch tails as raw Zig).
-    sig { params(body: T.untyped, lowering: T.untyped, ctx: BasicObject).returns(T.nilable(T::Array[T.untyped])) }
+    sig { params(body: T::Array[AST::Node], lowering: Object, ctx: T.nilable(T::Hash[Symbol, Object])).returns(T.nilable(SegmentList)) }
     def split(body, lowering, ctx: nil)
       T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
@@ -176,7 +221,6 @@ module FsmTransform
         segments, mapping = renumber_with_entry(segments, entry)
       end
       synth = builder.synthetic_fields.dup
-      segments.define_singleton_method(:synthetic_fields) { synth }
       alias_table =
         if mapping
           pre_renumber_overrides.each_with_object({}) { |(orig, ov), h|
@@ -186,8 +230,11 @@ module FsmTransform
         else
           pre_renumber_overrides
         end
-      segments.define_singleton_method(:alias_overrides_for) { |i| alias_table[i] }
-      segments
+      SegmentList.new(
+        segments: segments,
+        synthetic_fields: synth,
+        alias_overrides_by_index: alias_table,
+      )
     rescue UnsupportedShape
       nil
     end
@@ -406,7 +453,7 @@ module FsmTransform
     #
     #   cond_seg: [], CondBranch(cond_zig, body_entry, after_idx)
     #   body_segs (recursive): exit to cond_seg's index
-    sig { params(while_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
+    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: Object).returns(Integer) }
     def emit_while_fragment(while_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       cond_idx = builder.reserve_index
@@ -522,7 +569,7 @@ module FsmTransform
       end
     end
 
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: Segments::CtxFieldRef, elem_zig: T.untyped, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: Object, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
     def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)

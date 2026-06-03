@@ -289,7 +289,7 @@ module MIRLoweringControlFlow
   def for_each_plan(node)
     T.bind(self, MIRLowering) rescue nil
     @tmp_counter = T.let(@tmp_counter, T.untyped)
-    var = T.must(zig_safe_name(node.var_name))
+    var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)
@@ -510,7 +510,7 @@ module MIRLoweringControlFlow
     @for_counter = T.let(@for_counter, T.untyped)
     start_val = lower(node.start_expr)
     end_val = lower(node.end_expr)
-    var = T.must(zig_safe_name(node.var_name))
+    var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)

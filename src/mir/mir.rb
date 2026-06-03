@@ -234,6 +234,24 @@ module MIR
     const :move_guarded, T::Boolean
   end
 
+  class FsmResultTransferFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target_alloc, Symbol
+    const :move_guarded, T::Boolean
+
+    sig { returns(T::Array[MIR::Stmt]) }
+    def marks
+      MIR::OwnershipTransferPlan.new(
+        name: name,
+        target: :owned_sink,
+        target_alloc: target_alloc,
+        move_guarded: move_guarded,
+      ).marks
+    end
+  end
+
   class OwnershipConsumptionFact < T::Struct
     extend T::Sig
 
@@ -251,20 +269,22 @@ module MIR
 
   class BodySlot
     extend T::Sig
+    Body = T.type_alias { T::Array[MIR::Emittable] }
+    Writer = T.type_alias { T.proc.params(body: MIR::BodySlot::Body).void }
 
     sig { returns(Symbol) }
     attr_reader :name
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(MIR::BodySlot::Body) }
     attr_reader :body
 
-    sig { params(name: Symbol, body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    sig { params(name: Symbol, body: MIR::BodySlot::Body, writer: MIR::BodySlot::Writer).void }
     def initialize(name, body, writer)
-      @name = name
-      @body = body
-      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+      @name = T.let(name, Symbol)
+      @body = T.let(body, MIR::BodySlot::Body)
+      @writer = T.let(writer, MIR::BodySlot::Writer)
     end
 
-    sig { params(body: T::Array[T.untyped]).void }
+    sig { params(body: MIR::BodySlot::Body).void }
     def replace(body)
       @body = body
       @writer.call(body)
@@ -304,14 +324,14 @@ module MIR
 
     private
 
-    sig { params(values: T::Array[T.untyped]).returns(T::Array[Emittable]) }
+    sig { params(values: T::Array[Object]).returns(T::Array[Emittable]) }
     def compact_child_exprs(values)
       children = T.let([], T::Array[Emittable])
       values.each { |value| append_child_expr(children, value) }
       children
     end
 
-    sig { params(children: T::Array[Emittable], value: T.untyped).void }
+    sig { params(children: T::Array[Emittable], value: Object).void }
     def append_child_expr(children, value)
       if value.is_a?(Array)
         value.each { |child| append_child_expr(children, child) }
@@ -321,7 +341,7 @@ module MIR
       nil
     end
 
-    sig { params(name: Symbol, body: T.nilable(T::Array[T.untyped]), writer: T.proc.params(body: T::Array[T.untyped]).void).returns(BodySlot) }
+    sig { params(name: Symbol, body: T.nilable(T::Array[Emittable]), writer: BodySlot::Writer).returns(BodySlot) }
     def body_slot(name, body, writer)
       BodySlot.new(name, body || [], writer)
     end
@@ -711,7 +731,7 @@ module MIR
     sig do
       params(
         name: T.any(String, Symbol),
-        init: T.untyped,
+        init: Emittable,
         mutable: T::Boolean,
         annotation: T.nilable(Type),
         suppression: T.nilable(String),
@@ -2809,7 +2829,7 @@ module MIR
     extend T::Sig
     include Expr
 
-    sig { params(elem_type: String, count: String, default_value: T.untyped, alloc: T.nilable(Symbol), result_type: Type).void }
+    sig { params(elem_type: String, count: String, default_value: Emittable, alloc: T.nilable(Symbol), result_type: Type).void }
     def initialize(elem_type, count, default_value, alloc, result_type)
       super(elem_type, count, default_value, alloc)
       @result_type = T.let(result_type, Type)
@@ -3488,6 +3508,45 @@ module MIR
   # backend must never see this node.
   InlineBc = Struct.new(:op, :args, :stdlib_def) do
     include Expr
+    extend T::Sig
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs(args)
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      sig = FunctionSignature.unwrap(stdlib_def)
+      return OwnershipEffect.none unless sig&.emits_allocating? || sig&.heap_return_alloc?
+      return OwnershipEffect.none if sig&.fixed_return? && sig.return_type.void?
+      return OwnershipEffect.none if sig&.mutates_receiver? && !sig&.heap_return_alloc?
+
+      OwnershipEffect.owned(alloc: sig&.heap_return_alloc? ? :heap : nil)
+    end
+  end
+
+  # Register/bytecode OR-EXIT error rewrite. This used to ride through
+  # InlineBc as an ad hoc metadata hash, but InlineBc now has one role:
+  # stdlib/function-signature-backed bytecode intrinsic dispatch.
+  OrExitBcRewrite = Struct.new(:kind, :name_id, :clear_type, :has_message, :line, :message) do
+    include Expr
+    extend T::Sig
+
+    sig do
+      params(
+        kind: T.nilable(String),
+        name_id: T.nilable(Integer),
+        clear_type: T::Boolean,
+        has_message: T::Boolean,
+        line: Integer,
+        message: T.nilable(Emittable)
+      ).void
+    end
+    def initialize(kind, name_id, clear_type, has_message, line, message = nil)
+      super
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([message])
   end
 
   # Raw bytecode. Sibling to RawZig for the :bc target. Nothing in

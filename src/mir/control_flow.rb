@@ -365,8 +365,25 @@ class OwnershipDataflow
   end
 
   class CleanupDecisionFrame < T::Struct
-    const :body, T::Array[T.untyped]
+    const :body, T::Array[AST::Node]
     const :loop_depth, Integer
+  end
+
+  class CleanupDecision < T::Struct
+    extend T::Sig
+
+    const :needs_cleanup, T::Boolean
+    const :has_moved_guard, T::Boolean
+
+    sig { params(key: Symbol).returns(T::Boolean) }
+    def [](key)
+      case key
+      when :needs_cleanup then needs_cleanup
+      when :has_moved_guard then has_moved_guard
+      else
+        raise KeyError, "unknown cleanup decision key #{key.inspect}"
+      end
+    end
   end
 
   attr_reader :block_in, :block_out
@@ -376,9 +393,8 @@ class OwnershipDataflow
     @cfg = cfg
     @fn_node = fn_node
     @schema_lookup = schema_lookup
-    @block_in  = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
-    @block_out = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
-    @block_exit_cleanup_summary = T.let(nil, T.nilable(T::Hash[String, T::Hash[Symbol, T::Boolean]]))
+    @block_in  = T.let({}, T::Hash[Integer, T::Hash[String, OwnerEntry]]) # block.id => { var_name => OwnerEntry }
+    @block_out = T.let({}, T::Hash[Integer, T.nilable(T::Hash[String, OwnerEntry])]) # block.id => { var_name => OwnerEntry }
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -408,6 +424,7 @@ class OwnershipDataflow
       else
         join_predecessors(block)
       end
+      new_in = T.must(new_in)
       @block_in[block.id] = new_in
 
       # Transfer: apply each statement in the block.
@@ -466,18 +483,18 @@ class OwnershipDataflow
 
   # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
   # Backward-compatible: reads .state from OwnerEntry.
-  sig { returns(T::Hash[String, T::Hash[Symbol, T::Boolean]]) }
+  sig { returns(T::Hash[String, CleanupDecision]) }
   def cleanup_summary
-    summary = {}
+    summary = T.let({}, T::Hash[String, CleanupDecision])
     exit_states.each do |name, entry|
       st = entry.is_a?(OwnerEntry) ? entry.state : entry
       case st
       when OWNED
-        summary[name] = { needs_cleanup: true, has_moved_guard: false }
+        summary[name] = CleanupDecision.new(needs_cleanup: true, has_moved_guard: false)
       when MAYBE_MOVED
-        summary[name] = { needs_cleanup: true, has_moved_guard: true }
+        summary[name] = CleanupDecision.new(needs_cleanup: true, has_moved_guard: true)
       when MOVED
-        summary[name] = { needs_cleanup: false, has_moved_guard: false }
+        summary[name] = CleanupDecision.new(needs_cleanup: false, has_moved_guard: false)
       end
     end
     summary
@@ -570,7 +587,7 @@ class OwnershipDataflow
     pairs
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  sig { params(body: T::Array[AST::Node]).returns(T::Set[String]) }
   def duplicate_binding_names(body)
     counts = T.let(Hash.new(0), T::Hash[String, Integer])
     AST.each_locatable(body) do |node|
@@ -584,27 +601,25 @@ class OwnershipDataflow
     end
   end
 
-  sig { params(stmts: T::Array[T.untyped], var: String).returns(T::Boolean) }
+  sig { params(stmts: T::Array[AST::Node], var: String).returns(T::Boolean) }
   def linear_scope_decl_always_moves?(stmts, var)
     stmts.each_with_index do |stmt, idx|
       if declares_name?(stmt, var)
         return stmts[(idx + 1)..].to_a.any? { |s| stmt_moves_name?(s, var) }
       end
 
-      nested = AST.child_bodies(stmt).flatten
+      nested = T.cast(AST.child_bodies(stmt).flatten, T::Array[AST::Node])
       return true if !nested.empty? && linear_scope_decl_always_moves?(nested, var)
     end
     false
   end
 
-  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
   def declares_name?(stmt, var)
-    return false unless stmt.is_a?(AST::Locatable)
-
     MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
-  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
   def stmt_moves_name?(stmt, var)
     return false if stmt.is_a?(AST::ReturnNode)
     state = { var => OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: true) }
@@ -613,16 +628,13 @@ class OwnershipDataflow
       (AST.call?(stmt) && collect_bg_captures_in_args(stmt, state).include?(var))
   end
 
-  sig { params(var: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+  sig { params(var: String).returns(T.nilable(CleanupDecision)) }
   def block_exit_cleanup_summary(var)
     block_exit_cleanup_summaries[var]
   end
 
-  sig { returns(T::Hash[String, T::Hash[Symbol, T::Boolean]]) }
+  sig { returns(T::Hash[String, CleanupDecision]) }
   def block_exit_cleanup_summaries
-    cached = @block_exit_cleanup_summary
-    return cached if cached
-
     saw = T.let({}, T::Hash[String, T::Hash[Symbol, T::Boolean]])
     @block_out.each_value do |state|
       next unless state
@@ -642,12 +654,12 @@ class OwnershipDataflow
       end
     end
 
-    @block_exit_cleanup_summary = saw.transform_values do |rec|
+    saw.transform_values do |rec|
       moved = rec[:any_moved] && !rec[:any_maybe]
-      {
+      CleanupDecision.new(
         needs_cleanup: !moved,
-        has_moved_guard: rec[:any_maybe] || (!moved && rec[:any_moved]),
-      }
+        has_moved_guard: rec.fetch(:any_maybe) || (!moved && rec.fetch(:any_moved)),
+      )
     end
   end
 
@@ -656,7 +668,7 @@ class OwnershipDataflow
     dup_state(@block_in[block.id] || {})
   end
 
-  sig { params(stmt: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).void }
+  sig { params(stmt: AST::Node, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).void }
   def replay_transfer_stmt!(stmt, state)
     transfer_stmt(stmt, state)
     nil
@@ -664,7 +676,7 @@ class OwnershipDataflow
 
   private
 
-  sig { params(body: T::Array[T.untyped]).returns(CleanupDecisionFacts) }
+  sig { params(body: T::Array[AST::Node]).returns(CleanupDecisionFacts) }
   def cleanup_decision_facts(body)
     match_takes_vars = T.let(Set.new, T::Set[String])
     loop_declared_names = T.let(Set.new, T::Set[String])
@@ -685,7 +697,7 @@ class OwnershipDataflow
 
         child_depth = frame.loop_depth + (AST.loop_node?(stmt) ? 1 : 0)
         AST.child_bodies(stmt).each do |child_body|
-          stack << CleanupDecisionFrame.new(body: child_body, loop_depth: child_depth)
+          stack << CleanupDecisionFrame.new(body: T.cast(child_body, T::Array[AST::Node]), loop_depth: child_depth)
         end
       end
     end
@@ -786,7 +798,7 @@ class OwnershipDataflow
   end
 
   # Transition a variable to :moved, preserving OwnerEntry metadata.
-  sig { params(state: T::Hash[String, T.untyped], name: String).returns(T.any(OwnershipDataflow::OwnerEntry, Symbol)) }
+  sig { params(state: T::Hash[String, T.any(OwnershipDataflow::OwnerEntry, Symbol)], name: String).returns(T.any(OwnershipDataflow::OwnerEntry, Symbol)) }
   def mark_moved!(state, name)
     existing = state[name]
     if existing.is_a?(OwnerEntry)
@@ -799,7 +811,7 @@ class OwnershipDataflow
   end
 
   # Create an OwnerEntry for a new declaration from its type info.
-  sig { params(node: T.untyped).returns(T.nilable(OwnershipDataflow::OwnerEntry)) }
+  sig { params(node: AST::Node).returns(T.nilable(OwnershipDataflow::OwnerEntry)) }
   def make_owner_entry(node)
     ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "ownership dataflow owner") : nil
     is_heap = T.let(node.is_a?(AST::Locatable) ? node.heap_storage? == true : false, T::Boolean)
@@ -824,9 +836,10 @@ class OwnershipDataflow
   # chain that decomplex flagged as recomputed across the capture_analysis
   # root-cause cluster (transfer_stmt / collect_ownership_transfers /
   # _walk_bg_captures_in_expr / collect_bg_body_gives + siblings).
-  sig { params(node: T.untyped).returns(T::Enumerable[T.untyped]) }
+  sig { params(node: AST::Node).returns(T::Enumerable[String]) }
   def resource_captures(node)
-    node.capture_analysis&.resource_captures || []
+    analysis = node.respond_to?(:capture_analysis) ? T.unsafe(node).capture_analysis : nil
+    analysis&.resource_captures || []
   end
 
   # Transfer function for a single statement.
@@ -902,7 +915,7 @@ class OwnershipDataflow
     end
   end
 
-  sig { params(state: T::Hash[String, OwnershipDataflow::OwnerEntry], name: String, node: T.untyped).void }
+  sig { params(state: T::Hash[String, OwnershipDataflow::OwnerEntry], name: String, node: AST::Node).void }
   def update_declared_owner!(state, name, node)
     entry = make_owner_entry(node)
     if entry
@@ -1153,11 +1166,11 @@ class UseAfterMoveChecker
 
   attr_reader :errors
 
-  sig { params(fn_node: T.untyped, dataflow: T.untyped).void }
+  sig { params(fn_node: AST::FunctionDef, dataflow: OwnershipDataflow).void }
   def initialize(fn_node, dataflow)
     @fn_node = fn_node
     @dataflow = dataflow
-    @errors = T.let([], T::Array[T.untyped])
+    @errors = T.let([], T::Array[String])
   end
 
   # Run the check. Returns self for chaining.
@@ -1405,7 +1418,7 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), schema_lookup: T.nilable(Proc)).void }
+  sig { params(stmts: T.nilable(T::Array[AST::Node]), schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmts!(stmts, schema_lookup = nil)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s, schema_lookup) }
@@ -1415,14 +1428,14 @@ module LoopFrameAnalysis
   sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmt!(stmt, schema_lookup = nil)
     child_bodies = AST.child_bodies(stmt)
-    child_bodies.each { |body| walk_stmts!(body, schema_lookup) }
-    process_loop!(T.cast(stmt, LoopNode), child_bodies.first || [], schema_lookup) if AST.loop_node?(stmt)
+    child_bodies.each { |body| walk_stmts!(T.cast(body, T::Array[AST::Node]), schema_lookup) }
+    process_loop!(T.cast(stmt, LoopNode), T.cast(child_bodies.first || [], T::Array[AST::Node]), schema_lookup) if AST.loop_node?(stmt)
     nil
   end
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
-  sig { params(loop_node: LoopNode, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
+  sig { params(loop_node: LoopNode, body: T::Array[AST::Node], schema_lookup: T.nilable(Proc)).void }
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
@@ -1436,7 +1449,7 @@ module LoopFrameAnalysis
     nil
   end
 
-  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
+  sig { params(body: T::Array[AST::Node], local_names: T::Set[String]).returns(T::Boolean) }
   def self.outer_frame_receiver_alloc?(body, local_names)
     found = T.let(false, T::Boolean)
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
@@ -1447,8 +1460,9 @@ module LoopFrameAnalysis
       root = AST.root_identifier(node.object)
       next unless root&.symbol
       next if local_names.include?(root.name.to_s)
-      decl = root.symbol.respond_to?(:reg) ? root.symbol.reg : nil
-      sym = (decl && decl.respond_to?(:symbol) && decl.symbol) || root.symbol
+      root_symbol = T.must(root.symbol)
+      decl = root_symbol.respond_to?(:reg) ? root_symbol.reg : nil
+      sym = (decl && decl.respond_to?(:symbol) && decl.symbol) || root_symbol
       found = true unless sym.heap_storage?
     end
     found
@@ -1590,14 +1604,14 @@ class BorrowChecker
     token.line ? " (line #{token.line})" : ""
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmts: T.nilable(T::Array[AST::Node])).returns(T.nilable(T::Array[AST::Node])) }
   def check_stmts(stmts)
     return unless stmts.is_a?(Array)
     stmts.each { |stmt| check_stmt(stmt) }
   end
 
-  sig { params(stmt: T.untyped).returns(T.untyped) }
-	  def check_stmt(stmt)
+  sig { params(stmt: AST::Node).void }
+		  def check_stmt(stmt)
 	    case stmt
 	    when AST::WithBlock
 	      handle_with_block(stmt)
@@ -1633,9 +1647,9 @@ class BorrowChecker
 	          check_borrowed_move(name, stmt.token)
 	        end
 	      end
-	      AST.child_bodies(stmt).each { |body| check_stmts(body) }
-	    else
-	      AST.child_bodies(stmt).each { |body| check_stmts(body) }
+		      AST.child_bodies(stmt).each { |body| check_stmts(T.cast(body, T::Array[AST::Node])) }
+		    else
+		      AST.child_bodies(stmt).each { |body| check_stmts(T.cast(body, T::Array[AST::Node])) }
     end
   end
 
@@ -1684,8 +1698,8 @@ class BorrowChecker
 
   # Check if any identifier being moved in a binding RHS is currently borrowed.
   # Mirrors OwnershipDataflow#collect_binding_moves.
-	  sig { params(expr: T.untyped, token: Lexer::Token).returns(T.nilable(T::Set[String])) }
-	  def check_binding_moves(expr, token)
+		  sig { params(expr: AST::Node, token: Lexer::Token).returns(T.nilable(T::Set[String])) }
+		  def check_binding_moves(expr, token)
 	    return if @active_borrows.empty?
 	    return unless expr
 	    moved = collect_moved_names(expr)
@@ -1693,8 +1707,8 @@ class BorrowChecker
 	  end
 
 	  # Check explicit moves (was_moved) in function/method call arguments.
-	  sig { params(stmt: T.untyped, token: Lexer::Token).void }
-	  def check_explicit_moves(stmt, token)
+		  sig { params(stmt: AST::Node, token: Lexer::Token).void }
+		  def check_explicit_moves(stmt, token)
 	    return if @active_borrows.empty?
 	    state = synthetic_owner_state
 	    transfer_collector.send(:collect_explicit_moves, stmt, state).each { |name| check_borrowed_move(name, token) }

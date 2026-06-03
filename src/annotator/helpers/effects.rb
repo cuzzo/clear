@@ -1138,7 +1138,7 @@ module EffectTracker
     stmts.each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
   end
 
-  sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange), fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T.untyped) }
+  sig { params(node: Object, loop_node: T.any(AST::WhileLoop, AST::ForRange), fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def validate_tight_node!(node, loop_node, fn_nodes)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.nil?
@@ -1172,7 +1172,7 @@ module EffectTracker
       validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node, fn_nodes)
       node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
     else
-      node.each_pair { |_, v| validate_tight_node!(v, loop_node, fn_nodes) } if node.respond_to?(:each_pair)
+      T.unsafe(node).each_pair { |_, v| validate_tight_node!(v, loop_node, fn_nodes) } if node.respond_to?(:each_pair)
     end
   end
 

@@ -217,14 +217,15 @@ module Annotator
         )
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)
-        node.symbol.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
+        sym = T.must(node.symbol)
+        sym.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
         # (The late-provenance fold now happens BEFORE declare, above, so the
         # symbol is born with the correct storage -- no post-declare write.)
         # Propagate @link_source from the value type to the scope entry.
         val_ti = node.value&.full_type!(context: "declaration link source value")
         if val_ti&.link?
           link_src = val_ti.link_source
-          node.symbol.link_source = link_src if link_src
+          sym.link_source = link_src if link_src
         end
         # `~T@observable` bindings are non_escaping: the heap accumulator's
         # producer fiber holds a borrow of the source iterator (`gen`),
@@ -238,7 +239,7 @@ module Annotator
         # value out via `|> COLLECT` (joins + extracts scalar) or
         # `WITH MATERIALIZED VIEW` (deep-copy snapshot).
         if node_type.observable?
-          node.symbol.mark_non_escaping!
+          sym.mark_non_escaping!
         end
         # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
         # cannot be reached from another thread, so suggest the shared form.
@@ -266,7 +267,7 @@ module Annotator
             note!(node, msg)
           end
         end
-        classify_ownership!(node.symbol)
+        classify_ownership!(sym)
         og_declare(node.name, node, node.full_type!(context: "var declaration"))
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
@@ -305,8 +306,9 @@ module Annotator
           node.mode = :decl
           finalize_decl_node!(node, false)
           if node.value.instance_variable_get(:@has_borrowed_fields)
-            node.symbol.mark_non_escaping!
-            node.symbol.mark_borrowed_alias!
+            sym = T.must(node.symbol)
+            sym.mark_non_escaping!
+            sym.mark_borrowed_alias!
           end
           stamp_init_contents_heap!(node)
           stamp_bg_handle_lifetime!(node)

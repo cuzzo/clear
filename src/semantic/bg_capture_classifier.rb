@@ -51,6 +51,7 @@ module BgCaptureClassifier
       # transpile-tests/257_concurrent_capture_locked_param.cht.
       live_param_syms = Scope.live_param_syms(fn)
       AST.each_capture_analysis(fn.body) do |a|
+        a = T.cast(a, CapabilityHelper::CaptureAnalysis)
         classify_one!(a, live_param_syms, schema_lookup: schema_lookup)
         analyses["#{fn.name}:#{a.object_id}"] = a
       end

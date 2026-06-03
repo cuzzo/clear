@@ -55,8 +55,6 @@ require_relative "../backends/importer" # ModuleImporter — referenced by Seman
 class SemanticAnnotator
     extend T::Sig
 
-  VISITOR_METHOD_CACHE = T.let({}, T::Hash[T.untyped, String])
-
   include ErrorHelper
   include FixableHelper
   include FunctionAnalysis
@@ -457,7 +455,7 @@ private
     false
   end
 
-  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  sig { void }
   def setup_builtins
     STD_LIB.each do |name, config|
       current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
@@ -506,6 +504,7 @@ private
                        zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true }
       }
     ))
+    nil
   end
 
   sig { params(node: T.nilable(T.any(Symbol, AST::Node))).returns(T.untyped) }
@@ -522,12 +521,11 @@ private
     end
 
     # Dynamic Dispatch
-    klass = node.class
-    method_name = VISITOR_METHOD_CACHE[klass] ||= "visit_#{klass.name.split('::').last}"
+    method_name = "visit_#{node.class.name.split('::').last}"
     send(method_name, node)
   end
 
-  # Cached outer scope variable set - avoids O(n) flat_map per loop
+  # Outer scope variable set.
   sig { returns(T::Set[String]) }
   def outer_scope_vars
     @scope_stack.flat_map(&:visible_names).to_set

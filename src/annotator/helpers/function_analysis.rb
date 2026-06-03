@@ -583,7 +583,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    sym&.atomic? && !sym.indirect?
+    !!(sym&.atomic? && !sym.indirect?)
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }

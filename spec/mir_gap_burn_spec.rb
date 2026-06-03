@@ -342,7 +342,7 @@ RSpec.describe "MIR gap-burn characterization" do
     nil_lowering = Class.new(MIRLowering) do
       def lower(_stmt) = nil
     end.new
-    expect(nil_lowering.send(:lowered_stmt_packet, AST::PassStmt.new(tok))).to be_nil
+    expect(nil_lowering.send(:lowered_stmt_packet, ownership_finalization_context, AST::PassStmt.new(tok))).to be_nil
     expect(low.send(:lower_body_with_break, [], "__label")).to eq([])
     expect(low.send(:emit_stmts_zig, [MIR::Noop.new("skip")])).to eq("")
 
@@ -692,7 +692,8 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "covers ownership read checks and shard allocation facts" do
-    checker = UseAfterMoveChecker.new(fn([]), double)
+    fn_node = fn([])
+    checker = UseAfterMoveChecker.new(fn_node, OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node))
     moved_state = { "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true) }
     checker.send(:check_identifier_read, "dead", moved_state, tok)
     checker.send(:check_identifier_read, "unknown", moved_state, tok)

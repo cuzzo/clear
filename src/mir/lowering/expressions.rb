@@ -929,15 +929,16 @@ module MIRLoweringExpressions
     stmts
   end
 
-  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::InlineBc) }
+  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::OrExitBcRewrite) }
   def or_exit_bc_reassign(facts, msg_mir)
-    MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-      kind: facts.kind,
-      name_id: facts.name_id,
-      clear_type: facts.clear_type,
-      has_message: facts.has_message,
-      line: facts.line,
-    })
+    MIR::OrExitBcRewrite.new(
+      facts.kind,
+      facts.name_id,
+      facts.clear_type,
+      facts.has_message,
+      facts.line,
+      msg_mir,
+    )
   end
 
   sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node), return_value: MIR::Node).returns(MIR::ScopeBlock) }
@@ -1526,7 +1527,7 @@ module MIRLoweringExpressions
       transfer_name = zig_safe_name(raw_name)
       if entry&.needs_cleanup?
         entry[:has_moved_guard] = true
-        (@guarded_cleanup_names ||= {})[T.must(transfer_name)] = true
+        (@guarded_cleanup_names ||= {})[transfer_name] = true
       end
     end
     body = lower_body(node.body)
@@ -1802,7 +1803,7 @@ module MIRLoweringExpressions
     end
 
     sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
-      source.symbol.type
+      T.must(source.symbol).type
     end
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
 

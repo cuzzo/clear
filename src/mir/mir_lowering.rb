@@ -42,6 +42,21 @@ require_relative "lowering/control_flow"
 class MIRLowering
     extend T::Sig
 
+  OwnershipFact = T.type_alias do
+    T.any(
+      MIR::OwnedCreate,
+      MIR::OwnedDestroy,
+      MIR::OwnedTransfer,
+      MIR::OwnedBorrow,
+      MIR::OwnedStore,
+      MIR::OwnedReturn,
+    )
+  end
+  TransferMark = T.type_alias { T.any(MIR::TransferMark, MIR::MoveMark) }
+  FnSigMap = T.type_alias { T::Hash[T.any(String, Symbol), FunctionSignature] }
+  LoweredMir = T.type_alias { T.any(MIR::Node, T::Array[MIR::Node]) }
+  UnionVariantPayload = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
+
   class AllocatingResultFact < T::Struct
     extend T::Sig
 
@@ -177,15 +192,16 @@ class MIRLowering
 	  end
 
   class LoweredStmtPacket < T::Struct
-    const :ast_stmt, T.untyped
-    const :mir, T.untyped
-    const :pending, T::Array[T.untyped]
+    const :mir, LoweredMir
+    const :pending, T::Array[MIR::Node]
+    const :stmt_transfer_marks, T::Array[MIR::Stmt]
+    const :transfer_only, T::Boolean
     const :source_line, T.nilable(Integer)
     const :source_column, T.nilable(Integer)
   end
 
   class LoweredItemTarget < T::Struct
-    const :items, T::Array[T.untyped]
+    const :items, T::Array[MIR::Node]
     const :line, T.nilable(Integer)
   end
 
@@ -194,7 +210,7 @@ class MIRLowering
 
     const :owner_name, String
     const :name, String
-    const :data, T.untyped
+    const :data, UnionVariantPayload
     const :inline_struct, T::Boolean
     const :zig_type, String
 
@@ -207,7 +223,7 @@ class MIRLowering
   class OwnershipFinalizationContext < T::Struct
     const :inherited_alloc_names, T::Set[String]
     const :parent, T.nilable(OwnershipFinalizationContext), default: nil
-    const :out, T::Array[T.untyped]
+    const :out, T::Array[MIR::Node]
     const :guarded_cleanup_names, T::Set[String]
     const :alloc_marks, T::Hash[String, MIR::AllocMark]
     const :body_alloc_mark_names, T::Set[String]
@@ -219,7 +235,7 @@ class MIRLowering
 
   class OwnershipFactTarget < T::Struct
     const :name, String
-    const :expr, T.untyped
+    const :expr, MIR::Node
     const :type_info, T.nilable(Type)
     const :include_owned_result, T::Boolean
     const :include_transfer_contract, T::Boolean
@@ -234,7 +250,7 @@ class MIRLowering
   class OwnershipSurfaceScan < T::Struct
     extend T::Sig
 
-    const :facts, T::Array[T.untyped]
+    const :facts, T::Array[OwnershipFact]
     const :transfer_targets, T::Array[OwnershipTransferTarget]
   end
 
@@ -350,7 +366,7 @@ class MIRLowering
     FunctionSignature.unwrap(sig)
   end
 
-  sig { params(struct_schemas: T::Hash[Symbol, Schemas::StructSchema], enum_schemas: T::Hash[Symbol, T::Array[String]], union_schemas: T::Hash[Symbol, Schemas::UnionSchema], fn_sigs: T::Hash[String, FunctionSignature], moved_guard_info: T::Hash[String, T::Hash[String, TrueClass]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
+  sig { params(struct_schemas: T::Hash[Symbol, Schemas::StructSchema], enum_schemas: T::Hash[Symbol, T::Array[String]], union_schemas: T::Hash[Symbol, Schemas::UnionSchema], fn_sigs: FnSigMap, moved_guard_info: T::Hash[String, T::Hash[String, TrueClass]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
                  importer: nil, source_dir: nil,
@@ -366,7 +382,7 @@ class MIRLowering
       ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) || @enum_schemas&.dig(name) },
       T.proc.params(name: T.untyped).returns(T.untyped),
     )
-    @fn_sigs = T.let(fn_sigs || {}, T::Hash[T.untyped, T.untyped])
+    @fn_sigs = T.let(fn_sigs || {}, FnSigMap)
     @moved_guard_info = T.let(moved_guard_info || {}, T::Hash[String, T::Hash[T.untyped, T.untyped]])
     @rt_name = T.let("rt", String)
     @shard_context = T.let(nil, T.untyped)  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
@@ -387,18 +403,18 @@ class MIRLowering
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @current_binding_types = T.let({}, T::Hash[String, Type])
     @target = target
-    @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @fn_alloc_marked_names = T.let(nil, T.nilable(MIRLoweringFunctions::BoolNameMap))
     @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[String]))
     @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[String]))
-    @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @guarded_cleanup_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @decl_zig_name_map = T.let(nil, T.nilable(MIRLoweringFunctions::DeclNameMap))
+    @guarded_cleanup_names = T.let(nil, T.nilable(MIRLoweringFunctions::BoolNameMap))
+    @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[String, String]))
     @current_function_context = T.let(nil, T.nilable(MIRLoweringFunctions::FunctionLoweringContext))
     @atomic_emit_raw = T.let(false, T::Boolean)
     @used_sharded_map = T.let(false, T::Boolean)
     @current_bg_pointer_captures = T.let(nil, T.nilable(T::Set[String]))
-    @current_fiber_capture_symbols = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @do_capture_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @current_fiber_capture_symbols = T.let(nil, T.nilable(T::Hash[String, SymbolEntry]))
+    @do_capture_map = T.let(nil, T.nilable(T::Hash[String, String]))
     @locked_unwrap_map = T.let(nil, T.nilable(MIRLoweringCapabilities::LockedUnwrapMap))
     @rc_unwrap_map = T.let(nil, T.nilable(MIRLoweringCapabilities::RcUnwrapMap))
     @with_alias_alloc_map = T.let(nil, T.nilable(MIRLoweringCapabilities::AliasAllocMap))
@@ -416,6 +432,7 @@ class MIRLowering
     @for_counter = T.let(0, Integer)
     @ownership_finalized_body_ids = T.let(Set.new, T::Set[Integer])
     @ownership_finalized_node_ids = T.let(Set.new, T::Set[Integer])
+    @last_fsm_result_transfer_facts = T.let([], T::Array[MIR::FsmResultTransferFact])
     @_emitter = T.let(nil, T.nilable(MIREmitter))
   end
 
@@ -768,7 +785,7 @@ class MIRLowering
     if node.is_a?(AST::Identifier) && AST.moved?(ast_node)
       return placement_for_node(node) == :heap
     end
-    node.is_a?(AST::Identifier) && node.symbol&.heap_storage? == true
+    !!(node.is_a?(AST::Identifier) && node.symbol&.heap_storage? == true)
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -785,7 +802,7 @@ class MIRLowering
     when MIR::SuppressCleanup
       safe = zig_safe_name(node.name)
       if @guarded_cleanup_names&.[](safe)
-        ownership_transfer_marks(T.must(safe), :owned_sink, target_alloc: :heap, move_guarded: true)
+        ownership_transfer_marks(safe, :owned_sink, target_alloc: :heap, move_guarded: true)
       else
         []
       end
@@ -933,7 +950,7 @@ class MIRLowering
       cleanup_by_name: {},
     )
     stmts.each { |s|
-      packet = lowered_stmt_packet(s)
+      packet = lowered_stmt_packet(state, s)
       next unless packet
 
       append_pending_packet_nodes!(state, packet)
@@ -943,31 +960,31 @@ class MIRLowering
     state.out
   end
 
-  sig { params(body: T::Array[Object]).returns(T::Array[Object]) }
+  sig { params(body: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def mark_ownership_finalized_body!(body)
     @ownership_finalized_body_ids << body.object_id
     body
   end
 
-  sig { params(body: T::Array[Object]).returns(T::Boolean) }
+  sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
   def ownership_finalized_body?(body)
     @ownership_finalized_body_ids.include?(body.object_id)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: MIR::Node).returns(T::Boolean) }
   def ownership_finalized_node?(node)
     return false unless node.is_a?(MIR::Emittable)
 
     @ownership_finalized_node_ids.include?(node.object_id)
   end
 
-  sig { params(node: T.untyped).void }
+  sig { params(node: MIR::Node).void }
   def mark_ownership_finalized_node!(node)
     @ownership_finalized_node_ids << node.object_id if node.is_a?(MIR::Emittable)
     nil
   end
 
-  sig { params(nodes: T::Array[T.untyped]).void }
+  sig { params(nodes: T::Array[MIR::Node]).void }
   def mark_ownership_finalized_nodes!(nodes)
     nodes.each { |node| mark_ownership_finalized_node!(node) }
     nil
@@ -983,29 +1000,26 @@ class MIRLowering
 
   sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
   def append_lowered_statement_packet!(state, packet)
-    if packet.ast_stmt.is_a?(AST::MoveNode)
-      append_transfer_marks_to_body!(state, ownership_marks_for_transferred_temp(packet.mir), nil, nil)
+    if packet.transfer_only
+      append_transfer_marks_to_body!(state, packet.stmt_transfer_marks, nil, nil)
       return
     end
 
-    mir_nodes = normalize_allocating_mir_body(packet.mir.is_a?(Array) ? packet.mir.compact : [packet.mir])
+    packet_mir = packet.mir
+    packet_nodes = packet_mir.is_a?(Array) ? packet_mir.compact : [packet_mir]
+    mir_nodes = normalize_allocating_mir_body(packet_nodes)
     merge_body_mark_names!(state, mir_nodes)
     line = packet.source_line
     col = packet.source_column
     state.out << MIR::Comment.new("CLR:#{line}") if line
-    append_transfer_marks_to_body!(
-      state,
-      dedupe_transfer_marks(ownership_transfers_for_stmt(packet.ast_stmt, state.guarded_cleanup_names)),
-      line,
-      col,
-    )
+    append_transfer_marks_to_body!(state, packet.stmt_transfer_marks, line, col)
     mir_nodes.each { |node| append_ownership_finalized_node!(state, node, mir_nodes, line, col) }
     marks = mir_nodes.flat_map { |node| ownership_transfers_for_node(node, state) }
     append_transfer_marks_to_body!(state, dedupe_transfer_marks(marks), line, col)
     nil
   end
 
-  sig { params(state: OwnershipFinalizationContext, node: T.untyped).void }
+  sig { params(state: OwnershipFinalizationContext, node: MIR::Node).void }
   def append_already_finalized_node!(state, node)
     state.out << node
     record_ownership_finalization_node!(state, node) if node.is_a?(MIR::Emittable)
@@ -1015,8 +1029,8 @@ class MIRLowering
   sig do
     params(
       state: OwnershipFinalizationContext,
-      node: T.untyped,
-      body: T::Array[T.untyped],
+      node: MIR::Node,
+      body: T::Array[MIR::Node],
       line: T.nilable(Integer),
       col: T.nilable(Integer),
     ).void
@@ -1034,7 +1048,7 @@ class MIRLowering
     append_move_guard_for_transfer_mark!(node, state)
     surface = scan_ownership_surface!(
       state,
-      T.cast(node, MIR::NodeRoot),
+      node,
       collect_facts: true,
       collect_transfers: true,
     )
@@ -1050,7 +1064,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(state: OwnershipFinalizationContext, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
+  sig { params(state: OwnershipFinalizationContext, marks: T::Array[MIR::Stmt], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
     marks.each do |mark|
       if ownership_finalized_node?(mark)
@@ -1082,13 +1096,19 @@ class MIRLowering
     end
   end
 
-  sig { params(marks: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(marks: T::Array[MIR::Stmt]).returns(T::Array[MIR::Stmt]) }
   def dedupe_transfer_marks(marks)
-    marks.uniq { |mark| [mark.class, mark.respond_to?(:name) ? mark.name : nil, mark.respond_to?(:target) ? mark.target : nil] }
+    marks.uniq do |mark|
+      [
+        mark.class,
+        mark.respond_to?(:name) ? T.unsafe(mark).name : nil,
+        mark.respond_to?(:target) ? T.unsafe(mark).target : nil,
+      ]
+    end
   end
 
-  sig { params(stmt: T.untyped).returns(T.nilable(LoweredStmtPacket)) }
-  def lowered_stmt_packet(stmt)
+  sig { params(state: OwnershipFinalizationContext, stmt: AST::Node).returns(T.nilable(LoweredStmtPacket)) }
+  def lowered_stmt_packet(state, stmt)
     mir = lower(stmt)
     return nil unless mir
 
@@ -1096,10 +1116,18 @@ class MIRLowering
     pending = flush_pending
     mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt) && !hoisted_discard
     token = stmt.respond_to?(:token) ? stmt.token : nil
+    transfer_only = stmt.is_a?(AST::MoveNode)
+    stmt_transfer_marks =
+      if transfer_only
+        ownership_marks_for_transferred_temp(mir)
+      else
+        dedupe_transfer_marks(ownership_transfers_for_stmt(stmt, state.guarded_cleanup_names))
+      end
     LoweredStmtPacket.new(
-      ast_stmt: stmt,
-      mir: mir,
+      mir: T.cast(mir, LoweredMir),
       pending: pending,
+      stmt_transfer_marks: stmt_transfer_marks,
+      transfer_only: transfer_only,
       source_line: token&.line,
       source_column: token&.column,
     )
@@ -1130,20 +1158,20 @@ class MIRLowering
     [MIR::ScopeBlock.new(materialized.statements), true]
   end
 
-  sig { params(stmt: T.untyped).returns(T::Boolean) }
+  sig { params(stmt: AST::Node).returns(T::Boolean) }
   def discard_expr_stmt?(stmt)
     return false unless (AST.call?(stmt)) ||
                         (stmt.is_a?(AST::BinaryOp) && (stmt.op == :OR_RESCUE || stmt.op == :PIPE_ERR))
-    stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void
+    !!(stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void)
   end
 
-  sig { params(state: OwnershipFinalizationContext, root: T.untyped).void }
+  sig { params(state: OwnershipFinalizationContext, root: MIR::NodeRoot).void }
   def register_body_visible_names!(state, root)
     record_ownership_finalization_node!(state, root)
     nil
   end
 
-  sig { params(state: OwnershipFinalizationContext, root: T.untyped).void }
+  sig { params(state: OwnershipFinalizationContext, root: MIR::NodeRoot).void }
   def register_ownership_finalization_visible_names!(state, root)
     record_ownership_finalization_node!(state, root)
     nil
@@ -1186,7 +1214,7 @@ class MIRLowering
     ).returns(OwnershipSurfaceScan)
   end
   def scan_ownership_surface!(state, root, collect_facts:, collect_transfers:)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     transfer_targets = T.let([], T::Array[OwnershipTransferTarget])
     MIR.each_surface_node(root) do |node|
       record_ownership_finalization_surface_node!(state, node)
@@ -1227,10 +1255,10 @@ class MIRLowering
 
   sig do
     params(
-      body: T::Array[T.untyped],
+      body: T::Array[MIR::Node],
       inherited_alloc_names: T::Set[String],
       inherited_guarded_names: T::Set[String]
-    ).returns(T::Array[T.untyped])
+    ).returns(T::Array[MIR::Node])
   end
   def append_ownership_transfers_for_mir_body(body, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     normalized = normalize_allocating_mir_body(body)
@@ -1254,11 +1282,11 @@ class MIRLowering
 
   sig do
     params(
-      body: T::Array[T.untyped],
+      body: T::Array[MIR::Node],
       inherited_alloc_names: T::Set[String],
       inherited_guarded_names: T::Set[String],
       parent: OwnershipFinalizationContext,
-    ).returns(T::Array[T.untyped])
+    ).returns(T::Array[MIR::Node])
   end
   def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, parent)
     return body if ownership_finalized_body?(body)
@@ -1282,7 +1310,7 @@ class MIRLowering
     mark_ownership_finalized_body!(state.out)
   end
 
-  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
+  sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
   def finalize_ownership_for_mir_node!(node, body, state)
     if ownership_finalized_node?(node)
       append_already_finalized_node!(state, node)
@@ -1302,7 +1330,7 @@ class MIRLowering
     else
       surface = scan_ownership_surface!(
         state,
-        T.cast(node, MIR::NodeRoot),
+        node,
         collect_facts: true,
         collect_transfers: true,
       )
@@ -1321,7 +1349,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, state: OwnershipFinalizationContext).void }
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).void }
   def append_move_guard_for_transfer_mark!(node, state)
     return unless node.is_a?(MIR::TransferMark)
     return unless node.target == :owned_sink || node.target == :return
@@ -1352,7 +1380,7 @@ class MIRLowering
     ).marks.last)
 
     state.out << move
-    state.out.concat(ownership_facts_for_structural_node(state.out.last))
+    state.out.concat(ownership_facts_for_structural_node(T.must(state.out.last)))
     record_ownership_finalization_node!(state, move)
     nil
   end
@@ -1369,7 +1397,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, state: OwnershipFinalizationContext).void }
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).void }
   def append_implicit_alloc_fact!(node, state)
     alloc_mark = implicit_alloc_mark_for_mir_node(node, state)
     return unless alloc_mark
@@ -1383,7 +1411,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
+  sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
   def append_block_result_transfer!(node, body, state)
     return unless node.is_a?(MIR::BreakStmt) && node.value.is_a?(MIR::Ident)
 
@@ -1398,12 +1426,12 @@ class MIRLowering
     nil
   end
 
-  sig { params(nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
+  sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
   def alloc_mark_present?(nodes, name)
     nodes.any? { |node| node.is_a?(MIR::AllocMark) && node.name.to_s == name.to_s }
   end
 
-  sig { params(marks: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
+  sig { params(marks: T::Array[MIR::Stmt], state: OwnershipFinalizationContext).void }
   def append_transfer_marks!(marks, state)
     marks.each do |mark|
       if ownership_finalized_node?(mark)
@@ -1422,16 +1450,16 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_facts_for_mir_surface(node)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     MIR.each_surface_node(node) do |surface_node|
       append_ownership_facts_for_mir_node!(facts, surface_node)
     end
     dedupe_ownership_facts(facts)
   end
 
-  sig { params(facts: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(facts: T::Array[OwnershipFact]).returns(T::Array[OwnershipFact]) }
   def dedupe_ownership_facts(facts)
     seen = T.let(Set.new, T::Set[String])
     facts.select do |fact|
@@ -1444,7 +1472,7 @@ class MIRLowering
     end
   end
 
-  sig { params(fact: T.untyped).returns(T.nilable(String)) }
+  sig { params(fact: OwnershipFact).returns(T.nilable(String)) }
   def ownership_fact_dedupe_key(fact)
     case fact
     when MIR::OwnedCreate
@@ -1464,14 +1492,14 @@ class MIRLowering
     end
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_facts_for_mir_node(node)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_facts_for_mir_node!(facts, node)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], node: MIR::Node).void }
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
   def append_ownership_facts_for_mir_node!(facts, node)
     append_ownership_facts_for_structural_node!(facts, node)
     append_ownership_store_facts_for_consumption!(facts, node)
@@ -1506,7 +1534,7 @@ class MIRLowering
     end
   end
 
-  sig { params(name: String, expr: T.untyped, type_info: T.nilable(Type)).returns(T::Array[OwnershipFactTarget]) }
+  sig { params(name: String, expr: MIR::Node, type_info: T.nilable(Type)).returns(T::Array[OwnershipFactTarget]) }
   def ownership_fact_target_for_expr(name, expr, type_info)
     source_expr = ownership_contract_source_node(expr)
     include_owned_result = ownership_owned_result_fact_relevant?(expr) && !source_expr.is_a?(MIR::BgBlock)
@@ -1525,7 +1553,7 @@ class MIRLowering
     )]
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: MIR::Node).returns(T::Boolean) }
   def ownership_owned_result_fact_relevant?(expr)
     source_expr = ownership_contract_source_node(expr)
     return true if source_expr.is_a?(MIR::BgBlock)
@@ -1536,7 +1564,7 @@ class MIRLowering
     source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating? == true
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: MIR::Node).returns(T::Boolean) }
   def ownership_transfer_contract_relevant?(expr)
     source_expr = ownership_contract_source_node(expr)
     return false unless source_expr.is_a?(MIR::Emittable)
@@ -1545,7 +1573,7 @@ class MIRLowering
     contract.is_a?(MIR::OwnershipContract) && !contract.consumes.empty?
   end
 
-  sig { params(expr: T.untyped).returns(OwnershipFactTarget) }
+  sig { params(expr: MIR::Node).returns(OwnershipFactTarget) }
   def ownership_transfer_only_target(expr)
     OwnershipFactTarget.new(name: ownership_fact_source(expr), expr: expr, type_info: nil, include_owned_result: false, include_transfer_contract: true)
   end
@@ -1559,19 +1587,19 @@ class MIRLowering
       expr = binding[:expr]
       next nil unless capture && expr
 
-      ownership_fact_target_for_expr(capture.to_s, expr, nil)
+      ownership_fact_target_for_expr(capture.to_s, T.cast(expr, MIR::Node), nil)
     end
     targets.compact
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[MIR::OwnedStore]) }
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_store_facts_for_consumption(node)
-    facts = T.let([], T::Array[MIR::OwnedStore])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_store_facts_for_consumption!(facts, node)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], node: MIR::Node).void }
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
   def append_ownership_store_facts_for_consumption!(facts, node)
     fact = node.ownership_consumption
     return unless fact
@@ -1581,14 +1609,14 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[MIR::OwnedTransfer]) }
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_transfer_facts_for_consumption(node)
-    facts = T.let([], T::Array[MIR::OwnedTransfer])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_transfer_facts_for_consumption!(facts, node)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], node: MIR::Node).void }
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
   def append_ownership_transfer_facts_for_consumption!(facts, node)
     fact = node.ownership_consumption
     return unless fact
@@ -1598,14 +1626,14 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_facts_for_structural_node(node)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_facts_for_structural_node!(facts, node)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], node: MIR::Node).void }
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
   def append_ownership_facts_for_structural_node!(facts, node)
     case node
     when MIR::AllocMark
@@ -1623,14 +1651,14 @@ class MIRLowering
     MIR::OwnedCreate.new(mark.name.to_s, mark.alloc, mark.type_info, source)
   end
 
-  sig { params(target_name: String, expr: T.untyped, type_info: Type).returns(T::Array[T.untyped]) }
+  sig { params(target_name: String, expr: MIR::Node, type_info: Type).returns(T::Array[OwnershipFact]) }
   def ownership_facts_for_owned_result(target_name, expr, type_info)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_facts_for_owned_result!(facts, target_name, expr, type_info)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], target_name: String, expr: T.untyped, type_info: Type).void }
+  sig { params(facts: T::Array[OwnershipFact], target_name: String, expr: MIR::Node, type_info: Type).void }
   def append_ownership_facts_for_owned_result!(facts, target_name, expr, type_info)
     source_expr = ownership_contract_source_node(expr)
     if source_expr.is_a?(MIR::BgBlock)
@@ -1650,14 +1678,14 @@ class MIRLowering
     nil
   end
 
-  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(expr: MIR::Node).returns(T::Array[OwnershipFact]) }
   def ownership_transfer_facts_for_contract(expr)
-    facts = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[OwnershipFact])
     append_ownership_transfer_facts_for_contract!(facts, expr)
     facts
   end
 
-  sig { params(facts: T::Array[T.untyped], expr: T.untyped).void }
+  sig { params(facts: T::Array[OwnershipFact], expr: MIR::Node).void }
   def append_ownership_transfer_facts_for_contract!(facts, expr)
     names = ownership_contract_consumes_unwrapped(expr)
     return if names.empty?
@@ -1704,7 +1732,7 @@ class MIRLowering
     nodes.any? { |node| node.is_a?(MIR::TransferMark) && node.name.to_s == name.to_s }
   end
 
-  sig { params(node: MIR::Node, emitted: T::Array[T.untyped], remaining: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(node: MIR::Node, emitted: T::Array[MIR::Node], remaining: T::Array[MIR::Node]).returns(T::Array[MIR::Stmt]) }
   def pre_terminator_transfer_marks(node, emitted, remaining)
     []
   end
@@ -1789,11 +1817,11 @@ class MIRLowering
     )
   end
 
-  sig { params(stmt: T.untyped, guarded_cleanup_names: T::Set[String]).returns(T::Array[T.untyped]) }
+  sig { params(stmt: AST::Node, guarded_cleanup_names: T::Set[String]).returns(T::Array[MIR::Stmt]) }
   def ownership_transfers_for_stmt(stmt, guarded_cleanup_names)
     return [] if stmt.is_a?(AST::ReturnNode)
     return [] if AST.ownership_transfer_stmt?(stmt)
-    marks = T.let([], T::Array[T.untyped])
+    marks = T.let([], T::Array[MIR::Stmt])
     collect_bg_capture_transfer_roots(stmt).uniq.each do |name|
       safe = zig_safe_name(name)
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
@@ -1807,19 +1835,19 @@ class MIRLowering
 
   sig do
     params(
-      node: T.untyped,
+      node: MIR::Node,
       state: OwnershipFinalizationContext,
-    ).returns(T::Array[T.untyped])
+    ).returns(T::Array[MIR::Stmt])
   end
   def ownership_transfers_for_node(node, state)
     return [] if node.is_a?(MIR::ReturnStmt)
 
-    ownership_transfers_for_targets(ownership_transfer_operands_for_node(T.cast(node, MIR::Node), state), state)
+    ownership_transfers_for_targets(ownership_transfer_operands_for_node(node, state), state)
   end
 
-  sig { params(operand_targets: T::Array[OwnershipTransferTarget], state: OwnershipFinalizationContext).returns(T::Array[T.untyped]) }
+  sig { params(operand_targets: T::Array[OwnershipTransferTarget], state: OwnershipFinalizationContext).returns(T::Array[MIR::Stmt]) }
   def ownership_transfers_for_targets(operand_targets, state)
-    marks = T.let([], T::Array[T.untyped])
+    marks = T.let([], T::Array[MIR::Stmt])
     generated_mark_names = T.let(Set.new, T::Set[String])
     operand_targets.each do |operand_target|
       name = operand_target.name
@@ -2416,14 +2444,15 @@ class MIRLowering
   # Name and type helpers
   # ================================================================
 
-  sig { params(name: String).returns(T.nilable(String)) }
+  sig { params(name: String).returns(String) }
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     cleaned = "clearMain" if cleaned == "main"
-    ZigType.primitive_numeric_identifier?(T.must(cleaned)) ? "@\"#{cleaned}\"" : cleaned
+    cleaned = T.must(cleaned)
+    ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::Node).returns(Symbol) }
   def alloc_for_node(node)
     placement_for_node(node)
   end
@@ -2700,18 +2729,16 @@ class MIRLowering
     # Emit helper structs for inline struct variants
     helper_structs = variant_facts.filter_map do |fact|
       next unless fact.inline_struct
+      data = T.cast(fact.data, Schemas::InlineStructVariant)
 
-      fields = fact.data.fields.map { |fname, ftype|
+      fields = data.fields.map { |fname, ftype|
         zig_t = transpile_type(ftype, is_field: true)
         MIR::FieldDef.new(fname.to_s, zig_t, nil)
       }
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_entries = T.cast(
-        fact.data.deinit_entries || [],
-        T::Array[Schemas::InlineStructDeinitEntry]
-      )
+      deinit_entries = data.deinit_entries || []
       deinit_stmts = deinit_entries.flat_map { |de|
         self_field = MIR::FieldGet.new(self_ref, de.field)
         case de.kind
@@ -2864,11 +2891,11 @@ class MIRLowering
     # BC dispatches by op symbol in compile_inline_bc.
     if node.matched_stdlib_def&.emit&.bc
       mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-      return MIR::InlineBc.new(node.matched_stdlib_def.emit&.bc_op,
-                                mir_args, node.matched_stdlib_def)
+      stdlib_def = T.must(node.matched_stdlib_def)
+      return MIR::InlineBc.new(stdlib_def.emit&.bc_op, mir_args, stdlib_def)
     end
 
-    pattern = node.zig_pattern.dup
+    pattern = T.cast(node.zig_pattern, String).dup
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
     # checker can verify their cleanup. Non-allocating args (and frame allocs)
     # are left inline -- the pending Lets are emitted by lower_body's
@@ -3167,7 +3194,7 @@ class MIRLowering
     ".{ .stack_size = .#{variant} }"
   end
 
-  sig { params(rt_name: String, ctx_type: String, ctx_var: String, task_cfg: String, pin_mode: T.untyped).returns(String) }
+  sig { params(rt_name: String, ctx_type: String, ctx_var: String, task_cfg: String, pin_mode: T.nilable(T.any(Symbol, T::Boolean))).returns(String) }
   def fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
     spawn_args = "@intFromPtr(&Runtime.entryWrapper),\n" \
       "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \

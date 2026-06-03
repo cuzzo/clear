@@ -40,6 +40,7 @@ module MethodAnalysis
 
     scope_entry = list_arg.symbol
     ti = scope_entry&.type
+    return unless scope_entry
     return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 

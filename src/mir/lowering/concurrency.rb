@@ -255,6 +255,7 @@ module MIRLoweringConcurrency
       if analysis
         AST.each_capture_analysis(branch[:body]) do |nested|
           next if nested.equal?(analysis)
+          nested = T.cast(nested, CapabilityHelper::CaptureAnalysis)
           analysis.captures ||= {}
           analysis.capture_symbols ||= {}
           analysis.close_patterns ||= {}

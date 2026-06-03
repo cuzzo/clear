@@ -606,7 +606,7 @@ module Annotator
             current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
             node.symbol = current_scope.local_entry!(node.var_name)
-            classify_ownership!(node.symbol)
+            classify_ownership!(T.must(node.symbol))
             visit_stmts(node.body)
             finalize_scope(node)
             node.deferred_drops
@@ -654,7 +654,7 @@ module Annotator
             current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
             node.symbol = current_scope.local_entry!(node.var_name)
-            classify_ownership!(node.symbol)
+            classify_ownership!(T.must(node.symbol))
             visit_stmts(node.body)
             finalize_scope(node)
             node.deferred_drops

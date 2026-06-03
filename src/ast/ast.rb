@@ -32,6 +32,8 @@ module AST
   end
 
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
+  CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
+  CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
 
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
   def self.stamp_synthetic_type!(node, value, context:)
@@ -346,9 +348,6 @@ module AST
   # Walk every AST Locatable reachable from a root object. This is the
   # structural expression+statement walker; semantic walkers should layer
   # their own filtering on top instead of re-open-coding Struct member scans.
-  EACH_LOCATABLE_MEMBERS_CACHE = T.let({}, T::Hash[T.untyped, T::Array[Symbol]])
-  GENERATED_WALK_MEMBER_PATTERN = T.let(/token|drops/i.freeze, Regexp)
-
   sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.proc.params(node: Locatable).void).void }
   def self.each_locatable(root, descend_functions: false, &visitor)
     stack = root.is_a?(Array) ? root.reverse : [root]
@@ -365,84 +364,9 @@ module AST
       end
       yield node if node.is_a?(Locatable)
       next if node.is_a?(FunctionDef) && !descend_functions
-      next if defined?(Lexer::Token) && node.is_a?(Lexer::Token)
-      handled = true
-      case node
-      when Identifier, Literal, BreakNode, ContinueNode, OrRaise, OrBreak, OrPass, OrPrune
-        # leaf
-      when UnaryOp
-        stack << node.right if node.right
-      when BinaryOp
-        stack << node.right if node.right
-        stack << node.left if node.left
-      when FuncCall
-        stack << node.args
-      when MethodCall
-        stack << node.args
-        stack << node.object if node.object
-      when StaticCall
-        stack << node.args
-      when GetField
-        stack << node.target if node.target
-      when GetIndex
-        stack << node.index if node.index
-        stack << node.target if node.target
-      when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode, FreezeNode, CapabilityWrap
-        stack << node.value if node.value
-      when ReturnNode, ThrowNode
-        stack << node.value if node.value
-      when DieNode
-        stack << node.status if node.status
-      when Raise
-        stack << node.message_expr if node.message_expr
-      when Assert
-        stack << node.message if node.message
-        stack << node.condition if node.condition
-      when Assignment
-        stack << node.value if node.value
-        stack << node.name if node.name.is_a?(Struct)
-      when VarDecl, BindExpr
-        stack << node.value if node.value
-      when StructLit, UnionVariantLit
-        stack << node.fields if node.fields
-      when ListLit
-        stack << node.items
-      when HashLit
-        stack << node.pairs
-      when IfStatement
-        stack << node.else_branch if node.else_branch
-        stack << node.then_branch if node.then_branch
-        stack << node.condition if node.condition
-      when IfBind
-        stack << node.else_branch if node.else_branch
-        stack << node.then_branch if node.then_branch
-        stack << node.bindings
-      when WhileLoop
-        stack << node.do_branch if node.do_branch
-        stack << node.condition if node.condition
-      when WhileBindLoop
-        stack << node.do_branch if node.do_branch
-        stack << node.condition if node.condition
-      when MatchStatement
-        stack << node.default_case if node.default_case
-        stack << node.cases
-        stack << node.expr if node.expr
-      when ForRange
-        stack << node.body if node.body
-        stack << node.end_expr if node.end_expr
-        stack << node.start_expr if node.start_expr
-      when ForEach
-        stack << node.body if node.body
-        stack << node.collection if node.collection
-      else
-        handled = false
-      end
-      next if handled
       next unless node.is_a?(Struct)
 
-      members = EACH_LOCATABLE_MEMBERS_CACHE[node.class] ||=
-        node.class.members.reject { |member| member.to_s.match?(GENERATED_WALK_MEMBER_PATTERN) }
-      members.reverse_each do |member|
+      node.class.members.reverse_each do |member|
         value = node[member]
         if value.is_a?(Array)
           stack << value
@@ -831,7 +755,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T::Array[T.untyped], block: T.proc.params(analysis: T.untyped).void).void }
+  sig { params(body: T::Array[Object], block: T.proc.params(analysis: Object).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -900,58 +824,58 @@ module AST
     sig { returns(T.nilable(Type)) }
     def type_object; T.cast(instance_variable_get(:@type_object), T.nilable(Type)); end
 
-    sig { returns(T.untyped) }
-    def zig_pattern; instance_variable_get(:@zig_pattern); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T.any(String, Symbol))) }
+    def zig_pattern; T.cast(instance_variable_get(:@zig_pattern), T.nilable(T.any(String, Symbol))); end
+    sig { params(val: T.nilable(T.any(String, Symbol))).returns(T.nilable(T.any(String, Symbol))) }
     def zig_pattern=(val); instance_variable_set(:@zig_pattern, val); end
 
-    sig { returns(T.untyped) }
-    def matched_stdlib_def; instance_variable_get(:@matched_stdlib_def); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(FunctionSignature)) }
+    def matched_stdlib_def; T.cast(instance_variable_get(:@matched_stdlib_def), T.nilable(FunctionSignature)); end
+    sig { params(val: T.nilable(FunctionSignature)).returns(T.nilable(FunctionSignature)) }
     def matched_stdlib_def=(val)
       fs = IntrinsicRegistry.fs(val)
       instance_variable_set(:@matched_stdlib_def, fs)
       self.matched_signature = fs
     end
 
-    sig { returns(T.untyped) }
-    def matched_signature; instance_variable_get(:@matched_signature); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(FunctionSignature)) }
+    def matched_signature; T.cast(instance_variable_get(:@matched_signature), T.nilable(FunctionSignature)); end
+    sig { params(val: T.nilable(FunctionSignature)).returns(T.nilable(FunctionSignature)) }
     def matched_signature=(val); instance_variable_set(:@matched_signature, val); end
 
-    sig { void }
-    def stdlib_allocates; instance_variable_get(:@stdlib_allocates); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def stdlib_allocates; T.cast(instance_variable_get(:@stdlib_allocates), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def stdlib_allocates=(val); instance_variable_set(:@stdlib_allocates, val); end
 
-    sig { returns(T.untyped) }
-    def mutates_receiver; instance_variable_get(:@mutates_receiver); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def mutates_receiver; T.cast(instance_variable_get(:@mutates_receiver), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def mutates_receiver=(val); instance_variable_set(:@mutates_receiver, val); end
 
-    sig { returns(T.untyped) }
-    def was_moved; instance_variable_get(:@was_moved); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def was_moved; T.cast(instance_variable_get(:@was_moved), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def was_moved=(val); instance_variable_set(:@was_moved, val); end
 
-    sig { returns(T.untyped) }
-    def container_borrow; instance_variable_get(:@container_borrow); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def container_borrow; T.cast(instance_variable_get(:@container_borrow), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def container_borrow=(val); instance_variable_set(:@container_borrow, val); end
 
-    sig { returns(T.untyped) }
-    def needs_mut_ref; instance_variable_get(:@needs_mut_ref); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def needs_mut_ref; T.cast(instance_variable_get(:@needs_mut_ref), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def needs_mut_ref=(val); instance_variable_set(:@needs_mut_ref, val); end
 
-    sig { returns(T.untyped) }
-    def needs_heap_create; instance_variable_get(:@needs_heap_create); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def needs_heap_create; T.cast(instance_variable_get(:@needs_heap_create), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def needs_heap_create=(val); instance_variable_set(:@needs_heap_create, val); end
 
-    sig { void }
-    def collection_return; instance_variable_get(:@collection_return); end
-    sig { params(val: T.untyped).void }
+    sig { returns(T.nilable(Type)) }
+    def collection_return; T.cast(instance_variable_get(:@collection_return), T.nilable(Type)); end
+    sig { params(val: T.nilable(Type)).void }
     def collection_return=(val); instance_variable_set(:@collection_return, val); end
 
     sig { returns(T.nilable(Integer)) }
@@ -959,39 +883,39 @@ module AST
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
     def slot_size=(val); instance_variable_set(:@slot_size, val); end
 
-    sig { returns(T.untyped) }
-    def resource_close_zig; instance_variable_get(:@resource_close_zig); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(String)) }
+    def resource_close_zig; T.cast(instance_variable_get(:@resource_close_zig), T.nilable(String)); end
+    sig { params(val: T.nilable(String)).returns(T.nilable(String)) }
     def resource_close_zig=(val); instance_variable_set(:@resource_close_zig, val); end
 
-    sig { returns(T.untyped) }
-    def can_fail; instance_variable_get(:@can_fail); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def can_fail; T.cast(instance_variable_get(:@can_fail), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def can_fail=(val); instance_variable_set(:@can_fail, val); end
 
-    sig { returns(T.untyped) }
-    def error_kind; instance_variable_get(:@error_kind); end
-    sig { params(val: T.untyped).void }
+    sig { returns(T.nilable(Symbol)) }
+    def error_kind; T.cast(instance_variable_get(:@error_kind), T.nilable(Symbol)); end
+    sig { params(val: T.nilable(Symbol)).void }
     def error_kind=(val); instance_variable_set(:@error_kind, val); end
 
-    sig { returns(T.untyped) }
-    def error_type; instance_variable_get(:@error_type); end
-    sig { params(val: T.untyped).void }
+    sig { returns(T.nilable(Symbol)) }
+    def error_type; T.cast(instance_variable_get(:@error_type), T.nilable(Symbol)); end
+    sig { params(val: T.nilable(Symbol)).void }
     def error_type=(val); instance_variable_set(:@error_type, val); end
 
-    sig { returns(T.untyped) }
-    def var_used; instance_variable_get(:@var_used); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def var_used; T.cast(instance_variable_get(:@var_used), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def var_used=(val); instance_variable_set(:@var_used, val); end
 
-    sig { returns(T.untyped) }
-    def var_mutated; instance_variable_get(:@var_mutated); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(T::Boolean)) }
+    def var_mutated; T.cast(instance_variable_get(:@var_mutated), T.nilable(T::Boolean)); end
+    sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def var_mutated=(val); instance_variable_set(:@var_mutated, val); end
 
-    sig { returns(T.untyped) }
-    def symbol; instance_variable_get(:@symbol); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { returns(T.nilable(SymbolEntry)) }
+    def symbol; T.cast(instance_variable_get(:@symbol), T.nilable(SymbolEntry)); end
+    sig { params(val: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
     def symbol=(val); instance_variable_set(:@symbol, val); end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
@@ -1048,7 +972,7 @@ module AST
     # @param declared_type [Symbol, nil] The explicitly declared type (or nil/:Any for inference)
     # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
-    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
       # fn_type must not be flattened to its return type — preserve the full Type object.
       return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
@@ -1624,7 +1548,7 @@ module AST
     extend T::Sig
     include Locatable 
 
-    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
       res, error = super(declared_type)
       return [nil, error] if error
@@ -1648,7 +1572,7 @@ module AST
       Type.new(type_info)
     end
 
-    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
       target = Type.new(declared_type)
       return [nil, "Cannot initialize array of size #{target.capacity} with #{type_info.capacity} elements"] unless target.accepts?(type_info)

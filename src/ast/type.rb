@@ -41,7 +41,7 @@ class TypeCapabilities < T::Struct
 
   sig { returns(TypeCapabilities) }
   def copy
-    self
+    with
   end
 
   sig do
@@ -78,21 +78,6 @@ class TypeCapabilities < T::Struct
     observable_token: UNSET,
     polymorphic_shared: UNSET
   )
-    return self if ownership.equal?(UNSET) &&
-                   sync.equal?(UNSET) &&
-                   layout.equal?(UNSET) &&
-                   lock_rank.equal?(UNSET) &&
-                   collection.equal?(UNSET) &&
-                   shard_count.equal?(UNSET) &&
-                   soa.equal?(UNSET) &&
-                   elem_ownership.equal?(UNSET) &&
-                   elem_sync.equal?(UNSET) &&
-                   link_source.equal?(UNSET) &&
-                   observable.equal?(UNSET) &&
-                   observable_terminal.equal?(UNSET) &&
-                   observable_token.equal?(UNSET) &&
-                   polymorphic_shared.equal?(UNSET)
-
     next_ownership = T.let(ownership.equal?(UNSET) ? self.ownership : T.cast(ownership, T.nilable(Symbol)), T.nilable(Symbol))
     next_sync = T.let(sync.equal?(UNSET) ? self.sync : T.cast(sync, T.nilable(Symbol)), T.nilable(Symbol))
     next_layout = T.let(layout.equal?(UNSET) ? self.layout : T.cast(layout, T.nilable(Symbol)), T.nilable(Symbol))
@@ -107,21 +92,6 @@ class TypeCapabilities < T::Struct
     next_observable_terminal = T.let(observable_terminal.equal?(UNSET) ? self.observable_terminal : T.cast(observable_terminal, T.nilable(Symbol)), T.nilable(Symbol))
     next_observable_token = T.let(observable_token.equal?(UNSET) ? self.observable_token : observable_token, T.nilable(Object))
     next_polymorphic_shared = T.let(polymorphic_shared.equal?(UNSET) ? self.polymorphic_shared : T.cast(polymorphic_shared, T::Boolean), T::Boolean)
-
-    return self if next_ownership == self.ownership &&
-                   next_sync == self.sync &&
-                   next_layout == self.layout &&
-                   next_lock_rank == self.lock_rank &&
-                   next_collection == self.collection &&
-                   next_shard_count == self.shard_count &&
-                   next_soa == self.soa &&
-                   next_elem_ownership == self.elem_ownership &&
-                   next_elem_sync == self.elem_sync &&
-                   next_link_source == self.link_source &&
-                   next_observable == self.observable &&
-                   next_observable_terminal == self.observable_terminal &&
-                   next_observable_token == self.observable_token &&
-                   next_polymorphic_shared == self.polymorphic_shared
 
     TypeCapabilities.new(
       ownership: next_ownership,
@@ -167,7 +137,6 @@ class TypePlacement < T::Struct
   sig { params(provenance: MaybeSymbol).returns(TypePlacement) }
   def with(provenance: TypePlacement::UNSET)
     next_provenance = T.let(provenance.equal?(UNSET) ? self.provenance : T.cast(provenance, T.nilable(Symbol)), T.nilable(Symbol))
-    return self if next_provenance == self.provenance
 
     TypePlacement.new(
       provenance: next_provenance
@@ -226,30 +195,20 @@ class TypeShape < T::Struct
   const :generic_args_raw, T::Array[Symbol], default: []
   const :tense_type_raw, T.nilable(Symbol), default: nil
 
-  FROM_CORE_CACHE = T.let({}, T::Hash[String, TypeShape])
-  FROM_CORE_AUTO_CACHE = T.let({}, T::Hash[String, TypeShape])
-
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
   def self.from_core(core_str, auto: false)
-    cache = auto ? FROM_CORE_AUTO_CACHE : FROM_CORE_CACHE
-    cached = cache[core_str]
-    return cached if cached
-
     raw_symbol = core_str.to_sym
-    cache_key = core_str.frozen? ? core_str : core_str.dup.freeze
 
     if core_str.start_with?("~")
       tense_inner = T.must(core_str[1..])
       raise "Invalid type '#{core_str}': double tense (~~) is not allowed — ~T is already a promise" if tense_inner.start_with?("~")
 
-      shape = TypeShape.new(
+      return TypeShape.new(
         raw: raw_symbol,
         auto: auto,
         tense: true,
         tense_type_raw: tense_inner.to_sym
-      ).freeze
-      cache[cache_key] = shape
-      return shape
+      )
     end
 
     after_error_str = core_str
@@ -311,10 +270,10 @@ class TypeShape < T::Struct
     if !map && !array && generic_match
       generic_instance = true
       generic_base_raw = T.must(generic_match[1]).to_sym
-      generic_args_raw = T.must(generic_match[2]).split(",").map(&:strip).map(&:to_sym).freeze
+      generic_args_raw = T.must(generic_match[2]).split(",").map(&:strip).map(&:to_sym)
     end
 
-    shape = TypeShape.new(
+    TypeShape.new(
       raw: raw_symbol,
       array: array,
       map: map,
@@ -332,14 +291,12 @@ class TypeShape < T::Struct
       generic_base_raw: generic_base_raw,
       generic_args_raw: generic_args_raw,
       tense_type_raw: nil
-    ).freeze
-    cache[cache_key] = shape
-    shape
+    )
   end
 
   sig { returns(TypeShape) }
   def copy
-    self
+    with(generic_args_raw: generic_args_raw.dup)
   end
 
   sig { returns(T::Boolean) }
@@ -387,7 +344,6 @@ class Type
 
   TypeInput = T.type_alias { T.any(Type, Symbol, String) }
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
-  CAPABILITY_SUFFIX_CACHE = T.let({}, T::Hash[String, TypeCapabilitySuffix])
 
   sig { returns(TypeShape) }
   attr_reader :shape
@@ -436,6 +392,7 @@ class Type
 
   DEFAULT_SHAPE = T.let(TypeShape.new(raw: :Any).freeze, TypeShape)
   DEFAULT_CAPABILITIES = T.let(TypeCapabilities.new.freeze, TypeCapabilities)
+  AFFINE_CAPABILITIES = T.let(TypeCapabilities.new(ownership: :affine).freeze, TypeCapabilities)
   DEFAULT_PLACEMENT = T.let(TypePlacement.new.freeze, TypePlacement)
 
   class ObservablePublishSpec < T::Struct
@@ -703,17 +660,22 @@ class Type
       parse_raw_input(raw_input, auto: auto)
     end
 
-    # Capability fields — set after parse/copy so they can override.
+    # Capability fields — set after parse/copy so explicit constructor
+    # overrides can replace the parsed/default capability state. Most Type
+    # construction uses the parsed default, so avoid the generic merge path
+    # unless there is an actual override.
     apply_declared_location!(location)
-    apply_capabilities!(
-      ownership: ownership || TypeCapabilities::UNSET,
-      sync: sync || TypeCapabilities::UNSET,
-      layout: layout || TypeCapabilities::UNSET,
-      collection: collection || TypeCapabilities::UNSET,
-      shard_count: shard_count || TypeCapabilities::UNSET,
-      observable: observable ? true : TypeCapabilities::UNSET,
-      observable_terminal: observable_terminal || TypeCapabilities::UNSET
-    )
+    if ownership || sync || layout || collection || shard_count || observable || observable_terminal
+      apply_capabilities!(
+        ownership: ownership || TypeCapabilities::UNSET,
+        sync: sync || TypeCapabilities::UNSET,
+        layout: layout || TypeCapabilities::UNSET,
+        collection: collection || TypeCapabilities::UNSET,
+        shard_count: shard_count || TypeCapabilities::UNSET,
+        observable: observable ? true : TypeCapabilities::UNSET,
+        observable_terminal: observable_terminal || TypeCapabilities::UNSET
+      )
+    end
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
     pin_heap_for_sync_wrapper! if sync_requires_heap_provenance?
@@ -3117,27 +3079,33 @@ class Type
   def parse_raw_input(raw_input, auto: false)
     if raw_input.is_a?(FunctionSignature) || raw_input.is_a?(Array)
       @shape = TypeShape.new(raw: raw_input, auto: auto)
-      apply_capabilities!(ownership: :affine, sync: nil, collection: nil)
+      @capabilities = AFFINE_CAPABILITIES
       return
     end
 
-    normalized_str = raw_input.to_s.gsub(/\bNumber\b/, 'Float64')
+    raw_str = raw_input.to_s
+    normalized_str = if raw_input == :Number || raw_str == "Number"
+      "Float64"
+    elsif raw_str.include?("Number")
+      raw_str.gsub(/\bNumber\b/, 'Float64')
+    else
+      raw_str
+    end
+
     suffix = normalized_str.include?("<") ? TypeCapabilitySuffix.new(base: normalized_str, ownership: nil, sync: nil) : self.class.strip_capability_suffix_from(normalized_str)
     @shape = TypeShape.from_core(suffix.base, auto: auto)
-    apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
+    if suffix.ownership || suffix.sync
+      @capabilities = AFFINE_CAPABILITIES
+      apply_capabilities!(ownership: suffix.ownership || :affine, sync: suffix.sync, collection: nil)
+    else
+      @capabilities = AFFINE_CAPABILITIES
+    end
   end
 
   sig { params(str: String).returns(TypeCapabilitySuffix) }
   def self.strip_capability_suffix_from(str)
-    cached = CAPABILITY_SUFFIX_CACHE[str]
-    return cached if cached
-
-    cache_key = str.frozen? ? str : str.dup.freeze
-
     unless str.include?("@")
-      suffix = TypeCapabilitySuffix.new(base: cache_key, ownership: nil, sync: nil).freeze
-      CAPABILITY_SUFFIX_CACHE[cache_key] = suffix
-      return suffix
+      return TypeCapabilitySuffix.new(base: str, ownership: nil, sync: nil)
     end
 
     base, *caps = str.gsub(/\s+/, "").split("@")
@@ -3159,9 +3127,7 @@ class Type
       end
     end
 
-    suffix = TypeCapabilitySuffix.new(base: T.must(base).freeze, ownership: ownership, sync: sync).freeze
-    CAPABILITY_SUFFIX_CACHE[cache_key] = suffix
-    suffix
+    TypeCapabilitySuffix.new(base: T.must(base), ownership: ownership, sync: sync)
   end
 
   sig { params(str: String).returns(TypeCapabilitySuffix) }

@@ -579,7 +579,7 @@ module FsmWrapperEmitter
     s.nil? || s.strip.empty?
   end
 
-  sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(Object)).returns(Object) }
   def with_rt_name(mir_emitter, rt_name, &blk)
     previous = T.let("rt", String)
     previous = mir_emitter.rt_name

@@ -47,9 +47,9 @@ class FunctionReturn
 
   sig { params(kind: Kind, fixed: T.nilable(Type), infer: T.nilable(Symbol)).void }
   def initialize(kind:, fixed: nil, infer: nil)
-    @kind = kind
-    @fixed = fixed
-    @infer = infer
+    @kind = T.let(kind, Kind)
+    @fixed = T.let(fixed, T.nilable(Type))
+    @infer = T.let(infer, T.nilable(Symbol))
   end
 
   sig { params(t: Type).returns(FunctionReturn) }
