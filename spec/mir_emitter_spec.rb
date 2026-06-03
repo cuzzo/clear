@@ -1,4 +1,5 @@
 require "rspec"
+require_relative "../src/ast/ast"
 require_relative "../src/mir/mir"
 require_relative "../src/mir/mir_emitter"
 
@@ -726,5 +727,235 @@ RSpec.describe MIREmitter do
     expect(zig).to include("try rt.heapAlloc().create(Node)")
     expect(zig).to include("__p.* = Node{ .value = 42, .next = null }")
     expect(zig).to include("break :blk_indirect __p")
+  end
+
+  describe "edge coverage" do
+    def intrinsic_sig(**emit_kwargs)
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(**emit_kwargs)
+      sig
+    end
+
+    it "emits miscellaneous dispatch-only expression nodes" do
+      expect(e.emit(MIR::TryOrPanic.new(MIR::Call.new("fallible", [], false), "boom")))
+        .to eq("fallible() catch @panic(\"boom\")")
+      expect(e.emit(MIR::UnionPayloadGet.new(MIR::Ident.new("result"), :Ok)))
+        .to eq("(switch (result) { .Ok => |payload| payload, else => unreachable })")
+      expect(e.emit(MIR::UnionVariantGet.new(MIR::TryExpr.new(MIR::Call.new("load", [], false)), "Ok", nil)))
+        .to eq("(try load()).Ok")
+      expect(e.emit(MIR::HasField.new(MIR::Ident.new("item"), "value")))
+        .to eq("@hasField(@TypeOf(item), \"value\")")
+    end
+
+    it "emits sort statements" do
+      node = MIR::Sort.new(
+        "i64",
+        MIR::Ident.new("items"),
+        MIR::FieldGet.new(MIR::Ident.new("a"), "score"),
+        MIR::FieldGet.new(MIR::Ident.new("b"), "score"),
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("std.mem.sort(i64, items")
+      expect(zig).to include("return a.score < b.score;")
+    end
+
+    it "emits break expressions without statement punctuation" do
+      expect(e.emit(MIR::BreakExpr.new("blk", MIR::Ident.new("result"))))
+        .to eq("break :blk result")
+      expect(e.emit(MIR::BreakExpr.new(nil, nil))).to eq("break")
+    end
+
+    it "emits success-only reassignment cleanup for try-catch fallback to the old value" do
+      value = MIR::TryCatch.new(MIR::Call.new("replace", [], false), MIR::Ident.new("buf"), nil)
+      node = MIR::ReassignWithCleanup.new("buf", value, "[]const u8", :heap)
+      zig = e.emit(node)
+
+      expect(zig).to include("const __new_buf_opt: ?[]const u8 = (replace() catch null);")
+      expect(zig).to include("if (__new_buf_opt) |__new_buf_val|")
+      expect(zig).to include("buf = __new_buf_val;")
+      expect(e.send(:reassign_success_only_expr, node)).to eq(value.expr)
+    end
+
+    it "substitutes sharded direct map templates and allocator metadata" do
+      sig = intrinsic_sig(
+        zig: "{target}.put({index}, {value}, {alloc})",
+        shard_direct_zig: "{target}.direct({shard_idx}, {shard_key}, {index}, {value}, {key_zig}, {val_zig}, {alloc})",
+      )
+      node = MIR::ShardedMapPut.new(
+        MIR::Ident.new("map"),
+        MIR::Ident.new("key"),
+        MIR::Ident.new("val"),
+        MIR::Ident.new("idx"),
+        MIR::Ident.new("shard_key"),
+        :string_map,
+        sig,
+        "[]const u8",
+        "i64",
+        { alloc: :frame },
+        :shard_direct_zig,
+      )
+
+      expect(e.emit(node)).to eq("map.direct(idx, shard_key, key, val, []const u8, i64, rt.frameAlloc())")
+    end
+
+    it "reports missing sharded map templates loudly" do
+      sig = intrinsic_sig(zig: "{target}.get({index})")
+      node = MIR::ShardedMapGet.new(
+        MIR::Ident.new("map"),
+        MIR::Ident.new("key"),
+        nil,
+        nil,
+        :string_map,
+        sig,
+        nil,
+        nil,
+        nil,
+        :shard_direct_zig,
+      )
+
+      expect { e.emit(node) }.to raise_error(/ShardedMap: op has no :shard_direct_zig template/)
+    end
+
+    it "emits snapshot multi transactions through the conflict wrapper" do
+      node = MIR::SnapshotMultiTxn.new(
+        ".{ left, right }",
+        "rt",
+        "rt.heapAlloc()",
+        "const left_view = views[0];",
+        [MIR::Set.new(MIR::Ident.new("left_view.value"), MIR::Lit.new("1"))],
+        "return error.Conflict;",
+        nil,
+        nil,
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("CheatLib.versionedUpdateMulti(.{ left, right }, rt, rt.heapAlloc()")
+      expect(zig).to include("const left_view = views[0];")
+      expect(zig).to include("left_view.value = 1;")
+      expect(zig).to include("error.UpdateRetriesExhausted")
+    end
+
+    it "emits WITH MATCH dispatch arms with preludes" do
+      node = MIR::WithMatchDispatch.new("cell", [
+        {
+          family: :Locked,
+          probe: "@hasDecl(T, \"lock\")",
+          prelude_zig: "const x = cell.lock();",
+          body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("x")], false), false)],
+        },
+        {
+          family: :Plain,
+          probe: "true",
+          prelude_zig: "",
+          body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("cell")], false), false)],
+        },
+      ])
+
+      zig = e.emit(node)
+      expect(zig).to include("if (comptime @hasDecl(T, \"lock\"))")
+      expect(zig).to include("const x = cell.lock();")
+      expect(zig).to include("else if (comptime true)")
+      expect(zig).to include("_ = &cell;")
+    end
+
+    it "covers polymorphic flow termination helpers" do
+      expect(e.send(:flow_body_terminates?, [MIR::RawZig.new("return value;", "ret")])).to be true
+      expect(e.send(:flow_body_terminates?, [
+        MIR::ScopeBlock.new([MIR::ReturnStmt.new(nil)]),
+      ])).to be true
+      expect(e.send(:flow_body_terminates?, [
+        MIR::ExprStmt.new(MIR::Call.new("tick", [], false), false),
+      ])).to be false
+      expect(e.send(:flow_body_terminates?, [
+        MIR::IfStmt.new(
+          MIR::Ident.new("cond"),
+          [MIR::ReturnStmt.new(nil)],
+          [MIR::RawZig.new("return;", "ret")],
+        ),
+      ])).to be true
+    end
+
+    it "wraps snapshot conflicts with retry loops" do
+      zig = e.send(:wrap_conflict_handler, "cell.update()", "return error.Stop;", 3, "AtomicConflict")
+      expect(zig).to include("__snap_retry: while (true)")
+      expect(zig).to include("error.AtomicConflict")
+      expect(zig).to include("if (__retry + 1 < 3) continue;")
+    end
+
+    it "emits index inserts with frame and custom allocator expressions" do
+      heap = e.emit(MIR::IndexInsert.new(
+        MIR::Ident.new("map"),
+        MIR::Ident.new("key"),
+        MIR::Ident.new("value"),
+        nil,
+        "i64",
+        nil,
+      ))
+      frame = e.emit(MIR::IndexInsert.new(
+        MIR::Ident.new("map"),
+        MIR::Ident.new("key"),
+        MIR::Ident.new("value"),
+        nil,
+        "i64",
+        :frame,
+      ))
+      custom = e.emit(MIR::IndexInsert.new(
+        MIR::Ident.new("map"),
+        MIR::Ident.new("key"),
+        MIR::Ident.new("value"),
+        "u16",
+        "i64",
+        :arena_alloc,
+      ))
+
+      expect(heap).to include("rt.heapAlloc().dupe(u8, key)")
+      expect(frame).to include("rt.frameAlloc().dupe(u8, key)")
+      expect(custom).to include("arena_alloc.dupe(u16, key)")
+    end
+
+    it "emits multi-binding if-bind with else fallback" do
+      node = MIR::IfBindStmt.new(
+        [
+          { expr: MIR::Ident.new("maybe_a"), capture: "a" },
+          { expr: MIR::Ident.new("maybe_b"), capture: "b" },
+        ],
+        [MIR::ReturnStmt.new(MIR::Ident.new("a"))],
+        [MIR::ReturnStmt.new(MIR::Ident.new("b"))],
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("var __ib_ok_1: bool = false;")
+      expect(zig).to include("const a = maybe_a orelse break :__ib_1;")
+      expect(zig).to include("const b = maybe_b orelse break :__ib_1;")
+      expect(zig).to include("if (!__ib_ok_1)")
+    end
+
+    it "covers defensive strategy errors and passthrough cap wrapping" do
+      expect { e.emit(MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :unknown, :heap)) }
+        .to raise_error(/emit_deep_copy: unhandled strategy :unknown/)
+      expect { e.emit(MIR::ContainerInit.new("Bad", :unknown, :heap, nil)) }
+        .to raise_error(/emit_container_init: unhandled strategy :unknown/)
+      expect(e.emit(MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :passthrough, nil, nil, nil, :heap)))
+        .to eq("val")
+      expect { e.emit(MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :unknown, nil, nil, nil, :heap)) }
+        .to raise_error(/emit_cap_wrap: unhandled strategy :unknown/)
+    end
+
+    it "covers additional cast variants and invalid cast methods" do
+      expect(e.emit(MIR::Cast.new(MIR::Ident.new("n"), nil, :floatCast))).to eq("@floatCast(n)")
+      expect(e.emit(MIR::Cast.new(MIR::Ident.new("ptr"), "*u8", :ptrCast))).to eq("@ptrCast(ptr)")
+      expect(e.emit(MIR::Cast.new(MIR::Ident.new("wide"), "u8", :truncate))).to eq("@truncate(wide)")
+      expect { e.emit(MIR::Cast.new(MIR::Ident.new("x"), nil, :badCast)) }
+        .to raise_error(/emit_cast: unknown method :badCast/)
+    end
+
+    it "covers fallback sentinels and block-shaped guarded defers" do
+      expect(e.emit(MIR::SliceExpr.new(MIR::Ident.new("items"), MIR::Lit.new("1"), nil, nil)))
+        .to eq("items[1..]")
+      expect(e.emit(MIR::TypeSentinel.new(:min, "Custom"))).to eq("-std.math.floatMax(f64)")
+      expect(e.send(:guarded_defer, "conn", "{\nconn.close();\n}", false))
+        .to eq("defer {\nconn.close();\n}\n")
+    end
   end
 end

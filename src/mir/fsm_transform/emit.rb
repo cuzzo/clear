@@ -983,15 +983,7 @@ module FsmTransform
       nil
     end
 
-    sig do
-      params(
-        body: T::Array[MIR::Node],
-        promoted_names: T::Array[String],
-        ctx_ref: String,
-        ctx: FsmContext,
-        lowering: Object,
-      ).returns(T::Array[MIR::Node])
-    end
+    sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], ctx_ref: String, ctx: FsmContext, lowering: Object).returns(T::Array[MIR::Node]) }
     def lift_ctx_cleanups_to_destroy!(body, promoted_names, ctx_ref, ctx, lowering)
       lowering_api = T.unsafe(lowering)
       body.filter_map do |node|

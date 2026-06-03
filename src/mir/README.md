@@ -80,6 +80,71 @@ annotated AST
 The exact order is enforced by
 [`../semantic/pass_state.rb`](../semantic/pass_state.rb).
 
+## Facts and Plans Strategy
+
+MIR is built around explicit facts and short-lived plans. The names are not
+perfectly uniform in the codebase, so the important distinction is lifetime:
+
+* A **fact** is evidence another pass may rely on. It is created by one stage,
+  attached to the AST, a MIR node, or a function-level map, and then consumed
+  later by lowering, checking, or emission.
+* A **plan** is a local lowering recipe. It gathers related decisions for one
+  syntactic shape, then is immediately turned into explicit MIR nodes and facts.
+
+This is the core strategy: do semantic work once, preserve the result as typed
+data, and make the checker validate the explicit surface. The emitter should
+print the MIR shape it receives; it should not rediscover ownership, allocator,
+capture, or type decisions.
+
+### Persistent Facts
+
+| Fact object | Created by | Used by | Problem solved |
+| --- | --- | --- | --- |
+| `MIRPassState` | Each compiler stage | Every downstream MIR consumer | Prevents passes from reading facts before their producer has run. |
+| Type and symbol facts (`full_type`, `storage`, `sync`, capture analysis) | Annotation, escape analysis, `BgCaptureClassifier` | `CleanupClassifier`, `MIRPass`, `MIRLowering`, `FiberCtxBuilder` | Keeps type, placement, and capture decisions outside the emitter. |
+| `CleanupEntry` plus `cleanup_bindings` | `CleanupClassifier`, refined by `MIRPass` for moved guards and special branch facts | `MIRLowering`, `MIRChecker`, `MIREmitter` | Gives each owned binding one cleanup recipe: kind, allocator, scope, guard requirement, and resource-specific cleanup data. |
+| `moved_guard_info` | `MIRPass` from ownership dataflow and cleanup entries | `MIRLowering` | Preserves branch-sensitive move state so cleanup can be guarded instead of unconditional. |
+| `MIR::OwnershipEffect` | MIR node classes and lowering helpers | Hoist/lowering ownership finalization | States whether an expression produces an owned result, which allocator owns it, whether it needs hoisting, and what target binding carries it. |
+| `MIR::OwnershipOperandFact` and `MIR::OwnershipConsumptionFact` | Lowering at the consuming edge | `MIRLowering` ownership finalization and `MIRChecker` | Describes exactly which operands are owned, borrowed, or non-owning at a consuming operation. This avoids later tree/name inference. |
+| `MIR::OwnershipContract` and `MIR::CallableContract` | Function/intrinsic lowering and raw/inline escape hatches | `MIRChecker` and ownership finalization | Makes calls and template escape hatches declare their consuming parameters and checked arity. |
+| `MIR::AllocMark`, `Cleanup`, `ErrCleanup`, `TransferMark`, `MoveMark` | MIR lowering and ownership finalization | `MIRChecker`, then `MIREmitter` | Turns abstract ownership decisions into a visible lifecycle surface that can be checked for leaks, double frees, and use-after-move. |
+| `MIR::BoundaryCaptureFact` and `MIR::ExecutionBoundaryFact` | Concurrency/BG lowering from capture analysis | `MIRChecker` and audit tooling | Records what crosses BG/DO/stream boundaries and whether dispatch is local, pinned, or parallel. |
+| `MIR::FsmOwnershipFact` and `MIR::FsmResultTransferFact` | FSM lowering and transform helpers | FSM finalization/emission and checker paths | Carries ownership transfer evidence across suspend/resume segmentation. |
+| `InlineAllocMetadata` and inline/raw Zig audit metadata | Intrinsic/template lowering | `MIRChecker` | Keeps legacy Zig escape hatches accountable for allocator and opaque ownership behavior until they are fully structural. |
+
+### Short-Lived Plans
+
+Plans are useful when a decision needs several inputs but should not leak as
+ambient state. Common examples:
+
+| Plan object | Created by | Consumed by | Problem solved |
+| --- | --- | --- | --- |
+| `MIR::BindingMaterialization` and `MIR::MaterializationPacket` | Hoist and lowering helpers | Immediate lowering call sites | Emits `AllocMark`, `Let`, and optional cleanup in the correct order as one packet. |
+| `DestinationPlacementPlan`, `OwnedSinkPlan`, `OwnedSinkSourceFact`, `DestinationSourceFact` | `MIRLowering` placement/ownership helpers | Value placement and owned-sink materialization | Chooses keep/copy/retain/promote/heap-create behavior when a value flows into a required allocator or ownership sink. |
+| `ReturnOwnershipPlan` | `MIRLoweringControlFlow` | Return lowering | Computes which returned names need transfer marks, including converted cleanup names and guarded cleanup names. |
+| `ForEachPlan`, `ForRangePlan`, `MatchLoweringFacts`, `UnionMatchArmPlan` | `MIRLoweringControlFlow` | Loop and match lowering | Keeps control-flow lowering structural while carrying iterator, arm, and payload details. |
+| `ListLiteralPlan`, `HashLiteralPlan` | `MIRLoweringLiterals` | Literal lowering | Decides allocation, element type, ownership storage, and capability wrappers before building MIR nodes. |
+| `NextExprPlan`, `BgLoweringNames`, `BgBodyMaterialization`, `BgCaptureMaterialization` | `MIRLoweringConcurrency` | BG/stream/observable lowering | Keeps async result shape, runtime names, captures, and body materialization explicit at the boundary. |
+| `FiberCtxBuilder::CaptureSpec` and `FiberCtxBuilder::Result` | `FiberCtxBuilder` | BG, BG stream, DO, concurrent pipeline, and FSM-related lowering | Normalizes capture fields, initializers, body access rewrites, and FreshHeapCopy/RcClone cleanup wiring. |
+| `WithBindingMaterialization`, `LockBindingPlan`, `FallibleLockBindingPlan`, `MutableSnapshotPlan` | `MIRLoweringCapabilities` | `WITH` lowering | Separates lock acquisition, aliases, fallible clauses, sorted acquisition, and snapshot transactions from the body. |
+| `OwnershipFinalizationContext`, `OwnershipFactTarget`, `OwnershipTransferTarget`, `OwnershipSurfaceScan` | `MIRLowering` ownership finalization | The finalization pass over lowered MIR bodies | Tracks already-emitted alloc/transfer/move/cleanup facts while inserting missing ownership markers. |
+| `ThunkTransform::Plan`, `MutualPlan`, `MutualThunkPlan` | Thunk recursive splitters | Thunk emitters/lowering | Records recognized recursion shapes so trampoline emission does not infer them from text. |
+| FSM segment/liveness/suspend resolver records | `fsm_transform/*` | FSM emit and wrapper emission | Carries segment boundaries, cross-segment locals, suspend descriptors, and per-arm cleanup data across FSM lowering. |
+
+### Rules of Thumb
+
+* If a decision crosses a pass boundary, make it a fact and attach it to the AST,
+  a MIR node, or a function-level map.
+* If a decision is only needed to lower one shape, keep it as a plan and
+  immediately materialize it into MIR nodes/facts.
+* Ownership consumption must be emitted at the consuming edge as operand facts or
+  callable contracts. It should not be recovered later by walking arbitrary MIR
+  subtrees or rendered Zig text.
+* Allocator and cleanup facts have one writer. Architecture invariant specs
+  enforce the sanctioned writers for storage and cleanup placement fields.
+* Template or raw Zig escape hatches must carry explicit ownership contracts and
+  allocation metadata until they are replaced with structural MIR.
+
 ### 0. Annotated AST Input
 
 MIR starts after parsing and annotation. Names have been resolved, types are
@@ -521,12 +586,17 @@ available:
 The MIR directory is split by responsibility:
 
 * [`mir.rb`](mir.rb): MIR node definitions and ownership fact structs.
+* [`alloc.rb`](alloc.rb): annotation-side storage helpers mixed into the semantic annotator.
 * [`hoist.rb`](hoist.rb): AST rewrite that creates bindings for anonymous owned values.
 * [`pre_mir_type_check.rb`](pre_mir_type_check.rb): AST-to-MIR type invariant.
+* [`cleanup_entry.rb`](cleanup_entry.rb): typed cleanup recipe object used by cleanup classification, lowering, checking, and emission.
 * [`cleanup_classifier.rb`](cleanup_classifier.rb): cleanup plans for bindings.
 * [`control_flow.rb`](control_flow.rb): CFG construction, ownership dataflow, and use-after-move checking.
 * [`mir_pass.rb`](mir_pass.rb): coordinates MIR-side AST analysis and stamping.
 * [`mir_lowering.rb`](mir_lowering.rb) and [`lowering/`](lowering/): AST-to-MIR lowering.
+* [`materialization.rb`](materialization.rb): helper packets for emitting allocation marks, bindings, and cleanups together.
+* [`fiber_ctx_builder.rb`](fiber_ctx_builder.rb): shared capture-context builder for BG, DO, stream, concurrent, and FSM-adjacent lowering.
+* [`test_lowering.rb`](test_lowering.rb): TEST/WHEN/STUB/BENCHMARK lowering support.
 * [`mir_checker.rb`](mir_checker.rb): ownership and lifecycle verification over MIR.
 * [`mir_emitter.rb`](mir_emitter.rb): MIR-to-Zig emission.
 * [`fsm_transform.rb`](fsm_transform.rb), [`fsm_transform/`](fsm_transform),
@@ -553,3 +623,6 @@ Shared semantic analyses live outside MIR in [`../semantic`](../semantic):
 
 The design boundary is intentional: analysis belongs before or during lowering,
 verification belongs in the checker, and emission is mechanical.
+
+The active MIR coverage/review burn-down checklist lives in
+[`../../docs/agents/MIR_COVERAGE_AUDIT.md`](../../docs/agents/MIR_COVERAGE_AUDIT.md).

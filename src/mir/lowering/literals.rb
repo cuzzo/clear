@@ -198,6 +198,9 @@ module MIRLoweringLiterals
     rt_name = runtime_binding_name
     map_alloc = plan.alloc
     alloc_str = plan.alloc_zig
+    init_value = T.let(nil, T.untyped)
+    result_wrap = T.let(nil, T.nilable(Symbol))
+    result_wrap_fn = T.let(nil, T.nilable(String))
 
     # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap
     if plan.capability_wrapped?
@@ -212,11 +215,7 @@ module MIRLoweringLiterals
         zig_t = bare_ft.zig_type
 
         needs_alloc = bare_ft.map_init_needs_alloc?
-        inner = if needs_alloc
-          MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
-        else
-          MIR::StructInit.new(zig_t, [])
-        end
+        inner = MIR::StructInit.new(zig_t, needs_alloc ? [{ name: "alloc", value: MIR::Ident.new(alloc_str) }] : [])
 
         wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
         inner = T.cast(
@@ -229,6 +228,9 @@ module MIRLoweringLiterals
           MIR::CapWrap,
         )
         return inner if node.pairs.empty?
+        init_value = MIR::StructInit.new(zig_t, needs_alloc ? [{ name: "alloc", value: MIR::Ident.new(alloc_str) }] : [])
+        result_wrap = :striped
+        result_wrap_fn = wrap_fn
       else
         bare_ft = ti.bare_data_type
         zig_t = bare_ft.zig_type
@@ -242,11 +244,13 @@ module MIRLoweringLiterals
 
         wrapped = compose_capability_wrap(inner, zig_t, ti, :heap)
         return wrapped if node.pairs.empty?
-        inner = wrapped
+        init_value = inner
+        result_wrap = :composed
       end
     end
 
     zig_t = plan.zig_type
+    zig_t = init_value.zig_type if init_value.is_a?(MIR::StructInit)
 
     if node.pairs.empty?
       # PartitionedStringMap, PartitionedNumericMap, and NumericMapType don't have an .alloc field
@@ -258,7 +262,7 @@ module MIRLoweringLiterals
     # Non-empty hash: init + puts
     items = []
     alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), map_alloc == :heap ? "heapAlloc" : "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
-    items << MIR::Let.new("__hm", MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
+    items << MIR::Let.new("__hm", init_value || MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       k = lower(key_node)
       raw_v = with_decl_alloc(map_alloc) { materialize_owned_sink_value(lower(val_node), val_node, map_alloc) }
@@ -274,7 +278,17 @@ module MIRLoweringLiterals
       put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true, put_contract)
       items << MIR::ExprStmt.new(put_call, false)
     end
-    items << MIR::BreakStmt.new("__hm_blk", MIR::Ident.new("__hm"))
+    result = T.let(MIR::Ident.new("__hm"), T.untyped)
+    if result_wrap == :striped
+      result = MIR::CapWrap.new(result, zig_t, :own_only, nil, nil, T.must(result_wrap_fn), :heap)
+    elsif result_wrap == :composed
+      result = compose_capability_wrap(result, zig_t, ti, :heap)
+    end
+    if result_wrap
+      items << MIR::Let.new("__hm_wrapped", result, false, Type.new(ti), nil)
+      result = MIR::Ident.new("__hm_wrapped")
+    end
+    items << MIR::BreakStmt.new("__hm_blk", result)
     block = MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
     block.result_type = Type.new(ti)
     block

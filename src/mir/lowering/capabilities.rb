@@ -31,6 +31,7 @@ module MIRLoweringCapabilities
 
   CapabilitySpecValue = T.type_alias { T.any(AST::Node, Type, Symbol, String, T::Boolean, NilClass) }
   CapabilitySpec = T.type_alias { T.any(AST::Capability, T::Hash[Symbol, CapabilitySpecValue]) }
+  CapabilityVarNode = T.type_alias { T.any(AST::Identifier, AST::GetField) }
   WithBindingNode = T.type_alias { T.any(String, MIR::Node) }
 
   class FallibleClauseFact < T::Struct
@@ -47,7 +48,7 @@ module MIRLoweringCapabilities
   class WithCapabilityBindingContext < T::Struct
     const :node, AST::WithBlock
     const :cap, CapabilitySpec
-    const :var_node, AST::Identifier
+    const :var_node, CapabilityVarNode
     const :var_name, String
     const :alias_name, String
     const :resolved_type, T.nilable(Type)
@@ -114,7 +115,7 @@ module MIRLoweringCapabilities
   end
 
   class MutableSnapshotCap < T::Struct
-    const :var_node, AST::Identifier
+    const :var_node, CapabilityVarNode
     const :alias_name, String
     const :source_zig, String
     const :bare_type_zig, String
@@ -144,7 +145,7 @@ module MIRLoweringCapabilities
     wrapper ? "#{wrapper}(#{bare_zig_t})" : nil
   end
 
-  sig { params(var_node: AST::Identifier).returns(String) }
+  sig { params(var_node: CapabilityVarNode).returns(String) }
   def with_cap_var_name(var_node)
     T.bind(self, MIRLowering) rescue nil
     case var_node
@@ -168,7 +169,7 @@ module MIRLoweringCapabilities
   # CONCURRENT EACH callback take the direct c.ctrl.data.* Arc-unwrap
   # path (storage = :shared) instead of the polymorphic c.* path that
   # only works for non-Arc parameters.
-  sig { params(var_node: AST::Identifier).returns(T::Array[T.nilable(Symbol)]) }
+  sig { params(var_node: CapabilityVarNode).returns(T::Array[T.nilable(Symbol)]) }
   def with_cap_sync_storage(var_node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -196,7 +197,7 @@ module MIRLoweringCapabilities
   # Zig expression naming the locked-inner. Identifier → its Zig name (or
   # DO-capture rename). GetField → the chained field path (e.g.
   # `env.vars`), built recursively for nested fields.
-  sig { params(var_node: AST::Identifier, var_name: String).returns(String) }
+  sig { params(var_node: CapabilityVarNode, var_name: String).returns(String) }
   def with_cap_zig_target(var_node, var_name)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -214,7 +215,7 @@ module MIRLoweringCapabilities
   # True when the WITH-bound entity is a function parameter (vs. a local
   # binding). Parameters' runtime wrappers come from the caller and may
   # not be statically known at this fn's codegen time.
-  sig { params(var_node: AST::Identifier).returns(T::Boolean) }
+  sig { params(var_node: CapabilityVarNode).returns(T::Boolean) }
   def with_cap_is_param?(var_node)
     T.bind(self, MIRLowering) rescue nil
     return false unless var_node.is_a?(AST::Identifier)
@@ -299,7 +300,7 @@ module MIRLoweringCapabilities
     if clause
       materialization.add_binding(emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, node))
       fallible_caps.each do |cap|
-        var_name = with_cap_var_name(T.cast(cap[:var_node], AST::Identifier))
+        var_name = with_cap_var_name(T.cast(cap[:var_node], CapabilityVarNode))
         alias_name = (cap[:alias] || var_name).to_s
         materialization.add_fallible_clause(build_fallible_clause_mir(var_name, alias_name, clause))
       end
@@ -319,7 +320,7 @@ module MIRLoweringCapabilities
     ).returns(WithCapabilityBindingContext)
   end
   def with_capability_binding_context(node, cap, clause, with_label, needs_sort, rt_name)
-    var_node = T.cast(cap[:var_node], AST::Identifier)
+    var_node = T.cast(cap[:var_node], CapabilityVarNode)
     var_name = with_cap_var_name(var_node)
     alias_name = (cap[:alias] || var_name).to_s
     resolved = with_cap_resolved_type(cap)
@@ -385,7 +386,7 @@ module MIRLoweringCapabilities
     materialization.add_fallible_clause(build_fallible_clause_mir(context.var_name, context.alias_name, clause))
   end
 
-  sig { params(var_node: AST::Identifier).returns(String) }
+  sig { params(var_node: CapabilityVarNode).returns(String) }
   def with_capability_source_zig(var_node)
     lowerer = T.cast(self, MIRLowering)
     T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
@@ -1223,7 +1224,7 @@ module MIRLoweringCapabilities
 
   sig { params(lowerer: MIRLowering, cap: CapabilitySpec).returns(MutableSnapshotCap) }
   def mutable_snapshot_cap(lowerer, cap)
-    var_node = T.cast(cap[:var_node], AST::Identifier)
+    var_node = T.cast(cap[:var_node], CapabilityVarNode)
     var_name = with_cap_var_name(var_node)
     sym = var_node.symbol
     resolved_type = Type.from_node!(cap[:resolved_type], context: "mutable snapshot capability type")

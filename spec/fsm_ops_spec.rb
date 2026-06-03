@@ -85,6 +85,15 @@ RSpec.describe FsmOps do
         .to eq("__ctx_0.rt.getSched().fsmSleepTask(&__ctx_0.task, 42)")
     end
 
+    it "renders plain string expression literals" do
+      expect(emitter.emit_expr("already_rendered")).to eq("already_rendered")
+    end
+
+    it "rejects unknown expression ops" do
+      expect { emitter.emit_expr(Object.new) }
+        .to raise_error(ArgumentError, /unknown expression op/)
+    end
+
     it "rejects unknown function path roots" do
       path = FsmOps::FunctionPath.new(root: :bogus, parts: ["bad"])
       expect { path.render("__ctx_0") }
@@ -147,6 +156,14 @@ RSpec.describe FsmOps do
       expect(emitter.emit_stmt(stmt))
         .to include("return CheatHeader.fsmIoError(__ctx_0.rf_waiter.result);")
     end
+
+    it "renders try statement calls and rejects unknown statement ops" do
+      stmt = FsmOps::StmtCall.new(FO.fn("CheatHeader.tick"), [FO.arg(0)], true)
+      expect(emitter.emit_stmt(stmt)).to eq("try CheatHeader.tick(path_arg);")
+
+      expect { emitter.emit_stmt(Object.new) }
+        .to raise_error(ArgumentError, /unknown statement op/)
+    end
   end
 
   describe "MIR lowering" do
@@ -168,6 +185,32 @@ RSpec.describe FsmOps do
       expect(mir.init.callee).to eq("@as")
       expect(mir.init.args.first).to eq(MIR::Ident.new("usize"))
       expect(mir.init.args.last).to eq(MIR::Call.new("@intCast", [MIR::Lit.new("42")], false))
+    end
+
+    it "lowers string literals, Zig literals, and bounded slices" do
+      lowerer = FsmOps::Lowerer.new(
+        ctx_id: 7,
+        bg_rt: "__rt_bg7",
+        arg_mirs: [MIR::Ident.new("buf"), MIR::Ident.new("len")],
+      )
+
+      expect(lowerer.lower_expr("opaque")).to eq(MIR::Lit.new("opaque"))
+      expect(lowerer.lower_expr(FO.lit("undefined"))).to eq(MIR::Lit.new("undefined"))
+
+      slice = lowerer.lower_expr(FsmOps::SliceUntilIntCast.new(FO.arg(0), FO.arg(1)))
+      expect(slice).to be_a(MIR::SliceExpr)
+      expect(slice.target).to eq(MIR::Ident.new("buf"))
+    end
+
+    it "rejects lowerer arg overflows and unknown ops" do
+      lowerer = FsmOps::Lowerer.new(ctx_id: 7, bg_rt: "__rt_bg7", arg_mirs: [])
+
+      expect { lowerer.lower_expr(FO.arg(0)) }
+        .to raise_error(ArgumentError, /arg index 0 out of range/)
+      expect { lowerer.lower_expr(Object.new) }
+        .to raise_error(ArgumentError, /unknown expression op/)
+      expect { lowerer.lower_stmt(Object.new) }
+        .to raise_error(ArgumentError, /unknown statement op/)
     end
   end
 

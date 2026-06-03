@@ -149,5 +149,14 @@ RSpec.describe FsmTransform::Liveness do
         { captured: { "needle" => :placeholder } })
       expect(result.cross_segment_vars).not_to have_key("needle")
     end
+
+    it "records string-target assignments as definitions" do
+      defs = {}
+      stmt = AST::Assignment.new(nil, "slot", ident("source"))
+
+      FsmTransform::Liveness.collect_defs(stmt, defs)
+
+      expect(defs).to eq("slot" => nil)
+    end
   end
 end

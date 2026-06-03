@@ -25,6 +25,7 @@
 # value-producing fragment. The emitter dispatches on Struct class.
 
 require "sorbet-runtime"
+require_relative "mir"
 
 module FsmOps
     extend T::Sig
@@ -424,7 +425,7 @@ module FsmOps
       ops.map { |op| lower_stmt(op) }
     end
 
-    sig { params(op: Stmt).returns(Object) }
+    sig { params(op: T.untyped).returns(Object) }
     def lower_stmt(op)
       case op
       when AssignField

@@ -545,7 +545,10 @@ class MIRChecker
       end
       state.pending_block_transfers.clear
     else
-      if stmt.body_slots.empty?
+      manual_traversal = stmt.is_a?(MIR::DeferStmt) || stmt.is_a?(MIR::ErrDeferStmt) ||
+        stmt.is_a?(MIR::StructDef) ||
+        stmt.is_a?(MIR::FsmB1Body) || stmt.is_a?(MIR::FsmGenericBody) || stmt.is_a?(MIR::FsmIoBody)
+      if stmt.body_slots.empty? && !manual_traversal
         check_linear_expr_uses!(stmt, state)
         return
       end

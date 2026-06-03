@@ -191,13 +191,7 @@ module Hoist
     each_call_like(node, ->(candidate) { candidate.is_a?(AST::FuncCall) || candidate.is_a?(AST::MethodCall) }, &blk)
   end
 
-  sig do
-    params(
-      node: T.untyped,
-      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
-      blk: T.proc.params(arg0: T.untyped).void,
-    ).void
-  end
+  sig { params(node: T.untyped, matches: T.proc.params(candidate: T.untyped).returns(T::Boolean), blk: T.proc.params(arg0: T.untyped).void).void }
   def each_call_like(node, matches, &blk)
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
@@ -212,13 +206,7 @@ module Hoist
     end
   end
 
-  sig do
-    params(
-      child: T.untyped,
-      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
-      blk: T.proc.params(arg0: T.untyped).void,
-    ).void
-  end
+  sig { params(child: T.untyped, matches: T.proc.params(candidate: T.untyped).returns(T::Boolean), blk: T.proc.params(arg0: T.untyped).void).void }
   def each_call_like_child(child, matches, &blk)
     case child
     when Array then child.each { |c| each_call_like(c, matches, &blk) }
@@ -489,7 +477,6 @@ module MIRHoistLowering
     )
     @pending_stmts.concat(materialized.statements)
     @lowered_alloc_names&.add(name)
-    @lowered_alloc_names&.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
     MIR::Ident.new(name)
   end
@@ -645,8 +632,6 @@ module MIRHoistLowering
       Type.new(sig.return_type)
     when MIR::BgBlock
       raise "#{context}: allocating MIR::BgBlock has no result type" unless mir.result_type
-
-      Type.new(T.must(mir.result_type))
     when MIR::Pipeline
       if mir.ast_node
         Type.from_node!(mir.ast_node, context: context)
@@ -657,18 +642,12 @@ module MIRHoistLowering
       end
     when MIR::TryCatch
       raise "#{context}: allocating MIR::TryCatch has no result type" unless mir.result_type
-
-      Type.new(T.must(mir.result_type))
     when MIR::BlockExpr
-      unless mir.result_type
-        inferred = block_expr_result_type(mir)
-        return inferred if inferred
-        effect = mir.ownership_effect
-        return Type.new(:String, location: effect.alloc || alloc) if effect.cleanup_kind == :heap_string
-        raise "#{context}: allocating MIR::BlockExpr has no result type"
-      end
-
-      Type.new(T.must(mir.result_type))
+      inferred = block_expr_result_type(mir)
+      return inferred if inferred
+      effect = mir.ownership_effect
+      return Type.new(:String, location: effect.alloc || alloc) if effect.cleanup_kind == :heap_string
+      raise "#{context}: allocating MIR::BlockExpr has no result type"
     when MIR::Orelse, MIR::IfOptional
       raise "#{context}: allocating #{mir.class} has no typed allocation result"
     else
@@ -1240,15 +1219,19 @@ module MIRHoistLowering
   def cleanup_entry_for_ownership_effect(mir, alloc: :heap)
     return nil unless mir.respond_to?(:ownership_effect)
 
+    effect = mir.ownership_effect
+
     if mir.is_a?(MIR::BlockExpr)
-      transferred = mir_ident_names(mir).first
+      # BlockExpr#ownership_effect is the ownership fact that retains the
+      # local moved out by TransferMark; mir_ident_names intentionally filters
+      # block-local names.
+      transferred = effect.target_var
       if transferred
         let = mir.body&.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == transferred.to_s }
         return hoist_cleanup_entry(let.init, nil) if let
       end
     end
 
-    effect = mir.ownership_effect
     return nil unless effect.produces_owned
 
     case effect.cleanup_kind

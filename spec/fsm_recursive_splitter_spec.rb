@@ -138,6 +138,68 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     end
   end
 
+  describe "edge guards" do
+    it "raises if a reserved builder segment is finalized unfilled" do
+      builder = FsmTransform::RecursiveSplitter::Builder.new
+      builder.reserve_index
+
+      expect { builder.finalize }.to raise_error(/unfilled segments/)
+    end
+
+    it "rejects catch blocks and unhandled pivot statements" do
+      catch_block = AST::CatchBlock.new(nil, [], nil)
+      expect(FsmTransform::RecursiveSplitter.contains_unsupported?([catch_block]))
+        .to eq(true)
+
+      builder = FsmTransform::RecursiveSplitter::Builder.new
+      expect {
+        FsmTransform::RecursiveSplitter.emit_pivot(AST::PassStmt.new(nil), 0, builder, lowering)
+      }.to raise_error(FsmTransform::RecursiveSplitter::UnsupportedShape, /Unhandled pivot kind/)
+    end
+
+    it "rejects unsupported and unknown foreach descriptor shapes" do
+      promise = ident("p")
+      next_expr = AST::NextExpr.new(nil, promise)
+
+      unsupported_coll = AST::Identifier.new(nil, "unsupported_items")
+      unsupported_coll.full_type = Type.new(:Any)
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", unsupported_coll, [next_expr])], lowering)).to be_nil
+
+      unknown_type = Type.new(:UnknownCollection)
+      unknown_type.define_singleton_method(:fsm_foreach_descriptor) do
+        TypeFsmForEachDescriptor.new(kind: :unknown, var_zig_type: "i64")
+      end
+      unknown_coll = AST::Identifier.new(nil, "unknown_items")
+      unknown_coll.full_type = unknown_type
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", unknown_coll, [next_expr])], lowering)).to be_nil
+    end
+
+    it "returns nil when expression lowering fails" do
+      bad_lowering = Class.new {
+        def lower(_node)
+          raise "bad lower"
+        end
+      }.new
+
+      expect(FsmTransform::RecursiveSplitter.lower_to_zig(ident("x"), bad_lowering))
+        .to be_nil
+    end
+
+    it "remaps loop-back tails and passes through unknown tails" do
+      remapped = FsmTransform::RecursiveSplitter.remap_tail(
+        FsmTransform::Segments::LoopBack.new(4),
+        { 4 => 1 },
+      )
+      passthrough = Object.new
+
+      expect(remapped.target_index).to eq(1)
+      expect(FsmTransform::RecursiveSplitter.remap_tail(passthrough, {}))
+        .to equal(passthrough)
+    end
+  end
+
   describe "WhileLoop with NEXT" do
     it "produces cond + body + done" do
       promise = ident("p")

@@ -186,7 +186,7 @@ module Annotator
         # annotator must not pre-fold a type's heap-capable provenance onto
         # the symbol -- that over-promotes (e.g. a union typed heap-capable
         # but never actually escaping).
-        is_resource, resource_close = resolve_resource_close(node, final_type)
+        is_resource, resource_close = resolve_resource_close(node)
         node.resource_close_zig = resource_close
         node_type = node.full_type!(context: "var declaration")
         node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)

@@ -558,8 +558,6 @@ module MIRLoweringControlFlow
             field = MIR::FieldGet.new(payload, f.name.to_s)
             MIR::Let.new(f.name.to_s, field, false, nil, "_ = &#{f.name};")
           end
-        else
-          []
         end
       }
       branches = node.cases.flat_map { |c|
@@ -620,9 +618,6 @@ module MIRLoweringControlFlow
             else
               cond_parts.reduce { |acc, part| MIR::BinOp.new("and", acc, part) }
             end
-          elsif c.kind == :when
-            # WHEN guard: condition IS the guard expression, not subject == guard
-            lower(c.value)
           else
             head_eq = MIR::BinOp.new("==", subject, lower(c.value))
             (c.extra_values || []).reduce(head_eq) do |acc, ev|

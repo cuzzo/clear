@@ -487,7 +487,7 @@ class MIREmitter
   # outer-retry shape). Parameterize the Zig error name so the same wrapper works for both families:
   # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
   # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
-  sig { params(core_call: String, conflict_action: String, retries: NilClass, zig_error_name: String).returns(String) }
+  sig { params(core_call: String, conflict_action: String, retries: T.nilable(Integer), zig_error_name: String).returns(String) }
   def wrap_conflict_handler(core_call, conflict_action, retries, zig_error_name = "UpdateRetriesExhausted")
     if retries
       <<~ZIG.rstrip

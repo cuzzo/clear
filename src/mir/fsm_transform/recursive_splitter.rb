@@ -201,8 +201,6 @@ module FsmTransform
         synthetic_fields: synth,
         alias_overrides_by_index: alias_table,
       )
-    rescue UnsupportedShape
-      nil
     end
 
     class UnsupportedShape < StandardError; end

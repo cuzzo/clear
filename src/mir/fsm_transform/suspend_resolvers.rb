@@ -177,9 +177,10 @@ module FsmTransform
       promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
       sp_zig = Type.new(promise_ft).zig_type
       inner_type_info = T.let(nil, T.nilable(Type))
+      promise_type = Type.new(promise_ft)
       inner_zig =
-        if (pt = Type.new(promise_ft)).tense_type
-          inner_type_info = Type.new(pt.tense_type)
+        if promise_type.future? && promise_type.tense_type
+          inner_type_info = Type.new(promise_type.tense_type)
           inner_type_info.zig_type
         else
           nil

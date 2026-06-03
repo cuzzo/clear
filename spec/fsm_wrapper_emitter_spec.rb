@@ -200,6 +200,55 @@ RSpec.describe FsmWrapperEmitter do
       out = FsmWrapperEmitter.render(bod)
       expect(out).to match(/if \((?:@This\(\)\.)?runStep0.+\) \|_\| \{\} else \|err\| \{[\s\S]*?__ctx_0\.alloc\.free\(__ctx_0\.needle\);[\s\S]*?return \.\{ \.Done = \{\} \};/)
     end
+
+    it "renders dispatch pre-body skip arms" do
+      dispatch = MIR::FsmDispatch.new(
+        4,
+        [
+          MIR::FsmStateArm.new(
+            0,
+            MIR::FsmTailCondSkip.new("__ctx_4.skip", 2),
+            nil,
+            nil,
+            nil,
+            MIR::FsmTailJump.new(1),
+          ),
+        ],
+        true,
+      )
+
+      out = FsmWrapperEmitter.render_dispatch(dispatch)
+
+      expect(out).to include("if (__ctx_4.skip) {")
+      expect(out).to include("__ctx_4.step = 2;")
+      expect(out).to include("continue :__sw;")
+    end
+
+    it "rejects unknown dispatch tails" do
+      expect { FsmWrapperEmitter.render_tail(Object.new, 0) }
+        .to raise_error(ArgumentError, /unknown tail/)
+    end
+  end
+
+  describe "generic FSM body" do
+    it "passes through legacy raw resume function text" do
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgRawCtx",
+        "CheatLib.Promise(i64)",
+        "",
+        [],
+        [],
+        [],
+        "fn resumeFn(_: *CheatHeader.FsmTask) CheatHeader.YieldReason { return .{ .Done = {} }; }",
+        nil,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_raw", generic_ctx, spawn_setup)
+
+      out = FsmWrapperEmitter.render(generic_body)
+
+      expect(out).to include("fn resumeFn(_: *CheatHeader.FsmTask)")
+      expect(out).to include("return .{ .Done = {} };")
+    end
   end
 
   describe "step body as MIR statements" do

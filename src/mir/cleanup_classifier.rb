@@ -257,7 +257,7 @@ module CleanupClassifier
 
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
         moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
-        cleanup = classify_binding(var_name, node.full_type!, node, schema_lookup)
+        cleanup = classify_binding(node.full_type!, node, schema_lookup)
         cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
         unless cleanup
           if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
@@ -474,7 +474,7 @@ module CleanupClassifier
       expr_ti = Type.from_node!(expr, context: "capture binding")
       inner_ti = expr_ti.wrapped_type
       next unless inner_ti
-      e = classify_binding(name, inner_ti, anchor_node, schema_lookup)
+      e = classify_binding(inner_ti, anchor_node, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
       e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
       next unless e
@@ -559,8 +559,8 @@ module CleanupClassifier
   # non_copy_union) inline here; complex ones (collection, optional,
   # heap_storage, struct_cleanup_fields, rc_or_link, heap_struct_plain,
   # array_struct_strings) stay as separate methods due to their size.
-  sig { params(name: String, ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_binding(name, ti, node, schema_lookup)
+  sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_binding(ti, node, schema_lookup)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     value = node.respond_to?(:value) ? T.unsafe(node).value : nil
     return nil if binding_container_borrow?(node)
@@ -606,9 +606,6 @@ module CleanupClassifier
     end
     entry ||= entry(:uniform, has_moved_guard: true) if !ti.optional? && (ti.heap_ptr? || ti.indirect?)
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
-    if !entry && ti.atomic_ptr?
-      entry = entry(:uniform)
-    end
     entry ||= classify_rc_or_link(ti, schema_lookup)
     entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? || SymbolEntry.cleanup_sync?(sync)
     entry ||= classify_owned_string(ti, node, schema_lookup)
@@ -691,7 +688,6 @@ module CleanupClassifier
         ret.recursive_cleanup_shape?(schema_lookup)
     )
 
-    schema = schema_lookup.call(ret.resolved) rescue nil
     kind = ret.string? ? :heap_string : :uniform
     e = entry(kind, alloc: :heap, has_moved_guard: true)
     e[:fixed_alloc] = true

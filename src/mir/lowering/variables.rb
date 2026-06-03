@@ -185,16 +185,6 @@ module MIRLoweringVariables
         :owned_sink,
         target_alloc: facts.decl_alloc,
       ), MIR::Let)
-    elsif init.is_a?(MIR::Ident) &&
-          ownership_tracked_transfer_type?(facts.ft) &&
-          owned_binding_visible?(init.name.to_s)
-      let_node = T.cast(with_ownership_consumption(
-        let_node,
-        [init.name.to_s],
-        "var init",
-        :owned_sink,
-        target_alloc: facts.decl_alloc,
-      ), MIR::Let)
     end
 
     nodes = var_decl_materialization_plan(
@@ -786,8 +776,8 @@ module MIRLoweringVariables
         !fallible_self_fallback_reassign?(mapped || safe, value)
       result = if rp
         MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
-      elsif heap_return_var && node.name.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, @schema_lookup)
-        target_type = node.name.full_type!(context: "reassign target")
+      elsif heap_return_var && node.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, @schema_lookup)
+        target_type = node.full_type!(context: "reassign target")
         MIR::ReassignWithCleanup.new(mapped || safe, value, transpile_type(target_type), :heap)
       else
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
@@ -974,15 +964,8 @@ module MIRLoweringVariables
     end
 
     # Non-HashMap kinds (array, list, pool, set_collection) keep their
-    # InlineZig template path below.
-    target_var_for_bc = target_node.is_a?(AST::Identifier) ? target_node.name : nil
-    if @target == :bc && op[:bc_op] &&
-       !(@shard_context && target_var_for_bc == @shard_context[:map])
-      val = lower(node.value)
-      return MIR::ExprStmt.new(
-        MIR::InlineBc.new(op[:bc_op], [target, idx, val], op), false)
-    end
-
+    # InlineZig template path below. The BC backend already returned above
+    # with a structural Set(IndexGet, value).
     lower_template_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
   end
 
@@ -1126,18 +1109,6 @@ module MIRLoweringVariables
     pattern = pattern.gsub("&{target}", "&#{target_zig}")
     pattern = pattern.gsub("{index}", idx_zig)
     pattern = pattern.gsub("{value}", val_zig)
-
-    # Substitute shard-direct placeholders when inside SHARD body
-    if @shard_context && pattern.include?("{shard_idx}")
-      pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
-      pattern = pattern.gsub("{shard_key}", @shard_context[:key])
-    end
-
-    # Resolve type placeholders from receiver (not allocators -- safe to inline)
-    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      pattern = pattern.gsub("{key_zig}", receiver_type.key_type&.zig_type || "i64")
-      pattern = pattern.gsub("{val_zig}", receiver_type.value_type&.zig_type || "f64")
-    end
 
     iz = MIR::InlineZig.new(pattern, "index_set")
     iz.stdlib_def = op

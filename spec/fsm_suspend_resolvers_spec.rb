@@ -91,6 +91,20 @@ RSpec.describe FsmTransform::SuspendResolvers do
           FsmTransform::Segments::Segment.new(0, [], bad_tail), ctx, lowering)
       }.to raise_error(ArgumentError, /missing stdlib_def/)
     end
+
+    it "consumes finish values when IO has no bound result variable" do
+      finish_value_def = IntrinsicRegistry.fs({
+        suspends: true,
+        fsm_setup: [],
+        fsm_finish_value: FsmOps::ZigLit.new("__finished"),
+      })
+      tail = FsmTransform::Segments::IoSuspend.new(call_node, finish_value_def, nil)
+
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
+
+      expect(d.bind_stmts).to contain_exactly(an_instance_of(MIR::ExprStmt))
+    end
   end
 
   describe "resolve_next" do
@@ -171,6 +185,40 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.bind_stmts.first.expr).to be_a(MIR::TryCatch)
       expect(d.bind_stmts.first.expr.expr.method).to eq("finishFsmNext")
     end
+
+    it "handles malformed non-promise NEXT types as a defensive fallback" do
+      plain_ast = Object.new
+      def plain_ast.full_type; Type.new(:Int64); end
+
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(
+          0, [], FsmTransform::Segments::NextSuspend.new(plain_ast, nil)
+        ),
+        ctx, lowering, susp_idx: 2)
+
+      expect(d.result_zig_type).to be_nil
+      expect(d.bind_stmts).to contain_exactly(an_instance_of(MIR::ExprStmt))
+    end
+
+    it "tracks cleanup-bearing NEXT results with owned-result guards" do
+      string_promise = Object.new
+      def string_promise.full_type; Type.new(:"~String"); end
+
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(
+          0, [], FsmTransform::Segments::NextSuspend.new(string_promise, "payload")
+        ),
+        ctx, lowering, susp_idx: 3)
+
+      expect(d.result_needs_cleanup).to eq(true)
+      expect(d.ctx_field_decls).to include("__owned_payload_init: bool = false,")
+      expect(d.bind_stmts).to include(
+        an_object_having_attributes(
+          target: an_object_having_attributes(field: "__owned_payload_init"),
+          value: an_object_having_attributes(value: "true"),
+        ),
+      )
+    end
   end
 
   describe "resolve dispatch" do
@@ -181,6 +229,14 @@ RSpec.describe FsmTransform::SuspendResolvers do
           FsmTransform::Segments::Segment.new(0, [], bad_tail),
           ctx, lowering)
       }.to raise_error(ArgumentError, /no resolver for/)
+    end
+
+    it "treats type predicate failures as non-cleanup defensive fallbacks" do
+      bad_type = Type.new(:String)
+      bad_type.define_singleton_method(:string?) { raise "bad type" }
+
+      expect(FsmTransform::SuspendResolvers.ownership_bearing_result_type?(bad_type, lowering))
+        .to eq(false)
     end
   end
 end

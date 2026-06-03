@@ -202,5 +202,73 @@ RSpec.describe FsmTransform::Emit do
 
       expect(guards).to eq("payload" => "__owned_payload_init")
     end
+
+    it "lowers non-void Done segments with result capture enabled" do
+      lowering = Class.new {
+        attr_reader :calls
+
+        def initialize
+          @calls = []
+        end
+
+        def capture_inits_fsm(_capture_inits)
+          ""
+        end
+
+        def with_fiber_capture_map(_capture_map, rt_override:)
+          yield
+        end
+
+        def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
+          @calls << { stmts: stmts, no_result: no_result, ctx_id: ctx_id }
+          [MIR::ExprStmt.new(MIR::Lit.new("loweredResult()"), false)]
+        end
+
+        def render_mir_list(_nodes)
+          "loweredResult();"
+        end
+      }.new
+      result_expr = AST::Literal.new(nil, :NUMBER, 1, nil)
+      result_expr.full_type = :Int64
+      segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+        segments: [
+          FsmTransform::Segments::Segment.new(
+            0, [result_expr], FsmTransform::Segments::Done.new(nil)
+          ),
+        ],
+        synthetic_fields: [],
+        alias_overrides_by_index: {},
+      )
+      ctx = {
+        id: 5,
+        bg_rt: "__rt_bg5",
+        captured: {},
+        capture_close_zig: {},
+        pointer_captures: Set.new,
+        is_void: false,
+        ctx_type: "__BgCtx5",
+        promise_zig: "CheatHeader.Promise(i64)",
+        capture_fields: "",
+        blk_label: "__bg5",
+        rt_name: "rt",
+        ctx_var: "__ctx_5_ptr",
+        promise_var: "__promise_5",
+        alloc_var: "__alloc_5",
+        capture_inits: [],
+        promoted_decls: "",
+        pin_mode: false,
+        parallel: false,
+        extra_ctx_fields: [],
+        recursive_promoted_names: [],
+        fresh_heap_cleanup_names: [],
+        fresh_heap_cleanups: "",
+      }
+
+      result = FsmTransform::Emit.build_recursive(
+        ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
+
+      expect(result).to be_a(MIR::FsmLoweringResult)
+      expect(lowering.calls.first).to include(no_result: false, ctx_id: 5)
+    end
   end
 end

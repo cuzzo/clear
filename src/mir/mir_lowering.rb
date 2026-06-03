@@ -3291,12 +3291,6 @@ class MIRLowering
     iz
   end
 
-  # Returns the bare Zig type name for a type_info value, stripping any
-  # leading pointer qualifier that transpile_type may add (e.g. *Value -> Value).
-  def bare_zig_type(ti)
-    transpile_type(ti.is_a?(Type) ? ti.resolved.to_s : ti.to_s)
-  end
-
   sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
   def direct_slice_backed_expr?(ast_node, type_info)
     return true if type_info.fixed?

@@ -67,7 +67,7 @@ class BasicBlock
     block.predecessors << self unless block.predecessors.include?(self)
   end
 
-  sig { void }
+  sig { returns(T.untyped) }
   def terminator
     @stmts.last
   end

@@ -430,8 +430,10 @@ module MIRLoweringExpressions
     type_name = node.target.name.to_sym
     schema = @union_schemas&.dig(type_name)
     return nil unless schema.is_a?(Schemas::UnionSchema)
-    var_data = schema.variants[node.field]
-    return nil unless schema.variants.key?(node.field)
+    field_key = union_variant_key(schema, node.field)
+    return nil unless field_key
+
+    var_data = schema.variants[field_key]
     # Unit variants have nil / Symbol / Type variant data. Inline-struct
     # variants are Hashes with :kind => :inline_struct; payload variants
     # like `Idle: Int64` are Symbols/Types -- both could appear at this
@@ -442,6 +444,19 @@ module MIRLoweringExpressions
     # would have raised).
     return nil if Schemas.inline_struct?(var_data)
     UnitVariantAccess.new(type_name: type_name, variant_name: node.field)
+  end
+
+  sig { params(schema: Schemas::UnionSchema, field: T.untyped).returns(T.untyped) }
+  def union_variant_key(schema, field)
+    return field if schema.variants.key?(field)
+
+    field_s = field.to_s
+    return field_s if schema.variants.key?(field_s)
+
+    field_sym = field_s.to_sym
+    return field_sym if schema.variants.key?(field_sym)
+
+    nil
   end
 
   # ================================================================
@@ -817,7 +832,10 @@ module MIRLoweringExpressions
     schema = @union_schemas.dig(target_node.name.to_sym)
     return nil unless schema.is_a?(Schemas::UnionSchema)
 
-    var_data = schema.variants[node.field]
+    field_key = union_variant_key(schema, node.field)
+    return nil unless field_key
+
+    var_data = schema.variants[field_key]
     return nil if Schemas.inline_struct?(var_data)
 
     MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
