@@ -5,6 +5,7 @@ require 'bundler/setup'
 # COVERAGE=1. See spec/coverage_bootstrap.rb.
 require_relative '../spec/coverage_bootstrap'
 CoverageBootstrap.start(ENV.fetch('COVERAGE_BOOTSTRAP_NAME', 'transpile-tests'))
+require_relative '../tools/zig_coverage_support'
 
 require_relative '../src/backends/transpiler'
 
@@ -229,6 +230,33 @@ OUTPUT_FILE = "zig/all-tests.zig"
 HEADER_FILE = "zig/runtime/runtime-header.zig"
 GEN_JOBS = [Integer(ENV.fetch("TRANSPILE_GEN_JOBS", ENV.fetch("JOBS", "1"))), 1].max
 
+def zig_exe
+  [
+    File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
+    File.join(ZigCoverageSupport::ZIG_DIR, 'zig-new', 'zig'),
+    File.join(ZigCoverageSupport::ZIG_DIR, 'zig', 'zig'),
+    `which zig 2>/dev/null`.strip
+  ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+end
+
+def run_generated_zig_tests!
+  puts "Running generated Zig tests#{ZigCoverageSupport.enabled? ? ' under kcov' : ''}..."
+  output, status = ZigCoverageSupport.run_zig_test(
+    zig: zig_exe,
+    build_dir: ZigCoverageSupport::ZIG_DIR,
+    args: ['all-tests.zig', 'runtime/switch.S', 'runtime/onRoot.S', '-lc'],
+    suite: 'transpile-tests',
+    name: 'all-tests'
+  )
+  print output
+  exit 1 unless status.success?
+
+  if ZigCoverageSupport.enabled?
+    merged = ZigCoverageSupport.merge!('transpile-tests')
+    puts "Merged Zig coverage: #{merged}" if merged
+  end
+end
+
 def simplecov_child_command!(name)
   CoverageBootstrap.isolate_process!(name)
   return unless defined?(SimpleCov)
@@ -324,5 +352,6 @@ if @failed_tests&.any?
 end
 
 `zig fmt zig/all-tests.zig`
+run_generated_zig_tests! if ENV['TRANSPILE_RUN_ZIG'] == '1' || ZigCoverageSupport.enabled?
 puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
 end

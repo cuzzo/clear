@@ -145,10 +145,12 @@ jobs:
 
   transpile-tests:
     name: transpile-tests/ coverage (.cht via gen.rb)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       COVERAGE: "1"
       COVERAGE_ISOLATED: "1"
+      ZIG_COVERAGE: "1"
+      ZIG_COVERAGE_SUITE: "transpile-tests"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -158,9 +160,15 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      # Coverage only needs Ruby compile/lowering/emission. Runtime execution
-      # is covered by non-coverage clear-test gates; running it here fans out
-      # hundreds of SimpleCov clear-cli resultsets.
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+          kcov --version
+      # Ruby coverage records compile/lowering/emission. ZIG_COVERAGE=1 also
+      # runs the generated all-tests.zig bundle under kcov so this suite
+      # contributes runtime/lib Zig coverage without spawning per-file clear
+      # subprocesses.
       - uses: actions/cache@v4
         with:
           path: |
@@ -183,6 +191,18 @@ jobs:
           flags: ruby,transpile-tests
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-transpile-tests
+          path: zig/zig-out/coverage-transpile-tests/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./zig/zig-out/coverage-transpile-tests/merged/kcov-merged/cobertura.xml
+          flags: zig,transpile-tests
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   examples-benchmarks-corpus:
     name: examples/benchmarks buildable corpus
@@ -199,10 +219,10 @@ jobs:
           NO_COLOR: "1"
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
-  tools-fuzz-shard:
-    name: tools/fuzz coverage shard ${{ matrix.shard }}/5
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  examples-benchmarks-coverage-shard:
+    name: examples/benchmarks coverage shard ${{ matrix.shard }}/5
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -210,6 +230,8 @@ jobs:
     env:
       COVERAGE: "1"
       COVERAGE_ISOLATED: "1"
+      ZIG_COVERAGE: "1"
+      ZIG_COVERAGE_SUITE: "examples-benchmarks"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -219,6 +241,74 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+          kcov --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.cht', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      - run: bundle exec ruby tools/corpus_transpile_coverage.rb --shard ${{ matrix.shard }}/5
+      - run: bundle exec ruby tools/corpus_runtime_coverage.rb --shard ${{ matrix.shard }}/5
+      - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-examples-benchmarks-${{ matrix.shard }}
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/coverage.xml
+          flags: ruby,examples-benchmarks,examples-benchmarks-shard-${{ matrix.shard }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-examples-benchmarks-${{ matrix.shard }}
+          path: zig/zig-out/coverage-examples-benchmarks/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./zig/zig-out/coverage-examples-benchmarks/merged/kcov-merged/cobertura.xml
+          flags: zig,examples-benchmarks,examples-benchmarks-shard-${{ matrix.shard }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  tools-fuzz-shard:
+    name: tools/fuzz coverage shard ${{ matrix.shard }}/5
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    env:
+      COVERAGE: "1"
+      COVERAGE_ISOLATED: "1"
+      ZIG_COVERAGE: "1"
+      ZIG_COVERAGE_SUITE: "fuzz"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+          kcov --version
       - uses: actions/cache@v4
         with:
           path: |
@@ -227,9 +317,10 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      # Coverage mode is compile/lower/emit only. Runtime/leak fuzz gates run
-      # without COVERAGE so SimpleCov does not fan out through every child
-      # `clear test` / `clear build` process.
+      # Ruby coverage records compile/lower/emit. ZIG_COVERAGE=1 also bundles
+      # positive fuzz cells and runs that Zig test root under kcov; negative
+      # cells stay compile-only so SimpleCov does not fan out through every
+      # child `clear test` / `clear build` process.
       - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean --jobs "$(nproc)"
       - run: bundle exec ruby spec/collate_coverage.rb
       - uses: actions/upload-artifact@v4
@@ -242,6 +333,18 @@ jobs:
         with:
           files: ./coverage/coverage.xml
           flags: ruby,fuzz,fuzz-shard-${{ matrix.shard }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-fuzz-${{ matrix.shard }}
+          path: zig/zig-out/coverage-fuzz/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./zig/zig-out/coverage-fuzz/merged/kcov-merged/cobertura.xml
+          flags: zig,fuzz,fuzz-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -690,6 +793,7 @@ jobs:
       - ruby-unit
       - ruby-integration
       - transpile-tests
+      - examples-benchmarks-coverage-shard
       - tools-fuzz-shard
       - bc-lower-coverage-shard
       - zig-coverage

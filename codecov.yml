@@ -1,5 +1,8 @@
 ignore:
   - "tools/"
+  - "zig/all-tests.zig"
+  - "zig/all-fuzz.zig"
+  - "zig/._clear_cov_*.zig"
   - "zig/*-test.zig"
   - "zig/**/*-test.zig"
   - "zig/vopr-*.zig"
@@ -10,6 +13,11 @@ ignore:
   - "zig/**/*-vopr.zig"
   - "zig/*-loom.zig"
   - "zig/**/*-loom.zig"
+
+fixes:
+  - "runtime/::zig/runtime/"
+  - "lib/::zig/lib/"
+  - "experimental/::zig/experimental/"
 
 comment:
   layout: "reach, diff, flags, files"

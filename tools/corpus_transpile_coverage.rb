@@ -15,16 +15,32 @@
 #        ruby tools/branch_gap_report.rb
 
 require 'bundler/setup'
+require 'optparse'
 require_relative '../spec/coverage_bootstrap'
 CoverageBootstrap.start('corpus-transpile')
 
 require_relative '../src/backends/transpiler'
 
 ROOT = File.expand_path('..', __dir__)
+opts = { shard: nil }
+
+OptionParser.new do |o|
+  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--shard I/N]"
+  o.on("--shard I/N") do |v|
+    idx, total = v.split("/", 2).map(&:to_i)
+    abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total.positive? && idx && idx >= 0 && idx < total
+    opts[:shard] = [idx, total]
+  end
+end.parse!
+
 files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht'))
               .reject { |f| File.basename(f).start_with?('._') }
               .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
               .sort
+if opts[:shard]
+  idx, total = opts[:shard]
+  files = files.each_with_index.select { |_file, i| (i % total) == idx }.map(&:first)
+end
 
 ok = 0
 fail = 0

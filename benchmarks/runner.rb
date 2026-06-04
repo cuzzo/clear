@@ -3,6 +3,7 @@
 require 'fileutils'
 require 'benchmark'
 require 'json'
+require 'open3'
 
 # Find the Zig compiler (local or system). Resolve to absolute path
 # since the runner chdir's into zig/ for compilation.
@@ -110,6 +111,51 @@ def server_benchmark?(dir)
   File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
 end
 
+def coverage_sources(dir)
+  if File.exist?("#{dir}/bench.cht")
+    ["#{dir}/bench.cht"]
+  elsif File.exist?("#{dir}/server.cht")
+    ["#{dir}/server.cht"]
+  else
+    Dir.glob("#{dir}/bench*.cht").sort
+  end
+end
+
+def run_coverage_bench(dir)
+  puts "=== COVERAGE BENCHMARK: #{dir} ==="
+  sources = coverage_sources(dir)
+  if sources.empty?
+    puts "No CLEAR source found, skipping."
+    return
+  end
+
+  passed = 0
+  failed = 0
+  sources.each do |source|
+    label = File.basename(source, ".cht")
+    puts "  #{label}:"
+    output, status = Open3.capture2e(
+      {
+        "ZIG_COVERAGE" => "1",
+        "ZIG_COVERAGE_SUITE" => ENV.fetch("ZIG_COVERAGE_SUITE", "examples-benchmarks"),
+      },
+      "./clear",
+      "benchmark",
+      "--coverage",
+      source
+    )
+    if status.success?
+      passed += 1
+      puts "    OK"
+    else
+      failed += 1
+      puts "    WARNING: coverage benchmark failed"
+      puts output.lines.last(20).map { |line| "      #{line}" }.join
+    end
+  end
+  puts "Coverage benchmark summary: #{passed} ok, #{failed} failed"
+end
+
 def run_leak_check(dir, bench_bin, timeout_s: 60, timeout_ok: false)
   scale = ENV['BENCH_SCALE'] || "1.0"
   threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
@@ -161,6 +207,7 @@ end
 # -------------------------------------------------------------------------
 def run_bench(dir)
   leak_mode = ENV['BENCH_MODE'] == 'leak'
+  return run_coverage_bench(dir) if ENV['BENCH_MODE'] == 'coverage'
 
   bto = bench_timeout(dir)
 
@@ -771,6 +818,9 @@ if __FILE__ == $0
     when "--smoke"
       mode = "smoke"
       scale = "0.1"
+    when "--coverage"
+      mode = "coverage"
+      scale = "0.001"
     when "--sequential"
       dirs += Dir.glob("benchmarks/sequential/[0-9]*").select { |d| File.directory?(d) }.sort
     when "--concurrent"
@@ -787,8 +837,8 @@ if __FILE__ == $0
   end
 
   if dirs.empty?
-    if mode == "leak"
-      # Leak mode: run ALL benchmarks by default
+    if mode == "leak" || mode == "coverage"
+      # Leak/coverage modes run all benchmarks by default.
       dirs = Dir.glob("benchmarks/{sequential,concurrent,server,inter-clear}/[0-9]*").select { |d| File.directory?(d) }.sort
     else
       dirs = Dir.glob("benchmarks/sequential/0*").sort

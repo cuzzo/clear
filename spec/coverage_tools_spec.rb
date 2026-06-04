@@ -5,6 +5,7 @@ require_relative "../tools/loom_atomic_coverage"
 require_relative "../tools/vopr_coverage"
 require_relative "../tools/wait_loop_coverage"
 require_relative "../tools/diff_bucket_summary"
+require_relative "../tools/zig_coverage_support"
 
 RSpec.describe "coverage gap tools" do
   around do |example|
@@ -42,6 +43,26 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/parking-lot-loom.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/vopr-loom-runner.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
+  end
+
+  it "sanitizes Zig coverage suite and run names for kcov directories" do
+    expect(ZigCoverageSupport.sanitize_name("examples/benchmarks shard 1/5")).to eq("examples_benchmarks_shard_1_5")
+    expect(ZigCoverageSupport.sanitize_name("///")).to eq("run")
+  end
+
+  it "resolves Zig coverage output roots from either env override or suite name" do
+    old_dir = ENV.delete("ZIG_COVERAGE_DIR")
+    old_suite = ENV.delete("ZIG_COVERAGE_SUITE")
+    begin
+      ENV["ZIG_COVERAGE_SUITE"] = "fuzz shard"
+      expect(ZigCoverageSupport.output_root("default")).to end_with("/zig/zig-out/coverage-fuzz_shard")
+
+      ENV["ZIG_COVERAGE_DIR"] = "tmp/custom-zig-coverage"
+      expect(ZigCoverageSupport.output_root("default")).to eq(File.expand_path("../tmp/custom-zig-coverage", __dir__))
+    ensure
+      old_dir ? ENV["ZIG_COVERAGE_DIR"] = old_dir : ENV.delete("ZIG_COVERAGE_DIR")
+      old_suite ? ENV["ZIG_COVERAGE_SUITE"] = old_suite : ENV.delete("ZIG_COVERAGE_SUITE")
+    end
   end
 
   it "excludes VOPR and Loom harness files from Loom and VOPR scanners" do
