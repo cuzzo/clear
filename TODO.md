@@ -17,9 +17,9 @@
  - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [x] Continuous Integration
  - [x] Syntax maturity cleanup / sweep
- - [ ] Comment Cleansing
+ - [x] Comment Cleansing
 
-## v0.1 (Target = May 30)
+## v0.1 (Target = July 17)
 
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Finite State Machines
@@ -33,16 +33,16 @@
  - [x] True Polymorphic return
  - [x] Design by Contract v1: `WITH GURADED x ... AS y { } ON GuardFail`, `PRE { }` and `POST { }` *RUNTIME* 
  - [x] Typed Holes
+ - [x] Typed Transpiler: ~90% of slots & returns, in prep for self-hosting, to test-bed plans for Property Based Testing 
+ - [x] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
+ - [x] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
+ - [x] Full Fuzz Testing for Gated Acccess, Execution Boundary Crossing, Escape Analysis, FSM Transformation.
  - [ ] LEND keyword (attach lifetimes to functions / execution boundaries you LEND to)
- - [ ] Examples: mal v5, brnfk, are we fast yet, 1brc, NN
- - [ ] Typed Transpiler: ~90% of slots & returns, in prep for self-hosting, to test-bed plans for Property Based Testing 
- - [ ] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
- - [ ] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
- - [ ] Formal Verification for Gated Acccess, Execution Boundary Crossing, Escape Analysis, FSM Transformation (tracker: `docs/agents/fv-hardening-todo.md`)
+ - [ ] Examples: mal v5, brnfk, are we fast yet, 1brc, NN, cache, sqlite
 
 Milestone: A working CLEAR VM with debugger & time travel, that supports a decent chunk of the language (including concurrency).
 
- ## v0.2 (Target = July 15)
+ ## v0.2 (Target = Sept 1)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
  - [ ] Design by Contract v2: PRE { } Comptime
  - [ ] Implicit Logical TOCTAU made impossible via `@derivative` on `@shared` values and `@allowStale` to allow possible TOCTAU only *EXPLICITLY*.
@@ -61,7 +61,7 @@ Milestone: A working CLEAR VM with debugger & time travel, that supports a decen
 
 Milestone: *Basic* SQL/CLEAR database
 
-## v0.3 (Target = Oct 1)
+## v0.3 (Target = Nov 1)
 
  - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
