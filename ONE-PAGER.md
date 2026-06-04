@@ -6,7 +6,7 @@ CLEAR is designed for systems where performance is a requirement, not a luxury, 
 
 The goal is lofty: 
 
- * **Be more correct than Rust**
+ * **Be safer than Rust**
  * **Nearly as fast as hand-tuned C**
  * **In a language less complex than Go or TypeScript**
 
