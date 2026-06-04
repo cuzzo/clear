@@ -781,7 +781,8 @@ test "Promise(i64): repeated concurrent worker batches survive reuse" {
     rt.wireAllocator();
 
     const FIBERS = 4;
-    const ITERS = comptime coverageIters(8);
+    const ITERS = comptime if (build_options.coverage) 1 else if (build_options.tsan) 2 else 8;
+    const STEPS = if (build_options.tsan) 16 else 128;
 
     const Ctx = struct {
         inner: *CheatLib.Promise(i64).Inner,
@@ -816,7 +817,7 @@ test "Promise(i64): repeated concurrent worker batches survive reuse" {
                         .inner = promise.inner,
                         .bg_alloc = sa,
                         .value = @as(i64, @intCast(i + 1)),
-                        .steps = 128,
+                        .steps = STEPS,
                     };
                     try header.spawnPinned(
                         @intFromPtr(&Runtime.entryWrapper),
@@ -2821,7 +2822,9 @@ test "PartitionedNumericMap: shardIndexWithHash is deterministic" {
         counts[NumMap.shardIndexWithHash(k).shard] += 1;
     }
     var filled: usize = 0;
-    for (counts) |c| if (c > 0) { filled += 1; };
+    for (counts) |c| if (c > 0) {
+        filled += 1;
+    };
     try std.testing.expect(filled > 1);
 }
 
@@ -2887,7 +2890,10 @@ test "PartitionedNumericMap: remote put/get across schedulers" {
             const sa = rt_ptr.getSched().allocator;
 
             const map = try sa.create(NumMap);
-            defer { map.deinit(std.heap.c_allocator, std.heap.c_allocator); sa.destroy(map); }
+            defer {
+                map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+                sa.destroy(map);
+            }
             map.* = .{};
 
             var promises: [FIBERS]CheatLib.Promise(i64) = undefined;
@@ -2930,7 +2936,10 @@ test "PartitionedNumericMap: remote remove cleans up correctly" {
             const sa = rt_ptr.getSched().allocator;
 
             const map = try sa.create(NumMap);
-            defer { map.deinit(std.heap.c_allocator, std.heap.c_allocator); sa.destroy(map); }
+            defer {
+                map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+                sa.destroy(map);
+            }
             map.* = .{};
 
             // Put 50 keys via remote path

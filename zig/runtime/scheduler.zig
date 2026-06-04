@@ -149,7 +149,6 @@ pub const RemoteCompletion = struct {
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
-
 // A thread-safe wake-up signal
 pub const SmartEventFd = struct {
     const WakeEmpty: u32 = 0;
@@ -193,9 +192,21 @@ pub const SmartEventFd = struct {
     // Notified performs the eventfd write needed to wake io_uring.
     pub fn notify(self: *SmartEventFd) void {
         if (!self.armNotify()) return;
+        self.writeWake();
+    }
+
+    fn writeWake(self: *SmartEventFd) void {
         const val: u64 = 1;
         const bytes = std.mem.asBytes(&val);
         _ = std.c.write(self.fd, bytes.ptr, bytes.len);
+    }
+
+    /// Cold-path wake used by shutdown/watchdog code. This deliberately
+    /// writes eventfd even if the userspace token already says Notified;
+    /// that state can be stale relative to io_uring sleep during shutdown.
+    pub fn forceNotify(self: *SmartEventFd) void {
+        self.state.store(WakeNotified, .release);
+        self.writeWake();
     }
 
     // Called by Scheduler loop to reset the signal drain
@@ -236,7 +247,6 @@ pub const SmartEventFd = struct {
 
 const STACK_CACHE_LIMIT: usize = 128;
 
-
 pub const Scheduler = struct {
     // 1. The Manager State
     fiber_pool: std.ArrayListUnmanaged(*Task) = .empty,
@@ -266,7 +276,7 @@ pub const Scheduler = struct {
     // loop iteration so newly spawned / cross-thread-resumed tasks
     // get cache-hot priority but yielded tasks rotate fairly.
     yield_queue: std.ArrayListUnmanaged(*Task) = .empty,
-    stack_cache: std.ArrayListUnmanaged([]u8) = .empty,   // LIFO Cache for Stacks
+    stack_cache: std.ArrayListUnmanaged([]u8) = .empty, // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .empty,
     // Fibers parked waiting for a ParkingMutex or ParkingRwLock.
     // Scanned in the run loop's slow path for LOCK_TIMEOUT_MS deadlock detection.
@@ -475,7 +485,7 @@ pub const Scheduler = struct {
             for (q.items) |task| {
                 self.releaseTaskEbr(task);
                 if (task.base.stack.memory.len > 0) {
-                     self.freeStack(task.base.stack);
+                    self.freeStack(task.base.stack);
                 }
                 self.allocator.destroy(task.base); // Free Fiber
                 self.task_slab.destroy(task); // Free Task Struct
@@ -502,14 +512,14 @@ pub const Scheduler = struct {
         // Iterate valid range
         var i = t;
         while (i < b) : (i += 1) {
-             // Access raw slot directly
-             const task_opt = self.ready_queue.getBuffer()[i & self.ready_queue.getMask()].load(.monotonic);
-             if (task_opt) |task| {
-                 self.releaseTaskEbr(task);
-                 self.freeStack(task.base.stack);
-                 self.allocator.destroy(task.base);
-                 self.task_slab.destroy(task);
-             }
+            // Access raw slot directly
+            const task_opt = self.ready_queue.getBuffer()[i & self.ready_queue.getMask()].load(.monotonic);
+            if (task_opt) |task| {
+                self.releaseTaskEbr(task);
+                self.freeStack(task.base.stack);
+                self.allocator.destroy(task.base);
+                self.task_slab.destroy(task);
+            }
         }
         self.ready_queue.deinit();
         for (self.pinned_queue.items) |task| {
@@ -1762,10 +1772,7 @@ pub const Scheduler = struct {
     }
 
     fn hasWork(self: *Scheduler) bool {
-        return self.ready_queue.len() > 0
-            or self.pinned_queue.items.len > 0
-            or self.yield_queue.items.len > 0
-            or self.fsm_ready_queue.len() > 0;
+        return self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0 or self.yield_queue.items.len > 0 or self.fsm_ready_queue.len() > 0;
     }
 
     /// Public alias of hasWork for tests that need to inspect scheduler state.
@@ -2379,6 +2386,18 @@ pub const SchedulerRegistry = struct {
         }
     }
 
+    /// Force-wake all registered schedulers. This is for cold shutdown and
+    /// watchdog-style test harnesses where a stale coalesced wake token must
+    /// not suppress the eventfd write that gets a scheduler out of io_uring.
+    pub fn forceNotifyAll(self: *SchedulerRegistry) void {
+        const n = self.len.load(.acquire);
+        for (self.slots[0..n]) |*slot| {
+            if (slot.load(.acquire)) |sched| {
+                sched.event_fd.forceNotify();
+            }
+        }
+    }
+
     /// Free the id_map storage and reset all atomic state.
     /// Safe after all schedulers unregistered.  Required for test reuse.
     pub fn deinit(self: *SchedulerRegistry, allocator: std.mem.Allocator) void {
@@ -2564,7 +2583,6 @@ pub fn pinFsmTask(ptr: *fsm_mod.FsmTask) ?FsmTaskPin {
 pub fn unpinFsmTask(pin: FsmTaskPin) void {
     if (pin.allocator) |alloc| alloc.unpin(pin.slab);
 }
-
 
 pub const WaitGroup = struct {
     // The counter must be atomic. Routed through the comptime

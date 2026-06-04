@@ -17,7 +17,22 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const EbrContext = @import("../lib/ebr.zig").EbrContext;
 
-const TEST_DIR = "/tmp/clear_iouring_test";
+const TEST_DIR_PREFIX = "/tmp/clear_iouring_test";
+
+fn testDir(buf: *[256]u8) ![]const u8 {
+    return std.fmt.bufPrint(buf, "{s}_{d}", .{ TEST_DIR_PREFIX, std.os.linux.getpid() });
+}
+
+fn testFilePath(buf: *[256]u8, index: usize) ![]const u8 {
+    return std.fmt.bufPrint(buf, "{s}_{d}/file{d}.txt", .{ TEST_DIR_PREFIX, std.os.linux.getpid(), index });
+}
+
+fn cPath(path: []const u8, buf: *[256]u8) ![:0]u8 {
+    if (path.len >= buf.len) return error.NameTooLong;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return buf[0..path.len :0];
+}
 
 // ---------------------------------------------------------------------------
 // Boot helper: run a function inside the scheduler (mirrors runtime-footer).
@@ -69,14 +84,13 @@ fn runInScheduler(comptime userFn: fn (*Runtime) anyerror!void) !void {
 // ---------------------------------------------------------------------------
 fn ensureTestFiles() !void {
     var dir_path: [256]u8 = undefined;
-    if (TEST_DIR.len >= dir_path.len) return error.NameTooLong;
-    @memcpy(dir_path[0..TEST_DIR.len], TEST_DIR);
-    dir_path[TEST_DIR.len] = 0;
-    _ = std.c.mkdir(dir_path[0..TEST_DIR.len :0], 0o755);
+    const dir = try testDir(&dir_path);
+    var c_dir_path: [256]u8 = undefined;
+    _ = std.c.mkdir(try cPath(dir, &c_dir_path), 0o755);
 
     for (0..4) |i| {
-        var path_buf: [128]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+        var path_buf: [256]u8 = undefined;
+        const path = try testFilePath(&path_buf, i);
 
         var content_buf: [256]u8 = undefined;
         const content = std.fmt.bufPrint(&content_buf, "hello from file {d}\n", .{i}) catch unreachable;
@@ -89,26 +103,23 @@ fn ensureTestFiles() !void {
 
 fn cleanupTestFiles() void {
     for (0..4) |i| {
-        var path_buf: [128]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch continue;
-        var c_path: [129]u8 = undefined;
-        @memcpy(c_path[0..path.len], path);
-        c_path[path.len] = 0;
-        _ = std.c.unlink(c_path[0..path.len :0]);
+        var path_buf: [256]u8 = undefined;
+        const path = testFilePath(&path_buf, i) catch continue;
+        var c_path_buf: [256]u8 = undefined;
+        _ = std.c.unlink(cPath(path, &c_path_buf) catch continue);
     }
     var dir_path: [256]u8 = undefined;
-    if (TEST_DIR.len < dir_path.len) {
-        @memcpy(dir_path[0..TEST_DIR.len], TEST_DIR);
-        dir_path[TEST_DIR.len] = 0;
-        _ = std.c.rmdir(dir_path[0..TEST_DIR.len :0]);
-    }
+    const dir = testDir(&dir_path) catch return;
+    var c_dir_path: [256]u8 = undefined;
+    _ = std.c.rmdir(cPath(dir, &c_dir_path) catch return);
 }
 
 // ---------------------------------------------------------------------------
 // Test 1: Single-fiber readFile via io_uring returns correct content.
 // ---------------------------------------------------------------------------
 fn singleFileReadBody(rt: *Runtime) !void {
-    const data = try CheatLib.readFile(rt.heapAlloc(), TEST_DIR ++ "/file0.txt");
+    var path_buf: [256]u8 = undefined;
+    const data = try CheatLib.readFile(rt.heapAlloc(), try testFilePath(&path_buf, 0));
     try std.testing.expectEqualStrings("hello from file 0\n", data);
 }
 
@@ -124,8 +135,8 @@ test "io_uring single-fiber readFile" {
 // ---------------------------------------------------------------------------
 fn sequentialMultiReadBody(rt: *Runtime) !void {
     for (0..4) |i| {
-        var path_buf: [128]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+        var path_buf: [256]u8 = undefined;
+        const path = try testFilePath(&path_buf, i);
 
         const data = try CheatLib.readFile(rt.heapAlloc(), path);
 
@@ -167,8 +178,8 @@ fn concurrentReadBody(rt: *Runtime) !void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
             var ok: i64 = 1;
             for (0..2) |i| {
-                var path_buf: [128]u8 = undefined;
-                const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+                var path_buf: [256]u8 = undefined;
+                const path = try testFilePath(&path_buf, i);
                 const data = try CheatLib.readFile(self.alloc, path);
 
                 var exp_buf: [256]u8 = undefined;
@@ -188,8 +199,8 @@ fn concurrentReadBody(rt: *Runtime) !void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
             var ok: i64 = 1;
             for (2..4) |i| {
-                var path_buf: [128]u8 = undefined;
-                const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+                var path_buf: [256]u8 = undefined;
+                const path = try testFilePath(&path_buf, i);
                 const data = try CheatLib.readFile(self.alloc, path);
 
                 var exp_buf: [256]u8 = undefined;
@@ -244,8 +255,8 @@ fn repeatedReadYieldBody(rt: *Runtime) !void {
 
     for (0..200) |_| {
         for (0..4) |i| {
-            var path_buf: [128]u8 = undefined;
-            const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+            var path_buf: [256]u8 = undefined;
+            const path = try testFilePath(&path_buf, i);
 
             const data = try CheatLib.readFile(rt.heapAlloc(), path);
 

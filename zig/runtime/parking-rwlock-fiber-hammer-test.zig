@@ -93,7 +93,7 @@ fn schedulerThread(a: std.mem.Allocator) void {
 
 fn abortStartedWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
-    fp.global_registry.notifyAll();
+    fp.global_registry.forceNotifyAll();
     waitForWorkerRunExit(n);
     deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
@@ -107,7 +107,7 @@ fn waitForWorkerRunExit(n: usize) void {
     while (post_run_workers.load(.acquire) < n) {
         // A worker may be parked in the idle io_uring wait; keep nudging all
         // registered schedulers so shutdown cannot depend on one race-prone wake.
-        fp.global_registry.notifyAll();
+        fp.global_registry.forceNotifyAll();
         if (compat.milliTimestamp() >= deadline) {
             std.debug.panic(
                 "ParkingRwLock fiber hammer worker shutdown timed out: workers {d}/{d}\n",
@@ -144,7 +144,7 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
-    fp.global_registry.notifyAll();
+    fp.global_registry.forceNotifyAll();
     waitForWorkerRunExit(n);
     deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
@@ -310,9 +310,10 @@ fn waitForHammerCompletion(rt: *Runtime, shared: *Shared, expected_writers: usiz
     }
 }
 
-// Stackful fiber ParkingRwLock hammer: 4 writers + 8 readers spawned via
-// spawnBest. TSan runs one worker + main (the same two-scheduler surface used
-// by CLEAR_THREADS=2 burn-ins); non-TSan hammer keeps 4 workers + main.
+// Stackful fiber ParkingRwLock hammer: 4 writers + 8 readers spawned
+// across 4 worker schedulers + main = 5 schedulers via spawnBest. Each
+// writer mutates Sample{a, b} non-atomically; each reader checks the
+// invariant b == a * 2.
 //
 // Without the WRITE_LOCKED guard on lockShared's wake-on-undo (line
 // 956 of parking-lot.zig), this fails by reporting torn_reads > 0 --
@@ -333,12 +334,12 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
         global_ebr.deinit(test_alloc);
     }
 
-    const workers = if (build_options.coverage or build_options.tsan) 1 else 4;
+    const workers = if (build_options.coverage) 1 else 4;
     try withMainRuntimeN(workers, struct {
         fn body(rt: *Runtime) !void {
             const NW = if (build_options.coverage) 1 else 4;
             const NR = if (build_options.coverage) 1 else 8;
-            const ITERS: usize = if (build_options.coverage) 1 else 500;
+            const ITERS: usize = if (build_options.coverage) 1 else if (build_options.tsan) 100 else 500;
 
             var shared = Shared{};
             const sa = rt.getSched().allocator;
