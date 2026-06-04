@@ -15,7 +15,7 @@ The goal is lofty:
 CLEAR makes the common case zero-cost and the uncommon case explicit. You pay for complexity only when you use it.
 
 *   **Costs Visible Where You Decide, Invisible Where You Use**: Performance trade-offs (like `shared` vs `multiowned`) are visible at the *definition* of a resource, but elided at the *usage*. This allows for massive architectural refactors (e.g., moving from single-threaded to multi-threaded) with zero "function coloring" or ripple effects.
-*   **No Garbage Collector**: CLEAR uses Arena-based memory and deterministic reference counting. You get the predictable, jitter-free performance of Rust with the ergonomics of a managed language.
+*   **No Garbage Collector**: CLEAR uses Rust-style Affine Ownership and deterministic reference counting. You get the predictable, jitter-free performance of Rust with the ergonomics of a managed language.  It also uses an arena-based system by default, to make short-lived de/allocations as fast as possible.
 *   **Scoped Mutability, Not Lifetime Annotations**: Mutable shared access is scoped to explicit `WITH` blocks. No lifetime annotations, no borrow checker fights — shared mutability is a local reasoning task, not a global one.
 *   **Capability System**: CLEAR separates **Types** (what data is) from **Capabilities** (how it's accessed). Functions take Types, not Capabilities, ensuring your business logic remains decoupled from your synchronization strategy.
 *   **Railway Error Handling**: Error handling is a first-class control flow construct, not an after-thought. The "Happy Path" remains clear, while failure cases are handled via elegant `OR` and `CATCH` semantics.
