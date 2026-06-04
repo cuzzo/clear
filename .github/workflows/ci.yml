@@ -772,7 +772,7 @@ jobs:
           sudo apt-get install -y kcov
           kcov --version
       - working-directory: zig
-        run: zig build test -Dcoverage -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+        run: zig build test -Dcoverage -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
       - uses: actions/upload-artifact@v4
         with:
           name: zig-coverage-${{ matrix.shard }}
