@@ -35,19 +35,22 @@ results = sensors
      SELECT process_reading(_) OR PRUNE    # Drop failed readings
   |> WHERE _.intensity > 0.8
   |> LIMIT 1000;
-
-# The Control Plane automatically handles 'OnSkew'
-# If one shard becomes a bottleneck, the runtime detects the statistical
-# imbalance and enables work-stealing across shards automatically.
-# Note: IFF skew is detected, shared-nothing optimizations are sacrificed
-# to re-enable parallel processing of the skewed data.
 ```
+
+CLEAR comes with a Control Plane that can auto-detect `OnSkew`, `OnOverflow`, `OnUnderflow`, etc.
+
+ * If one shard becomes a bottleneck, the runtime detects the statistical imbalance and enables work-stealing across shards automatically.
+
+> [!Note]
+> IFF skew is detected, shared-nothing optimizations are sacrificed to re-enable parallel processing of the skewed data.
 
 ## PERFORMANCE
 
-In predictable workloads, as demonstrated in the included benchmarks, CLEAR outperforms Go and Rust/Tokio with considerably less, clearer code.
+In predictable workloads, as demonstrated in the included [benchmarks](benchmarks/README.md), CLEAR performs competitively with Rust/Tokio and Go, often times better - typically with ~60% less code than Go for current tasks, and ~30% less than Rust.
 
-This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not yet match this level of advantage — but there is substantial room for improvement by v1. CLEAR believes it will eventually outperform Go in almost all cases: no garbage collector, nearly half the memory footprint, more predictable response times, and zero chance of data races or a number of other concurrency hazards.
+This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not yet match this level of advantage — but there is substantial room for improvement by v1.
+
+CLEAR believes it will eventually outperform Go in almost all cases: no garbage collector, nearly half the memory footprint, more predictable response times, and zero chance of data races or a number of other concurrency hazards.
 
 ## THE IMPLICATIONS
 
