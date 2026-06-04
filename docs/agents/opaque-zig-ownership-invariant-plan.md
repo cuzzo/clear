@@ -96,6 +96,87 @@ Resolved in the InlineZig burndown:
 - `post_outer_body`, guard-failure error flow, bounded concurrent pointer
   casts, default stream capacity, and const-cast pipe-item helpers now have
   structural MIR nodes.
+- Final production `MIR::InlineZig.new` producers were removed. Registry-backed
+  template expressions now use `MIR::ZigTemplate`. The structural static-call,
+  builtin, and indexed-store paths carry child MIR args; the broader
+  pre-rendered intrinsic/spawn/trampoline surfaces remain documented below as
+  follow-up structuralization debt. All of them keep the typed
+  ownership/allocator metadata protocol from the old expression node.
+
+### Final InlineZig Burndown Plan / Results
+
+1. `obs_consumer_spawn`
+   - Plan: stop constructing `InlineZig` directly; move the audited spawn block
+     onto the typed template carrier while preserving the ownership contract
+     that consumes the source stream binding.
+   - Result: `PipelineHost` emits `MIR::ZigTemplate` for the spawn scaffold.
+     This is still the highest-risk remaining Zig template because the scaffold
+     contains fiber context transfer and should eventually become a dedicated
+     observable-consumer spawn node/runtime bridge.
+2. `static_call`
+   - Plan: keep static-call registry templates, but carry lowered MIR args
+     structurally so the emitter substitutes them and the checker can traverse
+     child expressions.
+   - Result: `lower_static_call` now returns `MIR::ZigTemplate` with MIR args
+     and `matched_stdlib_def`.
+3. `builtin_*`
+   - Plan: make builtin registry calls use the same structured template carrier
+     as static calls; BC still uses `InlineBc`.
+   - Result: `emit_builtin` returns `MIR::ZigTemplate` on Zig targets and
+     `MIR::InlineBc` on BC targets.
+4. `with_block_bindings`
+   - Plan: remove the direct `InlineZig` construction for WITH alias prelude
+     text while keeping its borrow/fallible-clause metadata attached.
+   - Result: WITH binding prelude text is carried by `MIR::ZigTemplate`. This
+     remains medium-risk debt because the binding lines are still emitted as a
+     pre-rendered Zig prelude; a future pass should split every WITH binding
+     into dedicated structural guard/alias nodes.
+5. `index_set`
+   - Plan: replace pre-rendered indexed-store templates with a named-argument
+     template node so target/index/value remain MIR children and ownership
+     transfer metadata stays attached to the store.
+   - Result: non-map indexed assignment uses `MIR::ZigTemplate` with
+     `{ target:, index:, value: }` children plus allocator metadata and target
+     variable facts.
+6. `intrinsic`
+   - Plan: remove the direct `InlineZig` producer for generic stdlib intrinsic
+     templates while keeping registry ownership facts, allocator metadata,
+     result type, and copied-consumed facts.
+   - Result: generic intrinsic lowering emits `MIR::ZigTemplate`. This is
+     lower risk than direct `InlineZig`, but still a broad template surface:
+     high-risk intrinsics should continue migrating to dedicated structural MIR
+     nodes when doing so reduces complexity.
+7. `extern_trampoline`
+   - Plan: stop returning `InlineZig` for root-stack callback trampolines while
+     preserving the existing allocator/result metadata.
+   - Result: extern trampoline lowering returns `MIR::ZigTemplate`. This remains
+     high-risk debt because the trampoline is multi-statement control flow; the
+     best final form is a dedicated `ExternTrampoline` MIR node whose emitter
+     owns the scaffold shape.
+
+Current production constructor inventory:
+
+`rg -n "MIR::InlineZig\.new|InlineZig\.new" src --glob '*.rb'`
+
+Result after this burndown: no production lowerer/back-end constructor sites.
+There are now no `MIR::InlineZig.new` / `InlineZig.new` constructor calls under
+`src/`. The node type still exists as a legacy checker/emitter surface and for
+negative checker fixtures, but production lowerers no longer construct it
+directly.
+
+Final metrics for this pass:
+
+- Decomplex baseline (`HEAD` before this pass): 5841 total candidates.
+- Decomplex after: 5841 total candidates. This is flat overall, but mixed by
+  cluster. Collapsed clusters: `ownership_contract` 8 -> 6, `stdlib_def`
+  14 -> 10, `allocs` 11 -> 9. New/grown clusters: `child_bodies` NEW with
+  2 findings, `is_a` 203 -> 204, `frame` 15 -> 17, `with_decl_alloc`
+  7 -> 11. This should be treated as a mixed decomplex result even though the
+  net candidate count stayed flat.
+- Untyped slot baseline (`tools/typing_baseline.rb src`, same `HEAD`): total
+  `T.untyped` 2395, params 1585, returns 523, struct/ivar slots 19.
+- Untyped slot after: total `T.untyped` 2395, params 1585, returns 523,
+  struct/ivar slots 19. All requested untyped counts stayed flat.
 
 Support/consumer sites are also part of the current opaque-Zig surface:
 

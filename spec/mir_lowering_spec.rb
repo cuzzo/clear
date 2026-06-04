@@ -1221,6 +1221,24 @@ RSpec.describe MIRLowering do
     end
   end
 
+  describe "intrinsic receiver allocation lowering" do
+    it "hoists frame-returning string intrinsics before direct string length" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          line = "SET:12345:payload";
+          total = substr(line, 4_i64, 5_i64).length();
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      zig = emit(mir)
+      expect(zig).to include("CheatLib.substr")
+      expect(zig).to match(/const __tmp_\d+ = .*CheatLib\.substr/)
+      expect(zig).to match(/@intCast\(__tmp_\d+\.len\)/)
+    end
+  end
+
   # =========================================================================
   # Control flow
   # =========================================================================
@@ -2117,7 +2135,20 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::IfBindStmt)
       then_zig = result.then_body.map { |stmt| emit(stmt) }.join("\n")
       expect(emit(result.bindings.first[:expr])).to include("CheatLib.weakRcUpgrade")
+      expect(result.then_body[0]).to be_a(MIR::AllocMark)
+      expect(result.then_body[0].name).to eq("node")
+      expect(result.then_body[1]).to be_a(MIR::Cleanup)
+      expect(result.then_body[1].name).to eq("node")
       expect(then_zig).to include("break;")
+    end
+
+    it "stamps frame allocation scopes inside IF-bind bodies" do
+      mark = MIR::AllocMark.new("tmp", :frame, Type.new(:String), :iteration)
+      if_bind = MIR::IfBindStmt.new([{ expr: MIR::Ident.new("maybe"), capture: "value" }], [mark], nil)
+
+      lowering.send(:stamp_loop_frame_alloc_scopes!, [if_bind], :function)
+
+      expect(mark.scope).to eq(:function)
     end
 
     it "lowers FOR EACH over maps through keyIterator optional binding" do
@@ -2189,6 +2220,40 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "function calls" do
+    it "does not invent ownership cleanup for copy-only union call results" do
+      mir = lower_source_mir(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        UNION Item { Boxed: Box, Raw: Int64, Empty }
+
+        FN makeItem(i: Int64) RETURNS Item ->
+          RETURN Item{ Raw: i };
+        END
+
+        FN scoreItem(item: Item) RETURNS Int64 ->
+          PARTIAL MATCH item START
+            Item.Raw AS v -> RETURN v;,
+            DEFAULT -> RETURN 0_i64;
+          END
+          RETURN 0_i64;
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE total = 0_i64;
+          MUTABLE i = 0_i64;
+          WHILE i < 3_i64 DO
+            total = total + scoreItem(makeItem(i));
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      main = mir.items.find { |item| item.is_a?(MIR::FnDef) && item.name == "clearMain" }
+      alloc_names = collect_mir_nodes(main.body, MIR::AllocMark).map(&:name)
+      expect(alloc_names).not_to include(a_string_matching(/__tmp/))
+    end
+
     it "treats owned-return calls as allocating even when the result type is scalar-shaped" do
       call = MIR::Call.new("ownedScalar", [], false, true)
       call.result_type = Type.new(:Int64)

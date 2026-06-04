@@ -603,13 +603,13 @@ module MIRLoweringCapabilities
     end
   end
 
-  sig { params(materialization: WithBindingMaterialization, node: AST::WithBlock).returns(T.nilable(MIR::InlineZig)) }
+  sig { params(materialization: WithBindingMaterialization, node: AST::WithBlock).returns(T.nilable(MIR::ZigTemplate)) }
   def with_block_inline_bindings(materialization, node)
     string_bindings = materialization.bindings.filter_map { |binding| binding if binding.is_a?(String) }.reject(&:empty?)
     all_bindings = string_bindings.join("\n")
     return nil if all_bindings.empty?
 
-    bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
+    bindings_iz = MIR::ZigTemplate.new(all_bindings, [], "with_block_bindings")
     stdlib_def = FunctionSignature.intrinsic_contract(borrows: with_block_borrow_names(node))
     clauses = materialization.fallible_clauses
     stdlib_def.emit.fallible_clauses = clauses unless clauses.empty?

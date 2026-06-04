@@ -394,6 +394,7 @@ module MIR
 
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[T.untyped]) }
+  ZigTemplateArgs = T.type_alias { T.any(T::Array[Emittable], T::Hash[Symbol, Emittable]) }
 
   sig { params(root: T.nilable(NodeRoot), blk: T.proc.params(arg0: Node).void).void }
   def self.each_node(root, &blk)
@@ -3517,7 +3518,10 @@ module MIR
 
     sig { returns(InlineZig) }
     def without_try
-      out = InlineZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var)
+      out = T.cast(
+        T.unsafe(self.class).new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var),
+        InlineZig,
+      )
       owns = result_ownership_bearing
       out.result_ownership_bearing = owns unless owns.nil?
       out.result_type = Type.new(result_type) if result_type
@@ -3533,6 +3537,43 @@ module MIR
       return if value.is_a?(OwnershipContract)
 
       raise TypeError, "ownership_contract must be MIR::OwnershipContract"
+    end
+  end
+
+  # Registry-backed Zig template with structured MIR children. This is the
+  # production replacement for creating ad hoc InlineZig nodes in lowerers:
+  # the Zig text comes from an audited template, while args remain traversable.
+  class ZigTemplate < InlineZig
+    extend T::Sig
+    extend T::Generic
+
+    Elem = type_member { { fixed: Object } }
+
+    sig { returns(ZigTemplateArgs) }
+    attr_reader :args
+
+    sig { params(code: String, args: ZigTemplateArgs, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(FunctionSignature), allocs: T.nilable(InlineAllocMetadata), target_var: T.nilable(String)).void }
+    def initialize(code, args, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
+      @args = T.let(args, ZigTemplateArgs)
+      super(code, reason, ownership_contract, stdlib_def, allocs, target_var)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      template_args = args
+      values = template_args.is_a?(Hash) ? template_args.values : template_args
+      compact_child_exprs(T.cast(values, T::Array[Object]))
+    end
+
+    sig { returns(ZigTemplate) }
+    def without_try
+      out = ZigTemplate.new(code.delete_prefix("try "), args, reason, ownership_contract, stdlib_def, allocs, target_var)
+      owns = result_ownership_bearing
+      out.result_ownership_bearing = owns unless owns.nil?
+      out.result_type = Type.new(result_type) if result_type
+      out.mark_opaque_ownership_operations! if opaque_ownership_operations
+      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
+      out
     end
   end
 
@@ -3722,7 +3763,7 @@ module MIR
     AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
     ReassignMark, FieldCleanupMark, ReassignWithCleanup,
     *LEGACY_OWNERSHIP_NODE_TYPES,
-    ReturnMark, DiscardOwned, InlineZig,
+    ReturnMark, DiscardOwned, InlineZig, ZigTemplate,
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,

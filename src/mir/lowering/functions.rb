@@ -766,7 +766,7 @@ module MIRLoweringFunctions
     inner_contract = MIR::CallableContract.new(
       inner_sig,
       MIR::OwnershipContract.new(covers_consuming_params: true),
-      arg_idents.length,
+      node.params.length,
     )
     inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, call_owned_return?(node), inner_contract)
     inner_call_mir.result_type = Type.new(payload_type || :Void)
@@ -1664,6 +1664,10 @@ module MIRLoweringFunctions
     consumed_names = arg_materialization.consumed_names
     consumed_operands = arg_materialization.consumed_operands
     val_alloc_placeholder = arg_materialization.val_alloc_placeholder
+    mir_args = mir_args.each_with_index.map do |arg_mir, index|
+      ast_arg = intrinsic_ast_arg(node, stdlib_facts, index)
+      mir_allocates?(arg_mir) ? T.cast(hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index)), MIR::Node) : arg_mir
+    end
 
     # Emit all args to Zig strings
     args_zig = mir_args.map { |a| emit_expr(a) }
@@ -1703,7 +1707,7 @@ module MIRLoweringFunctions
     # Substitute positional args
     args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}") { val } }
 
-    iz = MIR::InlineZig.new(pattern, "intrinsic")
+    iz = MIR::ZigTemplate.new(pattern, [], "intrinsic")
     result_type = Type.from_node!(node, context: "intrinsic result")
     iz.result_type = result_type
     iz.result_ownership_bearing = intrinsic_result_ownership_bearing?(result_type)
@@ -1729,6 +1733,19 @@ module MIRLoweringFunctions
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
+  end
+
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall), stdlib_facts: StdlibCallFacts, index: Integer).returns(T.nilable(AST::Node)) }
+  def intrinsic_ast_arg(node, stdlib_facts, index)
+    fact = stdlib_facts.args[index]
+    return fact.ast_arg if fact
+
+    if node.is_a?(AST::MethodCall)
+      return node.object if index == 0
+      return node.args[index - 1]
+    end
+
+    node.args[index]
   end
 
   sig do
@@ -1824,7 +1841,7 @@ module MIRLoweringFunctions
     build_extern_trampoline_call(node)
   end
 
-  sig { params(node: AST::MethodCall).returns(T.any(MIR::InlineZig, MIR::MethodCall)) }
+  sig { params(node: AST::MethodCall).returns(T.any(MIR::ZigTemplate, MIR::MethodCall)) }
   def lower_extern_method(node)
     T.bind(self, MIRLowering) rescue nil
     return lower_extern_direct_method(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
@@ -1876,7 +1893,7 @@ module MIRLoweringFunctions
     end
   end
 
-  sig { params(node: AST::FuncCall).returns(MIR::InlineZig) }
+  sig { params(node: AST::FuncCall).returns(MIR::ZigTemplate) }
   def build_extern_trampoline_call(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1936,7 +1953,7 @@ module MIRLoweringFunctions
     )
   end
 
-  sig { params(node: AST::MethodCall).returns(MIR::InlineZig) }
+  sig { params(node: AST::MethodCall).returns(MIR::ZigTemplate) }
   def build_extern_trampoline_method(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1973,7 +1990,7 @@ module MIRLoweringFunctions
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: T.nilable(T::Array[T.untyped]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::InlineZig) }
+  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: T.nilable(T::Array[T.untyped]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::ZigTemplate) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
     T.bind(self, MIRLowering) rescue nil
     ret_t = return_type
@@ -2029,7 +2046,7 @@ module MIRLoweringFunctions
     code << "break :blk_ext#{id} #{frame_name}.ret; " unless returns_void
     code << "}"
 
-    iz = MIR::InlineZig.new(code, "extern_trampoline")
+    iz = MIR::ZigTemplate.new(code, [], "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
     is_heap = alloc_kind == :heap ||
       (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) ||

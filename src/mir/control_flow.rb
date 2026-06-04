@@ -23,6 +23,7 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_entry"
+require_relative "placement"
 require_relative "../semantic/local_binding_facts"
 
 module MIRControlFlowExpr
@@ -1391,42 +1392,140 @@ module LoopFrameAnalysis
   def self.analyze!(fn_nodes, schema_lookup = nil)
     fn_nodes.each_value do |fn|
       next unless fn.body
-      walk_stmts!(fn.body, schema_lookup)
+      walk_stmts!(fn.body, schema_lookup, fn_nodes)
       update_shard_contexts!(fn.body, fn_nodes)
     end
   end
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[AST::Node]), schema_lookup: T.nilable(Proc)).void }
-  def self.walk_stmts!(stmts, schema_lookup = nil)
+  sig { params(stmts: T.nilable(T::Array[AST::Node]), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
+  def self.walk_stmts!(stmts, schema_lookup = nil, fn_nodes = {})
     return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_stmt!(s, schema_lookup) }
+    stmts.each { |s| walk_stmt!(s, schema_lookup, fn_nodes) }
     nil
   end
 
-  sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc)).void }
-  def self.walk_stmt!(stmt, schema_lookup = nil)
+  sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
+  def self.walk_stmt!(stmt, schema_lookup = nil, fn_nodes = {})
     child_bodies = AST.child_bodies(stmt)
-    child_bodies.each { |body| walk_stmts!(T.cast(body, T::Array[AST::Node]), schema_lookup) }
-    process_loop!(T.cast(stmt, LoopNode), T.cast(child_bodies.first || [], T::Array[AST::Node]), schema_lookup) if AST.loop_node?(stmt)
+    child_bodies.each { |body| walk_stmts!(T.cast(body, T::Array[AST::Node]), schema_lookup, fn_nodes) }
+    process_loop!(T.cast(stmt, LoopNode), T.cast(child_bodies.first || [], T::Array[AST::Node]), schema_lookup, fn_nodes) if AST.loop_node?(stmt)
     nil
   end
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
-  sig { params(loop_node: LoopNode, body: T::Array[AST::Node], schema_lookup: T.nilable(Proc)).void }
-  def self.process_loop!(loop_node, body, schema_lookup = nil)
+  sig { params(loop_node: LoopNode, body: T::Array[AST::Node], schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
+  def self.process_loop!(loop_node, body, schema_lookup = nil, fn_nodes = {})
     return if loop_node.tight
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
     local_names = local_facts.names
-    has_iteration_frame_locals = local_facts.iteration_frame_decls.any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    has_iteration_frame_locals =
+      local_facts.iteration_frame_decls.any? ||
+      loop_capture_frame_alloc?(loop_node, schema_lookup) ||
+      direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)
     has_extended_frame_locals = local_facts.frame_decls.any? do |decl|
       entry = MIR::LocalBindingAnalysis.binding_entry(decl)
       entry&.present? && entry.alloc == :frame && entry.scope != :iteration
     end || outer_frame_receiver_alloc?(body, local_names)
     loop_node.mark_per_iter = has_iteration_frame_locals && !has_extended_frame_locals
     nil
+  end
+
+  sig { params(body: T::Array[AST::Node], fn_nodes: FnNodes, local_names: T::Set[String]).returns(T::Boolean) }
+  def self.direct_loop_expression_frame_alloc?(body, fn_nodes, local_names = Set.new)
+    found = T.let(false, T::Boolean)
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |stmt|
+      next if direct_loop_expression_boundary?(stmt)
+      each_loop_local_locatable(stmt, local_names) do |node|
+        next if found
+        found = true if expression_allocates_frame_value?(node, fn_nodes)
+      end
+    end
+    found
+  end
+
+  sig { params(root: T.any(AST::Locatable, Object), local_names: T::Set[String], block: T.proc.params(arg0: AST::Locatable).void).void }
+  def self.each_loop_local_locatable(root, local_names = Set.new, &block)
+    stack = T.let([root], T::Array[T.any(AST::Locatable, Object)])
+    seen = T.let(Set.new, T::Set[Integer])
+    until stack.empty?
+      node = stack.pop
+      next unless node
+      if node.is_a?(Array)
+        node.reverse_each { |child| stack << child }
+        next
+      end
+      if node.is_a?(Hash)
+        node.each_value { |child| stack << child }
+        next
+      end
+      next unless node.is_a?(Struct)
+      next unless seen.add?(node.object_id)
+
+      yield node if node.is_a?(AST::Locatable)
+      next if !node.equal?(root) && direct_loop_expression_boundary?(node)
+      next if outer_mutating_receiver_call?(node, local_names)
+
+      T.unsafe(node).class.members.reverse_each do |member|
+        value = T.unsafe(node)[member]
+        if value.is_a?(Array) || value.is_a?(Hash) || value.is_a?(Struct)
+          stack << value
+        end
+      end
+    end
+    nil
+  end
+
+  sig { params(node: T.any(AST::Locatable, Object)).returns(T::Boolean) }
+  def self.direct_loop_expression_boundary?(node)
+    AST.loop_node?(node.is_a?(Struct) ? node : nil) ||
+      node.is_a?(AST::FunctionDef) ||
+      node.is_a?(AST::LambdaLit) ||
+      node.is_a?(AST::BgBlock) ||
+      node.is_a?(AST::BgStreamBlock)
+  end
+
+  sig { params(node: AST::Locatable, fn_nodes: FnNodes).returns(T::Boolean) }
+  def self.expression_allocates_frame_value?(node, fn_nodes)
+    return false unless expression_node_allocates_value?(node)
+
+    if node.is_a?(AST::FuncCall)
+      fn = fn_nodes[node.name]
+      return true if fn&.uses_frame
+    end
+
+    sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
+    emit = sig&.emit
+    if emit && !emit.mutates_receiver
+      return true if MIR::Placement.frame?(emit.return_alloc)
+      return true if emit.allocates && MIR::Placement.frame?(emit.alloc)
+    end
+
+    storage = node.respond_to?(:storage) ? T.unsafe(node).storage : nil
+    return true if MIR::Placement.frame?(storage)
+
+    type_info = node.full_type!(context: "loop frame allocation")
+    return true if type_info.frame?
+    type_info.needs_cleanup? && type_info.cleanup_allocator == :frame
+  end
+
+  sig { params(node: T.any(AST::Locatable, Object), local_names: T::Set[String]).returns(T::Boolean) }
+  def self.outer_mutating_receiver_call?(node, local_names)
+    return false unless node.is_a?(AST::MethodCall) || node.is_a?(AST::FuncCall)
+    sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
+    emit = sig&.emit
+    return false unless emit&.mutates_receiver
+
+    receiver = if node.is_a?(AST::MethodCall)
+      node.object
+    else
+      node.args.first
+    end
+    root = AST.root_identifier(receiver) rescue nil
+    return false unless root&.symbol
+    !local_names.include?(root.name.to_s)
   end
 
   sig { params(body: T::Array[AST::Node], local_names: T::Set[String]).returns(T::Boolean) }
@@ -1517,10 +1616,30 @@ module LoopFrameAnalysis
 
   sig { params(node: AST::Locatable).returns(T::Boolean) }
   def self.expression_node_allocates_value?(node)
+    return false if statement_like_expression_container?(node)
     return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
     return false if node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
 
     true
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def self.statement_like_expression_container?(node)
+    node.is_a?(AST::VarDecl) ||
+      node.is_a?(AST::BindExpr) ||
+      node.is_a?(AST::Assignment) ||
+      node.is_a?(AST::IfStatement) ||
+      node.is_a?(AST::IfBind) ||
+      node.is_a?(AST::MatchStatement) ||
+      node.is_a?(AST::WithBlock) ||
+      node.is_a?(AST::DoBlock) ||
+      node.is_a?(AST::ReturnNode) ||
+      node.is_a?(AST::Assert) ||
+      node.is_a?(AST::Raise) ||
+      node.is_a?(AST::ThrowNode) ||
+      node.is_a?(AST::DieNode) ||
+      node.is_a?(AST::BreakNode) ||
+      node.is_a?(AST::ContinueNode)
   end
 
 end

@@ -2843,13 +2843,9 @@ class MIRLowering
     pattern = T.cast(node.zig_pattern, String).dup
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
     # checker can verify their cleanup. Non-allocating args (and frame allocs)
-    # are left inline -- the pending Lets are emitted by lower_body's
-    # flush_pending before the enclosing statement.
-    arg_strs = node.args.map { |a| emit_expr(hoist_alloc(lower(a), a)) }
-    arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}") { arg } }
-    iz = MIR::InlineZig.new(pattern, "static_call")
-    iz.stdlib_def = node.matched_stdlib_def
-    iz
+    # stay as MIR children of the template expression.
+    mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
+    MIR::ZigTemplate.new(pattern, mir_args, "static_call", MIR::OwnershipContract.empty, node.matched_stdlib_def)
   end
 
   sig { params(node: AST::OrExit).returns(MIR::ScopeBlock) }
@@ -3188,11 +3184,9 @@ class MIRLowering
     names
   end
 
-  # Quick emit for an MIR expression (used when embedding in InlineZig).
-  # This is a temporary bridge -- ideally all expressions stay as MIR nodes.
-  # Emit a builtin operation from BUILTIN_OPS registry as MIR::InlineZig
-  # with stdlib_def attached so the MIR checker can verify ownership.
-  sig { params(name: Symbol, args: T::Array[T.untyped]).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
+  # Emit a builtin operation from BUILTIN_OPS registry with structured MIR
+  # children and stdlib_def attached so the MIR checker can verify ownership.
+  sig { params(name: Symbol, args: T::Array[T.untyped]).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
   def emit_builtin(name, args)
     entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry
@@ -3200,12 +3194,7 @@ class MIRLowering
       return MIR::InlineBc.new(name, args, entry)
     end
     pattern = entry.emit&.zig.to_s.dup
-    # Use block form of gsub so backslashes in Zig code (e.g. "\\" for a literal
-    # backslash) are not interpreted as replacement specials by String#gsub.
-    args.each_with_index { |a, i| code = emit_expr(a); pattern = pattern.gsub("{#{i}}") { code } }
-    iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
-    iz.stdlib_def = entry
-    iz
+    MIR::ZigTemplate.new(pattern, args, "builtin_#{name}", MIR::OwnershipContract.empty, entry)
   end
 
   sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
@@ -3246,6 +3235,7 @@ class MIRLowering
     return nil if ti.direct_indexable_collection?
 
     recv = lower(recv_ast)
+    recv = hoist_alloc(recv, recv_ast) if mir_allocates?(recv)
     return nil unless ti.string?
 
     MIR::Cast.new(MIR::ListLength.new(recv), "i64", :intCast)

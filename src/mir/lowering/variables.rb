@@ -1110,18 +1110,11 @@ module MIRLoweringVariables
       operand.name
     }, T::Array[String])
 
-    # Substitute non-allocator placeholders into the pattern
-    target_zig = T.must(emit_expr(target))
-    idx_zig = T.must(emit_expr(idx))
-    val_zig = T.must(emit_expr(val))
-
-    pattern = dispatch.template.dup
-    pattern = pattern.gsub("{target}", target_zig)
-    pattern = pattern.gsub("&{target}", "&#{target_zig}")
-    pattern = pattern.gsub("{index}", idx_zig)
-    pattern = pattern.gsub("{value}", val_zig)
-
-    iz = MIR::InlineZig.new(pattern, "index_set")
+    iz = MIR::ZigTemplate.new(
+      dispatch.template.dup,
+      { target: target, index: idx, value: val },
+      "index_set"
+    )
     iz.stdlib_def = op
     iz.allocs = dispatch.resolved_allocs unless dispatch.resolved_allocs.empty?
     if op[:takes_value]
@@ -1144,9 +1137,9 @@ module MIRLoweringVariables
         alloc_str = alloc_zig_str(dispatch.sink_alloc)
         cleanup_call = emit_builtin(:cleanupAt, [
           MIR::Ident.new(elem_zig),
-          MIR::Ident.new(target_zig),
+          target,
           MIR::Ident.new(alloc_str),
-          MIR::Ident.new(idx_zig),
+          idx,
         ])
         return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), setAt_stmt, *post_transfer_marks])
       end

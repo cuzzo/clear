@@ -79,6 +79,25 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.mark_per_iter).to be true
     end
 
+    it "WhileLoop: transient frame-allocating string method in body condition → mark_per_iter = true" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          json = "[,]";
+          MUTABLE commas = 0_i64;
+          MUTABLE i = 0_i64;
+          WHILE i < json.length() DO
+            IF json.charAt(i) == "," THEN
+              commas = commas + 1_i64;
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileLoop) }
+      expect(loop.mark_per_iter).to be true
+    end
+
     it "WhileLoop: local HashMap owns heap allocator and does not need a loop frame mark" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->

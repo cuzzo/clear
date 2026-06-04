@@ -141,14 +141,30 @@ module MIRLoweringControlFlow
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
   def lower_if_bind(node)
     T.bind(self, MIRLowering) rescue nil
+    capture_markers = T.let([], T::Array[MIR::Stmt])
     mir_bindings = node.bindings.map do |b|
       expr, pending = lower_head { lower_control_condition(b.expr, transfers_to_capture: true) }
+      if (capture_cleanup = bind_capture_cleanup(b.expr))
+        capture_name = b.name.to_s
+        capture_type = Type.from_node!(b.expr)
+        capture_markers << MIR::AllocMark.new(capture_name, :heap, capture_type, :function)
+        capture_markers << MIR::Cleanup.new(capture_name, capture_cleanup)
+      end
       { expr: loop_condition_expr(expr, pending), capture: b.name }
     end
-    then_body = lower_body(node.then_branch)
+    then_body = capture_markers + T.must(lower_body(node.then_branch))
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
+  end
+
+  sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
+  def bind_capture_cleanup(expr)
+    ti = Type.from_node!(expr)
+    ti = ti.success_type || ti
+    return nil unless ti.any_rc? || (ti.optional? && ti.wrapped_type&.any_rc?)
+
+    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false)
   end
 
   # Single-source frame-arena marker injection for every loop shape
@@ -183,6 +199,9 @@ module MIRLoweringControlFlow
       when MIR::AllocMark
         s.scope = scope if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt
+        stamp_loop_frame_alloc_scopes!(s.then_body, scope)
+        stamp_loop_frame_alloc_scopes!(s.else_body, scope)
+      when MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
         stamp_loop_frame_alloc_scopes!(s.else_body, scope)
       when MIR::ScopeBlock, MIR::BlockExpr
@@ -234,7 +253,7 @@ module MIRLoweringControlFlow
     rt = MIR::Ident.new(@rt_name)
     cond, cond_pending = lower_head { lower_control_condition(node.condition, transfers_to_capture: true) }
     body = lower_body(node.do_branch)
-    if (capture_cleanup = while_bind_capture_cleanup(node))
+    if (capture_cleanup = bind_capture_cleanup(node.condition))
       capture_name = node.binding_name.to_s
       capture_type = Type.from_node!(node.condition)
       body = [
@@ -251,15 +270,6 @@ module MIRLoweringControlFlow
     end
 
     MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, false)
-  end
-
-  sig { params(node: AST::WhileBindLoop).returns(T.nilable(CleanupEntry)) }
-  def while_bind_capture_cleanup(node)
-    ti = Type.from_node!(node.condition)
-    ti = ti.success_type || ti
-    return nil unless ti.any_rc? || (ti.optional? && ti.wrapped_type&.any_rc?)
-
-    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false)
   end
 
   # Returns true when the last reachable statement in a loop body is an
@@ -1149,7 +1159,7 @@ module MIRLoweringControlFlow
     ti = ti.success_type || ti
     is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_storage?) || ti.heap?
     return false if is_heap  # already handled by mir_allocates?
-    @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
+    !!(@union_schemas&.key?(ti.resolved) && ownership_bearing_type?(ti))
   end
 
   # Detect call-site auto-borrow for universal polymorphism. Plain T args

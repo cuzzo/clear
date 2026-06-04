@@ -3196,7 +3196,7 @@ class PipelineHost
           )
     ZIG
 
-    spawn_inline = MIR::InlineZig.new(spawn_zig, "obs_consumer_spawn")
+    spawn_inline = MIR::ZigTemplate.new(spawn_zig, [], "obs_consumer_spawn")
     # spawn_inline allocates the consumer-fiber ctx (heapAlloc().create)
     # and transfers ownership to the spawned fiber. The fiber's run() has
     # `defer rt.heapAlloc().destroy(ctx)` and the alloc site itself has
@@ -4093,7 +4093,7 @@ class PipelineHost
     if (workers = conc_op.options["workers"])
       visit_mir(workers)
     else
-      MIR::Call.new("CheatLib.threadCount", [], false)
+      MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
     end
   end
 

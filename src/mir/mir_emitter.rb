@@ -178,6 +178,7 @@ class MIREmitter
     when MIR::ItemsAccess      then emit_items_access(node)
     when MIR::OwnedSlice       then emit_owned_slice(node)
     when MIR::LambdaExpr       then emit_lambda(node)
+    when MIR::ZigTemplate      then emit_zig_template(node)
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
     when MIR::RawBc            then emit_raw_bc_as_zig(node)
@@ -273,6 +274,31 @@ class MIREmitter
   sig { params(node: MIR::InlineZig).returns(String) }
   def emit_inline_zig(node)
     code = node.code
+    if node.allocs
+      node.allocs.each do |key, sym|
+        code = code.gsub("{#{key}}", alloc_zig(sym))
+      end
+    end
+    code
+  end
+
+  sig { params(node: MIR::ZigTemplate).returns(String) }
+  def emit_zig_template(node)
+    code = node.code.dup
+    args = node.args
+    if args.is_a?(Hash)
+      args.each do |key, value|
+        rendered = emit(value)
+        code = code.gsub("&{#{key}}") { "&#{rendered}" }
+        code = code.gsub("{#{key}}") { rendered }
+      end
+    else
+      Array(args).each_with_index do |value, index|
+        rendered = emit(value)
+        code = code.gsub("&{#{index}}") { "&#{rendered}" }
+        code = code.gsub("{#{index}}") { rendered }
+      end
+    end
     if node.allocs
       node.allocs.each do |key, sym|
         code = code.gsub("{#{key}}", alloc_zig(sym))
