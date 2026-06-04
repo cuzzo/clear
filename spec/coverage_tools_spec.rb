@@ -4,6 +4,7 @@ require "fileutils"
 require_relative "../tools/loom_atomic_coverage"
 require_relative "../tools/vopr_coverage"
 require_relative "../tools/wait_loop_coverage"
+require_relative "../tools/diff_bucket_summary"
 
 RSpec.describe "coverage gap tools" do
   around do |example|
@@ -32,6 +33,31 @@ RSpec.describe "coverage gap tools" do
     sites = LoomAtomicCoverage.scan_atomic_sites(["zig/runtime"], @tmp)
 
     expect(sites.map { |s| [s[:file], s[:line]] }).to eq([["zig/runtime/prod.zig", 5]])
+  end
+
+  it "classifies Zig VOPR/Loom harness files as test code in diff buckets" do
+    expect(bucket_for("zig/runtime/scheduler.zig")).to eq(:zig_src)
+    expect(bucket_for("zig/runtime/scheduler-test.zig")).to eq(:zig_tests)
+    expect(bucket_for("zig/runtime/scheduler-timeout-vopr.zig")).to eq(:zig_tests)
+    expect(bucket_for("zig/runtime/parking-lot-loom.zig")).to eq(:zig_tests)
+    expect(bucket_for("zig/vopr-loom-runner.zig")).to eq(:zig_tests)
+    expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
+  end
+
+  it "excludes VOPR and Loom harness files from Loom and VOPR scanners" do
+    loom_excluded = %w[
+      foo-test.zig
+      foo-vopr.zig
+      foo-loom.zig
+      vopr-clock.zig
+      loom-clock.zig
+    ]
+    vopr_excluded = loom_excluded + ["foo-bench.zig"]
+
+    expect(loom_excluded).to all(match(LoomAtomicCoverage::TEST_FILE_RE))
+    expect(vopr_excluded).to all(match(VoprCoverage::TEST_FILE_RE))
+    expect("scheduler.zig").not_to match(LoomAtomicCoverage::TEST_FILE_RE)
+    expect("scheduler.zig").not_to match(VoprCoverage::TEST_FILE_RE)
   end
 
   it "does not classify control-flow atomic lines as kcov-elided false positives" do

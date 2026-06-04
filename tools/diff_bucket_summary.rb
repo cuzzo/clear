@@ -41,10 +41,18 @@ def numstat(base)
   end
 end
 
+def zig_test_or_harness_file?(path)
+  return false unless path.start_with?("zig/") && path.end_with?(".zig")
+
+  name = File.basename(path)
+  name.end_with?("-test.zig", "-vopr.zig", "-loom.zig") ||
+    name.start_with?("vopr-", "loom-")
+end
+
 def bucket_for(path)
   return :src_rb if path.start_with?("src/") && path.end_with?(".rb")
-  return :zig_tests if path.start_with?("zig/") && (path.end_with?("test.zig") || path.end_with?("-vopr.zig"))
-  return :zig_src if path.start_with?("zig/") && path.end_with?(".zig") && !path.end_with?("test.zig")
+  return :zig_tests if zig_test_or_harness_file?(path)
+  return :zig_src if path.start_with?("zig/") && path.end_with?(".zig")
   return :spec if path.start_with?("spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
@@ -340,55 +348,57 @@ def print_type_guardrails_markdown(findings)
   puts "_#{findings.length - 30} more findings omitted._" if findings.length > 30
 end
 
-options = parse_options(ARGV)
-base = options[:base] || default_base_ref
-stats = numstat(base)
-adds_by_path = added_lines(base)
-guardrail_findings = type_guardrail_findings(adds_by_path)
+if $PROGRAM_NAME == __FILE__
+  options = parse_options(ARGV)
+  base = options[:base] || default_base_ref
+  stats = numstat(base)
+  adds_by_path = added_lines(base)
+  guardrail_findings = type_guardrail_findings(adds_by_path)
 
-bucket_order = [
-  [:total, "total"],
-  [:src_rb, "src/**/*.rb"],
-  [:zig_src, "zig/**/*.zig !(*test.zig|*-vopr.zig)"],
-  [:spec, "spec/"],
-  [:transpile_tests, "transpile-tests/"],
-  [:tools, "tools/"],
-  [:zig_tests, "zig/**/*test.zig + *-vopr.zig"],
-  [:md, "*.md"],
-  [:other, "other"],
-]
+  bucket_order = [
+    [:total, "total"],
+    [:src_rb, "src/**/*.rb"],
+    [:zig_src, "zig/**/*.zig prod"],
+    [:spec, "spec/"],
+    [:transpile_tests, "transpile-tests/"],
+    [:tools, "tools/"],
+    [:zig_tests, "zig/**/*-test.zig + vopr/loom harness"],
+    [:md, "*.md"],
+    [:other, "other"],
+  ]
 
-grouped = Hash.new { |h, k| h[k] = [] }
-stats.each { |entry| grouped[bucket_for(entry[:path])] << entry }
-grouped[:total] = stats
+  grouped = Hash.new { |h, k| h[k] = [] }
+  stats.each { |entry| grouped[bucket_for(entry[:path])] << entry }
+  grouped[:total] = stats
 
-src_paths = grouped[:src_rb].map { |e| e[:path] }
-zig_paths = grouped[:zig_src].map { |e| e[:path] }
-zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
-src_cov = ruby_added_coverage(adds_by_path, src_paths)
-zig_cov = zig_added_coverage(adds_by_path, zig_paths)
-zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
+  src_paths = grouped[:src_rb].map { |e| e[:path] }
+  zig_paths = grouped[:zig_src].map { |e| e[:path] }
+  zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
+  src_cov = ruby_added_coverage(adds_by_path, src_paths)
+  zig_cov = zig_added_coverage(adds_by_path, zig_paths)
+  zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
 
-rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
-bucket_order.each do |key, label|
-  entries = grouped[key]
-  additions = entries.sum { |e| e[:additions] }
-  deletions = entries.sum { |e| e[:deletions] }
-  coverage = case key
-             when :src_rb then src_cov
-             when :zig_src then zig_cov
-             when :zig_tests then zig_test_cov
-             when :spec, :tools then ["not tracked", "not tracked"]
-             else ["", ""]
-             end
-  rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
-end
+  rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
+  bucket_order.each do |key, label|
+    entries = grouped[key]
+    additions = entries.sum { |e| e[:additions] }
+    deletions = entries.sum { |e| e[:deletions] }
+    coverage = case key
+               when :src_rb then src_cov
+               when :zig_src then zig_cov
+               when :zig_tests then zig_test_cov
+               when :spec, :tools then ["not tracked", "not tracked"]
+               else ["", ""]
+               end
+    rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
+  end
 
-if options[:format] == "markdown"
-  print_markdown(base, rows)
-  print_type_guardrails_markdown(guardrail_findings)
-else
-  puts "Diff base: #{base}...HEAD"
-  print_table(rows)
-  print_type_guardrails_text(guardrail_findings)
+  if options[:format] == "markdown"
+    print_markdown(base, rows)
+    print_type_guardrails_markdown(guardrail_findings)
+  else
+    puts "Diff base: #{base}...HEAD"
+    print_table(rows)
+    print_type_guardrails_text(guardrail_findings)
+  end
 end

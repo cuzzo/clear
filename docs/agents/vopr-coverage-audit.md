@@ -38,8 +38,9 @@ patterns:
 | `retry`      | `// VOPR-START-RETRY: <desc>` ... `// VOPR-END-RETRY` block markers, OR `// VOPR-RETRY` single-line marker |
 | `retry_body` | Every executable line INSIDE a `// VOPR-START-RETRY` ... `// VOPR-END-RETRY` block. Tracks whether the loop body executed (vs just the loop header). |
 
-Test files are excluded (`*-test.zig`, `vopr*.zig`, `*-loom.zig`,
-`*-vopr.zig`) — they're test infrastructure, not production runtime.
+Test files are excluded (`*-test.zig`, `vopr*.zig`, `loom*.zig`,
+`*-loom.zig`, `*-vopr.zig`) — they're test infrastructure, not
+production runtime.
 
 ## How sites are scored
 

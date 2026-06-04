@@ -79,9 +79,10 @@ module LoomAtomicCoverage
   # Test files use atomics to *exercise* the runtime; their own atomic
   # sites aren't candidates for Loom coverage. Excluded by default.
   # Also excluded: VOPR/Loom simulator + harness files themselves
-  # (vopr*.zig, *-loom.zig) -- atomics there are test infrastructure,
-  # not production runtime that Loom should be exercising.
-  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|[\w-]+-loom)\.zig\z/
+  # (vopr-*.zig, loom-*.zig, *-vopr.zig, *-loom.zig) -- atomics there
+  # are test infrastructure, not production runtime that Loom should be
+  # exercising.
+  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|loom[\w-]*|[\w-]+-loom|[\w-]+-vopr)\.zig\z/
 
   # Source-comment markers for code regions that are by-design unreachable
   # under the loom harness (e.g. thread-only paths guarded by
