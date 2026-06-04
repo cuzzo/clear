@@ -109,7 +109,7 @@ Because CLEAR's concurrency and memory lifetimes are declarative, the compiler h
 
 In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite State Machines (FSMs) rather than stack-allocated fibers. Some functions that use FFI or are re-entrant may prefer to use stacks explicitly, though *CAN* be lowered to FSMs.
 
-This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of Go's blocking syntax.
+This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of a SQL query.
 
 ### Profile Guided Optimization
 
