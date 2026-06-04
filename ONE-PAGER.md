@@ -1,11 +1,17 @@
 # CLEAR: The High-Performance Language for Humans
 
 ## WHY CLEAR?
+
 CLEAR is designed for systems where performance is a requirement, not a luxury, but where developer velocity and safety are paramount.
 
-The goal is simple: **Be more correct than Rust, nearly as fast as hand-tuned C, with a language less complex than Go or TypeScript.**
+The goal is lofty: 
+
+ * **Be more correct than Rust**
+ * **Nearly as fast as hand-tuned C**
+ * **In a language less complex than Go or TypeScript**
 
 ## HOW?
+
 CLEAR makes the common case zero-cost and the uncommon case explicit. You pay for complexity only when you use it.
 
 *   **Costs Visible Where You Decide, Invisible Where You Use**: Performance trade-offs (like `shared` vs `multiowned`) are visible at the *definition* of a resource, but elided at the *usage*. This allows for massive architectural refactors (e.g., moving from single-threaded to multi-threaded) with zero "function coloring" or ripple effects.
@@ -16,6 +22,7 @@ CLEAR makes the common case zero-cost and the uncommon case explicit. You pay fo
 *   **Native Interop via Zig**: CLEAR compiles to Zig, which compiles to native code via LLVM. Full access to the C standard library, native C ABI exports, and zero-overhead FFI — no bindings, no wrappers.
 
 ## WHAT DOES CLEAR LOOK LIKE?
+
 CLEAR excels at high-throughput data processing. Here is a pipeline that handles back-pressure, manages complex errors, and leverages shared-nothing architecture:
 
 ```ruby clear illustrative
@@ -37,11 +44,13 @@ results = sensors
 ```
 
 ## PERFORMANCE
+
 In predictable workloads, as demonstrated in the included benchmarks, CLEAR outperforms Go and Rust/Tokio with considerably less, clearer code.
 
 This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not yet match this level of advantage — but there is substantial room for improvement by v1. CLEAR believes it will eventually outperform Go in almost all cases: no garbage collector, nearly half the memory footprint, more predictable response times, and zero chance of data races or a number of other concurrency hazards.
 
 ## THE IMPLICATIONS
+
 CLEAR's foundational principle is to **minimize global complexity and maximize local reasoning.**
 
 1.  **Deep Optimization**: By enforcing local reasoning, the compiler can perform aggressive optimizations (like `Auto-Squishing` structs into SoA) that are often impossible in languages with pointer-aliasing or global side-effects.
