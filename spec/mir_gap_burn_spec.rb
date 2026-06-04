@@ -2356,7 +2356,8 @@ RSpec.describe "MIR gap-burn characterization" do
     post_low.define_singleton_method(:emit_stmts_zig) { |_stmts, **_kwargs| "checks();" }
     post_fn = fn([], return_type: :Void)
     outer = post_low.send(:build_post_outer_fn, post_fn, [], "void", false, :private, [])
-    expect(outer.body.first.code).not_to include("@import(\"builtin\").mode")
+    expect(outer.body.first).to be_a(MIR::ExprStmt)
+    expect(outer.body.any? { |node| node.is_a?(MIR::DebugOnly) }).to eq(false)
 
     borrowed_arg = AST::GetField.new(tok, id("owner", type: :Box), "field")
     borrowed_arg.full_type = Type.new(:String)

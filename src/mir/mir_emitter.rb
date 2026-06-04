@@ -78,6 +78,7 @@ class MIREmitter
     when MIR::AssertStmt       then emit_assert_stmt(node)
     when MIR::AssertRaisesCheck then emit_assert_raises_check(node)
     when MIR::TestPreamble     then emit_test_preamble
+    when MIR::DebugOnly        then emit_debug_only(node)
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
@@ -1326,6 +1327,16 @@ class MIREmitter
           defer __rt_box.deinit();
           __rt_box.wireAllocator();
           const rt: *Runtime = &__rt_box; _ = &rt;
+    ZIG
+  end
+
+  sig { params(node: MIR::DebugOnly).returns(String) }
+  def emit_debug_only(node)
+    body = emit_body(node.body || [])
+    <<~ZIG.rstrip
+      if (@import("builtin").mode == .Debug) {
+      #{indent_block(body, 4)}
+      }
     ZIG
   end
 

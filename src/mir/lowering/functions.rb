@@ -770,15 +770,9 @@ module MIRLoweringFunctions
     )
     inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, call_owned_return?(node), inner_contract)
     inner_call_mir.result_type = Type.new(payload_type || :Void)
-    call_zig = emit_expr(inner_call_mir)
 
-    # Each predicate check decomposes into structured MIR:
-    #   MIR::IfStmt(!cond, [MIR::Panic("DEBUG_POST failed: <source>")])
-    # The lowered cond is the same MIR expression the annotator type-
-    # checked against Bool. Only the wrapping comptime-debug-mode gate
-    # remains as InlineZig — Zig's `@import("builtin").mode == .Debug`
-    # has no MIR representation today (would need a new MIR node like
-    # MIR::ComptimeIf or MIR::DebugBlock; see follow-up).
+    # Each predicate check decomposes into structured MIR and runs
+    # behind a MIR::DebugOnly gate.
     check_stmts = (node.post_clauses || []).map do |entry|
       expr   = entry[:expr]
       source = entry[:source]
@@ -789,41 +783,22 @@ module MIRLoweringFunctions
                       nil)
     end
 
-    checks_zig = emit_stmts_zig(check_stmts, indent: "        ")
-
-    debug_block = if check_stmts.empty?
-      ""
+    body = if is_void
+      [
+        MIR::ExprStmt.new(inner_call_mir, false),
+        *([MIR::DebugOnly.new(check_stmts)] unless check_stmts.empty?),
+        MIR::ReturnStmt.new(nil),
+      ].compact
     else
-      <<~ZIG.rstrip
-        if (@import("builtin").mode == .Debug) {
-        #{checks_zig}
-        }
-      ZIG
+      [
+        MIR::Let.new("result", inner_call_mir, false, nil, "_ = &result;"),
+        *([MIR::DebugOnly.new(check_stmts)] unless check_stmts.empty?),
+        MIR::ReturnStmt.new(MIR::Ident.new("result")),
+      ].compact
     end
-
-    body_zig = if is_void
-      # Void return: no `result` to bind (visit_post_clauses! never
-      # declares it for void-payload functions, so a predicate can't
-      # reference it). Just call inner, run checks, return.
-      <<~ZIG.rstrip
-        #{call_zig};
-        #{debug_block}
-        return;
-      ZIG
-    else
-      <<~ZIG.rstrip
-        const result = #{call_zig};
-        _ = &result;
-        #{debug_block}
-        return result;
-      ZIG
-    end
-
-    iz = MIR::InlineZig.new(body_zig, "post_outer_body")
-    iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
 
     MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                   [iz], vis, false, comptime_params)
+                   body, vis, false, comptime_params)
   end
 
   # Returns the catch Zig plus checker-visible MIR bodies (one per clause,

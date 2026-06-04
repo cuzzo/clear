@@ -99,7 +99,7 @@ class MIRChecker
     MIR::AllocMark, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
     MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
     MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
-    MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
+    MIR::DebugOnly, MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
     MIR::ExprStmt, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
     MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
     MIR::FsmIoBody, MIR::IfBindStmt, MIR::IfChain, MIR::IfStmt,
@@ -575,6 +575,8 @@ class MIRChecker
     when MIR::ScopeBlock, MIR::BlockExpr
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, "scope")
+    when MIR::DebugOnly
+      check_linear_stmts!(stmt.body, state.copy)
     when MIR::SwitchStmt, MIR::UnionMatchStmt
       check_linear_expr_uses!(stmt.subject, state)
       states = T.let([], T::Array[LinearOwnershipState])

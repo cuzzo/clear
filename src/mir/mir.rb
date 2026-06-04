@@ -991,6 +991,13 @@ module MIR
     include Stmt
   end
 
+  DebugOnly = Struct.new(:body) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+  end
+
   # In-place sort.
   # Borrows `items_expr`; mutates the underlying slice. The comparator is
   # encoded as two key extraction expressions (key_a, key_b) — both are MIR
