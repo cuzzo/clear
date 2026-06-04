@@ -1,9 +1,9 @@
 //! freeze_bench.zig -- Measure cache-locality speedup from freezing a BST.
 //!
-//! Run: zig test zig/experimental/freeze_bench.zig --test-filter bench
+//! Run: zig test --dep freeze -Mroot=zig/experimental/freeze_bench.zig -Mfreeze=zig/runtime/freeze.zig -lc --test-filter bench
 
 const std = @import("std");
-const freeze_mod = @import("freeze.zig");
+const freeze_mod = @import("freeze");
 const Timer = struct {
     start_ns: u64,
     pub fn start() error{}!@This() { return .{ .start_ns = nanoNow() }; }

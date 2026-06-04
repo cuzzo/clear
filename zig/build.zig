@@ -49,6 +49,7 @@ pub fn build(b: *std.Build) void {
     const ebr_mod = b.createModule(.{ .root_source_file = b.path("lib/ebr.zig") });
     const ownership_mod = b.createModule(.{ .root_source_file = b.path("lib/ownership.zig") });
     const compat_mod = b.createModule(.{ .root_source_file = b.path("lib/compat.zig") });
+    const freeze_mod = b.createModule(.{ .root_source_file = b.path("runtime/freeze.zig") });
     ebr_mod.addImport("compat", compat_mod);
 
     // -------------------------------------------------------------------------
@@ -191,6 +192,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "ffi-concurrency-test.zig", .tsan = true },
         .{ .path = "fiber-test.zig", .tsan = true },
         .{ .path = "fiber-profile-test.zig", .tsan = true },
+        .{ .path = "runtime/freeze.zig" },
         // FSM (stackless task) tests
         .{ .path = "fsm-benchmark-test.zig", .tsan = true },
         .{ .path = "fsm-concurrent-test.zig", .tsan = true },
@@ -672,6 +674,7 @@ pub fn build(b: *std.Build) void {
         bench_tests.root_module.addImport("ebr", ebr_mod);
         bench_tests.root_module.addImport("ownership", ownership_mod);
         bench_tests.root_module.addImport("compat", compat_mod);
+        bench_tests.root_module.addImport("freeze", freeze_mod);
         bench_tests.root_module.addAssemblyFile(switch_s);
         bench_tests.root_module.addAssemblyFile(onroot_s);
         bench_tests.root_module.link_libc = true;
