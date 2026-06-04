@@ -61,7 +61,11 @@ class TestGenerator
                       cheat_code.include?("BG STREAM {") ||
                       cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
                       cheat_code.include?("@pinned") ||
+                      cheat_code.include?("@sharded") ||
+                      cheat_code.include?("SHARD(") ||
                       transpiled_body.include?("WaitGroup") ||
+                      transpiled_body.include?("PartitionedStringMap") ||
+                      transpiled_body.include?("PartitionedNumericMap") ||
                       transpiled_body.include?("concurrentList") ||
                       transpiled_body.include?("concurrentStream") ||
                       transpiled_body.include?("concurrentBounded")
@@ -312,6 +316,15 @@ end
 
 puts "Generating #{OUTPUT_FILE}..."
 
+# Iterate through all .cht files before opening the output file. Worker
+# processes inherit open file descriptors; keeping OUTPUT_FILE closed during
+# fork prevents each child from flushing a copy of the parent's header buffer.
+test_source_dir = File.expand_path(TEST_DIR)
+test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
+
+puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
+generated_blocks = generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS)
+
 File.open(OUTPUT_FILE, "w") do |f|
   # 1. Write the Runtime Header (Once)
   if File.exist?(HEADER_FILE)
@@ -328,12 +341,8 @@ File.open(OUTPUT_FILE, "w") do |f|
     exit 1
   end
 
-  # 2. Iterate through all .cht files in the test directory
-  test_source_dir = File.expand_path(TEST_DIR)
-  test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
-
-  puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
-  generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS).each do |filename, block, error|
+  # 2. Write generated test blocks in deterministic file order.
+  generated_blocks.each do |filename, block, error|
     if error
       $stderr.puts "    [ERROR] Failed to transpile #{filename}: #{error}"
       @failed_tests ||= []
