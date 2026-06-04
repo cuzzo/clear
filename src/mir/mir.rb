@@ -3172,6 +3172,32 @@ module MIR
     def child_exprs = compact_child_exprs([worker_count])
   end
 
+  # NEXT on a promise list (~T[]@list): await each promise into a new
+  # ArrayListUnmanaged(T) owned by `alloc`.
+  NextPromiseList = Struct.new(:list_expr, :elem_zig, :label, :results_var, :alloc) do
+    extend T::Sig
+    include Expr
+
+    sig { params(list_expr: Emittable, elem_zig: String, label: String, results_var: String, alloc: Symbol, result_type: Type).void }
+    def initialize(list_expr, elem_zig, label, results_var, alloc, result_type)
+      super(list_expr, elem_zig, label, results_var, alloc)
+      @result_type = T.let(result_type, Type)
+    end
+
+    sig { returns(Type) }
+    def result_type
+      @result_type
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([list_expr])
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
+  end
+
   # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
   # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
   # these at call sites. kind: :heap | :frame | :cleanup.
@@ -3694,6 +3720,7 @@ module MIR
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
     RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
+    NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,
     ShardedMapPut, ShardedMapGet,

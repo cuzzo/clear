@@ -166,6 +166,7 @@ class MIREmitter
     when MIR::PointerCast      then emit_pointer_cast(node)
     when MIR::ConstCast        then "@constCast(#{emit(node.expr)})"
     when MIR::DefaultStreamCapacity then emit_default_stream_capacity(node)
+    when MIR::NextPromiseList  then emit_next_promise_list(node)
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
     when MIR::AllocatorRef     then emit_allocator_ref(node)
     when MIR::Undef            then node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
@@ -1359,6 +1360,21 @@ class MIREmitter
   def emit_default_stream_capacity(node)
     workers = emit(node.worker_count)
     "blk: { var c: usize = 4; while (c < #{workers} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
+  end
+
+  sig { params(node: MIR::NextPromiseList).returns(String) }
+  def emit_next_promise_list(node)
+    list_expr = paren_if_try(T.must(emit(node.list_expr)))
+    alloc = alloc_zig(node.alloc)
+    <<~ZIG.rstrip
+      #{node.label}: {
+          var #{node.results_var} = std.ArrayListUnmanaged(#{node.elem_zig}).empty;
+          for (#{list_expr}.items) |__p| {
+              try #{node.results_var}.append(#{alloc}, try __p.next());
+          }
+          break :#{node.label} #{node.results_var};
+      }
+    ZIG
   end
 
   sig { params(node: MIR::StructInit).returns(String) }

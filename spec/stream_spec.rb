@@ -1751,6 +1751,21 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(src)
         expect(out).to match(/CheatLib\.getAt\(futures, 0\)\.next\(\)/)
       end
+
+      it "emits await-all materialization for NEXT futures" do
+        src = <<~CLEAR
+          FN f() RETURNS !Void ->
+            MUTABLE futures: ~Int64[]@list = [];
+            append(futures, BG { 7; });
+            values: Int64[] = NEXT futures;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("std.ArrayListUnmanaged(i64).empty")
+        expect(out).to match(/for \(\(?futures\)?\.items\) \|__p\|/)
+        expect(out).to include("try __p.next()")
+      end
     end
   end
 

@@ -52,6 +52,22 @@ RSpec.describe MIREmitter do
     expect(e.send(:emit_body_flow, [signal], :ret_no_commit)).to eq("__flow.* = .{ .kind = .raise_no_commit };\nreturn;")
   end
 
+  it "emits promise-list NEXT await-all expressions" do
+    node = MIR::NextPromiseList.new(
+      MIR::Ident.new("futures"),
+      "i64",
+      "__next_all_1",
+      "__next_results_1",
+      :frame,
+      Type.new(:"Int64[]"),
+    )
+    zig = e.emit(node)
+    expect(zig).to include("var __next_results_1 = std.ArrayListUnmanaged(i64).empty")
+    expect(zig).to include("for (futures.items) |__p|")
+    expect(zig).to include("try __next_results_1.append(rt.frameAlloc(), try __p.next())")
+    expect(zig).to include("break :__next_all_1 __next_results_1;")
+  end
+
   # =========================================================================
   # Variable declarations
   # =========================================================================

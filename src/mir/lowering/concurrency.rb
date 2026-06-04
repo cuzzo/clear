@@ -1064,23 +1064,18 @@ module MIRLoweringConcurrency
         return call
       end
 
-      promise_list_inner_str = emit_expr(promise_list_inner)
       elem_zig = T.must(promise_type.tense_type.element_type).zig_type
       @tmp_counter += 1
       promise_list_label = "__next_all_#{@tmp_counter}"
       results_var = "__next_results_#{@tmp_counter}"
-      alloc_fn = MIR::Placement.zig_allocator(alloc_sym, @rt_name)
-      code = "#{promise_list_label}: {\n" \
-             "    var #{results_var} = std.ArrayListUnmanaged(#{elem_zig}).empty;\n" \
-             "    for (#{promise_list_inner_str}.items) |__p| {\n" \
-             "        try #{results_var}.append(#{alloc_fn}, try __p.next());\n" \
-             "    }\n" \
-             "    break :#{promise_list_label} #{results_var};\n" \
-             "}"
-      iz = MIR::InlineZig.new(code, "next_promise_list")
-      iz.stdlib_def = FunctionSignature.intrinsic_contract(return_type: Type.new(result_t), allocates: true)
-      iz.allocs = { results_var => alloc_sym }
-      return iz
+      return MIR::NextPromiseList.new(
+        promise_list_inner,
+        elem_zig,
+        promise_list_label,
+        results_var,
+        alloc_sym,
+        Type.new(result_t),
+      )
     end
 
     # Collection observable (`~T[]@set:observable`): NEXT yields an owned
