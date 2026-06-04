@@ -3047,9 +3047,9 @@ class MIRLowering
   TIER_RANK = T.let({ "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze, T::Hash[T.untyped, T.untyped])
 
   sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
-  def task_config_zig(stack_size, computed_tier)
+  def task_config_variant(stack_size, computed_tier)
     default = @debug_mode ? "Large" : "Standard"
-    variant = if stack_size
+    if stack_size
       if stack_size == :stack
         STACK_SIZE_ZIG_VARIANT.fetch(computed_tier || :standard, default)
       else
@@ -3061,6 +3061,11 @@ class MIRLowering
     else
       default
     end
+  end
+
+  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
+  def task_config_zig(stack_size, computed_tier)
+    variant = task_config_variant(stack_size, computed_tier)
     ".{ .stack_size = .#{variant} }"
   end
 
@@ -3299,7 +3304,7 @@ class MIRLowering
 
   public
 
-  public :task_config_zig, :emit_expr, :emit_builtin,
+  public :task_config_variant, :task_config_zig, :emit_expr, :emit_builtin,
     :lower_head, :append_ownership_transfers_for_mir_body
 
   sig do

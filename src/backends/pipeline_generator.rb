@@ -135,21 +135,19 @@ module PipelineGenerator
     end
   end
 
-  # Returns [min_sentinel, max_sentinel] for a given Zig numeric type.
-  # min_sentinel is the initial value for a MIN accumulator (highest possible).
-  # max_sentinel is the initial value for a MAX accumulator (lowest possible).
-  sig { params(zig_t: String, resolved_sym: Symbol).returns(T::Array[String]) }
-  def agg_minmax_sentinels(zig_t, resolved_sym)
+  # Structural seeds for concurrent MIN/MAX reducers. The caller supplies the
+  # already-resolved result type; these helpers choose sentinel nodes without
+  # smuggling expressions as opaque Zig text.
+  sig { params(zig_t: String).returns(T.untyped) }
+  def agg_min_sentinel_mir(zig_t)
     T.bind(self, T.untyped) rescue nil
-    if [:Float32, :Float64].include?(resolved_sym)
-      ["std.math.floatMax(#{zig_t})", "-std.math.floatMax(#{zig_t})"]
-    elsif [:Int8, :Int16, :Int32, :Int64].include?(resolved_sym)
-      ["std.math.maxInt(#{zig_t})", "std.math.minInt(#{zig_t})"]
-    elsif [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].include?(resolved_sym)
-      ["std.math.maxInt(#{zig_t})", "0"]
-    else
-      ["std.math.floatMax(f64)", "-std.math.floatMax(f64)"]
-    end
+    MIR::TypeSentinel.new(:max, zig_t)
+  end
+
+  sig { params(zig_t: String, result_type: T.untyped).returns(T.untyped) }
+  def agg_max_sentinel_mir(zig_t, result_type)
+    T.bind(self, T.untyped) rescue nil
+    result_type.unsigned_integer? ? MIR::Lit.new("0") : MIR::TypeSentinel.new(:min, zig_t)
   end
 
 end

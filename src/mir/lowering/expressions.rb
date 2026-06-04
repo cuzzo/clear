@@ -955,7 +955,9 @@ module MIRLoweringExpressions
     if facts.kind
       stmts << MIR::Set.new(runtime_error_field("kind"), MIR::Ident.new(".#{facts.kind}"))
       if facts.error_name
-        name_id = MIR::InlineZig.new("@intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+        name_id = MIR::Call.new("@intFromEnum", [
+          MIR::FieldGet.new(MIR::Ident.new("ErrorName"), facts.error_name),
+        ], false, false, MIR::CallableContract.no_ownership(1))
         stmts << MIR::Set.new(runtime_error_field("error_name"), name_id)
       elsif facts.clear_type
         stmts << MIR::Set.new(runtime_error_field("error_name"), MIR::Lit.new("0"))

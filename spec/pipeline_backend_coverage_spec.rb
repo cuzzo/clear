@@ -121,11 +121,10 @@ RSpec.describe "pipeline backend coverage" do
       expect(host.build_pipe_items_block(ptype, "rt.frameAlloc()")).to include("pipe_src_list[0..]")
     end
 
-    it "uses numeric sentinel values by result family" do
-      expect(host.agg_minmax_sentinels("f64", :Float64)).to eq(["std.math.floatMax(f64)", "-std.math.floatMax(f64)"])
-      expect(host.agg_minmax_sentinels("i64", :Int64)).to eq(["std.math.maxInt(i64)", "std.math.minInt(i64)"])
-      expect(host.agg_minmax_sentinels("u64", :UInt64)).to eq(["std.math.maxInt(u64)", "0"])
-      expect(host.agg_minmax_sentinels("Custom", :Custom)).to eq(["std.math.floatMax(f64)", "-std.math.floatMax(f64)"])
+    it "builds min/max sentinels as MIR nodes" do
+      expect(host.agg_min_sentinel_mir("i64")).to eq(MIR::TypeSentinel.new(:max, "i64"))
+      expect(host.agg_max_sentinel_mir("i64", Type.new(:Int64))).to eq(MIR::TypeSentinel.new(:min, "i64"))
+      expect(host.agg_max_sentinel_mir("u64", Type.new(:UInt64))).to eq(MIR::Lit.new("0"))
     end
 
   end
@@ -183,6 +182,10 @@ RSpec.describe "pipeline backend coverage" do
 
         def task_config_zig(_stack_size, _computed_tier = nil)
           ".{}"
+        end
+
+        def task_config_variant(_stack_size, _computed_tier = nil)
+          "Large"
         end
 
       end.new
@@ -295,16 +298,97 @@ RSpec.describe "pipeline backend coverage" do
       lowering.instance_variable_set(:@target, nil)
     end
 
-    it "wraps explicit concurrent batch options for Zig usize use" do
+    it "wraps explicit concurrent scalar options as structural MIR" do
       batch = lit(8)
-      conc = OpenStruct.new(options: { "batch" => batch })
-      pipeline_host.define_singleton_method(:visit_mir) { |node| MIR::Lit.new(node.value) }
-      lowering.define_singleton_method(:emit_expr) { |node| node.respond_to?(:value) ? node.value.to_s : node.name.to_s }
+      workers = lit(4)
+      capacity = id("cap")
+      size = id("large")
+      conc = AST::ConcurrentOp.new(tok, nil, {
+        "batch" => batch,
+        "workers" => workers,
+        "capacity" => capacity,
+        "size" => size,
+      })
+      pipeline_host.define_singleton_method(:visit_mir) { |node| MIR::Lit.new(node.value.to_s) }
 
-      mir = pipeline_host.send(:bounded_concurrent_batch_mir, conc)
+      batch_mir = pipeline_host.send(:bounded_concurrent_batch_mir, conc)
+      workers_mir = pipeline_host.send(:bounded_concurrent_worker_count_for_call_mir, conc)
+      capacity_mir = pipeline_host.send(:stream_concurrent_capacity_mir, conc, "n_workers")
+      task_cfg_mir = pipeline_host.send(:bounded_concurrent_task_cfg_mir, conc)
 
-      expect(mir).to be_a(MIR::InlineZig)
-      expect(mir.code).to eq("@intCast(8)")
+      expect(batch_mir).to be_a(MIR::Cast)
+      expect(MIREmitter.new.emit(batch_mir)).to eq("@intCast(8)")
+      expect(workers_mir).to be_a(MIR::Cast)
+      expect(MIREmitter.new.emit(workers_mir)).to eq("@intCast(4)")
+      expect(capacity_mir).to be_a(MIR::Cast)
+      expect(MIREmitter.new.emit(capacity_mir)).to eq("@intCast(cap)")
+      expect(task_cfg_mir).to be_a(MIR::StructInit)
+      expect(MIREmitter.new.emit(task_cfg_mir)).to eq(".{ .stack_size = .Large }")
+    end
+
+    it "builds observable reduce publish as a structural MIR block" do
+      reduce = AST::ReduceOp.new(tok, lit(0), AST::BinaryOp.new(tok, id("acc"), :ADD, id("_")))
+      smooth = typed(AST::BinaryOp.new(tok, id("source"), :SMOOTH, reduce), Type.new(:Int64))
+      captured_publish = nil
+
+      pipeline_host.define_singleton_method(:transpile_type) { |_type| "i64" }
+      pipeline_host.define_singleton_method(:visit_mir) do |node|
+        node.equal?(reduce.initial_value) ? MIR::Lit.new("0") : MIR::BinOp.new("+", MIR::Ident.new("__obs_reduce_curr_0"), MIR::Ident.new("__item"))
+      end
+      pipeline_host.define_singleton_method(:observable_alloc_expr) { |_target, _method, _args| MIR::Ident.new("acc_alloc") }
+      pipeline_host.define_singleton_method(:lower_range_fold_observable) do |_p, _smooth, label, _source, acc_alloc_expr:, publish_stmts:|
+        captured_publish = publish_stmts
+        MIR::BlockExpr.new(label, [MIR::BreakStmt.new(label, acc_alloc_expr)])
+      end
+
+      result = pipeline_host.send(:lower_range_reduce_observable,
+        { item_var: "__item", source_name: "source" }, reduce, smooth, "__obs_label", id("source"))
+
+      expect(result).to be_a(MIR::BlockExpr)
+      publish = captured_publish.fetch(0)
+      expect(publish).to be_a(MIR::ExprStmt)
+      expect(publish.expr).to be_a(MIR::BlockExpr)
+      loop = publish.expr.body.find { |stmt| stmt.is_a?(MIR::WhileStmt) }
+      expect(loop).not_to be_nil
+      expect(loop.body.any? { |stmt| stmt.is_a?(MIR::IfBindStmt) }).to be true
+      zig = MIREmitter.new.emit(publish.expr)
+      expect(zig).to include("__obs_acc.inner.view()")
+      expect(zig).to include("__obs_acc.inner.tryCommit(__obs_reduce_curr_0, __obs_reduce_next_0)")
+      expect(zig).to include("__obs_acc.inner.markSeen()")
+      expect(zig).to include("break :__obs_reduce_blk_0 @as(i32, 0);")
+    end
+
+    it "builds concurrent reduce min/max seeds structurally" do
+      lhs = id("items", type: Type.new(:"Int64[]"))
+      conc = AST::ConcurrentOp.new(tok, nil, {})
+      captured_args = []
+      pipeline_host.define_singleton_method(:concurrent_list_item_type) { |_node| Type.new(:Int64) }
+      pipeline_host.define_singleton_method(:build_bounded_concurrent_callback) do |_op, _item_type, _return_type, _body_kind|
+        { id: 1, ctx_name: "__Ctx", ctx_var: "__ctx" }
+      end
+      pipeline_host.define_singleton_method(:list_concurrent_source_setup_stmts) { |_node| [] }
+      pipeline_host.define_singleton_method(:bounded_callback_context_stmts) { |_cb| [] }
+      lowering.define_singleton_method(:emit_builtin) do |name, args|
+        captured_args << args
+        MIR::Call.new(name.to_s, [], false, false, MIR::CallableContract.no_ownership(0))
+      end
+
+      min = AST::MinOp.new(tok, id("_"))
+      min_smooth = typed(AST::BinaryOp.new(tok, lhs, :SMOOTH, min), Type.new(:Int64))
+      pipeline_host.send(:lower_concurrent_list_reduce, lhs, conc, min, min_smooth)
+
+      max = AST::MaxOp.new(tok, id("_"))
+      max_smooth = typed(AST::BinaryOp.new(tok, lhs, :SMOOTH, max), Type.new(:Int64))
+      pipeline_host.send(:lower_concurrent_list_reduce, lhs, conc, max, max_smooth)
+
+      unsigned_max_smooth = typed(AST::BinaryOp.new(tok, lhs, :SMOOTH, max), Type.new(:UInt64))
+      pipeline_host.send(:lower_concurrent_list_reduce, lhs, conc, max, unsigned_max_smooth)
+
+      expect(captured_args[0][-2]).to eq(MIR::TypeSentinel.new(:max, "i64"))
+      expect(captured_args[0][-1]).to eq(MIR::Ident.new(".min"))
+      expect(captured_args[1][-2]).to eq(MIR::TypeSentinel.new(:min, "i64"))
+      expect(captured_args[1][-1]).to eq(MIR::Ident.new(".max"))
+      expect(captured_args[2][-2]).to eq(MIR::Lit.new("0"))
     end
 
     it "stamps boxed capture fields for pointer bounded callbacks" do

@@ -445,12 +445,6 @@ class PipelineHost
     @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 
-  # Delegate task_config_zig to MIRLowering (used by CONCURRENT pipeline operators)
-  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
-  def task_config_zig(stack_size, computed_tier = nil)
-    @lowering.task_config_zig(stack_size, computed_tier)
-  end
-
   sig { params(label: String, body: T::Array[MIR::Node], result_type: Type).returns(MIR::BlockExpr) }
   def typed_block_expr(label, body, result_type)
     block = MIR::BlockExpr.new(label, body)
@@ -3367,9 +3361,8 @@ class PipelineHost
     body_mir = with_pipeline_context(placeholder: p[:item_var], acc: curr_var) {
       visit_mir(reduce_op.expression)
     }
-    body_zig = @lowering.emit_expr(body_mir)
 
-    # Inline CAS-loop publish, wrapped as a labeled block expression so
+    # CAS-loop publish, wrapped as a labeled block expression so
     # ExprStmt's trailing `;` is well-formed (`(blk: { ... break :blk 0; });`).
     # References `__obs_acc` so the surrounding lower_range_fold_observable
     # text-rewrite (-> ctx.acc) catches it.
@@ -3380,20 +3373,33 @@ class PipelineHost
     # picks up the .release ordering on markSeen (was .monotonic, a
     # latent ordering bug since a reader's `started()` acquire-load
     # didn't synchronize-with the publish).
-    cas_zig = <<~ZIG.chomp
-      #{blk_label}: {
-                  var #{curr_var}: #{inner_zig} = __obs_acc.inner.view();
-                  while (true) {
-                      const #{next_var}: #{inner_zig} = #{body_zig};
-                      if (__obs_acc.inner.tryCommit(#{curr_var}, #{next_var})) |#{actual_var}| {
-                          #{curr_var} = #{actual_var};
-                      } else { break; }
-                  }
-                  __obs_acc.inner.markSeen();
-                  break :#{blk_label} @as(i32, 0);
-              }
-    ZIG
-    publish = [MIR::ExprStmt.new(MIR::InlineZig.new(cas_zig, "obs_reduce_publish"), true)]
+    inner_recv = MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner")
+    publish = [MIR::ExprStmt.new(MIR::BlockExpr.new(blk_label, [
+      MIR::Let.new(curr_var,
+        MIR::MethodCall.new(inner_recv, "view", [], false, MIR::CallableContract.no_ownership(0)),
+        true, nil, nil),
+      MIR::WhileStmt.new(MIR::Lit.new("true"), [
+        MIR::Let.new(next_var, body_mir, false, nil, nil),
+        MIR::IfBindStmt.new([
+          {
+            expr: MIR::MethodCall.new(inner_recv, "tryCommit", [
+              MIR::Ident.new(curr_var),
+              MIR::Ident.new(next_var),
+            ], false, MIR::CallableContract.no_ownership(2)),
+            capture: actual_var,
+          },
+        ], [
+          MIR::Set.new(MIR::Ident.new(curr_var), MIR::Ident.new(actual_var)),
+        ], [
+          MIR::BreakStmt.new(nil, nil),
+        ]),
+      ], nil, nil, nil, nil),
+      MIR::ExprStmt.new(
+        MIR::MethodCall.new(inner_recv, "markSeen", [], false, MIR::CallableContract.no_ownership(0)),
+        false,
+      ),
+      MIR::BreakStmt.new(blk_label, MIR::Cast.new(MIR::Lit.new("0"), "i32", :as)),
+    ]), true)]
 
     obs_target = transpile_type(smooth_node.full_type!).sub(/\A\*/, '')
     acc_alloc = observable_alloc_expr(obs_target, "newWith", [
@@ -4096,11 +4102,10 @@ class PipelineHost
   # CLEAR's Number lowers to i64). Wrap with @intCast at the call site only
   # -- the default-capacity expression interpolates the raw form to keep
   # comptime-int simplification (e.g. `c < 2 * 4`) working in Zig.
-  sig { params(conc_op: AST::ConcurrentOp).returns(MIR::InlineZig) }
+  sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Cast) }
   def bounded_concurrent_worker_count_for_call_mir(conc_op)
     raw = bounded_concurrent_worker_count_mir(conc_op)
-    raw_zig = @lowering.emit_expr(raw)
-    MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_workers_usize")
+    MIR::Cast.new(raw, nil, :intCast)
   end
 
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Lit) }
@@ -4116,8 +4121,7 @@ class PipelineHost
   def bounded_concurrent_batch_mir(conc_op)
     if (batch = conc_op.options["batch"])
       raw = visit_mir(batch)
-      raw_zig = @lowering.emit_expr(raw)
-      MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_batch_usize")
+      MIR::Cast.new(raw, nil, :intCast)
     else
       MIR::Lit.new("1")
     end
@@ -4134,10 +4138,12 @@ class PipelineHost
     nil
   end
 
-  sig { params(conc_op: AST::ConcurrentOp).returns(MIR::InlineZig) }
+  sig { params(conc_op: AST::ConcurrentOp).returns(MIR::StructInit) }
   def bounded_concurrent_task_cfg_mir(conc_op)
     size_node = conc_op.options["size"]
-    MIR::InlineZig.new(task_config_zig(size_node&.name&.downcase&.to_sym), "task_cfg")
+    MIR::StructInit.new(nil, [
+      { name: "stack_size", value: MIR::Ident.new(".#{@lowering.task_config_variant(size_node&.name&.downcase&.to_sym, nil)}") },
+    ])
   end
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type, return_type: T.untyped, body_kind: Symbol).returns(T::Hash[T.untyped, T.untyped]) }
@@ -4396,8 +4402,7 @@ class PipelineHost
   sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::Expr) }
   def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
     if (cap_node = conc_op.options&.[]("capacity"))
-      cap_zig = @lowering.emit_expr(@lowering.lower(cap_node))
-      MIR::InlineZig.new("@intCast(#{cap_zig})", "stream_conc_capacity_user")
+      MIR::Cast.new(@lowering.lower(cap_node), nil, :intCast)
     else
       MIR::DefaultStreamCapacity.new(MIR::Ident.new(n_workers_zig))
     end
@@ -4661,9 +4666,9 @@ class PipelineHost
               when :sum then MIR::Lit.new("0")
               when :average then MIR::Lit.new("0.0")
               when :min
-                MIR::InlineZig.new(T.must(agg_minmax_sentinels(result_zig, smooth_node.full_type!.resolved)[0]), "concurrent_reduce_min_init")
+                agg_min_sentinel_mir(result_zig)
               when :max
-                MIR::InlineZig.new(T.must(agg_minmax_sentinels(result_zig, smooth_node.full_type!.resolved)[1]), "concurrent_reduce_max_init")
+                agg_max_sentinel_mir(result_zig, result_t)
               end
 
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
@@ -4681,7 +4686,7 @@ class PipelineHost
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
       initial,
-      MIR::InlineZig.new(".#{kind}", "concurrent_reduce_kind"),
+      MIR::Ident.new(".#{kind}"),
     ])
 
     label = next_pipe_label
