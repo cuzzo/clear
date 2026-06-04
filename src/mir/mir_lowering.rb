@@ -380,6 +380,7 @@ class MIRLowering
     @importer = T.let(importer, T.nilable(ModuleImporter))
     @source_dir = T.let(source_dir, T.nilable(String))
     @emitted_types = T.let(Set.new, T::Set[T.untyped])
+    @emitted_require_modules = T.let(Set.new, T::Set[T.untyped])
     @debug_mode = debug_mode
     @pending_stmts = T.let([], T.nilable(T::Array[MIR::Stmt]))
     @tmp_counter = T.let(0, Integer)
@@ -2919,6 +2920,7 @@ class MIRLowering
       # ModuleImporter, not a pre-rendered Zig blob, so checker/emitter traversal
       # still sees function bodies and nested imports.
       same_dir = T.must(mod).source_dir == @source_dir
+      dependency_items = imported_module_dependency_items(T.must(mod))
       namespace_items = imported_module_items(T.must(mod))
 
       # VM target also needs the imported function bodies as MIR FnDefs so the
@@ -2931,7 +2933,11 @@ class MIRLowering
         return helper_fns if helper_fns.any?
       end
 
+      module_key = T.must(mod).object_id
+      return [] unless @emitted_require_modules.add?(module_key)
+
       [
+        *dependency_items,
         *visible_type_items(T.must(mod), same_dir: same_dir),
         MIR::ModuleNamespace.new(node.namespace, namespace_items),
       ]
@@ -2998,18 +3004,33 @@ class MIRLowering
 
   sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
   def imported_module_items(mod)
+    if mod.ast
+      return mod.ast.statements.filter_map do |stmt|
+        next nil if stmt.is_a?(AST::FunctionDef) && stmt.visibility == :private
+        next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
+        next lower(stmt) if stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
+
+        nil
+      end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+    end
+
     items = mod.mir_items
     return items.select { |item| item.is_a?(MIR::Emittable) } if items.is_a?(Array)
+    []
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
+  def imported_module_dependency_items(mod)
     return [] unless mod.ast
 
+    prev_source_dir = @source_dir
+    @source_dir = mod.source_dir
     mod.ast.statements.filter_map do |stmt|
-      next nil if stmt.is_a?(AST::FunctionDef) && stmt.visibility == :private
-      next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
-      next lower_require(stmt) if stmt.is_a?(AST::RequireNode)
-      next lower(stmt) if stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
-
-      nil
+      next nil unless stmt.is_a?(AST::RequireNode)
+      lower_require(stmt)
     end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+  ensure
+    @source_dir = prev_source_dir
   end
 
   sig { params(mod: ModuleImporter::CompiledModule, items: T::Array[MIR::Emittable]).returns(T::Array[MIR::FnDef]) }

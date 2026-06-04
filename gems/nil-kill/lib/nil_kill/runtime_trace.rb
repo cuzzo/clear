@@ -27,6 +27,7 @@ module NilKillRuntimeTrace
   @tuples = {}
   @collections = {}
   @objects = {}
+  @object_tokens = {}
   # Mutation coalescing: a tight loop mutating ONE object at ONE site
   # with ONE element-class fires record_collection_mutation N times,
   # all producing the SAME observation. Defer them into a single
@@ -509,11 +510,17 @@ module NilKillRuntimeTrace
   end
 
   # The finalizer MUST be built in a separate method so its closure
-  # captures ONLY the (Integer) object_id and the module -- never
-  # `value` (capturing value would pin it alive forever, the finalizer
-  # would never run, and the leak would be reinstated).
-  def self.objects_finalizer(oid)
-    proc { @objects.delete(oid) }
+  # captures ONLY scalars/tokens and the module -- never `value`
+  # (capturing value would pin it alive forever, the finalizer would
+  # never run, and the leak would be reinstated). Ruby can reuse an
+  # object_id before a stale finalizer runs, so deletion is generation
+  # checked instead of keyed by object_id alone.
+  def self.objects_finalizer(oid, token)
+    proc do
+      next unless @object_tokens[oid].equal?(token)
+      @object_tokens.delete(oid)
+      @objects.delete(oid)
+    end
   end
 
   def self.register_collection_owner(value, owner)
@@ -525,7 +532,8 @@ module NilKillRuntimeTrace
     end
 
     oid = value.object_id
-    unless @objects.key?(oid)
+    owners = @objects[oid]
+    unless owners
       # @objects is keyed by object_id and was NEVER evicted -> every
       # transient collection leaked an entry forever, and GC then
       # marked a monotonically growing live graph each cycle (the
@@ -538,8 +546,11 @@ module NilKillRuntimeTrace
       # and downstream output is byte-identical. The 13 mutation-hook
       # read sites + record_collection_mutation keep object_id keys
       # unchanged.
-      @objects[oid] = {}
-      ObjectSpace.define_finalizer(value, objects_finalizer(oid))
+      owners = {}
+      token = Object.new
+      @object_tokens[oid] = token
+      @objects[oid] = owners
+      ObjectSpace.define_finalizer(value, objects_finalizer(oid, token))
       # Mutation-gate marker. The collection-mutation hooks fire on
       # EVERY Array/Hash/Set mutation in the WHOLE process; the old
       # gate paid Kernel#object_id + an @objects hash lookup on each
@@ -551,7 +562,6 @@ module NilKillRuntimeTrace
       # @objects when the object -- and its ivar -- are already gone).
       value.instance_variable_set(:@__nil_kill_traced, true)
     end
-    owners = @objects[oid]
     owners[owner_identity_key(owner)] ||= owner
     record_collection_snapshot(value, owner)
   end
@@ -1244,7 +1254,13 @@ module NilKillRuntimeTrace
     Module.prepend(Module.new do
       def const_added(name)
         super
-        value = const_get(name)
+        # `const_added` also fires for `autoload`. Loading that constant from
+        # inside the hook forces arbitrary files during require-time, which can
+        # reorder unrelated namespaces (notably project AST vs the external
+        # `ast` gem) and crash the traced process.
+        return if autoload?(name, false)
+
+        value = const_get(name, false)
         NilKillRuntimeTrace.attach_struct(value) if value.is_a?(Class) && value < Struct
         NilKillRuntimeTrace.attach_data(value) if defined?(Data) && value.is_a?(Class) && value < Data
       rescue NameError

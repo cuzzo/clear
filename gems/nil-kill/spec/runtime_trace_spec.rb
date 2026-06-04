@@ -32,6 +32,31 @@ RSpec.describe "nil-kill runtime trace" do
     expect(rt.objects.key?(live.object_id)).to be(true)        # live survives eviction
   end
 
+  it "does not let a stale collection finalizer evict a reused object id" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    rt = NilKillRuntimeTrace
+    tokens = rt.instance_variable_get(:@object_tokens)
+    oid = -Process.pid
+    owners = {}
+    live_token = Object.new
+
+    rt.objects[oid] = owners
+    tokens[oid] = live_token
+
+    rt.send(:objects_finalizer, oid, Object.new).call
+
+    expect(rt.objects[oid]).to equal(owners)
+    expect(tokens[oid]).to equal(live_token)
+
+    rt.send(:objects_finalizer, oid, live_token).call
+
+    expect(rt.objects).not_to have_key(oid)
+    expect(tokens).not_to have_key(oid)
+  ensure
+    rt.objects.delete(oid) if defined?(rt) && defined?(oid)
+    tokens.delete(oid) if defined?(tokens) && defined?(oid)
+  end
+
   it "captures method returns, T.let values, and struct fields in a subprocess" do
     Dir.mktmpdir("nil-kill-runtime", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
@@ -62,6 +87,7 @@ RSpec.describe "nil-kill runtime trace" do
       tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
       env = {
         "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
         "NIL_KILL_TMP_DIR" => trace_tmp,
         "NIL_KILL_TARGETS" => dir,
         "RUBYOPT" => "-r#{tracer}",
@@ -78,6 +104,36 @@ RSpec.describe "nil-kill runtime trace" do
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "call", "param_elem" => a_hash_including("values" => include("String"))))
       expect(tlet_events).to include(a_hash_including("classes" => include("String")))
       expect(struct_events).to include(a_hash_including("class" => "Pair", "field" => "name", "classes" => include("String")))
+    end
+  end
+
+  it "does not force autoloaded constants from the Struct/Data const hook" do
+    Dir.mktmpdir("nil-kill-runtime-autoload", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      lazy = File.join(dir, "lazy_struct.rb")
+      File.write(lazy, "raise 'autoload should not be forced by const_added'\n")
+      File.write(source, <<~RUBY)
+        module LazyHost
+          autoload :LazyStruct, #{lazy.inspect}
+        end
+
+        puts "ok"
+      RUBY
+
+      trace_tmp = File.join(dir, "trace-tmp")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      expect(out).to include("ok")
     end
   end
 
@@ -118,6 +174,7 @@ RSpec.describe "nil-kill runtime trace" do
       tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
       env = {
         "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
         "NIL_KILL_TMP_DIR" => trace_tmp,
         "NIL_KILL_TARGETS" => dir,
         "RUBYOPT" => "-r#{tracer}",

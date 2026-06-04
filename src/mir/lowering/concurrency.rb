@@ -153,6 +153,19 @@ module MIRLoweringConcurrency
     end
   end
 
+  sig { params(analysis: T.untyped, base: T::Hash[String, String]).returns(T::Hash[String, String]) }
+  def fiber_capture_source_overrides(analysis, base = {})
+    T.bind(self, MIRLowering) rescue nil
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+    out = base.dup
+    (analysis&.capture_symbols || {}).each do |name, sym|
+      decl = sym&.reg
+      mapped = @decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]
+      out[name.to_s] ||= mapped if mapped
+    end
+    out
+  end
+
   sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def finalized_boundary_body_for_emit(body)
     prev_alloc_names = T.unsafe(self).instance_variable_get(:@lowered_alloc_names)
@@ -279,7 +292,11 @@ module MIRLoweringConcurrency
       # Capture handling delegated to FiberCtxBuilder -- same builder
       # BG/BG STREAM/CONCURRENT use. DO branches use "ctx" as the body
       # access prefix (no per-id suffix).
-      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx", fresh_heap_id: (id * 1000) + i, schema_lookup: @schema_lookup)
+      caps = FiberCtxBuilder.build(analysis,
+                                   body_access_prefix: "ctx",
+                                   fresh_heap_id: (id * 1000) + i,
+                                   source_overrides: fiber_capture_source_overrides(analysis),
+                                   schema_lookup: @schema_lookup)
 
       capture_fields = (caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," } +
                         capture_moved_guard_fields(caps.specs)).join("\n    ")
@@ -417,7 +434,7 @@ module MIRLoweringConcurrency
     # site-specific control fields (Promise.inner / alloc) and the
     # body access prefix (__ctx_<id> for BG) are added here.
     promoted_names = T.let({}, T::Hash[String, String])
-    outer_capture_map = @do_capture_map || {}
+    outer_capture_map = fiber_capture_source_overrides(analysis, @do_capture_map || {})
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "__ctx_#{id}",
                                  promoted_names: promoted_names,
@@ -450,6 +467,8 @@ module MIRLoweringConcurrency
                      caps.specs.map { |s|
                        outer_ref = outer_capture_map[s.name]
                        init_val = if s.dupe_decl_zig || promoted_names[s.name] || outer_ref.nil?
+                                    s.init_value_zig
+                                  elsif pointer_captures.include?(s.name)
                                     s.init_value_zig
                                   else
                                     outer_ref
@@ -872,6 +891,7 @@ module MIRLoweringConcurrency
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
                                  fresh_heap_id: id,
+                                 source_overrides: fiber_capture_source_overrides(analysis),
                                  schema_lookup: @schema_lookup)
 
     capture_fields = (caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," } +

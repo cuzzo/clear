@@ -2426,6 +2426,20 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to include("makeList")
     end
+
+    it "wraps non-empty @list literals in declared sync and ownership capabilities" do
+      items = [make_lit(:NUMBER, 1, full_type: :Int64), make_lit(:NUMBER, 2, full_type: :Int64)]
+      items.each { |i| i.coerced_type = :Int64 }
+      node = AST::ListLit.new(tok, items, nil)
+      node.full_type = Type.new(:"Int64[]", collection: :list, ownership: :shared, sync: :locked)
+
+      low = lowering
+      result = low.send(:with_expected_type, node.full_type) { low.lower(node) }
+      zig = emit(result)
+      expect(result).to be_a(MIR::CapWrap)
+      expect(zig).to include("CheatLib.lockedCreate(std.ArrayListUnmanaged(i64)")
+      expect(zig).to include("CheatLib.arcCreate(CheatLib.Locked(std.ArrayListUnmanaged(i64))")
+    end
   end
 
   describe "hash literals" do
@@ -3291,16 +3305,13 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers local require to visible type items plus a structural module namespace" do
+      imported_fn_ast = AST::FunctionDef.new(tok, "helper_value", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
+      imported_fn_ast.needs_rt = false
+      imported_fn_ast.can_fail = false
       imported_ast = AST::Program.new(tok, [
         AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
+        imported_fn_ast,
       ])
-      imported_fn = MIR::FnDef.new(
-        "helper_value",
-        [],
-        "i64",
-        [MIR::ReturnStmt.new(MIR::Lit.new("7"))],
-        :pub, false, nil
-      )
       imported_type = MIR::StructDef.new("PublicType", [], nil, :pub)
       imported_mod = ModuleImporter::CompiledModule.new(
         imported_ast,
@@ -3311,7 +3322,7 @@ RSpec.describe MIRLowering do
         {},
         {},
         nil,
-        [imported_fn],
+        nil,
         [imported_type],
       )
       importer = ModuleImporter.new(base_dir: Dir.pwd)
@@ -3323,8 +3334,39 @@ RSpec.describe MIRLowering do
       expect(result).to include(imported_type)
       namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
       expect(namespace.name).to eq("helper")
-      expect(namespace.items).to include(imported_fn)
+      expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
       expect(emit(namespace)).to include("const helper = struct")
+    end
+
+    it "emits a repeated local require module only once" do
+      imported_fn = MIR::FnDef.new(
+        "helper_value",
+        [],
+        "i64",
+        [MIR::ReturnStmt.new(MIR::Lit.new("7"))],
+        :pub, false, nil
+      )
+      imported_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, []),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [imported_fn],
+        [],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+      low = lowering(importer: importer, source_dir: Dir.pwd)
+
+      first = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
+      second = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
+
+      expect(first).to include(an_instance_of(MIR::ModuleNamespace))
+      expect(second).to eq([])
     end
 
     it "falls back to a structural namespace for BC local require when no helper functions exist" do
@@ -3349,7 +3391,7 @@ RSpec.describe MIRLowering do
       expect(result).to contain_exactly(an_instance_of(MIR::ModuleNamespace))
     end
 
-    it "reconstructs imported module items from AST when cached MIR is unavailable" do
+    it "reconstructs imported module items from AST without nesting requires" do
       private_fn = AST::FunctionDef.new(tok, "private_helper", [], nil, :Void, nil, [], nil, nil, :private, nil, false)
       imported_ast = AST::Program.new(tok, [
         private_fn,
@@ -3372,8 +3414,30 @@ RSpec.describe MIRLowering do
 
       items = lowering.send(:imported_module_items, imported_mod)
 
-      expect(items).to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
+      expect(items).not_to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
       expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
+    end
+
+    it "hoists imported module requires as dependency items" do
+      imported_ast = AST::Program.new(tok, [
+        AST::RequireNode.new(tok, "math", "math", :package),
+      ])
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      items = lowering.send(:imported_module_dependency_items, imported_mod)
+
+      expect(items).to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
     end
 
     it "filters imported type items and BC helper items defensively" do

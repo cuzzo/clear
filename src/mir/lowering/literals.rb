@@ -144,15 +144,16 @@ module MIRLoweringLiterals
     if node.items.empty?
       # Empty list: MIR expression depends on collection type
       if plan.list_collection?
-        zig_t = transpile_type(ti)
-        return MIR::ContainerInit.new(zig_t, :list_empty, list_alloc, nil)
+        inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
+        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :list_empty, list_alloc, nil)
+        return wrap_list_literal_capability(inner, ti, list_alloc)
       end
       # Dynamic empty list: use makeList with empty items
-      return MIR::MakeList.new(elem_zig, [], list_alloc)
+      return wrap_list_literal_capability(MIR::MakeList.new(elem_zig, [], list_alloc), ti, list_alloc)
     end
 
     # Non-empty list literal -> makeList
-    T.cast(
+    inner = T.cast(
       with_ownership_consumption(
         MIR::MakeList.new(elem_zig, items_mir, list_alloc),
         items_mir.flat_map { |item| mir_ident_names(item) },
@@ -161,6 +162,19 @@ module MIRLoweringLiterals
       ),
       MIR::MakeList,
     )
+    wrap_list_literal_capability(inner, ti, list_alloc)
+  end
+
+  sig { params(ti: Type).returns(T::Boolean) }
+  def list_literal_capability_wrap_needed?(ti)
+    return false if ti.striped?
+    ti.any_sync? || ti.shared? || ti.multiowned?
+  end
+
+  sig { params(inner: T.untyped, ti: Type, alloc: Symbol).returns(T.untyped) }
+  def wrap_list_literal_capability(inner, ti, alloc)
+    return inner unless list_literal_capability_wrap_needed?(ti)
+    compose_capability_wrap(inner, ti.bare_data_type.zig_type, ti, alloc)
   end
 
   sig { params(node: AST::DefaultArrayLit).returns(MIR::ArrayDefaultInit) }

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # nil-kill runtime evidence workload. Run under `nil-kill collect`.
 #
-# NOT a CI gate -- the evidence-collection workload. Every stage is
-# fault-tolerant (no `set -e`, each unit `|| true`): a failure must
-# not abort collection; we keep the runtime observed up to it and run
-# every later stage.
+# Evidence-collection workload. Stages are isolated from each other: a
+# failure does not abort collection immediately, so we keep the runtime
+# observed up to it and run every later stage. The script still exits
+# nonzero at the end if any stage failed, so a dirty collect cannot look
+# clean. Set NIL_KILL_ALLOW_STAGE_FAILURES=1 only when intentionally
+# collecting partial evidence from a broken tree.
 #
 # Speed: under nil-kill's source-instrumentation + tracer each Ruby
 # process is ~100x slower, so PARALLELISM is the dominant lever.
@@ -21,12 +23,19 @@ JOBS="${NK_JOBS:-$(nproc)}"
 # the only correct knob.
 export WORKERS="$JOBS"
 TOTAL_START=$SECONDS
+FAILED_STAGES=()
+
+record_stage_failure() {
+  local label="$1"
+  FAILED_STAGES+=("$label")
+  echo "=== [$label] stage failed, continuing ==="
+}
 
 run() {
   local label="$1"; shift
   local t0=$SECONDS
   echo "=== nil-kill workload [$label] start (jobs=$JOBS) ==="
-  "$@" || echo "=== [$label] stage failed, continuing ==="
+  "$@" || record_stage_failure "$label"
   echo "=== nil-kill workload [$label] done in $((SECONDS - t0))s ==="
 }
 
@@ -41,8 +50,10 @@ par_ruby() { # par_ruby <label> <find-args...> -- <ruby args...>
   ruby_args=("$@")
   local t0=$SECONDS
   echo "=== nil-kill workload [$label] start (jobs=$JOBS) ==="
-  find "${find_args[@]}" -print0 \
-    | xargs -0 -P "$JOBS" -I{} ruby "${ruby_args[@]}" {} >/dev/null 2>&1 || true
+  if ! find "${find_args[@]}" -print0 \
+    | xargs -0 -P "$JOBS" -I{} ruby "${ruby_args[@]}" {} >/dev/null 2>&1; then
+    record_stage_failure "$label"
+  fi
   echo "=== nil-kill workload [$label] done in $((SECONDS - t0))s ==="
 }
 
@@ -88,22 +99,30 @@ should_skip_build_file() {
   return 1
 }
 
+has_clear_main() {
+  grep -Eq '^[[:space:]]*FN[[:space:]]+main[[:space:]]*\(' "$1"
+}
+
 build_one() {
   should_skip_build_file "$1" && return 0
+  has_clear_main "$1" || return 0
   local timeout_seconds="${NIL_KILL_BUILD_TIMEOUT:-120}"
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${timeout_seconds}s" ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1 || true
+    timeout "${timeout_seconds}s" ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1
   else
-    ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1 || true
+    ./clear build "$1" -o "/tmp/clear-nk-build.$$.bin" >/dev/null 2>&1
   fi
 }
 export -f should_skip_build_file
+export -f has_clear_main
 export -f build_one
 {
   local_t0=$SECONDS
   echo "=== nil-kill workload [examples-build] start (jobs=$JOBS) ==="
-  find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
-    | xargs -0 -P "$JOBS" -I{} bash -c 'build_one "$@"' _ {} || true
+  if ! find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
+    | xargs -0 -P "$JOBS" -I{} bash -c 'build_one "$@"' _ {}; then
+    record_stage_failure "examples-build"
+  fi
   echo "=== nil-kill workload [examples-build] done in $((SECONDS - local_t0))s ==="
 }
 
@@ -115,3 +134,11 @@ run ffi-integration    bash -c 'cd transpile-tests/ffi-integration && zig build 
 par_ruby example-tests examples/testing -maxdepth 1 -name '*.cht' -- transpile-tests/gen.rb --single
 
 echo "=== nil-kill workload complete in $((SECONDS - TOTAL_START))s (jobs=$JOBS) ==="
+if ((${#FAILED_STAGES[@]} > 0)); then
+  echo "=== nil-kill workload failed stages: ${FAILED_STAGES[*]} ===" >&2
+  if [ "${NIL_KILL_ALLOW_STAGE_FAILURES:-0}" = "1" ]; then
+    echo "=== NIL_KILL_ALLOW_STAGE_FAILURES=1 set; returning success with partial evidence ===" >&2
+  else
+    exit 1
+  fi
+fi

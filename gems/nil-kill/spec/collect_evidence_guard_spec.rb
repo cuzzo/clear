@@ -20,14 +20,22 @@ RSpec.describe "collect evidence guard" do
     allow(File).to receive(:size) { |f| cov.merge(meth).fetch(f) }
   end
 
+  def suppress_expected_abort_stderr
+    old_stderr = $stderr
+    $stderr = StringIO.new
+    yield
+  ensure
+    $stderr = old_stderr
+  end
+
   it "aborts when coverage and methods are all zero-byte (total collapse)" do
     stub_evidence("1" => [0, 0])
-    expect { cli.send(:assert_collect_coverage_produced!) }.to raise_error(SystemExit)
+    expect { suppress_expected_abort_stderr { cli.send(:assert_collect_coverage_produced!) } }.to raise_error(SystemExit)
   end
 
   it "aborts when methods evidence is empty though coverage has content" do
     stub_evidence("1" => [4096, 0])
-    expect { cli.send(:assert_collect_coverage_produced!) }.to raise_error(SystemExit)
+    expect { suppress_expected_abort_stderr { cli.send(:assert_collect_coverage_produced!) } }.to raise_error(SystemExit)
   end
 
   it "passes when the single process holds both coverage and methods" do
@@ -37,7 +45,7 @@ RSpec.describe "collect evidence guard" do
 
   it "aborts when the MAJORITY of traced processes have coverage but zero methods (CORR-2b partial collapse)" do
     stub_evidence("1" => [4096, 0], "2" => [4096, 0], "3" => [4096, 8192])
-    expect { cli.send(:assert_collect_coverage_produced!) }.to raise_error(SystemExit, /systemic instrumentation abort/)
+    expect { suppress_expected_abort_stderr { cli.send(:assert_collect_coverage_produced!) } }.to raise_error(SystemExit, /systemic instrumentation abort/)
   end
 
   it "tolerates a minority straggler (fault-tolerant by design)" do
