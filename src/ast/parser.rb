@@ -1886,16 +1886,6 @@ class Parser
     elsif match!(:KEYWORD, 'BREAK')
       rhs = AST::OrBreak.new(previous)
 
-    # Syntax: ... OR EXIT
-    elsif match!(:KEYWORD, 'EXIT')
-      exit_token = previous
-      context = nil
-      if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
-        context = parse_primary
-      end
-      rhs = AST::ThrowNode.new(exit_token, context) # Nil value implies "Use the Pipe Result"
-
-
     # Syntax: ... OR ELSE value
     elsif match!(:KEYWORD, 'ELSE')
       # Meaning: Replace the error with a default value
@@ -2502,9 +2492,6 @@ class Parser
           next
         end
         @pos += 1
-        if depth == 0
-          return current.type == :CHAR && current.value == end_char
-        end
       end
     ensure
       @pos = saved

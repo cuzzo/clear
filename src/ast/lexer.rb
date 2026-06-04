@@ -253,11 +253,7 @@ class Lexer
         buffer << @s.getch
         advance_pos('$')
       else
-        if @s.eos?
-          raise "Lexer Error: Unclosed string starting at line #{start_col}"
-        end
-        buffer << @s.getch
-        advance_pos('"')
+        raise "Lexer Error: Unclosed string starting at line #{start_col}" if @s.eos?
       end
     end
   end
@@ -359,8 +355,6 @@ class Lexer
     when 'u64' then add(:UINT64,  val,        start_col)
     when 'f32' then add(:FLOAT32, val.to_f,   start_col)
     when 'f64' then add(:NUMBER,  val.to_f,   start_col)
-    else
-      raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
     end
   end
 

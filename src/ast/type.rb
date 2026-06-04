@@ -3069,8 +3069,7 @@ class Type
     if fixed? && other_type.fixed?
       other_capacity = other_type.capacity
       self_capacity = capacity
-      return other_capacity <= self_capacity if other_capacity.is_a?(Integer) && self_capacity.is_a?(Integer)
-      return false
+      return T.cast(other_capacity, Integer) <= T.cast(self_capacity, Integer)
     end
     dynamic? && other_type.dynamic?
   end
