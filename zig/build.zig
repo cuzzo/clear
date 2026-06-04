@@ -414,11 +414,12 @@ pub fn build(b: *std.Build) void {
 
     for (test_files, 0..) |entry, idx| {
         const filename = entry.path;
-        // Coverage runs every test-file entry, including stress /
-        // loom / vopr / hammer / fuzz entries. Those files scale their
-        // own iteration counts down when build_options.coverage is
-        // true, so kcov gets line coverage for the surface without
-        // ptracing the full stress workload.
+        // Coverage runs every regular test-file entry, including stress /
+        // hammer / fuzz entries. Loom/vopr wrappers are deliberately excluded
+        // here: under `zig test`, @import("root") resolves to the generated
+        // test runner, so root-level SimAtomic / SimRing seams are hidden.
+        // Rooted Loom/VOPR executables are wired into the regular coverage
+        // merge below instead.
         const skip_for_coverage = false;
 
         // Determine whether this iteration's test_step contribution
@@ -434,7 +435,10 @@ pub fn build(b: *std.Build) void {
         // TSan already covers.
         // Loom/vopr entries are likewise excluded from `test_step` —
         // they run only via `test_loom_vopr_step` (sharded, no TSan).
-        var include_in_test_step = !skip_for_coverage and (coverage or (!entry.tsan and !entry.hammer and !entry.loom_vopr));
+        var include_in_test_step =
+            !skip_for_coverage and
+            ((coverage and !entry.loom_vopr) or
+                (!coverage and !entry.tsan and !entry.hammer and !entry.loom_vopr));
         if (include_in_test_step) {
             const my_shard = (test_step_idx % shard_count) == shard_index;
             test_step_idx += 1;
@@ -442,63 +446,63 @@ pub fn build(b: *std.Build) void {
         }
 
         if (include_in_test_step) {
-        // Standard build (Debug, stage2 backend; coverage forces LLVM
-        // backend so kcov can read complete DWARF for project .zig
-        // sources -- stage2 emits limited DWARF that only exposes .S
-        // files and compiler_rt, leaving project files invisible to
-        // kcov regardless of include filters).
-        const unit_tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(filename),
-                .target = target,
-                .optimize = optimize,
-                .sanitize_thread = sanitize_thread,
-            }),
-            .use_llvm = if (coverage) true else null,
-        });
-        unit_tests.root_module.addImport("fiber-core", fiber_core_mod);
-        unit_tests.root_module.addImport("safety", safety_mod);
-        unit_tests.root_module.addImport("ebr", ebr_mod);
-        unit_tests.root_module.addImport("ownership", ownership_mod);
-        unit_tests.root_module.addImport("compat", compat_mod);
-        unit_tests.root_module.addImport("build_options", build_options_mod);
-        unit_tests.root_module.addAssemblyFile(switch_s);
-        unit_tests.root_module.addAssemblyFile(onroot_s);
-        unit_tests.root_module.link_libc = true;
-
-        if (coverage) {
-            // Numeric subdir keeps paths flat (test_files contains paths
-            // like "lib/atomic.zig" that would otherwise create deep
-            // dirs). kcov instruments the test binary on the fly:
-            //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
-            //
-            // jammy's apt ships kcov v38, which does not auto-create the
-            // output directory and reports "Can't open directory" if it
-            // doesn't exist. v40+ creates it on demand. Pre-create with
-            // `mkdir -p` so we work on either version.
-            const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
-            const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
-            const run_kcov = b.addSystemCommand(&.{
-                "kcov",
-                "--clean",
-                kcov_include_arg,
-                kcov_strip_arg,
-                kcov_dir,
+            // Standard build (Debug, stage2 backend; coverage forces LLVM
+            // backend so kcov can read complete DWARF for project .zig
+            // sources -- stage2 emits limited DWARF that only exposes .S
+            // files and compiler_rt, leaving project files invisible to
+            // kcov regardless of include filters).
+            const unit_tests = b.addTest(.{
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(filename),
+                    .target = target,
+                    .optimize = optimize,
+                    .sanitize_thread = sanitize_thread,
+                }),
+                .use_llvm = if (coverage) true else null,
             });
-            run_kcov.addArtifactArg(unit_tests);
-            run_kcov.stdio = .inherit;
-            run_kcov.setCwd(b.path("."));
-            run_kcov.step.dependOn(&mkdir_cmd.step);
-            test_step.dependOn(&run_kcov.step);
-            merge_cmd.?.addArg(kcov_dir);
-            merge_cmd.?.step.dependOn(&run_kcov.step);
-        } else {
-            const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
-            run_unit_tests.addArtifactArg(unit_tests);
-            run_unit_tests.stdio = .inherit;
-            run_unit_tests.setCwd(b.path("."));
-            test_step.dependOn(&run_unit_tests.step);
-        }
+            unit_tests.root_module.addImport("fiber-core", fiber_core_mod);
+            unit_tests.root_module.addImport("safety", safety_mod);
+            unit_tests.root_module.addImport("ebr", ebr_mod);
+            unit_tests.root_module.addImport("ownership", ownership_mod);
+            unit_tests.root_module.addImport("compat", compat_mod);
+            unit_tests.root_module.addImport("build_options", build_options_mod);
+            unit_tests.root_module.addAssemblyFile(switch_s);
+            unit_tests.root_module.addAssemblyFile(onroot_s);
+            unit_tests.root_module.link_libc = true;
+
+            if (coverage) {
+                // Numeric subdir keeps paths flat (test_files contains paths
+                // like "lib/atomic.zig" that would otherwise create deep
+                // dirs). kcov instruments the test binary on the fly:
+                //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
+                //
+                // jammy's apt ships kcov v38, which does not auto-create the
+                // output directory and reports "Can't open directory" if it
+                // doesn't exist. v40+ creates it on demand. Pre-create with
+                // `mkdir -p` so we work on either version.
+                const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
+                const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+                const run_kcov = b.addSystemCommand(&.{
+                    "kcov",
+                    "--clean",
+                    kcov_include_arg,
+                    kcov_strip_arg,
+                    kcov_dir,
+                });
+                run_kcov.addArtifactArg(unit_tests);
+                run_kcov.stdio = .inherit;
+                run_kcov.setCwd(b.path("."));
+                run_kcov.step.dependOn(&mkdir_cmd.step);
+                test_step.dependOn(&run_kcov.step);
+                merge_cmd.?.addArg(kcov_dir);
+                merge_cmd.?.step.dependOn(&run_kcov.step);
+            } else {
+                const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
+                run_unit_tests.addArtifactArg(unit_tests);
+                run_unit_tests.stdio = .inherit;
+                run_unit_tests.setCwd(b.path("."));
+                test_step.dependOn(&run_unit_tests.step);
+            }
         }
 
         // TSan / hammer builds — only for concurrency-sensitive tests.
@@ -519,31 +523,31 @@ pub fn build(b: *std.Build) void {
             const in_shard = (idx_ref.* % shard_count) == shard_index;
             idx_ref.* += 1;
             if (in_shard) {
-            const tsan_tests = b.addTest(.{
-                .root_module = b.createModule(.{
-                    .root_source_file = b.path(filename),
-                    .target = target,
-                    .optimize = .Debug,
-                    .sanitize_thread = true,
-                }),
-                .use_llvm = true,
-            });
-            tsan_tests.root_module.addImport("fiber-core", fiber_core_mod);
-            tsan_tests.root_module.addImport("safety", safety_mod);
-            tsan_tests.root_module.addImport("ebr", ebr_mod);
-            tsan_tests.root_module.addImport("ownership", ownership_mod);
-            tsan_tests.root_module.addImport("compat", compat_mod);
-            tsan_tests.root_module.addImport("build_options", tsan_build_options_mod);
-            tsan_tests.root_module.addAssemblyFile(switch_s);
-            tsan_tests.root_module.addAssemblyFile(onroot_s);
-            tsan_tests.root_module.link_libc = true;
+                const tsan_tests = b.addTest(.{
+                    .root_module = b.createModule(.{
+                        .root_source_file = b.path(filename),
+                        .target = target,
+                        .optimize = .Debug,
+                        .sanitize_thread = true,
+                    }),
+                    .use_llvm = true,
+                });
+                tsan_tests.root_module.addImport("fiber-core", fiber_core_mod);
+                tsan_tests.root_module.addImport("safety", safety_mod);
+                tsan_tests.root_module.addImport("ebr", ebr_mod);
+                tsan_tests.root_module.addImport("ownership", ownership_mod);
+                tsan_tests.root_module.addImport("compat", compat_mod);
+                tsan_tests.root_module.addImport("build_options", tsan_build_options_mod);
+                tsan_tests.root_module.addAssemblyFile(switch_s);
+                tsan_tests.root_module.addAssemblyFile(onroot_s);
+                tsan_tests.root_module.link_libc = true;
 
-            const label = if (entry.hammer) "hammer" else "tsan";
-            const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run {s} {s}", .{ label, filename }));
-            run_tsan_tests.addArtifactArg(tsan_tests);
-            run_tsan_tests.stdio = .inherit;
-            run_tsan_tests.setCwd(b.path("."));
-            target_step.dependOn(&run_tsan_tests.step);
+                const label = if (entry.hammer) "hammer" else "tsan";
+                const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run {s} {s}", .{ label, filename }));
+                run_tsan_tests.addArtifactArg(tsan_tests);
+                run_tsan_tests.stdio = .inherit;
+                run_tsan_tests.setCwd(b.path("."));
+                target_step.dependOn(&run_tsan_tests.step);
             }
         }
 
