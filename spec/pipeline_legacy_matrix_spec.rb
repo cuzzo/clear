@@ -9,6 +9,12 @@ require_relative "../src/backends/compiler_frontend"
 RSpec.describe "pipeline legacy matrix" do
   EXPECTED_CONCURRENT_INLINE_HITS = {}.freeze
   EXPECTED_INVALID_CASES = {}.freeze
+  STRUCTURALIZED_OBSERVABLE_INLINE_REASONS = %w[
+    obs_alloc
+    obs_wg_init
+    obs_set_completion
+    obs_distinct_publish
+  ].freeze
 
   def compile_and_lower(src)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
@@ -200,6 +206,20 @@ RSpec.describe "pipeline legacy matrix" do
     CLEAR
   end
 
+  def observable_program(binding_line)
+    <<~CLEAR
+      FN main() RETURNS Void ->
+        gen: ~?Int64[] = BG STREAM {
+          MUTABLE i: Int64 = 0_i64;
+          WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
+        };
+        #{binding_line}
+        final = NEXT running;
+        RETURN;
+      END
+    CLEAR
+  end
+
   def matrix_cases
     cases = []
     SOURCE_SETUPS.each do |source_name, setup|
@@ -252,5 +272,20 @@ RSpec.describe "pipeline legacy matrix" do
     end
     expect(pipeline_legacy_hits).to eq({})
     expect(concurrent_inline_hits).to eq(EXPECTED_CONCURRENT_INLINE_HITS)
+  end
+
+  it "keeps structuralized observable wiring out of InlineZig" do
+    cases = {
+      "sum" => observable_program("running: ~Int64@observable = gen |> SUM _;"),
+      "distinct" => observable_program("running: ~Int64[]@set:observable = gen |> DISTINCT _;"),
+      "reduce" => observable_program("running: ~Int64@observable = gen |> REDUCE(0_i64) acc + _;"),
+    }
+
+    reasons_by_case = cases.transform_values { |src| collect_inline_zig_reasons(compile_and_lower(src)) }
+
+    reasons_by_case.each_value do |reasons|
+      expect(reasons & STRUCTURALIZED_OBSERVABLE_INLINE_REASONS).to eq([])
+      expect(reasons.select { |reason| reason.start_with?("obs_") }.uniq).to eq(["obs_consumer_spawn"])
+    end
   end
 end

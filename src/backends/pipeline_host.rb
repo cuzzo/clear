@@ -3033,7 +3033,7 @@ class PipelineHost
   #
   # Per-terminal differences are isolated to TWO inputs:
   #
-  #   - `acc_alloc_zig`: the Zig expression that constructs the wrapper
+  #   - `acc_alloc_expr`: the MIR expression that constructs the wrapper
   #     (typically `WrapperT.new(rt.heapAlloc()) catch unreachable`,
   #     but seeded variants like REDUCE pass `WrapperT.newWith(...)`).
   #   - `publish_stmts`: the MIR statements that publish one item to
@@ -3043,9 +3043,9 @@ class PipelineHost
   #     does not expose `add`/`inc`/`submit`/`update` -- consumers go
   #     through `acc.inner` so ObservableTerminal stays per-terminal
   #     surface-free.
-  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, acc_alloc_zig: String, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, acc_alloc_expr: T.untyped, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
   def lower_range_fold_observable(p, smooth_node, label, source_node,
-                                  acc_alloc_zig:, publish_stmts:)
+                                  acc_alloc_expr:, publish_stmts:)
     range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true, MIR::CallableContract.no_ownership(0))
     capture_name = p[:initial_capture]
 
@@ -3066,38 +3066,46 @@ class PipelineHost
     # joiners (`NEXT running` / `|> COLLECT`) park on `wg.wait()`.
     # observable.zig stays runtime-free -- the WG bridge lives in
     # runtime-header.zig (CheatHeader.obsWg*).
-    # H9: every InlineZig that allocates carries a stdlib_def so the MIR
-    # checker can see the ownership effect. The observable's `:observable`
-    # cleanup template owns both the wrapper and the WaitGroup it wraps
-    # (destroy() forwards via done_destroy_fn), so neither needs a
-    # separate MIR::Cleanup -- but the `allocates: true` declaration
-    # makes the heap touch explicit instead of slipping past INV-12.
-    acc_alloc = MIR::InlineZig.new(acc_alloc_zig, "obs_alloc")
-    acc_alloc.stdlib_def = ALLOCATING_DEF
-    acc_alloc.allocs = MIR.inline_alloc_metadata(alloc: :heap)
-    acc_alloc.target_var = "__obs_acc"
     wg_init = MIR::HeapCreate.new(
       "CheatHeader.WaitGroup",
-      MIR::InlineZig.new("CheatHeader.WaitGroup.init(#{rt_name}.getSched())", "obs_wg_init", MIR::OwnershipContract.empty, ALLOC_REF_DEF),
+      MIR::Call.new("CheatHeader.WaitGroup.init", [
+        MIR::MethodCall.new(MIR::Ident.new(rt_name), "getSched", [], false, MIR::CallableContract.no_ownership(0)),
+      ], false, false, MIR::CallableContract.no_ownership(1)),
       :heap,
       "__obs_wg_alloc"
     )
-    set_completion = MIR::InlineZig.new(
-      "__obs_acc.setCompletion(@as(*anyopaque, @ptrCast(__obs_wg)), CheatHeader.obsWgDone, CheatHeader.obsWgWait, CheatHeader.obsWgDestroy)",
-      "obs_set_completion")
+    obs_wg_anyopaque = MIR::Cast.new(
+      MIR::Call.new("@ptrCast", [MIR::Ident.new("__obs_wg")], false, false, MIR::CallableContract.no_ownership(1)),
+      "*anyopaque",
+      :as,
+    )
+    set_completion_contract = MIR::CallableContract.new(
+      FunctionSignature.new(params: [
+        AST::Param.new(name: "ctx", type: Type.new(:Any)),
+        AST::Param.new(name: "done", type: Type.new(:Any)),
+        AST::Param.new(name: "wait", type: Type.new(:Any)),
+        AST::Param.new(name: "destroy", type: Type.new(:Any)),
+      ], return_type: Type.new(:Void)),
+      MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("__obs_wg", Type.new(:"CheatHeader.WaitGroup", layout: :indirect), "observable completion", :heap),
+      ]),
+      4,
+    )
+    set_completion = MIR::MethodCall.new(MIR::Ident.new("__obs_acc"), "setCompletion", [
+      obs_wg_anyopaque,
+      MIR::Ident.new("CheatHeader.obsWgDone"),
+      MIR::Ident.new("CheatHeader.obsWgWait"),
+      MIR::Ident.new("CheatHeader.obsWgDestroy"),
+    ], false, set_completion_contract)
     # setCompletion mutates __obs_acc to take ownership of __obs_wg; no
     # net allocation here. Borrows both pointers.
-    set_completion.stdlib_def = ALLOC_REF_DEF
-    set_completion.ownership_contract = MIR::OwnershipContract.consume_operands([
-      MIR::OwnershipOperandFact.owned_binding("__obs_wg", Type.new(:"CheatHeader.WaitGroup", layout: :indirect), "observable completion", :heap),
-    ])
     wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap,
       Type.new(:"CheatHeader.WaitGroup", layout: :indirect), :heap)
     acc_alloc_mark = MIR::AllocMark.new("__obs_acc", :heap, Type.new(obs_zig), :heap)
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],
       acc_alloc_mark,
-      MIR::Let.new("__obs_acc", acc_alloc, false, Type.new(obs_zig), nil),
+      MIR::Let.new("__obs_acc", acc_alloc_expr, false, Type.new(obs_zig), nil),
       wg_alloc_mark,
       MIR::Let.new("__obs_wg", wg_init,
         false, Type.new("*CheatHeader.WaitGroup"), nil),
@@ -3293,7 +3301,7 @@ class PipelineHost
               end
 
     lower_range_fold_observable(p, smooth_node, label, source_node,
-      acc_alloc_zig: default_obs_alloc_zig(smooth_node),
+      acc_alloc_expr: default_obs_alloc_expr(smooth_node),
       publish_stmts: T.must(publish))
   end
 
@@ -3344,7 +3352,6 @@ class PipelineHost
   def lower_range_reduce_observable(p, reduce_op, smooth_node, label, source_node)
     inner_zig = transpile_type(smooth_node.full_type!.tense_type)
     init_mir  = visit_mir(reduce_op.initial_value)
-    init_zig  = @lowering.emit_expr(init_mir)
 
     # Use a fid-prefixed sentinel for the `acc` substitution so
     # nothing in the user's reducer body can collide. Two REDUCE
@@ -3388,12 +3395,14 @@ class PipelineHost
     ZIG
     publish = [MIR::ExprStmt.new(MIR::InlineZig.new(cas_zig, "obs_reduce_publish"), true)]
 
-    rt_name = @do_rt_name || "rt"
     obs_target = transpile_type(smooth_node.full_type!).sub(/\A\*/, '')
-    acc_alloc = "#{obs_target}.newWith(#{rt_name}.heapAlloc(), CheatLib.obs.AtomicReduce(#{inner_zig}).init(#{init_zig})) catch unreachable"
+    acc_alloc = observable_alloc_expr(obs_target, "newWith", [
+      MIR::AllocatorRef.new(:heap),
+      MIR::Call.new("CheatLib.obs.AtomicReduce(#{inner_zig}).init", [init_mir], false, false, MIR::CallableContract.no_ownership(1)),
+    ])
 
     lower_range_fold_observable(p, smooth_node, label, source_node,
-      acc_alloc_zig: acc_alloc,
+      acc_alloc_expr: acc_alloc,
       publish_stmts: publish)
   end
 
@@ -3410,7 +3419,6 @@ class PipelineHost
     key_expr_mir = with_pipeline_context(placeholder: p[:item_var]) {
       visit_mir(distinct_op.expression)
     }
-    rt_name      = @do_rt_name || "rt"
     obs_zig      = transpile_type(smooth_node.full_type!)        # "*CheatLib.obs.ObservableStreamSet(i64)" or "*CheatLib.obs.ObservableStreamSetBounded(i64, 8)"
     target       = obs_zig.sub(/\A\*/, '')
     set_type     = smooth_node.full_type!.tense_type
@@ -3418,20 +3426,41 @@ class PipelineHost
     is_bounded   = set_type.fixed?
     cap          = set_type.capacity
 
-    submit_call = "_ = __obs_acc.inner.submit(#{@lowering.emit_expr(key_expr_mir)})"
-    submit_call = "#{submit_call} catch unreachable" unless is_bounded
+    submit_expr = MIR::MethodCall.new(
+      MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner"),
+      "submit",
+      [key_expr_mir],
+      false,
+      MIR::CallableContract.no_ownership(1),
+    )
+    submit_expr = MIR::TryCatch.new(submit_expr, MIR::Lit.new("unreachable"), nil) unless is_bounded
     publish = [
-      MIR::ExprStmt.new(MIR::InlineZig.new(submit_call, "obs_distinct_publish"), nil),
+      MIR::ExprStmt.new(submit_expr, true),
     ]
 
     inner_ctor = if is_bounded
-      "CheatLib.obs.StreamSetBounded(#{elem_zig}, #{cap}).init(#{rt_name}.heapAlloc()) catch unreachable"
+      observable_catch_unreachable(MIR::Call.new(
+        "CheatLib.obs.StreamSetBounded(#{elem_zig}, #{cap}).init",
+        [MIR::AllocatorRef.new(:heap)],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(1),
+      ))
     else
-      "CheatLib.obs.StreamSet(#{elem_zig}).init(#{rt_name}.heapAlloc()) catch unreachable"
+      observable_catch_unreachable(MIR::Call.new(
+        "CheatLib.obs.StreamSet(#{elem_zig}).init",
+        [MIR::AllocatorRef.new(:heap)],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(1),
+      ))
     end
 
     lower_range_fold_observable(p, smooth_node, label, source_node,
-      acc_alloc_zig: "#{target}.newWith(#{rt_name}.heapAlloc(), #{inner_ctor}) catch unreachable",
+      acc_alloc_expr: observable_alloc_expr(target, "newWith", [
+        MIR::AllocatorRef.new(:heap),
+        inner_ctor,
+      ]),
       publish_stmts: publish)
   end
 
@@ -3439,12 +3468,24 @@ class PipelineHost
   # type comes from Type#zig_type via smooth_node.full_type!, so terminals
   # whose Inner default-constructs (SUM/COUNT/AVG/ANY/ALL/FIND) all share
   # this one builder. MAX/MIN/REDUCE need a seeded init -- they pass
-  # their own `acc_alloc_zig`.
-  sig { params(smooth_node: AST::BinaryOp).returns(String) }
-  def default_obs_alloc_zig(smooth_node)
-    rt_name = @do_rt_name || "rt"
+  # their own `acc_alloc_expr`.
+  sig { params(smooth_node: AST::BinaryOp).returns(MIR::TryCatch) }
+  def default_obs_alloc_expr(smooth_node)
     target  = transpile_type(smooth_node.full_type!).sub(/\A\*/, '')
-    "#{target}.new(#{rt_name}.heapAlloc()) catch unreachable"
+    observable_alloc_expr(target, "new", [MIR::AllocatorRef.new(:heap)])
+  end
+
+  sig { params(expr: MIR::Node).returns(MIR::TryCatch) }
+  def observable_catch_unreachable(expr)
+    MIR::TryCatch.new(expr, MIR::Lit.new("unreachable"), nil)
+  end
+
+  sig { params(target: String, method: String, args: T::Array[T.untyped]).returns(MIR::TryCatch) }
+  def observable_alloc_expr(target, method, args)
+    observable_catch_unreachable(
+      MIR::Call.new("#{target}.#{method}", args, false, true,
+        MIR::CallableContract.no_ownership(args.length))
+    )
   end
 
   # Single source of truth mapping fold-op AST class to its observable

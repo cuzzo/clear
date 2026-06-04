@@ -58,81 +58,71 @@ opaque Zig text unless tests make that impossible.
 ## RawZig / InlineZig Inventory
 
 Inventory command:
-`rg -n "MIR::(?:RawZig|InlineZig)\.new" src --glob '*.rb'`
+`rg -n "MIR::InlineZig\.new" src --glob '*.rb'`
 
 This table lists every production creation site under `src/`. Risk is about
 whether the site could hide ownership, allocation, cleanup, control flow,
 aliasing, or concurrency semantics from structural MIR. Low-risk entries are
-still migration debt because `RawZig` and `InlineZig` are not the desired
-architecture for non-trivial code.
+still migration debt because `InlineZig` is not the desired architecture for
+non-trivial code. `RawZig` has been removed from `src/`.
 
 | Site | Reason | Risk | Suspicion / required direction |
 | --- | --- | --- | --- |
-| `src/mir/mir_lowering.rb:2946` | `require_local_module_opaque` (`RawZig`) | Critical | Inlines a separately transpiled module body as opaque Zig text. This can hide arbitrary imported function bodies from MIR ownership inspection in the Zig target. It needs an importer pipeline that carries imported MIR/FnDefs structurally instead of rewrapping emitted Zig. |
-| `src/backends/pipeline_host.rb:3197` | `obs_consumer_spawn` | Critical | Multi-statement spawn scaffold allocates a consumer context, transfers a stream source into a fiber, and relies on closed-form cleanup inside the opaque block. This is exactly the class of allocation/transfer behavior that should be structural MIR. |
-| `src/backends/pipeline_host.rb:3075` | `obs_alloc` | High | Heap-allocates an observable accumulator through generated Zig. It has metadata today, but the allocation surface should be a structural observable allocation node. |
-| `src/backends/pipeline_host.rb:3085` | `obs_set_completion` | High | Mutates the observable accumulator and transfers ownership of `__obs_wg` into a completion callback. The ownership contract helps, but the mutation/transfer should be represented directly. |
-| `src/backends/pipeline_host.rb:3424` | `obs_distinct_publish` | High | Calls `submit` on an observable set; the dynamic path can grow and allocate under `catch unreachable`. Allocation is not obvious at the MIR node boundary. This needs a structured publish/submit node or explicit callable metadata that captures the grow path. |
-| `src/mir/lowering/concurrency.rb:1080` | `next_promise_list` | High | Builds an `ArrayListUnmanaged`, loops promises, and appends results with the selected allocator. Allocates and performs control flow inside opaque Zig. |
-| `src/mir/lowering/variables.rb:1125` | `index_set` | High | Registry template can mutate indexed storage, allocate, and consume/move the assigned value. It carries metadata, but this is a structural indexed-store operation disguised as a template. |
-| `src/mir/lowering/functions.rb:2057` | `extern_trampoline` | High | Builds callback trampoline code, root-stack switching, error propagation, and potentially allocator-backed return handling in one opaque block. This should be a dedicated MIR/runtime trampoline node. |
+| `src/backends/pipeline_host.rb:3205` | `obs_consumer_spawn` | Critical | Multi-statement spawn scaffold allocates a consumer context, transfers a stream source into a fiber, and relies on closed-form cleanup inside the opaque block. This still needs a dedicated observable-consumer spawn MIR/runtime bridge before it can be removed without increasing complexity. |
+| `src/mir/lowering/variables.rb:1124` | `index_set` | High | Registry template can mutate indexed storage, allocate, and consume/move the assigned value. It carries metadata, but this is a structural indexed-store operation disguised as a template. |
+| `src/mir/lowering/functions.rb:2032` | `extern_trampoline` | High | Builds callback trampoline code, root-stack switching, error propagation, and potentially allocator-backed return handling in one opaque block. This should be a dedicated MIR/runtime trampoline node. |
 | `src/mir/lowering/capabilities.rb:612` | `with_block_bindings` | High | Emits lock/capability binding setup as joined Zig strings with fallible clauses. Capability acquisition and alias materialization are architecture-critical and should stay structural. |
-| `src/mir/lowering/functions.rb:822` | `post_outer_body` | Medium/High | Emits an entire wrapper function body with call, debug postcondition checks, and return flow. It is not allocator-heavy, but it is non-trivial statement/control-flow Zig. |
-| `src/mir/lowering/capabilities.rb:1143` | `pre_fail` | Medium/High | Multi-statement error setup plus `return error.CheatError;`. Should be a structural precondition-failure node instead of opaque return text. |
-| `src/mir/lowering/capabilities.rb:1204` | `with_guard_fail` | Medium/High | Emits guard failure action text, which may set runtime error state and transfer control flow. Should be structural guard failure MIR. |
-| `src/backends/pipeline_host.rb:3389` | `obs_reduce_publish` | Medium/High | CAS loop and observable state mutation inside opaque Zig. No obvious allocator, but concurrency correctness is hidden from MIR. |
-| `src/backends/pipeline_host.rb:4144` | `bounded_concurrent_ctx_cast` | Medium | Pointer cast from `raw_ctx` to generated callback context. No allocation, but pointer/aliasing safety is hidden. |
-| `src/backends/pipeline_host.rb:4787` | `bounded_concurrent_ctx_cast` | Medium | Same pointer-cast risk for the pointer/in-place callback variant. |
-| `src/backends/pipeline_host.rb:4730` | `list_each_inplace_mut_items` | Medium | Uses `@constCast(pipe_items)` to mutate a slice. No allocation, but it is aliasing/mutability-sensitive and should be a typed slice-mutability node or helper. |
-| `src/backends/pipeline_host.rb:4362` | `stream_conc_capacity_default` | Medium | Multi-statement block expression with a loop. Ownership-neutral, but beyond expression-level opacity. |
-| `src/mir/lowering/capabilities.rb:1094` | `with_guard_fail_raise` | Medium | Runtime error mutation in opaque Zig. Should be structural error-state update. |
-| `src/mir/lowering/capabilities.rb:1096` | `with_guard_fail_raise_flow` | Medium | Mutates `__flow` through raw text. Should be structural flow-state update. |
-| `src/mir/lowering/capabilities.rb:1103` | `with_guard_fail_exit` | Medium | Runtime error mutation with user message in opaque Zig. Should be structural error-state update. |
-| `src/mir/lowering/capabilities.rb:1105` | `with_guard_fail_exit_flow` | Medium | Mutates `__flow` through raw text. Should be structural flow-state update. |
-| `src/mir/mir_lowering.rb:2863` | `static_call` | Medium | Registry-backed stdlib call template. Acceptable only while `matched_stdlib_def` is complete and audited; long-term, common calls should lower to structural MIR or typed call nodes. |
-| `src/mir/mir_lowering.rb:3289` | `builtin_*` | Medium | Registry-backed builtin template. Same constraint as `static_call`: metadata must remain complete or this becomes opaque behavior. |
-| `src/mir/lowering/functions.rb:1731` | `intrinsic` | Medium | Registry-backed intrinsic template with allocation and ownership metadata. Safer than ad-hoc Zig, but still template opacity. |
-| `src/mir/test_lowering.rb:225` | `test_preamble` | Medium | Test-only runtime/allocator/EBR setup emitted as a large opaque block. It is not user program logic, but it does hide setup allocation/control details. |
-| `src/mir/test_lowering.rb:351` | `assert_raises` | Low/Medium | Test-only multi-statement assertion control flow. Ownership-neutral but not expression-level. |
-| `src/mir/test_lowering.rb:134` | `pending_skip` | Low/Medium | Test-only `return error.SkipZigTest;`. Control-flow text, but deliberately narrow. |
-| `src/mir/lowering/expressions.rb:1702` | `assert_eq_*` | Low/Medium | Test assertion call with `try std.testing.*`. Test-only, fallible call with metadata. |
-| `src/backends/pipeline_host.rb:3081` | `obs_wg_init` | Low/Medium | Constructor expression inside `HeapCreate`. Likely ownership-neutral itself, but it participates in heap object construction and should eventually be a structured initializer. |
-| `src/backends/pipeline_host.rb:4099` | `task_cfg` | Low/Medium | Generated task config literal. Ownership-neutral, but still opaque configuration syntax. |
+| `src/backends/pipeline_host.rb:3397` | `obs_reduce_publish` | Medium/High | CAS loop and observable state mutation inside opaque Zig. No obvious allocator, but concurrency correctness is hidden from MIR. Replacing it cleanly likely requires a typed AtomicReduce publish node or runtime helper that can take the reducer body safely. |
+| `src/mir/mir_lowering.rb:2850` | `static_call` | Medium | Registry-backed stdlib call template. Acceptable only while `matched_stdlib_def` is complete and audited; long-term, common calls should lower to structural MIR or typed call nodes. |
+| `src/mir/mir_lowering.rb:3201` | `builtin_*` | Medium | Registry-backed builtin template. Same constraint as `static_call`: metadata must remain complete or this becomes opaque behavior. |
+| `src/mir/lowering/functions.rb:1706` | `intrinsic` | Medium | Registry-backed intrinsic template with allocation and ownership metadata. Safer than ad-hoc Zig, but still template opacity. |
+| `src/backends/pipeline_host.rb:4143` | `task_cfg` | Low/Medium | Generated task config literal. Ownership-neutral, but still opaque configuration syntax. |
 | `src/mir/lowering/expressions.rb:958` | `or_exit_type` | Low | Enum-to-int expression only. Low memory risk; can become a small structural cast/literal helper later. |
-| `src/backends/pipeline_host.rb:4062` | `bounded_workers_usize` | Low | `@intCast` expression only. Low memory risk; should become structural cast eventually. |
-| `src/backends/pipeline_host.rb:4079` | `bounded_batch_usize` | Low | `@intCast` expression only. Low memory risk; should become structural cast eventually. |
-| `src/backends/pipeline_host.rb:4359` | `stream_conc_capacity_user` | Low | `@intCast` expression only. Low memory risk. |
-| `src/backends/pipeline_host.rb:4624` | `concurrent_reduce_min_init` | Low | Sentinel literal expression. Low memory risk. |
-| `src/backends/pipeline_host.rb:4626` | `concurrent_reduce_max_init` | Low | Sentinel literal expression. Low memory risk. |
-| `src/backends/pipeline_host.rb:4644` | `concurrent_reduce_kind` | Low | Enum literal expression. Low memory risk. |
+| `src/backends/pipeline_host.rb:4106` | `bounded_workers_usize` | Low | `@intCast` expression only. Low memory risk; should become structural cast eventually. |
+| `src/backends/pipeline_host.rb:4123` | `bounded_batch_usize` | Low | `@intCast` expression only. Low memory risk; should become structural cast eventually. |
+| `src/backends/pipeline_host.rb:4403` | `stream_conc_capacity_user` | Low | `@intCast` expression only. Low memory risk. |
+| `src/backends/pipeline_host.rb:4667` | `concurrent_reduce_min_init` | Low | Sentinel literal expression. Low memory risk. |
+| `src/backends/pipeline_host.rb:4669` | `concurrent_reduce_max_init` | Low | Sentinel literal expression. Low memory risk. |
+| `src/backends/pipeline_host.rb:4687` | `concurrent_reduce_kind` | Low | Enum literal expression. Low memory risk. |
+
+Resolved in the InlineZig burndown:
+
+- `obs_alloc`, `obs_wg_init`, `obs_set_completion`, and
+  `obs_distinct_publish` now lower through structural MIR call/cast/try-catch
+  nodes.
+- `next_promise_list` now lowers through `MIR::NextPromiseList`.
+- Test-only `test_preamble`, `assert_raises`, `pending_skip`, and
+  `assert_eq_*` now lower through structural test MIR.
+- `post_outer_body`, guard-failure error flow, bounded concurrent pointer
+  casts, default stream capacity, and const-cast pipe-item helpers now have
+  structural MIR nodes.
 
 Support/consumer sites are also part of the current opaque-Zig surface:
 
-1. `src/mir/mir.rb` defines `RawZig`, `InlineZig`, audit metadata, and warnings.
-   The comments already describe these as ownership escape hatches; the next
-   step is to make the warnings executable invariants.
+1. `src/mir/mir.rb` defines `InlineZig`, audit metadata, and warnings. The
+   comments already describe it as an ownership escape hatch; the next step is
+   to keep tightening executable invariants around the remaining producers.
 2. `src/mir/mir_checker.rb` verifies contracts, allocator metadata,
    target-var metadata, and rejects opaque ownership operations. This is the
    correct enforcement layer, but it must be backed by static creation-site
    gates so new producers cannot bypass it.
-3. `src/mir/mir_emitter.rb` renders `RawZig` verbatim and substitutes
-   `InlineZig` placeholders. This file must stay mechanically dumb: rendering
-   only, no ownership decisions.
+3. `src/mir/mir_emitter.rb` substitutes `InlineZig` placeholders. This file
+   must stay mechanically dumb: rendering only, no ownership decisions.
 4. `src/mir/hoist.rb`, `src/mir/lowering/variables.rb`, and
    `src/mir/lowering/control_flow.rb` inspect `InlineZig` allocator metadata
    during lowering/hoisting. These are legitimate until the producers are
    converted, but they are debt created by opaque allocation templates.
 5. `src/ast/diagnostic_registry.rb` documents checker diagnostics for
-   `InlineZig`/`RawZig`. This is not suspicious; it should be kept in sync with
-   the stronger invariant.
+   `InlineZig`. This is not suspicious; it should be kept in sync with the
+   stronger invariant.
 6. `examples/minivm/bc_emitter.rb` and
    `examples/minivm/register_bc_emitter.rb` reject, pattern-match, or partially
-   translate some `InlineZig`/`RawZig` shapes for the VM paths. This is
-   suspicious as a compatibility layer: the VM should consume structural MIR,
-   not parse Zig-shaped escape hatches.
+   translate some `InlineZig` shapes for the VM paths. This is suspicious as a
+   compatibility layer: the VM should consume structural MIR, not parse
+   Zig-shaped escape hatches.
 7. `tools/fuzz/templates/mir_checker_negative_matrix.rb` intentionally
-   constructs bad `InlineZig`/`RawZig` nodes for negative checker coverage. This
-   is not product code and should remain as test input for the invariant.
+   constructs bad `InlineZig` nodes for negative checker coverage. This is not
+   product code and should remain as test input for the invariant.
 
 ## Guarantee Strategy
 
