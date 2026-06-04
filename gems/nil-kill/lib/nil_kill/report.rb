@@ -1243,6 +1243,7 @@ module NilKill
       append_type_soundness_table(lines, evidence)
       append_untyped_cause_table(lines, evidence)
       append_union_decomplexity(lines, evidence)
+      append_deterministic_guard_collapse(lines, evidence)
       append_node_alias_candidates(lines, evidence)
       append_untyped_evidence_gaps(lines, evidence)
       append_signature_slot_evidence(lines, evidence)
@@ -1475,6 +1476,52 @@ module NilKill
         lines << "  - guards at: #{a["sites"].first(5).join(", ")}" if a["sites"].any?
         a["outliers"].first(6).each do |o|
           lines << "  - outlier producer `#{o["type"]}` at #{o["loc"]} `#{o["code"]}`"
+        end
+      end
+    end
+
+    DETERMINISTIC_GUARD_TOP_N = 30
+
+    def append_deterministic_guard_collapse(lines, evidence)
+      static_guards = Array(evidence.dig("facts", "deterministic_guards"))
+      contract_rows = guard_collapse_rows(evidence).select do |row|
+        row["dominant"] && row["dominant_share"].to_f >= 0.99 && Array(row["outliers"]).empty?
+      end
+      lines << ""
+      lines << "### Deterministic Guard Collapse"
+      lines << "- `static_proven` rows are predicates nil-kill can prove from source/type facts. `contract_proven` rows are guard clusters that collapse when the named origin is typed to its observed singleton producer. Runtime-only dominance is review material, not an autofix proof."
+      if static_guards.empty? && contract_rows.empty?
+        lines << "- none"
+        return
+      end
+
+      unless contract_rows.empty?
+        lines << "- Contract-proven collapses: #{contract_rows.size}"
+        contract_rows.first(DETERMINISTIC_GUARD_TOP_N).each do |row|
+          key, kind = canonical_contract(row)
+          lines << "  - contract_proven: #{row["guards"]} guard(s) collapse | `#{key}` (#{kind}) -> always `#{row["dominant"]}`"
+          lines << "    - methods/sites: #{row["method"]}; #{Array(row["guard_sites"]).first(5).join(", ")}"
+          lines << "    - producer evidence: #{row["via"] || "param origins"}"
+        end
+      end
+
+      unless static_guards.empty?
+        grouped = static_guards.group_by { |guard| [guard["path"], guard["line"], guard["code"]] }
+        rows = grouped.map do |(_path, _line, _code), guards|
+          guard = guards.first
+          {
+            "guard" => guard,
+            "count" => guards.size,
+            "methods" => guards.map { |g| [g["class"], g["method"]].compact.reject(&:empty?).join("#") }.uniq,
+          }
+        end.sort_by { |row| [-row["count"], row["guard"]["path"].to_s, row["guard"]["line"].to_i] }
+        lines << "- Static-proven branch predicates: #{static_guards.size}"
+        rows.first(DETERMINISTIC_GUARD_TOP_N).each do |row|
+          guard = row["guard"]
+          site = "#{guard["path"]}:#{guard["line"]}"
+          method = row["methods"].first || "top-level"
+          lines << "  - static_proven: #{site} #{method} `#{guard["code"]}` -> always #{guard["truth_value"]} (#{guard["branch_kind"]} takes #{guard["taken_branch"]})"
+          lines << "    - #{guard["reason"]}"
         end
       end
     end
