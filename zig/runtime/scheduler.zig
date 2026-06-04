@@ -487,7 +487,7 @@ pub const Scheduler = struct {
                 if (task.base.stack.memory.len > 0) {
                     self.freeStack(task.base.stack);
                 }
-                self.allocator.destroy(task.base); // Free Fiber
+                self.destroyFiber(task.base); // Free Fiber
                 self.task_slab.destroy(task); // Free Task Struct
             }
             q.deinit(self.allocator);
@@ -517,7 +517,7 @@ pub const Scheduler = struct {
             if (task_opt) |task| {
                 self.releaseTaskEbr(task);
                 self.freeStack(task.base.stack);
-                self.allocator.destroy(task.base);
+                self.destroyFiber(task.base);
                 self.task_slab.destroy(task);
             }
         }
@@ -525,7 +525,7 @@ pub const Scheduler = struct {
         for (self.pinned_queue.items) |task| {
             self.releaseTaskEbr(task);
             self.freeStack(task.base.stack);
-            self.allocator.destroy(task.base);
+            self.destroyFiber(task.base);
             self.task_slab.destroy(task);
         }
         self.pinned_queue.deinit(self.allocator);
@@ -534,7 +534,7 @@ pub const Scheduler = struct {
         for (self.yield_queue.items) |task| {
             self.releaseTaskEbr(task);
             self.freeStack(task.base.stack);
-            self.allocator.destroy(task.base);
+            self.destroyFiber(task.base);
             self.task_slab.destroy(task);
         }
         self.yield_queue.deinit(self.allocator);
@@ -740,6 +740,11 @@ pub const Scheduler = struct {
             return;
         }
         self.submitRemoteStackFree(owner, stack.memory);
+    }
+
+    fn destroyFiber(self: *Scheduler, fiber: *Fiber) void {
+        fiber.deinit();
+        self.allocator.destroy(fiber);
     }
 
     fn submitRemoteStackFree(self: *Scheduler, owner: *Scheduler, memory: []u8) void {
@@ -1121,7 +1126,7 @@ pub const Scheduler = struct {
                         if (task.config.pinned) {
                             self.pinned_queue.append(self.allocator, task) catch {
                                 self.freeLocalStackMemory(stack_mem);
-                                self.allocator.destroy(task.base);
+                                self.destroyFiber(task.base);
                                 self.task_slab.destroy(task);
                                 continue;
                             };
@@ -1130,7 +1135,7 @@ pub const Scheduler = struct {
                                 self.freeLocalStackMemory(stack_mem);
                                 self.fiber_pool.append(self.allocator, task) catch
                                     {
-                                        self.allocator.destroy(task.base);
+                                        self.destroyFiber(task.base);
                                         self.task_slab.destroy(task);
                                     };
                                 continue;
@@ -1495,7 +1500,7 @@ pub const Scheduler = struct {
                     // Compatibility no-op: tasks no longer own EBR slots.
                     self.releaseTaskEbr(task);
                     self.freeStack(task.base.stack);
-                    self.allocator.destroy(task.base);
+                    self.destroyFiber(task.base);
                     self.task_slab.destroy(task);
                 }
             },
@@ -1647,7 +1652,7 @@ pub const Scheduler = struct {
                     _ = self.active_tasks.fetchSub(1, .monotonic);
                     self.releaseTaskEbr(task);
                     self.freeStack(task.base.stack);
-                    self.allocator.destroy(task.base);
+                    self.destroyFiber(task.base);
                     self.task_slab.destroy(task);
                 }
                 // CAS-fail: a concurrent submitResume holds IN_QUEUE.
