@@ -50,6 +50,17 @@ RSpec.describe "AtomicEscapeSuggester (M2.9 static escape diagnosis)" do
       expect(fs.first[:message]).to be_a(String)
       expect(fs.first[:message]).to include("Lifetime Error")
     end
+
+    it "classifies non-RETURN escape findings as stores" do
+      token = Struct.new(:line, :column).new(7, 11)
+      finding = Struct.new(:message, :token).new("Lifetime Error: captured value escapes through a field store", token)
+
+      expect(AtomicEscapeSuggester.to_hash(finding)).to include(
+        line: 7,
+        col: 11,
+        kind: :store,
+      )
+    end
   end
 
   describe "negative cases" do

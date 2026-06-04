@@ -386,6 +386,29 @@ RSpec.describe PprofConverter do
       # No perf.data => nil regardless of perf_to_profile presence.
       expect(described_class.convert_perf(@profile_dir, nil)).to be_nil
     end
+
+    it 'returns nil when perf.data exists but perf_to_profile is unavailable' do
+      File.write(File.join(@profile_dir, 'perf.data'), 'perf bytes')
+      allow(described_class).to receive(:system)
+        .with('which perf_to_profile > /dev/null 2>&1')
+        .and_return(false)
+
+      expect(described_class.convert_perf(@profile_dir, nil)).to be_nil
+    end
+
+    it 'writes cpu.pb.gz when perf_to_profile succeeds' do
+      File.write(File.join(@profile_dir, 'perf.data'), 'perf bytes')
+      allow(described_class).to receive(:system) do |*args|
+        if args == ['which perf_to_profile > /dev/null 2>&1']
+          true
+        else
+          File.write(args[4], 'profile')
+          true
+        end
+      end
+
+      expect(described_class.convert_perf(@profile_dir, nil)).to eq(File.join(@profile_dir, 'cpu.pb.gz'))
+    end
   end
 
   describe '.convert_all' do
@@ -398,12 +421,62 @@ RSpec.describe PprofConverter do
       expect(out[:mvcc]).to eq(File.join(@profile_dir, 'mvcc.pb.gz'))
     end
 
+    it 'includes lock, channel, and cpu profiles when those converters emit files' do
+      tab = "\t"
+      File.write(File.join(@profile_dir, 'locks.txt'),
+                 "0x500#{tab}100#{tab}5#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n")
+      File.write(File.join(@profile_dir, 'channels.txt'),
+                 "0#{tab}5#{tab}5#{tab}0#{tab}2#{tab}5#{tab}8\n")
+      allow(described_class).to receive(:convert_perf)
+        .and_return(File.join(@profile_dir, 'cpu.pb.gz'))
+
+      out = described_class.convert_all(@profile_dir)
+
+      expect(out).to include(
+        lock: File.join(@profile_dir, 'lock.pb.gz'),
+        channels: File.join(@profile_dir, 'channels.pb.gz'),
+        cpu: File.join(@profile_dir, 'cpu.pb.gz'),
+      )
+    end
+
     it 'returns an empty hash for a directory with no profile files' do
       expect(described_class.convert_all(@profile_dir)).to eq({})
     end
 
     it 'returns an empty hash for a missing directory' do
       expect(described_class.convert_all('/nonexistent')).to eq({})
+    end
+  end
+
+  describe '.resolve_addrs' do
+    it 'maps user Zig frames back to CLEAR source lines and leaves runtime frames on Zig lines' do
+      File.write(File.join(@profile_dir, 'transpiled.zig'), <<~ZIG)
+        // CLR:10
+        const a = 1;
+        const b = 2;
+      ZIG
+      allow(IO).to receive(:popen).and_return(
+        "._clear_tmp_foo.main__anon_123\n/build/._clear_tmp_foo.zig:3 (discriminator 1)\n" \
+        "entryWrapper\n/runtime/scheduler.zig:44\n"
+      )
+
+      resolved = described_class.resolve_addrs(%w[0x10 0x20], '/tmp/fake-bin', @profile_dir)
+
+      expect(resolved['0x10']).to include(func: 'main', clear_line: 10, is_user_zig: true)
+      expect(resolved['0x20']).to include(func: 'entryWrapper', clear_line: nil, is_user_zig: false)
+    end
+  end
+
+  describe '.clear_source_path' do
+    it 'returns source.cht for user Zig frames when present' do
+      source = File.join(@profile_dir, 'source.cht')
+      File.write(source, 'FN main() RETURNS Void -> RETURN; END')
+
+      expect(described_class.clear_source_path(@profile_dir, '/build/._clear_tmp_foo.zig:3', is_user_zig: true)).to eq(source)
+    end
+
+    it 'returns the addr2line file path for non-user frames' do
+      expect(described_class.clear_source_path(@profile_dir, '/runtime/scheduler.zig:44', is_user_zig: false)).to eq('/runtime/scheduler.zig')
     end
   end
 end

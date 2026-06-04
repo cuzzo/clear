@@ -439,6 +439,10 @@ RSpec.describe StackVerifier do
       expect(v.cost_to_tier(65536 - 4096 + 1)).to eq(:xl)
       expect(v.cost_to_tier(200_000)).to eq(:xl)
     end
+
+    it "maps bytes above the xl budget to :service" do
+      expect(v.cost_to_tier(StackVerifier::TIER_BUDGET[:xl] + 1)).to eq(:service)
+    end
   end
 
   describe "#extract_full_call_graph" do
@@ -537,6 +541,20 @@ RSpec.describe StackVerifier do
       v = stub_verifier(SHARED_CALLEE_OBJDUMP)
       r = v.compute_main_optimal_tier
       expect(r[:path_cost]).to eq(0x80 + 0x200 + 0x40)
+    end
+
+    it "uses declared max depth when a recursive edge is bounded" do
+      v = stub_verifier("")
+      graph = {
+        frame_sizes: { "a" => 0x40 },
+        call_graph:  { "a" => Set["a"] },
+        fn_names:    { "a" => "#{PREFIX}.recur" },
+      }
+      fn_nodes = {
+        "recur" => FnDouble.new(reentrance_kind: :reentrant_max_depth, max_depth_n: 3),
+      }
+
+      expect(v.deepest_path_cost("a", graph, fn_nodes: fn_nodes)).to eq(0x40 + (0x40 * 3))
     end
   end
 

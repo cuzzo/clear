@@ -90,6 +90,17 @@ RSpec.describe PredicateRewriter do
       CLEAR
       expect(rw(src)).to include("xs.empty?()")
     end
+
+    it "`coll.length() <= 0` -> `coll.empty?()`" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          xs: Int64[] = [];
+          IF xs.length() <= 0 THEN RETURN; END
+          RETURN;
+        END
+      CLEAR
+      expect(rw(src)).to include("xs.empty?()")
+    end
   end
 
   describe "length() comparisons — any?" do
@@ -208,6 +219,48 @@ RSpec.describe PredicateRewriter do
       out = rw(src)
       expect(out).to include("# legacy: x == NIL was the old idiom")
       expect(out).to include("x.nil?()")
+    end
+  end
+
+  describe "source helper edge cases" do
+    it "rewrites NIL comparisons whose left side is a function call" do
+      src = <<~CLEAR
+        FN maybe() RETURNS ?Int64 -> RETURN NIL; END
+        FN main() RETURNS Void ->
+          IF maybe() == NIL THEN RETURN; END
+          RETURN;
+        END
+      CLEAR
+
+      expect(rw(src)).to include("(maybe()).nil?()")
+    end
+
+    it "wraps complex predicate receivers in parentheses" do
+      expect(PredicateRewriter.paren_if_needed("a + b")).to eq("(a + b)")
+    end
+
+    it "walks expressions across escaped quotes in strings" do
+      source = '"a\"; not done"; tail'
+      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq('"a\"; not done"'.length)
+    end
+
+    it "walks expressions across triple-quoted strings" do
+      source = '"""a; b) c"""; tail'
+      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq('"""a; b) c"""'.length)
+    end
+
+    it "skips comments while walking expression ends" do
+      source = "value # comment with ; and )\n"
+      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq("value".length)
+    end
+
+    it "stops at newlines and returns the last non-whitespace offset" do
+      source = "value  \nnext"
+      expect(PredicateRewriter.walk_to_expr_end(source, 0)).to eq("value".length)
+    end
+
+    it "returns the expression end when the source reaches EOF" do
+      expect(PredicateRewriter.walk_to_expr_end("value", 0)).to eq("value".length)
     end
   end
 end

@@ -83,6 +83,28 @@ RSpec.describe "MultiStatementLinter.lint!" do
     expect(lint(src)).to be_empty
   end
 
+  it "ignores escaped quotes inside string literals" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        s = "a\\"; still in string;";
+        RETURN;
+      END
+    CLEAR
+    expect(lint(src)).to be_empty
+  end
+
+  it "ignores semicolons inside triple-quoted strings" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        s = """
+          a; b; c;
+        """;
+        RETURN;
+      END
+    CLEAR
+    expect(lint(src)).to be_empty
+  end
+
   it "ignores `;` inside comments" do
     src = <<~CLEAR
       FN main() RETURNS Void ->

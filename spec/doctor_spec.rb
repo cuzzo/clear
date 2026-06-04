@@ -55,6 +55,19 @@ RSpec.describe Doctor do
     end
   end
 
+  it "formats sort keys and values for all doctor --by modes" do
+    Doctor.instance_variable_set(:@opts, { by: :inuse_allocs })
+    expect(Doctor.sort_key).to eq(:inuse_allocs)
+    expect(Doctor.sort_label).to eq("in-use allocations (alloc - free)")
+    expect(Doctor.fmt_sort_value(inuse_allocs: 12_345)).to eq("12,345 allocs")
+
+    Doctor.instance_variable_set(:@opts, { by: :unknown })
+    expect(Doctor.sort_key).to eq(:bytes)
+    expect(Doctor.fmt_sort_value(bytes: 512)).to eq("512 B")
+  ensure
+    Doctor.instance_variable_set(:@opts, nil)
+  end
+
   it "parses heap profile rows, sorts by bytes, and surfaces saturation warnings" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "alloc.txt"), <<~PROFILE)
@@ -75,6 +88,86 @@ RSpec.describe Doctor do
       expect(out).to include("*** WARNING: 2 allocation samples dropped")
       expect(out).to match(/Top sites by (bytes|in-use bytes \(alloc - free\)):/)
       expect(out).to include("(heap rc) = @multiowned RC allocation tracked by rcCreate")
+    end
+  end
+
+  it "resolves heap addresses, prints source locations, and supports cumulative ranking" do
+    Dir.mktmpdir do |root|
+      dir = File.join(root, "app.profile")
+      Dir.mkdir(dir)
+      binary = File.join(root, "app")
+      File.write(binary, "")
+      File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
+        // CLR:10
+        const a = 1;
+        const b = 2;
+      ZIG
+      File.write(File.join(dir, "alloc.txt"), <<~PROFILE)
+        # total_allocs 4
+        0x1,0x2 3 512 1 128 2
+        0x3 1 2048 0 0 1
+      PROFILE
+      allow(IO).to receive(:popen).and_return(
+        "mod.makeNode__anon_1\n/build/._clear_tmp_app.zig:3\n" \
+        "runtime.entryWrapper\n/runtime/runtime.zig:44\n" \
+        "mod.bigAlloc\n/build/._clear_tmp_app.zig:2\n"
+      )
+
+      Doctor.instance_variable_set(:@opts, { cumulative: false, by: :bytes })
+      flat = capture_stdout { Doctor.section_heap(dir, binary) }
+      expect(flat).to include("makeNode (line 10)")
+      expect(flat).to include("entryWrapper (runtime.zig:44)")
+
+      Doctor.instance_variable_set(:@opts, { cumulative: true, by: :bytes })
+      cumulative = capture_stdout { Doctor.section_heap(dir, binary) }
+      expect(cumulative).to include("Top functions by cumulative bytes")
+      expect(cumulative).to include("2.0 KB cum")
+      expect(cumulative).to include("512 B  cum")
+    end
+  ensure
+    Doctor.instance_variable_set(:@opts, nil)
+  end
+
+  it "prints CPU samples and maps perf srclines back to CLEAR hot lines" do
+    Dir.mktmpdir do |dir|
+      perf_data = File.join(dir, "perf.data")
+      File.write(perf_data, "perf")
+      File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
+        // CLR:2
+        user_pipeline();
+      ZIG
+      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+        FN main() RETURNS Void ->
+          xs |> map(fn);
+        END
+      CLEAR
+      allow(Doctor).to receive(:`) do |cmd|
+        if cmd.include?("--sort=srcline")
+          "  12.5%  samples  /build/._clear_tmp_app.zig:2\n" \
+            "  30.0%  samples  /zig/std.zig:10\n"
+        else
+          "  99.0%  hot_symbol\n"
+        end
+      end
+
+      out = capture_stdout { Doctor.section_cpu(dir, perf_data) }
+
+      expect(out).to include("CPU Profile")
+      expect(out).to include("99.0%  hot_symbol")
+      expect(out).to include("CLEAR Source Hot Lines")
+      expect(out).to include("[pipeline stage]")
+    end
+  end
+
+  it "prints a CPU no-samples fallback when perf has no top rows" do
+    Dir.mktmpdir do |dir|
+      perf_data = File.join(dir, "perf.data")
+      File.write(perf_data, "perf")
+      allow(Doctor).to receive(:`).and_return("")
+
+      out = capture_stdout { Doctor.section_cpu(dir, perf_data) }
+
+      expect(out).to include("no samples collected")
     end
   end
 
@@ -152,6 +245,7 @@ RSpec.describe Doctor do
         1 100 20 35 0 95 100
         2 20 100 0 40 10 100
         3 100 100 10 10 20 100
+        4 100 100 25 0 30 100
       PROFILE
 
       out = capture_stdout { Doctor.section_channels(dir) }
@@ -159,6 +253,7 @@ RSpec.describe Doctor do
       expect(out).to include("Channel Saturation")
       expect(out).to include("slow consumer")
       expect(out).to include("slow producer")
+      expect(out).to include("backpressure")
       expect(out).to include("balanced")
     end
   end
@@ -195,6 +290,27 @@ RSpec.describe Doctor do
       expect(out).to include("Scheduler imbalance")
       expect(out).to include("line 2: work = BG { 1 };")
       expect(out).to include("Use `BG { @parallel -> ... }`")
+    end
+  end
+
+  it "covers remaining lock diagnosis branches" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "locks.txt"), <<~PROFILE)
+        # addr acq cont wait max_wait hold max_hold read_acq read_cont read_wait read_max
+        0xptr\t800\t100\t1000\t1000\t800000\t1000\t1200\t100\t1000\t1000\t-
+        0xhotlong\t10\t3\t1000\t1000\t20000000\t3000000\t0\t0\t0\t0\t-
+        0xcont\t10\t3\t1000\t1000\t10000\t1000\t0\t0\t0\t0\t-
+        0xlong\t10\t0\t0\t0\t20000000\t3000000\t0\t0\t0\t0\t-
+        0xok\t10\t0\t0\t0\t10000\t1000\t0\t0\t0\t0\t-
+      PROFILE
+
+      out = capture_stdout { Doctor.section_locks(dir) }
+
+      expect(out).to include("contended lock")
+      expect(out).to include("hot lock + long hold")
+      expect(out).to include("contended — consider")
+      expect(out).to include("long critical section")
+      expect(out).to include("ok")
     end
   end
 
@@ -249,6 +365,23 @@ RSpec.describe Doctor do
     end
   end
 
+  it "renders atomic-ptr migration advice for @shared:locked candidates" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+        STRUCT Cfg { host: String, port: Int64 }
+        FN main!() RETURNS !Void ->
+          cfg = Cfg{ host: "a", port: 1 } @shared:locked;
+          WITH EXCLUSIVE cfg AS view { _ = view.host; }
+          RETURN;
+        END
+      CLEAR
+
+      out = capture_stdout { Doctor.emit_atomic_ptr_migration!(dir) }
+
+      expect(out).to include("'cfg: Cfg' @shared:locked")
+    end
+  end
+
   it "diagnoses MVCC COW thrash, misuse, retry pressure, and atomic-ptr upgrade candidates" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "source.cht"), <<~CLEAR)
@@ -266,6 +399,7 @@ RSpec.describe Doctor do
         0xretry\t64\t5000\t1000\t1500\t0\t1\t-
         0xfail\t64\t5000\t500\t0\t3\t1\t-
         0xsingle\t64\t5000\t2000\t0\t0\t0\t-
+        0xok\t64\t1\t0\t0\t0\t1\t-
       PROFILE
 
       out = capture_stdout { Doctor.section_mvcc(dir) }
@@ -278,6 +412,27 @@ RSpec.describe Doctor do
       expect(out).to include("UpdateRetriesExhausted")
       expect(out).to include("AtomicPtr upgrade-from-MVCC detected")
       expect(out).to include("'cfg: Cfg' @shared:versioned")
+      expect(out).to include("0B")
+      expect(out).to include("ok")
+    end
+  end
+
+  it "renders atomic escape findings surfaced by the doctor" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "source.cht"), "FN main() RETURNS Void -> RETURN; END\n")
+      require_relative "../src/tools/atomic_escape_suggester"
+      allow(AtomicEscapeSuggester).to receive(:analyze).and_return([
+        { line: nil, kind: :return },
+        { line: 5, kind: :store },
+        { line: 6, kind: :other },
+      ])
+
+      out = capture_stdout { Doctor.section_atomic_escape(dir) }
+
+      expect(out).to include("Atomic Escape")
+      expect(out).to include("RETURN escapes atomic-tied value")
+      expect(out).to include("store/append escapes atomic-tied value")
+      expect(out).to include("atomic-tied lifetime escape")
     end
   end
 
@@ -325,6 +480,34 @@ RSpec.describe Doctor do
       expect(hardware).to include("Branch miss rate: 10.0%")
       expect(freeze).to include("FREEZE Opportunity")
       expect(freeze).to include("line 77")
+    end
+  end
+
+  it "prints moderate LLC analysis and freeze locations from clear_line, function, and raw address" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "perf-stat.txt"), <<~PROFILE)
+             1,000      LLC-loads:u
+               150      LLC-load-misses:u
+      PROFILE
+
+      hardware = capture_stdout { Doctor.section_hardware(dir) }
+      expect(hardware).to include("LLC miss rate: 15.0% (moderate)")
+
+      sites = [
+        { addr: "0xline", allocs: 6_000, bytes: 192_000 },
+        { addr: "0xfunc", allocs: 6_000, bytes: 192_000 },
+        { addr: "0xraw", allocs: 6_000, bytes: 192_000 },
+      ]
+      resolved = {
+        "0xline" => { func: "makeNode", clear_line: 12 },
+        "0xfunc" => { func: "buildTree" },
+        "0xraw" => { func: "" },
+      }
+      freeze = capture_stdout { Doctor.section_freeze(dir, sites, resolved, 25.0) }
+
+      expect(freeze).to include("line 12")
+      expect(freeze).to include("buildTree")
+      expect(freeze).to include("0xraw")
     end
   end
 end

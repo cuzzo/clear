@@ -119,19 +119,14 @@ module AtomicPtrMigrationSuggester
   def stmt_eligible?(stmt, alias_name, struct_name)
     case stmt
     when AST::Assignment
-      target = stmt.target
+      target = stmt.name
       # FIELD-LEVEL assignment: `alias.field = ...` -- DISQUALIFY (this
       # is the @shared:locked stay-put pattern, not atomic-ptr-fit).
       return false if target.is_a?(AST::GetField) &&
                       target.target.is_a?(AST::Identifier) &&
                       target.target.name == alias_name
       # WHOLE-STRUCT replace: `alias = StructName{...}` -- ELIGIBLE.
-      if target.is_a?(AST::Identifier) && target.name == alias_name
-        rhs = stmt.value
-        return rhs.is_a?(AST::StructLit) &&
-               rhs.respond_to?(:type_name) &&
-               rhs.type_name.to_s == struct_name.to_s
-      end
+      return whole_struct_replace?(target, stmt.value, alias_name, struct_name) if alias_root?(target, alias_name)
       # Other targets reachable through the alias (e.g.
       # `arr[alias.field] = ...`) DISQUALIFY conservatively.
       !references_alias?(stmt, alias_name)
@@ -143,6 +138,7 @@ module AtomicPtrMigrationSuggester
       return false if target.is_a?(AST::GetField) &&
                       target.target.is_a?(AST::Identifier) &&
                       target.target.name == alias_name
+      return whole_struct_replace?(target, stmt.value, alias_name, struct_name) if alias_root?(target, alias_name)
       rhs_uses_alias_only_for_field_get?(stmt, alias_name)
     else
       # Read-only statement (print, control flow, etc.). Eligible iff
@@ -150,5 +146,16 @@ module AtomicPtrMigrationSuggester
       return false if control_flow_stmt?(stmt)
       rhs_uses_alias_only_for_field_get?(stmt, alias_name)
     end
+  end
+
+  def alias_root?(target, alias_name)
+    target == alias_name ||
+      (target.is_a?(AST::Identifier) && target.name == alias_name)
+  end
+
+  def whole_struct_replace?(target, rhs, alias_name, struct_name)
+    alias_root?(target, alias_name) &&
+      rhs.is_a?(AST::StructLit) &&
+      rhs.name.to_s == struct_name.to_s
   end
 end

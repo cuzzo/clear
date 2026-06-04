@@ -84,6 +84,18 @@ RSpec.describe LintFixRewriter do
       expect(out).to include("MUTABLE s = 0.0;")
     end
 
+    it "drops redundant annotations even when whitespace precedes the colon" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          MUTABLE total   : Int64 = 0;
+          total = 5;
+          RETURN total;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).not_to include(": Int64")
+    end
+
     it "keeps `: HashMap<K, V>` (decorated type)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
@@ -209,6 +221,12 @@ RSpec.describe LintFixRewriter do
       expect(out).to include("n = 5;")
       expect(out).not_to include("MUTABLE")
       expect(out).not_to include(": Int64")
+    end
+  end
+
+  describe ".to_type" do
+    it "returns nil for values that cannot be coerced to a Type" do
+      expect(LintFixRewriter.to_type("~~Int64")).to be_nil
     end
   end
 end

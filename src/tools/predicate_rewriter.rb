@@ -218,10 +218,6 @@ module PredicateRewriter
     node.value
   end
 
-  def flip_op(op)
-    {EQ: :EQ, NEQ: :NEQ, GT: :LT, GTE: :LTE, LT: :GT, LTE: :GTE}[op]
-  end
-
   # Map (op, literal) -> canonical predicate name. nil means
   # "no rewrite — either always-true/false or shape we don't simplify."
   sig { params(op: Symbol, lit: Integer).returns(T.nilable(String)) }
@@ -239,39 +235,28 @@ module PredicateRewriter
   # ---- Source span helpers ----
 
   # Returns `{start:, end:, other_start:, other_end:}` for a BinaryOp
-  # where one side is a small literal (NIL or Int). The "other" range
-  # is the operand that ISN'T the literal — for the rewrite payload.
-  # nil if span couldn't be cleanly resolved.
+  # whose right side is a small literal (NIL or Int). The "other" range
+  # is the left operand used for the rewrite payload. nil if span
+  # couldn't be cleanly resolved.
   sig { params(node: AST::BinaryOp, source: String).returns(Hash) }
   def compute_compare_span(node, source)
-    if literal_node?(node.right)
-      # `<expr> <op> <literal>`
-      lhs_start = leftmost_offset(node.left, source)
-      lhs_end   = rightmost_compact_offset(node.left, source)
-      lit_off   = offset_for(source, node.right.token.line, node.right.token.column)
-      return nil unless lhs_start && lhs_end && lit_off
-      lit_len   = literal_source_length(node.right, source, lit_off)
-      return nil unless lit_len
-      lhs_start, lhs_end = expand_paren_wrap(source, lhs_start, lhs_end)
-      end_off = lit_off + lit_len
-      {
-        start:        lhs_start,
-        end:          end_off,
-        other_start:  lhs_start,
-        other_end:    lhs_end,
-      }
-    elsif literal_node?(node.left)
-      # `<literal> <op> <expr>`
-      start_off = offset_for(source, node.left.token.line, node.left.token.column)
-      end_off   = rightmost_compact_offset(node.right, source)
-      return nil unless start_off && end_off
-      {
-        start:        start_off,
-        end:          end_off,
-        other_start:  leftmost_offset(node.right, source),
-        other_end:    end_off,
-      }
-    end
+    return nil unless literal_node?(node.right)
+
+    # `<expr> <op> <literal>`
+    lhs_start = leftmost_offset(node.left, source)
+    lhs_end   = rightmost_compact_offset(node.left, source)
+    lit_off   = offset_for(source, node.right.token.line, node.right.token.column)
+    return nil unless lhs_start && lhs_end && lit_off
+    lit_len   = literal_source_length(node.right, source, lit_off)
+    return nil unless lit_len
+    lhs_start, lhs_end = expand_paren_wrap(source, lhs_start, lhs_end)
+    end_off = lit_off + lit_len
+    {
+      start:        lhs_start,
+      end:          end_off,
+      other_start:  lhs_start,
+      other_end:    lhs_end,
+    }
   end
 
   # If the source character immediately before `lhs_start` is `(` AND
