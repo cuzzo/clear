@@ -16,6 +16,7 @@ module ZigCoverageSupport
   class Error < StandardError; end
 
   TRUTHY = %w[1 true yes on].freeze
+  KCOV_CODECOV_EXCLUDE_PATTERN = "-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz.zig,/._clear_cov_".freeze
 
   def self.enabled?
     TRUTHY.include?(ENV.fetch("ZIG_COVERAGE", "0").downcase) ||
@@ -77,6 +78,7 @@ module ZigCoverageSupport
       "--clean",
       "--include-path=#{ZIG_DIR}",
       "--strip-path=#{ROOT}/",
+      "--exclude-pattern=#{KCOV_CODECOV_EXCLUDE_PATTERN}",
       kcov_dir,
       bin_path,
     ]
@@ -102,7 +104,14 @@ module ZigCoverageSupport
 
     merged = File.join(root, "merged")
     FileUtils.mkdir_p(merged)
-    output, status = Open3.capture2e("kcov", "--merge", merged, *inputs, chdir: ROOT)
+    output, status = Open3.capture2e(
+      "kcov",
+      "--merge",
+      "--exclude-pattern=#{KCOV_CODECOV_EXCLUDE_PATTERN}",
+      merged,
+      *inputs,
+      chdir: ROOT,
+    )
     raise Error, "kcov merge failed for #{root}:\n#{output}" unless status.success?
 
     File.join(merged, "kcov-merged", "cobertura.xml")

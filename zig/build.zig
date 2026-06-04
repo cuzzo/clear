@@ -309,12 +309,14 @@ pub fn build(b: *std.Build) void {
     // Dedicated step for VOPR-only kcov runs. Mirror of coverage-loom.
     const coverage_vopr_step = b.step("coverage-vopr", "Run VOPR-only tests under kcov (requires -Dcoverage-vopr)");
 
+    const kcov_codecov_exclude_arg = "--exclude-pattern=-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz.zig,/._clear_cov_";
+
     // When -Dcoverage is set, accumulate per-test kcov runs so a final
     // merge step can produce one zig-out/coverage/merged/cobertura.xml
     // for Codecov upload. The merge step depends on every kcov run so
     // it fires only after all per-test coverage dirs are populated.
     const merge_cmd = if (coverage)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage/merged" })
     else
         null;
     if (merge_cmd) |m| {
@@ -323,7 +325,7 @@ pub fn build(b: *std.Build) void {
     }
     // Same shape as `merge_cmd`, but for the Loom-only coverage tree.
     const merge_cmd_loom = if (coverage_loom)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-loom/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-loom/merged" })
     else
         null;
     if (merge_cmd_loom) |m| {
@@ -332,7 +334,7 @@ pub fn build(b: *std.Build) void {
     }
     // Same shape as `merge_cmd_loom`, but for the VOPR-only coverage tree.
     const merge_cmd_vopr = if (coverage_vopr)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-vopr/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-vopr/merged" })
     else
         null;
     if (merge_cmd_vopr) |m| {
@@ -487,6 +489,7 @@ pub fn build(b: *std.Build) void {
                     "--clean",
                     kcov_include_arg,
                     kcov_strip_arg,
+                    kcov_codecov_exclude_arg,
                     kcov_dir,
                 });
                 run_kcov.addArtifactArg(unit_tests);
@@ -594,6 +597,7 @@ pub fn build(b: *std.Build) void {
                         "--clean",
                         kcov_include_arg,
                         kcov_strip_arg,
+                        kcov_codecov_exclude_arg,
                         kcov_dir,
                     });
                     run_kcov.addArtifactArg(lv_tests);
@@ -611,6 +615,7 @@ pub fn build(b: *std.Build) void {
                         "--clean",
                         kcov_include_arg,
                         kcov_strip_arg,
+                        kcov_codecov_exclude_arg,
                         kcov_dir,
                     });
                     run_kcov.addArtifactArg(lv_tests);
@@ -796,6 +801,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             loom_kcov_dir,
         });
         run_loom_kcov.addArtifactArg(loom_exe);
@@ -846,6 +852,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             pl_loom_kcov_dir,
         });
         run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
@@ -869,6 +876,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             pl_loom_kcov_dir,
         });
         run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
@@ -928,6 +936,7 @@ pub fn build(b: *std.Build) void {
                 "--clean",
                 kcov_include_arg,
                 kcov_strip_arg,
+                kcov_codecov_exclude_arg,
                 kcov_dir,
             });
             run_kcov.addArtifactArg(exe);
@@ -946,6 +955,7 @@ pub fn build(b: *std.Build) void {
                 "--clean",
                 kcov_include_arg,
                 kcov_strip_arg,
+                kcov_codecov_exclude_arg,
                 kcov_dir,
             });
             run_kcov.addArtifactArg(exe);
@@ -984,6 +994,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             versioned_loom_kcov_dir,
         });
         run_versioned_loom_kcov.addArtifactArg(versioned_loom_exe);
@@ -1029,6 +1040,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             vm_loom_kcov_dir,
         });
         run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
@@ -1047,6 +1059,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             vm_loom_kcov_dir,
         });
         run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
@@ -1090,6 +1103,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             ow_loom_kcov_dir,
         });
         run_ow_loom_kcov.addArtifactArg(ow_loom_exe);
@@ -1108,6 +1122,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             ow_loom_kcov_dir,
         });
         run_ow_loom_kcov.addArtifactArg(ow_loom_exe);

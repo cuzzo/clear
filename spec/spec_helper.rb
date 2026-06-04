@@ -72,6 +72,7 @@ if ENV["COVERAGE"] == "1"
     add_filter "/vendor/"
     add_filter "/examples/"
     add_filter "/benchmarks/"
+    add_filter "/gems/nil-kill/"
     # Track user-facing compiler tools under src/tools. Root-level tools/
     # is internal repo automation and is not tracked by track_files above.
     add_filter do |source_file|

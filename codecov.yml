@@ -1,8 +1,22 @@
 ignore:
+  - "gems/nil-kill/"
   - "tools/"
   - "zig/all-tests.zig"
   - "zig/all-fuzz.zig"
   - "zig/._clear_cov_*.zig"
+  - "all-tests.zig"
+  - "all-fuzz.zig"
+  - "._clear_cov_*.zig"
+  - "*-test.zig"
+  - "**/*-test.zig"
+  - "vopr-*.zig"
+  - "**/vopr-*.zig"
+  - "loom-*.zig"
+  - "**/loom-*.zig"
+  - "*-vopr.zig"
+  - "**/*-vopr.zig"
+  - "*-loom.zig"
+  - "**/*-loom.zig"
   - "zig/*-test.zig"
   - "zig/**/*-test.zig"
   - "zig/vopr-*.zig"
@@ -30,17 +44,10 @@ flags:
   ruby:
     paths:
       - src/
-      - spec/
-      - gems/
     carryforward: false
     joined: false
   zig:
     paths:
       - zig/
-    carryforward: false
-    joined: false
-  nil-kill:
-    paths:
-      - gems/nil-kill/
     carryforward: false
     joined: false

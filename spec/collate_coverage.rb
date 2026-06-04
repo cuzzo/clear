@@ -42,6 +42,7 @@ SimpleCov.configure do
   add_filter "/vendor/"
   add_filter "/examples/"
   add_filter "/benchmarks/"
+  add_filter "/gems/nil-kill/"
   add_filter do |source_file|
     source_file.filename.start_with?(File.join(SimpleCov.root, "tools/"))
   end

@@ -50,6 +50,16 @@ RSpec.describe "coverage gap tools" do
     expect(ZigCoverageSupport.sanitize_name("///")).to eq("run")
   end
 
+  it "excludes Zig test, VOPR, and Loom harness files from Codecov kcov reports" do
+    pattern = ZigCoverageSupport::KCOV_CODECOV_EXCLUDE_PATTERN
+
+    expect(pattern).to include("-test.zig")
+    expect(pattern).to include("-vopr.zig")
+    expect(pattern).to include("-loom.zig")
+    expect(pattern).to include("/vopr-")
+    expect(pattern).to include("/loom-")
+  end
+
   it "resolves Zig coverage output roots from either env override or suite name" do
     old_dir = ENV.delete("ZIG_COVERAGE_DIR")
     old_suite = ENV.delete("ZIG_COVERAGE_SUITE")
