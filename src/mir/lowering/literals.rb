@@ -289,7 +289,7 @@ module MIRLoweringLiterals
       result = MIR::Ident.new("__hm_wrapped")
     end
     items << MIR::BreakStmt.new("__hm_blk", result)
-    block = MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
+    block = MIR::BlockExpr.new("__hm_blk", items)
     block.result_type = Type.new(ti)
     block
   end

@@ -1231,7 +1231,7 @@ module MIRLoweringVariables
     ], false, false, MIR::CallableContract.no_ownership(3))
     assign = MIR::Set.new(field_get, value)
     with_ownership_consumption_for_value(assign, value, node.value, "MIR::Set", target_alloc: alloc_sym)
-    MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body([MIR::ExprStmt.new(cleanup_call, false), assign]))
+    MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), assign])
   end
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
