@@ -27,22 +27,6 @@ require "sorbet-runtime"
 module TestLowering
     extend T::Sig
 
-  # Per-test preamble emitted as InlineZig at the start of every
-  # synthesized MIR::TestDef body. Allocates a fresh DebugAllocator,
-  # EBR context, and Runtime so each Zig `test "..."` block runs in
-  # isolation.
-  TEST_PREAMBLE = T.let((<<~ZIG).chomp, String)
-    var da = std.heap.DebugAllocator(.{}){};
-        defer _ = da.deinit();
-        const allocator = da.allocator();
-        var global_ctx = EbrContext{};
-        defer global_ctx.deinit(allocator);
-        var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-        defer __rt_box.deinit();
-        __rt_box.wireAllocator();
-        const rt: *Runtime = &__rt_box; _ = &rt;
-  ZIG
-
   sig { params(node: AST::TestBlock).returns(T::Array[T.untyped]) }
   def lower_test_block(node)
     T.bind(self, MIRLowering) rescue nil
@@ -131,9 +115,10 @@ module TestLowering
     full_name = "#{env.ctx.test_name}: #{env.when_desc}: #{test_that.description}#{env.tag_suffix}"
 
     if test_that.pending
-      skip_iz = MIR::InlineZig.new("return error.SkipZigTest;", "pending_skip")
-      skip_iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-      return MIR::TestDef.new(full_name, [env.ctx.fresh_preamble, skip_iz])
+      return MIR::TestDef.new(full_name, [
+        env.ctx.fresh_preamble,
+        MIR::ReturnStmt.new(MIR::Ident.new("error.SkipZigTest")),
+      ])
     end
 
     # Scope @current_bindings to the synthesized test wrapper so
@@ -216,15 +201,11 @@ module TestLowering
       )
     end
 
-    # Build a fresh InlineZig preamble (allocator + Runtime + EBR
-    # context) for one Zig `test` block. Each call returns a new
-    # MIR::InlineZig instance because downstream passes mutate the
-    # stdlib_def hash.
-    sig { returns(MIR::InlineZig) }
+    # Build the allocator + Runtime + EBR context preamble for one Zig
+    # `test` block.
+    sig { returns(MIR::TestPreamble) }
     def fresh_preamble
-      iz = MIR::InlineZig.new(TEST_PREAMBLE, "test_preamble")
-      iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-      iz
+      MIR::TestPreamble.new(nil)
     end
 
     # Emit the BEFORE/AFTER ALL hooks in `bodies` as standalone Zig
@@ -328,29 +309,11 @@ module TestLowering
     node.each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
   end
 
-  sig { params(node: AST::AssertRaises).returns(MIR::InlineZig) }
+  sig { params(node: AST::AssertRaises).returns(MIR::AssertRaisesCheck) }
   def lower_assert_raises(node)
     T.bind(self, MIRLowering) rescue nil
     @rt_name = T.let(@rt_name, T.untyped)
-    rt_name = @rt_name
-    kind = node.kind
-    # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
-    expr_zig = emit_expr(lower(node.expression))
-    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
-    ar_code = [
-      "{",
-      "    if (#{expr_zig}) |_| {",
-      "        @panic(\"ASSERT_RAISES: expected #{kind} error but none raised\");",
-      "    } else |_| {",
-      "        if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {",
-      "            @panic(\"ASSERT_RAISES: expected #{kind} error, got different kind\");",
-      "        }",
-      "    }",
-      "}",
-    ].join("\n")
-    iz = MIR::InlineZig.new(ar_code, "assert_raises")
-    iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-    iz
+    MIR::AssertRaisesCheck.new(lower(node.expression), @rt_name.to_s, node.kind, node.error_name)
   end
 
   # Build the MIR replacement for a stubbed call site, or nil if `fn_name`

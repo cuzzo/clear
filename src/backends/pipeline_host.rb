@@ -4141,7 +4141,7 @@ class PipelineHost
     if caps.specs.empty?
       body << MIR::Suppress.new("raw_ctx")
     else
-      ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
+      ctx_cast = MIR::PointerCast.new(MIR::OptionalUnwrap.new(MIR::Ident.new("raw_ctx")), "*@This()")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
     end
 
@@ -4352,14 +4352,13 @@ class PipelineHost
   # `CONCURRENT(capacity: N)` overrides the default. Default rounds the
   # worker count to the next power of 2 (>= 4, <= 64) so the channel's
   # ring buffer satisfies its `cap & (cap-1) == 0` invariant.
-  sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::InlineZig) }
+  sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::Expr) }
   def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
     if (cap_node = conc_op.options&.[]("capacity"))
       cap_zig = @lowering.emit_expr(@lowering.lower(cap_node))
       MIR::InlineZig.new("@intCast(#{cap_zig})", "stream_conc_capacity_user")
     else
-      expr = "blk: { var c: usize = 4; while (c < #{n_workers_zig} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
-      MIR::InlineZig.new(expr, "stream_conc_capacity_default")
+      MIR::DefaultStreamCapacity.new(MIR::Ident.new(n_workers_zig))
     end
   end
 
@@ -4727,7 +4726,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       # The legacy `pipe_items` is a `[]const T`; @constCast strips the
       # const so the in-place helper can write through the slice.
-      MIR::InlineZig.new("@constCast(pipe_items)", "list_each_inplace_mut_items"),
+      MIR::ConstCast.new(MIR::Ident.new("pipe_items")),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
@@ -4784,7 +4783,7 @@ class PipelineHost
     if caps.specs.empty?
       body << MIR::Suppress.new("raw_ctx")
     else
-      ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
+      ctx_cast = MIR::PointerCast.new(MIR::OptionalUnwrap.new(MIR::Ident.new("raw_ctx")), "*@This()")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
     end
 

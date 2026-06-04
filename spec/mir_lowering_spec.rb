@@ -3185,7 +3185,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::AssertRaisesCheck)
       zig = emit(result)
       expect(zig).to include("ASSERT_RAISES")
       expect(zig).to include("matchesKind(.Runtime)")

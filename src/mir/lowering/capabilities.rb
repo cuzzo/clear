@@ -1091,28 +1091,33 @@ module MIRLoweringCapabilities
     when :return
       result << MIR::ReturnStmt.new(lower(T.must(clause.value)))
     when :raise
-      fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line})), "with_guard_fail_raise")
-      fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_raise_flow")
-      flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      result << MIR::ExprStmt.new(fail, false)
-      result << MIR::ExprStmt.new(flow, false)
-      result << MIR::ReturnStmt.new(nil)
+      result << MIR::ExprStmt.new(no_ownership_call("#{@rt_name}.setError", [
+        MIR::Ident.new(".Transient"),
+        no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.GuardFail")]),
+        MIR::Lit.new(zig_string_lit("WITH GUARD predicate failed")),
+        MIR::Lit.new(line),
+      ]), false)
+      result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :exit
       msg_zig = emit_expr(lower(T.must(clause.message)))
-      fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line})), "with_guard_fail_exit")
-      fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_exit_flow")
-      flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      result << MIR::ExprStmt.new(fail, false)
-      result << MIR::ExprStmt.new(flow, false)
-      result << MIR::ReturnStmt.new(nil)
+      result << MIR::ExprStmt.new(no_ownership_call("#{@rt_name}.setError", [
+        MIR::Ident.new(".Transient"),
+        no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.GuardFail")]),
+        MIR::Lit.new(msg_zig),
+        MIR::Lit.new(line),
+      ]), false)
+      result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :block
       result.concat(T.cast(lower_body(T.must(clause.body)), T::Array[MIR::Emittable]))
     else
       result
     end
     result
+  end
+
+  sig { params(callee: String, args: T::Array[T.untyped]).returns(MIR::Call) }
+  def no_ownership_call(callee, args)
+    MIR::Call.new(callee, args, false, false, MIR::CallableContract.no_ownership(args.length))
   end
 
   # Emit MIR for each PRE clause on a function definition. Each
@@ -1139,10 +1144,15 @@ module MIRLoweringCapabilities
       end
       msg_zig = zig_string_lit(msg_text)
 
-      fail_zig = %Q(#{@rt_name}.setError(.Input, @intFromEnum(ErrorName.PreconditionFail), #{msg_zig}, #{line});\nreturn error.CheatError;)
-      iz = MIR::InlineZig.new(fail_zig, "pre_fail")
-      iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-      MIR::IfStmt.new(MIR::UnaryOp.new("!", cond), [iz], nil)
+      MIR::IfStmt.new(MIR::UnaryOp.new("!", cond), [
+        MIR::ExprStmt.new(no_ownership_call("#{@rt_name}.setError", [
+          MIR::Ident.new(".Input"),
+          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.PreconditionFail")]),
+          MIR::Lit.new(msg_zig),
+          MIR::Lit.new(line),
+        ]), false),
+        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+      ], nil)
     end
   end
 
@@ -1200,10 +1210,47 @@ module MIRLoweringCapabilities
     clause = node.lock_error_clause
     return nil unless clause && clause.matched_types.include?(:GuardFail)
 
-    action = emit_error_action_zig(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
-    iz = MIR::InlineZig.new(action, "with_guard_fail")
-    iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
-    [iz]
+    error_action_stmts(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
+  end
+
+  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(T::Array[T.untyped]) }
+  def error_action_stmts(clause, with_label, with_node, error_type, default_msg)
+    T.bind(self, MIRLowering) rescue nil
+    @rt_name = T.let(@rt_name, T.untyped)
+    line = with_node.token&.line.to_s
+    err_name = error_type.to_s
+    kind = AST.kind_of_type(error_type) || :Transient
+    case clause.action
+    when :raise
+      [
+        MIR::ExprStmt.new(no_ownership_call("#{@rt_name}.setError", [
+          MIR::Ident.new(".#{kind}"),
+          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.#{err_name}")]),
+          MIR::Lit.new(zig_string_lit(default_msg)),
+          MIR::Lit.new(line),
+        ]), false),
+        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+      ]
+    when :exit
+      msg_zig = emit_expr(lower(T.must(clause.message)))
+      [
+        MIR::ExprStmt.new(no_ownership_call("#{@rt_name}.setError", [
+          MIR::Ident.new(".#{kind}"),
+          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.#{err_name}")]),
+          MIR::Lit.new(msg_zig),
+          MIR::Lit.new(line),
+        ]), false),
+        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+      ]
+    when :pass
+      [MIR::BreakStmt.new(T.must(with_label), nil)]
+    when :return
+      [MIR::ReturnStmt.new(lower(T.must(clause.value)))]
+    when :block
+      T.must(lower_body(T.must(clause.body))) + [MIR::BreakStmt.new(T.must(with_label), nil)]
+    else
+      raise "Internal: unknown lock action #{clause.action}"
+    end
   end
 
   sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(MutableSnapshotPlan) }

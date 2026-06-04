@@ -980,6 +980,17 @@ module MIR
     def child_exprs = compact_child_exprs([cond])
   end
 
+  AssertRaisesCheck = Struct.new(:expr, :rt_name, :kind, :error_name) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  TestPreamble = Struct.new(:unused) do
+    include Stmt
+  end
+
   # In-place sort.
   # Borrows `items_expr`; mutates the underlying slice. The comparator is
   # encoded as two key extraction expressions (key_a, key_b) — both are MIR
@@ -2353,6 +2364,15 @@ module MIR
     end
   end
 
+  # Statement scoped to PolymorphicMutateFlow callback emission.
+  # It writes the private __flow result and returns from the callback.
+  PolymorphicFlowSignal = Struct.new(:kind, :ret) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([ret])
+  end
+
   # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
   # F2 -> {...} END`. Lowers to a comptime `if (@hasField/@hasDecl)`
   # chain, one branch per family, each branch containing the matching
@@ -3123,6 +3143,33 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Pointer cast with Zig's required alignment assertion.
+  # Zig: @as(target_type, @ptrCast(@alignCast(expr)))
+  PointerCast = Struct.new(:expr, :target_type) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Const-removing cast for APIs that legitimately mutate through a slice.
+  # Zig: @constCast(expr)
+  ConstCast = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Default bounded-channel capacity for streaming CONCURRENT.
+  # Rounds worker_count * 4 up to a power of two in 4..64.
+  DefaultStreamCapacity = Struct.new(:worker_count) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([worker_count])
   end
 
   # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /

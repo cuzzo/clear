@@ -96,7 +96,7 @@ class MIRChecker
   )
 
   LINEAR_STATEMENT_NODE_TYPES = T.let([
-    MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
+    MIR::AllocMark, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
     MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
     MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
     MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
@@ -107,12 +107,13 @@ class MIRChecker
     MIR::MutualThunkTrampoline, MIR::Noop, MIR::OwnedBorrow,
     MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
     MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
-    MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
+    MIR::PolymorphicFlowSignal, MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
     MIR::RawBc, MIR::ReassignMark, MIR::ReassignWithCleanup,
     MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
     MIR::ShardedMapPut, MIR::SnapshotMultiTxn, MIR::SnapshotRead,
     MIR::SnapshotTransaction, MIR::Sort, MIR::StreamSpawn, MIR::StreamYield,
     MIR::StructDef, MIR::Suppress, MIR::SwitchStmt, MIR::TestDef,
+    MIR::TestPreamble,
     MIR::ThunkTrampoline, MIR::TransferMark, MIR::TypeAlias,
     MIR::UnionMatchStmt, MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
   ].freeze, T::Array[T::Class[T.anything]])
@@ -594,6 +595,8 @@ class MIRChecker
       else
         check_linear_stmt!(stmt.body, state)
       end
+    when MIR::AssertRaisesCheck
+      check_linear_expr_uses!(stmt.expr, state)
     when MIR::StreamSpawn
       check_linear_stmts!(stmt.body, LinearOwnershipState.new)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
@@ -602,6 +605,8 @@ class MIRChecker
     when MIR::PolymorphicMutate
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, "polymorphic-mutate")
+    when MIR::PolymorphicFlowSignal
+      check_linear_expr_uses!(stmt.ret, state)
     when MIR::PolymorphicMutateFlow
       check_linear_expr_uses!(stmt.guard_cond, state)
       states = T.let([], T::Array[LinearOwnershipState])
@@ -630,7 +635,7 @@ class MIRChecker
     when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
          MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
          MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,
-         MIR::UnionTypeDef
+         MIR::TestPreamble, MIR::UnionTypeDef
       nil
     end
     nil

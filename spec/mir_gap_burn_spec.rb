@@ -712,7 +712,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.lower(AST::OrPass.new(tok))).to be_a(MIR::Ident)
     expect(low.lower(AST::OrPrune.new(tok))).to be_a(MIR::Ident)
     expect(low.lower(AST::OrExit.new(tok, :Runtime, nil, nil))).to be_a(MIR::ScopeBlock)
-    expect(low.lower(AST::AssertRaises.new(tok, :Runtime, nil, lit(1, type: :Int64)))).to be_a(MIR::InlineZig)
+    expect(low.lower(AST::AssertRaises.new(tok, :Runtime, nil, lit(1, type: :Int64)))).to be_a(MIR::AssertRaisesCheck)
     expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
     expect(low.send(:ast_void_type?, Type.new(:Int64))).to eq(false)
     expect(low.send(:zig_format_for_type, Type.new(:String))).to eq("{s}")
@@ -733,7 +733,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     assert_named = AST::AssertRaises.new(tok, :Runtime, :NotFound, lit(1, type: :Int64))
     assert_named.full_type = Type.new(:Void)
-    expect(low.lower(assert_named).code).to include("matchesName(@intFromEnum(ErrorName.NotFound))")
+    expect(MIREmitter.new.emit(low.lower(assert_named))).to include("matchesName(@intFromEnum(ErrorName.NotFound))")
 
     refs = Set.new
     low.send(:collect_identifier_refs,
@@ -1422,7 +1422,11 @@ RSpec.describe "MIR gap-burn characterization" do
     pre_fn = fn([])
     pre_fn.pre_clauses = [{ expr: id("ok", type: :Bool), source: "" }]
     pre_lowered = low.send(:lower_pre_clauses, pre_fn)
-    expect(pre_lowered.first.then_body.first.code).to include("precondition failed")
+    pre_body = pre_lowered.first.then_body
+    expect(pre_body.first.expr).to be_a(MIR::Call)
+    expect(pre_body.first.expr.callee).to eq("rt.setError")
+    expect(pre_body.first.expr.args[2].value).to include("precondition failed")
+    expect(pre_body.last.value.name).to eq("error.CheatError")
 
     unknown_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
     expect { low.send(:emit_lock_action_zig, unknown_clause, "__with", with_node) }.to raise_error(/unknown lock action/)

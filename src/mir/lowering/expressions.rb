@@ -1619,7 +1619,7 @@ module MIRLoweringExpressions
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
-  sig { params(node: AST::Assert).returns(T.any(MIR::AssertStmt, MIR::InlineBc, MIR::InlineZig)) }
+  sig { params(node: AST::Assert).returns(T.any(MIR::AssertStmt, MIR::InlineBc, MIR::Call)) }
   def lower_assert(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1667,7 +1667,7 @@ module MIRLoweringExpressions
   # diagnostic output (field-by-field for structs, length+index for
   # slices, in-context highlight for strings) is rendered by Zig's
   # stdlib.
-  sig { params(node: AST::Assert).returns(T.nilable(MIR::InlineZig)) }
+  sig { params(node: AST::Assert).returns(T.nilable(MIR::Call)) }
   def try_lower_equality_assert(node)
     T.bind(self, MIRLowering) rescue nil
     cond = node.condition
@@ -1698,10 +1698,21 @@ module MIRLoweringExpressions
     args << left_zig
     args << right_zig
 
-    code = "try std.testing.#{helper}(#{args.join(', ')});"
-    iz = MIR::InlineZig.new(code, "assert_eq_#{helper}")
-    iz.stdlib_def = FunctionSignature.intrinsic_contract(borrows: :all, can_fail: true)
-    iz
+    args_mir = args.map { |arg| MIR::Lit.new(arg) }
+    params = args_mir.each_index.map do |idx|
+      AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
+    end
+    sig = FunctionSignature.new(params: params, return_type: Type.new(:Void), intrinsic: true)
+    sig.can_fail = true
+    sig.emit = IntrinsicEmit.new(borrows: :all)
+    contract = MIR::OwnershipContract.new(covers_consuming_params: true)
+    MIR::Call.new(
+      "std.testing.#{helper}",
+      args_mir,
+      true,
+      false,
+      MIR::CallableContract.new(sig, contract, args_mir.length),
+    )
   end
 
   # Picks the most specific Zig stdlib equality helper for the given

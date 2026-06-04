@@ -47,6 +47,7 @@ RSpec.describe "polymorphic-flow ON GuardFail action variants" do
     expect(zig).to include("ErrorName.GuardFail")
     expect(zig).to include("WITH GUARD predicate failed")
     expect(zig).to include(".kind = .raise_no_commit")
+    expect(zig).not_to include(".kind = .ret_no_commit, .ret = {}")
   end
 
   it "lowers ON GuardFail EXIT with a custom message" do
@@ -66,6 +67,7 @@ RSpec.describe "polymorphic-flow ON GuardFail action variants" do
     expect(zig).to include("ErrorName.GuardFail")
     expect(zig).to include("custom guard fail")
     expect(zig).to include(".kind = .raise_no_commit")
+    expect(zig).not_to include(".kind = .ret_no_commit, .ret = {}")
   end
 
   it "lowers ON GuardFail -> { ... } block as the fail-body statements" do

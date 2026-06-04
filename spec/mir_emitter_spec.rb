@@ -36,6 +36,22 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("-x")
   end
 
+  it "emits pointer, const, and default stream capacity helper expressions" do
+    ptr = MIR::PointerCast.new(MIR::OptionalUnwrap.new(MIR::Ident.new("raw_ctx")), "*@This()")
+    expect(e.emit(ptr)).to eq("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))")
+    expect(e.emit(MIR::ConstCast.new(MIR::Ident.new("pipe_items")))).to eq("@constCast(pipe_items)")
+
+    cap = e.emit(MIR::DefaultStreamCapacity.new(MIR::Ident.new("n_workers")))
+    expect(cap).to include("var c: usize = 4")
+    expect(cap).to include("while (c < n_workers * 4)")
+    expect(cap).to include("break :blk @min(c, 64);")
+  end
+
+  it "emits polymorphic flow signals inside flow bodies" do
+    signal = MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
+    expect(e.send(:emit_body_flow, [signal], :ret_no_commit)).to eq("__flow.* = .{ .kind = .raise_no_commit };\nreturn;")
+  end
+
   # =========================================================================
   # Variable declarations
   # =========================================================================

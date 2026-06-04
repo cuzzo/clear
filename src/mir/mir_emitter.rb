@@ -76,6 +76,8 @@ class MIREmitter
     when MIR::ContinueStmt     then "continue;"
     when MIR::Panic            then "@panic(#{node.message.inspect});"
     when MIR::AssertStmt       then emit_assert_stmt(node)
+    when MIR::AssertRaisesCheck then emit_assert_raises_check(node)
+    when MIR::TestPreamble     then emit_test_preamble
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
@@ -161,6 +163,9 @@ class MIREmitter
     when MIR::ListLength       then "#{paren_if_try(T.must(emit(node.expr)))}.len"
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
+    when MIR::PointerCast      then emit_pointer_cast(node)
+    when MIR::ConstCast        then "@constCast(#{emit(node.expr)})"
+    when MIR::DefaultStreamCapacity then emit_default_stream_capacity(node)
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
     when MIR::AllocatorRef     then emit_allocator_ref(node)
     when MIR::Undef            then node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
@@ -394,9 +399,18 @@ class MIREmitter
       else
         "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n}"
       end
+    when MIR::PolymorphicFlowSignal
+      emit_polymorphic_flow_signal(stmt)
     else
       emit(stmt)
     end
+  end
+
+  sig { params(node: MIR::PolymorphicFlowSignal).returns(String) }
+  def emit_polymorphic_flow_signal(node)
+    fields = [".kind = .#{node.kind}"]
+    fields << ".ret = #{emit(node.ret)}" if node.ret
+    "__flow.* = .{ #{fields.join(', ')} };\nreturn;"
   end
 
   sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
@@ -405,6 +419,8 @@ class MIREmitter
     last = stmts.last
     case last
     when MIR::ReturnStmt
+      true
+    when MIR::PolymorphicFlowSignal
       true
     when MIR::ScopeBlock
       flow_body_terminates?(last.body || [])
@@ -1281,6 +1297,37 @@ class MIREmitter
     "CheatLib.assert(#{emit(node.cond)}, #{node.message});"
   end
 
+  sig { params(node: MIR::AssertRaisesCheck).returns(String) }
+  def emit_assert_raises_check(node)
+    error_check = node.error_name ? " and !#{node.rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
+    <<~ZIG.rstrip
+      {
+          if (#{emit(node.expr)}) |_| {
+              @panic("ASSERT_RAISES: expected #{node.kind} error but none raised");
+          } else |_| {
+              if (!#{node.rt_name}.__error.matchesKind(.#{node.kind})#{error_check}) {
+                  @panic("ASSERT_RAISES: expected #{node.kind} error, got different kind");
+              }
+          }
+      }
+    ZIG
+  end
+
+  sig { returns(String) }
+  def emit_test_preamble
+    <<~ZIG.chomp
+      var da = std.heap.DebugAllocator(.{}){};
+          defer _ = da.deinit();
+          const allocator = da.allocator();
+          var global_ctx = EbrContext{};
+          defer global_ctx.deinit(allocator);
+          var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+          defer __rt_box.deinit();
+          __rt_box.wireAllocator();
+          const rt: *Runtime = &__rt_box; _ = &rt;
+    ZIG
+  end
+
   # Parenthesize try-expressions to prevent Zig precedence issues where
   # `try X.field` parses as `try (X.field)` instead of `(try X).field`.
   sig { params(expr: String).returns(String) }
@@ -1301,6 +1348,17 @@ class MIREmitter
   sig { params(node: MIR::UnaryOp).returns(String) }
   def emit_unary_op(node)
     "#{node.op}#{emit(node.operand)}"
+  end
+
+  sig { params(node: MIR::PointerCast).returns(String) }
+  def emit_pointer_cast(node)
+    "@as(#{node.target_type}, @ptrCast(@alignCast(#{emit(node.expr)})))"
+  end
+
+  sig { params(node: MIR::DefaultStreamCapacity).returns(String) }
+  def emit_default_stream_capacity(node)
+    workers = emit(node.worker_count)
+    "blk: { var c: usize = 4; while (c < #{workers} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
   end
 
   sig { params(node: MIR::StructInit).returns(String) }
