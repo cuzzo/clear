@@ -49,7 +49,7 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
     var spawned: usize = 0;
     errdefer {
         global_shutdown.store(true, .release);
-        fp.global_registry.notifyAll();
+        fp.global_registry.forceNotifyAll();
         for (threads[0..spawned]) |*t| t.join();
         fp.global_registry.deinit(alloc);
         fp.global_registry = .{};
@@ -70,7 +70,7 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
-    fp.global_registry.notifyAll();
+    fp.global_registry.forceNotifyAll();
     for (threads[0..n]) |*t| t.join();
     fp.global_registry.deinit(alloc);
     fp.global_registry = .{};
@@ -781,8 +781,8 @@ test "Promise(i64): repeated concurrent worker batches survive reuse" {
     rt.wireAllocator();
 
     const FIBERS = 4;
-    const ITERS = comptime if (build_options.coverage) 1 else if (build_options.tsan) 2 else 8;
-    const STEPS = if (build_options.tsan) 16 else 128;
+    const ITERS = comptime coverageIters(8);
+    const STEPS = 128;
 
     const Ctx = struct {
         inner: *CheatLib.Promise(i64).Inner,

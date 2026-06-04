@@ -1195,13 +1195,10 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     if (!build_options.tsan and !build_options.coverage) return error.SkipZigTest;
 
     const allocator = std.testing.allocator;
-    // Under TSan, libtsan's stackdepot and scheduler instrumentation do not
-    // tolerate the full 16 subscribers x 4096 messages unit-test workload,
-    // especially when CI burns several shard runs in parallel. Keep the
-    // multi-scheduler pubsub shape here, but leave high-pressure wait-loop
-    // coverage to stream-hammer-test.zig.
-    const subscriber_count = if (build_options.coverage) 3 else if (build_options.tsan) 4 else 16;
-    const message_count = if (build_options.coverage) 64 else if (build_options.tsan) 256 else 4096;
+    // Keep the pre-existing TSan stress shape. This test already has a
+    // dedicated TSan workload; do not shrink it further for stability.
+    const subscriber_count = if (build_options.coverage) 3 else if (build_options.tsan) 8 else 16;
+    const message_count = if (build_options.coverage) 64 else if (build_options.tsan) 1024 else 4096;
     // kcov ptraces every scheduler OS thread. This hammer's real cross-thread
     // coverage belongs to the TSan lane; under kcov keep the same spawnBest /
     // SplitStream surface on the active scheduler so coverage stays bounded.

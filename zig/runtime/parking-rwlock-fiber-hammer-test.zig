@@ -339,7 +339,7 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
         fn body(rt: *Runtime) !void {
             const NW = if (build_options.coverage) 1 else 4;
             const NR = if (build_options.coverage) 1 else 8;
-            const ITERS: usize = if (build_options.coverage) 1 else if (build_options.tsan) 100 else 500;
+            const ITERS: usize = if (build_options.coverage) 1 else 500;
 
             var shared = Shared{};
             const sa = rt.getSched().allocator;
