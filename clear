@@ -275,16 +275,22 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   cleanup_paths << tmp_zig if coverage_module_mode
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
-  # and check if a matching .zig file exists in the source directory.
+  # and check for either a sibling module.zig or packages/module/src/lib.zig.
   extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
-  ffi_modules = extern_modules.select { |m|
-    # Skip standard library modules (std.json, std.fs, etc.)
-    !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
-  }
+  ffi_modules = extern_modules.filter_map do |m|
+    next if m.start_with?('std.')
+
+    sibling = File.join(source_dir, "#{m}.zig")
+    src_mod = if File.exist?(sibling)
+                sibling
+              else
+                ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
+              end
+    src_mod ? [m, src_mod] : nil
+  end
 
   # Copy FFI modules to build dir for compilation
-  ffi_modules.each do |m|
-    src_mod = File.join(source_dir, "#{m}.zig")
+  ffi_modules.each do |m, src_mod|
     dst_mod = File.join(build_dir, "#{m}.zig")
     preexisting = File.exist?(dst_mod)
     if coverage_module_mode && preexisting && File.read(dst_mod) != File.read(src_mod)
@@ -892,11 +898,18 @@ when 'test'
     end
     source_dir = File.dirname(File.expand_path(source))
     extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
-    ffi_modules = extern_modules.select { |m|
-      !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
-    }
-    ffi_modules.each do |m|
-      src_mod = File.join(source_dir, "#{m}.zig")
+    ffi_modules = extern_modules.filter_map do |m|
+      next if m.start_with?('std.')
+
+      sibling = File.join(source_dir, "#{m}.zig")
+      src_mod = if File.exist?(sibling)
+                  sibling
+                else
+                  ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
+                end
+      src_mod ? [m, src_mod] : nil
+    end
+    ffi_modules.each do |m, src_mod|
       dst_mod = File.join(build_dir, "#{m}.zig")
       preexisting = File.exist?(dst_mod)
       if coverage_mode && preexisting && File.read(dst_mod) != File.read(src_mod)

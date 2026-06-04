@@ -138,6 +138,21 @@ module ClearBuildSupport
     nil
   end
 
+  sig { params(pkg_name: String, start_dir: String).returns(T.nilable(String)) }
+  def self.find_zig_package_source(pkg_name, start_dir:)
+    dir = File.expand_path(start_dir)
+    loop do
+      candidate = File.join(dir, "packages", pkg_name, "src", "lib.zig")
+      return candidate if File.exist?(candidate)
+
+      parent = File.dirname(dir)
+      break if parent == dir
+
+      dir = parent
+    end
+    nil
+  end
+
   sig { params(raw: String, caller_dir: String).returns(String) }
   def self.resolve_clear_require(raw, caller_dir:)
     if raw.start_with?("pkg:")

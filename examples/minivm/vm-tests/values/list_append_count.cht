@@ -1,5 +1,5 @@
 FN main() RETURNS Int64 ->
-    nums: Int64[] = [1_i64];
+    MUTABLE nums: Int64[] = [1_i64];
     nums.append(2_i64);
     RETURN nums.length();
 END

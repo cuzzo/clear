@@ -3407,9 +3407,10 @@ class MIRLowering
                                context: "pipeline allocation", known_allocating: false,
                                accept_owned_call: false, include_cleanup: false)
     owns_call_result = accept_owned_call && value.is_a?(MIR::Call) && value.owned_return?
-    return nil unless known_allocating || mir_allocates?(value) || owns_call_result
+    effect = value.respond_to?(:ownership_effect) ? value.ownership_effect : MIR::OwnershipEffect.none
+    return nil unless known_allocating || mir_allocates?(value) || owns_call_result || effect.produces_owned
 
-    alloc = mir_owned_alloc(value) || fallback_alloc
+    alloc = effect.alloc || mir_owned_alloc(value) || fallback_alloc
     stamp_allocating_result_target!(value, name, alloc: alloc)
     mark_type = type_info || mir_alloc_mark_type_info(value, ast_node, context: context)
     mark = MIR::AllocMark.new(name, alloc, mark_type, MIR::Placement.alloc_scope(alloc))

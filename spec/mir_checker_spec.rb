@@ -896,6 +896,21 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("ALLOC_CLEANUP_MISMATCH") && e.include?("data") }).to be true
     end
 
+    it "rejects ReassignWithCleanup when its allocator disagrees with the target AllocMark" do
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
+      body = [
+        alloc_mark("data", :frame),
+        MIR::ReassignWithCleanup.new("data", MIR::Lit.new("\"next\""), "[]const u8", :heap),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("reassign_alloc_mismatch", body))
+      expect(errors.any? { |e|
+        e.include?("ALLOC_CLEANUP_MISMATCH") &&
+          e.include?("ReassignWithCleanup") &&
+          e.include?("data")
+      }).to be true
+    end
+
     it "passes for matching frame alloc and frame cleanup" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
       body = [
@@ -1432,6 +1447,13 @@ RSpec.describe MIRChecker do
       guarded_left.released.add("x")
       checker.send(:normalize_guarded_conditional_releases!, [guarded_left, guarded_right])
       expect(guarded_left.maybe_released).to include("x")
+
+      nested_maybe = MIRChecker::LinearOwnershipState.new
+      no_release = MIRChecker::LinearOwnershipState.new
+      [nested_maybe, no_release].each { |state| state.guarded_finalizers.add("x") }
+      nested_maybe.maybe_released.add("x")
+      checker.send(:normalize_guarded_conditional_releases!, [nested_maybe, no_release])
+      expect(no_release.maybe_released).to include("x")
 
       expected = MIRChecker::LinearOwnershipState.new
       actual = MIRChecker::LinearOwnershipState.new

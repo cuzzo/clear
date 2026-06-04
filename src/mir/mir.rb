@@ -3311,10 +3311,11 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
+      return OwnershipEffect.owned(alloc: sink_alloc) if sink_alloc
+
       inner_effect = inner.respond_to?(:ownership_effect) ? inner.ownership_effect : OwnershipEffect.none
       return inner_effect if inner_effect.produces_owned
 
-      return OwnershipEffect.owned(alloc: sink_alloc) if sink_alloc
       OwnershipEffect.none
     end
   end

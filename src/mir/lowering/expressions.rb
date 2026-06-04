@@ -280,6 +280,8 @@ module MIRLoweringExpressions
     # The $v registration is handled by the pipeline host at the binding point.
     return lower(node.left) if node.op == :BIND_VAR
 
+    return lower_lazy_boolean_op(node) if node.op == :AND || node.op == :OR
+
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
       left = hoist_alloc(lower(node.left), node.left)
@@ -413,6 +415,17 @@ module MIRLoweringExpressions
     # Standard operators
     op_str = ZigTypeMapper::ZIG_OPS[node.op]
     raise "MIRLowering: unknown binary op #{node.op}" unless op_str
+    MIR::BinOp.new(op_str, left, right)
+  end
+
+  sig { params(node: AST::BinaryOp).returns(MIR::BinOp) }
+  def lower_lazy_boolean_op(node)
+    T.bind(self, MIRLowering) rescue nil
+    op_str = ZigTypeMapper::ZIG_OPS[node.op]
+    raise "MIRLowering: unknown boolean op #{node.op}" unless op_str
+
+    left = lower(node.left)
+    right = lower_scoped { lower(node.right) }
     MIR::BinOp.new(op_str, left, right)
   end
 

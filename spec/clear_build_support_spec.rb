@@ -135,6 +135,10 @@ RSpec.describe ClearBuildSupport do
         File.join(dir, "app", "packages", "math", "src", "lib.cht"),
         "PUB FN add(a: Int64, b: Int64) RETURNS Int64 -> RETURN a + b; END\n"
       )
+      zig_package = write(
+        File.join(dir, "app", "packages", "http", "src", "lib.zig"),
+        "pub fn ok() bool { return true; }\n"
+      )
       main = write(
         File.join(src_dir, "main.cht"),
         "REQUIRE \"helper.cht\";\nREQUIRE \"pkg:math\";\nFN main() RETURNS Int64 -> RETURN value(); END\n"
@@ -142,6 +146,8 @@ RSpec.describe ClearBuildSupport do
 
       expect(described_class.find_package_source("math", start_dir: src_dir)).to eq(package)
       expect(described_class.find_package_source("missing", start_dir: src_dir)).to be_nil
+      expect(described_class.find_zig_package_source("http", start_dir: src_dir)).to eq(zig_package)
+      expect(described_class.find_zig_package_source("missing", start_dir: src_dir)).to be_nil
       expect(described_class.resolve_clear_require("helper.cht", caller_dir: src_dir)).to eq(helper)
       expect(described_class.resolve_clear_require("pkg:math", caller_dir: src_dir)).to eq(package)
       expect {

@@ -54,7 +54,7 @@ END
 
 FN main() RETURNS Void ->
   # Start the canned test server on port 19876
-  startTestServer(19_876);
+  startTestServer(19_876_i64);
 
   # Give the server thread a moment to bind
   # (cooperative scheduler: this is a no-op yield)

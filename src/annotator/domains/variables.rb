@@ -309,6 +309,7 @@ module Annotator
           node.mode = :assign
 
           verify_unrestricted!(node)
+          node.symbol = scope.entry_for_write(node.name)
           validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
           stamp_type!(node, scope.resolve_type(node.name))
 

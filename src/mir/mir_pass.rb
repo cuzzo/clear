@@ -319,7 +319,6 @@ class MIRPass
     return false if ti&.any_rc? || ti&.any_sync?
 
     if node.is_a?(AST::Identifier)
-      return false unless fn.params.any? { |param| param.name.to_s == node.name.to_s }
       return false if fn.params.any? { |param| param.name.to_s == node.name.to_s && param.takes }
       return !!(ti&.string? || ti&.recursive_cleanup_shape?(@schema_lookup))
     end
@@ -661,7 +660,7 @@ class MIRPass
   def stamp_reassign_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
-    entry = bindings[stmt.name.to_s]
+    entry = cleanup_entry_for_binding_node(stmt, bindings)
     return unless entry && entry.kind != :resource
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
@@ -672,6 +671,17 @@ class MIRPass
     ti = stmt.full_type!
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
+  end
+
+  sig { params(node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(CleanupEntry)) }
+  def cleanup_entry_for_binding_node(node, bindings)
+    symbol = node.respond_to?(:symbol) ? node.symbol : nil
+    decl = symbol&.reg
+    if decl && decl.respond_to?(:mir_binding_entry)
+      entry = decl.mir_binding_entry
+      return entry if entry
+    end
+    bindings[node.name.to_s] if node.respond_to?(:name)
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.

@@ -884,7 +884,7 @@ module MIRHoistLowering
     result_children = T.let(expr.ownership_source_exprs, T::Array[T.untyped])
     owned_sources = T.let(expr.owned_position_source_exprs.to_set, T::Set[MIR::Emittable])
     result_children.each do |child|
-      if owned_position && owned_sources.include?(child)
+      if (owned_position || expr.is_a?(MIR::TryExpr)) && owned_sources.include?(child)
         prefix.concat(normalize_allocating_result_expr!(
           child,
           transfer_on_success: transfer_on_success,
@@ -973,7 +973,7 @@ module MIRHoistLowering
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def normalized_alloc_wrapper_alias?(expr)
     case expr
-    when MIR::TryExpr, MIR::Cast
+    when MIR::Cast
       expr.expr.is_a?(MIR::Ident)
     else
       false

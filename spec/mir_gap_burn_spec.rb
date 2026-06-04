@@ -547,6 +547,37 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(EscapeAnalysis.send(:call_result_is_heap?, foreign, {}, nil)).to eq(true)
   end
 
+  it "finalizes rt for heap-carrying string payload alias returns" do
+    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
+    alias_fn = fn([AST::ReturnNode.new(tok, id("payload", type: Type.new(:String)))], return_type: Type.new(:String))
+    alias_fn.heap_carry_return = true
+
+    expect(pass.send(:return_path_needs_allocator?, alias_fn)).to eq(true)
+
+    taken = param("owned", type: Type.new(:String), takes: true)
+    transfer_fn = fn([AST::ReturnNode.new(tok, id("owned", type: Type.new(:String)))], params: [taken], return_type: Type.new(:String))
+    transfer_fn.heap_carry_return = true
+
+    expect(pass.send(:return_path_needs_allocator?, transfer_fn)).to eq(false)
+  end
+
+  it "treats heap-carry return signatures as owned despite return lifetime metadata" do
+    sig = FunctionSignature.new(
+      params: [param("v", type: Type.new(:Value))],
+      return_type: Type.new(:String),
+      return_lifetime: ["v"],
+    )
+    sig.heap_carry_return = true
+    sig.heap_carry_return_vars = Set["s"]
+
+    low = MIRLowering.new(fn_sigs: { "getStr" => sig })
+    call = AST::FuncCall.new(tok, "getStr", [id("v", type: Type.new(:Value))])
+    call.full_type = Type.new(:String)
+    call.matched_signature = sig
+
+    expect(low.send(:call_owned_return?, call)).to eq(true)
+  end
+
   it "exercises lowering placement and sink plans directly" do
     low = lowering
     string_ast = lit("s", type: :String)
@@ -1173,6 +1204,15 @@ RSpec.describe "MIR gap-burn characterization" do
     owned_string.result_type = Type.new(:String)
     expect(low.send(:owned_call_result_requires_cleanup?, owned_string)).to eq(true)
 
+    fallible_owned = MIR::Call.new("fallibleString", [], false, true)
+    fallible_owned.result_type = Type.new(:String)
+    try_owned = MIR::TryExpr.new(fallible_owned)
+    prefix, ident = low.send(:normalize_allocating_used_expr, try_owned)
+    try_let = prefix.grep(MIR::Let).find { |let| let.name == ident.name }
+    expect(try_let.init).to be_a(MIR::TryExpr)
+    expect(try_let.init.expr).to equal(fallible_owned)
+    expect(prefix.grep(MIR::Let).none? { |let| let.init.equal?(fallible_owned) }).to eq(true)
+
     contract_sig = FunctionSignature.new(params: [], return_type: Type.new(:String))
     contract = MIR::CallableContract.new(contract_sig, MIR::OwnershipContract.empty, 0)
     contract_call = MIR::Call.new("contract_make", [], false, false, contract)
@@ -1275,7 +1315,8 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(chain_prefix).not_to be_empty
     expect(if_chain.branches.first[:cond]).to be_a(MIR::Ident)
 
-    expect(low.send(:normalized_alloc_wrapper_alias?, MIR::TryExpr.new(MIR::Ident.new("aliased")))).to eq(true)
+    expect(low.send(:normalized_alloc_wrapper_alias?, MIR::Cast.new(MIR::Ident.new("aliased"), "[]const u8", :as))).to eq(true)
+    expect(low.send(:normalized_alloc_wrapper_alias?, MIR::TryExpr.new(MIR::Ident.new("aliased")))).to eq(false)
 
     inline_sig = FunctionSignature.new(params: [], return_type: Type.new(:"String[]", collection: :list))
     inline = MIR::InlineZig.new("makeList()", "test", MIR::OwnershipContract.empty, inline_sig)
@@ -2383,6 +2424,14 @@ RSpec.describe "MIR gap-burn characterization" do
     trampoline.full_type = Type.new(:Int64)
     trampoline_out = extern_low.send(:build_extern_trampoline_call, trampoline)
     expect(trampoline_out.code).to include("a0: i64")
+
+    module_sig = FunctionSignature.new(params: [param("port", type: :Int64)], return_type: Type.new(:Void), module_alias: "http")
+    extern_low.instance_variable_set(:@fn_sigs, { "startTestServer" => module_sig })
+    module_call = AST::FuncCall.new(tok, "startTestServer", [lit(19_876, type: :Int64)])
+    module_call.full_type = Type.new(:Void)
+    module_call.module_alias = "http"
+    module_out = extern_low.send(:build_extern_trampoline_call, module_call)
+    expect(module_out.code).to include("a0: i64")
 
     lambda_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
     lambda_node = AST::LambdaLit.new(tok, [], ["raw_capture"], lit(1, type: :Int64), nil, nil)

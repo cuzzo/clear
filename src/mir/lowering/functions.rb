@@ -1438,7 +1438,9 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
-    return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
+    if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
+      return false unless sig.heap_carry_return == true || sig.heap_return_alloc?
+    end
     node_ti = if node.is_a?(AST::FunctionDef) && node.return_type
       Type.new(node.return_type)
     else
@@ -1922,21 +1924,23 @@ module MIRLoweringFunctions
     arg_codes = args.map { |a| emit_expr(a) }
     arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
 
-    # Use declared param types for struct fields to avoid comptime_int (e.g. @TypeOf(19876)).
-    # Skip extern/module functions: their CLEAR types (e.g. String -> []const u8) may differ
-    # from the actual Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
+    # Use declared scalar param types for struct fields to avoid comptime_int
+    # (e.g. @TypeOf(19876)). For module externs, keep non-scalars inferred:
+    # their CLEAR types (e.g. String -> []const u8) may differ from the actual
+    # Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
     sig = fn_sig_for(node.name)
     sig_params = sig ? sig.params.reject { |p| p.comptime } : []
-    arg_field_types = if sig&.module_alias
-      nil
-    else
-      types = sig_params.each_with_index.map do |p, i|
-        next nil unless i < runtime_ast_args.length
-        pt = p.type
-        pt.is_a?(Type) ? pt.zig_type(is_param: true) : (Type::ZIG_TYPE_MAP[pt] || nil)
+    types = sig_params.each_with_index.map do |p, i|
+      next nil unless i < runtime_ast_args.length
+      pt = p.type
+      type_obj = pt.is_a?(Type) ? pt : Type.new(pt)
+      if sig&.module_alias
+        resolved = type_obj.resolved
+        next nil unless type_obj.numeric? || resolved == :Bool || resolved == :Boolean
       end
-      types.empty? || types.all?(&:nil?) ? nil : types
+      type_obj.zig_type(is_param: true)
     end
+    arg_field_types = types.empty? || types.all?(&:nil?) ? nil : types
 
     call_parts = comptime_codes + (alloc_kind ? ["_alloc_"] : []) + arg_codes.each_index.map { |i| "f.a#{i}" }
     call_zig = "#{fn_zig}(#{call_parts.map { |p| p == "_alloc_" ? "f.alloc" : p }.join(', ')})"

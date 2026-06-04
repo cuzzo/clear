@@ -805,8 +805,9 @@ class MIRChecker
     return if states.empty?
     names = T.let(Set.new, T::Set[String])
     states.each { |state| names.merge(state.released) }
+    states.each { |state| names.merge(state.maybe_released) }
     names.each do |name|
-      released_count = states.count { |state| state.released.include?(name) }
+      released_count = states.count { |state| state.released.include?(name) || state.maybe_released.include?(name) }
       next if released_count == 0 || released_count == states.length
       next unless states.all? { |state| state.guarded_finalizers.include?(name) }
 
@@ -1058,6 +1059,7 @@ class MIRChecker
       when MIR::Set
         check_aggregate_expr!(stmt.value, nil, alloc_by_name)
       when MIR::ReassignWithCleanup
+        check_reassign_cleanup_alloc!(stmt, alloc_by_name)
         check_aggregate_expr!(stmt.value, stmt.alloc, alloc_by_name)
       when MIR::ReturnStmt, MIR::BreakStmt
         check_aggregate_expr!(stmt.value, nil, alloc_by_name)
@@ -1089,6 +1091,17 @@ class MIRChecker
         check_aggregate_stmts!(stmt.default_body, alloc_by_name)
       end
     end
+  end
+
+  sig { params(stmt: MIR::ReassignWithCleanup, alloc_by_name: T::Hash[String, Symbol]).void }
+  def check_reassign_cleanup_alloc!(stmt, alloc_by_name)
+    target_alloc = alloc_by_name[stmt.name.to_s]
+    return unless target_alloc
+    return if target_alloc == stmt.alloc
+
+    @errors << error(:ALLOC_CLEANUP_MISMATCH, stmt.name.to_s,
+      "MIR::ReassignWithCleanup frees old value with :#{stmt.alloc}, " \
+      "but #{stmt.name} was allocated with :#{target_alloc}")
   end
 
   sig { params(expr: T.untyped, owner_alloc: T.nilable(Symbol), alloc_by_name: T::Hash[String, Symbol]).returns(T.nilable(T::Array[T.untyped])) }

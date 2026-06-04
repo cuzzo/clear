@@ -337,7 +337,7 @@ END
 # ---------------------------------------------------------------------------
 
 FN bytecodePath() RETURNS String ->
-  RETURN "examples/puck/v11/bench/fib_int_small.puckc";
+  RETURN "../../examples/puck/v11/bench/fib_int_small.puckc";
 END
 
 FN main() RETURNS !Void ->

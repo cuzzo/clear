@@ -711,6 +711,18 @@ module MIRLoweringVariables
     !!(init.is_a?(MIR::Call) && init.owned_return?)
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(CleanupEntry)) }
+  def cleanup_entry_for_ast_binding(node)
+    symbol = T.let(nil, T.untyped)
+    symbol = node.symbol if node.respond_to?(:symbol)
+    decl = symbol&.reg
+    if decl && decl.respond_to?(:mir_binding_entry)
+      entry = decl.mir_binding_entry
+      return entry if entry
+    end
+    nil
+  end
+
   sig { params(node: AST::BindExpr).returns(T.untyped) }
   def lower_bind_expr(node)
     T.bind(self, MIRLowering) rescue nil
@@ -759,7 +771,7 @@ module MIRLoweringVariables
       rp = node.reassign_cleanup
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
-      binding_entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
+      binding_entry = cleanup_entry_for_ast_binding(node) || @current_bindings[node.name.to_s] || CleanupEntry::NONE
       heap_return_var = current_function_heap_carry_return_var?(node.name.to_s)
       assign_alloc = if heap_return_var
         :heap

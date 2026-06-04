@@ -654,10 +654,13 @@ class PipelineHost
     source_mir = visit_mir(list_node)
     source_prefix = T.let([], T::Array[T.untyped])
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
-    if source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
-      alloc = source_mir.allocs.any_heap? ? :heap : :frame
-      fact = @lowering.pipeline_alloc_mark_fact(source_mir, "pipe_src_list",
-        fallback_alloc: alloc, type_info: list_node.full_type!, known_allocating: true)
+    forced_alloc = if source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
+      source_mir.allocs.any_heap? ? :heap : :frame
+    end
+    if (fact = @lowering.pipeline_alloc_mark_fact(source_mir, "pipe_src_list",
+          fallback_alloc: forced_alloc || :heap, type_info: list_node.full_type!,
+          known_allocating: !forced_alloc.nil?))
+      alloc = fact.alloc
       source_prefix << fact.mark if fact
       source_cleanup = MIR::Cleanup.new("pipe_src_list",
         CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: list_node.full_type!.zig_type))

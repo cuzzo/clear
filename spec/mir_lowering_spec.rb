@@ -182,6 +182,22 @@ RSpec.describe MIRLowering do
     [low, result]
   end
 
+  def lower_source_mir(src)
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+    low = lowering(
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      moved_guard_info: result.moved_guard_info,
+      importer: importer,
+      source_dir: Dir.pwd,
+      debug_mode: true
+    )
+    low.lower_program(result.ast)
+  end
+
   def lower_fixture_mir(path)
     low, result = compile_fixture_lowering(path)
     low.lower_program(result.ast)
@@ -649,6 +665,66 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BinOp)
       expect(emit(result)).to eq("(true and false)")
+    end
+
+    it "keeps boolean RHS pending MIR inside the short-circuit boundary" do
+      low = lowering
+      left = make_lit(:BOOLEAN, false, full_type: :Boolean)
+      right = make_id("rhs", full_type: :Boolean)
+      node = make_binop(left, :AND, right)
+      original_lower = low.method(:lower)
+
+      low.define_singleton_method(:lower) do |child|
+        if child.equal?(right)
+          pending = instance_variable_get(:@pending_stmts)
+          pending << MIR::AllocMark.new("__rhs_tmp", :heap, Type.new(:String))
+          pending << MIR::Let.new("__rhs_tmp", MIR::DupeSlice.new(MIR::Lit.new("\"rhs\""), :heap), false, nil, nil)
+          MIR::Lit.new("true")
+        else
+          original_lower.call(child)
+        end
+      end
+
+      result = low.lower(node)
+      expect(result).to be_a(MIR::BinOp)
+      expect(result.right).to be_a(MIR::BlockExpr)
+      expect(low.flush_pending).to be_empty
+
+      zig = emit(result)
+      expect(zig).to include("false and __lazy_")
+      expect(zig).to include("break :__lazy_")
+    end
+  end
+
+  describe "assignment allocator provenance" do
+    it "uses declaration identity for same-name branch reassignment cleanup allocators" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN make() RETURNS String ->
+          RETURN "b" + "c";
+        END
+
+        FN main() RETURNS Void ->
+          IF TRUE THEN
+            MUTABLE s = "a";
+            s = s + "x";
+          ELSE
+            MUTABLE s = make();
+            s = s + "y";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      errors = MIRChecker.new.check_program!(mir)
+      expect(errors).to be_empty
+
+      zig = emit(mir)
+      expect(zig).to match(/var s: \[\]const u8 = .*rt\.frameAlloc\(\)/)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(s), rt.frameAlloc(), &s)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(s), rt.heapAlloc(), &s)")
+
+      expect(zig).to match(/var s_L\d+: \[\]const u8 = try make\(rt\)/)
+      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf\(s_L\d+\), rt\.heapAlloc\(\), &s_L\d+\)/)
     end
   end
 
@@ -3301,6 +3377,15 @@ RSpec.describe MIRLowering do
           expect(zig).to match(pattern)
         end
       end
+    end
+
+    it "keeps nested concurrent pipeline sources checker-clean" do
+      mir = lower_fixture_mir("examples/parallel_du/du.cht")
+      expect_checker_clean(mir)
+
+      zig = emit(mir)
+      expect(zig).to include("concurrentListSelect")
+      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&pipe_src_list\)/)
     end
 
   end
