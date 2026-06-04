@@ -3043,7 +3043,7 @@ class PipelineHost
   #     does not expose `add`/`inc`/`submit`/`update` -- consumers go
   #     through `acc.inner` so ObservableTerminal stays per-terminal
   #     surface-free.
-  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, acc_alloc_expr: T.untyped, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, acc_alloc_expr: MIR::Emittable, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
   def lower_range_fold_observable(p, smooth_node, label, source_node,
                                   acc_alloc_expr:, publish_stmts:)
     range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true, MIR::CallableContract.no_ownership(0))
@@ -3480,7 +3480,7 @@ class PipelineHost
     MIR::TryCatch.new(expr, MIR::Lit.new("unreachable"), nil)
   end
 
-  sig { params(target: String, method: String, args: T::Array[T.untyped]).returns(MIR::TryCatch) }
+  sig { params(target: String, method: String, args: T::Array[MIR::Emittable]).returns(MIR::TryCatch) }
   def observable_alloc_expr(target, method, args)
     observable_catch_unreachable(
       MIR::Call.new("#{target}.#{method}", args, false, true,
