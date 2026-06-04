@@ -497,7 +497,11 @@ module MIRLoweringExpressions
     source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
     mir_result = pipeline_host.lower_pipeline(node)
     result_type = Type.from_node!(node, context: "pipeline result ownership")
-    sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
+    sink_alloc = if result_type.observable?
+      :heap
+    elsif ownership_tracked_transfer_type?(result_type)
+      @current_decl_alloc || placement_for_node(node)
+    end
     return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
 
     Kernel.raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"

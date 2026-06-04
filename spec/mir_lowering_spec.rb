@@ -3349,6 +3349,13 @@ RSpec.describe MIRLowering do
         # with heapAlloc, calling running.next() in the body."
         required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
       },
+      "transpile-tests/306_observable_default.cht" => {
+        description: "inline observable aggregate COLLECT accumulator ownership",
+        required_patterns: [
+          /const __collect_acc_\d+/,
+          /CheatLib\.cleanup\(@TypeOf\(__collect_acc_\d+\), rt\.heapAlloc\(\), &__collect_acc_\d+\)/
+        ]
+      },
       "transpile-tests/329_versioned_snapshot_mutable.cht" => {
         description: "versioned mutable snapshot update conflict handling",
         required_patterns: [/\.update\(rt, rt\.heapAlloc\(\)/, /MvccConflict/]
