@@ -190,20 +190,19 @@ REGISTER_ROADMAP = [
             "side-effect ordering only when each branch is order-" \
             "independent; needs a sequential-equivalence assertion." },
   # @reentrant variants and Set landed in the P2 batch; remaining
-  # tests in those clusters need RawZig (out of scope) or runtime
-  # work for set iteration / sharded-list value-kind.
+  # tests in those clusters need runtime work for set iteration /
+  # sharded-list value-kind.
   { priority: "P2", title: "Map .values() / .keys() iteration",
     tests: 3, effort: "1 day",
     detail: "InlineBc(:values) / (:keys). Materialize the map's storage " \
             "into a typed list. Currently raises Unsupported." },
   # MIR::IfBindStmt landed in the runtime-blockers commit (single
   # and multi-binding via && short-circuit, currently only ?Int64).
-  { priority: "P2", title: "MIR::RawZig",
+  { priority: "P2", title: "Unsupported MIR leaves",
     tests: 5, effort: "Out of scope",
-    detail: "RawZig statements are an explicit escape hatch into the Zig " \
-            "backend. The bc VM is not Zig; tests using RawZig stay " \
-            "pending until each is rewritten to use a structured MIR " \
-            "node, per CLAUDE.md's no-Zig-parsing rule." },
+    detail: "The bc VM is not Zig. Any remaining Zig-specific compiler " \
+            "leaf must be rewritten to use a structured MIR node, per " \
+            "CLAUDE.md's no-Zig-parsing rule." },
 ].freeze
 
 def print_register_roadmap

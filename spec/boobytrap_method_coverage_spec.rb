@@ -131,7 +131,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     inline_mutator = MIR::InlineZig.new("x", "mutator", MIR::OwnershipContract.empty, { mutates_receiver: true }, nil)
     expect(checker.send(:expr_has_frame_alloc?, inline_mutator)).to be(false)
     expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(true)
-    expect(checker.send(:expr_has_frame_alloc?, MIR::RawZig.new("const p = frameAlloc();", "test"))).to be(true)
+    inline_frame = MIR::InlineZig.new("frameAlloc()", "frame_alloc_probe")
+    inline_frame.allocs = { alloc: :frame }
+    expect(checker.send(:expr_has_frame_alloc?, inline_frame)).to be(true)
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)
 
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_) { nil })

@@ -215,13 +215,14 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
     end
 
-    it "detects discarded RawZig stdlib call with allocates:true" do
-      rz = MIR::RawZig.new("try CheatLib.clone(value)", "raw_clone", MIR::OwnershipContract.empty, { allocates: true, return: :String, return_alloc: :heap })
-      body = [
-        MIR::ExprStmt.new(rz, false),
-      ]
-      errors = checker.check_fn!(fn_def("raw_stdlib_leak", body))
-      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("RawZig block") }).to be true
+    it "detects fixed-return InlineZig leaks even when ownership effect metadata is suppressed" do
+      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
+      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone_fixed", MIR::OwnershipContract.empty, sig)
+      iz.result_ownership_bearing = false
+
+      errors = checker.check_fn!(fn_def("stdlib_fixed_leak", [MIR::ExprStmt.new(iz, false)]))
+
+      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("clone_fixed") }).to be true
     end
 
     it "rejects InlineZig stdlib call with allocates:true returning Void without explicit ownership facts" do
@@ -1174,10 +1175,8 @@ RSpec.describe MIRChecker do
 
     it "rejects malformed ownership contracts at the MIR node boundary" do
       iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
-      rz = MIR::RawZig.new("try items.append(rt.heapAlloc(), m);", "intrinsic", MIR::OwnershipContract.empty, takes_signature)
 
       expect { iz[:ownership_contract] = { consumes: ["m"] } }.to raise_error(TypeError, /MIR::OwnershipContract/)
-      expect { rz[:ownership_contract] = nil }.to raise_error(TypeError, /MIR::OwnershipContract/)
       expect { iz.ownership_contract.consumes << "late" }.to raise_error(FrozenError)
     end
 
@@ -1226,10 +1225,6 @@ RSpec.describe MIRChecker do
       expect(stripped.copied_consumed_bindings).to eq(["m"])
     end
 
-    it "strips try from RawZig without regex parsing" do
-      raw = MIR::RawZig.new("try rawCall()", "raw")
-      expect(raw.without_try.code).to eq("rawCall()")
-    end
   end
 
   # ===========================================================================
@@ -1264,6 +1259,18 @@ RSpec.describe MIRChecker do
       program = checked_program([fn1])
       errors = checker.check_program!(program)
       expect(errors).to be_empty
+    end
+
+    it "checks functions inside structural module namespaces" do
+      namespace = MIR::ModuleNamespace.new("helper", [
+        fn_def("bad_imported_fn", [MIR::ExprStmt.new(owned_call, true)]),
+        MIR::StructDef.new("Payload", [], nil, :pub),
+      ])
+      program = checked_program([namespace])
+
+      errors = checker.check_program!(program)
+
+      expect(errors.any? { |e| e.include?("bad_imported_fn::makeList") && e.include?("HPT_LEAK") }).to be true
     end
   end
 
@@ -1580,13 +1587,13 @@ RSpec.describe MIRChecker do
         Set.new,
         require_operands: true)
 
-      malformed_zig = Class.new(MIR::RawZig) do
+      malformed_zig = Class.new(MIR::InlineZig) do
         def initialize
           super("raw()", "malformed")
         end
         def ownership_contract = Object.new
       end.new
-      checker.send(:verify_explicit_ownership_contracts!, [malformed_zig], Set.new, {})
+      checker.send(:verify_explicit_ownership_contracts!, [MIR::Lit.new("not_zig"), malformed_zig], Set.new, {})
 
       method = MIR::MethodCall.new(MIR::Ident.new("items"), "pop", [], false, MIR::CallableContract.no_ownership(0), :heap)
       reassign = MIR::ReassignWithCleanup.new("dst", MIR::Ident.new("owned"), "[]const u8", :heap)
@@ -1637,7 +1644,6 @@ RSpec.describe MIRChecker do
       expect(checker.send(:expr_has_frame_alloc?, mutating_inline)).to be false
       expect(checker.send(:expr_has_frame_alloc?, frame_inline)).to be true
       expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Lit.new("\"x\""), :frame))).to be true
-      expect(checker.send(:expr_has_frame_alloc?, MIR::RawZig.new("rt.frameAlloc()", "raw"))).to be true
       expect(checker.send(:expr_has_frame_alloc?, MIR::Ident.new("plain"))).to be false
 
       expect {

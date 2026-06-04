@@ -7,7 +7,7 @@ require_relative "../src/backends/importer"
 require_relative "../src/backends/compiler_frontend"
 
 RSpec.describe "pipeline legacy matrix" do
-  EXPECTED_CONCURRENT_RAW_HITS = {}.freeze
+  EXPECTED_CONCURRENT_INLINE_HITS = {}.freeze
   EXPECTED_INVALID_CASES = {}.freeze
 
   def compile_and_lower(src)
@@ -36,7 +36,7 @@ RSpec.describe "pipeline legacy matrix" do
     ).lower_program(result.ast)
   end
 
-  def collect_rawzig_reasons(root)
+  def collect_inline_zig_reasons(root)
     seen = {}
     reasons = []
     visit = nil
@@ -54,7 +54,7 @@ RSpec.describe "pipeline legacy matrix" do
       oid = obj.object_id
       return if seen[oid]
       seen[oid] = true
-      reasons << obj.reason.to_s if obj.is_a?(MIR::RawZig)
+      reasons << obj.reason.to_s if obj.is_a?(MIR::InlineZig)
       obj.each_pair { |_name, value| visit.call(value) } if obj.respond_to?(:each_pair)
       obj.instance_variables.each { |ivar| visit.call(obj.instance_variable_get(ivar)) }
     end
@@ -225,25 +225,25 @@ RSpec.describe "pipeline legacy matrix" do
     cases
   end
 
-  it "reports pipeline shapes that still lower through legacy RawZig paths" do
+  it "reports pipeline shapes that still lower through legacy opaque inline paths" do
     pipeline_legacy_hits = {}
-    concurrent_raw_hits = {}
+    concurrent_inline_hits = {}
     invalid = {}
 
     matrix_cases.each do |name, src|
       begin
-        reasons = collect_rawzig_reasons(compile_and_lower(src))
+        reasons = collect_inline_zig_reasons(compile_and_lower(src))
         pipeline_reasons = reasons.select { |r| r == "pipeline_legacy_host" }
         concurrent_reasons = reasons.select { |r| r.start_with?("concurrent_") }
         pipeline_legacy_hits[name] = pipeline_reasons.uniq unless pipeline_reasons.empty?
-        concurrent_raw_hits[name] = concurrent_reasons.uniq unless concurrent_reasons.empty?
+        concurrent_inline_hits[name] = concurrent_reasons.uniq unless concurrent_reasons.empty?
       rescue StandardError => e
         invalid[name] = "#{e.class}: #{e.message.lines.first&.strip}"
       end
     end
 
     warn "\nPipeline legacy host hits:\n#{pipeline_legacy_hits.map { |k, v| "  #{k}: #{v.join(', ')}" }.join("\n")}"
-    warn "\nConcurrent RawZig hits:\n#{concurrent_raw_hits.map { |k, v| "  #{k}: #{v.join(', ')}" }.join("\n")}"
+    warn "\nConcurrent InlineZig hits:\n#{concurrent_inline_hits.map { |k, v| "  #{k}: #{v.join(', ')}" }.join("\n")}"
     warn "\nPipeline legacy matrix invalid cases:\n#{invalid.map { |k, v| "  #{k}: #{v}" }.join("\n")}" unless invalid.empty?
 
     expect(invalid.keys.sort).to eq(EXPECTED_INVALID_CASES.keys.sort)
@@ -251,6 +251,6 @@ RSpec.describe "pipeline legacy matrix" do
       expect(invalid.fetch(name)).to match(pattern)
     end
     expect(pipeline_legacy_hits).to eq({})
-    expect(concurrent_raw_hits).to eq(EXPECTED_CONCURRENT_RAW_HITS)
+    expect(concurrent_inline_hits).to eq(EXPECTED_CONCURRENT_INLINE_HITS)
   end
 end

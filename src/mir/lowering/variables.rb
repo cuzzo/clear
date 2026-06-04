@@ -693,10 +693,9 @@ module MIRLoweringVariables
 
     return false if init.is_a?(MIR::Call)
 
-    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
+    if init.is_a?(MIR::InlineZig)
       return false unless init.stdlib_def&.emits_allocating?
       return true if init.stdlib_def&.heap_return_alloc?
-      return false unless init.is_a?(MIR::InlineZig)
 
       return init.allocs&.any_heap? == true
     end

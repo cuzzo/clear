@@ -11,7 +11,7 @@
 #   MIR::MutualThunkTrampoline  -- tail-position mutual recursion as tagged union
 #
 # MIREmitter owns the final Zig text for those MIR nodes. Thunk lowering
-# must not route through RawZig or the old Phase 4 segment scaffold.
+# must not route through opaque Zig text or the old Phase 4 segment scaffold.
 
 require "sorbet-runtime"
 require_relative "thunk_transform/recursive_splitter"

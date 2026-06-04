@@ -255,19 +255,6 @@ class MIRLowering
     const :transfer_targets, T::Array[OwnershipTransferTarget]
   end
 
-  class ZigConstBlock < T::Struct
-    extend T::Sig
-
-    const :name, String
-    const :kind, T.nilable(String)
-    const :lines, T::Array[String]
-
-    sig { returns(String) }
-    def text
-      lines.join
-    end
-  end
-
   include ZigTypeMapper
   include FsmLowering
   include TestLowering
@@ -2543,7 +2530,7 @@ class MIRLowering
     (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || root.name.to_s
   end
 
-  # Resolve allocator symbol to Zig string (for InlineZig/RawZig patterns only).
+  # Resolve allocator symbol to Zig string for InlineZig patterns.
   sig { params(kind: Symbol).returns(String) }
   def alloc_zig_str(kind)
     MIR::Placement.zig_allocator(kind, @rt_name)
@@ -2902,8 +2889,8 @@ class MIRLowering
     if node.kind == :package && !pkg_inline
       MIR::Import.new(node.namespace || node.path, "#{node.namespace || node.path}.zig", nil)
     else
-      # Local require / stdlib package: compile the module and inline
-      # the Zig body. Local uses compile_file (path); stdlib uses
+      # Local require / stdlib package: compile the module and inline its
+      # structural MIR. Local uses compile_file (path); stdlib uses
       # compile_package (name → resolved path).
       raise "MIRLowering: REQUIRE \"#{node.path}\" but no importer available" unless @importer
 
@@ -2931,43 +2918,27 @@ class MIRLowering
         end
       end
 
-      # Emit type definitions at file scope, then function body in struct wrapper
+      # Emit visible type definitions at file scope, then imported functions in
+      # a structural namespace wrapper. The namespace body is imported MIR from
+      # ModuleImporter, not a pre-rendered Zig blob, so checker/emitter traversal
+      # still sees function bodies and nested imports.
       same_dir = T.must(mod).source_dir == @source_dir
-      file_scope_types = visible_type_defs(T.must(mod), same_dir: same_dir)
-      body = T.must(mod).transpiled_body.strip
-      fn_body = strip_all_type_defs(body)
-      indented = fn_body.lines.map { |l| l.rstrip.empty? ? "" : "    #{l.rstrip}" }.join("\n")
-
-      lines = []
-      lines << file_scope_types if file_scope_types && !file_scope_types.strip.empty?
-      lines << "const #{node.namespace} = struct {\n#{indented}\n};"
-      # Opaque: body comes from a completed separate transpile pass (mod.transpiled_body).
-      # Decomposition requires threading MIR through the module-importer pipeline.
-      raw = MIR::RawZig.new(lines.join("\n"), "require_local_module_opaque",
-        MIR::OwnershipContract.empty)
+      namespace_items = imported_module_items(T.must(mod))
 
       # VM target also needs the imported function bodies as MIR FnDefs so the
       # bytecode emitter can lay out helpers and resolve namespaced calls
       # (e.g. `require_helper.addPub`). Lower each public function from the
       # module AST and tag its name with the importer namespace; the call-site
       # lookup in bc_emitter treats `<ns>.<fn>` as a synonym for the bare name.
-      if @target == :bc && T.must(mod).ast
-        helper_fns = []
-        T.must(mod).ast.statements.each do |stmt|
-          next unless stmt.is_a?(AST::FunctionDef)
-          fn_mir = lower_function_def(stmt)
-          if fn_mir
-            # Stash the AST on the MIR FnDef so bc_emitter's parallel walk can
-            # find it without going through CompilerFrontend's fn_nodes (which
-            # only sees the top-level AST, not imported modules).
-            fn_mir.instance_variable_set(:@ast_fn, stmt) if fn_mir.respond_to?(:instance_variable_set)
-            helper_fns << fn_mir
-          end
-        end
-        return [raw, *helper_fns] if helper_fns.any?
+      if @target == :bc
+        helper_fns = imported_bc_helper_fns(T.must(mod), namespace_items)
+        return helper_fns if helper_fns.any?
       end
 
-      raw
+      [
+        *visible_type_items(T.must(mod), same_dir: same_dir),
+        MIR::ModuleNamespace.new(node.namespace, namespace_items),
+      ]
     end
   end
 
@@ -2984,12 +2955,27 @@ class MIRLowering
     end
   end
 
-  sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T.nilable(String)) }
-  def visible_type_defs(mod, same_dir: false)
-    return nil unless mod.type_defs && !mod.type_defs.strip.empty?
-    return nil unless mod.ast
+  sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T::Array[MIR::Emittable]) }
+  def visible_type_items(mod, same_dir: false)
+    items = mod.type_items
+    return [] unless items
 
+    visible_names = visible_imported_type_names(mod, same_dir: same_dir)
+    return [] if visible_names.empty?
+
+    items.filter_map do |item|
+      next nil unless item.is_a?(MIR::Emittable)
+      next nil unless item.is_a?(MIR::NamedEmittable)
+
+      item if visible_names.include?(item.name.to_s)
+    end
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T::Set[String]) }
+  def visible_imported_type_names(mod, same_dir: false)
     visible_names = Set.new
+    return visible_names unless mod.ast
+
     mod.ast.statements.each do |stmt|
       case stmt
       when AST::StructDef, AST::EnumDef, AST::UnionDef
@@ -3011,114 +2997,40 @@ class MIRLowering
       end
     end
 
-    return nil if visible_names.empty?
-    keep_zig_const_blocks(mod.type_defs, visible_names)
+    visible_names
   end
 
-  sig { params(body: String).returns(String) }
-  def strip_all_type_defs(body)
-    result = body.dup
-    zig_const_blocks(body).each { |block| result.sub!(block.text, "") if block.kind }
-    result
+  sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
+  def imported_module_items(mod)
+    items = mod.mir_items
+    return items.select { |item| item.is_a?(MIR::Emittable) } if items.is_a?(Array)
+    return [] unless mod.ast
+
+    mod.ast.statements.filter_map do |stmt|
+      next nil if stmt.is_a?(AST::FunctionDef) && stmt.visibility == :private
+      next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
+      next lower_require(stmt) if stmt.is_a?(AST::RequireNode)
+      next lower(stmt) if stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
+
+      nil
+    end.flatten.select { |item| item.is_a?(MIR::Emittable) }
   end
 
-  sig { params(source: String).returns(T::Array[ZigConstBlock]) }
-  def zig_const_blocks(source)
-    lines = source.lines
-    blocks = T.let([], T::Array[ZigConstBlock])
-    i = T.let(0, Integer)
-    while i < lines.length
-      line = lines[i]
-      header = parse_zig_const_header(T.must(line))
-      if header
-        name = header.name
-        kind = header.kind
-        block_lines = T.let([T.must(line)], T::Array[String])
-        depth = brace_depth(T.must(line))
-        i += 1
-        while i < lines.length && depth > 0
-          block_lines << T.must(lines[i])
-          depth += brace_depth(T.must(lines[i]))
-          i += 1
-        end
-        if i < lines.length && lines[i]&.strip == '};'
-          block_lines << T.must(lines[i])
-          i += 1
-        end
-        blocks << ZigConstBlock.new(name: name, kind: kind, lines: block_lines)
-      else
-        i += 1
+  sig { params(mod: ModuleImporter::CompiledModule, items: T::Array[MIR::Emittable]).returns(T::Array[MIR::FnDef]) }
+  def imported_bc_helper_fns(mod, items)
+    ast_by_name = {}
+    if mod.ast
+      mod.ast.statements.each do |stmt|
+        ast_by_name[stmt.name.to_s] = stmt if stmt.is_a?(AST::FunctionDef)
       end
     end
-    blocks
-  end
 
-  sig { params(source: String, names: T::Set[String]).returns(String) }
-  def keep_zig_const_blocks(source, names)
-    zig_const_blocks(source).filter_map { |block| block.text if names.include?(block.name) }.join
-  end
-
-  sig { params(line: String).returns(Integer) }
-  def brace_depth(line)
-    line.count("{") - line.count("}")
-  end
-
-  sig { params(line: String).returns(T.nilable(ZigConstBlock)) }
-  def parse_zig_const_header(line)
-    rest = line.lstrip
-    return nil unless rest.start_with?("const ")
-    rest = T.must(rest[6..])
-    name = read_zig_identifier_prefix(rest)
-    return nil if name.empty?
-
-    rest = T.must(rest[name.length..]).lstrip
-    return nil unless rest.start_with?("=")
-    rest = T.must(rest[1..]).lstrip
-    ZigConstBlock.new(name: name, kind: zig_const_kind(rest), lines: [])
-  end
-
-  sig { params(text: String).returns(String) }
-  def read_zig_identifier_prefix(text)
-    chars = T.let([], T::Array[String])
-    text.each_char.with_index do |ch, idx|
-      valid = if idx.zero?
-        zig_identifier_start?(ch)
-      else
-        zig_identifier_part?(ch)
-      end
-      break unless valid
-      chars << ch
+    items.filter_map do |item|
+      next nil unless item.is_a?(MIR::FnDef)
+      ast_fn = ast_by_name[item.name.to_s]
+      item.instance_variable_set(:@ast_fn, ast_fn) if ast_fn && item.respond_to?(:instance_variable_set)
+      item
     end
-    chars.join
-  end
-
-  sig { params(ch: String).returns(T::Boolean) }
-  def zig_identifier_start?(ch)
-    codepoint = ch.ord
-    (codepoint >= 65 && codepoint <= 90) || (codepoint >= 97 && codepoint <= 122) || ch == "_"
-  end
-
-  sig { params(ch: String).returns(T::Boolean) }
-  def zig_identifier_part?(ch)
-    return true if zig_identifier_start?(ch)
-    codepoint = ch.ord
-    codepoint >= 48 && codepoint <= 57
-  end
-
-  sig { params(rest: String).returns(T.nilable(String)) }
-  def zig_const_kind(rest)
-    return "union(enum)" if zig_const_kind_prefix?(rest, "union(enum)")
-    return "struct" if zig_const_kind_prefix?(rest, "struct")
-    return "enum" if zig_const_kind_prefix?(rest, "enum")
-
-    nil
-  end
-
-  sig { params(rest: String, prefix: String).returns(T::Boolean) }
-  def zig_const_kind_prefix?(rest, prefix)
-    return false unless rest.start_with?(prefix)
-    suffix = T.must(rest[prefix.length..]).lstrip
-    suffix.start_with?("{") || suffix.start_with?("(")
   end
 
   # ================================================================

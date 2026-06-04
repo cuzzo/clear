@@ -233,8 +233,21 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps ownership-significant MIR node classes in an explicit registry" do
     expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
     expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
-    expect(source("src/mir/mir.rb")).to include("RawZig, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, InlineZig")
     expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
+  end
+
+  it "keeps raw Zig statement nodes out of production source" do
+    offenders = Dir.glob(File.join(ARCH_ROOT, "src", "**", "*.rb")).flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next unless line.include?("RawZig")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty, offenders.join("\n")
   end
 
   it "keeps linear MIR ownership traversal closed over statement node classes" do

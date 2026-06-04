@@ -147,7 +147,7 @@ RSpec.describe "MIR gap-burn characterization" do
     if_slots.last.replace([])
     expect(if_chain.default_body).to eq([])
 
-    raw = MIR::RawZig.new("try consume(owned)", "coverage")
+    raw = MIR::InlineZig.new("try consume(owned)", "coverage")
     contract = MIR::OwnershipContract.consumes(["owned"])
     raw.ownership_contract = contract
     expect(raw.explicit_ownership_contract).to eq(contract)
@@ -1002,7 +1002,8 @@ RSpec.describe "MIR gap-burn characterization" do
     importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
     bc_require_low = MIRLowering.new(importer: importer, source_dir: "/tmp", target: :bc)
     required = bc_require_low.lower(AST::RequireNode.new(tok, "helper.cht", "helper", :local))
-    expect(required).to include(an_instance_of(MIR::RawZig), an_instance_of(MIR::FnDef))
+    expect(required).to include(an_instance_of(MIR::FnDef))
+    expect(required).not_to include(an_instance_of(MIR::ModuleNamespace))
 
     items = []
     low.send(:append_lowered_items!, MIRLowering::LoweredItemTarget.new(items: items, line: 7), nil)
@@ -1030,8 +1031,19 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:lower_field_default, AST::DefaultLit.new(tok)).value).to eq(".{}")
 
     expect(low.send(:lower_direct_length, AST::FuncCall.new(tok, "len", []))).to be_nil
-    missing_ast_mod = ModuleImporter::CompiledModule.new(nil, nil, nil, nil, nil, nil, nil, "const Hidden = struct {};", nil)
-    expect(low.send(:visible_type_defs, missing_ast_mod)).to be_nil
+    missing_ast_mod = ModuleImporter::CompiledModule.new(
+      nil,
+      nil,
+      nil,
+      nil,
+      nil,
+      nil,
+      nil,
+      nil,
+      nil,
+      [MIR::StructDef.new("Hidden", [], nil, :pub)],
+    )
+    expect(low.send(:visible_type_items, missing_ast_mod)).to eq([])
     ptr_type = Type.new(:Payload)
     ptr_type.layout = :indirect
     expect(low.send(:bare_zig_type, ptr_type)).not_to start_with("*")
@@ -2100,8 +2112,13 @@ RSpec.describe "MIR gap-burn characterization" do
     bc_or_exit = MIRLowering.new(target: :bc).send(:lower_or_exit, AST::OrExit.new(tok, :Runtime, nil, lit("stop")))
     expect(bc_or_exit.body.first.expr).to be_a(MIR::OrExitBcRewrite)
 
-    const_blocks = low.send(:zig_const_blocks, "const A = struct {\n    fn f() void {\n    }\n}\n};\n")
-    expect(const_blocks.first.text).to include("};\n")
+    type_ast = AST::Program.new(tok, [
+      AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
+      AST::StructDef.new(tok, "PackageType", {}, nil, nil),
+      AST::UnionDef.new(tok, "Choice", { Pair: Schemas::InlineStructVariant.new(fields: {}) }, :pub),
+    ])
+    type_mod = ModuleImporter::CompiledModule.new(type_ast, nil, nil, nil, nil, nil, nil, nil, nil, [])
+    expect(low.send(:visible_imported_type_names, type_mod, same_dir: true)).to include("PublicType", "PackageType", "Choice", "Choice_Pair")
     expect(low.send(:fiber_spawn_call_zig, "rt", "Ctx", "ctx", ".{}", :shared)).to include("spawnPinned")
     expect(low.send(:fiber_spawn_call_zig, "rt", "Ctx", "ctx", ".{}", :unknown)).to include("spawnBest")
 

@@ -20,11 +20,11 @@
 #   INV-HPT-LEAK: A heap-returning call result used in statement position
 #     (not bound to a variable) is an unconditional leak.
 #
-#   INV-INLINE-CONTRACT: InlineZig/RawZig nodes that call CheatLib.*
+#   INV-INLINE-CONTRACT: InlineZig nodes that call CheatLib.*
 #     functions with ownership effects must declare stdlib_def so the
 #     checker can see those effects. Without it, the node is opaque.
 #
-#   INV-EXPLICIT-OWNERSHIP: Any stdlib/RawZig node that transfers
+#   INV-EXPLICIT-OWNERSHIP: Any stdlib-backed node that transfers
 #     ownership must declare the concrete binding names in
   #     typed ownership operands. Registry metadata says the call shape
 #     can consume; the contract says this lowered call does consume `x`.
@@ -103,12 +103,12 @@ class MIRChecker
     MIR::ExprStmt, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
     MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
     MIR::FsmIoBody, MIR::IfBindStmt, MIR::IfChain, MIR::IfStmt,
-    MIR::Import, MIR::IndexInsert, MIR::Let, MIR::MoveMark,
+    MIR::Import, MIR::IndexInsert, MIR::Let, MIR::ModuleNamespace, MIR::MoveMark,
     MIR::MutualThunkTrampoline, MIR::Noop, MIR::OwnedBorrow,
     MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
     MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
     MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
-    MIR::RawBc, MIR::RawZig, MIR::ReassignMark, MIR::ReassignWithCleanup,
+    MIR::RawBc, MIR::ReassignMark, MIR::ReassignWithCleanup,
     MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
     MIR::ShardedMapPut, MIR::SnapshotMultiTxn, MIR::SnapshotRead,
     MIR::SnapshotTransaction, MIR::Sort, MIR::StreamSpawn, MIR::StreamYield,
@@ -244,7 +244,7 @@ class MIRChecker
     owned_return_lets = []
     owned_result_lets = []
     inline_alloc_nodes = []
-    all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
+    all_zig_nodes = []  # InlineZig nodes scanned for CheatLib contracts
     inline_alloc_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
     all_zig_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
     structural_ownership_nodes = []
@@ -313,11 +313,6 @@ class MIRChecker
           inline_alloc_nodes << node
           inline_alloc_node_ids[node.object_id] = true
         end
-        unless all_zig_node_ids.key?(node.object_id)
-          all_zig_nodes << node
-          all_zig_node_ids[node.object_id] = true
-        end
-      when MIR::RawZig
         unless all_zig_node_ids.key?(node.object_id)
           all_zig_nodes << node
           all_zig_node_ids[node.object_id] = true
@@ -920,7 +915,7 @@ class MIRChecker
   def linear_expr_consumed_names(expr)
     names = T.let(Set.new, T::Set[String])
     walk_mir_node(expr) do |node|
-      if node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+      if node.is_a?(MIR::InlineZig)
         ownership_contract_consumes(node.ownership_contract).each { |name| names.add(name.to_s) }
       end
       if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
@@ -948,7 +943,7 @@ class MIRChecker
     when MIR::Ident
       names.add(expr.name.to_s)
       return
-    when MIR::InlineZig, MIR::RawZig, MIR::BlockExpr
+    when MIR::InlineZig, MIR::BlockExpr
       return
     end
     expr.child_exprs.each { |sub| collect_linear_expr_ident_names(sub, names) } if expr.is_a?(MIR::Emittable)
@@ -1172,8 +1167,13 @@ class MIRChecker
     MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")
     all_errors = T.let(ownership_registry_errors, T::Array[String])
     program.items.each do |item|
-      next unless item.is_a?(MIR::FnDef)
-      all_errors.concat(check_fn!(item, strict: strict))
+      if item.is_a?(MIR::FnDef)
+        all_errors.concat(check_fn!(item, strict: strict))
+      elsif item.is_a?(MIR::ModuleNamespace)
+        (item.items || []).each do |child|
+          all_errors.concat(check_fn!(child, strict: strict)) if child.is_a?(MIR::FnDef)
+        end
+      end
     end
     MIRPassState.for!(program).mark!(:mir_checked) if all_errors.empty?
     all_errors
@@ -1218,7 +1218,7 @@ class MIRChecker
   def owned_return_init?(init)
     return true if init.is_a?(MIR::Call) && init.owned_return?
 
-    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig) || init.is_a?(MIR::InlineBc)
+    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::InlineBc)
       return false unless stdlib_owned_return?(init)
       # Receiver-dependent (Proc-resolved) returns -- collection
       # intrinsics like pool.insert/get -- are not a static owned-
@@ -1325,7 +1325,7 @@ class MIRChecker
 
   sig { params(node: MIR::Node).returns(T::Boolean) }
   def stdlib_owned_fixed_return?(node)
-    return false unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+    return false unless node.is_a?(MIR::InlineZig)
 
     stdlib_owned_return?(node) && node.stdlib_def.fixed_return?
   end
@@ -1652,12 +1652,11 @@ class MIRChecker
       end
 
       if stdlib_owned_fixed_return?(expr)
-        owned_expr = T.cast(expr, T.any(MIR::InlineZig, MIR::RawZig))
+        owned_expr = T.cast(expr, MIR::InlineZig)
         ret = owned_expr.stdlib_def.return_type
         unless ret.void?
-          label = owned_expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
           leaks << error(:HPT_LEAK, owned_expr.reason,
-            "#{label} with allocates:true result not bound to variable (leak)")
+            "stdlib call with allocates:true result not bound to variable (leak)")
         end
       end
     end
@@ -1671,7 +1670,7 @@ class MIRChecker
       node.callee.to_s
     when MIR::MethodCall
       node.method.to_s
-    when MIR::InlineZig, MIR::RawZig
+    when MIR::InlineZig
       node.reason.to_s
     else
       node.class.name.to_s
@@ -1835,21 +1834,15 @@ class MIRChecker
     end
   end
 
-  # NO_CONTRACT: InlineZig/RawZig must have verifier-visible semantics.
+  # NO_CONTRACT: InlineZig must have verifier-visible semantics.
   #
-  # RawZig is always opaque. InlineZig is acceptable only when it carries a
+  # InlineZig is acceptable only when it carries a
   # stdlib_def/FunctionSignature contract that declares ownership effects. An
   # empty ownership_contract is not proof of purity; it is only meaningful after
   # the callable contract says whether ownership can move.
   sig { params(zig_nodes: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def verify_zig_contracts!(zig_nodes)
     zig_nodes.each do |node|
-      if node.is_a?(MIR::RawZig)
-        @errors << error(:RAW_NO_CONTRACT, node.reason || "raw_zig",
-          "RawZig is opaque to MIRChecker; decompose into structural MIR")
-        next
-      end
-
       if opaque_zig_allocator_ownership?(node)
         @errors << error(:OPAQUE_ZIG_OWNERSHIP, node.reason || "inline_zig",
           "InlineZig performs allocator ownership operations inside opaque code; decompose into structural MIR")
@@ -1977,7 +1970,7 @@ class MIRChecker
   sig { params(zig_nodes: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_explicit_ownership_contracts!(zig_nodes, transfers, allocs)
     zig_nodes.each do |node|
-      next unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+      next unless node.is_a?(MIR::InlineZig)
 
       unless node.ownership_contract.is_a?(MIR::OwnershipContract)
         @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
@@ -2440,8 +2433,6 @@ class MIRChecker
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
       expr.alloc == :frame
-    when MIR::RawZig
-      expr.code.is_a?(String) && expr.code.include?("frameAlloc()")
     else
       false
     end

@@ -270,7 +270,7 @@ RSpec.describe MIRLowering do
       fake.extend(MIRLoweringConcurrency)
       expr = make_lit(:INT64, 1)
       step = MIRLoweringConcurrency::BgBodyStep.new(expr: expr, binding: nil)
-      lowered = MIR::RawZig.new("try compute()", "spec")
+      lowered = MIR::InlineZig.new("try compute()", "spec")
 
       fake.define_singleton_method(:escaping_value_alloc) { |_inner| :heap }
       fake.define_singleton_method(:with_decl_alloc) { |_alloc, &blk| blk.call }
@@ -847,54 +847,31 @@ RSpec.describe MIRLowering do
       expect(zig).to include("Empty: void")
     end
 
-    it "filters Zig type definition blocks by visible imported names" do
-      source = <<~ZIG
-        const Keep = struct {
-            value: i64,
-        };
-        const Drop = enum {
-            A,
-        };
-        const AlsoKeep = union(enum) {
-            One: i64,
-        };
-      ZIG
-
-      filtered = lowering.send(:keep_zig_const_blocks, source, Set["Keep", "AlsoKeep"])
-
-      expect(filtered).to include("const Keep")
-      expect(filtered).to include("const AlsoKeep")
-      expect(filtered).not_to include("const Drop")
-    end
-
-    it "emits only public or same-directory package-visible imported type definitions once" do
+    it "selects only public or same-directory package-visible imported type items once" do
       pub_struct = AST::StructDef.new(tok, "PubThing", {}, :pub, nil)
       pkg_enum = AST::EnumDef.new(tok, "PkgThing", [:A], nil)
       private_struct = AST::StructDef.new(tok, "PrivateThing", {}, :private, nil)
       inline_union = AST::UnionDef.new(tok, "Value", { Pair: Schemas::InlineStructVariant.new(fields: {}) }, :pub)
       ast = AST::Program.new(tok, [pub_struct, pkg_enum, private_struct, inline_union])
-      type_defs = <<~ZIG
-        const PubThing = struct {};
-        const PkgThing = enum { A };
-        const PrivateThing = struct {};
-        const Value = union(enum) { Pair: Value_Pair };
-        const Value_Pair = struct {};
-      ZIG
-      mod = ModuleImporter::CompiledModule.new(ast, nil, nil, Dir.pwd, {}, {}, {}, type_defs)
+      type_items = [
+        MIR::StructDef.new("PubThing", [], nil, :pub),
+        MIR::EnumDef.new("PkgThing", ["A"], nil),
+        MIR::StructDef.new("PrivateThing", [], nil, :private),
+        MIR::UnionTypeDef.new("Value", [{ name: "Pair", zig_type: "Value_Pair" }], :pub),
+        MIR::StructDef.new("Value_Pair", [], nil, :private),
+      ]
+      mod = ModuleImporter::CompiledModule.new(ast, nil, nil, Dir.pwd, {}, {}, {}, nil, nil, type_items)
       low = lowering
 
-      same_dir_defs = low.send(:visible_type_defs, mod, same_dir: true)
-      second_pass = low.send(:visible_type_defs, mod, same_dir: true)
-      other_dir_defs = lowering.send(:visible_type_defs, mod, same_dir: false)
+      same_dir_names = low.send(:visible_type_items, mod, same_dir: true).map(&:name)
+      second_pass = low.send(:visible_type_items, mod, same_dir: true)
+      other_dir_names = lowering.send(:visible_type_items, mod, same_dir: false).map(&:name)
 
-      expect(same_dir_defs).to include("const PubThing")
-      expect(same_dir_defs).to include("const PkgThing")
-      expect(same_dir_defs).to include("const Value")
-      expect(same_dir_defs).to include("const Value_Pair")
-      expect(same_dir_defs).not_to include("const PrivateThing")
-      expect(second_pass).to be_nil
-      expect(other_dir_defs).to include("const PubThing")
-      expect(other_dir_defs).not_to include("const PkgThing")
+      expect(same_dir_names).to include("PubThing", "PkgThing", "Value", "Value_Pair")
+      expect(same_dir_names).not_to include("PrivateThing")
+      expect(second_pass).to eq([])
+      expect(other_dir_names).to include("PubThing", "Value", "Value_Pair")
+      expect(other_dir_names).not_to include("PkgThing")
     end
   end
 
@@ -3247,6 +3224,141 @@ RSpec.describe MIRLowering do
 
       expect { lowering.lower(node) }.to raise_error(/no importer available/)
     end
+
+    it "lowers local require to visible type items plus a structural module namespace" do
+      imported_ast = AST::Program.new(tok, [
+        AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
+      ])
+      imported_fn = MIR::FnDef.new(
+        "helper_value",
+        [],
+        "i64",
+        [MIR::ReturnStmt.new(MIR::Lit.new("7"))],
+        :pub, false, nil
+      )
+      imported_type = MIR::StructDef.new("PublicType", [], nil, :pub)
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [imported_fn],
+        [imported_type],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+      node = AST::RequireNode.new(tok, "helper.cht", "helper", :local)
+
+      result = lowering(importer: importer, source_dir: Dir.pwd).lower(node)
+
+      expect(result).to include(imported_type)
+      namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
+      expect(namespace.name).to eq("helper")
+      expect(namespace.items).to include(imported_fn)
+      expect(emit(namespace)).to include("const helper = struct")
+    end
+
+    it "falls back to a structural namespace for BC local require when no helper functions exist" do
+      imported_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, []),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [],
+        [],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+
+      result = lowering(importer: importer, source_dir: Dir.pwd, target: :bc)
+        .lower(AST::RequireNode.new(tok, "empty.cht", "empty", :local))
+
+      expect(result).to contain_exactly(an_instance_of(MIR::ModuleNamespace))
+    end
+
+    it "reconstructs imported module items from AST when cached MIR is unavailable" do
+      private_fn = AST::FunctionDef.new(tok, "private_helper", [], nil, :Void, nil, [], nil, nil, :private, nil, false)
+      imported_ast = AST::Program.new(tok, [
+        private_fn,
+        AST::RequireNode.new(tok, "math", "math", :package),
+        AST::ExternFnDecl.new(tok, "puts", [], Type.new(:Void), "c", nil),
+        make_lit(:NUMBER, 1),
+      ])
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      items = lowering.send(:imported_module_items, imported_mod)
+
+      expect(items).to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
+      expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
+    end
+
+    it "filters imported type items and BC helper items defensively" do
+      public_struct = AST::StructDef.new(tok, "PublicType", {}, :pub, nil)
+      struct_item = MIR::StructDef.new("PublicType", [], nil, :pub)
+      mixed_type_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        [Object.new, MIR::Lit.new("1"), struct_item],
+      )
+      nil_type_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+      no_ast_mod = ModuleImporter::CompiledModule.new(nil, nil, nil, Dir.pwd, {}, {}, {}, nil, nil, nil)
+      orphan_fn = MIR::FnDef.new("orphan", [], "void", [], :pub, false, nil)
+      ast_without_fns_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      expect(lowering.send(:visible_type_items, nil_type_mod)).to eq([])
+      expect(lowering.send(:visible_type_items, mixed_type_mod)).to eq([struct_item])
+      expect(lowering.send(:imported_module_items, no_ast_mod)).to eq([])
+      expect(lowering.send(:imported_bc_helper_fns, no_ast_mod, [struct_item, orphan_fn])).to eq([orphan_fn])
+      expect(lowering.send(:imported_bc_helper_fns, ast_without_fns_mod, [])).to eq([])
+    end
   end
 
   # =========================================================================
@@ -3460,15 +3572,15 @@ RSpec.describe MIRLowering do
 
       expect(collect_mir_nodes(mir, MIR::BatchWindowPush)).not_to be_empty
       expect(collect_mir_nodes(mir, MIR::BatchWindowFlush)).not_to be_empty
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include("pipeline_legacy_host")
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include("pipeline_legacy_host")
 
       zig = emit(mir)
       expect(zig).to include("CheatLib.BatchWindow(i64).init")
       expect(zig).to include(".freeBatch(")
     end
 
-    it "lowers non-mutual THUNK recursion through structural MIR instead of RawZig" do
+    it "lowers non-mutual THUNK recursion through structural MIR instead of opaque Zig" do
       mir = lower_fixture_mir("transpile-tests/526_non_mutual_thunk_trampoline.cht")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::ThunkTrampoline)
@@ -3483,11 +3595,11 @@ RSpec.describe MIRLowering do
       expect(thunk.recurse_arg_inits.length).to eq(1)
       expect(thunk.recurse_arg_inits.first).to include("current.n")
       expect(thunk.yield_line).to eq("rt.checkYield();")
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include(:thunk_trampoline_body)
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include(:thunk_trampoline_body)
     end
 
-    it "lowers mutual THUNK recursion through structural MIR instead of RawZig" do
+    it "lowers mutual THUNK recursion through structural MIR instead of opaque Zig" do
       mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.cht")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::MutualThunkTrampoline)
@@ -3515,8 +3627,8 @@ RSpec.describe MIRLowering do
       expect(odd_arm.fetch(:target_variant)).to eq("is_even")
       expect(odd_arm.fetch(:target_arg_inits).first).to include("f.n")
 
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include(:thunk_trampoline_body)
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include(:thunk_trampoline_body)
     end
 
     it "collects named observables by calling next directly" do

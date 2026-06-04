@@ -1,6 +1,6 @@
 # Opaque Zig Ownership Invariant Plan
 
-Status: planned
+Status: active; RawZig removal from `src/` complete
 
 Owner: Codex
 
@@ -135,6 +135,114 @@ Support/consumer sites are also part of the current opaque-Zig surface:
    is not product code and should remain as test input for the invariant.
 
 ## Guarantee Strategy
+
+## RawZig Removal Plan
+
+Status: complete
+
+Objective: remove `RawZig` entirely from `src/`, not merely stop producing it.
+After this burn-down, compiler MIR may not define, emit, check, or lower through
+a raw Zig statement node. Test-only negative coverage must use `InlineZig` or a
+purpose-built structural fixture instead.
+
+### Baseline Metrics
+
+Captured on 2026-06-04 before the refactor:
+
+1. `ruby gems/decomplex/exe/decomplex report src --output=/tmp/rawzig-decomplex-before.md`
+   - Cross-Detector Convergence: 1434
+   - Root-Cause Clusters: 354
+   - Decision Pressure: 297
+   - Missing Abstractions: 200
+   - Reification Misses: 25
+   - Semantic Predicate Aliases: 5
+   - Exact Predicate Aliases: 10
+   - Inconsistent Rename Clones: 71
+   - Flay Similarity: 0
+   - Neglected Updates: 1276
+   - Derived-State Staleness: 146
+   - Neglected Conditions: 11
+   - Neglected Path Conditions: 1692
+   - Oversized Predicates: 13
+   - Broken Protocols: 1353
+   - False Simplicity: 881
+   - Fat Unions: 12
+2. `ruby tools/typing_baseline.rb src`
+   - Total `T.untyped`: 2392
+   - Param slots with `T.untyped`: 1582
+   - Return slots with `T.untyped`: 521
+   - Struct/ivar slots with `T.untyped`: 19
+
+Acceptance gate: every decomplex count and every untyped slot count must be less
+than or equal to this baseline after the refactor. Any new Ruby lines must be
+covered by focused specs; branch coverage for the touched behavior should stay
+at or above the project target of about 80%.
+
+### Design
+
+1. Replace the local/stdlib `REQUIRE` RawZig producer with structural module
+   MIR. The importer already preserves imported module MIR as `mir_items`; the
+   lowering should wrap those items in a `ModuleNamespace` node that emits
+   `const namespace = struct { ... };`.
+2. Carry imported type definitions structurally as `type_items` on
+   `ModuleImporter::CompiledModule`. Filter visible type items by the imported
+   AST and same-directory/package visibility, preserving the existing
+   "emit each imported type once" behavior.
+3. Keep bytecode imports structural. The BC path can keep returning imported
+   helper `FnDef`s because the VM call emitter already strips namespace prefixes
+   when resolving helper functions.
+4. Delete the `RawZig` MIR node class, its stdlib-def coercion registration, its
+   ownership-significant registration, MIRChecker branches, and MIREmitter
+   branches.
+5. Remove RawZig-specific diagnostics and tests. Negative checker coverage
+   should now assert that `InlineZig` without a contract fails closed, because
+   there is no RawZig node left to instantiate.
+6. Add an architecture invariant that fails if the token `RawZig` appears under
+   `src/` again. The invariant is intentionally lexical: reintroducing the name
+   should require an explicit architecture decision, not a casual helper.
+7. Update docs and comments in `src/` so they describe the new invariant:
+   statement-level raw Zig is gone; expression-level opaque Zig is limited to
+   audited `InlineZig`.
+
+### Results
+
+Captured on 2026-06-04 after the refactor:
+
+1. Source inventory:
+   - `rg -n "\bRawZig\b|MIR::RawZig|RAW_NO_CONTRACT|RAW_UNJUSTIFIED" src --glob '*.rb' --glob '*.md'`
+   - Result: no matches under `src/`.
+2. `ruby gems/decomplex/exe/decomplex report src --output=/tmp/rawzig-decomplex-after.md`
+   - Cross-Detector Convergence: 1430
+   - Root-Cause Clusters: 354
+   - Decision Pressure: 297
+   - Missing Abstractions: 199
+   - Reification Misses: 25
+   - Semantic Predicate Aliases: 5
+   - Exact Predicate Aliases: 10
+   - Inconsistent Rename Clones: 71
+   - Flay Similarity: 0
+   - Neglected Updates: 1276
+   - Derived-State Staleness: 143
+   - Neglected Conditions: 11
+   - Neglected Path Conditions: 1664
+   - Oversized Predicates: 13
+   - Broken Protocols: 1332
+   - False Simplicity: 881
+   - Fat Unions: 12
+3. `ruby tools/typing_baseline.rb src`
+   - Total `T.untyped`: 2388
+   - Param slots with `T.untyped`: 1581
+   - Return slots with `T.untyped`: 520
+   - Struct/ivar slots with `T.untyped`: 19
+4. Focused coverage:
+   - `COVERAGE=1 COVERAGE_DIR=/tmp/rawzig_cov bundle exec rspec spec/architecture_invariants_spec.rb spec/diagnostic_registry_spec.rb spec/mir_emitter_spec.rb spec/fsm_wrapper_emitter_spec.rb spec/boobytrap_method_coverage_spec.rb spec/mir_checker_spec.rb spec/mir_gap_burn_spec.rb spec/mir_lowering_spec.rb spec/fsm_suspend_resolvers_spec.rb spec/pipeline_legacy_matrix_spec.rb`
+   - Result: 684 examples, 0 failures.
+   - Added executable source lines: 78/78 covered.
+   - Added-line branch arms: 56/56 covered.
+
+The acceptance gates passed: decomplex counts are all less than or equal to the
+baseline, untyped param/return/ivar slots are all less than or equal to the
+baseline, and new executable source coverage is complete.
 
 ### 1. Add A Static Token Gate
 

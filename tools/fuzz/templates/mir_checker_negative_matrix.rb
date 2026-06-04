@@ -44,7 +44,6 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :allocating_let_without_alloc, error_code: :ALLOCATING_LET_WITHOUT_ALLOC },
   { case_name: :cleanup_for_borrow_field, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
   { case_name: :cleanup_for_borrow_index, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
-  { case_name: :raw_zig_no_contract, error_code: :RAW_NO_CONTRACT },
   { case_name: :frame_field_store_escape, error_code: :FRAME_ALLOC_ESCAPES },
   { case_name: :frame_capture_escape, error_code: :FRAME_ALLOC_ESCAPES },
   { case_name: :frame_aggregate_escape, error_code: :FRAME_ALLOC_ESCAPES },
@@ -343,12 +342,6 @@ def mir_checker_negative_case(case_name)
         alloc_mark("x", :heap),
         MIR::Let.new("x", MIR::IndexGet.new(MIR::Ident.new("owner"), MIR::Lit.new("0")), false, nil, nil),
         MIR::Cleanup.new("x", cleanup(:heap, false)),
-      ]
-    RUBY
-  when :raw_zig_no_contract
-    <<~RUBY
-      [
-        MIR::ExprStmt.new(MIR::RawZig.new("CheatLib.dupeValue(T, x, alloc)", "opaque_ownership", MIR::OwnershipContract.empty, nil), false),
       ]
     RUBY
   when :frame_field_store_escape

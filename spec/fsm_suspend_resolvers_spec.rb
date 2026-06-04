@@ -156,7 +156,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.result_var).to eq("x")
     end
 
-    it "binds NEXT results with structured MIR instead of RawZig" do
+    it "binds NEXT results with structured MIR" do
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], next_tail_with_var),
         ctx, lowering, susp_idx: 1)
@@ -164,7 +164,6 @@ RSpec.describe FsmTransform::SuspendResolvers do
         an_instance_of(MIR::Let),
         an_instance_of(MIR::Set),
       )
-      expect(d.bind_stmts).not_to include(an_instance_of(MIR::RawZig))
       expect(d.bind_stmts.first.init).to be_a(MIR::TryCatch)
       expect(d.bind_stmts.first.init.expr).to be_a(MIR::MethodCall)
       expect(d.bind_stmts.first.init.expr.method).to eq("finishFsmNext")

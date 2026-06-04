@@ -57,6 +57,7 @@ class MIREmitter
     when MIR::UnionTypeDef then emit_union_def(node)
     when MIR::Import      then emit_import(node)
     when MIR::TypeAlias   then emit_type_alias(node)
+    when MIR::ModuleNamespace then emit_module_namespace(node)
     when MIR::TestDef     then emit_test_def(node)
 
     # --- Statements ---
@@ -89,7 +90,6 @@ class MIREmitter
     when MIR::DiscardOwned     then emit_discard_owned(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
-    when MIR::RawZig           then node.code
     when MIR::BgBlock          then node.code
     when MIR::DoBlock          then node.code
     when MIR::CatchWrapper     then node.code
@@ -246,7 +246,7 @@ class MIREmitter
     pattern
   end
 
-  # RawBc is the :bc-target sibling of RawZig. Nothing in current lowering
+  # RawBc is the :bc-target bytecode-template carrier. Nothing in current lowering
   # emits it (Phase 0 scaffolding only). If a :bc lowering path ever feeds
   # a RawBc into a Zig-producing step, fall back to the :zig field of the
   # registry entry so emission completes. Registry entries that reach Zig
@@ -406,14 +406,13 @@ class MIREmitter
     case last
     when MIR::ReturnStmt
       true
-    when MIR::RawZig
-      last.code.to_s.include?("return;") || last.code.to_s.include?("return ")
     when MIR::ScopeBlock
       flow_body_terminates?(last.body || [])
     when MIR::IfStmt
-      flow_body_terminates?(last.then_body || []) &&
-        last.else_body && !last.else_body.empty? &&
-        flow_body_terminates?(last.else_body || [])
+      return false unless flow_body_terminates?(last.then_body || [])
+      return false unless last.else_body && !last.else_body.empty?
+
+      flow_body_terminates?(last.else_body || [])
     else
       false
     end
@@ -595,6 +594,12 @@ class MIREmitter
   sig { params(node: MIR::TypeAlias).returns(String) }
   def emit_type_alias(node)
     "const #{node.name} = #{node.target};"
+  end
+
+  sig { params(node: MIR::ModuleNamespace).returns(String) }
+  def emit_module_namespace(node)
+    body = emit_body(node.items || [])
+    "const #{node.name} = struct {\n#{indent_block(body, 4)}\n};"
   end
 
   sig { params(node: MIR::TestDef).returns(String) }

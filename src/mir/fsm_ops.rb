@@ -373,7 +373,7 @@ module FsmOps
   # Sibling of Emitter. Emitter produces Zig text (legacy path);
   # Lowerer produces typed MIR nodes that the wrapper renders via
   # MIREmitter. The structural goal: every FSM body fragment is a
-  # real MIR statement, not a RawZig blob carrying Zig text.
+  # real MIR statement, not an opaque blob carrying Zig text.
   #
   # Constructor takes the same context as Emitter:
   #   ctx_id     Integer — for __ctx_<id>.X field references

@@ -240,6 +240,24 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("const json = @import(\"std\").json;")
   end
 
+  it "emits structural module namespaces" do
+    node = MIR::ModuleNamespace.new("helper", [
+      MIR::FnDef.new(
+        "answer",
+        [],
+        "i64",
+        [MIR::ReturnStmt.new(MIR::Lit.new("42"))],
+        :pub, false, nil
+      ),
+    ])
+
+    zig = e.emit(node)
+
+    expect(zig).to include("const helper = struct {")
+    expect(zig).to include("    pub fn answer() i64")
+    expect(zig).to include("    return 42;")
+  end
+
   it "emits type alias" do
     node = MIR::TypeAlias.new("Alloc", "std.mem.Allocator")
     expect(e.emit(node)).to eq("const Alloc = std.mem.Allocator;")
@@ -656,12 +674,12 @@ RSpec.describe MIREmitter do
   # =========================================================================
 
   it "emits defer with simple statement" do
-    node = MIR::DeferStmt.new(MIR::RawZig.new("allocator.free(buf)", "cleanup"))
+    node = MIR::DeferStmt.new("allocator.free(buf)")
     expect(e.emit(node)).to eq("defer allocator.free(buf);")
   end
 
   it "emits errdefer" do
-    node = MIR::ErrDeferStmt.new(MIR::RawZig.new("allocator.free(buf)", "cleanup"))
+    node = MIR::ErrDeferStmt.new("allocator.free(buf)")
     expect(e.emit(node)).to eq("errdefer allocator.free(buf);")
   end
 
@@ -680,13 +698,8 @@ RSpec.describe MIREmitter do
   end
 
   # =========================================================================
-  # RawZig and Noop
+  # Noop
   # =========================================================================
-
-  it "emits raw Zig" do
-    node = MIR::RawZig.new("@setEvalBranchQuota(100000);", "prologue")
-    expect(e.emit(node)).to eq("@setEvalBranchQuota(100000);")
-  end
 
   it "emits nil for Noop" do
     expect(e.emit(MIR::Noop.new("placeholder"))).to be_nil
@@ -860,7 +873,7 @@ RSpec.describe MIREmitter do
     end
 
     it "covers polymorphic flow termination helpers" do
-      expect(e.send(:flow_body_terminates?, [MIR::RawZig.new("return value;", "ret")])).to be true
+      expect(e.send(:flow_body_terminates?, [MIR::ReturnStmt.new(MIR::Ident.new("value"))])).to be true
       expect(e.send(:flow_body_terminates?, [
         MIR::ScopeBlock.new([MIR::ReturnStmt.new(nil)]),
       ])).to be true
@@ -871,9 +884,23 @@ RSpec.describe MIREmitter do
         MIR::IfStmt.new(
           MIR::Ident.new("cond"),
           [MIR::ReturnStmt.new(nil)],
-          [MIR::RawZig.new("return;", "ret")],
+          [MIR::ReturnStmt.new(nil)],
         ),
       ])).to be true
+      expect(e.send(:flow_body_terminates?, [
+        MIR::IfStmt.new(
+          MIR::Ident.new("cond"),
+          [MIR::ExprStmt.new(MIR::Call.new("tick", [], false), false)],
+          [MIR::ReturnStmt.new(nil)],
+        ),
+      ])).to be false
+      expect(e.send(:flow_body_terminates?, [
+        MIR::IfStmt.new(
+          MIR::Ident.new("cond"),
+          [MIR::ReturnStmt.new(nil)],
+          [],
+        ),
+      ])).to be false
     end
 
     it "wraps snapshot conflicts with retry loops" do

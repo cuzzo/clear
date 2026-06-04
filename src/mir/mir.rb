@@ -352,6 +352,16 @@ module MIR
     end
   end
 
+  module NamedEmittable
+      extend T::Sig
+      extend T::Helpers
+
+    interface!
+
+    sig { abstract.returns(T.any(String, Symbol)) }
+    def name; end
+  end
+
   module Stmt
       extend T::Sig
 
@@ -663,6 +673,7 @@ module MIR
   # Struct type definition.
   # Zig: const Name = struct { fields; methods };
   StructDef = Struct.new(:name, :fields, :methods, :visibility) do
+    include NamedEmittable
     include Stmt
   end
 
@@ -683,12 +694,14 @@ module MIR
   # Enum type definition.
   # Zig: const Name = enum { A, B, C };
   EnumDef = Struct.new(:name, :variants, :visibility) do
+    include NamedEmittable
     include Stmt
   end
 
   # Tagged union type definition.
   # Zig: const Name = union(enum) { A: type, B: void };
   UnionTypeDef = Struct.new(:name, :variants, :visibility) do
+    include NamedEmittable
     include Stmt
     # variants: [{ name: String, zig_type: String }]
     # unit variants have zig_type "void"
@@ -703,7 +716,20 @@ module MIR
   # Type alias.
   # Zig: const Name = target;
   TypeAlias = Struct.new(:name, :target) do
+    include NamedEmittable
     include Stmt
+  end
+
+  # Inline module namespace for local/stdlib REQUIRE.
+  # Zig: const Name = struct { ... };
+  # The body is structural MIR, not pre-rendered Zig text, so imported function
+  # bodies remain visible to traversal/checker/emitter code.
+  ModuleNamespace = Struct.new(:name, :items) do
+    extend T::Sig
+    include Stmt
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs(items || [])
   end
 
   # Test block.
@@ -1026,7 +1052,7 @@ module MIR
   DeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    # body: single MIR stmt, or a RawZig for inline defer
+    # body: single MIR stmt, or a plain string for transitional inline defer
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
@@ -1071,75 +1097,10 @@ module MIR
     def child_exprs = compact_child_exprs([expr])
   end
 
-  # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
-  # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
-  #
-  # WARNING: RawZig BYPASSES ownership verification. The MIR checker cannot
-  # see inside raw Zig code. Any allocation, deallocation, or ownership
-  # transfer inside a RawZig block is INVISIBLE to the checker.
-  #
-  # SAFETY RULES:
-  #   - NEVER allocate heap memory inside RawZig without a matching
-  #     MIR::AllocMark + MIR::Cleanup outside it (leak).
-  #   - NEVER free/deinit a binding inside RawZig that has a Cleanup
-  #     outside it (double-free).
-  #   - NEVER move ownership of a binding into RawZig without a
-  #     MIR::MoveMark + guarded Cleanup outside it (double-free or leak).
-  #   - NEVER return a frame-allocated value from RawZig without
-  #     MIR::EscapePromote outside it (use-after-free).
-  #   - ALWAYS declare ownership_contract so the checker can cross-reference.
-  #
-  # ownership_contract: MIR::OwnershipContract
-  #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
-  #   produces: bindings the raw block creates (must have MIR::AllocMark + MIR::Drop)
-  #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
-  RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
-    extend T::Sig
-    include Stmt
-
-    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped).void }
-    def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil)
-      super(code, reason, ownership_contract, stdlib_def)
-    end
-
-    sig { params(contract: OwnershipContract).returns(OwnershipContract) }
-    def ownership_contract=(contract)
-      self[:ownership_contract] = contract
-    end
-
-    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
-    def []=(key, value)
-      validate_ownership_contract!(value) if key == :ownership_contract || key == 2
-      super
-    end
-
-    sig { returns(T::Boolean) }
-    def expr?; true; end  # can appear in expression position too
-
-    sig { returns(OwnershipContract) }
-    def explicit_ownership_contract
-      ownership_contract
-    end
-
-    sig { returns(RawZig) }
-    def without_try
-      RawZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def)
-    end
-
-    private
-
-    sig { params(value: T.untyped).void }
-    def validate_ownership_contract!(value)
-      return if value.is_a?(OwnershipContract)
-
-      raise TypeError, "ownership_contract must be MIR::OwnershipContract"
-    end
-  end
-
   # Non-mutual THUNK trampoline body. This is still emitted as a local
   # synchronous frame machine, but the MIR now exposes the frame layout,
   # base cases, recursive step, combine op, and yield policy instead of
-  # hiding the entire function body in RawZig.
+  # hiding the entire function body in opaque Zig text.
   ThunkTrampoline = Struct.new(
     :fn_name,
     :ret_zig,
@@ -1531,9 +1492,9 @@ module MIR
   #
   # `body_stmts` is a list of MIR statement nodes (or plain Strings
   # as a transitional escape hatch). The wrapper renderer uses the
-  # standard MIREmitter to walk each one, so all MIR statement
-  # types -- MIR::Let, MIR::Set, MIR::DeferStmt, MIR::RawZig,
-  # MIR::ExprStmt, etc. -- are valid here. Plain strings are
+  # standard MIREmitter to walk each one, so structural MIR statement
+  # types such as MIR::Let, MIR::Set, MIR::DeferStmt, and MIR::ExprStmt
+  # are valid here. Plain strings are
   # accepted because MIREmitter.emit handles them as a base case;
   # they exist so the lowering can pass through Zig text from the
   # surrounding fiber-body lowering without a forced wrap.
@@ -3287,7 +3248,7 @@ module MIR
   end
 
   # Pipeline IR node. Wraps the pre-computed MIR output of a |> chain.
-  # Phase 1: inner carries old-path MIR (RawZig or MIR tree); all other fields nil.
+  # Phase 1: inner carries old-path MIR; all other fields nil.
   # Future phases: source_type, stages, sink, sink_alloc encode streaming structure.
   #
   # ast_node:    original |> BinaryOp AST node
@@ -3333,7 +3294,7 @@ module MIR
   #   - NEVER call a function that frees memory without a corresponding
   #     MIR::Cleanup marker outside the InlineZig.
   #   - NEVER embed multi-statement code -- InlineZig is for expressions only.
-  #     Use RawZig (with ownership_contract) for statement-level escape hatches.
+  #     Statement-level opaque Zig is not a valid MIR surface.
   #   - All CheatLib.* calls MUST go through BUILTIN_OPS or STD_LIB registries,
   #     not be emitted as raw InlineZig strings.
   #   - Pure expressions (casts, ranges, field access, Zig builtins) are safe
@@ -3550,11 +3511,9 @@ module MIR
     def child_exprs = compact_child_exprs([message])
   end
 
-  # Raw bytecode. Sibling to RawZig for the :bc target. Nothing in
+  # Raw bytecode. Bytecode-template carrier for the :bc target. Nothing in
   # mir_lowering emits this yet — Phase 0 scaffolding only (see
-  # examples/minivm/MIR_MIGRATION.md). Phase 3 will start emitting it
-  # by target-aware rewriting of RawZig sites that have a :bc_raw
-  # registry mapping.
+  # examples/minivm/MIR_MIGRATION.md).
   #
   # template: Array of Symbol | String | Array. bc_emitter walks the
   #   template: a Symbol is an opcode name (emit_op(OPCODE)), a String
@@ -3565,10 +3524,9 @@ module MIR
   # stdlib_def: the registry hash the template came from (ownership
   #   semantics so the checker can reason about it).
   #
-  # Same invisibility rule as RawZig applies: the checker cannot see
-  # inside the template. When Phase 3 lands, every bc_raw template should
-  # come from a registry entry whose ownership effects are declared in
-  # stdlib_def, making INV-5 enforceable uniformly.
+  # The checker cannot see inside the template. When this is used, every
+  # template should come from a registry entry whose ownership effects are
+  # declared in stdlib_def, making INV-5 enforceable uniformly.
   RawBc = Struct.new(:template, :args, :stdlib_def) do
     extend T::Sig
     include Stmt
@@ -3663,7 +3621,7 @@ module MIR
       T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
     end
   end
-  [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
+  [InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
     k.prepend(StdlibDefFsCoercion)
   end
 
@@ -3684,7 +3642,7 @@ module MIR
     AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
     ReassignMark, FieldCleanupMark, ReassignWithCleanup,
     *LEGACY_OWNERSHIP_NODE_TYPES,
-    ReturnMark, DiscardOwned, RawZig, InlineZig,
+    ReturnMark, DiscardOwned, InlineZig,
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,

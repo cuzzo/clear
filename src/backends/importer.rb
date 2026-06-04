@@ -19,7 +19,8 @@ class ModuleImporter
     :union_schemas,   # transpiler's @union_schemas for MATCH dispatch
     :enum_schemas,    # transpiler's @enum_schemas for MATCH dispatch
     :type_defs,       # Zig type definitions (structs/unions/enums) for file-scope emission
-    :mir_items        # full MIR items list, including FnDef bodies, for the bc emitter
+    :mir_items,       # full MIR items list, including FnDef bodies, for the bc emitter
+    :type_items       # structural MIR type items for REQUIRE inlining
   )
 
   # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
@@ -238,7 +239,8 @@ class ModuleImporter
       union_schemas,
       enum_schemas,
       type_defs,
-      result[:items]
+      result[:items],
+      result[:type_items]
     )
   end
 

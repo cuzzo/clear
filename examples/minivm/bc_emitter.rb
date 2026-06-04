@@ -3,7 +3,7 @@
 #
 # Receives a MIR::Program (post-MIRChecker) + CompilerFrontend::Result.
 # Uses MIR::Let.annotation for accurate slot types (avoids AST heuristics).
-# Falls back to AST nodes for Zig-specific leaves (InlineZig/RawZig) via a
+# Falls back to AST nodes for Zig-specific leaves (InlineZig) via a
 # parallel walk of MIR body and the original annotated AST body.
 #
 # Only compiles main/cheatMain. Non-main functions raise Unimplemented.
@@ -922,7 +922,7 @@ class BcEmitter
     @current_ast_stmt = ast_node
     case mir_node
     when MIR::Let
-      if mir_node.init.is_a?(MIR::InlineZig) || mir_node.init.is_a?(MIR::RawZig)
+      if mir_node.init.is_a?(MIR::InlineZig)
         # Recognized InlineZig reasons (e.g. bounded_concurrent_ctx_cast)
         # are dispatched in compile_expr's InlineZig handler, which raises
         # for unrecognized reasons. Letting these flow through compile_let
@@ -932,7 +932,7 @@ class BcEmitter
            mir_node.init.reason.to_s == "bounded_concurrent_ctx_cast"
           compile_let(mir_node)
         else
-          raise Unimplemented, "InlineZig/RawZig init not supported in VM path"
+          raise Unimplemented, "InlineZig init not supported in VM path"
         end
       else
         compile_let(mir_node)
@@ -1280,8 +1280,6 @@ class BcEmitter
       else
         raise Unimplemented, "InlineZig not supported in VM path"
       end
-    when MIR::RawZig
-      raise Unimplemented, "RawZig not supported in VM path"
     when MIR::BgBlock
       # Expression-position handler does the real work (emit deferred body
       # + BG_SPAWN). At stmt position we just evaluate and discard.
@@ -1367,9 +1365,9 @@ class BcEmitter
       compile_call_expr(expr)
     when MIR::MethodCall
       compile_method_call_expr(expr)
-    when MIR::InlineZig, MIR::RawZig
+    when MIR::InlineZig
       # Reason-based no-ops: OR EXIT writes rt.__error.{kind,error_name,
-      # message,clear_line} via RawZig; the VM has no rt struct, the error
+      # message,clear_line}; the VM has no rt struct, the error
       # sentinel carries kind+message directly via RAISE_ERR. These field
       # assigns are dead in BC mode.
       reason = expr.respond_to?(:reason) ? expr.reason.to_s : ""
@@ -2768,9 +2766,7 @@ class BcEmitter
         end
         push_type(:any); return
       end
-      raise Unimplemented, "InlineZig/RawZig in expression position (no bc template in stdlib)"
-    when MIR::RawZig
-      raise Unimplemented, "InlineZig/RawZig in expression position (no bc template in stdlib)"
+      raise Unimplemented, "InlineZig in expression position (no bc template in stdlib)"
     when MIR::InlineBc
       compile_inline_bc(node)
     when MIR::OrExitBcRewrite
@@ -2839,8 +2835,8 @@ class BcEmitter
     when MIR::Pipeline
       # Migrated pipeline operators produce a real MIR tree via
       # pipeline_host.lower_pipeline — compile that directly. Legacy operators
-      # leave inner as MIR::RawZig which the VM can't compile; the inner
-      # RawZig dispatch raises with a better error than a silent passthrough.
+      # leave unsupported inner MIR which the VM can't compile; the inner
+      # dispatch raises with a better error than a silent passthrough.
       compile_expr(node.inner)
     when MIR::BgBlock
       # Phase 1: emit the body as a separate bytecode chunk with its own
@@ -3160,8 +3156,7 @@ class BcEmitter
 
   # MIR::RawBc: template-driven multi-opcode emission. Unlike InlineBc
   # (which dispatches on op name via compile_inline_bc's case statement),
-  # RawBc carries the opcode sequence inline as a template array — same
-  # structural role as RawZig on the Zig side.
+  # RawBc carries the opcode sequence inline as a template array.
   #
   # Template element forms:
   #   Symbol              -> emit_op(OPCODE) with no immediate args.
@@ -4836,18 +4831,10 @@ class BcEmitter
     emit_op(STORE_SLOT, @slots["snapshot"])
   end
 
-  # Detect the OR EXIT catch_body shape produced by lower_orelse:
-  #   ScopeBlock([
-  #     ExprStmt(RawZig("rt.__error.kind = .X", "or_exit_kind")),
-  #     ExprStmt(RawZig("rt.__error.error_name = ...", "or_exit_type"|"or_exit_clear_type")),
-  #     ExprStmt(RawZig("rt.__error.message = ...", "or_exit_msg")),         (optional)
-  #     ExprStmt(RawZig("rt.__error.clear_line = N", "or_exit_line")),
-  #     ReturnStmt(Ident("__exit_err"))
-  #   ])
   # OR EXIT structural rewrite in expression position. The normal
   # `call OR EXIT ...` lowering is handled by compile_or_exit_catch_body;
   # this typed node keeps expression-position lowering independent from
-  # RawZig pattern matching.
+  # Zig text pattern matching.
   def compile_or_exit_bc_rewrite(node)
     emit_op(PUSH_ERR)
     emit_or_exit_rewrite_fields(node)
@@ -4898,51 +4885,17 @@ class BcEmitter
     last = stmts.last
     return false unless last.is_a?(MIR::ReturnStmt)
     rewrites = []
-    rawzigs = []
     stmts[0...-1].each do |s|
       return false unless s.is_a?(MIR::ExprStmt)
       if s.expr.is_a?(MIR::OrExitBcRewrite)
         rewrites << s.expr
-      elsif s.expr.is_a?(MIR::RawZig)
-        rawzigs << s.expr
       else
         return false
       end
     end
-    return false unless rawzigs.all? { |rz| rz.reason.to_s.start_with?("or_exit_") }
     # Load the error sentinel and mutate fields in-place.
     emit_op(LOAD_SLOT, @slots[tmp])
     rewrites.each { |rewrite| emit_or_exit_rewrite_fields(rewrite) }
-    rawzigs.each do |rz|
-      case rz.reason.to_s
-      when "or_exit_kind", "or_exit_kind_from_type"
-        if (m = rz.code.to_s.match(/__error\.kind = \.(\w+)/))
-          emit_op(LOAD_CONST, add_const([:str, m[1]]))
-          emit_op(ERR_SET_KIND)
-        end
-      when "or_exit_type"
-        if (m = rz.code.to_s.match(/ErrorName\.(\w+)/))
-          emit_op(LOAD_CONST, add_const([:str, m[1]]))
-          emit_op(ERR_SET_TYPE)
-        end
-      when "or_exit_clear_type"
-        emit_op(LOAD_CONST, add_const([:str, ""]))
-        emit_op(ERR_SET_TYPE)
-      when "or_exit_msg"
-        # The Zig source reads `rt.__error.message = <expr>`. The expr
-        # was an emit_expr of a lowered string literal — typically a
-        # quoted string. Extract via a permissive regex.
-        if (m = rz.code.to_s.match(/__error\.message\s*=\s*(.+)\z/m))
-          src = m[1].strip
-          if src =~ /\A"(.*)"\z/m
-            emit_op(LOAD_CONST, add_const([:str, $1]))
-            emit_op(ERR_SET_MSG)
-          end
-        end
-      when "or_exit_line"
-        # No-op for BC; we don't track source line on the error sentinel.
-      end
-    end
     # Store mutated error back to tmp, then BC_RET it (the catch_body's
     # ReturnStmt expects __exit_err which we already bound at the slot).
     emit_op(STORE_SLOT, @slots[tmp])

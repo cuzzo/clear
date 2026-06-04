@@ -149,7 +149,7 @@ module FsmLowering
           # the call expression's inner errors stay as anyerror!T
           # values stored in the result field). Both branches now
           # emit MIR::Set against the same typed target -- no
-          # RawZig in the FSM-IO post-result line.
+          # opaque Zig text in the FSM-IO post-result line.
           ctx_ident = MIR::Ident.new("__ctx_#{ctx_id}")
           target = MIR::FieldGet.new(
             MIR::FieldGet.new(ctx_ident, "inner"),
