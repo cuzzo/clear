@@ -6,7 +6,7 @@ This is my attempt to give it the praise it deserves, and the hope that I can he
 
 ## Why Is SQL Magic
 
-The cool kids in programming tend to cluster toward functional programming langauges.
+The cool kids in programming tend to cluster toward functional programming languages.
 
 They know that all the problems in software stem from **state** and **control flow**.
 
@@ -127,6 +127,30 @@ The problem is actually pretty constrained.  It *mainly* only impacts double neg
 
 This is not hard!  But it is *very* easily forgotten and *very* unintuitive for most people.
 
+It also impacts `IN`, `NOT IN`, `ANY`, and `ALL` in mysterious ways:
+
+```sql
+-- IN
+3 IN (1, 2, 3)     -- TRUE
+3 IN (1, 2)        -- FALSE
+3 IN (1, 2, NULL)  -- UNKNOWN (you probably expect false)!
+
+-- NOT IN
+2 NOT IN (1, 3)        -- TRUE
+2 NOT IN (1, 2, NULL)  -- FALSE
+3 NOT IN (1, 2, NULL)  -- UNKNOWN (you probably expect false)!
+
+-- ANY
+2 = ANY (ARRAY[1, 2, NULL]) -- TRUE
+3 = ANY (ARRAY[1, 2])       -- FALSE
+3 = ANY (ARRAY[1, 2, NULL]) -- UNKNOWN (you probably expect false)!
+
+-- ALL
+2 = ALL (ARRAY[2, 2])        -- TRUE
+2 = ALL (ARRAY[2, 3])        -- FALSE
+2 = ALL (ARRAY[2, 2, NULL])  -- UNKNOWN (you probably expect false)!
+```
+
 If you take the time to *get* that, you can work magic with SQL.  You can write bug-free concurrent, highly-efficient, multi-object consistent code to solve any problem you *don't* need explicit control flow for...
 
 It turns out, that's a lot of problems!  And it also turns out that efficient, bug-free, multi-object consistency is *extraordinarily* difficult to roll-it yourself.
@@ -134,5 +158,5 @@ It turns out, that's a lot of problems!  And it also turns out that efficient, b
 And even for the class of problem that *does* require control-flow, you can write User-Defined Functions (UDFs) to do the inherently bug-prone parts - which is typically far easier than the part SQL handles for you.
 
 > [!NOTE]
-> See [What Even Is Complexity Anyway?](what-even-is-complexity-anyway.md) to learn more about why state & control flow are the source of most problems in programming, and what you can do about it - besides trying to shoe-horn all your probems into SQL.
+> See [What Even Is Complexity Anyway?](what-even-is-complexity-anyway.md) to learn more about why state & control flow are the source of most problems in programming, and what you can do about it - besides trying to shoe-horn all your problems into SQL.
 
