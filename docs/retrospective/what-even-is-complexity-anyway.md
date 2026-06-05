@@ -36,7 +36,7 @@ They take inputs and produce outputs:
 FN add(x, y) -> RETURN x + y;
 ```
 
-State is often created, read, or mutated through the side effects of an impure function:
+State is often created, read, or mutated through the *side effects* of an impure function:
 
 ```ruby clear illustrative
 GLOBAL = 0
@@ -115,11 +115,11 @@ Wrong.
 
 A state machine is a fundamental mathematical reality. It consists of three things:
 
- * **States:** A finite set of conditions the system can be in (e.g., EmptyCart, ValidatedUser, Paid).
- * **Inputs/Events:** Actions that trigger a change (e.g., setCart(), processPayment()).
+ * **States:** A finite set of conditions the system can be in (e.g., `EmptyCart`, `ValidatedUser`, `Paid`).
+ * **Inputs/Events:** Actions that trigger a change (e.g., `setCart()`, `processPayment()`).
  * **Transitions:** Rules that explicitly say, "If I am in State A, and Event X happens, I move to State B. If Event Y happens, throw an error."
 
-State itself is particularly tricky. Most of the state an application creates is implicit / invisible.
+State itself is particularly tricky. Most of the state an application creates is *implicit* / invisible.
 
 State can be stored directly on an object, like: `isValid`
 
@@ -129,7 +129,7 @@ But state is often created on the fly:
 IF user.name != "" THEN ... END
 ```
 
-The above is control flow.  You used a value to make a decision (whether the user.name is not empty).  This is an “unnamed state”.  You don’t need a variable: `stateUserIsNamed` to have state.  You just need to make a decision on a value that changes over time.
+The above is control flow.  You used a value to make a decision (whether the `user.name` is not empty).  This is an "**unnamed state**".  You don’t need a variable: `stateUserIsNamed` to have state.  You just need to make a **decision** on a value that **changes over time**.
 
 Any value that can change over time is state. But a value that changes over time AND effects control flow, is typically the most problematic.
 
@@ -160,7 +160,9 @@ The effects are different than:
 powerUp() -> heal()
 ```
 
-Only one of these may be correct.  But how do we know?
+Only one of these may be correct.  But how do we know?  A lot of times you don't, until someone does something in the wrong order.
+
+The problem with these types of bugs is that as applications grow in complexity exponentially, it becomes easier for these bugs to go undetected.
 
 ## We’ve all seen bad code before:
 
@@ -351,7 +353,7 @@ The solution is: is there a way to identify what is bad and how to fix it easily
 
 What can save you is, shockingly, what Bjarne suggested: don’t get yourself into the mess in the first place.
 
-The best defense is a good offense.  The best thing that can save you is to stay AHEAD of the mess not behind it.  So measure it and stay ahead of it.
+The best defense is a good offense.  The best thing that can save you is to stay AHEAD of the mess, not behind it.  So measure it and stay ahead of it.
 
 Why is staying ahead of it so important?  Because software complexity tends to grow exponentially.  It doesn’t take too long of falling behind before you’re completely under water.
 
@@ -454,13 +456,13 @@ And wouldn’t that be great?  Your software would be half as complicated.  The 
  * 60-70% design
  * 40-30% language / framework
 
-Clojure does its best to minimize surface area for the language to give you headaches.  But so do a lot of other languages.
+Clojure does its best to minimize surface area for the language to give you headaches.  It can help you sleep at night knowing that you won't have some classes of bugs, and that you'd have had to go out of your way to encounter others.  That *IS* very valuable.  But a lot of others provide similar benefits:
 
  * Go is probably somewhere in the middle
  * Rust is probably somewhere near the ideal
  * C is probably somewhere near the un-ideal
 
-But, the reality is, the harder the language is, typically the engineers are better at it - survivorship bias, etc.  You’re not going to make it very far as a C engineer if you throw up your hands and slam your head into a brick wall every time you segfault…
+But, the reality is, the harder the language is, typically the engineers are better at it - survivorship bias, etc.  You’re not going to make it very far as a C engineer if you throw up your hands and slam your head into a brick wall every time you segfault...
 
 Yes, C makes your life harder. I’d argue it definitely makes your life more frustrating. It may slow you down more than Clojure or OCaml would.  But, typically, C engineers “figure it out enough” that the end result of what complexity looks like, tends to be the same:
 
@@ -468,6 +470,8 @@ Yes, C makes your life harder. I’d argue it definitely makes your life more fr
  * Less of it stems from particular languages or frameworks that you chose or inherited.
 
 Outliers obviously exist.
+
+At scale, the problem *tends* to be design that *causes* bugs, not people who can't code individual functions.
 
 ## In Closing
 
@@ -490,3 +494,5 @@ You’re trading hireability and performance ceiling for a little velocity - mos
 If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OCaml may be perfect for your project.
 
 But they’re not going to let you write a working version of Rust in a weekend.  Neither is using an LLM.
+
+Do yourself a favor, and measure complexity and stay ahead of it, regardless what language you choose - *especially* if you're using LLMs.
