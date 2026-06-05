@@ -372,7 +372,7 @@ The solution is an intelligent, prioritized triage - based on measures of comple
 
 Do not waste time refactoring a highly complex class if it hasn't been modified in three years and causes zero production issues. Leave it alone. It is a stable tumor.
 
-Instead, cross-reference your commit history with your complexity metrics. Look for files that have **high state-based branch counts**, **high state read/write counts (state & control flow)**, and ***high commit churn**. This intersection is *almost* always the nexus of your bad design. Target it.
+Instead, cross-reference your commit history with your complexity metrics. Look for files that have **high state-based branch counts**, **high state read/write counts (state & control flow)**, and **high commit churn**. This intersection is *almost* always the nexus of your bad design. Target it.
 
 Do not blindly use cyclomatic complexity. Cyclomatic complexity is easily cheated by *MOVING* complexity around, which does nothing. If you break half of a bad function up, turn it into two, you've arguably made something worse, not better.  If you take half of a bad class, and make it two bad classes, that's usually worse...
 
