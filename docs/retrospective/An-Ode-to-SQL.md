@@ -2,7 +2,7 @@
 
 A lot of developers seem to love to hate SQL.  I love to love it.  It's continuously made *very* hard problems in my life *extraordinarily* easy.  And I like things to be easy, so for that, I will forever be grateful to SQL.
 
-This is my attempt to give it the praise it deserves, and in hopes that I can help you realize its powers fully in the process.
+This is my attempt to give it the praise it deserves, and the hope that I can help you realize its powers fully in the process.
 
 ## Why Is SQL Magic
 
