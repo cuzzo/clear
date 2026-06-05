@@ -131,7 +131,7 @@ If you take the time to *get* that, you can work magic with SQL.  You can write 
 
 It turns out, that's a lot of problems!  And it also turns out that efficient, bug-free, multi-object consistency is *extraordinarily* difficult to roll-it yourself.
 
-And even for the ones you *can't*, you can write User-Defined Functions (UDFs) to do the inherently bug-prone parts.
+And even for the class of problem that *does* require control-flow, you can write User-Defined Functions (UDFs) to do the inherently bug-prone parts - which is typically far easier than the part SQL handles for you.
 
 > [!NOTE]
 > See [What Even Is Complexity Anyway?](what-even-is-complexity-anyway.md) to learn more about why state & control flow are the source of most problems in programming, and what you can do about it - besides trying to shoe-horn all your probems into SQL.
