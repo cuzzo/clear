@@ -325,15 +325,6 @@ pub fn build(b: *std.Build) void {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
-    const expand_coverage_cmd = if (coverage)
-        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_expand_cobertura.rb", "zig-out/coverage/merged/kcov-merged/cobertura.xml" })
-    else
-        null;
-    if (expand_coverage_cmd) |e| {
-        e.stdio = .inherit;
-        e.setCwd(b.path("."));
-        e.step.dependOn(&merge_cmd.?.step);
-    }
     // Same shape as `merge_cmd`, but for the Loom-only coverage tree.
     const merge_cmd_loom = if (coverage_loom)
         b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-loom/merged" })
@@ -647,9 +638,7 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    if (expand_coverage_cmd) |e| {
-        test_step.dependOn(&e.step);
-    } else if (merge_cmd) |m| {
+    if (merge_cmd) |m| {
         test_step.dependOn(&m.step);
     }
     if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
