@@ -12,7 +12,7 @@ They know that all the problems in software stem from **state** and **control fl
 
 Pure functional languages technically forbid state (though in a Turing Complete language, you can always find a way to get around that).
 
-SQL on the other hand truthfully does not allow *you* to write state nor control flow.
+SQL on the other hand truthfully does not allow *you* to write state and *severly* limits your ability to write control flow.
 
 Thus, it allows you to write bug-free concurrent code that can be *nearly* as performant as optimized C code - almost effortlessly.
 
@@ -20,7 +20,7 @@ Thus, it allows you to write bug-free concurrent code that can be *nearly* as pe
 
 SQL's fatal flaw is mainly math... Or rather, its implementation of set arithmetic. In pure mathematics, sets are clean. In *most* databases, they are not - due to `NULL`s.
 
-Pure math handles empty sets beautifully, but SQL uses `NULL` and unfortunately makes things messy.  Why?  Because the real world is messy.  Observe:
+Pure math handles empty sets beautifully, but SQL has `NULL`, which unfortunately makes things messy.  Why?  Because the real world is messy.  Observe:
 
 ### Users Table
 
@@ -50,21 +50,25 @@ The answer to "Is an unknown value not equal to zero?" is `UNKNOWN (NULL)`.
 
 A `WHERE` clause passes rows only if the condition evaluates strictly to `TRUE`. So Charlie is quietly dropped. This is the simplest place where `NULL` makes mathematical sense under relational algebra, but it completely violates human intuition.
 
+You can't weasle your way out of needing `NULL`.  Rust has `Optional<T>`.  SQL has `NULL`.  The problem is: SQL's implementation can be unintuitive and that part is hidden.
+
 ## And It Gets Worse With JOINs!
 
 The moment `NULL` enters a `JOIN` clause, predicates drop rows silently because `UNKNOWN` behavior propagates like a virus through control flow.
 
-The intersection of `JOIN` control flow and ternary logic (`TRUE`, `FALSE`, `UNKNOWN` via `NULL`) creates massive, invisible state matrices. A `LEFT JOIN` introduces `NULL` values for unmatched rows on the fly. If a downstream `WHERE` clause or subsequent `JOIN` evaluates a condition against those dynamically generated `NULL`s, rows are dropped silently.
+The intersection of `JOIN`, control flow, and ternary logic (`TRUE`, `FALSE`, `UNKNOWN` via `NULL`) can create large, invisible state matrices. A `LEFT JOIN` introduces `NULL` values for unmatched rows on the fly. If a downstream `WHERE` clause or subsequent `JOIN` evaluates a condition against those dynamically generated `NULL`s, rows are dropped silently.
 
 Unless you train yourself, these `UNKNOWN`/`NULL` behaviors are *probably* unexpected, and thus likely to be buggy.
 
 SQL doesn't allow *you* to write control flow.  But it does it for you.  It has *hidden* control flow.  And, unfortunately, the part it hides is exactly the unintuitive part!
 
-It’s that the translation from a relational schema to a flat row-stream introduces hidden structural side effects.
+The translation from a relational schema to a flat row-stream introduces hidden structural side effects.
 
  * In a normal language, if you double the data, you write an explicit loop or an append to do so. 
  * In SQL, the syntax for a 1:1 relation and a 1:Many relation looks identical (`JOIN table ON id`). 
    * The code looks completely passive, but the execution engine is secretly performing data multiplication under the hood.
+ * In an ideal language like Rust, if a value can be Optional / `NULL`, you must explicitly handle it.
+   * In SQL it does something that is consistent, but hidden & unintuitive.
 
 ## What's a JOIN actually?
 
