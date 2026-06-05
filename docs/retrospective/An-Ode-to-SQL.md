@@ -44,7 +44,7 @@ You get only Alice...  What?!  You love this?  Are you crazy?
 
 An ordinary person expects to get Alice and Charlie.  After all, Charlie's bonus is not 0. But SQL uses Three-Value Logic (Ternary Logic). In SQL, `NULL` is not a value like 0 or an empty string. `NULL` represents an unknown absence of value.
 
-When the engine evaluates Charlie, it computes: `NULL != 0.`
+When the engine evaluates Charlie, it computes: `NULL != 0`,
 
 The answer to "Is an unknown value not equal to zero?" is `UNKNOWN (NULL)`.
 
