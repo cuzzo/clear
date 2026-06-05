@@ -137,7 +137,7 @@ It also impacts `NOT` via `NOT IN` `NOT ANY`, `NOT BETWEEN` in mysterious ways, 
 -- IN
 3 IN (1, 2, 3)     -- TRUE
 3 IN (1, 2)        -- FALSE
-3 IN (1, 2, NULL)  -- UNKNOWN (since it's not a double negative, this probablye works).
+3 IN (1, 2, NULL)  -- UNKNOWN (since it's not a double negative, this is probably expected).
 
 -- NOT IN
 2 NOT IN (1, 3)        -- TRUE
