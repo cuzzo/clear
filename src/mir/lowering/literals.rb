@@ -173,6 +173,7 @@ module MIRLoweringLiterals
 
   sig { params(inner: T.untyped, ti: Type, alloc: Symbol).returns(T.untyped) }
   def wrap_list_literal_capability(inner, ti, alloc)
+    T.bind(self, MIRLowering)
     return inner unless list_literal_capability_wrap_needed?(ti)
     compose_capability_wrap(inner, ti.bare_data_type.zig_type, ti, alloc)
   end
