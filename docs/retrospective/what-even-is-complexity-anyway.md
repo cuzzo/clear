@@ -140,7 +140,7 @@ CLASS Player
   Int64 health;
   Int64 healingPower;
   FN heal() -> health += healingPower; END
-  FN poweUp() -> healingPower = healingPower * 2;
+  FN powerUp() -> healingPower = healingPower * 2;
 END
 ```
 
@@ -251,7 +251,7 @@ No.
 
 In any Turing Complete language, you can write a piece of software in infinite ways.  The vast majority of those ways are absolutely terrible.
 
-Take the stateful player example - it translates perfectly to Lisp (or OCaml or any lanaguage):
+Take the stateful player example - it translates perfectly to Lisp (or OCaml or any language):
 
 ```lisp
 (defvar *initial-billing-state* #(nil nil nil nil nil))
@@ -356,7 +356,7 @@ But metrics *can* help:
  * If you’re going to make a change to make things better, you have acceptance criteria - not opinions and vibes.
  * If you measure complexity, you cannot do a “refactor” that makes the code worse - that's "enshittification".
 
-Metrics can help you prioritize the most complicated parts of the codebase to and your efforts to resolve them - see the end for details.
+Metrics can help you prioritize the most complicated parts of the codebase and your efforts to resolve them - see the end for details.
 
 If your codebase is a steaming pile of crap, the solution is not making leaf functions prettier.
 
@@ -376,7 +376,7 @@ Instead, cross-reference your commit history with your complexity metrics. Look 
 
 Do not blindly use cyclomatic complexity. Cyclomatic complexity is easily cheated by *MOVING* complexity around, which does nothing. If you break half of a bad function up, turn it into two, you've arguably made something worse, not better.  If you take half of a bad class, and make it two bad classes, that's usually worse...
 
-Cyclomatic complexity *without* a bunch of state based control flow is typically harmless. Fixing it is typically a low ROI beauty contest.
+Cyclomatic complexity *without* a bunch of state-based control flow is typically harmless. Fixing it is *typically* a low ROI beauty contest.
 
 ### Step 2: Quarantine the Macro-State Boundaries
 
