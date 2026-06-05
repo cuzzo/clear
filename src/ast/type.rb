@@ -590,8 +590,8 @@ class Type
 
   sig { params(t_left: Symbol, t_right: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
-    lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
-    rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
+    lt = Type.new(t_left)
+    rt = Type.new(t_right)
 
     # A. Numeric addition (all int/float types)
     if lt.numeric? && rt.numeric?
@@ -615,9 +615,8 @@ class Type
 
   sig { params(from_type: Symbol, to_type: Symbol).returns(T::Boolean) }
   def self.safe_autocast?(from_type, to_type)
-    return false if false
-    from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
-    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
+    from_t = Type.new(from_type)
+    to_t   = Type.new(to_type)
     return false if from_t.fn_type? || to_t.fn_type?
     # Any numeric -> any numeric (implicit promotion/narrowing handled by Zig casts)
     return true if from_t.numeric? && to_t.numeric?

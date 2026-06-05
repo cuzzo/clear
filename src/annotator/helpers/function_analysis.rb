@@ -355,10 +355,7 @@ module FunctionAnalysis
         # Use .remove(i) or COPY arr[i] instead.
         if borrowed_takes_argument?(inner_node)
           arg_ti = inner_node.full_type!(context: "TAKES index argument")
-          arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
-          is_copy = arg_ti.is_a?(Type) ?
-            (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
-            true
+          is_copy = arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) }
           unless is_copy
             if inner_node.is_a?(AST::GetIndex)
               error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
@@ -581,7 +578,6 @@ module FunctionAnalysis
   sig { params(arg_node: AST::Identifier).returns(T::Boolean) }
   def atomic_cell_arg?(arg_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     !!(sym&.atomic? && !sym.indirect?)
   end
@@ -930,7 +926,7 @@ module FunctionAnalysis
 
     # Union variant constructors (Value.Nil, Shape.Point) create new values, not borrows.
     if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
-      schema = lookup_type_schema(node.target.name.to_sym) rescue nil
+      schema = lookup_type_schema(node.target.name.to_sym)
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
@@ -938,7 +934,7 @@ module FunctionAnalysis
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]
-    schema_resolver = ->(t) { lookup_type_schema(t) rescue nil }
+    schema_resolver = ->(t) { lookup_type_schema(t) }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
     fn_type_params = current_fn_ctx&.type_params || []
     is_type_param = fn_type_params.include?(type_info&.resolved)

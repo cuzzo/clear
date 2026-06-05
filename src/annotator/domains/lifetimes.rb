@@ -27,8 +27,8 @@ module Annotator
           is_resource = info&.resource
         end
 
-        is_copy = ti&.implicitly_copyable? { |t| lookup_type_schema(t) } rescue false
-        unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource || !is_copy
+        is_copy = ti.implicitly_copyable? { |t| lookup_type_schema(t) }
+        unless ti.multiowned? || ti.shared? || ti.requires_move? || is_resource || !is_copy
           error!(node, :GIVE_ON_COPY_TYPE, type: node.value.resolved_type)
         end
 
@@ -82,7 +82,7 @@ module Annotator
           copy.alloc = container_alloc
           elem = vti.element_type
           if elem
-            es = lookup_type_schema(elem.resolved) rescue nil
+            es = lookup_type_schema(elem.resolved)
             copy.deep_copy = Schemas.union?(es) &&
               (es.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
           end
@@ -121,7 +121,7 @@ module Annotator
         inner_type = node.value.full_type!(context: "COPY value")
         stamp_type!(node, inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type)
         ti = node.full_type!(context: "COPY result")
-        resolver = ->(name) { lookup_type_schema(name) rescue nil }
+        resolver = ->(name) { lookup_type_schema(name) }
 
         # COPY of a primitive or Id<T> is a semantic no-op (value copy, no allocation).
         # All other explicit COPYs produce heap-owned data.
@@ -148,7 +148,7 @@ module Annotator
         if vti.direct_indexable_collection?
           elem = vti.element_type
           if elem
-            schema = lookup_type_schema(elem.resolved) rescue nil
+            schema = lookup_type_schema(elem.resolved)
             if Schemas.union?(schema)
               has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
               node.deep_copy = has_heap
@@ -382,10 +382,7 @@ module Annotator
         return unless node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
 
         vti = node.value.full_type!(context: "assignment index value")
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-        is_copy = vti.is_a?(Type) ?
-          (vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
-          true
+        is_copy = vti.implicitly_copyable? { |t| lookup_type_schema(t) }
         return if is_copy
         return unless find_container_source(node.value)
 
@@ -717,7 +714,7 @@ module Annotator
         fn_node = @fn_nodes[current_fn_ctx&.name]
         rl = fn_node&.return_lifetime
         return if rl == :wildcard
-        declared = rl.is_a?(Array) ? rl : (rl.nil? ? [] : [rl])
+        declared = rl || []
 
         declared_names = declared.flat_map do |n|
           path = get_path_to_root(n)
@@ -802,7 +799,6 @@ module Annotator
         # LONGER. Destination outlives source iff dest_depth < source.depth.
         sources.each do |source|
           next if source.scope_depth.nil?
-          next if dest_depth.nil?
           if dest_depth < T.must(source.scope_depth)
             return "Lifetime Error: cannot store value with lifetime tied to " \
                    "scope depth #{source.scope_depth} into a destination at " \
@@ -953,7 +949,6 @@ module Annotator
       def collect_bg_sources_in_expr(expr)
         T.bind(self, SemanticAnnotator)
 
-        return [] if expr.nil?
         return bg_sources_for_block(expr) if expr.is_a?(AST::BgBlock) || expr.is_a?(AST::BgStreamBlock)
         return [] if SemanticAnnotator::BG_SOURCE_OPAQUE_AST_NODES.include?(expr.class)
         return [] unless expr.is_a?(Struct)
@@ -1045,8 +1040,7 @@ module Annotator
       def value_copy_capture?(t)
         T.bind(self, SemanticAnnotator)
 
-        ti = t.is_a?(Type) ? t : Type.new(t)
-        ti.bg_capture_is_value_copy? { |name| lookup_type_schema(name) rescue nil }
+        t.bg_capture_is_value_copy? { |name| lookup_type_schema(name) }
       end
 
       # Produce dotted-path lifetime roots. Wildcard and nil return [] because
@@ -1178,10 +1172,8 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "move candidate")
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        return unless vt.is_a?(Type)
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
-        return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
         existing = @og&.nodes&.[](node.name)
         if existing&.specific_move_action?
           # An earlier visitor (typically visit_GiveNode) already stamped
@@ -1206,8 +1198,6 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "TAKES ownership candidate")
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        return unless vt.is_a?(Type)
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 

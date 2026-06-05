@@ -23,8 +23,6 @@ module Capabilities
 
   sig { params(type: Type).returns(T::Array[String]) }
   def self.errors_for(type)
-    return [] unless type.is_a?(Type)
-
     errors = []
     caps = active_capabilities(type)
 
@@ -436,7 +434,7 @@ module CapabilityHelper
 
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
-    fn = fn_nodes[callee] if callee.is_a?(String)
+    fn = fn_nodes[callee]
     return nil unless fn
     return "can fail" if fn.can_fail
     effects = fn.effects || Set.new
@@ -599,11 +597,10 @@ module CapabilityHelper
     end.to_set
 
     rt = fn_node.return_type
-    rt_obj = rt.is_a?(Type) ? rt : (rt ? Type.new(rt) : nil)
-    payload = if rt_obj && rt_obj.error_union?
-                rt_obj.payload_type
+    payload = if rt && rt.error_union?
+                rt.payload_type
               else
-                rt_obj
+                rt
               end
 
     with_new_scope(current_scope) do
@@ -963,7 +960,7 @@ module CapabilityHelper
   sig { params(type: T.untyped).returns(Type) }
   def capability_alias_type(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
+    t = Type.new(type)
     if t.any_sync? || t.ownership != :affine
       t.bare_data_type
     else
@@ -1089,7 +1086,7 @@ module CapabilityHelper
       cap_type = info.atomic? ? info.type : node.full_type!(context: "fiber capture identifier")
       result.captures[name] = cap_type
       result.capture_symbols[name] = info
-      t = cap_type.is_a?(Type) ? cap_type : Type.new(cap_type || :Any)
+      t = cap_type
       result.pointer_captures << name if t.needs_pointer_passing?
       result.string_captures << name if t.string?
       result.resource_captures << name if t.resource? || info.close_zig

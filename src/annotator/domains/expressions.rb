@@ -393,7 +393,7 @@ module Annotator
         end
 
         result_type = (t1 == :Any) ? else_result : then_result
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(if_node, :IF_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 
@@ -442,7 +442,7 @@ module Annotator
         end
 
         result_type = all_types.first
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(match_node, :MATCH_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 

@@ -448,7 +448,7 @@ module Annotator
 
         if node.value.is_a?(AST::Identifier)
           vti = node.value.full_type!(context: "return identifier")
-          if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+          if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) }
             node.value.was_moved = true
           end
           # Returning a future consumes the promise; otherwise scope finalization
@@ -529,14 +529,11 @@ module Annotator
       def return_type_compatible?(actual_type, expected_type)
         T.bind(self, SemanticAnnotator)
 
-        expected_t = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type)
-        actual_t = actual_type.is_a?(Type) ? actual_type : Type.new(actual_type)
+        return true if expected_type.any? || actual_type.any?
+        return expected_type.accepts?(actual_type) if expected_type.fn_type?
+        return false unless same_return_capabilities?(expected_type, actual_type)
 
-        return true if expected_t.any? || actual_t.any?
-        return expected_t.accepts?(actual_t) if expected_t.fn_type?
-        return false unless same_return_capabilities?(expected_t, actual_t)
-
-        is_safe_autocast?(actual_t, expected_t)
+        is_safe_autocast?(actual_type, expected_type)
       end
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
@@ -564,11 +561,10 @@ module Annotator
       def type_display(type)
         T.bind(self, SemanticAnnotator)
 
-        t = type.is_a?(Type) ? type : Type.new(type)
-        parts = [t.resolved.to_s]
+        parts = [type.resolved.to_s]
 
-        ownership = t.ownership_surface_name
-        sync = t.sync_surface_name
+        ownership = type.ownership_surface_name
+        sync = type.sync_surface_name
         parts << ownership if ownership
         parts << sync if sync
 

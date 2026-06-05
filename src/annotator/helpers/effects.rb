@@ -524,8 +524,7 @@ module EffectTracker
       decl_alloc =
         begin
           rt = fn_node.return_type
-          rt = Type.new(rt) if rt && !rt.is_a?(Type)
-          if rt.is_a?(Type)
+          if rt
             if rt.error_union?
               rt.collection? || rt.string?
             else
@@ -634,7 +633,7 @@ module EffectTracker
       ret = fn_node.return_type
       next unless ret
 
-      ret_t = ret.is_a?(Type) ? ret : Type.new(ret)
+      ret_t = ret
       next if ret_t.error_union?
       # Promise/tense returns (`~T`, `counter:~T`) carry errors through
       # the BG fiber's join boundary, not through the surface signature.
@@ -1133,8 +1132,6 @@ module EffectTracker
   sig { params(stmts: T::Array[T.untyped], loop_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return if false
-    stmts = [stmts] unless stmts.is_a?(Array)
     @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
     fn_nodes = T.must(@fn_nodes)
     stmts.each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
@@ -1143,7 +1140,6 @@ module EffectTracker
   sig { params(node: Object, loop_node: T.any(AST::WhileLoop, AST::ForRange), fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def validate_tight_node!(node, loop_node, fn_nodes)
     T.bind(self, SemanticAnnotator) rescue nil
-    return if node.nil?
     case node
     when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
     when Array

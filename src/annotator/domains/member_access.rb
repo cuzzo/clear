@@ -144,7 +144,7 @@ module Annotator
             # the move into a value copy and leaks the box. String/scalar and
             # union/enum pointees still need the read-deref (Zig won't coerce
             # `*T` -> `T` for those consumers).
-            psch = (lookup_type_schema(field_type.resolved) rescue nil)
+            psch = lookup_type_schema(field_type.resolved)
             struct_pointee = Schemas.struct?(psch)
             node.indirect_field = true unless struct_pointee
             # For non-struct pointees, the read-deref produces a value of the

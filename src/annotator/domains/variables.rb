@@ -260,7 +260,7 @@ module Annotator
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
         ti = node.full_type!(context: "var declaration ownership")
-        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_fn_ctx&.record_heap_use!
         end
         accumulate_stack_bytes(storage, node)

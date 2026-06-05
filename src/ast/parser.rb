@@ -2453,7 +2453,7 @@ class Parser
   # supported; aggregate field types must be concrete.
   sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).void }
   def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
-    return unless type.is_a?(Type) && type.auto?
+    return unless type.auto?
     auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
     anchor = auto_tok || field_tok
     error!(anchor, :AUTO_NOT_ALLOWED_IN_FIELD, context: context_label, field: field_name)

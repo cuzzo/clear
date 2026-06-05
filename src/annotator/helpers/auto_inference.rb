@@ -203,7 +203,7 @@ class AutoConstraintCollector
 
   sig { params(t: T.nilable(Type)).returns(T::Boolean) }
   def auto?(t)
-    t.is_a?(Type) && t.auto?
+    !!t&.auto?
   end
 
   # Generic AST traversal. Tracks the enclosing FunctionDef so
@@ -953,6 +953,6 @@ class OperatorEvidenceCollector
 
   sig { params(t: T.nilable(Type)).returns(T::Boolean) }
   def auto?(t)
-    t.is_a?(Type) && t.auto?
+    !!t&.auto?
   end
 end

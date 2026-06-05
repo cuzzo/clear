@@ -392,20 +392,19 @@ module GenericAnalysis
   sig { params(type: Type).returns(T.untyped) }
   def generic_binding_value(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type.is_a?(Type) ? type : Type.new(type)
-    generic_type_has_capabilities?(t) ? Type.new(t) : t.resolved
+    generic_type_has_capabilities?(type) ? Type.new(type) : type.resolved
   end
 
   sig { params(type: Type).returns(T::Boolean) }
   def generic_shared_family_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
+    type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
   end
 
   sig { params(type: Type).returns(Type) }
   def generic_shared_payload_binding(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
+    t = Type.new(type)
     t.apply_reference_ownership!(:affine)
     t.mark_stack_value!
     t.mark_generic_payload_type_arg!
@@ -428,12 +427,10 @@ module GenericAnalysis
   sig { params(left: Type, right: Type).returns(T::Boolean) }
   def same_shared_call_capability?(left, right)
     T.bind(self, SemanticAnnotator) rescue nil
-    l = left.is_a?(Type) ? left : Type.new(left)
-    r = right.is_a?(Type) ? right : Type.new(right)
-    l.sync == r.sync &&
-      l.layout == r.layout &&
-      l.elem_ownership == r.elem_ownership &&
-      l.elem_sync == r.elem_sync
+    left.sync == right.sync &&
+      left.layout == right.layout &&
+      left.elem_ownership == right.elem_ownership &&
+      left.elem_sync == right.elem_sync
   end
 
   sig { params(type: Type).returns(T::Boolean) }
@@ -463,10 +460,9 @@ module GenericAnalysis
   sig { params(type: Type).returns(String) }
   def shared_call_capability_display(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type.is_a?(Type) ? type : Type.new(type)
     caps = ["@shared"]
-    caps << "indirect" if t.indirect?
-    caps << T.must(t.sync_family_name)
+    caps << "indirect" if type.indirect?
+    caps << T.must(type.sync_family_name)
     caps.compact.join(":")
   end
 
@@ -617,11 +613,11 @@ module GenericAnalysis
     # values, not borrows from an existing variable.
     if expr.is_a?(AST::GetField)
       if expr.target.is_a?(AST::Identifier)
-        target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
+        target_schema = lookup_type_schema(expr.target.name.to_sym)
         return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
       end
       field_ti = expr.full_type!(context: "field container source")
-      if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+      if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) }
         return root_variable_name(expr.target)
       end
     end
