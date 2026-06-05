@@ -1,0 +1,134 @@
+# An Ode to SQL
+
+A lot of developers seem to love to hate SQL.  I love to love it.  It's continuously made hard problems in my extraordinarily easy.  And for that, I will forever be grateful.
+
+This is my attempt to give it the praise it deserves, and in hopes that I can help you realize its powers fully in the process.
+
+## Why Is SQL Magic
+
+The cool kids in programming tend to cluster toward functional programming langauges.
+
+They know that all the problems in software stem from **state** and **control flow**.
+
+Pure functional languages technically forbid state (though in a Turing Complete language, you can always find a way to get around that).
+
+SQL on the other hand truthfully does not allow *you* to write state nor control flow.
+
+Thus, it allows you to write bug-free concurrent code that *can* be *nearly* as performant as optimized C code almost effortlessly.
+
+## Why is it Imperfect
+
+SQL's fatal flaw is mainly math... Or rather, its implementation of set arithmetic. In pure mathematics, sets are clean. In *most* databases, they are not - due to `NULL`s.
+
+Pure math handles empty sets beautifully, but SQL uses `NULL` and unfortunately makes things messy.  Why?  Because the real world is messy.  Observe:
+
+### Users Table
+
+| id | name | bonus |
+|----|------|-------|
+| 1 | Alice | 500 |
+| 2 | Bob | 0 |
+| 3 | Charlie | NULL (We don't know yet) |
+
+```sql
+SELECT name FROM users WHERE bonus != 0;
+```
+
+```text
+> 1, Alice, 500
+```
+
+You get only Alice...  What?!  You love this?  Are you crazy?
+
+## Why SQL Is the Way It Is (Ternary Logic)
+
+An ordinary person expects to get Alice and Charlie.  After all, Charlie's bonus is not 0. But SQL uses Three-Value Logic (Ternary Logic). In SQL, `NULL` is not a value like 0 or an empty string. `NULL` represents an unknown absence of value.
+
+When the engine evaluates Charlie, it computes: `NULL != 0.`
+
+The answer to "Is an unknown value not equal to zero?" is `UNKNOWN (NULL)`.
+
+Because a `WHERE` clause passes rows only if the condition evaluates strictly to `TRUE`, Charlie is quietly dropped. This is the simplest place where `NULL` makes mathematical sense under relational algebra, but it completely violates human intuition.
+
+## And It Gets Worse With JOINs!
+
+The moment `NULL` enters a `JOIN` clause, predicates drop rows silently because `UNKNOWN` behavior propagates like a virus through control flow.
+
+The intersection of `JOIN` control flow and ternary logic (`TRUE`, `FALSE`, `UNKNOWN` via `NULL`) creates massive, invisible state matrices. A `LEFT JOIN` introduces `NULL` values for unmatched rows on the fly. If a downstream `WHERE` clause or subsequent `JOIN` evaluates a condition against those dynamically generated `NULL`s, rows are dropped silently.
+
+Unless you train yourself, these `UNKNOWN`/`NULL` behaviors are *probably* unexpected, and thus likely to be buggy.
+
+SQL doesn't allow *you* to write control flow.  But it does it for you.  It has *hidden* control flow.  And, unfortunately, the part it hides is exactly the unintuitive part!
+
+It’s that the translation from a relational schema to a flat row-stream introduces hidden structural side effects.
+
+ * In a normal language, if you double the data, you write an explicit loop or an append to do so. 
+ * In SQL, the syntax for a 1:1 relation and a 1:Many relation looks identical (`JOIN table ON id`). 
+   * The code looks completely passive, but the execution engine is secretly performing data multiplication under the hood.
+
+## What's a JOIN actually?
+
+### Users Table
+
+| id | name | bonus |
+|----|------|-------|
+| 1 | Alice | 500 |
+| 2 | Bob | 0 |
+| 3 | Charlie | NULL (We don't know yet) |
+
+### Subscriptions Table
+
+| user_id | status |
+| ------- | ------ |
+| 1 | 'active' |
+| NULL | 'active' (An orphaned web-hook record) |
+
+You want a list of users and their subscription statuses, but you only care about active subscriptions. You write a standard `LEFT JOIN` because you want to make sure you don't lose users who don't have a subscription record yet:
+
+```sql
+SELECT
+  u.name,
+  s.status
+FROM
+  users AS u
+LEFT JOIN
+  subscriptions AS s 
+  ON
+    u.id = s.user_id
+WHERE
+  s.status = 'active'
+```
+
+```text
+> Alice, 'active'
+```
+
+Okay, all good.  Now, what if we flip the WHERE condition to: `s.status != 'active'`.
+
+You probably expect to get: 
+
+```text
+> Bob, NULL
+> Charlie, NULL
+```
+
+Instead you get:
+
+```text
+```
+
+Nothing!  Bob and Charlie completely vanish from the result set. Your `LEFT JOIN` acted exactly like an `INNER JOIN`.
+
+If that's not unintuitive, you've probably been doing a lot of SQL!
+
+## So Why Do I Love SQL?!
+
+Because if you take the time to read this two page essay and *get* it, you can write bug-free concurrent, highly-efficient, multi-object consistent code to solve any problem you *don't* need explicit control flow for...
+
+It turns out, that's a lot of problems!  And it also turns out that efficient, bug-free, multi-object consistency is *extraordinarily* difficult to roll-it yourself.
+
+And even for the ones you *can't*, you can write User-Defined Functions (UDFs) to do the inherently bug-prone parts.
+
+> [!NOTE]
+> See [What Even Is Complexity Anyway?](what-even-is-complexity-anyway.md) to learn more about why state & control flow are the source of most problems in programming, and what you can do about it - besides trying to shoe-horn all your probems into SQL.
+
