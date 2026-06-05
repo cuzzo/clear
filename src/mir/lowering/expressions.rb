@@ -1174,7 +1174,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(schema: T.untyped, node: AST::StructLit).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(schema: T.untyped, node: AST::StructLit).returns(T::Hash[Symbol, Symbol]) }
   def struct_lit_type_subst(schema, node)
     params = schema.respond_to?(:type_params) ? schema.type_params : nil
     args = node.type_args || []

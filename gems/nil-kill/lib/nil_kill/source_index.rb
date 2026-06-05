@@ -1977,7 +1977,22 @@ module NilKill
     end
 
     def sig_above(line)
-      (line - 2).downto([line - 6, 0].max) { |idx| return @lines[idx].strip if @lines[idx]&.match?(/\bsig\s*\{/) }
+      idx = line - 2
+      idx -= 1 while idx >= 0 && @lines[idx].to_s.strip.empty?
+      return nil if idx.negative?
+
+      stripped = @lines[idx].to_s.strip
+      return stripped if stripped.match?(/\bsig\s*\{/)
+
+      if stripped == "end"
+        floor = [idx - 40, 0].max
+        idx.downto(floor) do |start_idx|
+          current = @lines[start_idx].to_s
+          return @lines[start_idx..idx].join if current.match?(/\bsig\s+do\b/)
+          break if current.match?(/^\s*(def|class|module)\b/)
+        end
+      end
+
       nil
     end
 

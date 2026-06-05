@@ -342,7 +342,7 @@ class SemanticAnnotator
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
-    @og = T.let(OwnershipGraph.new, T.untyped)
+    @og = T.let(OwnershipGraph.new, OwnershipGraph)
     @og_scope_depth = T.let(0, Integer)
     @synthetic_fns = T.let([], T::Array[AST::FunctionDef])
     @branch_terminated = T.let(false, T::Boolean)

@@ -804,7 +804,7 @@ module CapabilityHelper
   sig { params(cap: AST::Capability).returns(T.nilable(String)) }
   def declare_capability_scope!(cap)
     T.bind(self, SemanticAnnotator) rescue nil
-    @og = T.let(@og, T.untyped)
+    @og = T.let(@og, T.any(OwnershipGraph, T.untyped))
     var_name = cap_var_name(cap[:var_node])
     source_entry = cap[:old_scope]&.resolve_entry(var_name)
     # Sync may live on the binding (Identifier path) or on the field's

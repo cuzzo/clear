@@ -119,6 +119,7 @@ module Doctor
   end
 
   # ── Heap Profile ──
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(Array) }
   def section_heap(profile_dir, binary)
     alloc_file = File.join(profile_dir, 'alloc.txt')
     unless File.exist?(alloc_file)
@@ -1214,6 +1215,7 @@ module Doctor
   # ── FREEZE Recommendation ──
   # Fires when: high LLC miss rate + many small scattered heap allocations
   # (the signature of individually malloc'd tree/list nodes).
+  sig { params(profile_dir: String, sites: T.nilable(Array), resolved: T.nilable(Hash), llc_miss_rate: T.nilable(Float)).returns(NilClass) }
   def section_freeze(profile_dir, sites, resolved, llc_miss_rate)
     return unless llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites && sites.any?
 
@@ -1407,6 +1409,7 @@ module Doctor
   # after-profile's binary so before/after addresses resolve through
   # the same symbol table (ASLR / rebuild can shift addresses but the
   # function name should stay stable for the same source).
+  sig { params(profile_dir: String, binary: T.nilable(String)).returns(Hash) }
   def parse_alloc_for_diff(profile_dir, binary)
     alloc_file = File.join(profile_dir, 'alloc.txt')
     return {} unless File.exist?(alloc_file)
@@ -1505,6 +1508,7 @@ module Doctor
     puts ""
   end
 
+  sig { params(profile_dir: String).returns(Hash) }
   def parse_locks_for_diff(profile_dir)
     lock_prof = File.join(profile_dir, 'locks.txt')
     return {} unless File.exist?(lock_prof)
@@ -1578,6 +1582,7 @@ module Doctor
     puts ""
   end
 
+  sig { params(profile_dir: String).returns(Hash) }
   def parse_mvcc_for_diff(profile_dir)
     mvcc_prof = File.join(profile_dir, 'mvcc.txt')
     return {} unless File.exist?(mvcc_prof)

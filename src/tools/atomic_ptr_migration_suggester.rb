@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require_relative "migration_suggester_helpers"
 
 # Static eligibility detector for migrating struct-shaped locked/versioned
@@ -35,6 +37,8 @@ require_relative "migration_suggester_helpers"
 # suggester. This module owns struct + whole-struct-replace eligibility and
 # the per-family capability dispatch.
 module AtomicPtrMigrationSuggester
+  extend T::Sig
+
   module_function
   extend MigrationSuggesterHelpers
 
@@ -116,6 +120,7 @@ module AtomicPtrMigrationSuggester
     body.all? { |stmt| stmt_eligible?(stmt, alias_name, struct_name) }
   end
 
+  sig { params(stmt: T.any(AST::Assignment, AST::BindExpr, AST::FuncCall), alias_name: String, struct_name: Symbol).returns(T::Boolean) }
   def stmt_eligible?(stmt, alias_name, struct_name)
     case stmt
     when AST::Assignment
@@ -148,6 +153,7 @@ module AtomicPtrMigrationSuggester
     end
   end
 
+  sig { params(target: T.any(AST::GetField, AST::Identifier, String), alias_name: String).returns(T::Boolean) }
   def alias_root?(target, alias_name)
     target == alias_name ||
       (target.is_a?(AST::Identifier) && target.name == alias_name)

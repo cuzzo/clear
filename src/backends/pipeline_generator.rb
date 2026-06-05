@@ -138,7 +138,7 @@ module PipelineGenerator
   # Structural seeds for concurrent MIN/MAX reducers. The caller supplies the
   # already-resolved result type; these helpers choose sentinel nodes without
   # smuggling expressions as opaque Zig text.
-  sig { params(zig_t: String).returns(T.untyped) }
+  sig { params(zig_t: String).returns(MIR::TypeSentinel) }
   def agg_min_sentinel_mir(zig_t)
     T.bind(self, T.untyped) rescue nil
     MIR::TypeSentinel.new(:max, zig_t)
