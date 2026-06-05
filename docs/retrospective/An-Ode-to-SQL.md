@@ -131,28 +131,35 @@ The problem is actually pretty constrained.  It *mainly* only impacts double neg
 
 This is not hard!  But it is *very* easily forgotten and *very* unintuitive for most people.
 
-It also impacts `IN`, `NOT IN`, `ANY`, and `ALL` in mysterious ways:
+It also impacts `NOT` via `NOT IN` `NOT ANY`, `NOT BETWEEN` in mysterious ways, as well as `ANY`:
 
 ```sql
 -- IN
 3 IN (1, 2, 3)     -- TRUE
 3 IN (1, 2)        -- FALSE
-3 IN (1, 2, NULL)  -- UNKNOWN (you probably expect false)!
+3 IN (1, 2, NULL)  -- UNKNOWN (since it's not a double negative, this probablye works).
 
 -- NOT IN
 2 NOT IN (1, 3)        -- TRUE
 2 NOT IN (1, 2, NULL)  -- FALSE
-3 NOT IN (1, 2, NULL)  -- UNKNOWN (you probably expect false)!
+3 NOT IN (1, 2, NULL)  -- UNKNOWN (you probably expect false, and this will be a bug)!
 
--- ANY
-2 = ANY (ARRAY[1, 2, NULL]) -- TRUE
-3 = ANY (ARRAY[1, 2])       -- FALSE
-3 = ANY (ARRAY[1, 2, NULL]) -- UNKNOWN (you probably expect false)!
+-- BETWEEN
+3 BETWEEN 1 AND 5      -- TRUE
+6 BETWEEN 1 AND 5      -- FALSE
+NULL BETWEEN 1 AND 5   -- UNKNOWN (Dropped, probably expected)
+
+-- NOT BETWEEN (The Hidden Trap)
+6 NOT BETWEEN 1 AND 5    -- TRUE
+3 NOT BETWEEN 1 AND 5    -- FALSE
+NULL NOT BETWEEN 1 AND 5 -- UNKNOWN (You probably expect TRUE, but it completely vanishes)!
 
 -- ALL
 2 = ALL (ARRAY[2, 2])        -- TRUE
 2 = ALL (ARRAY[2, 3])        -- FALSE
 2 = ALL (ARRAY[2, 2, NULL])  -- UNKNOWN (you probably expect false)!
+5 < ALL (ARRAY[10, 20])      -- TRUE
+5 < ALL (ARRAY[10, 20, NULL])-- UNKNOWN (you porbably expect true)!
 ```
 
 If you take the time to *get* that, you can work magic with SQL.  You can write bug-free concurrent, highly-efficient, multi-object consistent code to solve any problem you *don't* need explicit control flow for...
