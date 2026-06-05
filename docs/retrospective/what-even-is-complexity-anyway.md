@@ -131,9 +131,9 @@ IF user.name != "" THEN ... END
 
 The above is control flow.  You used a value to make a decision (whether the `user.name` is not empty).  This is an "**unnamed state**".  You don’t need a variable: `stateUserIsNamed` to have state.  You just need to make a **decision** on a value that **changes over time**.
 
-Any value that can change over time is state. But a value that changes over time *AND* effects control flow, is typically the most problematic.
+Any value that can change over time is state. But a value that changes over time *AND* affects control flow, is typically the most problematic.
 
-Let's examine an outlier state that *DOESN'T* effect control flow, but could still be problematic:
+Let's examine an outlier state that *DOESN'T* affect control flow, but could still be problematic:
 
 ```ruby clear illustrative
 CLASS Player
@@ -241,7 +241,7 @@ There may be 99 functions you have to call in the exact right order, and if you 
 
 This is why complexity is the default state of all software. Writing clean code isn't a passive state you achieve once and leave alone; it is an active, ongoing expenditure of energy.
 
-Who created the mortal sin of making this "bad"?  Which commit broke the cammels back and made this `BillingService` completely unusable? As with state, the problem is, commits rarely come with a message that says: "WATCH OUT! THIS IS TERRIBLE DESIGN!". When you get the diff to review, you don't even have all the information available, typically, to make an informed decision. When do you decide that someone needs to make a ~1000 line refactor to finally clean up the mess anyway?
+Who created the mortal sin of making this "bad"?  Which commit broke the camel's back and made this `BillingService` completely unusable? As with state, the problem is, commits rarely come with a message that says: "WATCH OUT! THIS IS TERRIBLE DESIGN!". When you get the diff to review, you don't even have all the information available, typically, to make an informed decision. When do you decide that someone needs to make a ~1000 line refactor to finally clean up the mess anyway?
 
 To fight complexity, we have to fight entropy. We do this not by hoping for a Silver Bullet - that an LLM will magically sort out our mess. We do this by ruthlessly minimizing global state, enforcing explicit control flows, and keeping our execution paths so visible that complexity has nowhere to hide.
 
@@ -371,7 +371,7 @@ This is why - when faced with a pile of crap - a lot of senior engineers, rightl
 But metrics *can* help:
 
  * If you’re going to make a change to make things better, you have acceptance criteria - not opinions and vibes.
- * If you measure complexity, you cannot do a “refactor” that makes the code worse - that's "enshifitication".
+ * If you measure complexity, you cannot do a “refactor” that makes the code worse - that's "enshittification".
 
 Metrics can help you prioritize the most complicated parts of the codebase to and your efforts to resolve them - see the end for details.
 
@@ -403,7 +403,7 @@ Find the places where state leaks across boundaries: where three different modul
 
 You aren't fixing the bad design yet: you are containing the blast radius of it...
 
-Trying to completely fix it all at once is a re-write which will more-often than not turn out poorly - either due to the time taking much longer than anticipated, integration failures, or the new solution being bad in different ways, rather than the solution you actually needed…
+Trying to completely fix it all at once is a re-write which will more-often than not turn out poorly. Either it takes  much longer than anticipated, has integration failures, or the new solution is bad in different ways, rather than the solution you *actually* needed...
 
 ### Step 3: Enforce a "Complexity Tax" on New Pull Requests
 
@@ -498,4 +498,4 @@ If you really want to increase your velocity, do yourself a favor.  Measure comp
 > [gems/nil-kill](/gems/nil-kill/README.md), [gems/decomplex](/gems/decomplex/README.md), [gems/slopcop](/gems/slopcop/README.md), [gems/boobytrap](/gems/boobytrap/README.md), and [gems/espalier](/gems/espalier/README.md) do all of this for CLEAR.
 
 > [!NOTE]
-> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!  But you *don't* get a silver bullet...
+> This is why [CLEAR](/README.md) is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!  But you *don't* get a silver bullet...
