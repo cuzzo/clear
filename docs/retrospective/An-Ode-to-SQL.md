@@ -14,7 +14,7 @@ Pure functional languages technically forbid state (though in a Turing Complete 
 
 SQL on the other hand truthfully does not allow *you* to write state nor control flow.
 
-Thus, it allows you to write bug-free concurrent code that *can* be *nearly* as performant as optimized C code - almost effortlessly.
+Thus, it allows you to write bug-free concurrent code that can be *nearly* as performant as optimized C code - almost effortlessly.
 
 ## Why is it Imperfect
 
