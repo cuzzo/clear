@@ -48,7 +48,7 @@ When the engine evaluates Charlie, it computes: `NULL != 0.`
 
 The answer to "Is an unknown value not equal to zero?" is `UNKNOWN (NULL)`.
 
-Because a `WHERE` clause passes rows only if the condition evaluates strictly to `TRUE`, Charlie is quietly dropped. This is the simplest place where `NULL` makes mathematical sense under relational algebra, but it completely violates human intuition.
+A `WHERE` clause passes rows only if the condition evaluates strictly to `TRUE`. So Charlie is quietly dropped. This is the simplest place where `NULL` makes mathematical sense under relational algebra, but it completely violates human intuition.
 
 ## And It Gets Worse With JOINs!
 
@@ -123,7 +123,11 @@ If that's not unintuitive, you've probably been doing a lot of SQL!
 
 ## So Why Do I Love SQL?!
 
-Because if you take the time to read this two page essay and *get* it, you can write bug-free concurrent, highly-efficient, multi-object consistent code to solve any problem you *don't* need explicit control flow for...
+The problem is actually pretty constrained.  It *mainly* only impacts double negatives.  `WHERE x != <blah>`.  Intuitively, people expect `NULL` to `!=` everything.  Instead it is `UNKNOWN` to everything.
+
+This is not hard!  But it is *very* easily forgotten and *very* unintuitive for most people.
+
+If you take the time to *get* that, you can work magic with SQL.  You can write bug-free concurrent, highly-efficient, multi-object consistent code to solve any problem you *don't* need explicit control flow for...
 
 It turns out, that's a lot of problems!  And it also turns out that efficient, bug-free, multi-object consistency is *extraordinarily* difficult to roll-it yourself.
 
