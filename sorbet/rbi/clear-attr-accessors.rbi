@@ -1560,6 +1560,11 @@ class MIR::Program
   def items; end
 end
 
+class MIR::ZigTemplate
+  sig { returns(MIR::ZigTemplateArgs) }
+  def args; end
+end
+
 class MIRChecker
   sig { returns(T::Array[T.untyped]) }
   def errors; end
@@ -2201,6 +2206,11 @@ class WithBlock
   def view_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def view_kind=(value); end
+end
+
+class ZigTemplate
+  sig { returns(MIR::ZigTemplateArgs) }
+  def args; end
 end
 
 class ZigTranspiler

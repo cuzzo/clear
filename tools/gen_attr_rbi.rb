@@ -137,6 +137,10 @@ typed_count = ivar_types.values.sum(&:size)
 preserved_count = rbi_preserved.values.sum(&:size)
 warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches, #{preserved_count} preserved from existing RBI"
 
+normalize_type = lambda do |_class_path, type_str|
+  type_str.gsub(/\bZigTemplateArgs\b/, "MIR::ZigTemplateArgs")
+end
+
 puts <<~HDR
   # typed: true
   # frozen_string_literal: true
@@ -160,7 +164,7 @@ declared.keys.sort.each do |cls|
   next if attrs.empty?
   puts "class #{cls}"
   attrs.each do |kind, name|
-    type_str = ivar_types.dig(cls, name.to_s) || rbi_preserved.dig(cls, name.to_s) || "T.untyped"
+    type_str = normalize_type.call(cls, ivar_types.dig(cls, name.to_s) || rbi_preserved.dig(cls, name.to_s) || "T.untyped")
     if kind == :attr_reader || kind == :attr_accessor
       puts "  sig { returns(#{type_str}) }"
       puts "  def #{name}; end"
