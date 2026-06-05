@@ -144,7 +144,7 @@ module PipelineGenerator
     MIR::TypeSentinel.new(:max, zig_t)
   end
 
-  sig { params(zig_t: String, result_type: T.untyped).returns(T.untyped) }
+  sig { params(zig_t: String, result_type: Type).returns(T.any(MIR::Lit, MIR::TypeSentinel)) }
   def agg_max_sentinel_mir(zig_t, result_type)
     T.bind(self, T.untyped) rescue nil
     result_type.unsigned_integer? ? MIR::Lit.new("0") : MIR::TypeSentinel.new(:min, zig_t)

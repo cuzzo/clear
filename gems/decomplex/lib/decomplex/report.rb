@@ -41,6 +41,11 @@ module Decomplex
       @fsimple = FalseSimplicity.scan(@files).findings
       @oversized_predicates = OversizedPredicate.scan(@files).findings
       @fatu = FatUnion.scan(@files).fat_unions
+      state_mesh = StateMesh.scan(@files, min_writes: 1)
+      state_mesh.run
+      @state_heat = state_mesh.findings
+      @state_branch = StateBranchDensity.scan(@files).findings
+      @temporal_ordering = TemporalOrderingPressure.scan(@files)
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
@@ -55,6 +60,9 @@ module Decomplex
     # frequency-ranked (support / scatter / confidence, descending).
     SECTIONS = [
       ["Decision Pressure",      :@pressure, 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)"],
+      ["State Heatmap",          :@state_heat, 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner"],
+      ["State-Based Branch Density", :@state_branch, 1, "branch decisions over mutable/object state -- state + control-flow pressure"],
+      ["Temporal Ordering Pressure", :@temporal_ordering, 1, "public mutable lifecycle surfaces that create implicit state-machine ordering"],
       ["Missing Abstractions",   :@miss,   1, "guard tuple recomputed across >=2 decision units"],
       ["Reification Misses",     :@reif,   1, "an existing predicate reinvented inline -- invariant #16"],
       ["Semantic Predicate Aliases", :@salias, 1, "one decision, multiple names (receiver/polarity folded)"],
@@ -71,6 +79,8 @@ module Decomplex
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
     ].freeze
 
+    CONVERGENCE_EXCLUDED_SECTIONS = ["State Heatmap"].freeze
+
     # Read-only structured verdict for sibling consumers (slopcop):
     # the exact [title, tier, findings] triples to_markdown renders and
     # Convergence already consumes. Single source of truth -- consumers
@@ -85,7 +95,8 @@ module Decomplex
     # unreachable today (spans are raw AST node line/col); this is the
     # tripwire that catches a future detector regression at the source.
     def sections_data
-      data = SECTIONS.map { |t, iv, tier, _| [t, tier, instance_variable_get(iv)] }
+      data = SECTIONS.reject { |t, *_| CONVERGENCE_EXCLUDED_SECTIONS.include?(t) }
+                     .map { |t, iv, tier, _| [t, tier, instance_variable_get(iv)] }
       data.each do |title, _tier, findings|
         next unless findings
 
@@ -254,6 +265,22 @@ module Decomplex
                  "- **[#{h[:kind]}]** support=#{h[:support]} scatter=#{h[:scatter]} " \
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \
                  "  - #{h[:sites].first(6).map { |s| nav(s) }.join(' ; ')}\n"
+               when "State Heatmap"
+                 "- `#{h[:field]}` -- messiness **#{h[:messiness]}** " \
+                 "(writes=#{h[:writes]}, reads=#{h[:reads]}, re-derived=#{h[:re_derivations]}, " \
+                 "scatter=#{h[:scatter]}, receiver patterns=#{h[:receiver_types]})\n" \
+                 "  - writers: #{h[:top_writers].map { |s| nav(s) }.join(' ; ')}\n" \
+                 "  - readers: #{h[:top_readers].map { |s| nav(s) }.join(' ; ')}\n"
+               when "State-Based Branch Density"
+                 "- #{nav(h[:at])} -- **#{h[:decisions]}** state-based branch decision(s), " \
+                 "refs=`#{h[:state_refs].first(8).join(' | ')}` score=#{h[:score]}\n" \
+                 "  - example predicate: `#{h[:predicate]}`\n"
+               when "Temporal Ordering Pressure"
+                 "- `#{h[:owner]}` (#{nav(h[:at])}) -- implicit lifecycle score **#{h[:score]}** " \
+                 "(public=#{h[:public_methods]}, state methods=#{h[:state_methods]}, writers=#{h[:writers]}, " \
+                 "fields=#{h[:state_fields].size}, shared=#{h[:shared_fields].size}, flows=#{h[:orderings]}, states=#{h[:state_space]})\n" \
+                 "  - shared fields: `#{h[:shared_fields].first(8).join(' | ')}`\n" \
+                 "  - surface: #{h[:sites].first(6).map { |s| nav(s) }.join(' ; ')}\n"
                when "Neglected Conditions", "Neglected Path Conditions"
                  "- *POSSIBLE* (support=#{h[:support]}) #{nav(h[:at])} -- MISSING " \
                  "`#{h[:missing]}` from `#{(h[:pattern] || h[:guards]).join(' | ')}`\n"

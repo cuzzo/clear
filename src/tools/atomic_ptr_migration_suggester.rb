@@ -159,6 +159,7 @@ module AtomicPtrMigrationSuggester
       (target.is_a?(AST::Identifier) && target.name == alias_name)
   end
 
+  sig { params(target: T.any(AST::GetField, AST::Identifier, String), rhs: AST::Node, alias_name: String, struct_name: String).returns(T::Boolean) }
   def whole_struct_replace?(target, rhs, alias_name, struct_name)
     alias_root?(target, alias_name) &&
       rhs.is_a?(AST::StructLit) &&

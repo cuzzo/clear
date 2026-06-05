@@ -35,6 +35,19 @@ module PredicateRewriter
 
   module_function
 
+  class Edit < T::Struct
+    const :start, Integer
+    const :len, Integer
+    const :replacement, String
+  end
+
+  class CompareSpan < T::Struct
+    const :start, Integer
+    const :end_pos, Integer
+    const :other_start, Integer
+    const :other_end, Integer
+  end
+
   sig { params(source: String).returns(String) }
   def rewrite(source)
     tokens = ::Lexer.new(source).tokenize
@@ -139,7 +152,7 @@ module PredicateRewriter
   # expression parser is fragile for chains (`NIL == users.find(p)`),
   # so v1 leaves it alone — users (or a future pre-pass) can flip
   # the operands first.
-  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
+  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Edit)) }
   def match_nil_compare(node, source)
     return nil unless [:EQ, :NEQ].include?(node.op)
     return nil unless nil_literal?(node.right)
@@ -148,15 +161,15 @@ module PredicateRewriter
 
     span = compute_compare_span(node, source)
     return nil unless span
-    other_text = source[span[:other_start]...span[:other_end]]
+    other_text = source[span.other_start...span.other_end]
     return nil unless other_text && !other_text.strip.empty?
 
     pred = node.op == :EQ ? "nil?" : "present?"
-    {
-      start:       span[:start],
-      len:         span[:end] - span[:start],
+    Edit.new(
+      start: span.start,
+      len: span.end_pos - span.start,
       replacement: "#{paren_if_needed(other_text)}.#{pred}()",
-    }
+    )
   end
 
   def nil_literal?(node)
@@ -175,7 +188,7 @@ module PredicateRewriter
   #
   # Always-true / always-false combinations (`>= 0`, `< 0`) are NOT
   # rewritten — PredicateLinter surfaces them as warnings instead.
-  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
+  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Edit)) }
   def match_length_compare(node, source)
     op = node.op
     return nil unless [:EQ, :NEQ, :GT, :GTE, :LT, :LTE].include?(op)
@@ -200,11 +213,11 @@ module PredicateRewriter
     receiver = receiver_source_for_method_call(length_call, source)
     return nil unless receiver && !receiver.strip.empty?
 
-    {
-      start:       span[:start],
-      len:         span[:end] - span[:start],
+    Edit.new(
+      start: span.start,
+      len: span.end_pos - span.start,
       replacement: "#{paren_if_needed(receiver)}.#{pred}()",
-    }
+    )
   end
 
   def length_call?(node)
@@ -238,7 +251,7 @@ module PredicateRewriter
   # whose right side is a small literal (NIL or Int). The "other" range
   # is the left operand used for the rewrite payload. nil if span
   # couldn't be cleanly resolved.
-  sig { params(node: AST::BinaryOp, source: String).returns(Hash) }
+  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(CompareSpan)) }
   def compute_compare_span(node, source)
     return nil unless literal_node?(node.right)
 
@@ -251,12 +264,12 @@ module PredicateRewriter
     return nil unless lit_len
     lhs_start, lhs_end = expand_paren_wrap(source, lhs_start, lhs_end)
     end_off = lit_off + lit_len
-    {
-      start:        lhs_start,
-      end:          end_off,
-      other_start:  lhs_start,
-      other_end:    lhs_end,
-    }
+    CompareSpan.new(
+      start: lhs_start,
+      end_pos: end_off,
+      other_start: lhs_start,
+      other_end: lhs_end,
+    )
   end
 
   # If the source character immediately before `lhs_start` is `(` AND
@@ -461,12 +474,12 @@ module PredicateRewriter
 
   # ---- Edit application ----
 
-  sig { params(source: String, edits: Array).returns(String) }
+  sig { params(source: String, edits: T::Array[Edit]).returns(String) }
   def apply_edits(source, edits)
-    sorted = edits.sort_by { |e| -e[:start] }
+    sorted = edits.sort_by { |e| -e.start }
     out = source.dup
     sorted.each do |e|
-      out[e[:start], e[:len]] = e[:replacement]
+      out[e.start, e.len] = e.replacement
     end
     out
   end

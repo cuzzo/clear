@@ -15,7 +15,9 @@ def usage
                  time-decay baseline stays over the whole history;
                  only WHICH files are ranked is filtered.
 
-    With no --coverage (or a missing file) only fix-churn is shown.
+    The report also tracks state-based branch hotspots from Decomplex
+    and time-decayed multi-file fix blast radius. With no --coverage
+    (or a missing file) only fix-churn-backed sections are shown.
   U
   exit 1
 end

@@ -788,13 +788,17 @@ module MIRLoweringControlFlow
     default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : nil
     # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
     default ||= [] if facts.is_int_match
-    # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig
-    if facts.is_enum_match && !default
+    # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig.
+    # Exhaustive enum switches cannot include an `else` prong in Zig 0.16, even
+    # when the source used PARTIAL MATCH with an unreachable DEFAULT.
+    if facts.is_enum_match
       all_variants = @enum_schemas[facts.expr_type_sym]&.map(&:to_s)&.sort || []
       covered = node.cases.flat_map { |c|
         [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
       }.sort
-      default = [] unless covered == all_variants
+      exhaustive = covered == all_variants
+      default = nil if default && exhaustive
+      default = [] if !default && !exhaustive
     end
     MIR::SwitchStmt.new(facts.subject, arms, default)
   end

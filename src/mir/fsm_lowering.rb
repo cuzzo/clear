@@ -451,7 +451,7 @@ module FsmLowering
     # bare and Arc/Rc-wrapped callers.
     is_param = var_node.symbol&.is_param
     polymorphic_locked = is_param && !any_rc &&
-                         (resolved&.sync == :locked || resolved&.sync == :write_locked)
+                         (!!resolved&.locked? || !!resolved&.write_locked?)
     lock_kind = if cap[:capability] == :write_locked_read
                   :rwlock_read
                 elsif write_locked

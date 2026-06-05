@@ -41,6 +41,11 @@ module DiagnosticExamples
   extend T::Sig
   module_function
 
+  class FixScan < T::Struct
+    const :fix_lines, T::Array[String]
+    const :next_idx, Integer
+  end
+
   # Default search path: every spec file the convention might live in.
   # New spec files using the convention should be added here.
   DEFAULT_SPEC_FILES = T.let([
@@ -88,39 +93,45 @@ module DiagnosticExamples
         next
       end
       code = T.must(m[1]).to_sym
-      fix_lines = T.let([], T::Array[String])
-      j = i + 1
-      # Collect contiguous @fix: lines (and any blank/comment lines).
-      while j < lines.length
-        line_j = T.must(lines[j])
-        if line_j =~ /^\s*#\s*@fix:\s?(.*)$/
-          fix_lines << $1.rstrip
-          j += 1
-        elsif line_j =~ /^\s*#/ || line_j.strip.empty?
-          j += 1
-        else
-          break
-        end
-      end
-      if j < lines.length && (dm = T.must(lines[j]).match(/^(\s*)describe\b/))
+      fix_scan = scan_fix_lines(lines, i + 1)
+      describe_idx = fix_scan.next_idx
+      if describe_idx < lines.length &&
+         (dm = T.must(lines[describe_idx]).match(/^(\s*)describe\b/))
         desc_indent = T.must(dm[1]).length
-        desc_end = find_block_end(lines, j, desc_indent)
+        desc_end = find_block_end(lines, describe_idx, desc_indent)
         if desc_end
-          block = T.must(lines[j..desc_end])
+          block = T.must(lines[describe_idx..desc_end])
           out[code] = {
             bad:  extract_first_heredoc_in_it(block, expecting_raise: true),
-            fix:  fix_lines.join("\n"),
+            fix:  fix_scan.fix_lines.join("\n"),
             good: extract_first_heredoc_in_it(block, expecting_raise: false),
             file: path,
-            line: j + 1,
+            line: describe_idx + 1,
           }
           i = desc_end + 1
           next
         end
       end
-      # Annotation didn't lead to a describe — skip past it.
-      i = j
+      i = describe_idx
     end
+  end
+
+  sig { params(lines: T::Array[String], start_idx: Integer).returns(FixScan) }
+  def scan_fix_lines(lines, start_idx)
+    fix_lines = T.let([], T::Array[String])
+    idx = start_idx
+    while idx < lines.length
+      line = T.must(lines[idx])
+      if (match = line.match(/^\s*#\s*@fix:\s?(.*)$/))
+        fix_lines << T.must(match[1]).rstrip
+        idx += 1
+      elsif line =~ /^\s*#/ || line.strip.empty?
+        idx += 1
+      else
+        break
+      end
+    end
+    FixScan.new(fix_lines: fix_lines, next_idx: idx)
   end
 
   # Walk forward from `start_idx` (line of `describe ... do`) and find

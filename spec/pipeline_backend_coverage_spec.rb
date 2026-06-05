@@ -273,6 +273,40 @@ RSpec.describe "pipeline backend coverage" do
       expect(pipeline_host.send(:ast_stmts_use_placeholder?, [AST::FuncCall.new(tok, "f", [id("x")])])).to be false
     end
 
+    it "unwraps finite range SMOOTH chains and rejects non-SMOOTH range candidates" do
+      range = AST::RangeLit.new(tok, lit(0), lit(4), false)
+      where = AST::WhereOp.new(tok, id("_"))
+      chain = typed(AST::BinaryOp.new(tok, range, :SMOOTH, where), Type.new(:"Int64[]"))
+      non_smooth = typed(AST::BinaryOp.new(tok, id("items", type: Type.new(:"Int64[]")), :ADD, where), Type.new(:"Int64[]"))
+
+      expect(pipeline_host.send(:unwrap_range_chain, chain)).to eq(source: range, stages: [where])
+      expect(pipeline_host.send(:unwrap_range_chain, non_smooth)).to be_nil
+    end
+
+    it "unwraps binding UNNEST fold chains and rejects malformed left spines" do
+      source = id("users", type: Type.new(:"User[]"))
+      outer_binding = AST::BinaryOp.new(tok, source, :BIND_VAR, id("$u"))
+      unnest_expr = AST::GetField.new(tok, id("$u"), :orders)
+      unnest = AST::UnnestOp.new(tok, unnest_expr)
+      unnest_chain = typed(AST::BinaryOp.new(tok, outer_binding, :SMOOTH, unnest), Type.new(:"Order[]"))
+      where = AST::WhereOp.new(tok, id("_"))
+      filtered_chain = typed(AST::BinaryOp.new(tok, unnest_chain, :SMOOTH, where), Type.new(:"Order[]"))
+      fold = AST::CountOp.new(tok, id("_"))
+      full_chain = typed(AST::BinaryOp.new(tok, filtered_chain, :SMOOTH, fold), Type.new(:Int64))
+      malformed_left = typed(AST::BinaryOp.new(tok, outer_binding, :ADD, unnest), Type.new(:"Order[]"))
+      malformed_chain = typed(AST::BinaryOp.new(tok, malformed_left, :SMOOTH, fold), Type.new(:Int64))
+      non_smooth_terminal = typed(AST::BinaryOp.new(tok, malformed_left, :ADD, fold), Type.new(:Int64))
+
+      result = pipeline_host.send(:unwrap_binding_unnest_chain, full_chain)
+
+      expect(result[:source]).to equal(source)
+      expect(result[:outer_binding]).to eq("$u")
+      expect(result[:unnest_expr]).to equal(unnest_expr)
+      expect(result[:stages]).to eq([where])
+      expect(pipeline_host.send(:unwrap_binding_unnest_chain, malformed_chain)).to be_nil
+      expect(pipeline_host.send(:unwrap_binding_unnest_chain, non_smooth_terminal)).to be_nil
+    end
+
     it "lowers SHARD+CONCURRENT EACH to a sequential BC loop" do
       lowering.instance_variable_set(:@target, :bc)
       range = AST::RangeLit.new(tok, lit(0), lit(4), false)
@@ -364,7 +398,15 @@ RSpec.describe "pipeline backend coverage" do
       captured_args = []
       pipeline_host.define_singleton_method(:concurrent_list_item_type) { |_node| Type.new(:Int64) }
       pipeline_host.define_singleton_method(:build_bounded_concurrent_callback) do |_op, _item_type, _return_type, _body_kind|
-        { id: 1, ctx_name: "__Ctx", ctx_var: "__ctx" }
+        PipelineHost::BoundedConcurrentCallback.new(
+          id: 1,
+          ctx_name: "__Ctx",
+          ctx_def: MIR::StructDef.new("__Ctx", [], [], nil),
+          ctx_var: "__ctx",
+          ctx_let: MIR::Let.new("__ctx", MIR::StructInit.new("__Ctx", []), true, nil, nil),
+          pre_ctx_stmts: [],
+          post_ctx_stmts: [],
+        )
       end
       pipeline_host.define_singleton_method(:list_concurrent_source_setup_stmts) { |_node| [] }
       pipeline_host.define_singleton_method(:bounded_callback_context_stmts) { |_cb| [] }
@@ -422,7 +464,7 @@ RSpec.describe "pipeline backend coverage" do
 
       callback = pipeline_host.send(:build_bounded_concurrent_callback_pointer, conc, Type.new(:Int64))
 
-      field = callback[:ctx_def].fields.first
+      field = callback.ctx_def.fields.first
       expect(field.name).to eq("c")
       expect(field.boxed_capture).to eq("Counter")
     end

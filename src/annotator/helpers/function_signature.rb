@@ -12,6 +12,7 @@ require_relative "function_return"
 class FunctionSignature
     extend T::Sig
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
+  LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, AST::Node, T::Array[T.any(LifetimeSource, AST::Node)])) }
 
   # Static signature fields (set at creation)
   sig { returns(T.untyped) }
@@ -160,7 +161,7 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[AST::Param], return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[Symbol]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
+  sig { params(params: T::Array[AST::Param], return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), return_lifetime: LifetimeInput, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[Symbol]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
@@ -286,15 +287,15 @@ class FunctionSignature
 
   private
 
-  sig { params(val: T.untyped).returns(T::Array[LifetimeSource]) }
+  sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }
   def normalize_lifetime(val)
     return [] if val.nil?
     raw = val.is_a?(Array) ? val : [val]
     raw.map do |item|
       if item.respond_to?(:name)
-        item.name.to_s
+        item.public_send(:name).to_s
       else
-        T.cast(item.is_a?(Symbol) ? item : item.to_s, LifetimeSource)
+        item.is_a?(Symbol) ? item : item.to_s
       end
     end
   end

@@ -49,6 +49,8 @@ def skipped_example?(path)
   case rel
   when "examples/minivm/_bc_runner.cht",
        "examples/minivm/_scheme_runner.cht",
+       "examples/minivm/bench_pool_ops.cht",
+       "examples/minivm/bench_pool_ops_nosync.cht",
        "examples/minivm/debugger.cht",
        "examples/minivm/parser.cht",
        "examples/minivm/register_debugger.cht",

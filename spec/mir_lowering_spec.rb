@@ -917,6 +917,30 @@ RSpec.describe MIRLowering do
       expect(result.suppression).to eq("_ = unused;")
     end
 
+    it "delegates set declarations with SMOOTH values to expression lowering" do
+      delegate = Class.new do
+        include MIRLoweringVariables
+
+        attr_reader :lowered_node
+
+        def lower(node)
+          @lowered_node = node
+          MIR::Ident.new("lowered_smooth")
+        end
+      end.new
+      source = make_id("items", full_type: :"Int64[]")
+      stage = AST::DistinctOp.new(tok, make_id("_"))
+      smooth = AST::BinaryOp.new(tok, source, :SMOOTH, stage)
+      smooth.full_type = Type.new(:"Int64[]", collection: :set)
+      node = AST::VarDecl.new(tok, "unique", nil, smooth, false)
+      node.full_type = Type.new(:"Int64[]", collection: :set)
+
+      result = delegate.send(:lower_var_decl_init, node, node.full_type, "Set_i64", false, :frame)
+
+      expect(result.name).to eq("lowered_smooth")
+      expect(delegate.lowered_node).to equal(smooth)
+    end
+
     it "lowers BindExpr in decl mode" do
       value = make_lit(:STRING, "hello")
       node = AST::BindExpr.new(tok, "greeting", nil, value)
@@ -1435,6 +1459,26 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::SwitchStmt)
       expect(result.default_body).to eq([])
+    end
+
+    it "omits unreachable defaults for exhaustive enum switches" do
+      expr = make_id("op", full_type: :Op)
+      get = AST::GetField.new(tok, make_id("Op"), "Get")
+      get.full_type = :Op
+      put = AST::GetField.new(tok, make_id("Op"), "Put")
+      put.full_type = :Op
+      cases = [
+        AST::MatchCase.new(kind: :eq, value: get, body: [make_lit(:NUMBER, 1.0)]),
+        AST::MatchCase.new(kind: :eq, value: put, body: [make_lit(:NUMBER, 2.0)]),
+      ]
+      node = AST::MatchStatement.new(tok, expr, cases, [make_lit(:NUMBER, 3.0)], nil, nil, false, nil)
+      node.full_type = :Void
+
+      result = lowering(enum_schemas: { Op: [:Get, :Put] }).lower(node)
+
+      expect(result).to be_a(MIR::SwitchStmt)
+      expect(result.default_body).to be_nil
+      expect(emit(result)).not_to include("else =>")
     end
 
     it "lowers expression-mode match to a BlockExpr" do

@@ -1115,7 +1115,7 @@ module MIRLoweringCapabilities
     result
   end
 
-  sig { params(callee: String, args: T::Array[T.untyped]).returns(MIR::Call) }
+  sig { params(callee: String, args: T::Array[MIR::Emittable]).returns(MIR::Call) }
   def no_ownership_call(callee, args)
     MIR::Call.new(callee, args, false, false, MIR::CallableContract.no_ownership(args.length))
   end
@@ -1213,7 +1213,7 @@ module MIRLoweringCapabilities
     error_action_stmts(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
   end
 
-  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(T::Array[T.untyped]) }
+  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(T::Array[MIR::Emittable]) }
   def error_action_stmts(clause, with_label, with_node, error_type, default_msg)
     T.bind(self, MIRLowering) rescue nil
     @rt_name = T.let(@rt_name, T.untyped)

@@ -1423,7 +1423,7 @@ module PipeAnalysis
   sig { params(lhs: T.untyped).returns(T::Boolean) }
   def shard_concurrent_source?(lhs)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs.is_a?(AST::BinaryOp) && lhs.op == :SMOOTH && lhs.right.is_a?(AST::ShardOp)
+    lhs.is_a?(AST::BinaryOp) && lhs.smooth? && lhs.right.is_a?(AST::ShardOp)
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }

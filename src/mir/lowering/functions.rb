@@ -1910,10 +1910,10 @@ module MIRLoweringFunctions
     # Comptime args can't be struct fields (Zig type is `type`, comptime-only).
     # They are baked directly into the call_zig string.
     comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
-    comptime_codes = comptime_args.map { |a| emit_expr(lower_extern_arg(a)) }
+    comptime_codes = comptime_args.map { |a| T.must(emit_expr(lower_extern_arg(a))) }
 
     args = runtime_ast_args.map { |a| lower_extern_arg(a) }
-    arg_codes = args.map { |a| emit_expr(a) }
+    arg_codes = args.map { |a| T.must(emit_expr(a)) }
     arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
 
     # Use declared scalar param types for struct fields to avoid comptime_int
@@ -1962,7 +1962,7 @@ module MIRLoweringFunctions
     id = @extern_counter
     obj = lower(node.object)
     args = node.args.map { |a| lower_extern_arg(a) }
-    arg_codes = args.map { |a| emit_expr(a) }
+    arg_codes = args.map { |a| T.must(emit_expr(a)) }
     arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
     receiver_code = emit_expr(obj)
     build_extern_trampoline_common(
@@ -1990,7 +1990,7 @@ module MIRLoweringFunctions
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: T.nilable(T::Array[T.untyped]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::ZigTemplate) }
+  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[String], arg_field_types: T.nilable(T::Array[T.nilable(String)]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.nilable(AST::Node)).returns(MIR::ZigTemplate) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
     T.bind(self, MIRLowering) rescue nil
     ret_t = return_type
@@ -2048,8 +2048,9 @@ module MIRLoweringFunctions
 
     iz = MIR::ZigTemplate.new(code, [], "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
+    ast_symbol = ast_node.respond_to?(:symbol) ? ast_node.public_send(:symbol) : nil
     is_heap = alloc_kind == :heap ||
-      (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) ||
+      (ast_symbol&.heap_storage? == true) ||
       !!pt&.heap?
     iz.stdlib_def = is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
     iz.allocs = MIR.inline_alloc_metadata(alloc: alloc_kind) if is_heap && alloc_kind

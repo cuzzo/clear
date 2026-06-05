@@ -153,7 +153,7 @@ module MIRLoweringConcurrency
     end
   end
 
-  sig { params(analysis: T.untyped, base: T::Hash[String, String]).returns(T::Hash[String, String]) }
+  sig { params(analysis: T.nilable(CapabilityHelper::CaptureAnalysis), base: T::Hash[String, String]).returns(T::Hash[String, String]) }
   def fiber_capture_source_overrides(analysis, base = {})
     T.bind(self, MIRLowering) rescue nil
     @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)

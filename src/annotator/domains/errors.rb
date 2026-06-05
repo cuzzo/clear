@@ -265,7 +265,7 @@ module Annotator
 
         body.each do |stmt|
           AST.each_locatable(stmt) do |node|
-            if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+            if node.is_a?(AST::BinaryOp) && node.smooth?
               t = node.left.full_type!(context: "pipe input type")
               types << t.resolved.to_s unless t.void? || t.error_union?
             end

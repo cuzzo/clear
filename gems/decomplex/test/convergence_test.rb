@@ -134,15 +134,15 @@ class ConvergenceTest < Minitest::Test
     # Abstractions, tier 1, shared with `b`) AND a `send` (False
     # Simplicity, tier 3) -> two independent detectors converge on `a`.
     src = <<~RB
-      def a(o)
+      def a(kind)
         o.send(:x)
-        case o.k
+        case kind
         when A then 1
         when B then 2
         end
       end
-      def b(o)
-        case o.k
+      def b(kind)
+        case kind
         when A then 3
         when B then 4
         end

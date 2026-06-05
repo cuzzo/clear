@@ -1667,6 +1667,30 @@ RSpec.describe Formatter do
 
     let(:emitter) { Formatter::Emitter.new([]) }
 
+    it "centralizes formatter root-depth and END-block keyword predicates" do
+      expect(emitter.send(:root_depth?, 0, 0)).to eq(true)
+      expect(emitter.send(:root_depth?, 1, 0)).to eq(false)
+      expect(Formatter::Emitter::END_BLOCK_OPENERS).to include("IF", "FN", "START")
+      expect(Formatter::Emitter::INLINE_END_BLOCK_OPENERS).to include("IF", "FN")
+      expect(Formatter::Emitter::INLINE_END_BLOCK_OPENERS).not_to include("START")
+    end
+
+    it "ignores nested comments when deciding whether a MATCH arm comment is top-level" do
+      toks = [
+        ft(:VAR_ID, "Pat"),
+        ft(:OP, "->"),
+        ft(:KEYWORD, "IF"),
+        ft(:VAR_ID, "x"),
+        ft(:KEYWORD, "THEN"),
+        ft(:COMMENT, "# nested"),
+        ft(:KEYWORD, "END"),
+      ]
+
+      arm = emitter.send(:build_match_arm, toks, 0, toks.length, 1, nil)
+
+      expect(arm[:multi]).to eq(true)
+    end
+
     it "does not treat START after a statement boundary as a MATCH block" do
       toks = Formatter::FormatLexer.new("x; START").tokenize
       start_idx = toks.index { |t| t.type == :KEYWORD && t.raw == "START" }

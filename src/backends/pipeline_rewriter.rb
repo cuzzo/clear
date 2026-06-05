@@ -32,7 +32,7 @@ class PipelineRewriter
     # Handle SMOOTH nodes BEFORE recursing into children.
     # This preserves pipeline chains (a |> WHERE |> SELECT |> SUM)
     # so collect_chain can discover and fuse them into a single loop.
-    if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+    if node.is_a?(AST::BinaryOp) && node.smooth?
       return rewrite_pipeline(node)
     end
 
@@ -122,7 +122,7 @@ class PipelineRewriter
     # Skip rewriting for pool, sharded, SOA sources, and when the source is
     # itself a pipeline (e.g. data |> SKIP 2 |> SUM _). These need special
     # iteration patterns that the transpiler's pipeline_generator handles.
-    if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.op == :SMOOTH)
+    if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.smooth?)
       # Only patch if the source actually changed; patching the same object
       # back into the chain creates a circular reference.
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -258,7 +258,7 @@ class PipelineRewriter
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def binding_source?(node)
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
-    return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+    return false unless node.is_a?(AST::BinaryOp) && node.smooth?
     # Walk the source chain to find if its root is a BIND_VAR.
     inner_src = collect_chain(node)[:source]
     inner_src.is_a?(AST::BinaryOp) && inner_src.op == :BIND_VAR
@@ -285,7 +285,7 @@ class PipelineRewriter
     end
 
     # Now walk back through fusible stages
-    while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+    while cursor.is_a?(AST::BinaryOp) && cursor.smooth?
       r = cursor.right
       if is_fusible?(r)
         stages.unshift(r)
@@ -771,7 +771,7 @@ class PipelineRewriter
   sig { params(node: T.untyped, new_source: T.untyped).returns(T.untyped) }
   def patch_chain_source!(node, new_source)
     cursor = node
-    while cursor.left.is_a?(AST::BinaryOp) && cursor.left.op == :SMOOTH
+    while cursor.left.is_a?(AST::BinaryOp) && cursor.left.smooth?
       cursor = cursor.left
     end
     cursor.left = new_source

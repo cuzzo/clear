@@ -21,6 +21,18 @@ module Boobytrap
       {}
     end
 
+    def state_branch_density(files, root:)
+      return [] if files.empty?
+      return [] unless load_decomplex
+
+      Decomplex::StateBranchDensity.scan(files).findings.map do |h|
+        h.merge(file: relpath(h[:file], root))
+      end
+    rescue StandardError => e
+      warn "boobytrap: decomplex state-branch density unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
+      []
+    end
+
     def from_sections(sections, root:)
       Decomplex::Convergence.rollup(sections, min_detectors: 1).to_h do |unit|
         key = [relpath(unit[:file], root), unit[:method]]

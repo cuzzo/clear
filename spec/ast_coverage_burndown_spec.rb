@@ -75,6 +75,17 @@ RSpec.describe "AST coverage burndown" do
     end
   end
 
+  describe "AST node predicates" do
+    it "identifies SMOOTH binary operations without exposing the raw op check" do
+      tok = token(:SMOOTH, "|>")
+      left = AST::Identifier.new(tok, "xs")
+      right = AST::Identifier.new(tok, "map")
+
+      expect(AST::BinaryOp.new(tok, left, :SMOOTH, right).smooth?).to eq(true)
+      expect(AST::BinaryOp.new(tok, left, :ADD, right).smooth?).to eq(false)
+    end
+  end
+
   describe "fixable diagnostics primitives" do
     it "serializes spans and validates fix confidence" do
       span = Span.new(file: "main.cht", line: 2, col: 4, length: 3)

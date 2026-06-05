@@ -81,6 +81,8 @@ class Formatter
   CLOSE_LEADING   = %w[END }].freeze
   OUTDENT_LEADING = %w[ELSE ELSE_IF CATCH DEFAULT].freeze
   BLANK_BEFORE    = %w[CATCH DEFAULT].freeze
+  END_BLOCK_OPENERS = %w[IF WHILE FOR TEST WHEN FN START].freeze
+  INLINE_END_BLOCK_OPENERS = %w[IF WHILE FOR TEST WHEN FN].freeze
 
   # Keywords that attach directly to a following `(` — no space inserted.
   # Everything else gets a space between keyword and `(`.
@@ -279,6 +281,8 @@ class Formatter::Emitter
   CLOSE_LEADING   = Formatter::CLOSE_LEADING
   OUTDENT_LEADING = Formatter::OUTDENT_LEADING
   BLANK_BEFORE    = Formatter::BLANK_BEFORE
+  END_BLOCK_OPENERS = Formatter::END_BLOCK_OPENERS
+  INLINE_END_BLOCK_OPENERS = Formatter::INLINE_END_BLOCK_OPENERS
   BRACKET_OPEN    = Formatter::BRACKET_OPEN
   BRACKET_CLOSE   = Formatter::BRACKET_CLOSE
 
@@ -309,6 +313,11 @@ class Formatter::Emitter
   sig { params(token: Formatter::FormatLexer::Token, depth: Integer).returns(T::Boolean) }
   def top_level_keyword?(token, depth)
     depth.zero? && token.type == :KEYWORD
+  end
+
+  sig { params(first_depth: Integer, second_depth: Integer).returns(T::Boolean) }
+  def root_depth?(first_depth, second_depth)
+    first_depth.zero? && second_depth.zero?
   end
 
   sig { params(out: Array, body_start: Integer).void }
@@ -533,7 +542,7 @@ class Formatter::Emitter
         bdepth -= 1 if bracket_close?(t.raw)
       elsif top_level_keyword?(t, bdepth)
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+        when *END_BLOCK_OPENERS
           kdepth += 1
         when 'END'
           return j if kdepth.zero?
@@ -585,7 +594,7 @@ class Formatter::Emitter
         elsif bracket_close?(t.raw)
           bdepth -= 1
         elsif t.raw == ','
-          if bdepth.zero? && kdepth.zero?
+          if root_depth?(bdepth, kdepth)
             arms << build_match_arm(toks, arm_start, j, arrow_idx, j)
             arm_start = skip_nls(toks, j + 1)
             j = arm_start
@@ -593,11 +602,11 @@ class Formatter::Emitter
             next
           end
         end
-      elsif t.type == :OP && t.raw == '->' && bdepth.zero? && kdepth.zero?
+      elsif t.type == :OP && t.raw == '->' && root_depth?(bdepth, kdepth)
         arrow_idx ||= j
       elsif top_level_keyword?(t, bdepth)
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+        when *END_BLOCK_OPENERS
           kdepth += 1
         when 'END'
           kdepth -= 1 if kdepth.positive?
@@ -626,18 +635,18 @@ class Formatter::Emitter
           # between the comment and the body, producing
           # `Pat ->  # tag stmt;,` which Zig-of-CLEAR cannot parse —
           # the comment extends to end-of-line and eats the body.
-          has_comment = true if bdepth.zero? && kdepth.zero?
+          has_comment = true if root_depth?(bdepth, kdepth)
         elsif t.type == :SYM
           if bracket_open?(t.raw)
             bdepth += 1
           elsif bracket_close?(t.raw)
             bdepth -= 1
           elsif t.raw == ';'
-            semi_count += 1 if bdepth.zero? && kdepth.zero?
+            semi_count += 1 if root_depth?(bdepth, kdepth)
           end
         elsif top_level_keyword?(t, bdepth)
           case t.raw
-          when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+          when *END_BLOCK_OPENERS
             has_block = true if kdepth.zero?
             kdepth += 1
           when 'END'
@@ -747,7 +756,7 @@ class Formatter::Emitter
           j += 1
           next
         elsif t.raw == ';'
-          if bdepth.zero? && kdepth.zero?
+          if root_depth?(bdepth, kdepth)
             out << t
             j += 1
             insert_nl(out)
@@ -756,7 +765,7 @@ class Formatter::Emitter
         end
       elsif top_level_keyword?(t, bdepth)
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+        when *END_BLOCK_OPENERS
           kdepth += 1
         when 'END'
           kdepth -= 1 if kdepth.positive?
@@ -829,7 +838,7 @@ class Formatter::Emitter
       # actually closes with END. Brace-terminated blocks (WITH/MATCH/
       # STRUCT/UNION/ENUM/BG) are handled by the `{`/`}` branches below.
       # Filter WITH (`CATCH Input WITH(...)`) is not a block opener.
-      if tj.type == :KEYWORD && %w[FN IF WHILE FOR TEST WHEN START].include?(tj.raw)
+      if tj.type == :KEYWORD && END_BLOCK_OPENERS.include?(tj.raw)
         if tj.raw == 'FN'
           j = emit_fn_block(out, toks, j)
           next
@@ -1196,7 +1205,7 @@ class Formatter::Emitter
         end
       elsif top_level_keyword?(t, bdepth)
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+        when *INLINE_END_BLOCK_OPENERS
           kdepth += 1
         when 'END'
           kdepth -= 1 if kdepth.positive?
@@ -1241,7 +1250,7 @@ class Formatter::Emitter
         end
       elsif top_level_keyword?(t, bdepth)
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+        when *END_BLOCK_OPENERS
           kdepth += 1
         when 'END'
           return j if kdepth.zero?
@@ -1265,7 +1274,7 @@ class Formatter::Emitter
       return nil if t.type == :NL
       if t.type == :KEYWORD
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+        when *INLINE_END_BLOCK_OPENERS
           depth += 1
         when 'END'
           return j if depth == 0
@@ -1337,7 +1346,7 @@ class Formatter::Emitter
 
       if tj.type == :KEYWORD
         case tj.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN' then block_depth += 1
+        when *INLINE_END_BLOCK_OPENERS then block_depth += 1
         when 'END' then block_depth -= 1 if block_depth > 0
         end
       end
@@ -1350,11 +1359,11 @@ class Formatter::Emitter
         next
       end
 
-      if tj.type == :SYM && tj.raw == ';' && depth.zero? && block_depth.zero?
+      if tj.type == :SYM && tj.raw == ';' && root_depth?(depth, block_depth)
         j = emit_stmt_terminator(out, toks, j)
         next
       end
-      if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && depth.zero? && block_depth.zero?
+      if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && root_depth?(depth, block_depth)
         insert_nl(out)
         out << tj
         j += 1
@@ -1377,7 +1386,7 @@ class Formatter::Emitter
       # liner in a multi-line chain, and the missing NL collapsed the
       # whole ladder against the IF column.)
       if tj.type == :KEYWORD && %w[THEN DO].include?(tj.raw) &&
-         depth.zero? && block_depth.zero?
+         root_depth?(depth, block_depth)
         out << tj
         j += 1
         k = j
@@ -2109,7 +2118,7 @@ class Formatter::Emitter
         when '(', '[', '{' then depth += 1
         when ')', ']', '}' then depth -= 1
         when ';'
-          if depth.zero? && block_depth.zero?
+          if root_depth?(depth, block_depth)
             count += 1 if has_tokens
             has_tokens = false
             saw_block_at_top = false
@@ -2119,7 +2128,7 @@ class Formatter::Emitter
       elsif t.type == :KEYWORD
         case t.raw
         when 'DO', 'THEN'
-          saw_block_at_top = true if depth.zero? && block_depth.zero?
+          saw_block_at_top = true if root_depth?(depth, block_depth)
           block_depth += 1
         when 'END'
           block_depth -= 1 if block_depth > 0
@@ -2174,7 +2183,7 @@ class Formatter::Emitter
           # runs earlier in the pipeline). Without this guard, the FOR
           # body in `BG { @parallel -> FOR i IN ... DO a; b; END }`
           # would be torn apart.
-          if depth.zero? && block_depth.zero?
+          if root_depth?(depth, block_depth)
             j = emit_stmt_terminator(out, toks, j)
             next
           end
@@ -2218,7 +2227,7 @@ class Formatter::Emitter
       elsif t.type == :OP && t.raw == '->' && bdepth.zero?
         return true
       elsif top_level_keyword?(t, bdepth) &&
-            %w[FN IF WHILE FOR TEST WHEN START].include?(t.raw)
+            END_BLOCK_OPENERS.include?(t.raw)
         return false
       end
       return false if t.type == :SYM && t.raw == ';' && bdepth.zero?

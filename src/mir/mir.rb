@@ -395,6 +395,23 @@ module MIR
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[T.untyped]) }
   ZigTemplateArgs = T.type_alias { T.any(T::Array[Emittable], T::Hash[Symbol, Emittable]) }
+  NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
+
+  sig { params(name: T.any(String, Symbol), value: Emittable).returns(NamedMirField) }
+  def self.named_field(name, value)
+    field = T.let({}, NamedMirField)
+    field[:name] = name
+    field[:value] = value
+    field
+  end
+
+  sig { params(expr: Emittable, capture: T.any(String, Symbol)).returns(NamedMirField) }
+  def self.if_binding(expr, capture)
+    binding = T.let({}, NamedMirField)
+    binding[:expr] = expr
+    binding[:capture] = capture
+    binding
+  end
 
   sig { params(root: T.nilable(NodeRoot), blk: T.proc.params(arg0: Node).void).void }
   def self.each_node(root, &blk)
@@ -3532,7 +3549,7 @@ module MIR
 
     private
 
-    sig { params(value: T.untyped).void }
+    sig { params(value: Object).void }
     def validate_ownership_contract!(value)
       return if value.is_a?(OwnershipContract)
 

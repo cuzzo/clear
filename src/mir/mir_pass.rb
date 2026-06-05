@@ -673,7 +673,7 @@ class MIRPass
     stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
   end
 
-  sig { params(node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(CleanupEntry)) }
+  sig { params(node: AST::Node, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_binding_node(node, bindings)
     symbol = node.respond_to?(:symbol) ? node.symbol : nil
     decl = symbol&.reg
@@ -681,7 +681,7 @@ class MIRPass
       entry = decl.mir_binding_entry
       return entry if entry
     end
-    bindings[node.name.to_s] if node.respond_to?(:name)
+    bindings[node.public_send(:name).to_s] if node.respond_to?(:name)
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.

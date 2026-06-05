@@ -271,7 +271,7 @@ module MIRLoweringExpressions
   def lower_binary_op(node)
     T.bind(self, MIRLowering) rescue nil
     # Pipeline operator: x |> f -> f(x), or complex pipeline ops
-    return lower_smooth(node) if node.op == :SMOOTH
+    return lower_smooth(node) if node.smooth?
 
     # Error chain: expr OR handler
     return lower_or_rescue(node) if node.op == :OR_RESCUE
@@ -459,7 +459,7 @@ module MIRLoweringExpressions
     UnitVariantAccess.new(type_name: type_name, variant_name: node.field)
   end
 
-  sig { params(schema: Schemas::UnionSchema, field: T.untyped).returns(T.untyped) }
+  sig { params(schema: Schemas::UnionSchema, field: T.any(String, Symbol)).returns(T.nilable(T.any(String, Symbol))) }
   def union_variant_key(schema, field)
     return field if schema.variants.key?(field)
 
@@ -1174,9 +1174,9 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(schema: T.untyped, node: AST::StructLit).returns(T::Hash[Symbol, Symbol]) }
+  sig { params(schema: T.any(Schemas::StructSchema, Schemas::InlineStructVariant), node: AST::StructLit).returns(T::Hash[Symbol, Symbol]) }
   def struct_lit_type_subst(schema, node)
-    params = schema.respond_to?(:type_params) ? schema.type_params : nil
+    params = schema.is_a?(Schemas::StructSchema) ? schema.type_params : nil
     args = node.type_args || []
     return {} unless params&.any? && args.any?
     out = T.let({}, T::Hash[Symbol, T.untyped])

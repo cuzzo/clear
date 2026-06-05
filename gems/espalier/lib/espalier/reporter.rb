@@ -104,10 +104,10 @@ module Espalier
 
     def state_owner_pressure
       lines = ["## State Owner Pressure", "_State-heavy owners with broad method/delegation surfaces._", ""]
-      lines << "| # | owner | score | state | methods | state touches | delegations | suggested refactor |"
-      lines << "|---|-------|-------|-------|---------|---------------|-------------|--------------------|"
+      lines << "| # | owner | score | flags | state | methods | state touches | delegations | suggested refactor |"
+      lines << "|---|-------|-------|-------|-------|---------|---------------|-------------|--------------------|"
       module_scores.first(@limit).each_with_index do |row, idx|
-        lines << "| #{idx + 1} | #{module_ref(row)} | #{fmt(row[:score])} | #{row[:state_count]} | " \
+        lines << "| #{idx + 1} | #{module_ref(row)} | #{fmt(row[:score])} | #{owner_flags(row)} | #{row[:state_count]} | " \
                  "#{row[:method_count]} | #{row[:state_touches]} | #{row[:delegations]} | #{owner_refactor(row)} |"
       end
       lines << ""
@@ -403,6 +403,15 @@ module Espalier
       else
         "audit cohesion before local cleanup"
       end
+    end
+
+    def owner_flags(row)
+      flags = []
+      flags << "state-heavy" if row[:state_count] >= 5
+      flags << "many-mutators" if row[:write_methods] >= 5
+      flags << "broad-delegator" if row[:delegations] >= 100
+      flags << "low-cohesion-candidate" if row[:state_count] >= 5 && row[:state_touches] < row[:state_count] * 2
+      flags.empty? ? "-" : flags.join(", ")
     end
 
     def method_refactor(row)

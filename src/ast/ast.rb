@@ -1498,8 +1498,12 @@ module AST
     # the field's emission in MIR::BlockExpr when the field actually emitted
     # any pending allocs. OR_RESCUE's right side is the fallback expression;
     # boolean AND/OR's right side must only run after short-circuiting allows it.
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[Symbol]) }
     def lazy_fields = (%i[AND OR OR_RESCUE].include?(op) ? [:right] : [])
+    sig { returns(T::Boolean) }
+    def smooth?
+      op == :SMOOTH
+    end
     # True on a `|> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
     # whose source is a still-running tense stream — fold terminal is backed by
     # an Observable<T> / atomic accumulator and may be observed via WITH VIEW.

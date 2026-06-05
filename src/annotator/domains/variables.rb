@@ -43,7 +43,7 @@ module Annotator
         target = node.type
         return unless target.future? && target.observable?
         pipe = node.value
-        return unless pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH
+        return unless pipe.is_a?(AST::BinaryOp) && pipe.smooth?
         return unless pipe.observable_terminal
         pipe.observable_dest = true
         # Preserve the terminal kind set by lift_to_observable_if_terminal!.
@@ -108,7 +108,7 @@ module Annotator
         # tense source; any other shape leaves it false.
         if node.type&.future? && node.type.observable?
           pipe = node.value
-          ok = pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH && pipe.observable_dest
+          ok = pipe.is_a?(AST::BinaryOp) && pipe.smooth? && pipe.observable_dest
           unless ok
             msg = "`~T@observable` bindings must be initialized by a pipeline-terminal fold " \
                   "over a tense stream (e.g. `running: ~Int64@observable = stream |> SUM _`). " \

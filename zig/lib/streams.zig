@@ -174,20 +174,14 @@ pub fn SplitStream(
 
         fn lockInner(inner: *Inner) void {
             while (true) {
-                inner.mutex.lock() catch |err| switch (err) {
-                    error.LockTimeout => continue,
-                    else => unreachable,
-                };
+                inner.mutex.lock() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
                 return;
             }
         }
 
         fn lockSharedInner(inner: *Inner) void {
             while (true) {
-                inner.mutex.lockShared() catch |err| switch (err) {
-                    error.LockTimeout => continue,
-                    else => unreachable,
-                };
+                inner.mutex.lockShared() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
                 return;
             }
         }

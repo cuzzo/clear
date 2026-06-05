@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "find"
+require "json"
 require "open3"
+require_relative "zig_coverage_sanitize"
 
 # Shared kcov wrapper for generated Zig test runners.
 #
@@ -17,6 +20,7 @@ module ZigCoverageSupport
 
   TRUTHY = %w[1 true yes on].freeze
   KCOV_CODECOV_EXCLUDE_PATTERN = "-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz.zig,/._clear_cov_".freeze
+  SANITIZER_REMOVALS_FILE = ".zig-coverage-sanitizer-removals.json"
 
   def self.enabled?
     TRUTHY.include?(ENV.fetch("ZIG_COVERAGE", "0").downcase) ||
@@ -83,6 +87,7 @@ module ZigCoverageSupport
       bin_path,
     ]
     run_output, run_status = Open3.capture2e(env, *kcov_args, chdir: run_dir || build_dir)
+    sanitize_coverage_run!(kcov_dir, bin_path) if run_status.success?
     [compile_output + run_output, run_status]
   ensure
     FileUtils.rm_f(bin_path) if bin_path && ENV["ZIG_COVERAGE_KEEP_BIN"] != "1"
@@ -114,6 +119,74 @@ module ZigCoverageSupport
     )
     raise Error, "kcov merge failed for #{root}:\n#{output}" unless status.success?
 
-    File.join(merged, "kcov-merged", "cobertura.xml")
+    xml_path = File.join(merged, "kcov-merged", "cobertura.xml")
+    removals = ZigCoverageSanitizer.sanitize_file!(xml_path, allowed_removals: proof_backed_removal_keys(root))
+    unless removals.empty?
+      warn "Zig coverage sanitizer removed #{removals.length} proof-backed merged orphan runtime-header hit(s): #{ZigCoverageSanitizer.format_hits(removals)}"
+    end
+    ZigCoverageSanitizer.assert_no_orphan_hits!(xml_path)
+    xml_path
+  end
+
+  def self.sanitize_coverage_run!(kcov_dir, bin_path)
+    all_removals = []
+    coverage_xml_paths(kcov_dir).each do |xml_path|
+      removals = ZigCoverageSanitizer.sanitize_file!(xml_path, binary: bin_path)
+      all_removals.concat(removals)
+      unless removals.empty?
+        warn "Zig coverage sanitizer removed #{removals.length} proof-backed orphan runtime-header hit(s): #{ZigCoverageSanitizer.format_hits(removals)}"
+      end
+      ZigCoverageSanitizer.assert_no_orphan_hits!(xml_path)
+    end
+    write_sanitizer_removals!(kcov_dir, all_removals)
+    all_removals
+  end
+
+  def self.coverage_xml_paths(kcov_dir)
+    return [] unless Dir.exist?(kcov_dir)
+
+    paths = []
+    Find.find(kcov_dir) do |path|
+      if File.directory?(path)
+        Find.prune if File.basename(path) == "kcov-merged"
+        next
+      end
+
+      paths << path if File.basename(path) == "cobertura.xml"
+    end
+    paths.sort
+  end
+
+  def self.write_sanitizer_removals!(kcov_dir, removals)
+    path = File.join(kcov_dir, SANITIZER_REMOVALS_FILE)
+    if removals.empty?
+      FileUtils.rm_f(path)
+      return
+    end
+
+    payload = removals.map do |removal|
+      {
+        "file" => removal.file,
+        "function" => removal.function,
+        "line" => removal.line,
+        "hits" => removal.hits,
+      }
+    end
+    File.write(path, JSON.pretty_generate(payload))
+  end
+
+  def self.proof_backed_removal_keys(root)
+    return {} unless Dir.exist?(root)
+
+    Dir.children(root).each_with_object({}) do |entry, keys|
+      next if entry == "merged"
+
+      marker = File.join(root, entry, SANITIZER_REMOVALS_FILE)
+      next unless File.file?(marker)
+
+      JSON.parse(File.read(marker)).each do |row|
+        keys[ZigCoverageSanitizer.removal_key(row.fetch("file"), row.fetch("function"), row.fetch("line"))] = true
+      end
+    end
   end
 end

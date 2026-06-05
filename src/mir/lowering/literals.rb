@@ -171,7 +171,7 @@ module MIRLoweringLiterals
     ti.any_sync? || ti.shared? || ti.multiowned?
   end
 
-  sig { params(inner: T.untyped, ti: Type, alloc: Symbol).returns(T.untyped) }
+  sig { params(inner: MIR::Emittable, ti: Type, alloc: Symbol).returns(MIR::Emittable) }
   def wrap_list_literal_capability(inner, ti, alloc)
     T.bind(self, MIRLowering)
     return inner unless list_literal_capability_wrap_needed?(ti)
@@ -230,7 +230,7 @@ module MIRLoweringLiterals
         zig_t = bare_ft.zig_type
 
         needs_alloc = bare_ft.map_init_needs_alloc?
-        inner = MIR::StructInit.new(zig_t, needs_alloc ? [{ name: "alloc", value: MIR::Ident.new(alloc_str) }] : [])
+        inner = MIR::StructInit.new(zig_t, needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_str))] : [])
 
         wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
         inner = T.cast(
@@ -243,7 +243,7 @@ module MIRLoweringLiterals
           MIR::CapWrap,
         )
         return inner if node.pairs.empty?
-        init_value = MIR::StructInit.new(zig_t, needs_alloc ? [{ name: "alloc", value: MIR::Ident.new(alloc_str) }] : [])
+        init_value = MIR::StructInit.new(zig_t, needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_str))] : [])
         result_wrap = :striped
         result_wrap_fn = wrap_fn
       else
@@ -252,7 +252,7 @@ module MIRLoweringLiterals
 
         needs_alloc = bare_ft.map_init_needs_alloc?
         inner = if needs_alloc
-          MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
+          MIR::StructInit.new(zig_t, [MIR.named_field("alloc", MIR::Ident.new(alloc_str))])
         else
           MIR::StructInit.new(zig_t, [])
         end
@@ -277,7 +277,7 @@ module MIRLoweringLiterals
     # Non-empty hash: init + puts
     items = []
     alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), map_alloc == :heap ? "heapAlloc" : "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
-    items << MIR::Let.new("__hm", init_value || MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
+    items << MIR::Let.new("__hm", init_value || MIR::StructInit.new(zig_t, [MIR.named_field("alloc", alloc_expr)]), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       k = lower(key_node)
       raw_v = with_decl_alloc(map_alloc) { materialize_owned_sink_value(lower(val_node), val_node, map_alloc) }

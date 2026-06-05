@@ -3207,7 +3207,7 @@ class MIRLowering
 
   # Emit a builtin operation from BUILTIN_OPS registry with structured MIR
   # children and stdlib_def attached so the MIR checker can verify ownership.
-  sig { params(name: Symbol, args: T::Array[T.untyped]).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
   def emit_builtin(name, args)
     entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry

@@ -325,6 +325,15 @@ pub fn build(b: *std.Build) void {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
+    const sanitize_cmd = if (coverage)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd.?.step);
+    }
     // Same shape as `merge_cmd`, but for the Loom-only coverage tree.
     const merge_cmd_loom = if (coverage_loom)
         b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-loom/merged" })
@@ -334,6 +343,15 @@ pub fn build(b: *std.Build) void {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
+    const sanitize_cmd_loom = if (coverage_loom)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-loom/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd_loom) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd_loom.?.step);
+    }
     // Same shape as `merge_cmd_loom`, but for the VOPR-only coverage tree.
     const merge_cmd_vopr = if (coverage_vopr)
         b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-vopr/merged" })
@@ -342,6 +360,15 @@ pub fn build(b: *std.Build) void {
     if (merge_cmd_vopr) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
+    }
+    const sanitize_cmd_vopr = if (coverage_vopr)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd_vopr) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd_vopr.?.step);
     }
 
     // Counts only the test_files entries that contribute to `test_step`
@@ -638,11 +665,13 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    if (merge_cmd) |m| {
+    if (sanitize_cmd) |s| {
+        test_step.dependOn(&s.step);
+    } else if (merge_cmd) |m| {
         test_step.dependOn(&m.step);
     }
-    if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
-    if (merge_cmd_vopr) |m| coverage_vopr_step.dependOn(&m.step);
+    if (sanitize_cmd_loom) |s| coverage_loom_step.dependOn(&s.step) else if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
+    if (sanitize_cmd_vopr) |s| coverage_vopr_step.dependOn(&s.step) else if (merge_cmd_vopr) |m| coverage_vopr_step.dependOn(&m.step);
 
     // -------------------------------------------------------------------------
     // BENCHMARKS (zig build benchmark)

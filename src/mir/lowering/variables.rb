@@ -594,7 +594,7 @@ module MIRLoweringVariables
     end
 
     if ft.set_collection?
-      return lower(node.value) if rhs.is_a?(AST::BinaryOp) && rhs.op == :SMOOTH
+      return lower(node.value) if rhs.is_a?(AST::BinaryOp) && rhs.smooth?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
       inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
@@ -710,7 +710,7 @@ module MIRLoweringVariables
     !!(init.is_a?(MIR::Call) && init.owned_return?)
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(CleanupEntry)) }
+  sig { params(node: AST::Node).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_ast_binding(node)
     symbol = T.let(nil, T.untyped)
     symbol = node.symbol if node.respond_to?(:symbol)
@@ -1110,9 +1110,13 @@ module MIRLoweringVariables
       operand.name
     }, T::Array[String])
 
+    template_args = T.let({}, T::Hash[Symbol, MIR::Emittable])
+    template_args[:target] = target
+    template_args[:index] = idx
+    template_args[:value] = val
     iz = MIR::ZigTemplate.new(
       dispatch.template.dup,
-      { target: target, index: idx, value: val },
+      template_args,
       "index_set"
     )
     iz.stdlib_def = op
