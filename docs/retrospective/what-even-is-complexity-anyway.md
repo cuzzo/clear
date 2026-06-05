@@ -490,7 +490,7 @@ Rich Hickey makes a great joke about functional programming languages:
 
 > Parenthesis are hard, yes... haha... I mean, I’ve seen them before.  But I’ve never seen them ON THAT SIDE of the function!!  My God!
 
-Functional programming isn't so scary, and it *might* provide a lot of value for you.  But like functional programming nor Rust, is going to allow you to write a working version of Rust in a weekend.  Neither is using an LLM.  There's no Silver Bullet.
+Functional programming isn't so scary, and it *might* provide a lot of value for you.  But functional programming nor Rust will allow you to write a working version of the Rust compiler in a weekend.  Neither will using an LLM.  There is no Silver Bullet.
 
 If you really want to increase your velocity, do yourself a favor.  Measure complexity and stay ahead of it.  You may quickly find your designs are worse than you thought they were, and fix them *BEFORE* they become problems.  Do this *regardless* of what language you choose - *especially* if you're using LLMs.
 
