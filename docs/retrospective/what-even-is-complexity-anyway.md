@@ -291,9 +291,6 @@ All of that is business logic: **Essential Complexity**.  Those things *may* nee
 
  * Bad engineer: instead of adding together positive and negative numbers, first I should see if it’s negative, then get the absolute value, then subtract it.
 
-> [!NOTE]
-> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!
-
 The harder and more complicated a language is, and the more difficult it is to recover from bad design choices, the more you need to reach outside the box, and the more you get trapped into a bad box once you go in there.
 
 The cost of a bad function is minimal.  The cost of a bad architecture / design (in most existing languagues) is enormous.
@@ -329,9 +326,6 @@ A sure-fire sign that you’re heading in the wrong direction is:
  * Is your complexity growing exponentially while your features are growing linearly?
 
 These are things you can and should measure as well.
-
-> [!NOTE]
-> [gems/nil-kill](/gems/nil-kill/README.md), [gems/decomplex](/gems/decomplex/README.md), [gems/slopcop](/gems/slopcop/README.md), [gems/boobytrap](/gems/boobytrap/README.md), and [gems/espalier](/gems/espalier/README.md) do all of this for [CLEAR](/README.md).
 
 Most software is moving in the wrong direction, and we know it.  But people rarely quantify it.
 
@@ -379,7 +373,7 @@ But metrics *can* help:
  * If you’re going to make a change to make things better, you have acceptance criteria - not opinions and vibes.
  * If you measure complexity, you cannot do a “refactor” that makes the code worse - that's "enshifitication".
 
-Metrics can help you prioritize the most complicated parts of the codebase to and your efforts to resolve them.
+Metrics can help you prioritize the most complicated parts of the codebase to and your efforts to resolve them - see the end for details.
 
 If your codebase is a steaming pile of crap, the solution is not making leaf functions prettier.
 
@@ -496,12 +490,12 @@ Rich Hickey makes a great joke about functional programming languages:
 
 > Parenthesis are hard, yes... haha... I mean, I’ve seen them before.  But I’ve never seen them ON THAT SIDE of the function!!  My God!
 
-The reality is, functional programming looks alien, and always will, and as a result, almost certainly will never scale to be hireable.
-
-You’re trading hireability and performance ceiling for a little velocity - mostly from your code being less buggy.  That’s a sideways trade *most* of the time.  From a quality of life perspective, you might want to check it out.  From a career perspective, less certain...
-
-If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OxCaml may be perfect for your project.  Who knows?
-
-But they’re not going to let you write a working version of Rust in a weekend.  Neither is using an LLM.  There's no Silver Bullet.
+Functional programming isn't so scary, and it *might* provide a lot of value for you.  But like functional programming nor Rust, is going to allow you to write a working version of Rust in a weekend.  Neither is using an LLM.  There's no Silver Bullet.
 
 If you really want to increase your velocity, do yourself a favor.  Measure complexity and stay ahead of it.  You may quickly find your designs are worse than you thought they were, and fix them *BEFORE* they become problems.  Do this *regardless* of what language you choose - *especially* if you're using LLMs.
+
+> [!NOTE]
+> [gems/nil-kill](/gems/nil-kill/README.md), [gems/decomplex](/gems/decomplex/README.md), [gems/slopcop](/gems/slopcop/README.md), [gems/boobytrap](/gems/boobytrap/README.md), and [gems/espalier](/gems/espalier/README.md) do all of this for CLEAR.
+
+> [!NOTE]
+> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!
