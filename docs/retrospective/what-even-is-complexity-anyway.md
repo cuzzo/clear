@@ -251,7 +251,7 @@ No.
 
 In any Turing Complete language, you can write a piece of software in infinite ways.  The vast majority of those ways are absolutely terrible.
 
-Take the stateful player example - it translates perfectly to lisp (or OCaml or any lanaguage):
+Take the stateful player example - it translates perfectly to Lisp (or OCaml or any lanaguage):
 
 ```lisp
 (defvar *initial-billing-state* #(nil nil nil nil nil))
