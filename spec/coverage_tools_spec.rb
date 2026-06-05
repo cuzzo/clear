@@ -75,6 +75,42 @@ RSpec.describe "coverage gap tools" do
     end
   end
 
+  it "expands kcov Cobertura to track meaningful Zig source lines omitted from DWARF" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    File.write(File.join(@tmp, "zig/runtime/foo.zig"), <<~ZIG)
+      // full-line comment is not coverage debt
+      pub fn foo() void {
+          const x = 1;
+          _ = x;
+      }
+    ZIG
+    xml = File.join(@tmp, "cobertura.xml")
+    File.write(xml, <<~XML)
+      <?xml version="1.0" ?>
+      <coverage line-rate="1.0" lines-covered="1" lines-valid="1">
+        <packages>
+          <package name="" line-rate="1.0">
+            <classes>
+              <class name="foo" filename="runtime/foo.zig" line-rate="1.0">
+                <lines>
+                  <line number="2" hits="1"/>
+                </lines>
+              </class>
+            </classes>
+          </package>
+        </packages>
+      </coverage>
+    XML
+
+    ZigCoverageSupport.expand_cobertura!(xml, zig_dir: File.join(@tmp, "zig"))
+
+    doc = REXML::Document.new(File.read(xml))
+    lines = REXML::XPath.match(doc, "//class/lines/line").map { |line| [line.attributes["number"].to_i, line.attributes["hits"].to_i] }
+    expect(lines).to eq([[2, 1], [3, 0], [4, 0], [5, 0]])
+    expect(REXML::XPath.first(doc, "/coverage").attributes["lines-valid"]).to eq("4")
+    expect(REXML::XPath.first(doc, "/coverage").attributes["lines-covered"]).to eq("1")
+  end
+
   it "excludes VOPR and Loom harness files from Loom and VOPR scanners" do
     loom_excluded = %w[
       foo-test.zig
