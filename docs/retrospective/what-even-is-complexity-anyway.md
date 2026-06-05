@@ -1,34 +1,24 @@
 # What even is complexity anyway?
 
-In the 80s, the costs of software started ballooning.
+In the 80s, the costs of software started ballooning. People became obsessed with the idea that software could and should write itself.
 
-People became obsessed with the idea that software could and should write itself.
+ML techniques are not new. Neural Networks had existed since the 60s, and in the 80s - like LLMs today - there was a craze to apply those techniques to "fix" all of the problems in software, namely to get it to write itself and/or correct itself.
 
-ML techniques are not new. Neural Networks had existed since the 60s, and in the 80s - like LLMs today - there was a craze to apply those techniques to “fix” all of the problems in software, namely to get it to write itself or correct itself.
-
-In [No Silver Bullet](https://www.cs.unc.edu/techreports/86-020.pdf), the proposal is simple: well written software is almost as simple as it can possibly be.
-
-There is little hope for a language to save us such that it can be 10x or more expressive than today's leading languages.
+In [No Silver Bullet](https://www.cs.unc.edu/techreports/86-020.pdf), the proposal is simple: well written software is almost as simple as it can possibly be. There is little hope for a language to save us such that it can be 10x or more expressive than today's leading languages.
 
 The operative phrase from No Silver Bullet is “well written software”.  Most software is far from well written.
 
-In the 80s, as now, people tried to figure out: is there even a way to programmatically define what is well written and ideal?
-
-This is thought to be an undecidable problem.
-
-If this was possible, you could programmatically rewrite all architecturally bad software to its ideal form.
-
-The fact that you've not seen this is evidence the problem remains unsolved.
+In the 80s, as now, people tried to figure out: is there even a way to programmatically define what is well written and ideal? This is thought to be an undecidable problem. If this was possible, you could programmatically rewrite all architecturally bad software to its ideal form. The fact that you've not seen this is evidence the problem remains unsolved.
 
 In [Out of the Tar Pit](https://curtclifton.net/papers/MoseleyMarks06a.pdf), the author spends much time discussing the difference between Essential and Accidental Complexity.
 
 But I don't think the average person really understands complexity. As in Out of the Tar Pit, this essay is not focused on Complexity Theory.  It is focused on the complexity that makes software hard to understand and maintain, essentially.
 
-At its core, complexity stems almost entirely from state and control flow. More specifically, it is unnecessary, implicit, shared, mutable, duplicated, or poorly bounded state/control flow.  Most of that stems from bad design.
+At its core, complexity stems almost entirely from **state** and **control flow**. More specifically, it is unnecessary, implicit, shared, mutable, duplicated, or poorly bounded state/control flow.  Most of that stems from **bad design**.
 
 State and control flow are sort of easy to understand at a high level, but it can be a challenge to pin down exactly what the problem is, where, and why.
 
-Good design typically focuses on minimizing state and control flow, so if you do not understand them fully, it is hard to design good software.
+Good design typically focuses on minimizing state and implicit control flow, so if you do not understand them fully, it is hard to design good software.
 
 It is easy to feel the pain of bad software, but it is hard to fix or avoid it if you don't understand the cause.
 
