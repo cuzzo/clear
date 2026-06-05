@@ -12,7 +12,7 @@ They know that all the problems in software stem from **state** and **control fl
 
 Pure functional languages technically forbid state (though in a Turing Complete language, you can always find a way to get around that).
 
-SQL on the other hand truthfully does not allow *you* to write state and *severly* limits your ability to write control flow.
+SQL on the other hand truthfully does not allow *you* to write state and *severely* limits your ability to write control flow.
 
 Thus, it allows you to write bug-free concurrent code that can be *nearly* as performant as optimized C code - almost effortlessly.
 
