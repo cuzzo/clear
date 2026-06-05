@@ -489,10 +489,10 @@ Rich Hickey makes a great joke about functional programming languages:
 
 The reality is, functional programming looks alien, and always will, and as a result, almost certainly will never scale to be hireable.
 
-You’re trading hireability and performance ceiling for a little velocity - mostly from your code being less buggy.  That’s a sideways trade most of the time.
+You’re trading hireability and performance ceiling for a little velocity - mostly from your code being less buggy.  That’s a sideways trade *most* of the time.  From a quality of life perspective, you might want to check it out.  From a career perspective, less certain...
 
-If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OCaml may be perfect for your project.
+If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OxCaml may be perfect for your project.
 
-But they’re not going to let you write a working version of Rust in a weekend.  Neither is using an LLM.
+But they’re not going to let you write a working version of Rust in a weekend.  Neither is using an LLM.  There's no Silver Bullet.
 
 Do yourself a favor, and measure complexity and stay ahead of it, regardless what language you choose - *especially* if you're using LLMs.
