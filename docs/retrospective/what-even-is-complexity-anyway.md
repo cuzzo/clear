@@ -498,4 +498,4 @@ If you really want to increase your velocity, do yourself a favor.  Measure comp
 > [gems/nil-kill](/gems/nil-kill/README.md), [gems/decomplex](/gems/decomplex/README.md), [gems/slopcop](/gems/slopcop/README.md), [gems/boobytrap](/gems/boobytrap/README.md), and [gems/espalier](/gems/espalier/README.md) do all of this for CLEAR.
 
 > [!NOTE]
-> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!
+> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!  But you *don't* get a silver bullet...
