@@ -12,15 +12,13 @@ In the 80s, as now, people tried to figure out: is there even a way to programma
 
 In [Out of the Tar Pit](https://curtclifton.net/papers/MoseleyMarks06a.pdf), the author spends much time discussing the difference between Essential and Accidental Complexity.
 
-But I don't think the average person really understands complexity. As in Out of the Tar Pit, this essay is not focused on Complexity Theory.  It is focused on the complexity that makes software hard to understand and maintain, essentially.
+But I don't think the average person really understands complexity. In this essay, complexity is not Complexity Theory in computer science.  Like in Out of the tar Pit, it is the complexity that makes software hard to understand and maintain, essentially.
 
-At its core, complexity stems almost entirely from **state** and **control flow**. More specifically, it is unnecessary, implicit, shared, mutable, duplicated, or poorly bounded state/control flow.  Most of that stems from **bad design**.
+At its core, this complexity stems almost entirely from **state** and **control flow**. More specifically, it is unnecessary, implicit, shared, mutable, duplicated, or poorly bounded state/control flow.  And most of that stems from **bad design**.
 
-State and control flow are sort of easy to understand at a high level, but it can be a challenge to pin down exactly what the problem is, where, and why.
+State and control flow are sort of easy to understand at a high level, but it can be a challenge to pin down exactly what the problem is, where, and why.  Good design typically focuses on minimizing state and implicit control flow. So if you do not understand them fully, it is hard to design good software.
 
-Good design typically focuses on minimizing state and implicit control flow, so if you do not understand them fully, it is hard to design good software.
-
-It is easy to feel the pain of bad software, but it is hard to fix or avoid it if you don't understand the cause.
+It is easy to feel the pain of bad software, who among us engineers can say they have not?  But it is hard to fix or avoid this pain if you don't understand the cause.
 
 ## What is state?
 
@@ -74,7 +72,7 @@ END
 
 ## That doesn’t seem so bad.  What’s the big problem?
 
-Take a very typical object oriented lifecycle, for a BillingService:
+Take a very typical object oriented lifecycle, for a `BillingService`:
 
 ```ruby clear illustrative
 CLASS BillingService
@@ -86,30 +84,32 @@ CLASS BillingService
 END
 ```
 
-All of these functions individually are fine. They  mutate some state on the BillingService.
+All of these functions individually are fine. They  mutate some state on the `BillingService`.
 
-The problem is that this class has an implicit Control Flow.  You are supposed to do something like:
+The problem is that this class has an *implicit* Control Flow.  You are supposed to do something like:
 
 ```
 setUser() -> setCart() -> validateUser() -> applyDiscount() -> processPayment()
 ```
 
-But there are infinite combinations in which these 5 functions could be applied.  Will the code work if you try?
+But there are infinite combinations in which these 5 functions that could be applied.  Will the code work if you try?
 
 ```
 setUser() -> applyDiscount() -> validateUser() -> setCart() -> processPayment()
 ```
 
-What this class has technically done is created a state machine with 2^N states and M! Control Flows.  You only need to add a handful more decision points on state & class methods before this class is completely incomprehensible for the human mind.
+What this class has technically done is created a state machine with `2^N` states and `M!` Control Flows.  You only need to add a handful more decision points on state & class methods that use them before this class is completely incomprehensible for the human mind.
 
- * **Essential Complexity:** The actual business logic (e.g., "A user must pay for the items in their cart"). You cannot code your way out of this.
- * **Accidental Complexity:** The mess we introduce by our choice of tooling or poor architecture (e.g., the state bugs in BillingService). This is entirely preventable.
+ * **Essential Complexity:** The actual business logic (e.g., "A user must pay for the items in their cart").
+   * You cannot code your way out of this.
+ * **Accidental Complexity:** The mess we introduce by our choice of tooling or poor architecture (e.g., the state bugs in `BillingService`).
+   * This is entirely preventable.
 
 ## What’s a State Machine Anyway?
 
-A state machine is not an academic abstraction or a complex design pattern you rarely implement.
+A state machine is not an academic abstraction. It is rarely a complex design pattern that you *actually* implement.
 
-A lot of engineers learn about state machines in college, promptly forget about them, and might think, since they’ve never seen a state machine class, and never created one, they don’t ever have “state machines”.
+A lot of engineers learn about state machines in college, promptly forget about them, and might think, since they’ve never seen a state machine class, and never created one, they don’t ever have "state machines".
 
 Wrong.
 
@@ -119,7 +119,7 @@ A state machine is a fundamental mathematical reality. It consists of three thin
  * **Inputs/Events:** Actions that trigger a change (e.g., `setCart()`, `processPayment()`).
  * **Transitions:** Rules that explicitly say, "If I am in State A, and Event X happens, I move to State B. If Event Y happens, throw an error."
 
-State itself is particularly tricky. Most of the state an application creates is *implicit* / invisible.
+State itself is particularly tricky.  Most of the state an application creates is *implicit* / invisible.  As are nearly all of the "state machines".
 
 State can be stored directly on an object, like: `isValid`
 
@@ -131,9 +131,9 @@ IF user.name != "" THEN ... END
 
 The above is control flow.  You used a value to make a decision (whether the `user.name` is not empty).  This is an "**unnamed state**".  You don’t need a variable: `stateUserIsNamed` to have state.  You just need to make a **decision** on a value that **changes over time**.
 
-Any value that can change over time is state. But a value that changes over time AND effects control flow, is typically the most problematic.
+Any value that can change over time is state. But a value that changes over time *AND* effects control flow, is typically the most problematic.
 
-Let's examine an outlier state that DOESN'T effect control flow, but could still be problematic:
+Let's examine an outlier state that *DOESN'T* effect control flow, but could still be problematic:
 
 ```ruby clear illustrative
 CLASS Player
@@ -160,7 +160,7 @@ The effects are different than:
 powerUp() -> heal()
 ```
 
-Only one of these may be correct.  But how do we know?  A lot of times you don't, until someone does something in the wrong order.
+Only one of these may be correct.  But how do we know which one?  A lot of times you don't, until someone does something in the wrong order.
 
 The problem with these types of bugs is that as applications grow in complexity exponentially, it becomes easier for these bugs to go undetected.
 
@@ -218,7 +218,7 @@ How are you supposed to write working code when this is possible?  And why is th
 
 In physics, entropy is the measure of disorder or randomness in a closed system. Left alone, things fall apart. Buildings crumble, hot coffee goes cold, and neat rooms become messy.
 
-Software behaves exactly the same way. Every time you write a quick patch, add an IF statement to bypass an existing constraint, or introduce a new instance variable to fix a localized bug, you are increasing the entropy of the system.
+Software behaves exactly the same way. Every time you make a quick commit, add an IF statement to bypass an existing constraint, or introduce a new instance variable to fix a localized bug, you are increasing the entropy of the system.
 
 You start with a pristine, perfectly ordered vision:
 
@@ -229,7 +229,7 @@ setUser() -> setCart() -> validateUser() -> processPayment()
 
 But requirements change...
 
-A feature request demands a discount step, but only for certain users on Tuesdays. A bug fix requires a temporary tracking ID. Suddenly, without anyone maliciously trying to write bad code, your system slides into maximum entropy:
+A feature request demands a discount step, but only for certain users on Tuesdays. A bug fix requires a temporary tracking ID. Suddenly, without anyone maliciously trying to write bad code, without any particular commit looking terrible, your system slides into maximum entropy:
 
 ```
 # Day 300: Chaos (High Entropy)
@@ -241,8 +241,11 @@ There may be 99 functions you have to call in the exact right order, and if you 
 
 This is why complexity is the default state of all software. Writing clean code isn't a passive state you achieve once and leave alone; it is an active, ongoing expenditure of energy.
 
-To fight complexity, we have to fight entropy. We do this not by hoping an LLM will magically sort out our mess, but by ruthlessly minimizing global state, enforcing explicit control flows, and keeping our execution paths so visible that complexity has nowhere to hide.
-Can a language save you?
+Who created the mortal sin of making this "bad"?  Which commit broke the cammels back and made this `BillingService` completely unusable? As with state, the problem is, commits rarely come with a message that says: "WATCH OUT! THIS IS TERRIBLE DESIGN!". When you get the diff to review, you don't even have all the information available, typically, to make an informed decision. When do you decide that someone needs to make a ~1000 line refactor to finally clean up the mess anyway?
+
+To fight complexity, we have to fight entropy. We do this not by hoping for a Silver Bullet - that an LLM will magically sort out our mess. We do this by ruthlessly minimizing global state, enforcing explicit control flows, and keeping our execution paths so visible that complexity has nowhere to hide.
+
+## Can a language save you?
 
 No.
 
@@ -284,21 +287,22 @@ Look at our `OverEngineeredCalculator` - there are infinite ways to add more unn
  * PM: I want to know how often people try to divide by 0.
  * PM: It’s too slow when people try to add 1, add a fast path.
 
-All of that is business logic: **Essential Complexity**.  Those things may need to exist.  But a suitably bad engineer could add infinite complexity as well:
+All of that is business logic: **Essential Complexity**.  Those things *may* need to exist.  But a suitably bad engineer could add infinite complexity as well:
 
  * Bad engineer: instead of adding together positive and negative numbers, first I should see if it’s negative, then get the absolute value, then subtract it.
 
-This is why I believe a language should be designed to be 1) understandable, 2) opinionated, 3) full-featured, and 4) maximally optional (allow you to change bad design easily).
+> [!NOTE]
+> This is why [CLEAR](/README.md) is is designed to be 1) understandable, 2) opinionated, 3) full-featured, 4) maximally optional (allow you to change bad design easily), and 5) has built-in tooling as a first-class citizen to detect these problems. You do get the "WATCH OUT" signs!
 
-The harder and more complicated a language is, and the more difficult it is to recover from bad design choices, the more you need to reach outside the box and the more you get trapped into a bad box once you go in there.
+The harder and more complicated a language is, and the more difficult it is to recover from bad design choices, the more you need to reach outside the box, and the more you get trapped into a bad box once you go in there.
 
-The cost of a bad function is minimal.  The cost of a bad architecture / design in most existing languagues is enormous.
+The cost of a bad function is minimal.  The cost of a bad architecture / design (in most existing languagues) is enormous.
 
 A bad function can be rewritten cheaply.
 
 An engineer may decide to open a subprocess, call grep, parse the results, mutate a string.  You can replace that with a call to `gsub`.
 
-A bad design cannot be fixed so easily.
+A bad design can *rarely* be fixed so easily.
 
 A bad engineer designs a class with tons of unnecessary state and implicit control flow.  Another engineer builds a class to interact with it, and bleeds its toxic implementation details throughout the codebase.
 
@@ -326,6 +330,9 @@ A sure-fire sign that you’re heading in the wrong direction is:
 
 These are things you can and should measure as well.
 
+> [!NOTE]
+> [gems/nil-kill](/gems/nil-kill/README.md), [gems/decomplex](/gems/decomplex/README.md), [gems/slopcop](/gems/slopcop/README.md), [gems/boobytrap](/gems/boobytrap/README.md), and [gems/espalier](/gems/espalier/README.md) do all of this for [CLEAR](/README.md).
+
 Most software is moving in the wrong direction, and we know it.  But people rarely quantify it.
 
 ## I know what the problem is.  How do I fix it?
@@ -334,9 +341,9 @@ Bjarne Stroustrup has a cute quote about writing working C code.
 
 When asked: How do you handle memory leaks in C?
 
-Bjarne says: Why, by not writing them in the first place…
+Bjarne says: Why, by not writing them in the first place...
 
-The problem with prescribing design patterns is... Writing good software DOES NOT SCALE. Bad software is everywhere.
+The problem with prescribing design patterns is... Writing good software *DOES NOT* scale. Bad software is everywhere.
 
 Anyone who tries to fool you that Google and Facebook and Alibaba are filled with beautiful, perfectly working software has never peaked under the hood.
 
@@ -344,16 +351,16 @@ Sure, the quality is higher than average, but messes abound even at the most eli
 
 The solution at scale is not: write good code.
 
-The solution is: is there a way to identify what is bad and how to fix it easily?
+The solution is: build tooling to identify what is bad, where it is, and when you should invest in fixing it.
 
 *YOU*, individually, may be able to come up with a good design, follow it truthfully, and write a good implementation.  At an institutional level, that does not scale.  It is irrelevant.
 
  * Languages or frameworks can help, but they cannot save you.
- * Hiring can help, but it certainly cannot save you.
+ * Hiring can help, but it also cannot save you.
 
 What can save you is, shockingly, what Bjarne suggested: don’t get yourself into the mess in the first place.
 
-The best defense is a good offense.  The best thing that can save you is to stay AHEAD of the mess, not behind it.  So measure it and stay ahead of it.
+The best defense is a good offense.  The best thing that can save you is to stay *AHEAD* of the mess, not behind it.  So measure it and stay ahead of it.
 
 Why is staying ahead of it so important?  Because software complexity tends to grow exponentially.  It doesn’t take too long of falling behind before you’re completely under water.
 
@@ -367,18 +374,18 @@ If writing good code was easy, there probably wouldn’t be so many software job
 
 This is why - when faced with a pile of crap - a lot of senior engineers, rightly, will throw up their hands and shrug and say: C’est la Vie. It’s the way it is. No use fighting it. Learn to live with the crap.
 
-But metrics can save you here:
+But metrics *can* help:
 
- * If you’re going to make a change to make things better, you have acceptance criteria.
- * If you measure complexity, you cannot do a “refactor” that makes the code worse.
+ * If you’re going to make a change to make things better, you have acceptance criteria - not opinions and vibes.
+ * If you measure complexity, you cannot do a “refactor” that makes the code worse - that's "enshifitication".
 
-Metrics can help you prioritize the most complicated parts of the codebase to prioritize your efforts.
+Metrics can help you prioritize the most complicated parts of the codebase to and your efforts to resolve them.
 
 If your codebase is a steaming pile of crap, the solution is not making leaf functions prettier.
 
 ### One thing that is critical:
 
-The solution to your problem is DEFINITELY NOT moving to Rust or OCaml or Clojure.
+The solution to your problem is *DEFINITELY NOT* moving to Rust or OCaml or Clojure.
 
 If your team wrote a pile of crap in Python, they can just as easily write a pile of crap in Rust.
 
@@ -388,19 +395,19 @@ The solution is an intelligent, prioritized triage - based on measures of comple
 
 Do not waste time refactoring a highly complex class if it hasn't been modified in three years and causes zero production issues. Leave it alone. It is a stable tumor.
 
-Instead, cross-reference your version control logs with your complexity metrics. Look for files that have both high state-based branch counts & state read/write counts (state & control flow) and high commit churn. This intersection is almost always the nexus of your bad design. Target it.
+Instead, cross-reference your commit history with your complexity metrics. Look for files that have **high state-based branch counts**, **high state read/write counts (state & control flow)**, and ***high commit churn**. This intersection is *almost* always the nexus of your bad design. Target it.
 
-Do not blindly use cyclomatic complexity. Cyclomatic complexity is easily cheated by MOVING complexity around, which does nothing. If you break half of a bad function up, turn it into two, you've arguably made something worse, not better.
+Do not blindly use cyclomatic complexity. Cyclomatic complexity is easily cheated by *MOVING* complexity around, which does nothing. If you break half of a bad function up, turn it into two, you've arguably made something worse, not better.  If you take half of a bad class, and make it two bad classes, that's usually worse...
 
-Cyclomatic complexity without a bunch of state based control flow is typically harmless. Fixing it is typically a low ROI beauty contest.
+Cyclomatic complexity *without* a bunch of state based control flow is typically harmless. Fixing it is typically a low ROI beauty contest.
 
 ### Step 2: Quarantine the Macro-State Boundaries
 
 If your codebase is a steaming pile of crap, the solution is definitely not spending two weeks making local leaf functions look prettier. That is a micro-fix for a macro-disaster.
 
-Find the places where state leaks across boundaries—where three different modules are reaching inside a global object to mutate values. Do not rewrite the modules. Instead, figure out the API that is missing that those readers & writers should be using, and implement it.
+Find the places where state leaks across boundaries: where three different modules are reaching inside a global object to mutate values. Do not rewrite the modules. Instead, figure out the API that is missing that those readers & writers *should* be using, and implement it.
 
-You aren't fixing the bad design yet; you are containing the blast radius of the bad design.
+You aren't fixing the bad design yet: you are containing the blast radius of it...
 
 Trying to completely fix it all at once is a re-write which will more-often than not turn out poorly - either due to the time taking much longer than anticipated, integration failures, or the new solution being bad in different ways, rather than the solution you actually needed…
 
@@ -408,13 +415,15 @@ Trying to completely fix it all at once is a re-write which will more-often than
 
 You cannot clean a house while people are tracking mud through the front door. If your metrics show that complexity is growing exponentially while features grow linearly, you must change the rules of entry.
 
-Introduce a static analysis step into your CI pipeline. If a new pull request pushes the cyclomatic complexity of an active file past a certain threshold, or introduces new un-contained mutable state, it fails the build. You don't have to force developers to write "good code" overnight—you just have to make writing implicitly chaotic code too syntactically expensive to ship.
+Introduce a static analysis step into your CI pipeline.  New pull requests should have minimal increases to your complexity ratings, and ideally should come with cleanups that *reduce* complexity while adding new features.  You don't have to force developers to write "good code" overnight.  You can just have them chip away at the worse offenders.
+
+If you don't have the testing in place for this to be possible, you need to start chipping away at that *first*. Otherwise, your mess will grow exponentially, and progress will crawl to a freeze.
 
 If you’re swimming in a pile of exponentially growing shit, the solution isn’t to swim faster, it’s to clean the water.
 
 ## What does that look like?
 
-Let’s return to the BillingService and see this in action:
+Let’s return to the `BillingService` and see this in action:
 
 ```ruby clear illustrative
 CLASS BillingService
@@ -426,11 +435,11 @@ CLASS BillingService
 END
 ```
 
-As it currently exists, it has an implicit control flow, that you need to call all of these functions in the correct order (or one of many possible correct orders) for a payment to succeed.
+As it currently exists, it has an *implicit* control flow, that you need to call all of these functions in the correct order (or one of many possible correct orders) for a payment to succeed.
 
-As none of the instance variables have a giant sign that says: “I’M STATE! WATCH OUT!”  None of the methods have a sign that says: “I CAUSE CONTROL FLOW! WATCH OUT!”
+As none of the instance variables have a giant sign that says: “I’M STATE! WATCH OUT!”  Also none of the methods have a sign that says: “I CAUSE CONTROL FLOW! WATCH OUT!”
 
-The solution to this problem is likely that the BillingService should only expose one public function: `processPayment()`, and you feed it all the data that it needs.
+The solution to this problem is likely that the `BillingService` should only expose one public function: `processPayment()`, and you feed it all the data that it needs.
 
 In the process, you eliminate the state: storing the user and the cart and the discount.
 
@@ -451,7 +460,7 @@ If I had to make a guess how much complexity is typically Essential (building th
 
 Some language / framework designers want you to think that if C or Assembly would be 100% accidental complexity, by using their language or framework, you’ll get 0% accidental complexity.
 
-And wouldn’t that be great?  Your software would be half as complicated.  The reality is that of the Accidental Complexity, it depends on language, but it typically looks like:
+And wouldn’t that be great?  Your software would be half as complicated.  The reality is that of the Accidental Complexity, it depends on language, but it *probably* looks something like:
 
  * 60-70% design
  * 40-30% language / framework
@@ -464,35 +473,35 @@ Clojure does its best to minimize surface area for the language to give you head
 
 But, the reality is, the harder the language is, typically the engineers are better at it - survivorship bias, etc.  You’re not going to make it very far as a C engineer if you throw up your hands and slam your head into a brick wall every time you segfault...
 
-Yes, C makes your life harder. I’d argue it definitely makes your life more frustrating. It may slow you down more than Clojure or OCaml would.  But, typically, C engineers “figure it out enough” that the end result of what complexity looks like, tends to be the same:
+Yes, C makes your life harder. I’d argue it definitely makes your life more *frustrating*. It may slow you down more than Clojure or OCaml would.  But, typically, C engineers “figure it out enough” that the end result of what complexity looks like, tends to be the same:
 
  * Most of it stems from a design that entropy bastardized and broke.
- * Less of it stems from particular languages or frameworks that you chose or inherited.
+ * Less of it stems from "C being bad" and "the libraries and frameworks sucking".
 
 Outliers obviously exist.
 
-At scale, the problem *tends* to be design that *causes* bugs, not people who can't code individual functions.
+At scale, the problem *tends* to be design that *causes* bugs, not people who can't code individual functions.  *Occassionally* you inherit those designs through mainstream frameworks in a language, but that's the exception, not the norm.
 
 ## In Closing
 
 In No Silver Bullet, I don’t feel the author did a good enough job making it concrete exactly why there is No Silver Bullet, and why there is unlikely ever to be one.
 
-If you are starting a new project, I would obviously recommend trying to find the right balance of a language that makes your life as easy as possible, and one that others can build on and understand.
+If you are starting a new project, I recommend trying to find the right balance of a language that makes your life as easy as possible, and one that others can build on and understand, and that has access to the tooling and libraries you need so that you *DON'T* need to re-invent wheels poorly.
 
 But if a Silver Bullet exists to make building a Rust compiler easy, no one has found it yet.
 
-Rather than searching for a Silver Bullet, you should search for the right combination of what maximizes velocity, reduces room for error (especially severity), is performant / cost effective, and easy to hire for. 
+Rather than searching for a Silver Bullet, you should search for the right combination of what maximizes velocity, reduces room for error (especially severity), is performant / cost effective, and - if applicable - easy to hire for. 
 
 Rich Hickey makes a great joke about functional programming languages:
 
-> Parenthesis are hard, yes… haha… I mean, I’ve seen them.  But I’ve never seen them ON THAT SIDE of the function before.  My God!
+> Parenthesis are hard, yes... haha... I mean, I’ve seen them before.  But I’ve never seen them ON THAT SIDE of the function!!  My God!
 
 The reality is, functional programming looks alien, and always will, and as a result, almost certainly will never scale to be hireable.
 
 You’re trading hireability and performance ceiling for a little velocity - mostly from your code being less buggy.  That’s a sideways trade *most* of the time.  From a quality of life perspective, you might want to check it out.  From a career perspective, less certain...
 
-If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OxCaml may be perfect for your project.
+If you’re working on a project on your own, and you know what you’re doing, give Clojure or OCaml a shot.  They’re great.  YMMV.  OxCaml may be perfect for your project.  Who knows?
 
 But they’re not going to let you write a working version of Rust in a weekend.  Neither is using an LLM.  There's no Silver Bullet.
 
-Do yourself a favor, and measure complexity and stay ahead of it, regardless what language you choose - *especially* if you're using LLMs.
+If you really want to increase your velocity, do yourself a favor.  Measure complexity and stay ahead of it.  You may quickly find your designs are worse than you thought they were, and fix them *BEFORE* they become problems.  Do this *regardless* of what language you choose - *especially* if you're using LLMs.
