@@ -254,29 +254,12 @@ In any Turing Complete language, you can write a piece of software in infinite w
 Take the stateful player example:
 
 ```lisp
-;; Our initial state bucket: #(Health HealingPower StatusFlag)
-(defvar *initial-state* #(100 10 1)) 
-
-;; A "pure" function. It doesn't mutate the original array; 
-;; it returns a brand new array. No side effects!
-(defun process-healing (state)
-  (let ((new-state (copy-seq state)))
-    ;; Implicit control flow: If StatusFlag (Index 2) is 1, heal.
-    (when (= (aref new-state 2) 1)
-      (setf (aref new-state 0) (+ (aref new-state 0) (aref new-state 1)))
-      ;; Mysteriously change the flag to 2 for the next function in the pipeline
-      (setf (aref new-state 2) 2)) 
-    new-state))
-
-;; Another "pure" function.
-(defun process-power-up (state)
-  (let ((new-state (copy-seq state)))
-    ;; Implicit control flow: If StatusFlag (Index 2) is 2, power up.
-    (when (= (aref new-state 2) 2)
-      (setf (aref new-state 1) (* (aref new-state 1) 2))
-      ;; Reset flag to 0
-      (setf (aref new-state 2) 0)) 
-    new-state))
+(defvar *initial-billing-state* #(nil nil nil nil nil))
+(defun set-cart ... )
+(defun set-user ... )
+(defun validate-user ... )
+(defun apply-discount ... )
+(defun process-payment ... )
 ```
 
 It's the same problem, slightly less bad, different language.
