@@ -5,9 +5,8 @@ require_relative 'fsm_ops'
 require_relative 'fsm_wrapper_emitter'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
-# so the helpers share the lowering's ambient state
-# (@do_capture_map, @pending_stmts, @current_bg_pointer_captures,
-# @rt_name) and core helpers (lower, emit_expr,
+# so the helpers share the lowering's explicit function/capture state and
+# core helpers (lower, emit_expr,
 # with_fiber_capture_map, hoist_alloc, ...).
 #
 # Top-level FSM emission lives in src/mir/fsm_transform.rb +
@@ -18,7 +17,7 @@ require_relative 'fsm_wrapper_emitter'
 #   capture_inits_fsm                  -- ctx struct init helper
 #   lower_step_stmts / emit_step_stmts -- AST stmt list -> MIR -> Zig
 #                                          text (consults
-#                                          @do_capture_map)
+#                                          capture_state.do_capture_map)
 #   render_mir_list                    -- shared MIREmitter wrapper
 #   fsm_cap_metadata                   -- per-cap lock-acquire metadata
 #                                          (try_method, alias_data_ref,
@@ -44,22 +43,22 @@ module FsmLowering
 
   sig { returns(T.nilable(T::Hash[String, String])) }
   def fsm_fn_name_rename_map
-    T.cast(instance_variable_get(:@fn_name_rename_map), T.nilable(T::Hash[String, String]))
+    T.bind(self, MIRLowering) rescue nil
+    function_state.fn_name_rename_map
   end
 
   sig { returns(T::Hash[String, CleanupEntry]) }
   def fsm_current_bindings
-    T.cast(instance_variable_get(:@current_bindings) || {}, T::Hash[String, CleanupEntry])
+    T.bind(self, MIRLowering) rescue nil
+    function_state.current_bindings || {}
   end
 
   sig { returns(T::Hash[String, T::Boolean]) }
   def fsm_guarded_cleanup_names
-    existing = T.cast(
-      instance_variable_get(:@guarded_cleanup_names),
-      T.nilable(T::Hash[String, T::Boolean]),
-    )
+    T.bind(self, MIRLowering) rescue nil
+    existing = function_state.guarded_cleanup_names
     names = T.let(existing || {}, T::Hash[String, T::Boolean])
-    instance_variable_set(:@guarded_cleanup_names, names)
+    function_state.guarded_cleanup_names = names
     names
   end
 
@@ -162,12 +161,7 @@ module FsmLowering
           result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
           result_set = MIR::Set.new(target, result_value, false)
           transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
-          last_facts = T.cast(
-            instance_variable_get(:@last_fsm_result_transfer_facts),
-            T.nilable(T::Array[MIR::FsmResultTransferFact]),
-          ) || []
-          last_facts.concat(transfer_facts)
-          instance_variable_set(:@last_fsm_result_transfer_facts, last_facts)
+          capture_state.last_fsm_result_transfer_facts.concat(transfer_facts)
           guard_fsm_result_cleanup!(result_mir, transfer_facts)
           transfer_names = transfer_facts.map(&:name).uniq
           if transfer_names.any?
@@ -182,7 +176,7 @@ module FsmLowering
           result_mir << result_set
           result_mir.concat(transfer_facts.flat_map(&:marks))
           if last_step[:expr].is_a?(AST::Identifier)
-            guard_map = instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
+            guard_map = capture_state.current_fsm_owned_result_guards
             guard_name = guard_map&.[](last_step[:expr].name.to_s)
             if guard_name
               result_mir << MIR::Set.new(
@@ -323,7 +317,7 @@ module FsmLowering
     safe = fsm_zig_safe_name(node.name.to_s)
     safe = rename_map[safe] if rename_map&.key?(safe)
     entry = bindings[node.name.to_s] || bindings[safe.to_s] || CleanupEntry::NONE
-    (entry.present? && entry.alloc == :heap) || node.symbol&.heap_storage? == true
+    (entry.present? && entry.heap?) || node.symbol&.heap_storage? == true
   end
 
   # Lower one step expression into a list of MIR statements
@@ -372,11 +366,46 @@ module FsmLowering
   sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Node]) }
   def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
-    instance_variable_set(:@last_fsm_result_transfer_facts, [])
+    capture_state.last_fsm_result_transfer_facts = []
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
-    inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
-    inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
+    inherited_allocs = capture_state.current_fsm_inherited_alloc_names
+    inherited_guards = capture_state.current_fsm_inherited_guarded_names
     append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards)
+  end
+
+  sig { returns(T::Array[MIR::FsmResultTransferFact]) }
+  def last_fsm_result_transfer_facts
+    T.bind(self, MIRLowering)
+    capture_state.last_fsm_result_transfer_facts
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        pointer_captures: T::Set[String],
+        inherited_alloc_names: T::Set[String],
+        inherited_guard_names: T::Set[String],
+        owned_result_guards: T.nilable(T::Hash[String, String]),
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_fsm_segment_lowering_context(pointer_captures:, inherited_alloc_names:, inherited_guard_names:, owned_result_guards:, &blk)
+    T.bind(self, MIRLowering)
+    prev_alloc_names = T.let(nil, T.nilable(T::Set[String]))
+    prev_guard_names = T.let(nil, T.nilable(T::Set[String]))
+    prev_result_guards = capture_state.current_fsm_owned_result_guards
+    prev_alloc_names = capture_state.current_fsm_inherited_alloc_names
+    prev_guard_names = capture_state.current_fsm_inherited_guarded_names
+
+    capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names
+    capture_state.current_fsm_inherited_guarded_names = inherited_guard_names
+    capture_state.current_fsm_owned_result_guards = owned_result_guards
+    with_bg_fiber_body_context(pointer_captures, &blk)
+  ensure
+    capture_state.current_fsm_owned_result_guards = prev_result_guards
+    capture_state.current_fsm_inherited_guarded_names = T.must(prev_guard_names)
+    capture_state.current_fsm_inherited_alloc_names = T.must(prev_alloc_names)
   end
 
   # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
@@ -389,20 +418,15 @@ module FsmLowering
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
     return "" if false || mir_list.empty?
-    @_emitter = T.let(@_emitter, T.nilable(MIREmitter))
-    @_emitter ||= begin
-      require_relative "mir_emitter"
-      MIREmitter.new
-    end
-    @rt_name = T.let(@rt_name, T.nilable(String))
-    @_emitter.rt_name = @rt_name || "rt"
+    emitter = runtime_state.emitter!
+    emitter.rt_name = runtime_binding_name
     # `lower_var_decl` may return an Array of MIR nodes (e.g.
     # [AllocMark, Let, Cleanup]) for cleanup-needing bindings. After
     # the FreshHeapCopy capture wiring on master's BG path, this also
     # arrives inside FSM-lowered fiber bodies (test 258 / 273 etc.).
     # Flatten one level so each emit sees a single MIR node.
     mir_list.flatten(1).filter_map { |n|
-      out = @_emitter.emit(n)
+      out = emitter.emit(n)
       next nil if out.nil? || out.strip.empty?
       stripped = out.strip
       out = out + ";" if stripped.start_with?("try ") && !stripped.end_with?(";", "}")
@@ -526,17 +550,16 @@ module FsmLowering
     when :pass
       FsmLockErrorArmSplit.new(body_zig: "", exit_kind: :goto_post)
     when :block
-      @current_bg_pointer_captures = T.let(@current_bg_pointer_captures, T.nilable(T::Set[String]))
-      prev_bg_ptr_caps = @current_bg_pointer_captures
-      @current_bg_pointer_captures = pointer_captures
-      @pending_stmts = T.let(@pending_stmts, T.nilable(T::Array[T.untyped]))
-      prev_fiber_pending = @pending_stmts
-      @pending_stmts = []
+      prev_bg_ptr_caps = capture_state.current_bg_pointer_captures
+      capture_state.current_bg_pointer_captures = pointer_captures
+      function_state.pending_stmts = T.let(function_state.pending_stmts, T.nilable(T::Array[MIR::Stmt]))
+      prev_fiber_pending = function_state.pending_stmts
+      function_state.pending_stmts = []
       block_code = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
         emit_step_stmts(clause.body || [], no_result: true)
       end
-      @pending_stmts = prev_fiber_pending
-      @current_bg_pointer_captures = prev_bg_ptr_caps
+      function_state.pending_stmts = prev_fiber_pending
+      capture_state.current_bg_pointer_captures = prev_bg_ptr_caps
       return nil if block_code.nil?
       FsmLockErrorArmSplit.new(body_zig: block_code, exit_kind: :goto_post)
     else

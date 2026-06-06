@@ -61,7 +61,32 @@ The Clear compiler should move toward the same shape:
 - Ownership and cleanup facts are checked over stable MIR entities.
 - Backend emission consumes already-checked MIR and facts.
 
+### Status
+
+Implemented in the current MIR lowering refactor. The detailed record is in
+`docs/agents/mir-lowering-mega-owner-plan.md`.
+
+The completed work removed `MIRLowering` from Decomplex temporal ordering
+pressure, moved broad state into typed phase owners, removed migrated dynamic
+lowerer reflection paths, and converted several mutation-heavy helpers into
+typed plan-producing APIs. Follow-up work should focus on the remaining
+state-based branch density in the newly explicit helper decisions, not on
+restoring broad mutable lowerer state.
+
+Closure note: final verification is recorded in
+`docs/agents/mir-lowering-mega-owner-plan.md`. Decomplex total candidates fell
+`7300 -> 6773`; cross-detector convergence fell `1821 -> 1803`; neglected
+updates fell `1156 -> 685`; neglected path conditions fell `1663 -> 1581`;
+and `MIRLowering` no longer appears as the temporal-ordering owner. SlopCop
+dark arms fell `3287 -> 3220` and genuine gaps fell `1342 -> 1327`. Nil-kill
+untyped slots stayed flat or dropped: params `981 -> 942`, returns `228 ->
+225`, fields/ivars `1017 -> 860`, collections `0 -> 0`; hash-record pressure
+fell `184 / 285 -> 183 / 281`.
+
 ### /plan
+
+Detailed implementation checklist:
+`docs/agents/mir-lowering-mega-owner-plan.md`.
 
 1. Define a `LoweringInput` object containing the immutable inputs needed to
    build MIR for one compilation unit or function.

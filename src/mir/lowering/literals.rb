@@ -46,13 +46,43 @@ module MIRLoweringLiterals
     def capability_wrapped?
       arc_wrapped || rc_wrapped
     end
+
+    sig { returns(String) }
+    def allocator_method
+      MIR::Placement.explicit_heap?(alloc) ? "heapAlloc" : "frameAlloc"
+    end
+  end
+
+  class HashLiteralCapabilityPlan < T::Struct
+    extend T::Sig
+
+    const :zig_type, String
+    const :init_value, T.nilable(MIR::StructInit)
+    const :empty_result, T.nilable(MIR::Emittable)
+    const :result_wrap, T.nilable(Symbol)
+    const :result_wrap_fn, T.nilable(String)
+
+    sig { returns(T::Boolean) }
+    def wraps_result?
+      !result_wrap.nil?
+    end
+
+    sig { returns(T::Boolean) }
+    def striped_result?
+      result_wrap == :striped
+    end
+
+    sig { returns(T::Boolean) }
+    def composed_result?
+      result_wrap == :composed
+    end
   end
 
   sig { params(node: AST::ListLit).returns(T.untyped) }
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
-    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
+    function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
+    function_state.current_decl_alloc = T.let(function_state.current_decl_alloc, T.nilable(Symbol))
 
     plan = list_literal_plan(node)
     ti = plan.type_info
@@ -65,7 +95,7 @@ module MIRLoweringLiterals
       # the head via LIST_POP_FRONT (same as BG STREAM materialization).
       # The "__bc_stream__" sentinel elem_type lets the emitter mark
       # the binding's slot as a stream so NEXT routes via LIST_POP_FRONT.
-      if lowering_target == :bc
+      if bc_target?
         items_mir_bc = node.items.map { |i| lower(i) }
         return MIR::MakeList.new("__bc_stream__", items_mir_bc, :frame)
       end
@@ -188,7 +218,7 @@ module MIRLoweringLiterals
     unless count.is_a?(Integer)
       Kernel.raise "default fixed-array literal requires an integer capacity"
     end
-    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), @current_decl_alloc || alloc_for_node(node), type_info)
+    MIR::ArrayDefaultInit.new(elem_zig, count.to_s, default_array_value(elem_type), function_state.current_decl_alloc || alloc_for_node(node), type_info)
   end
 
   sig { params(elem_type: Type).returns(MIR::Lit) }
@@ -206,113 +236,171 @@ module MIRLoweringLiterals
   sig { params(node: AST::HashLit).returns(T.untyped) }
   def lower_hash_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
     plan = hash_literal_plan(node)
-    ti = plan.type_info
-    rt_name = runtime_binding_name
-    map_alloc = plan.alloc
-    alloc_str = plan.alloc_zig
-    init_value = T.let(nil, T.untyped)
-    result_wrap = T.let(nil, T.nilable(Symbol))
-    result_wrap_fn = T.let(nil, T.nilable(String))
-
-    # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap
-    if plan.capability_wrapped?
-      # Sharded maps have their sync mode built into the Zig type
-      # (e.g. MutexShardedStringMap), so they need the legacy direct-
-      # composition path that preserves shard_count + sync on bare_ft.
-      # Plain (non-sharded) maps go through compose_capability_wrap for
-      # the unified Group 1 / Group 2 separation.
-      if ti.striped?
-        bare_ft = Type.new(ti.resolved.to_s)
-        bare_ft.copy_striped_map_topology_from!(ti)
-        zig_t = bare_ft.zig_type
-
-        needs_alloc = bare_ft.map_init_needs_alloc?
-        inner = MIR::StructInit.new(zig_t, needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_str))] : [])
-
-        wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
-        inner = T.cast(
-          with_ownership_consumption(
-            MIR::CapWrap.new(inner, zig_t, :own_only, nil, nil, wrap_fn, :heap),
-            mir_ident_names(inner),
-            "MIR::CapWrap",
-            target_alloc: :heap,
-          ),
-          MIR::CapWrap,
-        )
-        return inner if node.pairs.empty?
-        init_value = MIR::StructInit.new(zig_t, needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_str))] : [])
-        result_wrap = :striped
-        result_wrap_fn = wrap_fn
-      else
-        bare_ft = ti.bare_data_type
-        zig_t = bare_ft.zig_type
-
-        needs_alloc = bare_ft.map_init_needs_alloc?
-        inner = if needs_alloc
-          MIR::StructInit.new(zig_t, [MIR.named_field("alloc", MIR::Ident.new(alloc_str))])
-        else
-          MIR::StructInit.new(zig_t, [])
-        end
-
-        wrapped = compose_capability_wrap(inner, zig_t, ti, :heap)
-        return wrapped if node.pairs.empty?
-        init_value = inner
-        result_wrap = :composed
-      end
-    end
-
-    zig_t = plan.zig_type
-    zig_t = init_value.zig_type if init_value.is_a?(MIR::StructInit)
+    capability = hash_literal_capability_plan(plan)
 
     if node.pairs.empty?
-      # PartitionedStringMap, PartitionedNumericMap, and NumericMapType don't have an .alloc field
-      needs_alloc = !zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType")
-      strategy = needs_alloc ? :map_bare : :map_empty
-      return MIR::ContainerInit.new(zig_t, strategy, map_alloc, nil)
+      return capability.empty_result if capability.empty_result
+
+      return empty_hash_literal(plan, capability.zig_type)
     end
 
-    # Non-empty hash: init + puts
-    items = []
-    alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), map_alloc == :heap ? "heapAlloc" : "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
-    items << MIR::Let.new("__hm", init_value || MIR::StructInit.new(zig_t, [MIR.named_field("alloc", alloc_expr)]), true, nil, nil)
+    non_empty_hash_literal(node, plan, capability)
+  end
+
+  sig { params(plan: HashLiteralPlan).returns(HashLiteralCapabilityPlan) }
+  def hash_literal_capability_plan(plan)
+    T.bind(self, MIRLowering) rescue nil
+    return unwrapped_hash_literal_capability_plan(plan) unless plan.capability_wrapped?
+
+    if plan.type_info.striped?
+      striped_hash_literal_capability_plan(plan)
+    else
+      composed_hash_literal_capability_plan(plan)
+    end
+  end
+
+  sig { params(plan: HashLiteralPlan).returns(HashLiteralCapabilityPlan) }
+  def unwrapped_hash_literal_capability_plan(plan)
+    HashLiteralCapabilityPlan.new(
+      zig_type: plan.zig_type,
+      init_value: nil,
+      empty_result: nil,
+      result_wrap: nil,
+      result_wrap_fn: nil,
+    )
+  end
+
+  sig { params(plan: HashLiteralPlan).returns(HashLiteralCapabilityPlan) }
+  def striped_hash_literal_capability_plan(plan)
+    T.bind(self, MIRLowering) rescue nil
+    bare_type = Type.new(plan.type_info.resolved.to_s)
+    bare_type.copy_striped_map_topology_from!(plan.type_info)
+    zig_type = bare_type.zig_type
+    init_value = hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?)
+    wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
+    empty_result = T.cast(
+      with_ownership_consumption(
+        MIR::CapWrap.new(init_value, zig_type, :own_only, nil, nil, wrap_fn, :heap),
+        mir_ident_names(init_value),
+        "MIR::CapWrap",
+        target_alloc: :heap,
+      ),
+      MIR::CapWrap,
+    )
+    HashLiteralCapabilityPlan.new(
+      zig_type: zig_type,
+      init_value: hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?),
+      empty_result: empty_result,
+      result_wrap: :striped,
+      result_wrap_fn: wrap_fn,
+    )
+  end
+
+  sig { params(plan: HashLiteralPlan).returns(HashLiteralCapabilityPlan) }
+  def composed_hash_literal_capability_plan(plan)
+    T.bind(self, MIRLowering) rescue nil
+    bare_type = plan.type_info.bare_data_type
+    zig_type = bare_type.zig_type
+    init_value = hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?)
+    HashLiteralCapabilityPlan.new(
+      zig_type: zig_type,
+      init_value: init_value,
+      empty_result: compose_capability_wrap(init_value, zig_type, plan.type_info, :heap),
+      result_wrap: :composed,
+      result_wrap_fn: nil,
+    )
+  end
+
+  sig { params(zig_type: String, alloc_zig: String, needs_alloc: T::Boolean).returns(MIR::StructInit) }
+  def hash_literal_init_struct(zig_type, alloc_zig, needs_alloc)
+    fields = needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_zig))] : []
+    MIR::StructInit.new(zig_type, fields)
+  end
+
+  sig { params(plan: HashLiteralPlan, zig_type: String).returns(MIR::ContainerInit) }
+  def empty_hash_literal(plan, zig_type)
+    # PartitionedStringMap, PartitionedNumericMap, and NumericMapType do not
+    # expose an allocator field.
+    strategy = hash_literal_empty_needs_alloc?(zig_type) ? :map_bare : :map_empty
+    MIR::ContainerInit.new(zig_type, strategy, plan.alloc, nil)
+  end
+
+  sig { params(zig_type: String).returns(T::Boolean) }
+  def hash_literal_empty_needs_alloc?(zig_type)
+    !zig_type.include?("PartitionedStringMap") &&
+      !zig_type.include?("PartitionedNumericMap") &&
+      !zig_type.include?("NumericMapType")
+  end
+
+  sig { params(node: AST::HashLit, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan).returns(MIR::BlockExpr) }
+  def non_empty_hash_literal(node, plan, capability)
+    T.bind(self, MIRLowering) rescue nil
+    items = T.let([], T::Array[MIR::Stmt])
+    alloc_expr = hash_literal_allocator_expr(plan)
+    items << MIR::Let.new("__hm", capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc_zig, true), true, nil, nil)
     node.pairs.each do |key_node, val_node|
-      k = lower(key_node)
-      raw_v = with_decl_alloc(map_alloc) { materialize_owned_sink_value(lower(val_node), val_node, map_alloc) }
-      v = hoist_alloc(raw_v, val_node, err_cleanup: true)
-      operands = ownership_operands_for_value(k, key_node, "hash literal key", map_alloc) +
-        ownership_operands_for_value(v, val_node, "hash literal value", map_alloc)
-      base_contract = MIR::CallableContract.no_ownership(4)
-      put_contract = MIR::CallableContract.new(
-        base_contract.signature,
-        MIR::OwnershipContract.consume_operands(operands),
-        4,
-      )
-      put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true, put_contract)
-      items << MIR::ExprStmt.new(put_call, false)
+      items << hash_literal_put_stmt(key_node, val_node, plan, alloc_expr)
     end
-    result = T.let(MIR::Ident.new("__hm"), T.untyped)
-    if result_wrap == :striped
-      result = MIR::CapWrap.new(result, zig_t, :own_only, nil, nil, T.must(result_wrap_fn), :heap)
-    elsif result_wrap == :composed
-      result = compose_capability_wrap(result, zig_t, ti, :heap)
-    end
-    if result_wrap
-      items << MIR::Let.new("__hm_wrapped", result, false, Type.new(ti), nil)
+    result = hash_literal_result(MIR::Ident.new("__hm"), plan, capability)
+    if capability.wraps_result?
+      items << MIR::Let.new("__hm_wrapped", result, false, Type.new(plan.type_info), nil)
       result = MIR::Ident.new("__hm_wrapped")
     end
     items << MIR::BreakStmt.new("__hm_blk", result)
     block = MIR::BlockExpr.new("__hm_blk", items)
-    block.result_type = Type.new(ti)
+    block.result_type = Type.new(plan.type_info)
     block
+  end
+
+  sig { params(plan: HashLiteralPlan).returns(MIR::MethodCall) }
+  def hash_literal_allocator_expr(plan)
+    T.bind(self, MIRLowering) rescue nil
+    MIR::MethodCall.new(
+      MIR::Ident.new(runtime_binding_name),
+      plan.allocator_method,
+      [],
+      false,
+      MIR::CallableContract.no_ownership(0),
+    )
+  end
+
+  sig { params(key_node: AST::Node, val_node: AST::Node, plan: HashLiteralPlan, alloc_expr: MIR::MethodCall).returns(MIR::ExprStmt) }
+  def hash_literal_put_stmt(key_node, val_node, plan, alloc_expr)
+    T.bind(self, MIRLowering) rescue nil
+    key_mir = lower(key_node)
+    raw_value = with_decl_alloc(plan.alloc) do
+      materialize_owned_sink_value(lower(val_node), val_node, plan.alloc)
+    end
+    value_mir = hoist_alloc(raw_value, val_node, err_cleanup: true)
+    operands = ownership_operands_for_value(key_mir, key_node, "hash literal key", plan.alloc) +
+      ownership_operands_for_value(value_mir, val_node, "hash literal value", plan.alloc)
+    base_contract = MIR::CallableContract.no_ownership(4)
+    put_contract = MIR::CallableContract.new(
+      base_contract.signature,
+      MIR::OwnershipContract.consume_operands(operands),
+      4,
+    )
+    MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, key_mir, value_mir], true, put_contract),
+      false,
+    )
+  end
+
+  sig { params(result: MIR::Emittable, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan).returns(MIR::Emittable) }
+  def hash_literal_result(result, plan, capability)
+    T.bind(self, MIRLowering) rescue nil
+    return MIR::CapWrap.new(result, capability.zig_type, :own_only, nil, nil, T.must(capability.result_wrap_fn), :heap) if capability.striped_result?
+    return compose_capability_wrap(result, capability.zig_type, plan.type_info, :heap) if capability.composed_result?
+
+    result
   end
 
   sig { params(node: AST::ListLit).returns(ListLiteralPlan) }
   def list_literal_plan(node)
     T.bind(self, MIRLowering) rescue nil
-    expected_ti = Type.from_node(@current_expected_type)
+    expected_ti = Type.from_node(function_state.current_expected_type)
     ti = if expected_ti&.collection?
       expected_ti
     else
@@ -323,7 +411,7 @@ module MIRLoweringLiterals
     elem_ti = elem_type ? Type.new(elem_type) : nil
     ListLiteralPlan.new(
       type_info: type_info,
-      alloc: @current_decl_alloc || alloc_for_node(node),
+      alloc: function_state.current_decl_alloc || alloc_for_node(node),
       element_type: elem_ti,
       element_zig: elem_ti ? transpile_type(elem_ti) : "u8",
       element_needs_owned_storage: elem_ti ? elem_ti.recursive_cleanup_shape?(mir_schema_lookup) : false,
@@ -334,12 +422,12 @@ module MIRLoweringLiterals
   def hash_literal_plan(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.new(node.coerced_type_info || node.full_type!)
-    map_alloc = @current_decl_alloc || alloc_for_node(node)
+    map_alloc = function_state.current_decl_alloc || alloc_for_node(node)
     rt_name = runtime_binding_name
     HashLiteralPlan.new(
       type_info: ti,
       alloc: map_alloc,
-      alloc_zig: "#{rt_name}.#{map_alloc == :heap ? "heapAlloc" : "frameAlloc"}()",
+      alloc_zig: MIR::Placement.zig_allocator(map_alloc, rt_name),
       zig_type: transpile_type(ti),
       arc_wrapped: ti.shared?,
       rc_wrapped: ti.multiowned?,

@@ -219,9 +219,23 @@ RSpec.describe FsmTransform::Emit do
           yield
         end
 
+        def with_fsm_segment_lowering_context(pointer_captures:, inherited_alloc_names:, inherited_guard_names:, owned_result_guards:)
+          @calls << {
+            pointer_captures: pointer_captures,
+            inherited_alloc_names: inherited_alloc_names,
+            inherited_guard_names: inherited_guard_names,
+            owned_result_guards: owned_result_guards,
+          }
+          yield
+        end
+
         def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
           @calls << { stmts: stmts, no_result: no_result, ctx_id: ctx_id }
           [MIR::ExprStmt.new(MIR::Lit.new("loweredResult()"), false)]
+        end
+
+        def last_fsm_result_transfer_facts
+          []
         end
 
         def render_mir_list(_nodes)
@@ -268,7 +282,8 @@ RSpec.describe FsmTransform::Emit do
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
 
       expect(result).to be_a(MIR::FsmLoweringResult)
-      expect(lowering.calls.first).to include(no_result: false, ctx_id: 5)
+      lower_call = lowering.calls.find { |call| call.key?(:stmts) }
+      expect(lower_call).to include(no_result: false, ctx_id: 5)
     end
   end
 end

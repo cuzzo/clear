@@ -666,7 +666,7 @@ class MIRPass
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
     # otherwise leak). needs_cleanup? alone misses the moved-out case.
-    return unless entry.needs_cleanup? || entry.alloc == :heap
+    return unless entry.needs_cleanup? || entry.heap?
 
     ti = stmt.full_type!
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)

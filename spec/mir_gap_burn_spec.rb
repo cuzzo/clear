@@ -58,6 +58,31 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(fresh.specs.first.body_cleanup_zig).to include("owned_moved")
   end
 
+  it "initializes nullable FunctionState collections through typed accessors" do
+    state = MIRLoweringFunctions::FunctionState.new
+    state.current_binding_types = nil
+    state.lowered_guarded_cleanup_names = nil
+
+    expect(state.binding_types!).to eq({})
+    expect(state.current_binding_types).to eq({})
+    expect(state.lowered_guarded_cleanup_names!).to eq(Set.new)
+    expect(state.lowered_guarded_cleanup_names).to eq(Set.new)
+  end
+
+  it "keeps MIR lowering schema lookup keyed by typed names" do
+    schemas = MIRLoweringSchemas.new(
+      struct_schemas: {},
+      enum_schemas: {},
+      union_schemas: {},
+    )
+    variants = [:Ok, "Err"]
+
+    schemas.register_enum("Result", variants)
+
+    expect(schemas.lookup("Result")).to eq(variants)
+    expect(schemas.lookup(:Result)).to eq(variants)
+  end
+
   it "treats malformed capture type objects as non-cleanup defensive fallbacks" do
     bad_type = Object.new
     bad_type.define_singleton_method(:to_s) { raise "bad capture type" }
@@ -127,6 +152,17 @@ RSpec.describe "MIR gap-burn characterization" do
       escape_reason: nil,
     )
     expect(placement.frame?).to eq(true)
+    expect(MIR::Placement.explicit_heap?(:heap)).to eq(true)
+    expect(MIR::Placement.explicit_heap?(nil)).to eq(false)
+    expect(MIR::Placement.explicit_frame?(:frame)).to eq(true)
+    expect(MIR::Placement.explicit_frame?(nil)).to eq(false)
+
+    heap_cleanup = CleanupEntry.build(:uniform, alloc: :heap)
+    frame_cleanup = heap_cleanup.with_alloc(:frame)
+    expect(heap_cleanup.heap?).to eq(true)
+    expect(heap_cleanup.frame?).to eq(false)
+    expect(frame_cleanup.heap?).to eq(false)
+    expect(frame_cleanup.frame?).to eq(true)
 
     program = MIR::Program.new([])
     state = MIRPassState.new
@@ -135,7 +171,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     branch_body = [MIR::ExprStmt.new(MIR::Ident.new("branch"), false)]
     if_chain = MIR::IfChain.new(
-      [{ cond: MIR::Ident.new("cond"), body: branch_body }],
+      [MIR::IfChainBranch.new(cond: MIR::Ident.new("cond"), body: branch_body)],
       [MIR::ExprStmt.new(MIR::Ident.new("default"), false)],
     )
     expect(if_chain.child_exprs.map(&:name)).to eq(["cond"])
@@ -143,7 +179,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(if_slots.map(&:name)).to eq([:branches_0, :default_body])
     replacement_branch = [MIR::ExprStmt.new(MIR::Ident.new("replacement"), false)]
     if_slots.first.replace(replacement_branch)
-    expect(if_chain.branches.first[:body]).to eq(replacement_branch)
+    expect(if_chain.branches.first.body).to eq(replacement_branch)
     if_slots.last.replace([])
     expect(if_chain.default_body).to eq([])
 
@@ -692,7 +728,7 @@ RSpec.describe "MIR gap-burn characterization" do
     atomic.full_type = atomic_type
     expect(low.send(:rc_retain_needed?, atomic)).to eq(false)
 
-    low.instance_variable_set(:@rc_unwrap_map, { "rc" => true })
+    low.capability_state.rc_unwrap_map = { "rc" => "__rc" }
     expect(low.send(:rc_retain_needed?, shared)).to eq(false)
   end
 
@@ -743,10 +779,10 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(refs).to eq(Set["outer", "inner"])
 
     mapped = id("mapped", type: :String)
-    low.instance_variable_set(:@decl_zig_name_map, { mapped.symbol.reg.object_id => "mapped_L1" })
+    low.function_state.decl_zig_name_map = { mapped.symbol.reg.object_id => "mapped_L1" }
     expect(low.send(:stub_local_idents, mapped)).to eq(["mapped_L1"])
-    low.instance_variable_set(:@decl_zig_name_map, nil)
-    low.instance_variable_set(:@fn_name_rename_map, { "renamed" => "renamed_L2" })
+    low.function_state.decl_zig_name_map = nil
+    low.function_state.fn_name_rename_map = { "renamed" => "renamed_L2" }
     expect(low.send(:stub_local_idents, id("renamed", type: :String))).to eq(["renamed_L2"])
 
     low.instance_variable_set(:@active_stubs, {
@@ -937,7 +973,7 @@ RSpec.describe "MIR gap-burn characterization" do
     ], [], nil)
     expect(low.send(:if_bind_ownership_fact_targets, if_bind)).to eq([])
 
-    low.instance_variable_set(:@current_bindings, {})
+    low.function_state.current_bindings = {}
     bg_missing_body = AST::BgBlock.new(tok, [id("other")], nil, nil, false, false, nil, false)
     bg_missing_body.capture_analysis = double(move_mark_names: Set["missing"])
     expect(low.send(:ownership_transfers_for_stmt, bg_missing_body, Set.new)).to eq([])
@@ -945,13 +981,13 @@ RSpec.describe "MIR gap-burn characterization" do
     bg_missing_entry = AST::BgBlock.new(tok, [id("given")], nil, nil, false, false, nil, false)
     bg_missing_entry.capture_analysis = double(move_mark_names: Set["given"])
     expect(low.send(:collect_bg_capture_transfer_roots, bg_missing_entry)).to eq([])
-    low.instance_variable_set(:@current_bindings, { "given" => CleanupEntry.build(:uniform, alloc: :heap) })
-    low.instance_variable_set(:@fn_name_rename_map, { "given" => "renamed_given" })
+    low.function_state.current_bindings = { "given" => CleanupEntry.build(:uniform, alloc: :heap) }
+    low.function_state.fn_name_rename_map = { "given" => "renamed_given" }
     expect(low.send(:ownership_transfers_for_stmt, bg_missing_entry, Set.new).first.name).to eq("renamed_given")
     missing_entry_low = Class.new(MIRLowering) do
       def collect_bg_capture_transfer_roots(_stmt) = ["missing_entry"]
     end.new
-    missing_entry_low.instance_variable_set(:@current_bindings, {})
+    missing_entry_low.function_state.current_bindings = {}
     expect(missing_entry_low.send(:ownership_transfers_for_stmt, bg_missing_entry, Set.new)).to eq([])
 
     empty_target_lowering = Class.new(MIRLowering) do
@@ -963,11 +999,11 @@ RSpec.describe "MIR gap-burn characterization" do
       MIR::ExprStmt.new(MIR::Ident.new("x"), false),
       ownership_finalization_context)).to eq([])
 
-    low.instance_variable_set(:@current_bindings, nil)
+    low.function_state.current_bindings = nil
     expect(low.send(:ownership_consumed_name_operands, ["hidden"], "src", :heap)).to eq([])
     visibility_low = lowering
-    visibility_low.instance_variable_set(:@current_bindings, {})
-    visibility_low.instance_variable_set(:@lowered_alloc_names, nil)
+    visibility_low.function_state.current_bindings = {}
+    visibility_low.function_state.lowered_alloc_names = nil
     expect(visibility_low.send(:owned_binding_visible?, "hidden")).to eq(false)
 
     prog = AST::Program.new(tok, [])
@@ -1322,10 +1358,10 @@ RSpec.describe "MIR gap-burn characterization" do
     existing_transfer = MIR::IfBindStmt.new([], [MIR::TransferMark.new("kept", :owned_sink, :heap)], nil)
     expect(low.send(:if_bind_transfer_present?, existing_transfer, "kept")).to eq(true)
 
-    if_chain = MIR::IfChain.new([{ cond: MIR::DupeSlice.new(MIR::Ident.new("cond"), :heap), body: [] }], nil)
+    if_chain = MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::DupeSlice.new(MIR::Ident.new("cond"), :heap), body: [])], nil)
     chain_prefix = low.send(:normalize_allocating_mir_stmt!, if_chain)
     expect(chain_prefix).not_to be_empty
-    expect(if_chain.branches.first[:cond]).to be_a(MIR::Ident)
+    expect(if_chain.branches.first.cond).to be_a(MIR::Ident)
 
     expect(low.send(:normalized_alloc_wrapper_alias?, MIR::Cast.new(MIR::Ident.new("aliased"), "[]const u8", :as))).to eq(true)
     expect(low.send(:normalized_alloc_wrapper_alias?, MIR::TryExpr.new(MIR::Ident.new("aliased")))).to eq(false)
@@ -1340,7 +1376,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
   it "covers capability lowering helper edge branches" do
     low = lowering
-    low.instance_variable_set(:@rt_name, "rt")
+    low.runtime_state.rt_name = "rt"
     low.define_singleton_method(:lower) do |node|
       if node.respond_to?(:name)
         MIR::Ident.new(node.name.to_s)
@@ -1550,19 +1586,19 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(placed_try_catch.body).to include(an_instance_of(MIR::AllocMark))
     expect(placed_try_catch.body.last).to be_a(MIR::BreakStmt)
 
-    low.instance_variable_set(:@current_bindings, {})
-    low.instance_variable_set(:@lowered_alloc_names, Set["lowered"])
+    low.function_state.current_bindings = {}
+    low.function_state.lowered_alloc_names = Set["lowered"]
     expect(low.send(:ownership_consumed_name_operands, ["lowered"], "spec", :heap).first.name).to eq("lowered")
-    low.instance_variable_set(:@lowered_alloc_names, nil)
+    low.function_state.lowered_alloc_names = nil
     expect(low.send(:ownership_consumed_name_operands, ["hidden"], "spec", :heap)).to eq([])
     expect(low.send(:ownership_operand_type, Object.new, "spec").resolved).to eq(:Any)
     expect(low.send(:ownership_operand_type, lit("typed", type: :String), "spec").resolved).to eq(:String)
 
-    low.instance_variable_set(:@current_bindings, {})
-    low.instance_variable_set(:@pending_stmts, [MIR::AllocMark.new("pending", :heap, Type.new(:String))])
+    low.function_state.current_bindings = {}
+    low.function_state.pending_stmts = [MIR::AllocMark.new("pending", :heap, Type.new(:String))]
     expect(low.send(:owned_binding_visible?, "pending")).to eq(true)
-    low.instance_variable_set(:@pending_stmts, nil)
-    low.instance_variable_set(:@lowered_alloc_names, Set.new)
+    low.function_state.pending_stmts = nil
+    low.function_state.lowered_alloc_names = Set.new
     expect(low.send(:owned_binding_visible?, "missing")).to eq(false)
 
     expect(low.send(:borrowed_ownership_ast?, nil)).to eq(false)
@@ -1603,9 +1639,9 @@ RSpec.describe "MIR gap-burn characterization" do
       MIR::Ident.new("missing"), lit("missing", type: :String),
       Type.new(:String), "spec", :heap, require_visible_owned: false)).to eq([])
     rooted = id("rooted", type: :String)
-    low.instance_variable_set(:@current_bindings, {
+    low.function_state.current_bindings = {
       "rooted" => CleanupEntry.build(:uniform, alloc: :heap),
-    })
+    }
     rooted_operand = low.send(:ownership_operands_for_sink_value,
       MIR::Ident.new("other"), rooted,
       Type.new(:String), "spec", :heap, require_visible_owned: false)
@@ -1694,11 +1730,11 @@ RSpec.describe "MIR gap-burn characterization" do
     nested = id("nested", type: box_type, storage: :heap)
     listed = id("listed", type: box_type, storage: :heap)
 
-    low.instance_variable_set(:@current_bindings, {
+    low.function_state.current_bindings = {
       "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
       "nested" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
       "listed" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
-    })
+    }
     low.define_singleton_method(:ownership_tracked_transfer_type?) { |_type| true }
 
     expect(low.send(:fsm_ast_result_consumed_roots, AST::MoveNode.new(tok, owned))).to eq(["owned"])
@@ -1727,7 +1763,7 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:flush_pending) { [] }
     low.define_singleton_method(:ast_void_type?) { |_type| false }
     low.define_singleton_method(:with_ownership_consumption) { |mir, *_args, **_kwargs| mir }
-    low.instance_variable_set(:@current_fsm_owned_result_guards, { "owned" => "owned_moved" })
+    low.capture_state.current_fsm_owned_result_guards = { "owned" => "owned_moved" }
 
     lowered = low.lower_step_stmts([owned], no_result: false, ctx_id: 9)
     expect(lowered).to include(
@@ -1832,8 +1868,8 @@ RSpec.describe "MIR gap-burn characterization" do
 
     result = low.lower(match)
     expect(result).to be_a(MIR::IfChain)
-    expect(result.branches.first[:body].grep(MIR::Let).map(&:name)).to include("x")
-    expect(result.branches.first[:cond]).to be_a(MIR::BinOp)
+    expect(result.branches.first.body.grep(MIR::Let).map(&:name)).to include("x")
+    expect(result.branches.first.cond).to be_a(MIR::BinOp)
 
     low.define_singleton_method(:emit_builtin) { |name, args| MIR::Call.new(name.to_s, args, false, false) }
     string_case = AST::MatchCase.new(
@@ -1845,7 +1881,7 @@ RSpec.describe "MIR gap-burn characterization" do
     string_match = AST::MatchStatement.new(tok, id("cmd", type: :String), [string_case], nil, nil, nil, false, nil)
     string_match.string_match = true
     string_match.full_type = :Void
-    expect(low.lower(string_match).branches.first[:cond].op).to eq("or")
+    expect(low.lower(string_match).branches.first.cond.op).to eq("or")
 
     union_low = MIRLowering.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :Int64, Warn: :Int64 }) })
     union_subject = id("result", type: :Result)
@@ -1867,13 +1903,28 @@ RSpec.describe "MIR gap-burn characterization" do
     union_match.full_type = :Void
     union_result = union_low.lower(union_match)
     expect(union_result).to be_a(MIR::IfChain)
-    expect(union_result.branches.flat_map { |b| b[:body].grep(MIR::Let).map(&:name) }).to include("payload", "value")
+    expect(union_result.branches.flat_map { |b| b.body.grep(MIR::Let).map(&:name) }).to include("payload", "value")
+
+    switch_union_match = AST::MatchStatement.new(
+      tok,
+      union_subject,
+      [AST::MatchCase.new(kind: :eq, value: warn, destructure: destructure, body: [lit(7, type: :Int64)])],
+      nil,
+      nil,
+      nil,
+      false,
+      nil
+    )
+    switch_union_match.full_type = :Void
+    switch_result = union_low.lower(switch_union_match)
+    expect(switch_result).to be_a(MIR::UnionMatchStmt)
+    expect(switch_result.arms.flat_map { |arm| arm[:body].grep(MIR::Let).map(&:name) }).to include("value")
 
     generic_case = AST::MatchCase.new(kind: :eq, value: id("A", type: :Any),
       extra_values: [id("B", type: :Any)], body: [lit(6, type: :Int64)])
     generic_match = AST::MatchStatement.new(tok, id("subject", type: :Any), [generic_case], nil, nil, nil, false, nil)
     generic_match.full_type = :Void
-    expect(low.lower(generic_match).branches.first[:cond].op).to eq("or")
+    expect(low.lower(generic_match).branches.first.cond.op).to eq("or")
   end
 
   it "covers control-flow loop, match, and return-transfer edge branches" do
@@ -1882,7 +1933,7 @@ RSpec.describe "MIR gap-burn characterization" do
     branch_mark = MIR::AllocMark.new("branch_owned", :frame, Type.new(:String), nil)
     default_mark = MIR::AllocMark.new("default_owned", :frame, Type.new(:String), nil)
     match_mark = MIR::AllocMark.new("match_owned", :frame, Type.new(:String), nil)
-    if_chain = MIR::IfChain.new([{ cond: MIR::Lit.new("true"), body: [branch_mark] }], [default_mark])
+    if_chain = MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("true"), body: [branch_mark])], [default_mark])
     with_match = MIR::WithMatchDispatch.new("cell", [{ family: :LOCKED, probe: "true", prelude_zig: "", body: [match_mark] }])
     low.send(:stamp_loop_frame_alloc_scopes!, [if_chain, with_match], :iteration)
     expect([branch_mark.scope, default_mark.scope, match_mark.scope]).to all(eq(:iteration))
@@ -1909,7 +1960,7 @@ RSpec.describe "MIR gap-burn characterization" do
     guard_case = AST::MatchCase.new(kind: :when, value: guard, body: [lit(1, type: :Int64)])
     guard_match = AST::MatchStatement.new(tok, id("plain", type: :Any), [guard_case], nil, nil, nil, false, nil)
     guard_match.full_type = :Void
-    expect(low.lower(guard_match).branches.first[:cond]).to be_a(MIR::Lit)
+    expect(low.lower(guard_match).branches.first.cond).to be_a(MIR::Lit)
 
     union_low = MIRLowering.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Fallback: :Int64 }) })
     union_subject = id("result", type: :Result)
@@ -1919,7 +1970,7 @@ RSpec.describe "MIR gap-burn characterization" do
     fallback_match = AST::MatchStatement.new(tok, union_subject, [fallback_case, fallback_guard], nil, nil, nil, false, nil)
     fallback_match.full_type = :Void
     fallback_result = union_low.lower(fallback_match)
-    expect(fallback_result.branches.first[:cond].right.name).to eq(".Fallback")
+    expect(fallback_result.branches.first.cond.right.name).to eq(".Fallback")
 
     method_variant = AST::MethodCall.new(tok, id("Result"), "Ok", [])
     variant_case = AST::MatchCase.new(kind: :eq, value: method_variant, body: [])
@@ -1930,9 +1981,9 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:current_function_return_payload_zig) { "*Payload" }
     expect(low.send(:return_value_already_payload_pointer?, malformed_return_value)).to eq(false)
 
-    low.instance_variable_set(:@current_bindings, {
+    low.function_state.current_bindings = {
       "borrowed" => CleanupEntry.no_cleanup(alloc: :frame, scope: :function),
-    })
+    }
     expect(low.send(:returned_no_cleanup_binding?, "borrowed")).to eq(true)
 
     unfinished_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
@@ -2090,8 +2141,11 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:bg_stream_boundary_stmt?, stream_stmt)).to eq(true)
 
     call_arg = id("arg", type: :String)
+    call_arg.was_moved = true
     call_stmt = AST::FuncCall.new(tok, "consume", [call_arg])
-    expect(low.send(:arg_is_call_argument?, call_stmt, call_arg)).to eq(true)
+    scanner = low.send(:ownership_scanner)
+    expect(scanner.send(:arg_is_call_argument?, call_stmt, call_arg)).to eq(true)
+    expect(low.send(:collect_moved_arg_roots, call_stmt)).to eq([])
     facts_low = Class.new(MIRLowering) do
       def stdlib_call_ownership_facts(_call)
         MIRLoweringFunctions::CallOwnershipFacts.new(takes_indices: Set.new, consumed_names: ["arg"])
@@ -2103,11 +2157,11 @@ RSpec.describe "MIR gap-burn characterization" do
       params: [param("taken", takes: true)],
       return_type: Type.new(:Void),
     )
-    low.instance_variable_set(:@current_bindings, {
+    low.function_state.current_bindings = {
       "taken" => CleanupEntry.build(:uniform, alloc: :heap),
-    })
+    }
     expect(low.send(:stdlib_call_ownership_facts, real_call).takes?(0)).to eq(true)
-    expect(low.send(:nested_ownership_scope?, stream_stmt)).to eq(true)
+    expect(scanner.send(:nested_ownership_scope?, stream_stmt)).to eq(true)
     expect(low.send(:consumed_binding_root, AST::GetField.new(tok, id("owner", type: :String), "field"))).to eq("owner")
     expect(low.send(:discard_owned_zig_type, lit(1, type: :Int64), CleanupEntry.build(:uniform, alloc: :heap))).to eq("i64")
     expect(low.send(:root_receiver_node,
@@ -2141,9 +2195,9 @@ RSpec.describe "MIR gap-burn characterization" do
       fallback: lit("fallback", type: :String)).result_type.resolved).to eq(:String)
     cleanup_entry = low.send(:pipeline_owned_cleanup_entry, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), lit("s"))
     expect(cleanup_entry).to be_a(CleanupEntry)
-    low.instance_variable_set(:@current_bindings, {
+    low.function_state.current_bindings = {
       "owned_value" => CleanupEntry.build(:uniform, alloc: :heap),
-    })
+    }
     index_insert = MIR::IndexInsert.new(
       MIR::Ident.new("map"),
       MIR::Lit.new("\"k\""),
@@ -2206,7 +2260,7 @@ RSpec.describe "MIR gap-burn characterization" do
       target_name: "sharded",
       needs_mut_ref: false,
     )
-    low.instance_variable_set(:@shard_context, { map: "sharded", idx: "__idx", key: "__key" })
+    low.shard_context = { map: "sharded", idx: "__idx", key: "__key" }
     old_shard_template = INDEX_OPS[:string_map][:get][:shard_direct_zig]
     begin
       INDEX_OPS[:string_map][:get][:shard_direct_zig] = "{target}.getDirect({shard_idx}, {shard_alloc}, {shard_key})"
@@ -2231,10 +2285,9 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(low.send(:index_collection_value, MIR::Ident.new("set"), MIR::Ident.new("item"), set_plan)).to be_a(MIR::InlineZig)
 
-    blank_schema = Object.new
-    def blank_schema.type_params = nil
+    blank_schema = Schemas::StructSchema.new(fields: {}, type_params: nil)
     expect(low.send(:struct_lit_field_types, AST::StructLit.new(tok, "Missing", {}, nil, []))).to eq({})
-    low.instance_variable_set(:@schema_lookup, ->(_name) { blank_schema })
+    low.replace_mir_schema_lookup!(->(_name) { blank_schema })
     expect(low.send(:struct_lit_field_types, AST::StructLit.new(tok, "Blank", {}, nil, []))).to eq({})
 
     low = MIRLowering.new(struct_schemas: {
@@ -2250,6 +2303,7 @@ RSpec.describe "MIR gap-burn characterization" do
     end
     low.define_singleton_method(:hoist_alloc) { |expr, *_args, **_kwargs| expr }
     low.define_singleton_method(:with_ownership_consumption) { |node, *_args, **_kwargs| node }
+    low.define_singleton_method(:with_ownership_consumption_for_value) { |node, *_args, **_kwargs| node }
     low.define_singleton_method(:move_mark_field!) { |_node| nil }
     low.define_singleton_method(:rc_retain_needed?) { |_node| false }
     low.define_singleton_method(:mir_owned_alloc) { |_node| :frame }
@@ -2260,7 +2314,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(field_types["value"].resolved).to eq(:String)
 
     list_type = Type.new(:"Int64[]", collection: :list)
-    low.instance_variable_set(:@schema_lookup, ->(name) {
+    low.replace_mir_schema_lookup!(->(name) {
       next nil unless name == :Box
 
       Schemas::StructSchema.new(fields: {
@@ -2275,7 +2329,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(lowered_aggregate.fields.first[:value]).to be_a(MIR::DeepCopy)
 
     recursive_type = Type.new(:NeedsCopy)
-    low.instance_variable_set(:@schema_lookup, ->(name) {
+    low.replace_mir_schema_lookup!(->(name) {
       next nil unless name == :Box
 
       Schemas::StructSchema.new(fields: {
@@ -2288,6 +2342,15 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:recursive_field_copy_required?) { |_ft, _node, _field_alloc, _sink_alloc| true }
     recursive_lowered = low.send(:lower_struct_lit, recursive_lit)
     expect(recursive_lowered.fields.first[:value]).to be_a(MIR::DeepCopy)
+
+    indirect_value = id("indirect", type: :IndirectPayload, storage: :frame)
+    indirect_value.needs_heap_create = true
+    indirect_lit = AST::StructLit.new(tok, "Box", { "value" => indirect_value }, :heap, [])
+    indirect_lit.full_type = Type.new(:Box)
+    low.define_singleton_method(:recursive_field_copy_required?) { |_ft, _node, _field_alloc, _sink_alloc| false }
+    indirect_lowered = low.send(:lower_struct_lit, indirect_lit)
+    expect(indirect_lowered).to be_a(MIR::BlockExpr)
+    expect(indirect_lowered.body).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::BreakStmt))
 
     single_payload = AST::UnionVariantLit.new(tok, "Choice", "Payload", { "value" => lit("s") }, :heap)
     expect(low.send(:union_variant_lit_field_types, single_payload)["value"].resolved).to eq(:String)
@@ -2305,7 +2368,7 @@ RSpec.describe "MIR gap-burn characterization" do
     opt_type = Type.new(:"?String", location: :heap)
     expect(low.send(:lower_copy, AST::CopyNode.new(tok, id("opt", type: opt_type, storage: :heap)))).to be_a(MIR::DeepCopy)
     list_type = Type.new(:"Int64[]", collection: :list)
-    low.instance_variable_set(:@current_expected_type, list_type)
+    low.function_state.current_expected_type = list_type
     expect(low.send(:lower_copy, AST::CopyNode.new(tok, id("list", type: list_type, storage: :heap))).zig_type).to eq(list_type.zig_type)
     scalar_copy = AST::CopyNode.new(tok, id("scalar", type: :Int64, storage: :frame))
     expect(low.send(:lower_copy, scalar_copy).zig_type).to eq(list_type.zig_type)
@@ -2324,6 +2387,119 @@ RSpec.describe "MIR gap-burn characterization" do
     cap = AST::CapabilityWrap.new(tok, id("plain", type: :Int64), nil, nil, nil)
     cap.full_type = Type.new(:Int64)
     expect(low.send(:lower_cap_wrap, cap).strategy).to eq(:passthrough)
+  end
+
+  it "covers extracted MIR lowering state-owner helper branches" do
+    low = lowering
+
+    old_pointer_captures = Set["old"]
+    old_pending = [MIR::ExprStmt.new(MIR::Ident.new("keep"), false)]
+    low.capture_state.current_bg_pointer_captures = old_pointer_captures
+    low.function_state.pending_stmts = old_pending
+    seen_pointer_captures = nil
+    seen_pending = nil
+    low.define_singleton_method(:emit_step_stmts) do |_body, no_result: false|
+      seen_pointer_captures = capture_state.current_bg_pointer_captures
+      seen_pending = function_state.pending_stmts
+      no_result ? "handled_block();" : "handled_expr();"
+    end
+    low.define_singleton_method(:with_fiber_capture_map) { |_map, rt_override: nil, &blk| blk.call }
+    block_clause = AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: tok,
+      body: [AST::PassStmt.new(tok)])
+    with_node = AST::WithBlock.new(tok, [], [], nil)
+    split = low.send(:emit_fsm_lock_error_arm_split,
+      clause: block_clause,
+      ctx_id: 4,
+      with_node: with_node,
+      capture_map: { "cap" => "__ctx_4.cap" },
+      pointer_captures: Set["fresh"],
+      bg_rt: "__rt_bg",
+      rt_name: "rt")
+
+    expect(split.exit_kind).to eq(:goto_post)
+    expect(split.body_zig).to eq("handled_block();")
+    expect(seen_pointer_captures).to eq(Set["fresh"])
+    expect(seen_pending).to eq([])
+    expect(low.capture_state.current_bg_pointer_captures).to eq(old_pointer_captures)
+    expect(low.function_state.pending_stmts).to eq(old_pending)
+
+    versioned_prelude = low.send(:with_match_arm_prelude, :VERSIONED, "cell", "alias", with_node)
+    expect(versioned_prelude).to include(".read(").and include("const alias")
+
+    exit_clause = AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: tok,
+      message: lit("timeout"))
+    exit_body = low.send(:error_action_stmts, exit_clause, "__with", with_node, :GuardFail, "guard failed")
+    expect(exit_body).to contain_exactly(an_instance_of(MIR::ExprStmt), an_instance_of(MIR::ReturnStmt))
+
+    observable_source = id("running", type: Type.new(:"~String", observable: true))
+    next_node = AST::NextExpr.new(tok, observable_source)
+    next_node.full_type = Type.new(:String)
+    lowered_next = low.send(:lower_next_expr, next_node, :frame)
+    expect(lowered_next).to be_a(MIR::BlockExpr)
+    expect(lowered_next.label).to start_with("__obs_next_string_")
+    expect(lowered_next.body).to include(an_instance_of(MIR::ExprStmt), an_instance_of(MIR::BreakStmt))
+
+    pool_type = Type.new(:"Int64[]", collection: :pool)
+    pool_plan = MIRLoweringControlFlow::ForEachPlan.new(
+      var: "item",
+      body: [MIR::ExprStmt.new(MIR::Ident.new("use_item"), false)],
+      rt: MIR::Ident.new("rt"),
+      collection: MIR::Ident.new("pool"),
+      collection_type: pool_type,
+      collection_setup: [],
+      mutable: false,
+      mark_per_iter: nil,
+      tight: false,
+    )
+    pool_loop = low.send(:for_each_loop_stmt, AST::ForEach.new(tok, "item", id("pool", type: pool_type), [], nil, false), pool_plan)
+    expect(pool_loop).to be_a(MIR::ForStmt)
+    expect(pool_loop.capture).to match(/\*__pslot_\d+/)
+    expect(pool_loop.body.first).to be_a(MIR::IfStmt)
+    expect(low.send(:for_each_owned_collection_source_alloc, MIR::Ident.new("items"), Type.new(:String))).to be_a(Symbol)
+
+    default_low = lowering
+    default_low.define_singleton_method(:lower_match_branch) do |_body, _label|
+      [MIR::ExprStmt.new(MIR::Ident.new("default"), false)]
+    end
+    default_low.define_singleton_method(:hoist_unhoisted_return_allocs) { |body, _body_ast| body }
+    default_body = default_low.send(:lower_match_default_body, [AST::PassStmt.new(tok)], "__match")
+    expect(default_body.first).to be_a(MIR::ExprStmt)
+
+    fallback_access = AST::GetField.new(tok, id("owner", type: :Box, storage: :heap), "name")
+    fallback_access.full_type = Type.new(:String)
+    low.function_state.current_decl_alloc = :frame
+    materialized = low.send(:materialize_or_fallback_value, MIR::Ident.new("owner.name"), fallback_access)
+    expect(materialized).to be_a(MIR::Ident)
+    expect(low.function_state.pending_stmts).to include(an_instance_of(MIR::AllocMark))
+
+    heap_template = low.send(:build_extern_trampoline_common,
+      id: 91,
+      prefix: "__ext_",
+      args_tuple_name: "__args",
+      frame_name: "__frame",
+      arg_codes: [],
+      arg_field_types: nil,
+      arg_tuple: ".{}",
+      alloc_kind: :heap,
+      return_type: Type.new(:Void),
+      call_zig: "native(f.alloc)",
+      receiver_field: nil,
+      ast_node: nil)
+    frame_template = low.send(:build_extern_trampoline_common,
+      id: 92,
+      prefix: "__ext_",
+      args_tuple_name: "__args",
+      frame_name: "__frame",
+      arg_codes: [],
+      arg_field_types: nil,
+      arg_tuple: ".{}",
+      alloc_kind: :frame,
+      return_type: Type.new(:Void),
+      call_zig: "native(f.alloc)",
+      receiver_field: nil,
+      ast_node: nil)
+    expect(heap_template.code).to include(".alloc = rt.heapAlloc()")
+    expect(frame_template.code).to include(".alloc = rt.frameAlloc()")
   end
 
   it "covers function lowering helper edge branches" do
@@ -2388,7 +2564,7 @@ RSpec.describe "MIR gap-burn characterization" do
     any_call.full_type = Type.new(:Any)
     carry_sig = FunctionSignature.new(params: [param("source", type: :Int64)], return_type: Type.new(:String))
     expect(method_low.send(:call_owned_return?, any_call)).to eq(false)
-    method_low.instance_variable_set(:@fn_sigs, { "returns_from_arg" => carry_sig })
+    method_low.program_state.fn_sigs = { "returns_from_arg" => carry_sig }
     expect(method_low.send(:call_owned_return?, any_call)).to eq(false)
 
     carry_sig.heap_carry_return_vars = Set["source"]
@@ -2441,14 +2617,14 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(direct.callee).to eq("c_lib.native")
 
     trampoline_sig = FunctionSignature.new(params: [param("value", type: :Int64)], return_type: Type.new(:Int64))
-    extern_low.instance_variable_set(:@fn_sigs, { "native" => trampoline_sig })
+    extern_low.program_state.fn_sigs = { "native" => trampoline_sig }
     trampoline = AST::FuncCall.new(tok, "native", [value_arg])
     trampoline.full_type = Type.new(:Int64)
     trampoline_out = extern_low.send(:build_extern_trampoline_call, trampoline)
     expect(trampoline_out.code).to include("a0: i64")
 
     module_sig = FunctionSignature.new(params: [param("port", type: :Int64)], return_type: Type.new(:Void), module_alias: "http")
-    extern_low.instance_variable_set(:@fn_sigs, { "startTestServer" => module_sig })
+    extern_low.program_state.fn_sigs = { "startTestServer" => module_sig }
     module_call = AST::FuncCall.new(tok, "startTestServer", [lit(19_876, type: :Int64)])
     module_call.full_type = Type.new(:Void)
     module_call.module_alias = "http"
@@ -2587,9 +2763,9 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(packet.statements.map(&:class)).to eq([MIR::AllocMark, MIR::Let])
 
     source_low = lowering
-    source_low.instance_variable_set(:@current_bindings, {
+    source_low.function_state.current_bindings = {
       "src" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
-    })
+    }
     source_low.define_singleton_method(:lower) { |node| MIR::Ident.new(node.name.to_s) }
     source_low.define_singleton_method(:with_ownership_consumption_for_value) { |node, *_args, **_kwargs| node }
     source_decl = AST::VarDecl.new(tok, "dst", nil, id("src", type: Type.new(:Payload, ownership: :shared), storage: :heap), false)
@@ -2616,9 +2792,9 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(copied).to be_a(MIR::DeepCopy)
 
     owner_mark_low = lowering
-    owner_mark_low.instance_variable_set(:@current_bindings, {
+    owner_mark_low.function_state.current_bindings = {
       "root" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
-    })
+    }
     root = id("root", type: :Box, storage: :heap)
     moved_field = AST::GetField.new(tok, root, "child")
     moved_field.full_type = Type.new(:Payload)

@@ -103,6 +103,23 @@ class PipelineConcurrentInvocation < T::Struct
     ]
   end
 
+  sig { params(source_pointer: MIR::Emittable, capacity: MIR::Emittable, alloc: Symbol, is_inf: MIR::Emittable).returns(T::Array[MIR::Emittable]) }
+  def stream_each_args(source_pointer, capacity, alloc, is_inf)
+    [
+      apply_ident,
+      is_inf,
+      MIR::AllocatorRef.new(alloc),
+      MIR::Ident.new("rt"),
+      source_pointer,
+      worker_count,
+      capacity,
+      batch_size,
+      parallel,
+      task_config,
+      context_arg,
+    ]
+  end
+
   sig { params(before_context: T::Array[MIR::Emittable], after_context: T::Array[MIR::Emittable]).returns(T::Array[MIR::Emittable]) }
   def scoped_body(before_context:, after_context:)
     [
@@ -744,8 +761,12 @@ class PipelineConcurrentLowerer
 
     call = @services.emit_builtin.call(:concurrentStreamEach, [
       MIR::Ident.new(item_t.zig_type),
-      MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
-      *invoke.stream_allocating_args(source.pointer, capacity, @services.pipeline_result_alloc.call),
+      *invoke.stream_each_args(
+        source.pointer,
+        capacity,
+        @services.pipeline_result_alloc.call,
+        MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
+      ),
     ])
 
     MIR::ScopeBlock.new(invoke.scoped_body(

@@ -1394,7 +1394,7 @@ RSpec.describe MIRChecker do
 
       nested_state = MIRChecker::LinearOwnershipState.new
       [
-        MIR::IfChain.new([{ cond: MIR::Lit.new("cond"), body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }], []),
+        MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])], []),
         MIR::DeferStmt.new([MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::DeferStmt.new(MIR::ExprStmt.new(MIR::Lit.new("1"), false)),
         MIR::StreamSpawn.new({}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
@@ -1488,13 +1488,13 @@ RSpec.describe MIRChecker do
     it "covers move-mark, aggregate, and registry traversal branches" do
       checker.send(:verify_move_mark_scope!, [MIR::MoveMark.new("x")])
       checker.send(:verify_move_mark_scope!, [
-        MIR::IfChain.new([{ cond: MIR::Lit.new("cond"), body: [MIR::MoveMark.new("branch")] }], [MIR::MoveMark.new("default")]),
+        MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::MoveMark.new("branch")])], [MIR::MoveMark.new("default")]),
         MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::MoveMark.new("arm")] }]),
       ])
 
       aggregate = [
         MIR::IfChain.new(
-          [{ cond: MIR::Ident.new("cond"), body: [MIR::Let.new("owner", MIR::StructInit.new("S", [{ name: "field", value: MIR::Ident.new("child") }]), false, nil, nil)] }],
+          [MIR::IfChainBranch.new(cond: MIR::Ident.new("cond"), body: [MIR::Let.new("owner", MIR::StructInit.new("S", [{ name: "field", value: MIR::Ident.new("child") }]), false, nil, nil)])],
           [MIR::ExprStmt.new(MIR::StructInit.new("S", [{ name: "field", value: MIR::Ident.new("child") }]), false)],
         ),
       ]

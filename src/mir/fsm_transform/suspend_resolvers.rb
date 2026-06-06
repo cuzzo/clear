@@ -258,7 +258,7 @@ module FsmTransform
     sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }
     def ownership_bearing_result_type?(type_info, lowering)
       return false unless type_info
-      schema_lookup = lowering.instance_variable_get(:@schema_lookup) rescue nil
+      schema_lookup = lowering.respond_to?(:mir_schema_lookup) ? lowering.mir_schema_lookup : nil
       type_info.string? || type_info.heap_ptr? || type_info.collection_value? ||
         type_info.recursive_cleanup_shape?(schema_lookup)
     rescue StandardError

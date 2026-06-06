@@ -1427,7 +1427,7 @@ module LoopFrameAnalysis
       direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)
     has_extended_frame_locals = local_facts.frame_decls.any? do |decl|
       entry = MIR::LocalBindingAnalysis.binding_entry(decl)
-      entry&.present? && entry.alloc == :frame && entry.scope != :iteration
+      entry&.present? && entry.frame? && entry.scope != :iteration
     end || outer_frame_receiver_alloc?(body, local_names)
     loop_node.mark_per_iter = has_iteration_frame_locals && !has_extended_frame_locals
     nil

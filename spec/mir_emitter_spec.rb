@@ -177,8 +177,10 @@ RSpec.describe MIREmitter do
 
   it "emits if-chain" do
     node = MIR::IfChain.new(
-      [{ cond: MIR::BinOp.new("==", MIR::Ident.new("x"), MIR::Lit.new("1")),
-         body: [MIR::ReturnStmt.new(MIR::Lit.new("\"one\""))] }],
+      [MIR::IfChainBranch.new(
+        cond: MIR::BinOp.new("==", MIR::Ident.new("x"), MIR::Lit.new("1")),
+        body: [MIR::ReturnStmt.new(MIR::Lit.new("\"one\""))],
+      )],
       [MIR::ReturnStmt.new(MIR::Lit.new("\"other\""))]
     )
     zig = e.emit(node)

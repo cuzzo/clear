@@ -82,7 +82,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     l.define_singleton_method(:stamp_allocating_result_target!) { |_expr, _name, alloc: nil| alloc }
 
     l.send(:hoist_lazy_alloc_result, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame), id("s"))
-    expect(l.instance_variable_get(:@pending_stmts).map(&:class)).to include(MIR::AllocMark, MIR::Let)
+    expect(l.function_state.pending_stmts.map(&:class)).to include(MIR::AllocMark, MIR::Let)
 
     passthrough = MIR::Ident.new("plain")
     l.send(:hoist_lazy_alloc_result, passthrough, id("plain"))
@@ -112,7 +112,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   it "covers moved-root collection helpers without source-level fuzz state" do
     l = lowering
     owned = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, needs_cleanup: true, zig_type: "Thing")
-    l.instance_variable_get(:@current_bindings)["item"] = owned
+    l.function_state.current_bindings["item"] = owned
 
     moved = AST::MoveNode.new(tok, id("item", type: Type.new(:String), moved: true))
     expect(l.send(:collect_explicit_move_roots, moved)).to eq(["item"])
@@ -201,7 +201,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(target.elem_ownership).to eq(:affine)
     expect(target.elem_sync).to eq(:write_locked)
 
-    l.instance_variable_set(:@do_capture_map, { "root" => "__ctx.root" })
+    l.capture_state.do_capture_map = { "root" => "__ctx.root" }
     path = AST::GetField.new(tok, AST::GetField.new(tok, id("root"), "inner"), "leaf")
     expect(l.send(:build_field_path_zig, path)).to eq("__ctx.root.inner.leaf")
     expect(l.send(:build_field_path_zig, Object.new)).to be_a(String)

@@ -236,7 +236,6 @@ module Annotator
         method_sig = type_schema.methods[node.name]
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
-        node.instance_variable_set(:@extern_method, true)
         stamp_type!(node, method_sig.return_type)
         record_effect(EffectTracker::EXTERN)
         record_extern_method_alloc!(method_sig)

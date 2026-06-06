@@ -365,7 +365,7 @@ class MIRChecker
           "return ownership transfer has no MIR::AllocMark")
         next
       end
-      next if marks.all? { |mark| mark.alloc == :heap }
+      next if marks.all? { |mark| MIR::Placement.heap?(mark.alloc) }
 
       @errors << error(:RETURN_TRANSFER_FRAME_ALLOC, name,
         "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")
@@ -586,8 +586,8 @@ class MIRChecker
     when MIR::IfChain
       states = T.let([], T::Array[LinearOwnershipState])
       stmt.branches&.each do |branch|
-        check_linear_expr_uses!(branch[:cond], state)
-        states << linear_project_branch_state(check_linear_stmts!(branch[:body], state.copy), state, "if-chain")
+        check_linear_expr_uses!(branch.cond, state)
+        states << linear_project_branch_state(check_linear_stmts!(branch.body, state.copy), state, "if-chain")
       end
       states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "if-chain")
       linear_merge_branch_states!(states, state, "if-chain")
@@ -760,7 +760,7 @@ class MIRChecker
 
   sig { params(target: Symbol, target_alloc: T.nilable(Symbol)).returns(T::Boolean) }
   def escaping_transfer_target?(target, target_alloc)
-    return target_alloc == :heap if target == :owned_sink
+    return MIR::Placement.explicit_heap?(target_alloc) if target == :owned_sink
 
     LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS.include?(target)
   end
@@ -988,7 +988,7 @@ class MIRChecker
         stmt.arms&.each { |a| verify_move_mark_scope!(a[:body], visible.dup) }
         verify_move_mark_scope!(stmt.default_body, visible.dup)
       when MIR::IfChain
-        stmt.branches&.each { |b| verify_move_mark_scope!(b[:body], visible.dup) }
+        stmt.branches&.each { |b| verify_move_mark_scope!(b.body, visible.dup) }
         verify_move_mark_scope!(stmt.default_body, visible.dup)
       when MIR::BgBlock
         verify_move_mark_scope!(stmt.run_body, visible.dup)
@@ -1087,8 +1087,8 @@ class MIRChecker
         check_aggregate_stmts!(stmt.default_body, alloc_by_name)
       when MIR::IfChain
         stmt.branches&.each do |b|
-          check_aggregate_expr!(b[:cond], nil, alloc_by_name)
-          check_aggregate_stmts!(b[:body], alloc_by_name)
+          check_aggregate_expr!(b.cond, nil, alloc_by_name)
+          check_aggregate_stmts!(b.body, alloc_by_name)
         end
         check_aggregate_stmts!(stmt.default_body, alloc_by_name)
       end
@@ -1347,7 +1347,7 @@ class MIRChecker
         next
       end
 
-      if marks.any? { |m| m.alloc == :frame }
+      if marks.any? { |m| MIR::Placement.frame?(m.alloc) }
         @errors << error(:OWNED_RETURN_ALLOC_NOT_HEAP, let.name,
           "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")
       end
@@ -1722,7 +1722,7 @@ class MIRChecker
       # container = use-after-free when the frame rewinds.
       { key_alloc: alloc_metadata.key_alloc, val_alloc: alloc_metadata.value_alloc }.each do |alloc_key, stored_alloc|
         next unless stored_alloc
-        if stored_alloc == :frame && container_alloc == :heap
+        if MIR::Placement.explicit_frame?(stored_alloc) && MIR::Placement.explicit_heap?(container_alloc)
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "#{alloc_key} is :frame but container '#{target}' is :heap " \
             "(stored data will dangle after frame rewind)")
@@ -1835,7 +1835,7 @@ class MIRChecker
       next if cleanups.key?(name)
       next if errdefer_destroy_names.include?(name)
       next if transfers.include?(name)
-      next if alloc_marks.all? { |m| m.alloc == :frame }
+      next if alloc_marks.all? { |m| MIR::Placement.frame?(m.alloc) }
       @errors << error(:ALLOC_WITHOUT_CLEANUP, name,
         "AllocMark with no Cleanup, ErrCleanup, ErrDeferStmt(DestroyPtr), or TransferMark -- leaked allocation")
     end
@@ -2405,7 +2405,7 @@ class MIRChecker
     found = T.let(false, T::Boolean)
     each_loop_local_node(stmts) do |node|
       next unless node.is_a?(MIR::AllocMark)
-      next unless node.alloc == :frame
+      next unless MIR::Placement.frame?(node.alloc)
 
       scope = T.unsafe(node).scope
       scope = scope.is_a?(Symbol) ? scope : :unknown
@@ -2439,7 +2439,7 @@ class MIRChecker
       expr.allocs&.any_frame?
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
-      expr.alloc == :frame
+      MIR::Placement.frame?(expr.alloc)
     else
       false
     end

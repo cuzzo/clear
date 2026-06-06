@@ -732,45 +732,36 @@ module FsmTransform
           raw_stmts
         else
           want_result = !is_void && result_seg_indices.include?(seg.index)
-          prev_ptr = lowering.instance_variable_get(:@current_bg_pointer_captures)
-          lowering.instance_variable_set(:@current_bg_pointer_captures, pointer_captures)
-          prev_pending = lowering.instance_variable_get(:@pending_stmts)
-          lowering.instance_variable_set(:@pending_stmts, [])
-          prev_fsm_allocs = lowering.instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
-          prev_fsm_guards = lowering.instance_variable_get(:@current_fsm_inherited_guarded_names) rescue nil
-          inherited_capture_names = Array(ctx[:fsm_destroy_lines]).filter_map do |entry|
+          inherited_capture_names = T.let(Array(ctx[:fsm_destroy_lines]).filter_map do |entry|
             next nil unless entry.is_a?(DestroyLine) && (entry.kind == :capture || entry.kind == :body)
             name = entry.name
             name ? "__ctx_#{id}.#{name}" : nil
-          end.to_set
+          end.to_set, T::Set[String])
           captured.keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }
-          lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
-          lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, inherited_capture_names)
           # Per-segment alias overrides (e.g. WITH's `inner` ->
           # __ctx_<id>.c.ctrl.data.*.data) merged into the rendering
           # capture_map so identifier resolution sees the alias.
           seg_overrides = segment_list.alias_overrides_for(seg.index)
           eff_capture_map = seg_overrides ?
                               capture_map.merge(seg_overrides) : capture_map
-          lowered_mir = lowering_api.with_fiber_capture_map(eff_capture_map, rt_override: bg_rt) do
-            prev_guard_map = lowering.instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
-            lowering.instance_variable_set(:@current_fsm_owned_result_guards, owned_result_guards)
-            if want_result
-              lowering_api.lower_finalized_fsm_step_mir(
-                ast_stmts, no_result: false, ctx_id: id,
-              )
-            else
-              lowering_api.lower_finalized_fsm_step_mir(ast_stmts, no_result: true)
+          lowered_mir = lowering_api.with_fsm_segment_lowering_context(
+            pointer_captures: pointer_captures || Set.new,
+            inherited_alloc_names: inherited_capture_names,
+            inherited_guard_names: inherited_capture_names,
+            owned_result_guards: owned_result_guards,
+          ) do
+            lowering_api.with_fiber_capture_map(eff_capture_map, rt_override: bg_rt) do
+              if want_result
+                lowering_api.lower_finalized_fsm_step_mir(
+                  ast_stmts, no_result: false, ctx_id: id,
+                )
+              else
+                lowering_api.lower_finalized_fsm_step_mir(ast_stmts, no_result: true)
+              end
             end
-          ensure
-            lowering.instance_variable_set(:@current_fsm_owned_result_guards, prev_guard_map)
           end
-          facts = lowering.instance_variable_get(:@last_fsm_result_transfer_facts) || []
+          facts = lowering_api.last_fsm_result_transfer_facts
           seg_result_facts[seg.index] = facts
-          lowering.instance_variable_set(:@pending_stmts, prev_pending)
-          lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, prev_fsm_allocs)
-          lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, prev_fsm_guards)
-          lowering.instance_variable_set(:@current_bg_pointer_captures, prev_ptr)
           return nil if lowered_mir.nil?
           all_promoted = fsm_promoted_names + captured.keys.map(&:to_s)
           if all_promoted.any?
@@ -1243,19 +1234,15 @@ module FsmTransform
 
       bg_rt = ctx[:bg_rt]
       pointer_captures = ctx[:pointer_captures]
-      prev_ptr = lowering.instance_variable_get(:@current_bg_pointer_captures)
-      lowering.instance_variable_set(:@current_bg_pointer_captures, pointer_captures)
-      prev_pending = lowering.instance_variable_get(:@pending_stmts)
-      lowering.instance_variable_set(:@pending_stmts, [])
-      result = lowering.with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-        # Caller-supplied sp_idx (allocated by compute_sp_indices in
-        # dispatch order) takes precedence so sp_<N> labels track
-        # 1-based suspend position, not segment-graph index.
-        eff_sp = sp_idx || (seg.index + 1)
-        SuspendResolvers.resolve(seg, ctx, lowering, susp_idx: eff_sp)
+      result = lowering.with_bg_fiber_body_context(pointer_captures || Set.new) do
+        lowering.with_fiber_capture_map(capture_map, rt_override: bg_rt) do
+          # Caller-supplied sp_idx (allocated by compute_sp_indices in
+          # dispatch order) takes precedence so sp_<N> labels track
+          # 1-based suspend position, not segment-graph index.
+          eff_sp = sp_idx || (seg.index + 1)
+          SuspendResolvers.resolve(seg, ctx, lowering, susp_idx: eff_sp)
+        end
       end
-      lowering.instance_variable_set(:@pending_stmts, prev_pending)
-      lowering.instance_variable_set(:@current_bg_pointer_captures, prev_ptr)
       result
     end
 

@@ -302,7 +302,7 @@ RSpec.describe MIRLowering do
       fake.extend(MIRLoweringControlFlow)
       fake.define_singleton_method(:lower) { |value| value }
       fake.define_singleton_method(:emit_expr) { |_value| ".Fallback" }
-      arm = Struct.new(:value, :extra_values).new(Object.new, [])
+      arm = AST::MatchCase.new(kind: :eq, value: AST::Identifier.new(tok, "fallback"), body: [], extra_values: [])
 
       expect(fake.send(:union_match_case_variants, arm)).to eq(["Fallback"])
     end
@@ -350,7 +350,7 @@ RSpec.describe MIRLowering do
     it "translates MIR::SuppressCleanup to explicit transfer and move marks when a cleanup guard is visible" do
       suppress = MIR::SuppressCleanup.new(tok, "buf")
       l = lowering
-      l.instance_variable_set(:@guarded_cleanup_names, { "buf" => true })
+      l.function_state.guarded_cleanup_names = { "buf" => true }
       result = l.lower(suppress)
       expect(result).to contain_exactly(
         an_instance_of(MIR::TransferMark),
@@ -676,7 +676,7 @@ RSpec.describe MIRLowering do
 
       low.define_singleton_method(:lower) do |child|
         if child.equal?(right)
-          pending = instance_variable_get(:@pending_stmts)
+          pending = function_state.pending_stmts
           pending << MIR::AllocMark.new("__rhs_tmp", :heap, Type.new(:String))
           pending << MIR::Let.new("__rhs_tmp", MIR::DupeSlice.new(MIR::Lit.new("\"rhs\""), :heap), false, nil, nil)
           MIR::Lit.new("true")
@@ -1532,8 +1532,8 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::IfChain)
-      expect(result.branches.first[:cond]).to be_a(MIR::Lit)
-      expect(emit(result.branches.first[:cond])).to eq("true")
+      expect(result.branches.first.cond).to be_a(MIR::Lit)
+      expect(emit(result.branches.first.cond)).to eq("true")
     end
   end
 
@@ -1600,13 +1600,13 @@ RSpec.describe MIRLowering do
                                     mutable: true, storage: :stack, sync: :locked)
 
       # CleanupClassifier is the cleanup-recipe authority; lowering inherits
-      # from @current_bindings (INV-14). Drive it as the pipeline does
+      # from FunctionState current bindings (INV-14). Drive it as the pipeline does
       # rather than the removed destination-synthesis fallback.
       fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [node],
                                 nil, nil, nil, nil, false)
       low = lowering
-      low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
+      low.function_state.current_bindings =
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil })
 
       result = low.lower(node)
       expect(result).to be_a(Array)
@@ -2850,8 +2850,8 @@ RSpec.describe MIRLowering do
       fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [decl],
                                 nil, nil, nil, nil, false)
       low = lowering
-      low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
+      low.function_state.current_bindings =
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil })
 
       zig = emit(low.lower(node))
       expect(zig).to include("blk_copy_")
@@ -3952,7 +3952,7 @@ RSpec.describe MIRLowering do
 
     context "lazy fallback scoping (descend + lower_scoped)" do
       # The fallback expression is evaluated lazily. Any allocations done
-      # while lowering it must NOT escape to outer @pending_stmts -- they
+      # while lowering it must NOT escape to outer FunctionState pending statements -- they
       # belong to the orelse/catch fallback branch and must only run when
       # that branch is actually taken. AST::BinaryOp#lazy_fields declares
       # :right as lazy when op == :OR_RESCUE; descend() wraps the right
@@ -3961,9 +3961,9 @@ RSpec.describe MIRLowering do
         # Allocating fallback: a StructLit whose String field gets a
         # CopyNode-wrapped rodata literal. Lowering the field invokes
         # hoist_alloc which pushes a `Let __tmp = DeepCopy(...)` into
-        # @pending_stmts. With lazy scoping that hoisted Let must land
+        # FunctionState pending statements. With lazy scoping that hoisted Let must land
         # inside the MIR::BlockExpr wrapping the fallback, NOT in outer
-        # @pending_stmts.
+        # FunctionState pending statements.
         left = make_id("opt_node", full_type: :"?Node")
         lit  = make_lit(:STRING, "?", full_type: Type.new(:String, location: :rodata))
         copy = AST::CopyNode.new(tok, lit)
@@ -3976,7 +3976,7 @@ RSpec.describe MIRLowering do
 
         l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
         result = l.lower(node)
-        expect(l.instance_variable_get(:@pending_stmts)).to be_empty
+        expect(l.function_state.pending_stmts).to be_empty
         expect(result).to be_a(MIR::Orelse)
         expect(result.fallback).to be_a(MIR::BlockExpr)
         expect(result.fallback.body.any? { |stmt| stmt.is_a?(MIR::AllocMark) }).to be true
@@ -4140,9 +4140,9 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   it "unwraps cast and try nodes when recording FSM result transfers" do
     l = lowering
     entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@current_bindings, { "owned" => entry })
-    l.instance_variable_set(:@fn_name_rename_map, {})
-    l.instance_variable_set(:@guarded_cleanup_names, {})
+    l.function_state.current_bindings = { "owned" => entry }
+    l.function_state.fn_name_rename_map = {}
+    l.function_state.guarded_cleanup_names = {}
     ast = AST::Identifier.new(tok, "owned")
     ast.full_type = Type.new(:String)
     mir = MIR::Cast.new(MIR::TryExpr.new(MIR::Ident.new("owned")), "[]const u8", :as)
@@ -4152,14 +4152,14 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
       .to eq([["owned", :heap, true]])
     expect(entry.has_moved_guard?).to eq(true)
-    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned" => true)
+    expect(l.function_state.guarded_cleanup_names).to include("owned" => true)
   end
 
   it "guards renamed FSM result cleanups and records consumed owned fields" do
     l = lowering
     cleanup = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@fn_name_rename_map, { "owned" => "owned_renamed" })
-    l.instance_variable_set(:@guarded_cleanup_names, {})
+    l.function_state.fn_name_rename_map = { "owned" => "owned_renamed" }
+    l.function_state.guarded_cleanup_names = {}
 
     l.guard_fsm_result_cleanup!(
       [MIR::Cleanup.new("owned", cleanup)],
@@ -4167,11 +4167,11 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     )
 
     expect(cleanup.has_moved_guard?).to eq(true)
-    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned_renamed" => true)
+    expect(l.function_state.guarded_cleanup_names).to include("owned_renamed" => true)
 
     binding = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@current_bindings, { "owned" => binding })
-    l.instance_variable_set(:@guarded_cleanup_names, { "owned_renamed" => true })
+    l.function_state.current_bindings = { "owned" => binding }
+    l.function_state.guarded_cleanup_names = { "owned_renamed" => true }
     owned = AST::Identifier.new(tok, "owned")
     owned.full_type = Type.new(:String)
     ast = AST::StructLit.new(tok, "Box", { "value" => owned }, :heap, [])

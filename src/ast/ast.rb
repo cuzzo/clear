@@ -1786,7 +1786,10 @@ module AST
   Raise        = Struct.new(:token, :kind, :error_name, :message_expr) { include Locatable }
   ThrowNode    = Struct.new(:token, :value) { include Locatable }
   DieNode      = Struct.new(:token, :status) { include Locatable }
-  Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
+  Slice        = Struct.new(:token, :target, :start, :end, :exclusive) do
+    extend T::Sig
+    include Locatable
+  end
   Require      = Struct.new(:token, :path) { include Locatable }
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.

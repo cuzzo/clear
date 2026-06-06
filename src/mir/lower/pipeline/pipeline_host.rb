@@ -1099,7 +1099,7 @@ class PipelineHost
 
   sig { returns(T::Boolean) }
   def bc_target?
-    @lowering.lowering_target == :bc
+    @lowering.bc_target?
   end
 
   sig { params(source_node: AST::Node).returns(PipelineHost::PipelineSourceShape) }

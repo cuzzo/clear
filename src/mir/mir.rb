@@ -922,21 +922,28 @@ module MIR
     end
   end
 
+  class IfChainBranch < T::Struct
+    extend T::Sig
+
+    prop :cond, Emittable
+    prop :body, T::Array[Emittable]
+  end
+
   # If-chain statement (for union/string MATCH).
   # Zig: if (cond1) { ... } else if (cond2) { ... } else { ... }
   IfChain = Struct.new(:branches, :default_body) do
     extend T::Sig
     include Stmt
-    # branches: [{ cond: MIR expr, body: [MIR stmt] }]
+    # branches: [MIR::IfChainBranch]
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      compact_child_exprs(branches&.map { |branch| branch[:cond] } || [])
+      compact_child_exprs(branches&.map(&:cond) || [])
     end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
       branches&.each_with_index do |branch, index|
-        slots << body_slot(:"branches_#{index}", branch[:body], ->(new_body) { branch[:body] = new_body })
+        slots << body_slot(:"branches_#{index}", branch.body, ->(new_body) { branch.body = new_body })
       end
       slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
       slots

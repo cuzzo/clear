@@ -393,21 +393,22 @@ module MIRHoistLowering
 
   sig { returns(T::Array[T.untyped]) }
   def flush_pending
-    stmts = @pending_stmts
-    @pending_stmts = []
+    T.bind(self, MIRLowering) rescue nil
+    stmts = function_state.pending!
+    function_state.pending_stmts = []
     stmts
   end
 
   sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def lower_scoped(&blk)
-    prev = @pending_stmts
-    @pending_stmts = []
+    T.bind(self, MIRLowering) rescue nil
+    prev = function_state.pending_stmts
+    function_state.pending_stmts = []
     result = blk.call
-    scoped = @pending_stmts
-    @pending_stmts = prev
+    scoped = function_state.pending!
+    function_state.pending_stmts = prev
     return result if scoped.empty?
-    @block_expr_counter += 1
-    label = "__lazy_#{@block_expr_counter}"
+    label = "__lazy_#{lowering_counters.next_block_expr_id}"
     alloc_names = scoped.each_with_object(Set.new) do |stmt, names|
       names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
@@ -421,12 +422,12 @@ module MIRHoistLowering
         next unless stmt.name.to_s == name
 
         stmt.cleanup_entry[:has_moved_guard] = true
-        (@guarded_cleanup_names ||= {})[name] = true
-        @lowered_guarded_cleanup_names&.add(name)
+        (function_state.guarded_cleanup_names ||= {})[name] = true
+        function_state.lowered_guarded_cleanup_names&.add(name)
       end
     end
     transfer_marks = alloc_names.intersection(result_names).flat_map do |name|
-      MIR.ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name], move_guarded: !!@guarded_cleanup_names&.[](name))
+      MIR.ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name], move_guarded: !!function_state.guarded_cleanup_names&.[](name))
     end
     block = MIR::BlockExpr.new(label, scoped + transfer_marks + [MIR::BreakStmt.new(label, result)])
     block.lazy_boundary = true
@@ -436,11 +437,12 @@ module MIRHoistLowering
 
   sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
   def lower_head(&blk)
-    prev = @pending_stmts
-    @pending_stmts = []
+    T.bind(self, MIRLowering) rescue nil
+    prev = function_state.pending_stmts
+    function_state.pending_stmts = []
     result = blk.call
-    produced = @pending_stmts
-    @pending_stmts = prev
+    produced = function_state.pending!
+    function_state.pending_stmts = prev
     [result, produced]
   end
 
@@ -463,9 +465,9 @@ module MIRHoistLowering
 
   sig { params(expr: T.untyped, ast_node: T.untyped).void }
   def hoist_lazy_alloc_result(expr, ast_node)
+    T.bind(self, MIRLowering) rescue nil
     return expr unless mir_allocates?(expr)
-    @tmp_counter += 1
-    name = "__tmp_#{@tmp_counter}"
+    name = "__tmp_#{lowering_counters.next_tmp_id}"
     ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
     alloc = mir_owned_alloc(expr) || :heap
     materialized = MIR::BindingMaterialization.new(
@@ -475,8 +477,8 @@ module MIRHoistLowering
       type_info: ti,
       mutable: false
     )
-    @pending_stmts.concat(materialized.statements)
-    @lowered_alloc_names&.add(name)
+    function_state.pending!.concat(materialized.statements)
+    function_state.lowered_alloc_names&.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
     MIR::Ident.new(name)
   end
@@ -494,6 +496,7 @@ module MIRHoistLowering
 
   sig { params(call: MIR::Call).returns(T::Boolean) }
   def owned_call_result_requires_cleanup?(call)
+    T.bind(self, MIRLowering) rescue nil
     return false unless call.owned_return?
 
     raw_type = call.result_type || call.callable_contract&.signature&.return_type
@@ -504,8 +507,8 @@ module MIRHoistLowering
     ti.string? ||
       ti.collection? ||
       ti.collection_value? ||
-      ti.recursive_cleanup_shape?(@schema_lookup) ||
-      ti.needs_cleanup?(@schema_lookup) ||
+      ti.recursive_cleanup_shape?(mir_schema_lookup) ||
+      ti.needs_cleanup?(mir_schema_lookup) ||
       ti.heap_ptr? ||
       ti.indirect? ||
       ti.any_rc? ||
@@ -569,9 +572,10 @@ module MIRHoistLowering
     ).returns(T.untyped)
   end
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
+    T.bind(self, MIRLowering) rescue nil
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     if expr.respond_to?(:expr?) && expr.expr?
-      @pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
+      function_state.pending!.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
     end
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
@@ -583,7 +587,7 @@ module MIRHoistLowering
       cleanup_entry: hoist_cleanup_entry(expr, ast_node)
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
-    @pending_stmts.concat(plan.statements)
+    function_state.pending!.concat(plan.statements)
     record_hoisted_allocation!(plan)
     MIR::Ident.new(plan.name)
   end
@@ -705,13 +709,14 @@ module MIRHoistLowering
     ).returns(MIR::BindingMaterialization)
   end
   def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:)
-    @tmp_counter += 1
+    T.bind(self, MIRLowering) rescue nil
+    tmp_id = lowering_counters.next_tmp_id
     entry = cleanup_entry
     if entry
       entry[:has_moved_guard] = transfer_on_success ? true : false
     end
     MIR::BindingMaterialization.new(
-      name: "__tmp_#{@tmp_counter}",
+      name: "__tmp_#{tmp_id}",
       expr: expr,
       alloc: mir_owned_alloc(expr) || :heap,
       type_info: type_info,
@@ -723,18 +728,19 @@ module MIRHoistLowering
 
   sig { params(plan: MIR::BindingMaterialization).void }
   def record_hoisted_allocation!(plan)
-    @lowered_alloc_names&.add(plan.name)
+    T.bind(self, MIRLowering) rescue nil
+    function_state.lowered_alloc_names&.add(plan.name)
     entry = plan.cleanup_entry
     return unless entry&.has_moved_guard?
 
-    (@guarded_cleanup_names ||= {})[plan.name] = true
-    @lowered_guarded_cleanup_names&.add(plan.name)
+    (function_state.guarded_cleanup_names ||= {})[plan.name] = true
+    function_state.lowered_guarded_cleanup_names&.add(plan.name)
   end
 
   sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }
   def hoist_normalized_value_expr(expr)
-    @tmp_counter += 1
-    name = "__tmp_#{@tmp_counter}"
+    T.bind(self, MIRLowering) rescue nil
+    name = "__tmp_#{lowering_counters.next_tmp_id}"
     [T.let([MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped]), MIR::Ident.new(name)]
   end
 
@@ -806,9 +812,9 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :subject))
     when MIR::IfChain
       stmt.branches&.each do |branch|
-        cond = branch[:cond]
+        cond = branch.cond
         cond_prefix, normalized = normalize_allocating_used_expr(cond)
-        branch[:cond] = normalized
+        branch.cond = normalized
         prefix.concat(cond_prefix)
       end
     when MIR::DeferStmt, MIR::ErrDeferStmt
@@ -1088,12 +1094,13 @@ module MIRHoistLowering
 
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
   def copy_container_borrow_if_needed(expr, ast_node)
+    T.bind(self, MIRLowering) rescue nil
     return expr unless MIRHoistFacts.container_borrow_expr?(ast_node)
     return expr if mir_allocates?(expr)
 
     ti = Type.from_node!(ast_node, context: "container borrow copy")
     ti = ti.success_type || ti
-    return expr unless @union_schemas&.key?(ti.resolved)
+    return expr unless union_schemas.key?(ti.resolved)
     copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :full_value, :heap)
     hoist_alloc(copied, ast_node, err_cleanup: true)
   end
@@ -1178,14 +1185,15 @@ module MIRHoistLowering
 
   sig { params(ast_node: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_owned_result(ast_node, alloc: :heap)
+    T.bind(self, MIRLowering) rescue nil
     return nil unless ast_node
     ti = Type.from_node!(ast_node, context: "owned result cleanup entry")
     ti = ti.success_type || ti
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?
-    return nil unless ti.needs_explicit_cleanup?(alloc, @schema_lookup) ||
-      ti.recursive_cleanup_shape?(@schema_lookup) ||
-      ti.needs_cleanup?(@schema_lookup) ||
+    return nil unless ti.needs_explicit_cleanup?(alloc, mir_schema_lookup) ||
+      ti.recursive_cleanup_shape?(mir_schema_lookup) ||
+      ti.needs_cleanup?(mir_schema_lookup) ||
       ti.heap_ptr? ||
       ti.collection_value?
 
@@ -1196,6 +1204,7 @@ module MIRHoistLowering
 
   sig { params(mir: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def typed_cleanup_entry_for_mir_result(mir, alloc: :heap)
+    T.bind(self, MIRLowering) rescue nil
     typed_result = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
       T.unsafe(mir).result_type
     elsif mir.respond_to?(:callable_contract)
@@ -1209,7 +1218,7 @@ module MIRHoistLowering
       ti = ti.success_type || ti
       return heap_string_entry(alloc: alloc) if ti.string?
       return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection? ||
-        ti.recursive_cleanup_shape?(@schema_lookup) || ti.needs_cleanup?(@schema_lookup)
+        ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)
     end
 
     nil

@@ -1092,18 +1092,22 @@ RSpec.describe "pipeline backend coverage" do
     let(:lowering) do
       Class.new do
         attr_accessor :fn_sigs, :shard_context
+        attr_reader :function_state
 
         def initialize
           instance_variable_set(:@fn_sigs, {})
           instance_variable_set(:@target, nil)
-          instance_variable_set(:@current_decl_alloc, nil)
           instance_variable_set(:@bg_block_counter, 0)
           instance_variable_set(:@rt_name, "rt")
-          instance_variable_set(:@guarded_cleanup_names, {})
+          @function_state = OpenStruct.new(current_decl_alloc: nil, guarded_cleanup_names: {})
         end
 
         def lowering_target
           instance_variable_get(:@target)
+        end
+
+        def bc_target?
+          lowering_target == :bc
         end
 
         def runtime_binding_name
@@ -1117,11 +1121,11 @@ RSpec.describe "pipeline backend coverage" do
         end
 
         def pipeline_result_alloc
-          instance_variable_get(:@current_decl_alloc) == :heap ? :heap : :frame
+          function_state.current_decl_alloc == :heap ? :heap : :frame
         end
 
         def pipeline_guarded_cleanup_name?(name)
-          !!instance_variable_get(:@guarded_cleanup_names)[name]
+          !!function_state.guarded_cleanup_names[name]
         end
 
         def with_runtime_binding_name(rt_name)
@@ -1207,7 +1211,7 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     it "adapts PipelineMaterializer services through the real host runtime adapter" do
-      lowering.instance_variable_set(:@current_decl_alloc, :heap)
+      lowering.function_state.current_decl_alloc = :heap
       lowering.instance_variable_set(:@target, :bc)
       lowering.define_singleton_method(:mir_schema_lookup) { nil }
       lowering.define_singleton_method(:pipeline_alloc_mark_fact) do |_value, name, fallback_alloc:,

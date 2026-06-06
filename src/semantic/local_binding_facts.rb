@@ -94,7 +94,7 @@ module MIR
 
     sig { params(node: AST::Node, entry: T.nilable(CleanupEntry)).returns(T::Boolean) }
     def self.binding_frame_allocates?(node, entry)
-      return false unless entry&.present? && entry.alloc == :frame
+      return false unless entry&.present? && entry.frame?
       return true if entry.needs_cleanup?
       return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
 

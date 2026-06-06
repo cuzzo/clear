@@ -1792,6 +1792,22 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("__BoundedConcurrentCtx1.apply")
       expect(zig).not_to include("s.toList(")
     end
+
+    it "orders CONCURRENT EACH stream helper arguments for the runtime wrapper" do
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+            s: ~Int64[] = 0 ..< 5;
+            s |> CONCURRENT(workers: 2, capacity: 4) EACH {
+                print(_);
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentStreamEach(i64, __BoundedConcurrentCtx1.apply, false, rt.frameAlloc(), rt, &s, @intCast(2), @intCast(4)")
+      expect(zig).not_to include("CheatLib.concurrentStreamEach(i64, false, __BoundedConcurrentCtx1.apply")
+      expect(zig).not_to include("s.toList(")
+    end
   end
 
   describe "concurrent bounded stream pipelines" do

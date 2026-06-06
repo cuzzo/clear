@@ -284,17 +284,13 @@ class Parser
     if first.is_a?(AST::RangeLit)
       # parse_expression consumed the range operator: 0..<3 → RangeLit(0, 3, false)
       consume(:CHAR, ']')
-      node = AST::Slice.new(first.token, lhs, first.start, first.finish)
-      node.instance_variable_set(:@exclusive, !first.inclusive)
-      node
+      AST::Slice.new(first.token, lhs, first.start, first.finish, !first.inclusive)
     elsif match?(:RANGE, '..')
       # SLICE: list[0..3] (inclusive end)
       range_token = consume(:RANGE, '..')
       last = parse_expression
       consume(:CHAR, ']')
-      node = AST::Slice.new(range_token, lhs, first, last)
-      node.instance_variable_set(:@exclusive, false)
-      node
+      AST::Slice.new(range_token, lhs, first, last, false)
     else
       # INDEX: list[0]
       # INDEX: hash["OK"]

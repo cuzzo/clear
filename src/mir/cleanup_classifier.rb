@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "cleanup_entry"
+require_relative "placement"
 require_relative "../ast/type"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator/helpers/function_signature"
@@ -106,7 +107,7 @@ module CleanupClassifier
     return if node.is_a?(AST::BindExpr) && node.mode == :assign
     entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
     return unless entry&.present?
-    entry[:scope] = if entry.alloc == :heap
+    entry[:scope] = if entry.heap?
                       :heap
                     elsif loop_depth.positive?
                       :iteration
@@ -184,7 +185,7 @@ module CleanupClassifier
     entry = local_entries[ident.name.to_s]
     return unless entry&.present?
 
-    entry[:scope] = :function if entry.alloc == :frame && entry.scope == :iteration
+    entry[:scope] = :function if entry.frame? && entry.scope == :iteration
   end
 
   sig { params(call: AST::FuncCall).returns(T::Array[AST::Param]) }
@@ -243,7 +244,7 @@ module CleanupClassifier
     return :frame unless target_node.is_a?(AST::Identifier)
 
     target_entry = bindings[target_node.name.to_s]
-    target_entry&.alloc == :heap ? :heap : :frame
+    target_entry&.heap? ? :heap : :frame
   end
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
@@ -292,7 +293,7 @@ module CleanupClassifier
     ti = full_type.is_a?(Type) ? full_type : Type.new(full_type)
     return nil unless ti.heap_ptr? || ti.collection_value?
     alloc = ti.cleanup_allocator(schema_lookup)
-    CleanupEntry.no_cleanup(alloc: alloc, scope: alloc == :heap ? :heap : :function)
+    CleanupEntry.no_cleanup(alloc: alloc, scope: MIR::Placement.heap?(alloc) ? :heap : :function)
   rescue
     nil
   end
@@ -983,7 +984,7 @@ module CleanupClassifier
     # so the arena reclaim is correct. The previous :cleanup fallback
     # was a workaround for the same mismatch class the list-elem case
     # had; no longer needed.
-    alloc = ti.provenance_alloc == :frame ? :frame : :heap
+    alloc = MIR::Placement.frame?(ti.provenance_alloc) ? :frame : :heap
     entry(:uniform, alloc: alloc)
   end
 

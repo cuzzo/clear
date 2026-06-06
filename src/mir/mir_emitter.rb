@@ -817,8 +817,8 @@ class MIREmitter
   sig { params(node: MIR::IfChain).returns(String) }
   def emit_if_chain(node)
     parts = node.branches.map { |br|
-      cond = emit(br[:cond])
-      body = emit_body(br[:body])
+      cond = emit(br.cond)
+      body = emit_body(br.body)
       "if (#{cond}) {\n#{body}\n}"
     }
     result = parts.join(" else ")
