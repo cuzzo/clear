@@ -540,13 +540,18 @@ owners.
 Closure note: final changed-line coverage is 669/669 (100.0%) and changed-branch
 coverage is 108/122 (88.5%). Decomplex total fell 15665 -> 15322, with the
 largest drops in inconsistent rename clones, neglected path conditions, broken
-protocols, and false simplicity. SlopCop dark arms fell 8276 -> 3287; the
-genuine-gap bucket is not directly comparable because the final report joined a
-larger coverage file set, but no pipeline refactor file appears in the top gap
-set. Nil-kill untyped slots stayed flat or fell: params 989 -> 981, returns
-229 -> 228, fields/ivars 1017 -> 1017, collections 0 -> 0. The nil-kill
-collection completed with the same expected failed workload stages as the
-midpoint snapshot: `integration-specs` and `examples-build`.
+protocols, and false simplicity. SlopCop dark arms fell 8276 -> 3287 in the
+original reports. A follow-up controlled full-coverage rerun showed the apparent
+genuine-gap jump was measurement drift: the narrow midpoint report had only 71
+files, while the controlled midpoint had 117 files and already had 1354 genuine
+gaps. Apples-to-apples full-coverage SlopCop was 3303 -> 3287 dark arms and
+1354 -> 1354 genuine gaps under the same direct-report invocation; with bundled
+decomplex attribution, final genuine gaps were 1342 because 12 additional arms
+classified as spurious. Either way, the refactor did not add genuine gaps.
+Nil-kill untyped slots stayed flat or fell: params 989 -> 981, returns 229 ->
+228, fields/ivars 1017 -> 1017, collections 0 -> 0. The nil-kill collection
+completed with the same expected failed workload stages as the midpoint
+snapshot: `integration-specs` and `examples-build`.
 
 ## P1 Design: Typed Capability/Guard Plan Records
 
