@@ -302,6 +302,16 @@ RSpec.describe SemanticAnnotator do
         expect(t.stream_element_type.to_sym).to eq(:Float64)
       end
 
+      it "runtime_stream_storage_element_type returns the payload for dynamic streams" do
+        t = Type.new(:"~Float64[]")
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Float64)
+      end
+
+      it "runtime_stream_storage_element_type returns the payload for bounded streams" do
+        t = Type.new(:"~Float64[3]")
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Float64)
+      end
+
       it "stream_capacity returns N for ~Float64[3]" do
         expect(Type.new(:"~Float64[3]").stream_capacity).to eq(3)
       end
@@ -671,6 +681,21 @@ RSpec.describe SemanticAnnotator do
         expect(t.bounded_stream?).to be true
         expect(t.stream_element_type.resolved).to eq :"?Float64"
         expect(t.stream_capacity).to eq 3
+      end
+
+      it "runtime_stream_storage_element_type returns payload for bounded optional streams" do
+        t = Type.new(:"~?Float64[3]")
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Float64)
+      end
+
+      it "runtime_stream_storage_element_type returns payload for open streams" do
+        t = Type.new(:"~?Float64[]")
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Float64)
+      end
+
+      it "runtime_stream_storage_element_type returns nil for non-stream futures" do
+        t = Type.new(:"~Float64")
+        expect(t.runtime_stream_storage_element_type).to be_nil
       end
 
       it "open_stream_marker? is true for Float64[?]" do
@@ -1123,6 +1148,11 @@ RSpec.describe SemanticAnnotator do
       it "inf_stream_element_type returns Bool for ~Bool[INF]" do
         t = Type.new(:"~Bool[INF]")
         expect(t.inf_stream_element_type.resolved).to eq :Bool
+      end
+
+      it "runtime_stream_storage_element_type returns payload for infinite streams" do
+        t = Type.new(:"~Bool[INF]")
+        expect(t.runtime_stream_storage_element_type.resolved).to eq(:Bool)
       end
 
       it "requires_move? is false for infinite streams (resource semantics)" do

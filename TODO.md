@@ -89,7 +89,7 @@ Source signal: 70 .rb files / ~57k LOC in `src/`. Anti-pattern census from grep 
   - 1409 `is_a?` checks (141 `is_a?(Hash)` = hash-as-struct; 99 `is_a?(Array)` = array-as-tuple; 67 mixed `is_a?(String)`/`is_a?(Symbol)`)
   - 635 `respond_to?` (duck-typing escape hatches; 289 surface as reek `ManualDispatch`)
   - 228 `.nil?` checks (164 surface as reek `NilCheck`)
-  - 64 reek `DataClump` clusters (top: PipelineHost/PipelineGenerator with `(list_node, smooth_node)` through 18 methods, Formatter::Emitter `(start, toks)` through 17, etc.)
+  - 64 reek `DataClump` clusters (top: PipelineHost / pipeline lowerers with `(list_node, smooth_node)` through 18 methods, Formatter::Emitter `(start, toks)` through 17, etc.)
   - 91 `ControlParameter` + 54 `BooleanParameter` (flag args switching behavior)
   - 313 `Struct.new` already in use → good baseline
 
@@ -98,7 +98,7 @@ Each P0 item is mechanical and self-verifying via existing tests; doing them BEF
 ### P0 — must complete before declaring "ready to type"
 
  - [ ] Extract top hash-as-struct schemas (target: 141 `is_a?(Hash)` → ~40): `Schema` for the `schema.is_a?(Hash) && schema[:kind] == :union` pattern in cleanup_classifier.rb / type.rb / annotator.rb / mir_lowering.rb (clustered: 36+25+24+14 sites). **Subsumes String/Symbol normalization:** ~15 of the 65 `is_a?(String|Symbol)` sites are schema mixed-key filters (`k.is_a?(Symbol)` rejecting `:kind`/`:field_defaults` metadata vs String field names) — typed Schema (`kind: Symbol`, `field_names: Array[String]`) kills them at the root. The other ~50 sites are either correct primitive-rejection in AST walkers or syntactic dispatch on `node.name`, NOT normalization.
- - [ ] `PipelineSite`/`PipelineFrame` struct: collapse the `(id, options, rt_name, workers_code, list_node, smooth_node, stream_node, conc_op, lhs)` clump that DataClump-flags 25+ methods across PipelineHost / PipelineGenerator / PipelineRewriter
+ - [ ] `PipelineSite`/`PipelineFrame` struct: collapse the `(id, options, rt_name, workers_code, list_node, smooth_node, stream_node, conc_op, lhs)` clump that DataClump-flags 25+ methods across PipelineHost / pipeline lowerers / PipelineRewriter
  - [ ] `Formatter::Emitter::EmitterState` struct: collapse the `(toks, start, out, pc, po, arrow_idx)` clump (17-method DataClump cluster, single-class, smallest blast radius — good warm-up extraction)
  - [ ] Tighten nilable fields where field is always set in practice: top targets `sync` (13), `node` (7), `out` (6), `schema` (5), `entry`/`code`/`expr_type`/`layout`/`mir`/`name`/`ownership`/`path`/`rl`/`rt`/`syn` (3 each); replace `.nil?` guards with construction-time invariants
 

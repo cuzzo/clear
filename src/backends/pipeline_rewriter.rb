@@ -15,9 +15,8 @@ require_relative "../ast/std_lib"
 class PipelineRewriter
     extend T::Sig
 
-  # OrderByOp, IndexOp, WindowOp, JoinOp: require Zig-specific constructs
-  # (comparator structs, HashMap ops, dual-source joins). These fall through
-  # to the pipeline_generator path.
+  # OrderByOp, IndexOp, WindowOp, JoinOp: require structural MIR/runtime
+  # lowering that the MIR pipeline lowerers own.
 
   sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
@@ -121,7 +120,7 @@ class PipelineRewriter
 
     # Skip rewriting for pool, sharded, SOA sources, and when the source is
     # itself a pipeline (e.g. data |> SKIP 2 |> SUM _). These need special
-    # iteration patterns that the transpiler's pipeline_generator handles.
+    # iteration patterns owned by the MIR pipeline lowerers.
     if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.smooth?)
       # Only patch if the source actually changed; patching the same object
       # back into the chain creates a circular reference.
@@ -758,8 +757,8 @@ class PipelineRewriter
     ret_type&.error_union? || false
   end
 
-  # Returns true if the source requires the transpiler's pipeline_generator
-  # (pool, sharded, or SOA collections need special iteration patterns).
+  # Returns true if the source requires MIR pipeline lowering (pool, sharded,
+  # or SOA collections need special iteration patterns).
   sig { params(source: AST::Locatable).returns(T::Boolean) }
   def needs_transpiler_pipeline?(source)
     ti = source.full_type!(context: "pipeline source")

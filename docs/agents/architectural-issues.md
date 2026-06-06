@@ -44,7 +44,8 @@ is the strongest architectural decision in the codebase.
   with dependency ordering). This one doesn't.
 
 - **Stage 3** says "pipeline fusion & string concat desugaring" but doesn't mention
-  `pipeline_generator.rb` (the non-fusable fallback path).
+  the MIR pipeline lowerers in `src/mir/lower/pipeline` for non-fusable
+  pipeline shapes.
 
 ### Why It Matters
 

@@ -23,6 +23,17 @@ module Decomplex
       public require require_relative requires_ancestor sealed! sig type_member
       type_template untyped unsafe void
     ].freeze
+    TEST_DSL_MIDS = %w[
+      a_kind_of after around before be be_a be_an be_empty be_falsey be_nil
+      be_truthy change contain_exactly context describe eq eql equal expect
+      have_attributes have_key have_received it match not_to raise_error
+      receive subject to
+    ].freeze
+    ZERO_ARG_ACTION_MIDS = %w[
+      acquire begin close commit connect deinit disconnect drain finish flush
+      lock open release rollback start stop unlock wait
+    ].freeze
+    IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
 
     def self.scan(files)
       calls = []
@@ -48,7 +59,7 @@ module Decomplex
       defstack = Ast.def_push(node, defstack)
       if %i[CALL FCALL VCALL].include?(node.type)
         mid = node.children[node.type == :CALL ? 1 : 0]
-        unless DECLARATIVE_MIDS.include?(mid.to_s)
+        if protocol_event?(node, mid.to_s)
           @calls << Call.new(mid: mid.to_s, file: @file,
                              defn: defstack.last || "(top-level)",
                              line: node.first_lineno,
@@ -57,6 +68,20 @@ module Decomplex
         end
       end
       node.children.each { |c| walk(c, defstack) }
+    end
+
+    private
+
+    def protocol_event?(node, mid)
+      return false if IGNORED_MIDS.include?(mid)
+      return false if passive_reader_call?(node, mid)
+
+      true
+    end
+
+    def passive_reader_call?(node, mid)
+      node.type == :CALL && node.children[2].nil? &&
+        !ZERO_ARG_ACTION_MIDS.include?(mid)
     end
 
     class Report

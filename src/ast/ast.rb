@@ -34,6 +34,23 @@ module AST
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
   CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
   CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
+  PipelineRewriteMetadataIvars = T.let([
+    :@type_object,
+    :@coerced_type_object,
+    :@storage_override,
+    :@var_used,
+    :@slot_size,
+  ].freeze, T::Array[Symbol])
+  PipelineRewriteCallMetadataIvars = T.let([
+    :@zig_pattern,
+    :@matched_stdlib_def,
+    :@matched_signature,
+    :@stdlib_allocates,
+    :@mutates_receiver,
+    :@can_fail,
+    :@error_kind,
+    :@error_type,
+  ].freeze, T::Array[Symbol])
 
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
   def self.stamp_synthetic_type!(node, value, context:)
@@ -43,6 +60,30 @@ module AST
 
     stamped
   end
+
+  sig do
+    params(
+      src: AST::Locatable,
+      dst: AST::Locatable,
+      include_call_metadata: T::Boolean,
+    ).returns(AST::Locatable)
+  end
+  def self.copy_pipeline_rewrite_metadata!(src, dst, include_call_metadata: false)
+    src.full_type!(context: "pipeline rewrite type copy")
+    copy_pipeline_metadata_ivars!(src, dst, PipelineRewriteMetadataIvars)
+    copy_pipeline_metadata_ivars!(src, dst, PipelineRewriteCallMetadataIvars) if include_call_metadata
+    dst
+  end
+
+  sig { params(src: AST::Locatable, dst: AST::Locatable, ivars: T::Array[Symbol]).void }
+  def self.copy_pipeline_metadata_ivars!(src, dst, ivars)
+    ivars.each do |ivar|
+      next unless src.instance_variable_defined?(ivar)
+
+      dst.instance_variable_set(ivar, src.instance_variable_get(ivar))
+    end
+  end
+  private_class_method :copy_pipeline_metadata_ivars!
 
   # A node's value-type is, for these kinds, a pure function of its
   # structure — so it is DERIVED, never stamped. The full_type getter

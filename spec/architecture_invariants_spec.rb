@@ -32,7 +32,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
-      rel == "backends/pipeline_host.rb" ||
+      rel == "mir/lower/pipeline/pipeline_context.rb" ||
+      rel == "mir/lower/pipeline/pipeline_host.rb" ||
       rel == "backends/pipeline_rewriter.rb" ||
       rel == "backends/string_concat_rewriter.rb" ||
       rel == "mir/mir_lowering.rb" ||
@@ -285,14 +286,16 @@ RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
     "src/mir/mir_lowering.rb",
     "src/mir/hoist.rb",
     "src/mir/fsm_lowering.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_materializer.rb",
   ].freeze
 
   OWNERSHIP_LOWERING_GLOBS = [
     "src/mir/mir_lowering.rb",
     "src/mir/lowering/**/*.rb",
     "src/mir/fsm_lowering.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_materializer.rb",
   ].freeze
 
   def ownership_lowering_files
@@ -511,7 +514,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/annotator/helpers/function_analysis.rb",
     "src/annotator/helpers/generic_analysis.rb",
     "src/annotator/helpers/pipe_analysis.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
     "src/backends/pipeline_rewriter.rb",
     "src/semantic/escape_analysis.rb",
     "src/mir/lowering/expressions.rb",
@@ -607,7 +610,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       %r{\Asrc/ast/ast\.rb\z},
       %r{\Asrc/ast/parser\.rb\z},
       %r{\Asrc/annotator/},
-      %r{\Asrc/backends/pipeline_host\.rb\z},
+      %r{\Asrc/mir/lower/pipeline/pipeline_context\.rb\z},
+      %r{\Asrc/mir/lower/pipeline/pipeline_host\.rb\z},
       %r{\Asrc/backends/pipeline_rewriter\.rb\z},
       %r{\Asrc/backends/string_concat_rewriter\.rb\z},
       %r{\Asrc/mir/hoist\.rb\z},
@@ -1022,7 +1026,8 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
 
   it "routes production ownership transfer marks through the typed transfer plan" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
-                 [File.join(ARCH_ROOT, "src/backends/pipeline_host.rb")]).sort.flat_map do |path|
+                 [File.join(ARCH_ROOT, "src/mir/lower/pipeline/pipeline_host.rb"),
+                  File.join(ARCH_ROOT, "src/mir/lower/pipeline/pipeline_materializer.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       next [] if rel == "src/mir/mir.rb"
 

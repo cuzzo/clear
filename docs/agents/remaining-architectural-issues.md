@@ -375,17 +375,193 @@ for what it accepts and produces.
    at least one of: owner pressure, state lifecycle pressure, temporal ordering
    pressure, state-based branch density, or multi-file fix blast radius.
 
-## Suggested Priority
+## Prioritized Implementation Plan
 
-1. Ownership/capability fact graph and MIR lowering separation.
-2. Type model tightening at phase boundaries.
-3. Pipeline IR and pipeline host containment.
-4. High-pressure hash record promotion in memory-sensitive paths.
-5. Branch hub classifier-plan-executor migrations.
-6. Coverage and invariant tests around the above.
-7. Phase API stabilization to reduce future blast radius.
+The strategic priority and the next implementation priority are not the same.
+The full ownership/capability fact graph is probably the largest architecture
+win, but it has the most unknowns and the highest blast radius. The next work
+should choose a slice that is still memory-safety-relevant, overlaps multiple
+reports, is local enough to finish with strong coverage, and creates typed
+phase products that later make the larger ownership work easier.
+
+### Ranking Criteria
+
+- **Impact**: reduces memory-safety ambiguity, state/control-flow complexity,
+  fix blast radius, or high-pressure report findings.
+- **Ease**: can be implemented as a local migration with existing tests and
+  without inventing new compiler semantics.
+- **Unknowns**: how much behavior must be rediscovered before the work is safe.
+- **Confidence**: likelihood that the change can be completed cleanly and
+  improve metrics without opening a rewrite.
+
+### Evidence Used
+
+- Espalier ranks `PipelineHost` as the #2 state owner pressure site and
+  `MIRLowering` as #3.
+- Boobytrap ranks `src/mir/mir_lowering.rb` as the highest defect-risk file and
+  `src/mir/lower/pipeline/pipeline_host.rb` as #3.
+- Nil-kill points at repeated weak hash records in `PipelineHost`, especially
+  `build_lazy_range_prefix`, and capability-lowering hash records in
+  `src/mir/lowering/capabilities.rb`.
+- Decomplex shows broad convergence around ownership, sync/layout state,
+  pipeline analysis/lowering, and loose phase contracts.
+
+### Recommended Order
+
+| priority | work | impact | ease | unknowns | confidence | why now |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| P0 | **Typed PipelineHost phase records** | High | High | Low | Very high | Big overlap: Espalier #2 owner, Boobytrap #3 hotspot, nil-kill repeated weak hash records. Local, testable, and already partially started by typed callback records. |
+| P1 | **Typed capability/guard plan records** | High | Medium-high | Low-medium | High | Directly memory-safety-sensitive lock/capability state. Nil-kill identifies concrete hash records; implementation should be mostly local to capability helpers. |
+| P2 | **OwnershipGraph typed node table and place IDs** | Very high | Medium | Medium | Medium-high | Smaller gateway into the larger ownership fact graph. It addresses memory safety directly without trying to split all MIR lowering first. |
+| P3 | **PipeAnalysis option/result records** | High | Medium | Medium | Medium | Decomplex flags pipeline analysis heavily. This pairs well with P0 but is earlier-phase semantic analysis, so it has more behavior to preserve. |
+| P4 | **Function/body lowering context records in MIRLowering** | Very high | Medium-low | Medium-high | Medium | Important, but it touches the highest-risk file. Do after P0/P1 establish the pattern and tests. |
+| P5 | **Type phase boundary tightening** | Very high | Low-medium | High | Medium-low | Huge payoff, but high unknowns because `Type` currently carries syntax, semantic, backend, and fallback roles. Start only with a narrow sub-boundary. |
+| P6 | **Full ownership/capability fact graph separation** | Highest | Low | Highest | Medium-low | Correct strategic destination, but too large for the first high-confidence win. Use P1/P2/P4 to reduce unknowns first. |
+
+## P0 Design: Typed PipelineHost Phase Records
+
+### Why This Is The Best First Win
+
+`PipelineHost` has the best impact-to-risk ratio. It is a top architecture
+pressure owner, a high Boobytrap hotspot, and a nil-kill weak-record cluster,
+but many of the highest-confidence fixes are representational: replace
+hash-shaped phase bags with typed records while preserving behavior.
+
+This is not cosmetic typing. The current lazy-range prefix hash encodes a
+mini state machine:
+
+- `range_let` exists only for non-variable stream sources.
+- `source_name` and `next_method` define the source lifecycle.
+- `outer_stmts` and `stage_stmts` must be emitted in a specific order.
+- `item_var`, `initial_capture`, and `item_used` encode capture semantics.
+- `elem_zig` carries element type information that downstream code assumes.
+
+Making that record typed turns hidden temporal assumptions into explicit
+fields. It also gives later Pipeline IR work a concrete first data product.
+
+### Proposed Records
+
+```ruby
+class LazyRangePrefix < T::Struct
+  const :range_let, T.nilable(MIR::Let)
+  const :source_name, String
+  const :next_method, String
+  const :outer_stmts, T::Array[MIR::Emittable]
+  const :stage_stmts, T::Array[MIR::Emittable]
+  const :item_var, String
+  const :initial_capture, String
+  const :item_used, T::Boolean
+  const :elem_zig, String
+end
+```
+
+Likely follow-on records:
+
+- `PipelineSourceSetup`: setup statements plus source/items pointer for list,
+  stream, and bounded-stream sources.
+- `ObservableFoldPlan`: accumulator allocation, publish statements, source
+  cleanup, and terminal kind.
+- `BcIterRange`: already exists as a tuple alias; convert to a named record if
+  it starts accumulating more fields.
+
+### /plan
+
+1. Add `LazyRangePrefix` as a `T::Struct` in `PipelineHost`.
+2. Change `build_lazy_range_prefix` to return `LazyRangePrefix`.
+3. Replace all `p[:...]` reads in range/observable pipeline lowering with field
+   accessors.
+4. Delete `RangeFoldPrefix = T::Hash[Symbol, Object]` if no caller still needs
+   it.
+5. Add focused tests that assert the plan shape directly:
+   - range source has a `range_let`;
+   - variable stream source has no `range_let`;
+   - `LIMIT`, `SKIP`, `WHERE`, and `TAKE_WHILE` populate ordered stage
+     statements;
+   - observable cleanup uses the plan's `item_var`;
+   - bytecode paths consume the same plan fields.
+6. Run `bundle exec srb tc`, targeted pipeline specs, full specs, and
+   `tools/diff_bucket_summary.rb` to verify source guardrails and nil-kill
+   pressure improve or stay flat.
+
+### Acceptance Criteria
+
+- No new `T::Hash[T.untyped, T.untyped]` or hash-record guardrail findings in
+  `PipelineHost`.
+- Nil-kill weak hash-record entries for `build_lazy_range_prefix` disappear or
+  decrease materially after recollection.
+- PipelineHost behavior is unchanged in existing specs.
+- New tests cover every newly added/changed line and the meaningful branches in
+  the plan builder.
+- Decomplex and Espalier metrics should improve or remain flat for
+  `PipelineHost`; any local increase must be explained.
+
+## P1 Design: Typed Capability/Guard Plan Records
+
+### Why This Comes Second
+
+Capability and guard lowering is directly memory-safety-sensitive: it affects
+locked access, aliasing, guard variables, address expressions, and cleanup
+requirements. Nil-kill identifies concrete weak hash records in
+`src/mir/lowering/capabilities.rb`, so the unknowns are bounded.
+
+The work should follow P0 because it is the same architectural pattern applied
+to a more safety-sensitive subsystem: replace phase bags with named records,
+then make consumers read explicit fields.
+
+### /plan
+
+1. Identify the specific local hash records named by nil-kill, especially the
+   `cap` and `e` records in capability lowering.
+2. Introduce domain records such as `CapabilityAliasPlan`,
+   `LockGuardEmission`, or `WithAliasPlan`. Use names from the actual code path,
+   not generic `CapRecord`.
+3. Convert constructors first, then consumers. Do not keep hash and struct
+   paths live in parallel except through a temporary private adapter.
+4. Add invariant tests around lock guard ordering, alias owner/alloc state,
+   address expression emission, and cleanup/restore behavior.
+5. Re-run nil-kill and Decomplex to verify the migration removes weak lookups
+   and state-based branch pressure rather than moving it.
+
+## P2 Design: OwnershipGraph Typed Node Table
+
+### Why This Is The First Ownership-Graph Slice
+
+The full ownership fact graph is the strategic destination, but the smallest
+high-confidence gateway is to make the existing ownership graph's node table
+typed and explicit. Nil-kill reports weak indexing around `@nodes`, and
+Boobytrap already ranks `src/mir/ownership_graph.rb` as a risk file. This gives
+us a direct memory-safety win without splitting all of MIR lowering.
+
+### /plan
+
+1. Audit `OwnershipGraph` node payloads and operations: create, move, borrow,
+   drop, alias, and lookup.
+2. Introduce typed IDs or a typed key wrapper if string keys currently mix
+   bindings, places, paths, and synthetic temporaries.
+3. Type `@nodes` as a map from the stable key type to a named node record.
+4. Replace weak lookups with methods that encode absence explicitly:
+   `fetch_node`, `node?`, `ensure_node`, or a typed result object.
+5. Add invariant tests for move/drop/borrow edge cases before broad callers are
+   changed.
+
+## Work To Defer
+
+The following remain strategically important, but they should not be first if
+the objective is a confident high-impact win:
+
+- **Full MIRLowering separation**: huge payoff, but it touches the highest
+  Boobytrap hotspot and many mutable phase assumptions. Start by extracting
+  typed records from the seams before splitting the coordinator.
+- **Type model overhaul**: likely one of the biggest long-term wins, but the
+  current `Type` object carries too many roles. Begin only with narrow
+  sub-boundaries after the pipeline/capability record migrations prove the
+  pattern.
+- **General branch-hub rewrites**: classifier-plan-executor is correct, but it
+  becomes risky if done before the data products are typed. Do it after the
+  relevant plan records exist.
 
 The ordering matters. Local cleanup should wait when it does not reduce hidden
-state, implicit control flow, or memory-safety ambiguity. The highest-value work
-is the work that makes compiler facts explicit and prevents later phases from
-guessing.
+state, implicit control flow, or memory-safety ambiguity. The highest-value
+near-term work is the work that makes compiler facts explicit and prevents
+later phases from guessing, while keeping the implementation small enough to
+test thoroughly.

@@ -25,7 +25,7 @@ require_relative "../ast/type"
 require_relative "../ast/async_result_shape"
 require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
-require_relative "../backends/pipeline_host"
+require_relative "lower/pipeline/pipeline_host"
 require_relative "fsm_lowering"
 require_relative "fsm_transform"
 require_relative "thunk_transform"
@@ -438,6 +438,36 @@ class MIRLowering
   sig { returns(String) }
   def runtime_binding_name
     @rt_name
+  end
+
+  sig { returns(Integer) }
+  def next_pipeline_observable_id
+    id = T.cast(instance_variable_get(:@bg_block_counter), Integer)
+    instance_variable_set(:@bg_block_counter, id + 1)
+    id
+  end
+
+  sig { returns(Symbol) }
+  def pipeline_result_alloc
+    @current_decl_alloc == :heap ? :heap : :frame
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def pipeline_guarded_cleanup_name?(name)
+    !!@guarded_cleanup_names&.[](name)
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(rt_name: String, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_runtime_binding_name(rt_name, &blk)
+    previous = T.cast(instance_variable_get(:@rt_name), String)
+    instance_variable_set(:@rt_name, rt_name)
+    blk.call
+  ensure
+    instance_variable_set(:@rt_name, previous)
   end
 
   sig { returns(Integer) }

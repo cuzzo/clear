@@ -2388,6 +2388,18 @@ class Type
     dynamic_stream? || bounded_stream? || open_stream? || inf_stream?
   end
 
+  sig { returns(T.nilable(Type)) }
+  def runtime_stream_storage_element_type
+    elem = if open_stream?
+      open_stream_element_type
+    elsif dynamic_stream? || bounded_stream?
+      tense_type.element_type
+    elsif inf_stream?
+      inf_stream_element_type
+    end
+    elem ? Type.new(elem) : nil
+  end
+
   sig { params(has_limit: T::Boolean).returns(T::Boolean) }
   def bounded_pipeline_stream_source?(has_limit)
     dynamic_stream? || bounded_stream? || open_stream? || (inf_stream? && has_limit)
