@@ -3,8 +3,13 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "./pipeline_context"
+require_relative "./pipeline_records"
+require_relative "./pipeline_binding_chain_lowerer"
+require_relative "./pipeline_plan"
 require_relative "../../../backends/zig_type_mapper"
 require_relative "./pipeline_materializer"
+require_relative "./pipeline_scalar_lowerer"
+require_relative "./pipeline_list_lowerer"
 require_relative "./pipeline_range_lowerer"
 require_relative "./pipeline_concurrent_lowerer"
 require_relative "./pipeline_batch_window_lowerer"
@@ -20,71 +25,13 @@ class PipelineHost
 
   include ZigTypeMapper
 
-  # Per-stage state for sequential pipeline lowering. `list` is the source
-  # list AST, `options` is the smooth-node carrying alloc/error policy/etc.
-  # Reek flagged the (list_node, smooth_node) clump across 13+ lower_*
-  # methods. Bundled so the dispatcher builds once and threads through.
-  class PipelineSite < T::Struct
-    const :list, T.untyped
-    const :options, T.untyped
-  end
-
-  class PipelineSourceShape < T::Struct
-    extend T::Sig
-
-    const :type, Type
-    const :bc_target, T::Boolean
-    const :named_source, T::Boolean
-
-    sig { returns(Type) }
-    def element_type
-      elem_type = type.element_type
-      raise "pipeline source shape: #{type} has no element type" unless elem_type
-      elem_type
-    end
-
-    sig { returns(T::Boolean) }
-    def infinite_stream?
-      type.inf_stream?
-    end
-
-    sig { returns(T::Boolean) }
-    def bc_infinite_stream?
-      bc_target && infinite_stream?
-    end
-
-    sig { returns(T::Boolean) }
-    def bc_named_infinite_stream?
-      bc_infinite_stream? && named_source
-    end
-  end
+  PipelineSite = ::PipelineSite
+  PipelineSourceShape = ::PipelineSourceShape
 
   BcIterRange = T.type_alias { PipelineBcIterRange }
   LazyRangePrefix = PipelineLazyRangePrefix
   DefaultObservableFoldOp = T.type_alias { PipelineDefaultObservableFoldOp }
-
-  class BindingUnnestChain < T::Struct
-    extend T::Sig
-
-    const :source, AST::Node
-    const :outer_binding, String
-    const :unnest_expr, AST::Node
-    const :inner_binding, T.nilable(String)
-    const :stages, T::Array[AST::Node]
-    const :fold, AST::Node
-
-    sig { params(key: Symbol).returns(T.nilable(T.any(AST::Node, String, T::Array[AST::Node]))) }
-    def [](key)
-      case key
-      when :source then source
-      when :outer_binding then outer_binding
-      when :unnest_expr then unnest_expr
-      when :inner_binding then inner_binding
-      when :stages then stages
-      when :fold then fold
-      end
-    end
-  end
+  BindingUnnestChain = ::PipelineBindingUnnestChain
 
   sig { returns(T.untyped) }
   attr_reader :fn_sigs
@@ -105,6 +52,10 @@ class PipelineHost
     @do_rt_name = T.let(nil, T.nilable(String))
     @materializer = T.let(PipelineMaterializer.new(host: build_materializer_host), PipelineMaterializer)
     @range_lowerer = T.let(PipelineRangeLowerer.new(host: build_range_lowerer_host), PipelineRangeLowerer)
+    @binding_chain_lowerer = T.let(PipelineBindingChainLowerer.new(services: build_binding_chain_services), PipelineBindingChainLowerer)
+    @plan_builder = T.let(PipelinePlanBuilder.new(services: build_plan_services), PipelinePlanBuilder)
+    @scalar_lowerer = T.let(PipelineScalarLowerer.new(services: build_scalar_services), PipelineScalarLowerer)
+    @list_lowerer = T.let(PipelineListLowerer.new(services: build_list_services), PipelineListLowerer)
     @concurrent_lowerer = T.let(PipelineConcurrentLowerer.new(services: build_concurrent_services), PipelineConcurrentLowerer)
     @batch_window_lowerer = T.let(PipelineBatchWindowLowerer.new(services: build_batch_window_services), PipelineBatchWindowLowerer)
     @set_index_lowerer = T.let(PipelineSetIndexLowerer.new(services: build_set_index_services), PipelineSetIndexLowerer)
@@ -112,6 +63,100 @@ class PipelineHost
   end
 
   private
+
+  sig { returns(PipelinePlanServices) }
+  def build_plan_services
+    PipelinePlanServices.new(
+      lowering_target: -> { @lowering.lowering_target },
+      range_chain: ->(node) { unwrap_range_chain(node) },
+      binding_chain: ->(node) { @binding_chain_lowerer.unwrap_chain(node) },
+    )
+  end
+
+  sig { returns(PipelineScalarServices) }
+  def build_scalar_services
+    PipelineScalarServices.new(
+      visit_expr: ->(_list_node, expr_node, placeholder) {
+        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }, MIR::Node)
+      },
+      pipeline_block: ->(list_node, blk) {
+        pipeline_block(list_node) { |items, label| blk.call(items, label) }
+      },
+      transpile_type: ->(type_info) { transpile_type(type_info) },
+    )
+  end
+
+  sig { returns(PipelineListServices) }
+  def build_list_services
+    PipelineListServices.new(
+      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_expr: ->(_list_node, expr_node, placeholder) {
+        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }, MIR::Node)
+      },
+      visit_reduce_expr: ->(expr_node, item_placeholder, acc_placeholder) {
+        T.cast(with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(expr_node) }, MIR::Node)
+      },
+      visit_body: ->(body_stmts, placeholder) {
+        visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
+      },
+      visit_join_lambda: ->(body, join_params) {
+        T.cast(with_context_state(current_context.with_join_params(join_params)) { visit_mir(body) }, MIR::Node)
+      },
+      pipeline_block: ->(list_node, blk) {
+        pipeline_block(list_node) { |items, label| blk.call(items, label) }
+      },
+      transpile_type: ->(type_info) { transpile_type(type_info) },
+      pipeline_alloc: ->(smooth_node) { pipeline_alloc(smooth_node) },
+      pipeline_result_alloc: -> { pipeline_result_alloc },
+      source_shape: ->(source_node) { pipeline_source_shape(source_node) },
+      next_label: -> { next_pipe_label },
+      set_current_label: ->(label) { @current_pipe_label = label },
+      append_owned_value_stmt: ->(receiver, alloc, value_expr) {
+        append_owned_value_stmt(receiver, alloc, value_expr)
+      },
+      borrowed_pipeline_value: ->(value, type_info, alloc) {
+        borrowed_pipeline_value(value, type_info, alloc)
+      },
+      cleanup_bearing_type: ->(type_info) { cleanup_bearing_type?(type_info) },
+      owning_pipeline_temp_stmts: ->(name, source, type_info, zig_type, alloc) {
+        owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
+      },
+    )
+  end
+
+  sig { returns(PipelineBindingChainServices) }
+  def build_binding_chain_services
+    PipelineBindingChainServices.new(
+      bc_target: -> { bc_target? },
+      next_label: -> { next_pipe_label },
+      set_current_label: ->(label) { @current_pipe_label = label },
+      pipe_binding_zig_name: ->(clear_name) { pipe_binding_zig_name(clear_name) },
+      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir_with_placeholder: ->(node, placeholder) {
+        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+      },
+      visit_mir_with_reduce_placeholders: ->(node, item_placeholder, acc_placeholder) {
+        T.cast(with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(node) }, MIR::Node)
+      },
+      transpile_type: ->(type_info) { transpile_type(type_info) },
+      with_named_bindings: ->(bindings, blk) { with_named_bindings(bindings, &blk) },
+      ast_uses_placeholder: ->(node) { ast_node_uses_placeholder?(node) },
+    )
+  end
+
+  sig { params(bindings: T::Hash[String, String], blk: T.proc.returns(MIR::BlockExpr)).returns(MIR::BlockExpr) }
+  def with_named_bindings(bindings, &blk)
+    entries = bindings.map { |name, zig| PipelineNamedBinding.new(name: name, zig: zig) }
+    apply_named_bindings(entries, 0, &blk)
+  end
+
+  sig { params(entries: T::Array[PipelineNamedBinding], index: Integer, blk: T.proc.returns(MIR::BlockExpr)).returns(MIR::BlockExpr) }
+  def apply_named_bindings(entries, index, &blk)
+    return blk.call if index >= entries.length
+
+    entry = entries.fetch(index)
+    with_named_binding(entry.name, entry.zig) { apply_named_bindings(entries, index + 1, &blk) }
+  end
 
   sig { returns(PipelineEachServices) }
   def build_each_services
@@ -132,7 +177,7 @@ class PipelineHost
       },
       range_chain: ->(node) { unwrap_range_chain(node) },
       lower_each_range: ->(source_node, stages, each_op) { lower_each_range(source_node, stages, each_op) },
-      lower_sharded_each: ->(list_node, each_op) { lower_sharded_each(PipelineSite.new(list: list_node, options: list_node), each_op) },
+      lower_sharded_each: ->(list_node, each_op) { lower_sharded_each(list_node, each_op) },
       ast_stmts_use_placeholder: ->(body_stmts) { ast_stmts_use_placeholder?(body_stmts) },
       next_index_name: -> {
         @each_idx_counter += 1
@@ -598,68 +643,42 @@ class PipelineHost
 
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
   # Returns nil for non-migrated operators (caller falls back to string path).
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(PipelineLoweringResult) }
   def lower_pipeline(node)
-    rhs = node.right
-    lhs = node.left
-    lhs_type = lhs.full_type!
+    plan = @plan_builder.build(node)
+    return nil unless plan
 
-    # SOA scalar operators must keep the direct field-slice loop on the
-    # Zig backend; materializing full structs would erase the point of SOA.
-    # The VM has no SoA layout (Value.List is uniform), so BC keeps using
-    # the generic structural fold path.
-    is_soa = lhs_type&.soa_linear_collection?
-    scalar_op = AST.pipeline_range_fold?(rhs)
-    if is_soa && scalar_op && @lowering.lowering_target != :bc
-      return lower_soa_scalar_fold(PipelineSite.new(list: lhs, options: node), rhs)
-    end
+    lower_dispatch_plan(plan)
+  end
 
-    # Range source with fold terminal: fuse into a single accumulating while loop.
-    if AST.pipeline_range_fold?(rhs)
-      range_chain = unwrap_range_chain(lhs)
-      return lower_range_fold(range_chain.source, range_chain.stages, T.cast(rhs, DefaultObservableFoldOp), node) if range_chain
-    end
-
-    # Range source with REDUCE: fuse into a single accumulating while loop.
-    if rhs.is_a?(AST::ReduceOp)
-      range_chain = unwrap_range_chain(lhs)
-      return lower_range_reduce(range_chain.source, range_chain.stages, rhs, node) if range_chain
-    end
-
-    # Binding-unnest chain: source AS $u |> UNNEST expr [AS $o] |> [stages] |> fold
-    # Must be fused into nested loops - materializing UNNEST would lose the $u context.
-    if (bchain = unwrap_binding_unnest_chain(node))
-      return lower_binding_chain(bchain, node)
-    end
-
-    site = PipelineSite.new(list: lhs, options: node)
-    case rhs
-    when AST::CountOp   then lower_count(site, rhs)
-    when AST::SumOp     then lower_sum(site, rhs)
-    when AST::AverageOp then lower_average(site, rhs)
-    when AST::MinOp     then lower_min(site, rhs)
-    when AST::MaxOp     then lower_max(site, rhs)
-    when AST::AnyOp     then lower_any(site, rhs)
-    when AST::AllOp     then lower_all(site, rhs)
-    when AST::FindOp    then lower_find(site, rhs)
-    when AST::WhereOp   then lower_where(site, rhs.expression)
-    when AST::SelectOp  then lower_select(site, rhs.expression)
-    when AST::LimitOp   then lower_limit(site, rhs)
-    when AST::TakeWhileOp then lower_take_while(site, rhs.expression)
-    when AST::SkipOp    then lower_skip(site, rhs)
-    when AST::DistinctOp then lower_distinct(site, rhs)
-    when AST::UnnestOp  then lower_unnest(site, rhs)
-    when AST::ReduceOp  then lower_reduce(site, rhs)
-    when AST::WindowOp       then lower_window(site, rhs)
-    when AST::BatchWindowOp
-      lower_batch_window(site, rhs)
-    when AST::OrderByOp      then lower_order_by(site, rhs)
-    when AST::IndexOp   then lower_index(site, rhs.expression)
-    when AST::JoinOp    then lower_join(site, rhs)
-    when AST::TapOp     then lower_tap(site, rhs)
-    when AST::EachOp    then lower_each(site, rhs)
-    when AST::ConcurrentOp then lower_concurrent(site, rhs)
-    else nil
+  sig { params(plan: PipelineDispatchPlan).returns(PipelineLoweringResult) }
+  def lower_dispatch_plan(plan)
+    route = plan.route
+    case route
+    when PipelineRoute::SoaScalarFold
+      lower_soa_scalar_fold(plan.site, T.cast(plan.rhs, PipelineMaterializedScalarOp))
+    when PipelineRoute::RangeFold
+      range_chain = T.must(plan.range_chain)
+      lower_range_fold(range_chain.source, range_chain.stages, T.cast(plan.rhs, DefaultObservableFoldOp), plan.site.options)
+    when PipelineRoute::RangeReduce
+      range_chain = T.must(plan.range_chain)
+      lower_range_reduce(range_chain.source, range_chain.stages, T.cast(plan.rhs, AST::ReduceOp), plan.site.options)
+    when PipelineRoute::BindingChain
+      lower_binding_chain(T.must(plan.binding_chain), plan.site.options)
+    when PipelineRoute::ScalarTerminal
+      @scalar_lowerer.lower(plan.site, T.cast(plan.rhs, PipelineMaterializedScalarOp))
+    when PipelineRoute::ListTerminal
+      @list_lowerer.lower(plan.site, T.cast(plan.rhs, PipelineListTerminalOp))
+    when PipelineRoute::Distinct
+      lower_distinct(plan.site, T.cast(plan.rhs, AST::DistinctOp))
+    when PipelineRoute::BatchWindow
+      lower_batch_window(plan.site, T.cast(plan.rhs, AST::BatchWindowOp))
+    when PipelineRoute::Index
+      lower_index(plan.site, T.cast(T.cast(plan.rhs, AST::IndexOp).expression, AST::Node))
+    when PipelineRoute::Each
+      lower_each(plan.site, T.cast(plan.rhs, AST::EachOp))
+    when PipelineRoute::Concurrent
+      lower_concurrent(plan.site, T.cast(plan.rhs, AST::ConcurrentOp))
     end
   end
 
@@ -851,7 +870,7 @@ class PipelineHost
       ], nil)
       final_expr = MIR::Ident.new("all_result")
     when AST::FindOp
-      elem_zig_type = transpile_type(list_node.full_type!.element_type.resolved.to_s)
+      elem_zig_type = transpile_type(T.must(list_node.full_type!.element_type).resolved.to_s)
       init_stmts << MIR::Let.new("find_result", MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil)
       init_stmts << MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil)
       loop_body << MIR::Let.new("find_matches", expr_mir, false, nil, nil)
@@ -880,173 +899,42 @@ class PipelineHost
 
   sig { params(site: PipelineHost::PipelineSite, count_node: AST::CountOp).returns(MIR::BlockExpr) }
   def lower_count(site, count_node)
-    list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::IfStmt.new(pred_mir, [
-            MIR::Set.new(MIR::Ident.new("count_result"),
-              MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1")))
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("count_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, count_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, sum_node: AST::SumOp).returns(MIR::BlockExpr) }
   def lower_sum(site, sum_node)
-    list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new("f64"), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Set.new(MIR::Ident.new("sum_result"),
-            MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir))
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("sum_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, sum_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, avg_node: AST::AverageOp).returns(MIR::BlockExpr) }
   def lower_average(site, avg_node)
-    list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
-        MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Set.new(MIR::Ident.new("avg_sum"),
-            MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir))
-        ], nil),
-        MIR::BreakStmt.new(label,
-          MIR::Conditional.new(
-            MIR::BinOp.new("==", MIR::Ident.new("avg_count"), MIR::Lit.new("0")),
-            MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
-            MIR::BinOp.new("/", MIR::Ident.new("avg_sum"),
-              MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("avg_count"), nil, :floatFromInt), "f64", :as))))
-      ]
-    end
+    @scalar_lowerer.lower(site, avg_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, min_node: AST::MinOp).returns(MIR::BlockExpr) }
   def lower_min(site, min_node)
-    list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::IfStmt.new(
-          MIR::BinOp.new("==",
-            MIR::FieldGet.new(MIR::Ident.new(items), "len"),
-            MIR::Lit.new("0")),
-          [MIR::Panic.new("MIN applied to empty list")],
-          nil),
-        MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, "f64"),
-          true, Type.new("f64"), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("min_val", expr_mir, false, nil, nil),
-          MIR::IfStmt.new(
-            MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
-            [MIR::Set.new(MIR::Ident.new("min_result"), MIR::Ident.new("min_val"))],
-            nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("min_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, min_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, max_node: AST::MaxOp).returns(MIR::BlockExpr) }
   def lower_max(site, max_node)
-    list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::IfStmt.new(
-          MIR::BinOp.new("==",
-            MIR::FieldGet.new(MIR::Ident.new(items), "len"),
-            MIR::Lit.new("0")),
-          [MIR::Panic.new("MAX applied to empty list")],
-          nil),
-        MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, "f64"),
-          true, Type.new("f64"), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("max_val", expr_mir, false, nil, nil),
-          MIR::IfStmt.new(
-            MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
-            [MIR::Set.new(MIR::Ident.new("max_result"), MIR::Ident.new("max_val"))],
-            nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("max_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, max_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, any_node: AST::AnyOp).returns(MIR::BlockExpr) }
   def lower_any(site, any_node)
-    list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, any_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::IfStmt.new(pred_mir, [
-            MIR::Set.new(MIR::Ident.new("any_result"), MIR::Lit.new("true")),
-            MIR::BreakStmt.new(nil, nil)
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("any_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, any_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, all_node: AST::AllOp).returns(MIR::BlockExpr) }
   def lower_all(site, all_node)
-    list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, all_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
-            MIR::Set.new(MIR::Ident.new("all_result"), MIR::Lit.new("false")),
-            MIR::BreakStmt.new(nil, nil)
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("all_result"))
-      ]
-    end
+    @scalar_lowerer.lower(site, all_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, find_node: AST::FindOp).returns(MIR::BlockExpr) }
   def lower_find(site, find_node)
-    list_node = site.list
-    elem_zig_type = transpile_type(list_node.full_type!.element_type.resolved.to_s)
-    pred_mir = visit_pipeline_expr_mir(list_node, find_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("find_result",
-          MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil),
-        MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("find_matches", pred_mir, false, nil, nil),
-          MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
-            MIR::Set.new(MIR::Ident.new("find_result"), MIR::Ident.new("it")),
-            MIR::Set.new(MIR::Ident.new("find_found"), MIR::Lit.new("true")),
-            MIR::BreakStmt.new(nil, nil)
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label,
-          MIR::Conditional.new(
-            MIR::Ident.new("find_found"),
-            MIR::Cast.new(MIR::Ident.new("find_result"), "?#{elem_zig_type}", :as),
-            MIR::Lit.new("null")))
-      ]
-    end
+    @scalar_lowerer.lower(site, find_node)
   end
 
   # --- Filter/transform operator lowerings (Phase 2) ---
@@ -1056,169 +944,36 @@ class PipelineHost
     pipeline_result_alloc
   end
 
-  sig { params(site: PipelineHost::PipelineSite, expr_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, expr_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_where(site, expr_node)
-    list_node = site.list
-    smooth_node = site.options
-    elem_type = list_node.full_type!.element_type.resolved.to_s
-    elem_zig = transpile_type(elem_type)
-    alloc = pipeline_alloc(smooth_node)
-    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("matches", pred_mir, false, nil, nil),
-          MIR::IfStmt.new(MIR::Ident.new("matches"), [
-            append_owned_value_stmt("res_list", alloc,
-              borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-      ]
-    end
+    @list_lowerer.lower_where_expr(site, expr_node)
   end
 
-  sig { params(site: PipelineHost::PipelineSite, expr_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, expr_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_select(site, expr_node)
-    list_node = site.list
-    smooth_node = site.options
-    res_type = expr_node.full_type!
-    res_zig = transpile_type(res_type)
-    alloc = pipeline_alloc(smooth_node)
-    expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("val", expr_mir, false, nil, nil),
-          append_owned_value_stmt("res_list", alloc,
-            borrowed_pipeline_value(MIR::Ident.new("val"), Type.new(res_type), alloc))
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-      ]
-    end
+    @list_lowerer.lower_select_expr(site, expr_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, limit_node: AST::LimitOp).returns(MIR::BlockExpr) }
   def lower_limit(site, limit_node)
-    list_node = site.list
-    smooth_node = site.options
-    source_shape = pipeline_source_shape(list_node)
-    elem_type = source_shape.element_type.resolved.to_s
-    elem_zig = transpile_type(elem_type)
-    alloc = pipeline_alloc(smooth_node)
-    count_mir = visit_mir(limit_node.count)
-    # BC + inf-stream source: SliceExpr/ListLength can't talk to
-    # Value.Channel. Drain N items via a ForStmt that pulls from the
-    # channel through STREAM_NEXT (the bc_emitter's compile_for special-
-    # cases @channel_slots) and accumulates into a list. Producer fibers
-    # whose body terminates early push Nil; the for-loop's nil-guard
-    # ends the drain.
-    if source_shape.bc_infinite_stream?
-      label = next_pipe_label
-      source_mir = visit_mir(list_node)
-      @current_pipe_label = label
-      return MIR::BlockExpr.new(label, [
-        MIR::Let.new("__lim_src", source_mir, false, nil, nil),
-        MIR::Let.new("__lim_n", count_mir, false, nil, nil),
-        MIR::Let.new("__lim_res",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
-        MIR::Let.new("__lim_i", MIR::Lit.new("0_i64"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new("__lim_src"), "__lim_it", [
-          MIR::IfStmt.new(
-            MIR::BinOp.new(">=", MIR::Ident.new("__lim_i"), MIR::Ident.new("__lim_n")),
-            [MIR::BreakStmt.new(nil, nil)], nil),
-          MIR::ExprStmt.new(MIR::MethodCall.new(
-            MIR::Ident.new("__lim_res"), "append",
-            [MIR::Ident.new("__lim_it")], true,
-            MIR::CallableContract.no_ownership(1)), nil),
-          MIR::Set.new(MIR::Ident.new("__lim_i"),
-            MIR::BinOp.new("+", MIR::Ident.new("__lim_i"), MIR::Lit.new("1_i64")), nil),
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("__lim_res"))
-      ])
-    end
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("lim_requested",
-          MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
-        MIR::Let.new("lim_actual",
-          MIR::Call.new("@min", [MIR::Ident.new("lim_requested"),
-                                 MIR::ListLength.new(MIR::Ident.new(items))], false),
-          false, nil, nil),
-        MIR::Let.new("lim_result",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(
-          MIR::SliceExpr.new(MIR::Ident.new(items),
-            MIR::Lit.new("0"), MIR::Ident.new("lim_actual"), nil),
-          "it",
-          [
-            append_owned_value_stmt("lim_result", alloc,
-              borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
-          ],
-          nil
-        ),
-        MIR::BreakStmt.new(label, MIR::Ident.new("lim_result"))
-      ]
-    end
+    @list_lowerer.lower(site, limit_node)
   end
 
-  sig { params(site: PipelineHost::PipelineSite, expr_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, expr_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_take_while(site, expr_node)
-    list_node = site.list
-    smooth_node = site.options
-    elem_type = list_node.full_type!.element_type.resolved.to_s
-    elem_zig = transpile_type(elem_type)
-    alloc = pipeline_alloc(smooth_node)
-    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("matches", pred_mir, false, nil, nil),
-          MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
-            [MIR::BreakStmt.new(nil, nil)], nil),
-          append_owned_value_stmt("res_list", alloc,
-            borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-      ]
-    end
+    @list_lowerer.lower_take_while_expr(site, expr_node)
   end
 
-  sig { params(site: T.untyped, skip_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, skip_node: AST::SkipOp).returns(MIR::BlockExpr) }
   def lower_skip(site, skip_node)
-    list_node = site.list
-    label = next_pipe_label
-    source_mir = visit_mir(list_node)
-    @current_pipe_label = label
-    count_mir = visit_mir(skip_node.count)
-
-    MIR::BlockExpr.new(label, [
-      MIR::Let.new("__skip_src", source_mir, false, nil, nil),
-      MIR::Let.new("__skip_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__skip_src"), true), false, nil, nil),
-      MIR::Let.new("skip_requested",
-        MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
-      MIR::Let.new("skip_actual",
-        MIR::Call.new("@min", [MIR::Ident.new("skip_requested"),
-                               MIR::ListLength.new(MIR::Ident.new("__skip_items"))], false),
-        false, nil, nil),
-      MIR::BreakStmt.new(label,
-        MIR::SliceExpr.new(MIR::Ident.new("__skip_items"),
-                           MIR::Ident.new("skip_actual"), nil, nil))
-    ])
+    @list_lowerer.lower(site, skip_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, distinct_node: AST::DistinctOp).returns(MIR::BlockExpr) }
   def lower_distinct(site, distinct_node)
     @set_index_lowerer.lower_distinct(
-      T.cast(site.list, AST::Node),
-      T.cast(site.options, AST::BinaryOp),
+      site.list,
+      site.options,
       distinct_node,
     )
   end
@@ -1227,270 +982,62 @@ class PipelineHost
 
   sig { params(site: PipelineHost::PipelineSite, unnest_node: AST::UnnestOp).returns(MIR::BlockExpr) }
   def lower_unnest(site, unnest_node)
-    list_node = site.list
-    smooth_node = site.options
-    inner_elem_type = T.must(unnest_node.full_type!.element_type).resolved.to_s
-    inner_zig = transpile_type(inner_elem_type)
-    alloc = pipeline_alloc(smooth_node)
-    expr_mir = visit_pipeline_expr_mir(list_node, unnest_node.expression)
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(inner_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("unn_inner", expr_mir, false, nil, nil),
-          MIR::Let.new("unn_inner_items",
-            MIR::ItemsAccess.new(MIR::Ident.new("unn_inner"), true), false, nil, nil),
-          MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
-            MIR::ExprStmt.new(MIR::MethodCall.new(
-              MIR::Ident.new("res_list"), "append",
-              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("inner_it")], true,
-              MIR::CallableContract.no_ownership(2)), nil)
-          ], nil)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-      ]
-    end
+    @list_lowerer.lower(site, unnest_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, reduce_node: AST::ReduceOp).returns(MIR::BlockExpr) }
   def lower_reduce(site, reduce_node)
-    list_node = site.list
-    acc_zig = transpile_type(reduce_node.full_type!)
-    init_mir = visit_mir(reduce_node.initial_value)
-    expr_mir = with_pipeline_context(placeholder: "it", acc: "acc") {
-      visit_mir(reduce_node.expression)
-    }
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Set.new(MIR::Ident.new("acc"), expr_mir)
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
-      ]
-    end
+    @list_lowerer.lower(site, reduce_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, window_node: AST::WindowOp).returns(MIR::BlockExpr) }
   def lower_window(site, window_node)
-    list_node = site.list
-    smooth_node = site.options
-    expr_type_str = window_node.expression.full_type!.to_s
-    res_zig = transpile_type(expr_type_str)
-    alloc = pipeline_alloc(smooth_node)
-    size_mir = visit_mir(window_node.size)
-    expr_mir = with_pipeline_context(placeholder: "window_slice") {
-      visit_mir(window_node.expression)
-    }
-    pipeline_block(list_node) do |items, label|
-      [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::ScopeBlock.new([
-          MIR::Let.new("__w_size",
-            MIR::Cast.new(size_mir, "usize", :intCast), false, nil, nil),
-          MIR::IfStmt.new(
-            MIR::BinOp.new(">=",
-              MIR::FieldGet.new(MIR::Ident.new(items), "len"),
-              MIR::Ident.new("__w_size")),
-            [
-              MIR::Let.new("__wi", MIR::Lit.new("0"), true, Type.new("usize"), nil),
-              MIR::WhileStmt.new(
-                MIR::BinOp.new("<=",
-                  MIR::Ident.new("__wi"),
-                  MIR::BinOp.new("-",
-                    MIR::FieldGet.new(MIR::Ident.new(items), "len"),
-                    MIR::Ident.new("__w_size"))),
-                [
-                  MIR::Let.new("window_slice",
-                    MIR::SliceExpr.new(MIR::Ident.new(items),
-                      MIR::Ident.new("__wi"),
-                      MIR::BinOp.new("+", MIR::Ident.new("__wi"), MIR::Ident.new("__w_size")),
-                      nil),
-                    false, nil, nil),
-                  MIR::Let.new("val", expr_mir, false, nil, nil),
-                  MIR::ExprStmt.new(MIR::MethodCall.new(
-                    MIR::Ident.new("res_list"), "append",
-                    [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")],
-                    true, MIR::CallableContract.no_ownership(2)), nil)
-                ],
-                nil,
-                MIR::Set.new(MIR::Ident.new("__wi"),
-                  MIR::BinOp.new("+", MIR::Ident.new("__wi"), MIR::Lit.new("1"))),
-                nil, nil)
-            ], nil)
-        ]),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-      ]
-    end
+    @list_lowerer.lower(site, window_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, bw_node: AST::BatchWindowOp).returns(MIR::BlockExpr) }
   def lower_batch_window(site, bw_node)
     @batch_window_lowerer.lower(
-      T.cast(site.list, AST::Node),
-      T.cast(site.options, AST::BinaryOp),
+      site.list,
+      site.options,
       bw_node,
     )
   end
 
   sig { params(site: PipelineHost::PipelineSite, order_node: AST::OrderByOp).returns(MIR::BlockExpr) }
   def lower_order_by(site, order_node)
-    list_node = site.list
-    smooth_node = site.options
-    elem_type = list_node.full_type!.element_type.resolved.to_s
-    elem_zig = transpile_type(elem_type)
-    alloc = pipeline_alloc(smooth_node)
-    key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
-    key_b = with_pipeline_context(placeholder: "b") { visit_mir(order_node.expression) }
-    pipeline_block(list_node) do |items, label|
-      result_name = "#{label}_ord_result"
-      [
-        MIR::Let.new(result_name,
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &#{result_name};"),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          append_owned_value_stmt(result_name, alloc,
-            borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
-        ], nil),
-        MIR::Sort.new(elem_zig,
-          MIR::FieldGet.new(MIR::Ident.new(result_name), "items"),
-          key_a, key_b),
-        MIR::BreakStmt.new(label, MIR::Ident.new(result_name))
-      ]
-    end
+    @list_lowerer.lower(site, order_node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, expr_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_index(site, expr_node)
     @set_index_lowerer.lower_index(
-      T.cast(site.list, AST::Node),
-      T.cast(site.options, AST::BinaryOp),
+      site.list,
+      site.options,
       expr_node,
     )
   end
 
   sig { params(site: PipelineHost::PipelineSite, join_node: AST::JoinOp).returns(MIR::BlockExpr) }
   def lower_join(site, join_node)
-    list_node = site.list
-    smooth_node = site.options
-    left_zig  = transpile_type(list_node.full_type!.element_type.resolved.to_s)
-    right_src_mir = visit_mir(join_node.right_source)
-    right_type_info = join_node.right_source.full_type!
-    left_type_info = list_node.full_type!.element_type
-    right_zig = transpile_type(right_type_info.element_type.resolved.to_s)
-    result_zig = "struct { left: #{left_zig}, right: ?#{right_zig} }"
-    alloc = pipeline_result_alloc
-    left_owns = cleanup_bearing_type?(left_type_info)
-    right_owns = cleanup_bearing_type?(right_type_info.element_type)
-
-    key_expr = join_node.key_expr
-    is_lambda = key_expr.is_a?(AST::LambdaLit)
-
-    if is_lambda
-      params = key_expr.params
-      left_param  = params[0].name
-      right_param = params[1].name
-      join_params = T.let({ left_param => "__jl", right_param => "__jr" }, PipelinePlaceholderMap)
-      pred_mir = with_context_state(current_context.with_join_params(join_params)) do
-        visit_mir(key_expr.body)
-      end
-    else
-      left_key_mir  = with_pipeline_context(placeholder: "__jl") { visit_mir(key_expr) }
-      right_key_mir = with_pipeline_context(placeholder: "__jr") { visit_mir(key_expr) }
-      pred_mir = MIR::Call.new("CheatLib.eql", [left_key_mir, right_key_mir], false)
-    end
-
-    label = next_pipe_label
-    source_mir = visit_mir(list_node)
-    @current_pipe_label = label
-
-    left_value = left_owns ? MIR::Ident.new("__jl_owned") : MIR::Ident.new("__jl")
-    right_value = MIR::Ident.new("__match")
-    after_append = []
-    if left_owns
-      after_append.concat(MIR::OwnershipTransferPlan.new(
-        name: "__jl_owned",
-        target: :owned_sink,
-        target_alloc: pipeline_result_alloc,
-        move_guarded: true,
-      ).marks)
-    end
-    if right_owns
-      after_append.concat(MIR::OwnershipTransferPlan.new(
-        name: "__match",
-        target: :owned_sink,
-        target_alloc: pipeline_result_alloc,
-        move_guarded: true,
-      ).marks)
-    end
-
-    MIR::BlockExpr.new(label, [
-      MIR::Let.new("__jl_src", source_mir, false, nil, nil),
-      MIR::Let.new("__jr_src", right_src_mir, false, nil, nil),
-      MIR::Let.new("__jl_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__jl_src"), true), false, nil, nil),
-      MIR::Let.new("__jr_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__jr_src"), true), false, nil, nil),
-      MIR::Let.new("res_list",
-        MIR::ContainerInit.new("std.ArrayListUnmanaged(#{result_zig})",
-          :list_empty, alloc, nil), true, nil, nil),
-      MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
-        MIR::Let.new("__match", MIR::Lit.new("null"), true, Type.new("?#{right_zig}"), nil),
-        *(right_owns ? [
-          MIR::ErrCleanup.new("__match",
-            CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: "?#{right_zig}")),
-        ] : []),
-        MIR::ForStmt.new(MIR::Ident.new("__jr_items"), "__jr", [
-          MIR::IfStmt.new(pred_mir, [
-            MIR::Set.new(MIR::Ident.new("__match"),
-              right_owns ? MIR::DeepCopy.new(MIR::Ident.new("__jr"), right_zig, nil, :full_value, alloc) : MIR::Ident.new("__jr")),
-            MIR::BreakStmt.new(nil, nil),
-          ], nil)
-        ], nil),
-        *(left_owns ? owning_pipeline_temp_stmts("__jl_owned", MIR::Ident.new("__jl"), left_type_info, left_zig, alloc) : []),
-        MIR::ExprStmt.new(MIR::MethodCall.new(
-          MIR::Ident.new("res_list"), "append",
-          [MIR::AllocatorRef.new(alloc),
-           MIR::StructInit.new(nil, [
-             {name: "left",  value: left_value},
-             {name: "right", value: right_value}])],
-          true, MIR::CallableContract.no_ownership(2)), nil),
-        *after_append
-      ], nil),
-      MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
-    ])
+    @list_lowerer.lower(site, join_node)
   end
 
-  sig { params(site: T.untyped, tap_op: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, tap_op: AST::TapOp).returns(MIR::BlockExpr) }
   def lower_tap(site, tap_op)
-    list_node = site.list
-    smooth_node = site.options
-    label = next_pipe_label
-    source_mir = visit_mir(list_node)
-    @current_pipe_label = label
-
-    body_mir = visit_pipeline_body_mir(tap_op.body, placeholder: "__tap_item")
-
-    MIR::BlockExpr.new(label, [
-      MIR::Let.new("__tap_src", source_mir, false, nil, nil),
-      MIR::Let.new("__tap_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__tap_src"), true), false, nil, nil),
-      MIR::ForStmt.new(MIR::Ident.new("__tap_items"), "__tap_item", body_mir, nil),
-      MIR::BreakStmt.new(label, MIR::Ident.new("__tap_src"))
-    ])
+    @list_lowerer.lower(site, tap_op)
   end
 
   # --- Side-effect operator lowerings (Phase 4) ---
 
   sig { params(site: PipelineHost::PipelineSite, each_op: AST::EachOp).returns(PipelineEachResult) }
   def lower_each(site, each_op)
-    @each_lowerer.lower(T.cast(site.list, AST::Node), each_op)
+    @each_lowerer.lower(site.list, each_op)
   end
 
-  sig { params(site: PipelineHost::PipelineSite, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
-  def lower_sharded_each(site, each_op)
-    @concurrent_lowerer.lower_sharded_each(T.cast(site.list, AST::Node), each_op)
+  sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
+  def lower_sharded_each(list_node, each_op)
+    @concurrent_lowerer.lower_sharded_each(list_node, each_op)
   end
 
   sig { params(node: AST::Node).returns(T::Boolean) }
@@ -1505,278 +1052,14 @@ class PipelineHost
     @range_lowerer.unwrap_range_chain(node)
   end
 
-  # Detect a binding-unnest chain suitable for fused nested-loop generation:
-  #   BIND_VAR(source, $u) |> [BIND_VAR(]UNNEST(expr)[, $o)] |> [WHERE/SELECT] |> fold
-  #
-  # Note: `UNNEST expr AS $o` parses as BIND_VAR(UnnestOp(expr), $o) because AS has
-  # higher precedence than |>. Both `|> UNNEST expr` and `|> UNNEST expr AS $o` are handled.
-  #
-  # Returns the chain components, or nil if the pattern doesn't match.
   sig { params(node: AST::BinaryOp).returns(T.nilable(BindingUnnestChain)) }
   def unwrap_binding_unnest_chain(node)
-    return nil unless node.is_a?(AST::BinaryOp) && node.smooth?
-
-    # Terminal must be a fold op
-    fold = node.right
-    return nil unless AST.pipeline_range_fold?(fold)
-    cursor = T.let(node.left, T.any(AST::BinaryOp, AST::Identifier))
-
-    # Collect optional intermediate WHERE/SELECT stages (in chain order)
-    stages = T.let([], T::Array[AST::Node])
-    rhs = T.let(nil, T.nilable(AST::Node))
-    while cursor.is_a?(AST::BinaryOp) && cursor.smooth?
-      rhs = cursor.right
-      if AST.pipeline_select_filter_op?(rhs)
-        stages.unshift(rhs)
-        cursor = cursor.left
-      else
-        break
-      end
-    end
-
-    # cursor must now be: SMOOTH(BIND_VAR(source, $u), unnest_part)
-    return nil unless cursor.is_a?(AST::BinaryOp) && cursor.smooth?
-    lhs = cursor.left
-    rhs = cursor.right
-
-    # Must be a UnnestOp
-    return nil unless rhs.is_a?(AST::UnnestOp)
-
-    # Detect optional inner binding: `UNNEST expr AS $o` parses as
-    # UnnestOp(expression=BIND_VAR(expr, $o)) because :pipe_expression uses
-    # parse_expression(1) which consumes AS at prec 2 as part of the inner expr.
-    unnest_expr = rhs.expression
-    inner_binding = T.let(nil, T.nilable(String))
-    if unnest_expr.is_a?(AST::BinaryOp) && unnest_expr.op == :BIND_VAR
-      inner_binding = unnest_expr.right.name.to_s # "$o"
-      unnest_expr   = unnest_expr.left        # the actual array expression
-    end
-
-    # LHS must be a BIND_VAR (source AS $u)
-    return nil unless lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
-
-    BindingUnnestChain.new(
-      source: lhs.left,
-      outer_binding: lhs.right.name.to_s,
-      unnest_expr: unnest_expr,
-      inner_binding: inner_binding,
-      stages: stages,
-      fold: fold,
-    )
+    @binding_chain_lowerer.unwrap_chain(node)
   end
 
-  # Generate fused nested loops for a binding-unnest chain.
-  # Outer loop: source elements bound to $u (outer_zig).
-  # Inner loop: unnest expression elements (inner_zig).
-  # Both bindings are visible in stage expressions and the fold.
-  sig { params(chain: BindingUnnestChain, smooth_node: AST::BinaryOp).returns(T.nilable(MIR::BlockExpr)) }
+  sig { params(chain: BindingUnnestChain, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_binding_chain(chain, smooth_node)
-    outer_name = chain.outer_binding            # "$u"
-    outer_zig  = pipe_binding_zig_name(outer_name)  # "__pipe_u"
-    inner_name = chain.inner_binding            # "$o" or nil
-    inner_zig  = inner_name ? pipe_binding_zig_name(inner_name) : "__bc_inner"
-    label      = next_pipe_label
-
-    # BC backend's bc_emitter has a flat per-function slot table, so two
-    # binding chains in the same function reusing __bc_acc would land on
-    # the same slot with whichever residency was assigned first (e.g.
-    # SUM allocates an f64 fslot, then ANY's :bool tries to STORE through
-    # @slots and reads back stale f64). Suffix per pipeline so each chain
-    # has its own slot. Mirrors the lower_range_fold suffix scheme.
-    names = if bc_target?
-      sfx = "_#{label.sub('__pblk', 'b')}"
-      {
-        src:    "__bc_src#{sfx}",
-        unn:    "__bc_unn#{sfx}",
-        acc:    "__bc_acc#{sfx}",
-        sum:    "__bc_sum#{sfx}",
-        cnt:    "__bc_cnt#{sfx}",
-        val:    "__bc_val#{sfx}",
-        result: "__bc_result#{sfx}",
-        found:  "__bc_found#{sfx}",
-      }
-    else
-      { src: "__bc_src", unn: "__bc_unn", acc: "__bc_acc",
-        sum: "__bc_sum", cnt: "__bc_cnt", val: "__bc_val",
-        result: "__bc_result", found: "__bc_found" }
-    end
-
-    with_named_binding(outer_name, outer_zig) do
-      source_mir = visit_mir(chain.source)
-      unnest_mir = visit_mir(chain.unnest_expr) # $u already in @named_bindings
-
-      inner_block = lambda do
-        acc_init, loop_body, post_inner, result_expr = lower_binding_fold(
-          chain.fold, chain.stages, inner_zig, smooth_node, names)
-
-        # When inner_name is nil the capture is the generated __bc_inner which
-        # the fold expression may not reference (e.g. ALL $u.discount > 0.0).
-        # Detect actual usage by emitting the body to text and scanning for the
-        # capture name, then suppress only if unused to avoid Zig errors.
-        unless inner_name
-          body_text = loop_body.map { |s| @emitter.emit(s).to_s }.join
-          unless body_text.include?(inner_zig)
-            # Structural unused-capture suppression: MIR::Suppress emits
-            # `_ = &name;` which silences Zig's unused-capture error and
-            # is a no-op the VM skips entirely.
-            loop_body = [MIR::Suppress.new(inner_zig), *loop_body]
-          end
-        end
-
-        inner_loop = MIR::ForStmt.new(
-          MIR::ItemsAccess.new(MIR::Ident.new(names[:unn]), true),
-          inner_zig, loop_body, nil)
-
-        outer_loop = MIR::ForStmt.new(
-          MIR::ItemsAccess.new(MIR::Ident.new(names[:src]), true),
-          outer_zig,
-          [
-            MIR::Let.new(names[:unn], unnest_mir, false, nil, nil),
-            inner_loop,
-            *post_inner
-          ],
-          nil)
-
-        MIR::BlockExpr.new(label, [
-          MIR::Let.new(names[:src], source_mir, false, nil, nil),
-          *acc_init,
-          outer_loop,
-          MIR::BreakStmt.new(label, result_expr)
-        ])
-      end
-
-      if inner_name
-        with_named_binding(inner_name, inner_zig) { inner_block.call }
-      else
-        inner_block.call
-      end
-    end
-  end
-
-  # Build accumulator init stmts, per-element body stmts, optional post-inner-loop
-  # stmts, and result expr for a fold op inside a binding chain.
-  # Returns [init_stmts, loop_body_stmts, post_inner_stmts, result_expr].
-  # post_inner_stmts are placed in the OUTER loop after the inner for-loop.
-  # placeholder is the Zig inner loop var name. smooth_node is the outer SMOOTH node.
-  # names: hash of bc-suffixed binding names (acc, sum, cnt, val, result, found).
-  sig { params(fold: T.untyped, stages: T::Array[T.untyped], placeholder: String, smooth_node: T.nilable(AST::BinaryOp), names: T.nilable(T::Hash[Symbol, String])).returns(T.nilable(T::Array[T.untyped])) }
-  def lower_binding_fold(fold, stages, placeholder, smooth_node = nil, names = nil)
-    names ||= { acc: "__bc_acc", sum: "__bc_sum", cnt: "__bc_cnt",
-                val: "__bc_val", result: "__bc_result", found: "__bc_found" }
-    acc_n, sum_n, cnt_n, val_n, result_n, found_n =
-      names[:acc], names[:sum], names[:cnt], names[:val], names[:result], names[:found]
-    acc_n = T.must(acc_n)
-    sum_n = T.must(sum_n)
-    cnt_n = T.must(cnt_n)
-    val_n = T.must(val_n)
-    result_n = T.must(result_n)
-    found_n = T.must(found_n)
-    case fold
-    when AST::SumOp
-      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init   = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, Type.new("f64"), nil)]
-      accum  = [MIR::Set.new(MIR::Ident.new(acc_n),
-                  MIR::BinOp.new("+", MIR::Ident.new(acc_n), expr))]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::CountOp
-      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, Type.new("i64"), nil)]
-      accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new(acc_n),
-                 MIR::BinOp.new("+", MIR::Ident.new(acc_n), MIR::Lit.new("1")))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::AverageOp
-      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      # Use f64 for count to avoid @floatFromInt in the division.
-      init = [MIR::Let.new(sum_n, MIR::Lit.new("0"), true, Type.new("f64"), nil),
-              MIR::Let.new(cnt_n, MIR::Lit.new("0.0"), true, Type.new("f64"), nil)]
-      accum = [MIR::Set.new(MIR::Ident.new(sum_n),
-                 MIR::BinOp.new("+", MIR::Ident.new(sum_n), expr)),
-               MIR::Set.new(MIR::Ident.new(cnt_n),
-                 MIR::BinOp.new("+", MIR::Ident.new(cnt_n), MIR::Lit.new("1.0")))]
-      result = MIR::Conditional.new(
-        MIR::BinOp.new("==", MIR::Ident.new(cnt_n), MIR::Lit.new("0.0")),
-        MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
-        MIR::BinOp.new("/", MIR::Ident.new(sum_n), MIR::Ident.new(cnt_n)))
-      [init, bc_wrap_stages(stages, placeholder, accum), [], result]
-
-    when AST::MinOp
-      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n,
-                 MIR::TypeSentinel.new(:max, "f64"), true, Type.new("f64"), nil)]
-      accum = [MIR::Let.new(val_n, expr, false, nil, nil),
-               MIR::IfStmt.new(
-                 MIR::BinOp.new("<", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
-                 [MIR::Set.new(MIR::Ident.new(acc_n), MIR::Ident.new(val_n))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::MaxOp
-      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n,
-                 MIR::TypeSentinel.new(:min, "f64"), true, Type.new("f64"), nil)]
-      accum = [MIR::Let.new(val_n, expr, false, nil, nil),
-               MIR::IfStmt.new(
-                 MIR::BinOp.new(">", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
-                 [MIR::Set.new(MIR::Ident.new(acc_n), MIR::Ident.new(val_n))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::AnyOp
-      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n, MIR::Lit.new("false"), true, nil, nil)]
-      accum = [MIR::IfStmt.new(pred, [
-                 MIR::Set.new(MIR::Ident.new(acc_n), MIR::Lit.new("true")),
-                 MIR::BreakStmt.new(nil, nil)], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::AllOp
-      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new(acc_n, MIR::Lit.new("true"), true, nil, nil)]
-      accum = [MIR::IfStmt.new(MIR::UnaryOp.new("!", pred), [
-                 MIR::Set.new(MIR::Ident.new(acc_n), MIR::Lit.new("false")),
-                 MIR::BreakStmt.new(nil, nil)], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
-
-    when AST::FindOp
-      # Result type is ?InnerElemType; derive from smooth_node.full_type!.
-      result_ft = Type.new(T.must(smooth_node).full_type!)
-      find_zig  = result_ft.optional? ? transpile_type(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
-      pred = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init = [MIR::Let.new(result_n, MIR::Undef.new(nil), true, Type.new(find_zig), nil),
-              MIR::Let.new(found_n, MIR::Lit.new("false"), true, nil, nil)]
-      accum = [MIR::IfStmt.new(pred, [
-                 MIR::Set.new(MIR::Ident.new(result_n), MIR::Ident.new(placeholder)),
-                 MIR::Set.new(MIR::Ident.new(found_n), MIR::Lit.new("true")),
-                 MIR::BreakStmt.new(nil, nil)
-               ], nil)]
-      # After the inner loop, break the outer loop too so the first match wins.
-      post_inner = [MIR::IfStmt.new(MIR::Ident.new(found_n), [MIR::BreakStmt.new(nil, nil)], nil)]
-      result = MIR::Conditional.new(
-        MIR::Ident.new(found_n),
-        MIR::Cast.new(MIR::Ident.new(result_n), "?#{find_zig}", :as),
-        MIR::Lit.new("null"))
-      [init, bc_wrap_stages(stages, placeholder, accum), post_inner, result]
-
-    else
-      raise "lower_binding_fold: unsupported fold op #{fold.class}"
-    end
-  end
-
-  # Wrap accum_stmts with WHERE predicate guards from intermediate stages.
-  # Stages are applied innermost-first (each WHERE wraps the inner body).
-  sig { params(stages: T::Array[T.untyped], placeholder: String, accum_stmts: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
-  def bc_wrap_stages(stages, placeholder, accum_stmts)
-    body = accum_stmts
-    stages.reverse_each do |stage|
-      if stage.is_a?(AST::SelectOp)
-        raise "SELECT is not supported in AS $v binding chains. " \
-              "Use WHERE to filter or name the projection with AS $o before the fold."
-      end
-      next unless stage.is_a?(AST::WhereOp)
-      pred = with_pipeline_context(placeholder: placeholder) { visit_mir(stage.expression) }
-      body = [MIR::IfStmt.new(pred, body, nil)]
-    end
-    body
+    @binding_chain_lowerer.lower(chain, smooth_node)
   end
 
   # Lower a fold expression with integer→float coercion when the
@@ -1935,7 +1218,7 @@ class PipelineHost
   # runtime-backed InlineZig calls. Falling through here is now a migration bug.
   sig { params(site: PipelineHost::PipelineSite, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentResult) }
   def lower_concurrent(site, conc_op)
-    @concurrent_lowerer.lower(T.cast(site.options, AST::BinaryOp), conc_op)
+    @concurrent_lowerer.lower(site.options, conc_op)
   end
 
 end

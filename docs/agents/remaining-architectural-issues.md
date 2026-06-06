@@ -495,6 +495,59 @@ Likely follow-on records:
 - Decomplex and Espalier metrics should improve or remain flat for
   `PipelineHost`; any local increase must be explained.
 
+### PipelineHost Completion Checklist
+
+The WIP refactor deleted the legacy backend host/generator, moved MIR pipeline
+lowering to `src/mir/lower/pipeline`, and split materializer, range, each,
+batch-window, set-index, context, and concurrent lowerers. The remaining work is
+the rest of the same architectural issue, not a separate cleanup:
+
+- [x] **PipelinePlan dispatch record**: decode `AST::BinaryOp` pipeline shape
+  into a typed plan before dispatch. `PipelineHost#lower_pipeline` should stop
+  re-reading `lhs`, `rhs`, `lhs_type`, SOA/range/binding facts, and operation
+  class directly in a branch hub.
+- [x] **PipelineScalarLowerer**: move count/sum/average/min/max/any/all/find
+  materialized scalar terminals out of `PipelineHost`, with a typed services
+  object for expression lowering, block construction, labels, and type
+  translation.
+- [x] **PipelineListLowerer**: move materialized list/filter/transform
+  terminals (`WHERE`, `SELECT`, `LIMIT`, `TAKE_WHILE`, `SKIP`, `DISTINCT`,
+  `UNNEST`, `REDUCE`, `WINDOW`, `ORDER_BY`, `JOIN`, `TAP`) out of
+  `PipelineHost`, preserving ownership/cleanup behavior through typed
+  materializer services.
+- [x] **PipelineObservableLowerer**: move range-observable terminal scaffolding
+  and allocation/catch/publish helpers out of `PipelineHost`, so range and
+  set-index lowerers consume an explicit observable terminal plan instead of
+  host callbacks.
+- [x] **Binding-chain lowering plan**: replace `BindingUnnestChain` plus
+  `lower_binding_fold` hash/name plumbing with typed binding-chain fold records
+  that make outer binding, inner binding, stage wrapping, and bytecode wrapping
+  explicit.
+- [x] **Narrow final host API**: after the extractions, `PipelineHost` should
+  primarily own context stack, service construction, top-level plan dispatch,
+  and the narrow adapter to `MIRLowering`. Any remaining direct `@lowering`
+  call must be justified as an adapter operation.
+- [x] **Metric and coverage closure**: rerun Decomplex, SlopCop, and nil-kill
+  from the midpoint snapshot to final. Decomplex and SlopCop should move down
+  overall; nil-kill untyped slots must stay flat or decrease; 100% of
+  added/changed lines and roughly 80%+ changed branches must be covered.
+
+Status note: the observable terminal implementation is owned by
+`PipelineRangeLowerer`; the remaining `PipelineHost` observable methods are
+adapter shims for existing direct test/caller surface, not implementation
+owners.
+
+Closure note: final changed-line coverage is 669/669 (100.0%) and changed-branch
+coverage is 108/122 (88.5%). Decomplex total fell 15665 -> 15322, with the
+largest drops in inconsistent rename clones, neglected path conditions, broken
+protocols, and false simplicity. SlopCop dark arms fell 8276 -> 3287; the
+genuine-gap bucket is not directly comparable because the final report joined a
+larger coverage file set, but no pipeline refactor file appears in the top gap
+set. Nil-kill untyped slots stayed flat or fell: params 989 -> 981, returns
+229 -> 228, fields/ivars 1017 -> 1017, collections 0 -> 0. The nil-kill
+collection completed with the same expected failed workload stages as the
+midpoint snapshot: `integration-specs` and `examples-build`.
+
 ## P1 Design: Typed Capability/Guard Plan Records
 
 ### Why This Comes Second

@@ -527,6 +527,11 @@ RSpec.describe "pipeline backend coverage" do
       if node.respond_to?(:value)
         walk.call(node.value)
       end
+      [:condition, :cond, :left, :right, :target, :index, :iter].each do |field|
+        next unless node.respond_to?(field)
+        reader = node.method(field)
+        walk.call(reader.call) if reader.arity.zero?
+      end
       if node.respond_to?(:args) && node.args.is_a?(Array)
         node.args.each { |child| walk.call(child) }
       end
@@ -726,7 +731,7 @@ RSpec.describe "pipeline backend coverage" do
       list = id("items", type: Type.new(:"Int64[]"))
       range = typed(AST::RangeLit.new(tok, lit(0), lit(4), false), Type.new(:"~Int64[]"))
       bounded = id("bounded", type: Type.new(:"~Int64[4]"))
-      stream = id("events", type: Type.new(:"~Int64[]"))
+      stream = id("events", type: Type.new(:"~Int64[INF]"))
 
       shard = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
       typed(shard, Type.new(:Void))
@@ -991,7 +996,7 @@ RSpec.describe "pipeline backend coverage" do
       set_block = each_lowerer.lower(set, each_op)
       expect(collect_mir_nodes(set_block, MIR::WhileStmt).first.capture).to eq("__each_kptr")
 
-      stream = id("events", type: Type.new(:"~Int64[]"))
+      stream = id("events", type: Type.new(:"~Int64[INF]"))
       add_range_chain(each_host, stream, stages: [AST::WhereOp.new(tok, id("_"))])
       expect(each_lowerer.lower(stream, each_op).body.first.name).to eq("__range")
 
@@ -1392,12 +1397,192 @@ RSpec.describe "pipeline backend coverage" do
 
       result = pipeline_host.send(:unwrap_binding_unnest_chain, full_chain)
 
-      expect(result[:source]).to equal(source)
-      expect(result[:outer_binding]).to eq("$u")
-      expect(result[:unnest_expr]).to equal(unnest_expr)
-      expect(result[:stages]).to eq([where])
+      expect(result.source).to equal(source)
+      expect(result.outer_binding).to eq("$u")
+      expect(result.unnest_expr).to equal(unnest_expr)
+      expect(result.stages).to eq([where])
       expect(pipeline_host.send(:unwrap_binding_unnest_chain, malformed_chain)).to be_nil
       expect(pipeline_host.send(:unwrap_binding_unnest_chain, non_smooth_terminal)).to be_nil
+    end
+
+    it "exposes source shape predicates and binding-chain stage capture facts" do
+      shape = PipelineHost::PipelineSourceShape.new(
+        type: Type.new(:"~Int64[INF]"),
+        bc_target: true,
+        named_source: true,
+      )
+      expect(shape.infinite_stream?).to be true
+      expect(shape.bc_named_infinite_stream?).to be true
+
+      source = id("users", type: Type.new(:"User[]"))
+      chain = PipelineHost::BindingUnnestChain.new(
+        source: source,
+        outer_binding: "$u",
+        unnest_expr: id("orders", type: Type.new(:"Int64[]")),
+        inner_binding: nil,
+        stages: [AST::WhereOp.new(tok, id("_", type: Type.new(:Bool)))],
+        fold: AST::CountOp.new(tok, id("flag", type: Type.new(:Bool))),
+      )
+      lowerer = pipeline_host.instance_variable_get(:@binding_chain_lowerer)
+
+      expect(lowerer.send(:inner_capture_required?, chain)).to be true
+    end
+
+    it "keeps host service adapters and terminal wrappers narrow" do
+      list_services = pipeline_host.send(:build_list_services)
+      expect(list_services.owning_pipeline_temp_stmts.call(
+        "__owned",
+        MIR::Ident.new("source"),
+        Type.new(:String),
+        "[]u8",
+        :heap,
+      )).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::Let), a_kind_of(MIR::ErrCleanup))
+
+      binding_services = pipeline_host.send(:build_binding_chain_services)
+      reduced = binding_services.visit_mir_with_reduce_placeholders.call(
+        typed(AST::BinaryOp.new(tok, id("_"), :ADD, id("acc"))),
+        "__item",
+        "__acc",
+      )
+      expect(reduced).to be_a(MIR::Ident)
+
+      site = PipelineHost::PipelineSite.new(
+        list: id("items", type: Type.new(:"Int64[]")),
+        options: typed(AST::BinaryOp.new(tok, id("items", type: Type.new(:"Int64[]")), :SMOOTH, AST::CountOp.new(tok, id("_"))), Type.new(:Int64)),
+      )
+      block = MIR::BlockExpr.new("__delegated", [])
+      scalar_calls = []
+      scalar = Object.new
+      scalar.define_singleton_method(:lower) do |_site, op|
+        scalar_calls << op.class
+        block
+      end
+      pipeline_host.instance_variable_set(:@scalar_lowerer, scalar)
+
+      pipeline_host.send(:lower_sum, site, AST::SumOp.new(tok, id("_")))
+      pipeline_host.send(:lower_average, site, AST::AverageOp.new(tok, id("_")))
+      pipeline_host.send(:lower_min, site, AST::MinOp.new(tok, id("_")))
+      pipeline_host.send(:lower_max, site, AST::MaxOp.new(tok, id("_")))
+      pipeline_host.send(:lower_any, site, AST::AnyOp.new(tok, id("_", type: Type.new(:Bool))))
+      pipeline_host.send(:lower_all, site, AST::AllOp.new(tok, id("_", type: Type.new(:Bool))))
+      pipeline_host.send(:lower_find, site, AST::FindOp.new(tok, id("_", type: Type.new(:Bool))))
+      expect(scalar_calls).to eq([
+        AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+        AST::AnyOp, AST::AllOp, AST::FindOp,
+      ])
+
+      list_calls = []
+      list = Object.new
+      list.define_singleton_method(:lower_where_expr) { |_site, expr| list_calls << [:where, expr.class]; block }
+      list.define_singleton_method(:lower_select_expr) { |_site, expr| list_calls << [:select, expr.class]; block }
+      list.define_singleton_method(:lower_take_while_expr) { |_site, expr| list_calls << [:take, expr.class]; block }
+      list.define_singleton_method(:lower) { |_site, op| list_calls << [:terminal, op.class]; block }
+      pipeline_host.instance_variable_set(:@list_lowerer, list)
+
+      pipeline_host.send(:lower_where, site, id("_", type: Type.new(:Bool)))
+      pipeline_host.send(:lower_select, site, id("_"))
+      pipeline_host.send(:lower_limit, site, AST::LimitOp.new(tok, lit(2)))
+      pipeline_host.send(:lower_take_while, site, id("_", type: Type.new(:Bool)))
+      pipeline_host.send(:lower_skip, site, AST::SkipOp.new(tok, lit(1)))
+      pipeline_host.send(:lower_unnest, site, typed(AST::UnnestOp.new(tok, id("_")), Type.new(:"Int64[]")))
+      pipeline_host.send(:lower_reduce, site, typed(AST::ReduceOp.new(tok, lit(0), id("_")), Type.new(:Int64)))
+      pipeline_host.send(:lower_window, site, typed(AST::WindowOp.new(tok, lit(2), id("_")), Type.new(:"Int64[]")))
+      pipeline_host.send(:lower_order_by, site, AST::OrderByOp.new(tok, id("_")))
+      pipeline_host.send(:lower_join, site, AST::JoinOp.new(tok, id("other", type: Type.new(:"Int64[]")), id("_")))
+      pipeline_host.send(:lower_tap, site, AST::TapOp.new(tok, []))
+      expect(list_calls.map(&:first)).to eq([
+        :where, :select, :terminal, :take, :terminal, :terminal,
+        :terminal, :terminal, :terminal, :terminal, :terminal,
+      ])
+
+      sharded_calls = []
+      concurrent = Object.new
+      concurrent.define_singleton_method(:lower_sharded_each) do |list_node, each_op|
+        sharded_calls << [list_node, each_op]
+        MIR::ScopeBlock.new([])
+      end
+      pipeline_host.instance_variable_set(:@concurrent_lowerer, concurrent)
+      each = AST::EachOp.new(tok, [])
+      expect(pipeline_host.send(:lower_sharded_each, site.list, each)).to be_a(MIR::ScopeBlock)
+      expect(sharded_calls).to eq([[site.list, each]])
+    end
+
+    it "lowers uncovered materialized list terminal shapes through typed services" do
+      labels = []
+      services = PipelineListServices.new(
+        visit_mir: ->(node) {
+          case node
+          when AST::Literal then MIR::Lit.new(node.value.to_s)
+          when AST::Identifier then MIR::Ident.new(node.name.to_s)
+          else MIR::Ident.new("expr")
+          end
+        },
+        visit_expr: ->(_list_node, _expr_node, placeholder) { MIR::Ident.new(placeholder) },
+        visit_reduce_expr: ->(_expr_node, item_placeholder, acc_placeholder) {
+          MIR::BinOp.new("+", MIR::Ident.new(item_placeholder), MIR::Ident.new(acc_placeholder))
+        },
+        visit_body: ->(_body_stmts, placeholder) { [MIR::Suppress.new(placeholder)] },
+        visit_join_lambda: ->(_body, _join_params) { MIR::Lit.new("true") },
+        pipeline_block: ->(_list_node, blk) {
+          label = "__list#{labels.length + 1}"
+          labels << label
+          MIR::BlockExpr.new(label, blk.call("pipe_items", label))
+        },
+        transpile_type: ->(type_info) { type_info.to_s.include?("Int64") ? "i64" : type_info.to_s },
+        pipeline_alloc: ->(_smooth_node) { :heap },
+        pipeline_result_alloc: -> { :heap },
+        source_shape: ->(source_node) {
+          PipelineHost::PipelineSourceShape.new(
+            type: source_node.full_type!,
+            bc_target: true,
+            named_source: source_node.is_a?(AST::Identifier),
+          )
+        },
+        next_label: -> {
+          label = "__direct#{labels.length + 1}"
+          labels << label
+          label
+        },
+        set_current_label: ->(label) { labels << "current:#{label}" },
+        append_owned_value_stmt: ->(receiver, _alloc, value_expr) {
+          MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(receiver), "append", [value_expr], false,
+            MIR::CallableContract.no_ownership(1)), nil)
+        },
+        borrowed_pipeline_value: ->(value, _type_info, _alloc) { value },
+        cleanup_bearing_type: ->(_type_info) { true },
+        owning_pipeline_temp_stmts: ->(name, source, type_info, _zig_type, _alloc) {
+          [MIR::Let.new(name, source, false, type_info, nil)]
+        },
+      )
+      lowerer = PipelineListLowerer.new(services: services)
+      items = id("items", type: Type.new(:"Int64[]"))
+
+      where_site = PipelineHost::PipelineSite.new(
+        list: items,
+        options: typed(AST::BinaryOp.new(tok, items, :SMOOTH, AST::WhereOp.new(tok, id("_"))), Type.new(:"Int64[]")),
+      )
+      expect(lowerer.lower_where_expr(where_site, id("_", type: Type.new(:Bool)))).to be_a(MIR::BlockExpr)
+      expect(lowerer.lower_select_expr(where_site, id("_"))).to be_a(MIR::BlockExpr)
+      expect(lowerer.lower_take_while_expr(where_site, id("_", type: Type.new(:Bool)))).to be_a(MIR::BlockExpr)
+
+      stream = id("events", type: Type.new(:"~Int64[INF]"))
+      limit = AST::LimitOp.new(tok, lit(2))
+      limit_site = PipelineHost::PipelineSite.new(
+        list: stream,
+        options: typed(AST::BinaryOp.new(tok, stream, :SMOOTH, limit), Type.new(:"Int64[]")),
+      )
+      limit_block = lowerer.lower(limit_site, limit)
+      expect(limit_block.body.grep(MIR::Let).map(&:name)).to include("__lim_src", "__lim_res")
+
+      unnest = typed(AST::UnnestOp.new(tok, id("_", type: Type.new(:"Int64[]"))), Type.new(:"Int64[]"))
+      unnest_block = lowerer.lower(where_site, unnest)
+      expect(collect_mir_nodes(unnest_block, MIR::ForStmt).length).to be >= 2
+
+      join = AST::JoinOp.new(tok, id("other", type: Type.new(:"Int64[]")), id("key"))
+      join_block = lowerer.lower(where_site, join)
+      expect(collect_mir_nodes(join_block, MIR::ErrCleanup)).not_to be_empty
+      expect(collect_mir_nodes(join_block, MIR::TransferMark).map(&:name)).to include("__jl_owned", "__match")
+      expect(collect_mir_nodes(join_block, MIR::Call).map(&:callee)).to include("CheatLib.eql")
     end
 
     it "builds typed lazy range prefixes for finite stage chains" do
