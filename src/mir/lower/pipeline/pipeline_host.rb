@@ -6,6 +6,7 @@ require_relative "./pipeline_context"
 require_relative "./pipeline_records"
 require_relative "./pipeline_binding_chain_lowerer"
 require_relative "./pipeline_plan"
+require_relative "./pipeline_lowering_bridge"
 require_relative "../../../backends/zig_type_mapper"
 require_relative "./pipeline_materializer"
 require_relative "./pipeline_scalar_lowerer"
@@ -15,6 +16,7 @@ require_relative "./pipeline_concurrent_lowerer"
 require_relative "./pipeline_batch_window_lowerer"
 require_relative "./pipeline_set_index_lowerer"
 require_relative "./pipeline_each_lowerer"
+require_relative "./pipeline_placeholder_usage"
 require_relative "../../fiber_ctx_builder"
 require_relative "../../placement"
 
@@ -38,9 +40,8 @@ class PipelineHost
 
   sig { params(lowering: MIRLowering, emitter: MIREmitter).void }
   def initialize(lowering:, emitter:)
-    @lowering = T.let(lowering, MIRLowering)
-    @emitter = T.let(emitter, MIREmitter)
-    @fn_sigs = T.let(lowering.fn_sigs, MIRLoweringProgramState::FnSigMap)
+    @lowering_bridge = T.let(PipelineLoweringBridge.new(lowering: lowering, emitter: emitter), PipelineLoweringBridge)
+    @fn_sigs = T.let(@lowering_bridge.fn_sigs, MIRLoweringProgramState::FnSigMap)
     @pipeline_context = T.let(PipelineContextState.empty, PipelineContextState)
     @mir_mode = T.let(false, T::Boolean)
     @each_idx_counter = T.let(0, Integer)
@@ -67,7 +68,7 @@ class PipelineHost
   sig { returns(PipelinePlanServices) }
   def build_plan_services
     PipelinePlanServices.new(
-      lowering_target: -> { @lowering.lowering_target },
+      lowering_target: -> { @lowering_bridge.lowering_target },
       range_chain: ->(node) { unwrap_range_chain(node) },
       binding_chain: ->(node) { @binding_chain_lowerer.unwrap_chain(node) },
     )
@@ -212,7 +213,7 @@ class PipelineHost
       },
       cleanup_bearing_type: ->(type_info) { cleanup_bearing_type?(type_info) },
       pipeline_alloc_mark_fact: ->(value, name, fallback_alloc, ast_node, context, include_cleanup) {
-        fact = @lowering.pipeline_alloc_mark_fact(
+        fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value,
           name,
           fallback_alloc: fallback_alloc,
@@ -224,10 +225,10 @@ class PipelineHost
         fact ? PipelineIndexAllocationFact.new(alloc: fact.alloc, mark: fact.mark, cleanup_entry: fact.cleanup_entry) : nil
       },
       pipeline_owned_cleanup_entry: ->(value, ast_node) {
-        @lowering.pipeline_owned_cleanup_entry(value, ast_node)
+        @lowering_bridge.pipeline_owned_cleanup_entry(value, ast_node)
       },
       pipeline_index_insert_with_ownership: ->(insert, value, value_owns, target_alloc) {
-        @lowering.pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc: target_alloc)
+        @lowering_bridge.pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc: target_alloc)
       },
       index_temp_name: -> { "__idx_item_#{@pipe_temp_counter + 1}" },
     )
@@ -268,10 +269,10 @@ class PipelineHost
       schema_lookup: -> { pipeline_schema_lookup },
       runtime_name: -> { @do_rt_name || "rt" },
       next_observable_id: -> {
-        @lowering.next_pipeline_observable_id
+        @lowering_bridge.next_pipeline_observable_id
       },
       emit_observable_body: ->(body_mir, fiber_rt) { emit_observable_body_with_rt(body_mir, fiber_rt) },
-      task_config_zig: -> { @lowering.task_config_zig(nil, nil) },
+      task_config_zig: -> { @lowering_bridge.default_task_config_zig },
     )
   end
 
@@ -289,12 +290,12 @@ class PipelineHost
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
       },
       lower_head_with_placeholder: ->(node, placeholder) {
-        value, pending = @lowering.lower_head {
+        head = @lowering_bridge.lower_head {
           with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
         }
         PipelineConcurrentHeadResult.new(
-          value: T.cast(value, MIR::Node),
-          pending: pending,
+          value: head.value,
+          pending: head.pending,
         )
       },
       callback_expr_mir: ->(expr, placeholder, capture_map, capture_symbols, rt_override) {
@@ -312,7 +313,7 @@ class PipelineHost
         }
       },
       pipeline_alloc_mark_fact: ->(value, name, fallback_alloc, type_info, ast_node, accept_owned_call, include_cleanup) {
-        fact = @lowering.pipeline_alloc_mark_fact(
+        fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value,
           name,
           fallback_alloc: fallback_alloc,
@@ -324,7 +325,7 @@ class PipelineHost
         fact ? PipelineConcurrentAllocationFact.new(alloc: fact.alloc, mark: fact.mark, cleanup_entry: fact.cleanup_entry) : nil
       },
       append_ownership_transfers: ->(body) {
-        @lowering.append_ownership_transfers_for_mir_body(body)
+        @lowering_bridge.append_ownership_transfers_for_mir_body(body)
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -336,23 +337,23 @@ class PipelineHost
         concurrent_source_setup(lhs)
       },
       emit_builtin: ->(name, args) {
-        @lowering.emit_builtin(name, args)
+        @lowering_bridge.emit_builtin(name, args)
       },
       emit_expr: ->(node) {
-        T.must(@lowering.emit_expr(node))
+        T.must(@lowering_bridge.emit_expr(node))
       },
       lower_mir: ->(node) {
-        T.cast(@lowering.lower(node), MIR::Node)
+        @lowering_bridge.lower_node(node)
       },
       next_label: -> { next_pipe_label },
       typed_block_expr: ->(label, body, result_type) {
         typed_block_expr(label, T.cast(body, T::Array[MIR::Node]), result_type)
       },
       task_config_variant: ->(size_name) {
-        @lowering.task_config_variant(size_name, nil)
+        @lowering_bridge.task_config_variant(size_name)
       },
       guarded_cleanup_name: ->(name) {
-        @lowering.pipeline_guarded_cleanup_name?(name)
+        @lowering_bridge.guarded_cleanup_name?(name)
       },
       do_rt_name: -> { @do_rt_name || "rt" },
       agg_min_sentinel_mir: ->(zig_type) { agg_min_sentinel_mir(zig_type) },
@@ -389,17 +390,17 @@ class PipelineHost
 
   sig { params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String) }
   def emit_observable_body_with_rt(body_mir, fiber_rt)
-    saved_emit_rt = @emitter.rt_name
-    @emitter.rt_name = fiber_rt
-    @lowering.with_runtime_binding_name(fiber_rt) do
+    saved_emit_rt = @lowering_bridge.emitter_rt_name
+    @lowering_bridge.emitter_rt_name = fiber_rt
+    @lowering_bridge.with_runtime_binding_name(fiber_rt) do
       body_mir.filter_map { |stmt|
-        code = @lowering.emit_expr(stmt)
+        code = @lowering_bridge.emit_expr(stmt)
         next nil if code.nil? || code.empty?
         code.strip.end_with?("}", ";") ? code : "#{code};"
       }.join("\n            ")
     end
   ensure
-    @emitter.rt_name = T.must(saved_emit_rt)
+    @lowering_bridge.emitter_rt_name = T.must(saved_emit_rt)
   end
 
   sig { returns(PipelineMaterializer::RuntimeHost) }
@@ -407,7 +408,7 @@ class PipelineHost
     PipelineMaterializer::RuntimeHost.new(
       visit_mir: ->(node) { visit_mir(node) },
       alloc_mark_fact: ->(value, name, fallback_alloc, type_info, ast_node, context, known_allocating) {
-        fact = @lowering.pipeline_alloc_mark_fact(
+        fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value,
           name,
           fallback_alloc: fallback_alloc,
@@ -418,9 +419,9 @@ class PipelineHost
         )
         fact ? PipelineMaterializer::AllocationFact.new(alloc: fact.alloc, mark: fact.mark) : nil
       },
-      result_alloc: -> { @lowering.pipeline_result_alloc },
+      result_alloc: -> { @lowering_bridge.pipeline_result_alloc },
       bc_target: -> { bc_target? },
-      schema_lookup: -> { @lowering.mir_schema_lookup },
+      schema_lookup: -> { @lowering_bridge.mir_schema_lookup },
       next_label: -> { next_pipe_label },
       set_current_label: ->(label) { @current_pipe_label = label },
       next_item_temp_name: -> {
@@ -528,7 +529,7 @@ class PipelineHost
       .returns(T.type_parameter(:U))
   end
   def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
-    @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
+    @lowering_bridge.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 
   sig { params(label: String, body: T::Array[MIR::Node], result_type: Type).returns(MIR::BlockExpr) }
@@ -547,20 +548,9 @@ class PipelineHost
 
     context = current_context
 
-    # Placeholder: _ inside pipeline expression -> loop variable name
-    if node.is_a?(AST::Identifier) && node.name == "_" && context.placeholder_name
-      return T.must(context.placeholder_name)
-    end
-
-    # Join param map: lambda param names -> Zig loop variables
-    join_param_map = context.join_param_map
-    if node.is_a?(AST::Identifier) && join_param_map && join_param_map[node.name]
-      return join_param_map.fetch(node.name)
-    end
-
-    # Named pipeline binding: $u -> registered Zig var (e.g. "__pipe_u")
-    if node.is_a?(AST::Identifier) && !context.named_bindings.empty? && context.named_bindings.key?(node.name)
-      return context.named_bindings.fetch(node.name)
+    if node.is_a?(AST::Identifier)
+      replacement = context.replacement_for_identifier(node.name)
+      return replacement if replacement
     end
 
     # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
@@ -580,11 +570,6 @@ class PipelineHost
       return "__soa_#{field}[__soa_i] = #{value};"
     end
 
-    # Accumulator placeholder
-    if node.is_a?(AST::Identifier) && node.name == "acc" && context.acc_placeholder
-      return T.must(context.acc_placeholder)
-    end
-
     # Before sending to MIRLowering, substitute _ placeholders and join
     # params in the AST tree. MIRLowering's lower() recurses on its own,
     # so it won't call back to us for sub-expressions.
@@ -592,8 +577,8 @@ class PipelineHost
 
     # Propagate shard-direct context so MIRLowering emits putDirect/getDirect
     # General case: lower to MIR, emit to Zig
-    mir_node = @lowering.lower(substituted)
-    T.must(@emitter.emit(mir_node))
+    mir_node = @lowering_bridge.lower_node(substituted)
+    T.must(@lowering_bridge.emit_mir(mir_node))
   end
 
   # MIR-mode visit: returns MIR node instead of Zig string.
@@ -601,7 +586,7 @@ class PipelineHost
   sig { params(node: AST::Node).returns(MIR::Node) }
   def visit_mir(node)
     substituted = substitute_placeholders(node)
-    T.cast(@lowering.lower(substituted), MIR::Node)
+    @lowering_bridge.lower_node(substituted)
   end
 
   # Lower an array of AST body statements to MIR nodes, with pipeline
@@ -611,7 +596,7 @@ class PipelineHost
   def visit_pipeline_body_mir(body_stmts, placeholder:)
     with_pipeline_context(placeholder: placeholder) do
       substituted = body_stmts.map { |stmt| substitute_placeholders(stmt) }
-      @lowering.lower_body(substituted)
+      @lowering_bridge.lower_body(substituted)
     end
   end
 
@@ -621,26 +606,12 @@ class PipelineHost
   # Used to decide whether to use `|__each_item|` vs `|_|` in while captures.
   sig { params(stmts: T::Array[AST::Node]).returns(T::Boolean) }
   def ast_stmts_use_placeholder?(stmts)
-    stmts.any? { |s| ast_node_uses_placeholder?(s) }
+    PipelinePlaceholderUsage.statements_use_placeholder?(stmts)
   end
 
   sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
   def ast_node_uses_placeholder?(node)
-    return false unless node
-    return false if AST.scalar_literal_value?(T.cast(node, Object))
-    return node.name == "_" if node.is_a?(AST::Identifier)
-    # Traverse known child fields that may contain sub-expressions/statements
-    [:left, :right, :value, :args, :object, :target, :index, :condition,
-     :then_branch, :else_branch, :do_branch, :body, :start, :finish].each do |field|
-      next unless node.respond_to?(field)
-      child = node.public_send(field)
-      case child
-      when Array  then return true if child.any? { |c| ast_node_uses_placeholder?(c) }
-      when NilClass, String, Symbol, Numeric, TrueClass, FalseClass, Hash then next
-      else return true if ast_node_uses_placeholder?(child)
-      end
-    end
-    false
+    PipelinePlaceholderUsage.node_uses_placeholder?(node)
   end
 
   # Recursively replace AST::Identifier("_") with the current placeholder name,
@@ -663,33 +634,37 @@ class PipelineHost
     lower_dispatch_plan(plan)
   end
 
-  sig { params(plan: PipelineDispatchPlan).returns(PipelineLoweringResult) }
+  sig { params(plan: PipelineOperationPlan).returns(PipelineLoweringResult) }
   def lower_dispatch_plan(plan)
-    route = plan.route
-    case route
-    when PipelineRoute::SoaScalarFold
+    lower_execution_plan(plan.execution, plan)
+  end
+
+  sig { params(execution: PipelineExecutionKind, plan: PipelineOperationPlan).returns(PipelineLoweringResult) }
+  def lower_execution_plan(execution, plan)
+    case execution
+    when PipelineExecutionKind::SoaScalarFold
       lower_soa_scalar_fold(plan.site, T.cast(plan.rhs, PipelineMaterializedScalarOp))
-    when PipelineRoute::RangeFold
-      range_chain = T.must(plan.range_chain)
+    when PipelineExecutionKind::FusedRangeFold
+      range_chain = T.must(plan.source.range_chain)
       lower_range_fold(range_chain.source, range_chain.stages, T.cast(plan.rhs, DefaultObservableFoldOp), plan.site.options)
-    when PipelineRoute::RangeReduce
-      range_chain = T.must(plan.range_chain)
+    when PipelineExecutionKind::FusedRangeReduce
+      range_chain = T.must(plan.source.range_chain)
       lower_range_reduce(range_chain.source, range_chain.stages, T.cast(plan.rhs, AST::ReduceOp), plan.site.options)
-    when PipelineRoute::BindingChain
-      lower_binding_chain(T.must(plan.binding_chain), plan.site.options)
-    when PipelineRoute::ScalarTerminal
+    when PipelineExecutionKind::BindingChain
+      lower_binding_chain(T.must(plan.source.binding_chain), plan.site.options)
+    when PipelineExecutionKind::MaterializedScalar
       @scalar_lowerer.lower(plan.site, T.cast(plan.rhs, PipelineMaterializedScalarOp))
-    when PipelineRoute::ListTerminal
+    when PipelineExecutionKind::MaterializedList
       @list_lowerer.lower(plan.site, T.cast(plan.rhs, PipelineListTerminalOp))
-    when PipelineRoute::Distinct
+    when PipelineExecutionKind::SetDistinct
       lower_distinct(plan.site, T.cast(plan.rhs, AST::DistinctOp))
-    when PipelineRoute::BatchWindow
+    when PipelineExecutionKind::BatchWindow
       lower_batch_window(plan.site, T.cast(plan.rhs, AST::BatchWindowOp))
-    when PipelineRoute::Index
+    when PipelineExecutionKind::SetIndex
       lower_index(plan.site, T.cast(T.cast(plan.rhs, AST::IndexOp).expression, AST::Node))
-    when PipelineRoute::Each
+    when PipelineExecutionKind::Each
       lower_each(plan.site, T.cast(plan.rhs, AST::EachOp))
-    when PipelineRoute::Concurrent
+    when PipelineExecutionKind::Concurrent
       lower_concurrent(plan.site, T.cast(plan.rhs, AST::ConcurrentOp))
     end
   end
@@ -709,7 +684,7 @@ class PipelineHost
     @materializer.result_alloc
   end
 
-  sig { returns(T.nilable(Proc)) }
+  sig { returns(MIRLoweringSchemas::SchemaLookup) }
   def pipeline_schema_lookup
     @materializer.schema_lookup
   end
@@ -749,28 +724,7 @@ class PipelineHost
 
   sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
   def ast_uses_bare_placeholder?(node)
-    return false unless node
-    return false if node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
-                    node.is_a?(TrueClass) || node.is_a?(FalseClass)
-    return node.name == "_" if node.is_a?(AST::Identifier)
-    if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-      return false
-    end
-
-    [:left, :right, :value, :args, :object, :target, :index, :condition,
-     :then_branch, :else_branch, :do_branch, :body, :start, :finish].each do |field|
-      next unless node.respond_to?(field)
-      child = node.public_send(field)
-      case child
-      when Array
-        return true if child.any? { |c| ast_uses_bare_placeholder?(c) }
-      when NilClass, String, Symbol, Numeric, TrueClass, FalseClass, Hash
-        next
-      else
-        return true if ast_uses_bare_placeholder?(child)
-      end
-    end
-    false
+    PipelinePlaceholderUsage.node_uses_bare_placeholder?(node)
   end
 
   sig { params(site: PipelineHost::PipelineSite, fold_node: PipelineMaterializedScalarOp).returns(MIR::BlockExpr) }
@@ -1109,7 +1063,7 @@ class PipelineHost
 
   sig { returns(T::Boolean) }
   def bc_target?
-    @lowering.bc_target?
+    @lowering_bridge.bc_target?
   end
 
   sig { params(source_node: AST::Node).returns(PipelineHost::PipelineSourceShape) }

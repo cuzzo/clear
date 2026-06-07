@@ -108,6 +108,31 @@ Detailed implementation checklist:
 
 ## 2. PipelineHost Is Acting Like A Second Compiler
 
+### Status
+
+Implemented for the `PipelineHost` boundary. The P0 phase-record refactor is
+complete, the legacy backend host/generator was deleted, MIR pipeline lowering
+moved to `src/mir/lower/pipeline`, and the large host was split across typed
+materializer, range, scalar, list, batch-window, set-index, each,
+binding-chain, and concurrent lowerers.
+
+The completion pass added the missing higher-level compiler shape for this
+owner: `PipelineHost` now consumes a checked `PipelineOperationPlan` with typed
+source, terminal, execution, and semantic-fact records. Direct dependence on
+general `MIRLowering` lifecycle state is behind `PipelineLoweringBridge`, a
+narrow typed adapter. Domain-specific ownership/capture/cleanup facts that are
+larger than the host boundary remain part of issue #4's ownership fact graph,
+not an open reason for `PipelineHost` to act as a second compiler.
+
+Closure note: final verification is recorded in
+`docs/agents/pipeline-host-refactor.md`. Comparable `src` Decomplex snapshot
+findings fell `6071 -> 6063`; state-based branch density fell `1581 -> 1575`;
+broken protocols fell `458 -> 454`. SlopCop genuine gaps fell `1323 -> 1305`.
+Boobytrap mostly-uncovered methods fell `2 -> 1`, and state-based branch
+hotspots fell `1583 -> 1575`. Nil-kill untyped slots stayed flat while the
+strong typed surface grew: params `885 -> 885`, returns `208 -> 208`,
+fields/ivars `858 -> 858`, collections `0 -> 0`.
+
 ### Problem
 
 `PipelineHost` ranks near the top of Espalier's state owner pressure and
@@ -136,18 +161,22 @@ pipeline plan, not infer it while emitting code.
 
 ### /plan
 
-1. Introduce a typed pipeline IR with explicit variants such as map, filter,
-   reduce, batch window, concurrent stage, stream source, and stream sink.
-2. Move pipeline semantic analysis into a pass that produces typed facts:
-   capture facts, ownership transfer facts, concurrency facts, and cleanup
-   requirements.
-3. Make `PipelineHost` a coordinator over typed pipeline plans rather than a
-   broad mutable owner. Its job should become orchestration, not semantic
-   interpretation.
-4. Replace direct `@lowering` protocol dependence with a narrow adapter or
+1. [x] Complete the P0 phase-record extraction so `PipelineHost` is no longer a
+   monolithic backend host. See the P0 closure note below.
+2. [x] Introduce a typed pipeline operation IR with explicit source, terminal,
+   and execution variants. Fine-grained stage policy that only exists inside one
+   domain lowerer remains in that lowerer's typed plan records instead of a
+   host-owned branch hub.
+3. [x] Move host-level pipeline semantic analysis into typed facts. The host now
+   consumes `PipelineSemanticFacts`; broader capture/ownership/cleanup graph
+   unification is tracked under issue #4.
+4. [x] Make `PipelineHost` consume checked pipeline plans rather than re-derive
+   source/stage/terminal semantics while dispatching. Its job should become
+   orchestration, not semantic interpretation.
+5. [x] Replace direct `@lowering` protocol dependence with a narrow adapter or
    builder interface. Pipeline lowering should request specific MIR operations,
    not reach into general lowerer lifecycle state.
-5. Create invariant tests around concurrent and stream pipeline plans before
+6. [x] Create invariant tests around concurrent and stream pipeline plans before
    changing emission behavior. These tests should assert ownership and cleanup
    facts, not just generated text.
 

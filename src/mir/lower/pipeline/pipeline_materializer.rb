@@ -6,6 +6,7 @@ require "sorbet-runtime"
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
 require_relative "../../cleanup_entry"
+require_relative "../../lowering/schema_registry"
 require_relative "../../mir"
 require_relative "../../placement"
 
@@ -71,7 +72,7 @@ class PipelineMaterializer
     sig { abstract.returns(T::Boolean) }
     def materializer_bc_target?; end
 
-    sig { abstract.returns(T.nilable(Proc)) }
+    sig { abstract.returns(MIRLoweringSchemas::SchemaLookup) }
     def materializer_schema_lookup; end
 
     sig { abstract.returns(String) }
@@ -107,7 +108,7 @@ class PipelineMaterializer
         alloc_mark_fact: PipelineMaterializer::AllocationFactResolver,
         result_alloc: T.proc.returns(Symbol),
         bc_target: T.proc.returns(T::Boolean),
-        schema_lookup: T.proc.returns(T.nilable(Proc)),
+        schema_lookup: T.proc.returns(MIRLoweringSchemas::SchemaLookup),
         next_label: T.proc.returns(String),
         set_current_label: T.proc.params(label: String).void,
         next_item_temp_name: T.proc.returns(String),
@@ -120,7 +121,7 @@ class PipelineMaterializer
       @alloc_mark_fact = T.let(alloc_mark_fact, PipelineMaterializer::AllocationFactResolver)
       @result_alloc = T.let(result_alloc, T.proc.returns(Symbol))
       @bc_target = T.let(bc_target, T.proc.returns(T::Boolean))
-      @schema_lookup = T.let(schema_lookup, T.proc.returns(T.nilable(Proc)))
+      @schema_lookup = T.let(schema_lookup, T.proc.returns(MIRLoweringSchemas::SchemaLookup))
       @next_label = T.let(next_label, T.proc.returns(String))
       @set_current_label = T.let(set_current_label, T.proc.params(label: String).void)
       @next_item_temp_name = T.let(next_item_temp_name, T.proc.returns(String))
@@ -160,7 +161,7 @@ class PipelineMaterializer
       @bc_target.call
     end
 
-    sig { override.returns(T.nilable(Proc)) }
+    sig { override.returns(MIRLoweringSchemas::SchemaLookup) }
     def materializer_schema_lookup
       @schema_lookup.call
     end
@@ -191,7 +192,7 @@ class PipelineMaterializer
     @host.materializer_result_alloc
   end
 
-  sig { returns(T.nilable(Proc)) }
+  sig { returns(MIRLoweringSchemas::SchemaLookup) }
   def schema_lookup
     @host.materializer_schema_lookup
   end

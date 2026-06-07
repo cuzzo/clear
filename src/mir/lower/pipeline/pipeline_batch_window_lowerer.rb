@@ -88,7 +88,11 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_plan(plan)
-    source_kind = plan.source_kind
+    lower_source_plan(plan.source_kind, plan)
+  end
+
+  sig { params(source_kind: PipelineBatchWindowSourceKind, plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
+  def lower_source_plan(source_kind, plan)
     case source_kind
     when PipelineBatchWindowSourceKind::BcInfiniteStream
       lower_bc_infinite_stream(plan)

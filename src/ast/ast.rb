@@ -1192,6 +1192,35 @@ module AST
 
   Node = T.type_alias { Locatable }
 
+  class PipelineShardContext < T::Struct
+    extend T::Sig
+
+    const :map_var, Node
+    const :key_expr, Node
+    const :shard_count, T.nilable(Integer), default: nil
+    const :auto_detected, T::Boolean, default: false
+    const :key_allocates_frame, T::Boolean, default: false
+    const :body_allocates_frame, T::Boolean, default: false
+
+    sig { params(key_allocates_frame: T::Boolean, body_allocates_frame: T::Boolean).returns(PipelineShardContext) }
+    def with_frame_allocations(key_allocates_frame:, body_allocates_frame:)
+      PipelineShardContext.new(
+        map_var: map_var,
+        key_expr: key_expr,
+        shard_count: shard_count,
+        auto_detected: auto_detected,
+        key_allocates_frame: key_allocates_frame,
+        body_allocates_frame: body_allocates_frame,
+      )
+    end
+  end
+
+  class PipelineShardedAccess < T::Struct
+    const :map_name, String
+    const :key_expr, Node
+    const :map_token, Lexer::Token
+  end
+
   class ErrorSelector < T::Struct
     const :form, Symbol
     const :name, Symbol
@@ -1896,7 +1925,7 @@ module AST
   # options: Hash of String => ASTNode  (e.g. {"pool_size" => Literal(8)})
   ConcurrentOp = Struct.new(:token, :op, :options) do
     include Locatable
-    attr_accessor :shard_context  # set by annotator: { map_var:, shard_count:, key_expr: }
+    attr_accessor :shard_context  # set by annotator as PipelineShardContext
     attr_accessor :capture_analysis
   end
   Placeholder  = Struct.new(:token) { include Locatable }

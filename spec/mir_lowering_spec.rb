@@ -1768,6 +1768,22 @@ RSpec.describe MIRLowering do
       expect(zig).not_to include("create(Node)")
       expect(zig).to include(".value = 1.0")
     end
+
+    it "lowers borrowed dynamic array fields as borrowed items access" do
+      source = make_id("items", full_type: Type.array_of(:Int64))
+      node = AST::StructLit.new(tok, "Window", { "items" => source }, nil, nil)
+      node.full_type = :Window
+      node.borrowed_field_names = Set["items"]
+
+      result = lowering(struct_schemas: {
+        Window: Schemas::StructSchema.new(fields: { "items" => Type.array_of(:Int64) }),
+      }).lower(node)
+
+      field_value = MIR.struct_init_field_value(result.fields.first)
+      expect(field_value).to be_a(MIR::ItemsAccess)
+      expect(field_value.expr).to eq(MIR::Ident.new("items"))
+      expect(field_value.safe).to eq(true)
+    end
   end
 
   describe "indirect aggregate field ownership" do

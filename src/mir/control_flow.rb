@@ -1577,17 +1577,18 @@ module LoopFrameAnalysis
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
-      ctx = node.shard_context
+      ctx = T.cast(node.shard_context, AST::PipelineShardContext)
 
       # key_allocates_frame: does the routing key expression allocate from frame?
-      key_expr = ctx[:key_expr]
-      ctx[:key_allocates_frame] = key_allocates_frame?(key_expr, fn_nodes) if key_expr
+      key_allocates_frame = key_allocates_frame?(ctx.key_expr, fn_nodes)
 
       # body_allocates_frame: does the EACH body contain local frame allocs?
       each_body = node.respond_to?(:op) && node.op.respond_to?(:body) ? node.op.body : nil
-      if each_body
-        ctx[:body_allocates_frame] = MIR::LocalBindingAnalysis.direct_loop_body_facts(each_body).frame_decls.any?
-      end
+      body_allocates_frame = each_body ? MIR::LocalBindingAnalysis.direct_loop_body_facts(each_body).frame_decls.any? : ctx.body_allocates_frame
+      node.shard_context = ctx.with_frame_allocations(
+        key_allocates_frame: key_allocates_frame,
+        body_allocates_frame: body_allocates_frame,
+      )
     end
   end
 

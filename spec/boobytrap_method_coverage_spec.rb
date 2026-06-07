@@ -277,7 +277,11 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.define_singleton_method(:sharded_unsynced_identifier?) { |node| node.equal?(shard_id) }
     expect(a.send(:pre_scan_node_for_sharded, [id("other"), shard_id])).to be(true)
 
-    access = { map_name: "items", key_expr: lit }
+    access = AST::PipelineShardedAccess.new(
+      map_name: "items",
+      key_expr: lit,
+      map_token: tok,
+    )
     a.define_singleton_method(:sharded_get_index_access) do |node, context:|
       context == "pipeline target" && node.equal?(shard_id) ? access : nil
     end

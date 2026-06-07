@@ -440,6 +440,10 @@ RSpec.describe "pipeline backend coverage" do
     node
   end
 
+  def empty_schema_lookup
+    ->(_name) { nil }
+  end
+
   def stamp_pipeline_fixture_metadata(node, coerced_type: nil, storage: nil,
                                       var_used: nil, slot_size: nil)
     node.instance_variable_set(:@coerced_type_object, Type.new(coerced_type)) if coerced_type
@@ -486,7 +490,7 @@ RSpec.describe "pipeline backend coverage" do
       },
       result_alloc: -> { result_alloc },
       bc_target: -> { bc_target },
-      schema_lookup: -> { nil },
+      schema_lookup: -> { empty_schema_lookup },
       next_label: -> {
         state.label_counter += 1
         "__mat#{state.label_counter}"
@@ -737,7 +741,11 @@ RSpec.describe "pipeline backend coverage" do
 
       shard = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
       typed(shard, Type.new(:Void))
-      shard.shard_context = { auto_detected: true, key_expr: id("_"), map_var: id("counts") }
+      shard.shard_context = AST::PipelineShardContext.new(
+        auto_detected: true,
+        key_expr: id("_"),
+        map_var: id("counts"),
+      )
       concurrent_lowerer.lower(concurrent_smooth(range, shard), shard)
       expect(concurrent_host.calls.last).to eq(:shard)
 
@@ -781,13 +789,63 @@ RSpec.describe "pipeline backend coverage" do
       expect(concurrent_host.calls[-1]).to eq(:list_where)
     end
 
+    it "builds typed concurrent plans for source, terminal, and semantic facts" do
+      list = id("items", type: Type.new(:"Int64[]", collection: :list))
+      range = typed(AST::RangeLit.new(tok, lit(0), lit(4), false), Type.new(:"~Int64[]"))
+      bounded = id("bounded", type: Type.new(:"~Int64[4]"))
+      stream = id("events", type: Type.new(:"~Int64[INF]"))
+
+      shard = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
+      typed(shard, Type.new(:Void))
+      shard.shard_context = AST::PipelineShardContext.new(
+        auto_detected: true,
+        key_expr: id("_"),
+        map_var: id("counts"),
+      )
+      shard_plan = concurrent_lowerer.send(:concurrent_plan, concurrent_smooth(range, shard), shard)
+      expect(shard_plan.source_kind).to eq(PipelineConcurrentSourceKind::ShardEach)
+      expect(shard_plan.terminal_kind).to eq(PipelineConcurrentTerminalKind::Each)
+      expect(shard_plan.shard_context).to be_a(AST::PipelineShardContext)
+
+      concurrent_host.bc_target = true
+      prune_expr = AST::BinaryOp.new(tok, id("_"), :OR_RESCUE, AST::OrPrune.new(tok))
+      bc = AST::ConcurrentOp.new(tok, AST::SelectOp.new(tok, prune_expr), {})
+      typed(bc, Type.new(:"Int64[]"))
+      bind = AST::BinaryOp.new(tok, list, :BIND_VAR, id("$u"))
+      bc_plan = concurrent_lowerer.send(:concurrent_plan, concurrent_smooth(bind, bc), bc)
+      expect(bc_plan.source_kind).to eq(PipelineConcurrentSourceKind::BcMaterialized)
+      expect(bc_plan.terminal_kind).to eq(PipelineConcurrentTerminalKind::Select)
+      expect(bc_plan.binding_name).to eq("$u")
+      expect(bc_plan.bc_expression.policy).to eq(:prune)
+      concurrent_host.bc_target = false
+
+      bounded_conc = AST::ConcurrentOp.new(tok, AST::WhereOp.new(tok, id("_")), {})
+      bounded_plan = concurrent_lowerer.send(:concurrent_plan, concurrent_smooth(bounded, bounded_conc), bounded_conc)
+      expect(bounded_plan.source_kind).to eq(PipelineConcurrentSourceKind::BoundedStream)
+      expect(bounded_plan.terminal_kind).to eq(PipelineConcurrentTerminalKind::Where)
+
+      stream_conc = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
+      stream_plan = concurrent_lowerer.send(:concurrent_plan, concurrent_smooth(stream, stream_conc), stream_conc)
+      expect(stream_plan.source_kind).to eq(PipelineConcurrentSourceKind::RuntimeStream)
+
+      mutating_each = AST::EachOp.new(tok, [AST::Assignment.new(tok, id("_"), lit(1))])
+      list_conc = AST::ConcurrentOp.new(tok, mutating_each, {})
+      list_plan = concurrent_lowerer.send(:concurrent_plan, concurrent_smooth(list, list_conc), list_conc)
+      expect(list_plan.source_kind).to eq(PipelineConcurrentSourceKind::RuntimeList)
+      expect(list_plan.list_each_mutates_placeholder).to be true
+    end
+
     it "raises explicit errors for unsupported concurrent shapes" do
       scalar = id("n", type: Type.new(:Int64))
       list = id("items", type: Type.new(:"Int64[]"))
+      stream = id("events", type: Type.new(:"~Int64[INF]"))
       reduce = AST::ReduceOp.new(tok, lit(0), id("_"))
 
       expect {
         concurrent_call(scalar, AST::SelectOp.new(tok, id("_")))
+      }.to raise_error(/unsupported non-legacy CONCURRENT shape/)
+      expect {
+        concurrent_call(stream, reduce)
       }.to raise_error(/unsupported non-legacy CONCURRENT shape/)
       expect {
         concurrent_call(list, reduce)
@@ -1049,6 +1107,103 @@ RSpec.describe "pipeline backend coverage" do
     end
   end
 
+  describe PipelinePlanBuilder do
+    def plan_builder(target:, range_chains:, binding_chains:)
+      PipelinePlanBuilder.new(
+        services: PipelinePlanServices.new(
+          lowering_target: -> { target },
+          range_chain: ->(node) { range_chains[node.object_id] },
+          binding_chain: ->(node) { binding_chains[node.object_id] },
+        ),
+      )
+    end
+
+    def smooth_pipeline(lhs, rhs, type = Type.new(:Int64))
+      typed(AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs), type)
+    end
+
+    def soa_list_type
+      type = Type.new(:"Int64[]", collection: :list)
+      type.mark_soa_layout!
+      type
+    end
+
+    it "builds checked source, terminal, execution, and semantic facts" do
+      target = :zig
+      range_chains = {}
+      binding_chains = {}
+      builder = plan_builder(target: target, range_chains: range_chains, binding_chains: binding_chains)
+
+      soa = id("soa_items", type: soa_list_type)
+      soa_count = AST::CountOp.new(tok, id("_", type: Type.new(:Bool)))
+      soa_plan = builder.build(smooth_pipeline(soa, soa_count))
+      expect(soa_plan.execution).to eq(PipelineExecutionKind::SoaScalarFold)
+      expect(soa_plan.source.kind).to eq(PipelineSourceKind::Soa)
+      expect(soa_plan.terminal.kind).to eq(PipelineTerminalKind::ScalarFold)
+      expect(soa_plan.facts.bc_target).to be false
+
+      bc_builder = plan_builder(target: :bc, range_chains: range_chains, binding_chains: binding_chains)
+      bc_plan = bc_builder.build(smooth_pipeline(soa, AST::CountOp.new(tok, id("_", type: Type.new(:Bool)))))
+      expect(bc_plan.execution).to eq(PipelineExecutionKind::MaterializedScalar)
+      expect(bc_plan.source.kind).to eq(PipelineSourceKind::Materialized)
+      expect(bc_plan.facts.bc_target).to be true
+
+      range = typed(AST::RangeLit.new(tok, lit(0), lit(4), false), Type.new(:"~Int64[]"))
+      range_chains[range.object_id] = PipelineRangeChain.new(source: range, stages: [AST::WhereOp.new(tok, id("_", type: Type.new(:Bool)))])
+      range_plan = builder.build(smooth_pipeline(range, AST::SumOp.new(tok, id("_"))))
+      expect(range_plan.execution).to eq(PipelineExecutionKind::FusedRangeFold)
+      expect(range_plan.source.range_chain.stages.length).to eq(1)
+      expect(range_plan.facts.range_fused).to be true
+
+      reduce_plan = builder.build(smooth_pipeline(range, AST::ReduceOp.new(tok, lit(0), id("_"))))
+      expect(reduce_plan.execution).to eq(PipelineExecutionKind::FusedRangeReduce)
+      expect(reduce_plan.terminal.kind).to eq(PipelineTerminalKind::RangeReduce)
+
+      list = id("items", type: Type.new(:"Int64[]", collection: :list))
+      binding_smooth = smooth_pipeline(list, AST::CountOp.new(tok, id("_", type: Type.new(:Bool))))
+      binding_chains[binding_smooth.object_id] = PipelineBindingUnnestChain.new(
+        source: list,
+        outer_binding: "$u",
+        unnest_expr: id("orders", type: Type.new(:"Int64[]")),
+        inner_binding: "$o",
+        stages: [],
+        fold: AST::CountOp.new(tok, id("_", type: Type.new(:Bool))),
+      )
+      binding_plan = builder.build(binding_smooth)
+      expect(binding_plan.execution).to eq(PipelineExecutionKind::BindingChain)
+      expect(binding_plan.source.binding_chain.outer_binding).to eq("$u")
+      expect(binding_plan.facts.binding_fused).to be true
+    end
+
+    it "maps every materialized terminal and rejects unsupported terminal execution" do
+      builder = plan_builder(target: :zig, range_chains: {}, binding_chains: {})
+      list = id("items", type: Type.new(:"Int64[]", collection: :list))
+
+      terminals = {
+        PipelineExecutionKind::MaterializedList => AST::WhereOp.new(tok, id("_", type: Type.new(:Bool))),
+        PipelineExecutionKind::SetDistinct => AST::DistinctOp.new(tok),
+        PipelineExecutionKind::BatchWindow => AST::BatchWindowOp.new(tok, { "count" => lit(2) }, id("_")),
+        PipelineExecutionKind::SetIndex => AST::IndexOp.new(tok, id("_")),
+        PipelineExecutionKind::Each => AST::EachOp.new(tok, []),
+        PipelineExecutionKind::Concurrent => AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {}),
+      }
+
+      terminals.each do |execution, terminal|
+        plan = builder.build(smooth_pipeline(list, terminal, Type.new(:"Int64[]")))
+        expect(plan.execution).to eq(execution)
+      end
+
+      each_plan = builder.build(smooth_pipeline(list, AST::EachOp.new(tok, [])))
+      expect(each_plan.facts.side_effecting).to be true
+      concurrent_plan = builder.build(smooth_pipeline(list, AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})))
+      expect(concurrent_plan.facts.concurrent).to be true
+      expect(builder.build(smooth_pipeline(list, id("not_a_terminal")))).to be_nil
+      expect {
+        builder.send(:execution_for, PipelineTerminalKind::RangeFold)
+      }.to raise_error(/unsupported pipeline terminal/)
+    end
+  end
+
   describe PipelineEachLowerer do
     let(:each_host) { PipelineEachCoverageHost.new }
     let(:each_lowerer) { described_class.new(services: each_host.services) }
@@ -1284,6 +1439,58 @@ RSpec.describe "pipeline backend coverage" do
 
     let(:pipeline_host) { PipelineHost.new(lowering: lowering, emitter: MIREmitter.new) }
 
+    it "routes MIRLowering protocol access through the typed bridge" do
+      bridge = pipeline_host.instance_variable_get(:@lowering_bridge)
+      lowering.function_state.current_decl_alloc = :heap
+
+      expect(bridge.fn_sigs).to eq(lowering.fn_sigs)
+      expect(bridge.lowering_target).to eq(:zig)
+      expect(bridge.bc_target?).to be false
+      lowering.instance_variable_set(:@target, :bc)
+      expect(bridge.bc_target?).to be true
+      expect(bridge.pipeline_result_alloc).to eq(:heap)
+      expect(bridge.mir_schema_lookup.call(:Missing)).to be_nil
+      expect(bridge.next_pipeline_observable_id).to eq(0)
+      expect(bridge.default_task_config_zig).to eq(".{}")
+      expect(bridge.task_config_variant(:large)).to eq("Large")
+      expect(bridge.guarded_cleanup_name?("__missing")).to be false
+
+      lowered = bridge.lower_node(id("x"))
+      expect(lowered).to eq(MIR::Ident.new("x"))
+      expect(bridge.lower_body([id("x")])).to eq([MIR::Ident.new("x")])
+      expect(bridge.emit_mir(MIR::Ident.new("x"))).to eq("x")
+      expect(bridge.emit_expr(MIR::Ident.new("x"))).to eq("x")
+      expect(bridge.emit_builtin(:testBuiltin, [MIR::Lit.new("1")])).to be_a(MIR::InlineZig)
+      expect(bridge.lower_head { MIR::Ident.new("head") }.value).to eq(MIR::Ident.new("head"))
+      expect(bridge.append_ownership_transfers_for_mir_body([MIR::Suppress.new("x")])).to eq([MIR::Suppress.new("x")])
+
+      lowering.define_singleton_method(:pipeline_alloc_mark_fact) do |_value, name, fallback_alloc:,
+          type_info: nil, ast_node: nil, context: "pipeline allocation", known_allocating: false,
+          accept_owned_call: false, include_cleanup: false|
+        MIRLowering::PipelineAllocMarkFact.new(
+          alloc: fallback_alloc,
+          mark: MIR::AllocMark.new(name, fallback_alloc, type_info || Type.new(:Int64), :heap),
+        )
+      end
+      fact = bridge.pipeline_alloc_mark_fact(
+        MIR::Ident.new("owned"),
+        "__owned",
+        fallback_alloc: :heap,
+        type_info: Type.new(:String),
+        ast_node: id("owned", type: Type.new(:String)),
+        known_allocating: true,
+      )
+      expect(fact.mark.name).to eq("__owned")
+      expect(bridge.pipeline_owned_cleanup_entry(MIR::Ident.new("x"), nil)).to be_nil
+      insert = MIR::IndexInsert.new(MIR::Ident.new("idx"), MIR::Ident.new("k"), MIR::Ident.new("v"))
+      expect(bridge.pipeline_index_insert_with_ownership(insert, MIR::Ident.new("v"), false, target_alloc: :heap)).to equal(insert)
+
+      expect(bridge.with_runtime_binding_name("__rt2") { lowering.runtime_binding_name }).to eq("__rt2")
+      expect(bridge.with_fiber_capture_map({}, capture_symbols: nil, rt_override: "__rt3") { :ok }).to eq(:ok)
+      bridge.emitter_rt_name = "__rt4"
+      expect(bridge.emitter_rt_name).to eq("__rt4")
+    end
+
     it "normalizes observable type names and rewrites body identifiers on token boundaries" do
       range_lowerer = pipeline_host.instance_variable_get(:@range_lowerer)
 
@@ -1306,7 +1513,8 @@ RSpec.describe "pipeline backend coverage" do
     it "adapts PipelineMaterializer services through the real host runtime adapter" do
       lowering.function_state.current_decl_alloc = :heap
       lowering.instance_variable_set(:@target, :bc)
-      lowering.define_singleton_method(:mir_schema_lookup) { nil }
+      lookup = empty_schema_lookup
+      lowering.define_singleton_method(:mir_schema_lookup) { lookup }
       lowering.define_singleton_method(:pipeline_alloc_mark_fact) do |_value, name, fallback_alloc:,
           type_info: nil, ast_node: nil, context: "pipeline allocation", known_allocating: false,
           accept_owned_call: false, include_cleanup: false|
@@ -1319,7 +1527,7 @@ RSpec.describe "pipeline backend coverage" do
       materializer = pipeline_host.instance_variable_get(:@materializer)
 
       expect(materializer.result_alloc).to eq(:heap)
-      expect(materializer.schema_lookup).to be_nil
+      expect(materializer.schema_lookup.call(:Missing)).to be_nil
 
       soa_pool_type = Type.new(:"Int64[8]", collection: :pool)
       soa_pool_type.mark_soa_layout!
@@ -1622,6 +1830,7 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(pipeline_host.send(:visit_pipeline_expr_mir, list, id("_"), "__item")).to be_a(MIR::Ident)
       expect(pipeline_host.send(:ast_uses_bare_placeholder?, AST::FuncCall.new(tok, "touch", [id("_")]))).to be true
+      expect(pipeline_host.send(:ast_uses_bare_placeholder?, AST::GetField.new(tok, id("_"), :x))).to be false
 
       range = typed(AST::RangeLit.new(tok, lit(0), lit(2), true), Type.new(:"~Int64[]"))
       expect(pipeline_host.send(:finite_stream_source_node?, range)).to be true
@@ -1765,7 +1974,8 @@ RSpec.describe "pipeline backend coverage" do
 
     it "threads typed lazy range prefixes through non-bytecode bounded stream consumers" do
       stub_pipeline_host_mir_visitors(pipeline_host)
-      lowering.define_singleton_method(:mir_schema_lookup) { nil }
+      lookup = empty_schema_lookup
+      lowering.define_singleton_method(:mir_schema_lookup) { lookup }
 
       stream = id("events", type: Type.new(:"~Int64[4]"))
       distinct = AST::DistinctOp.new(tok, id("_"))
@@ -1885,7 +2095,8 @@ RSpec.describe "pipeline backend coverage" do
     it "dispatches observable range folds through the typed terminal registry" do
       stub_pipeline_host_mir_visitors(pipeline_host)
       lowering.define_singleton_method(:emit_expr) { |node| MIREmitter.new.emit(node) }
-      lowering.define_singleton_method(:mir_schema_lookup) { nil }
+      lookup = empty_schema_lookup
+      lowering.define_singleton_method(:mir_schema_lookup) { lookup }
       stream = id("events", type: Type.new(:"~Int64[]"))
       count = AST::CountOp.new(tok, id("_"))
       smooth = typed(AST::BinaryOp.new(tok, stream, :SMOOTH, count), Type.new(:Int64))
@@ -1916,7 +2127,11 @@ RSpec.describe "pipeline backend coverage" do
       key_expr = id("_")
       map = id("counts")
       conc = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, [AST::FuncCall.new(tok, "touch", [id("_")])]), {})
-      conc.shard_context = { auto_detected: true, key_expr: key_expr, map_var: map }
+      conc.shard_context = AST::PipelineShardContext.new(
+        auto_detected: true,
+        key_expr: key_expr,
+        map_var: map,
+      )
 
       pipeline_host.define_singleton_method(:visit_mir) do |node|
         node.is_a?(AST::Literal) ? MIR::Lit.new(node.value) : MIR::Ident.new(node.name)
@@ -2011,7 +2226,8 @@ RSpec.describe "pipeline backend coverage" do
     it "threads typed lazy range prefixes through observable fold helpers" do
       stub_pipeline_host_mir_visitors(pipeline_host)
       lowering.define_singleton_method(:emit_expr) { |node| MIREmitter.new.emit(node) }
-      lowering.define_singleton_method(:mir_schema_lookup) { nil }
+      lookup = empty_schema_lookup
+      lowering.define_singleton_method(:mir_schema_lookup) { lookup }
       source = id("source", type: Type.new(:"~Int64[]"))
       prefix = lazy_range_prefix(source_name: "source", item_var: "__item")
       count = AST::CountOp.new(tok, id("_"))

@@ -15,6 +15,28 @@ class PipelineEachSoaBody < T::Struct
   const :fields, T::Array[String]
 end
 
+class PipelineEachSourceKind < T::Enum
+  enums do
+    Sharded = new("sharded")
+    Soa = new("soa")
+    Pool = new("pool")
+    RangeChain = new("range_chain")
+    List = new("list")
+    Set = new("set")
+    RangeLiteral = new("range_literal")
+    Unsupported = new("unsupported")
+  end
+end
+
+class PipelineEachPlan < T::Struct
+  const :source_kind, PipelineEachSourceKind
+  const :list_node, AST::Node
+  const :each_op, AST::EachOp
+  const :lhs_type, Type
+  const :range_chain, T.nilable(PipelineRangeChain)
+  const :bc_target, T::Boolean
+end
+
 class PipelineEachServices < T::Struct
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
@@ -37,25 +59,74 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachResult) }
   def lower(list_node, each_op)
-    lhs_type = list_node.full_type!
-
-    return @services.lower_sharded_each.call(list_node, each_op) if lhs_type.sharded? && !@services.bc_target.call
-    return lower_soa_each(list_node, lhs_type, each_op) if lhs_type.soa_linear_collection? && !@services.bc_target.call
-    return lower_pool_each(list_node, lhs_type, each_op) if lhs_type.pool?
-
-    range_chain = @services.range_chain.call(list_node)
-    if range_chain && !(@services.bc_target.call && list_node.is_a?(AST::RangeLit) && range_chain.stages.empty?)
-      return @services.lower_each_range.call(range_chain.source, range_chain.stages, each_op)
-    end
-
-    return lower_list_each(list_node, each_op) if lhs_type.list_collection? || lhs_type.fixed_soa?
-    return lower_set_each(list_node, each_op) if lhs_type.set_collection?
-    return lower_range_literal_each(list_node, each_op) if list_node.is_a?(AST::RangeLit)
-
-    nil
+    lower_plan(each_plan(list_node, each_op))
   end
 
   private
+
+  sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachPlan) }
+  def each_plan(list_node, each_op)
+    lhs_type = list_node.full_type!
+    bc_target = @services.bc_target.call
+    range_chain = @services.range_chain.call(list_node)
+
+    PipelineEachPlan.new(
+      source_kind: each_source_kind(list_node, lhs_type, range_chain, bc_target),
+      list_node: list_node,
+      each_op: each_op,
+      lhs_type: lhs_type,
+      range_chain: range_chain,
+      bc_target: bc_target,
+    )
+  end
+
+  sig { params(plan: PipelineEachPlan).returns(PipelineEachResult) }
+  def lower_plan(plan)
+    lower_source_plan(plan.source_kind, plan)
+  end
+
+  sig { params(source_kind: PipelineEachSourceKind, plan: PipelineEachPlan).returns(PipelineEachResult) }
+  def lower_source_plan(source_kind, plan)
+    case source_kind
+    when PipelineEachSourceKind::Sharded
+      @services.lower_sharded_each.call(plan.list_node, plan.each_op)
+    when PipelineEachSourceKind::Soa
+      lower_soa_each(plan.list_node, plan.lhs_type, plan.each_op)
+    when PipelineEachSourceKind::Pool
+      lower_pool_each(plan.list_node, plan.lhs_type, plan.each_op, bc_target: plan.bc_target)
+    when PipelineEachSourceKind::RangeChain
+      chain = T.must(plan.range_chain)
+      @services.lower_each_range.call(chain.source, chain.stages, plan.each_op)
+    when PipelineEachSourceKind::List
+      lower_list_each(plan.list_node, plan.each_op, bc_target: plan.bc_target)
+    when PipelineEachSourceKind::Set
+      lower_set_each(plan.list_node, plan.each_op)
+    when PipelineEachSourceKind::RangeLiteral
+      lower_range_literal_each(plan.list_node, plan.each_op)
+    when PipelineEachSourceKind::Unsupported
+      nil
+    end
+  end
+
+  sig { params(list_node: AST::Node, lhs_type: Type, range_chain: T.nilable(PipelineRangeChain), bc_target: T::Boolean).returns(PipelineEachSourceKind) }
+  def each_source_kind(list_node, lhs_type, range_chain, bc_target)
+    return PipelineEachSourceKind::Sharded if lhs_type.sharded? && !bc_target
+    return PipelineEachSourceKind::Soa if lhs_type.soa_linear_collection? && !bc_target
+    return PipelineEachSourceKind::Pool if lhs_type.pool?
+    return PipelineEachSourceKind::RangeChain if range_chain_usable?(list_node, range_chain, bc_target)
+    return PipelineEachSourceKind::List if lhs_type.list_collection? || lhs_type.fixed_soa?
+    return PipelineEachSourceKind::Set if lhs_type.set_collection?
+    return PipelineEachSourceKind::RangeLiteral if list_node.is_a?(AST::RangeLit)
+
+    PipelineEachSourceKind::Unsupported
+  end
+
+  sig { params(list_node: AST::Node, range_chain: T.nilable(PipelineRangeChain), bc_target: T::Boolean).returns(T::Boolean) }
+  def range_chain_usable?(list_node, range_chain, bc_target)
+    return false unless range_chain
+
+    !(bc_target && list_node.is_a?(AST::RangeLit) && range_chain.stages.empty?)
+  end
 
   sig { params(list_node: AST::Node, lhs_type: Type, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_soa_each(list_node, lhs_type, each_op)
@@ -91,11 +162,11 @@ class PipelineEachLowerer
     ])
   end
 
-  sig { params(list_node: AST::Node, lhs_type: Type, each_op: AST::EachOp).returns(T.any(MIR::ForStmt, MIR::ScopeBlock)) }
-  def lower_pool_each(list_node, lhs_type, each_op)
+  sig { params(list_node: AST::Node, lhs_type: Type, each_op: AST::EachOp, bc_target: T::Boolean).returns(T.any(MIR::ForStmt, MIR::ScopeBlock)) }
+  def lower_pool_each(list_node, lhs_type, each_op, bc_target:)
     source_mir = @services.visit_mir.call(list_node)
     pool_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
-    if @services.bc_target.call && list_node.is_a?(AST::Identifier)
+    if bc_target && list_node.is_a?(AST::Identifier)
       return lower_bc_indexed_each(list_node, pool_body_mir, skip_nil: true)
     end
 
@@ -145,11 +216,11 @@ class PipelineEachLowerer
     )
   end
 
-  sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
-  def lower_list_each(list_node, each_op)
+  sig { params(list_node: AST::Node, each_op: AST::EachOp, bc_target: T::Boolean).returns(MIR::ScopeBlock) }
+  def lower_list_each(list_node, each_op, bc_target:)
     source_mir = @services.visit_mir.call(list_node)
     list_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
-    if @services.bc_target.call && list_node.is_a?(AST::Identifier)
+    if bc_target && list_node.is_a?(AST::Identifier)
       return MIR::ScopeBlock.new([lower_bc_indexed_each(list_node, list_body_mir, skip_nil: false)])
     end
 

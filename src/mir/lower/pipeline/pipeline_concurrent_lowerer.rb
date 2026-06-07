@@ -17,6 +17,44 @@ class PipelineConcurrentBcExpression < T::Struct
   const :expr, AST::Node
 end
 
+class PipelineConcurrentSourceKind < T::Enum
+  enums do
+    ShardEach = new("shard_each")
+    BcMaterialized = new("bc_materialized")
+    BoundedStream = new("bounded_stream")
+    RuntimeStream = new("runtime_stream")
+    RuntimeList = new("runtime_list")
+  end
+end
+
+class PipelineConcurrentTerminalKind < T::Enum
+  enums do
+    Select = new("select")
+    Where = new("where")
+    Each = new("each")
+    Count = new("count")
+    Sum = new("sum")
+    Average = new("average")
+    Min = new("min")
+    Max = new("max")
+    Unsupported = new("unsupported")
+  end
+end
+
+class PipelineConcurrentPlan < T::Struct
+  const :source_kind, PipelineConcurrentSourceKind
+  const :terminal_kind, PipelineConcurrentTerminalKind
+  const :lhs, AST::Node
+  const :real_lhs, AST::Node
+  const :smooth_node, AST::BinaryOp
+  const :conc_op, AST::ConcurrentOp
+  const :inner, AST::Node
+  const :binding_name, T.nilable(String)
+  const :shard_context, T.nilable(AST::PipelineShardContext)
+  const :bc_expression, T.nilable(PipelineConcurrentBcExpression)
+  const :list_each_mutates_placeholder, T::Boolean
+end
+
 class PipelineConcurrentAllocationFact < T::Struct
   const :alloc, Symbol
   const :mark, MIR::AllocMark
@@ -131,13 +169,6 @@ class PipelineConcurrentInvocation < T::Struct
   end
 end
 
-class PipelineConcurrentShardContext < T::Struct
-  const :auto_detected, T::Boolean
-  const :map_var, AST::Node
-  const :key_expr, AST::Node
-  const :key_allocates_frame, T::Boolean
-end
-
 class PipelineConcurrentSourcePointer < T::Struct
   const :setup, T::Array[MIR::Emittable]
   const :pointer, MIR::Emittable
@@ -191,31 +222,120 @@ class PipelineConcurrentLowerer
 
   sig { params(smooth_node: AST::BinaryOp, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentResult) }
   def lower(smooth_node, conc_op)
+    lower_plan(concurrent_plan(smooth_node, conc_op))
+  end
+
+  private
+
+  sig { params(smooth_node: AST::BinaryOp, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentPlan) }
+  def concurrent_plan(smooth_node, conc_op)
     lhs = T.cast(smooth_node.left, AST::Node)
-
-    if shard_context(conc_op)
-      return lower_shard_concurrent_each(lhs, conc_op, smooth_node)
-    end
-
-    if @services.bc_target.call
-      lhs_ti = lhs.full_type!
-      return lower_bc(lhs, conc_op, smooth_node) unless stream_type?(lhs_ti)
-    end
-
-    if bounded_identifier_stream?(lhs)
-      return lower_concurrent_bounded_stream(T.cast(lhs, AST::Identifier), conc_op)
-    end
-
-    stream_result = lower_stream_source(lhs, conc_op)
-    return stream_result if stream_result
-
-    list_result = lower_list_source(lhs, conc_op, smooth_node)
-    return list_result if list_result
-
-    inner = conc_op.op
+    inner = T.cast(conc_op.op, AST::Node)
+    binding_name, real_lhs = unwrap_binding_source(lhs)
     lhs_type = lhs.full_type!
+    real_lhs_type = real_lhs.full_type!
+    terminal_kind = concurrent_terminal_kind(inner)
+    source_kind = concurrent_source_kind(lhs, real_lhs, lhs_type, real_lhs_type, conc_op)
+    unsupported_concurrent_shape!(lhs, lhs_type, inner) unless source_kind
+
+    PipelineConcurrentPlan.new(
+      source_kind: source_kind,
+      terminal_kind: terminal_kind,
+      lhs: lhs,
+      real_lhs: real_lhs,
+      smooth_node: smooth_node,
+      conc_op: conc_op,
+      inner: inner,
+      binding_name: binding_name,
+      shard_context: shard_context(conc_op),
+      bc_expression: bc_expression_for(terminal_kind, inner),
+      list_each_mutates_placeholder: list_each_mutates_placeholder?(source_kind, terminal_kind, inner),
+    )
+  end
+
+  sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_plan(plan)
+    lower_source_plan(plan.source_kind, plan)
+  end
+
+  sig { params(source_kind: PipelineConcurrentSourceKind, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_source_plan(source_kind, plan)
+    case source_kind
+    when PipelineConcurrentSourceKind::ShardEach
+      lower_shard_concurrent_each(plan.lhs, plan.conc_op, plan.smooth_node)
+    when PipelineConcurrentSourceKind::BcMaterialized
+      lower_bc_plan(plan)
+    when PipelineConcurrentSourceKind::BoundedStream
+      lower_bounded_stream_plan(plan)
+    when PipelineConcurrentSourceKind::RuntimeStream
+      lower_stream_plan(plan)
+    when PipelineConcurrentSourceKind::RuntimeList
+      lower_list_plan(plan)
+    end
+  end
+
+  sig do
+    params(
+      lhs: AST::Node,
+      real_lhs: AST::Node,
+      lhs_type: Type,
+      real_lhs_type: Type,
+      conc_op: AST::ConcurrentOp,
+    ).returns(T.nilable(PipelineConcurrentSourceKind))
+  end
+  def concurrent_source_kind(lhs, real_lhs, lhs_type, real_lhs_type, conc_op)
+    return PipelineConcurrentSourceKind::ShardEach if shard_context(conc_op)
+    return PipelineConcurrentSourceKind::BcMaterialized if @services.bc_target.call && !stream_type?(lhs_type)
+    return PipelineConcurrentSourceKind::BoundedStream if bounded_identifier_stream?(lhs)
+    return PipelineConcurrentSourceKind::RuntimeStream if runtime_stream_source?(lhs, lhs_type)
+    if !@services.bc_target.call && (range_runtime_source?(real_lhs) || list_runtime_source?(real_lhs_type))
+      return PipelineConcurrentSourceKind::RuntimeList
+    end
+
+    nil
+  end
+
+  sig { params(inner: AST::Node).returns(PipelineConcurrentTerminalKind) }
+  def concurrent_terminal_kind(inner)
+    case inner
+    when AST::SelectOp then PipelineConcurrentTerminalKind::Select
+    when AST::WhereOp then PipelineConcurrentTerminalKind::Where
+    when AST::EachOp then PipelineConcurrentTerminalKind::Each
+    when AST::CountOp then PipelineConcurrentTerminalKind::Count
+    when AST::SumOp then PipelineConcurrentTerminalKind::Sum
+    when AST::AverageOp then PipelineConcurrentTerminalKind::Average
+    when AST::MinOp then PipelineConcurrentTerminalKind::Min
+    when AST::MaxOp then PipelineConcurrentTerminalKind::Max
+    else PipelineConcurrentTerminalKind::Unsupported
+    end
+  end
+
+  sig { params(terminal_kind: PipelineConcurrentTerminalKind, inner: AST::Node).returns(T.nilable(PipelineConcurrentBcExpression)) }
+  def bc_expression_for(terminal_kind, inner)
+    case terminal_kind
+    when PipelineConcurrentTerminalKind::Select
+      bc_error_policy(T.cast(inner, AST::SelectOp).expression)
+    when PipelineConcurrentTerminalKind::Where
+      bc_error_policy(T.cast(inner, AST::WhereOp).expression)
+    else
+      nil
+    end
+  end
+
+  sig { params(source_kind: PipelineConcurrentSourceKind, terminal_kind: PipelineConcurrentTerminalKind, inner: AST::Node).returns(T::Boolean) }
+  def list_each_mutates_placeholder?(source_kind, terminal_kind, inner)
+    return false unless source_kind == PipelineConcurrentSourceKind::RuntimeList
+    return false unless terminal_kind == PipelineConcurrentTerminalKind::Each
+
+    each_body_mutates_placeholder?(T.cast(inner, AST::EachOp).body)
+  end
+
+  sig { params(lhs: AST::Node, lhs_type: Type, inner: AST::Node).returns(T.noreturn) }
+  def unsupported_concurrent_shape!(lhs, lhs_type, inner)
     raise "lower_concurrent: unsupported non-legacy CONCURRENT shape lhs=#{lhs.class} lhs_type=#{lhs_type.class} op=#{inner.class}"
   end
+
+  public
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_sharded_each(list_node, each_op)
@@ -358,16 +478,21 @@ class PipelineConcurrentLowerer
     end)
   end
 
-  sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentResult) }
-  def lower_concurrent_bounded_stream(lhs, conc_op)
-    inner = conc_op.op
-    case inner
-    when AST::SelectOp
-      lower_concurrent_bounded_select(lhs, conc_op, inner)
-    when AST::WhereOp
-      lower_concurrent_bounded_where(lhs, conc_op, inner)
-    when AST::EachOp
-      lower_concurrent_bounded_each(lhs, conc_op, inner)
+  sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bounded_stream_plan(plan)
+    lhs = T.cast(plan.lhs, AST::Identifier)
+    lower_bounded_stream_terminal_plan(plan.terminal_kind, lhs, plan)
+  end
+
+  sig { params(terminal_kind: PipelineConcurrentTerminalKind, lhs: AST::Identifier, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bounded_stream_terminal_plan(terminal_kind, lhs, plan)
+    case terminal_kind
+    when PipelineConcurrentTerminalKind::Select
+      lower_concurrent_bounded_select(lhs, plan.conc_op, T.cast(plan.inner, AST::SelectOp))
+    when PipelineConcurrentTerminalKind::Where
+      lower_concurrent_bounded_where(lhs, plan.conc_op, T.cast(plan.inner, AST::WhereOp))
+    when PipelineConcurrentTerminalKind::Each
+      lower_concurrent_bounded_each(lhs, plan.conc_op, T.cast(plan.inner, AST::EachOp))
     else
       raise "CONCURRENT over bounded streams only supports SELECT/WHERE/EACH"
     end
@@ -538,48 +663,60 @@ class PipelineConcurrentLowerer
     ))
   end
 
-  sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, smooth_node: AST::BinaryOp).returns(PipelineConcurrentResult) }
-  def lower_bc(lhs, conc_op, smooth_node)
-    bind_name, real_lhs = unwrap_binding_source(lhs)
+  sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bc_plan(plan)
     work = lambda do
-      lower_bc_operation(real_lhs, T.cast(conc_op.op, AST::Node), smooth_node)
+      lower_bc_terminal_plan(plan.terminal_kind, plan)
     end
 
-    if bind_name
-      @services.with_optional_named_binding.call(bind_name, "it", work)
+    lower_with_optional_binding(plan.binding_name, "it", work)
+  end
+
+  sig { params(binding_name: T.nilable(String), item_name: String, work: T.proc.returns(PipelineConcurrentResult)).returns(PipelineConcurrentResult) }
+  def lower_with_optional_binding(binding_name, item_name, work)
+    return @services.with_optional_named_binding.call(binding_name, item_name, work) if binding_name
+
+    work.call
+  end
+
+  sig { params(terminal_kind: PipelineConcurrentTerminalKind, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bc_terminal_plan(terminal_kind, plan)
+    case terminal_kind
+    when PipelineConcurrentTerminalKind::Select
+      expr = T.must(plan.bc_expression)
+      lower_bc_select_expression(expr.policy, expr, plan)
+    when PipelineConcurrentTerminalKind::Where
+      expr = T.must(plan.bc_expression)
+      lower_bc_where_expression(expr.policy, expr, plan)
+    when PipelineConcurrentTerminalKind::Each
+      @services.lower_each.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::EachOp))
+    when PipelineConcurrentTerminalKind::Sum
+      @services.lower_sum.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::SumOp))
+    when PipelineConcurrentTerminalKind::Count
+      @services.lower_count.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::CountOp))
+    when PipelineConcurrentTerminalKind::Min
+      @services.lower_min.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MinOp))
+    when PipelineConcurrentTerminalKind::Max
+      @services.lower_max.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MaxOp))
+    when PipelineConcurrentTerminalKind::Average
+      @services.lower_average.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::AverageOp))
     else
-      work.call
+      raise "lower_concurrent_bc: unsupported inner op #{plan.inner.class}"
     end
   end
 
-  sig { params(real_lhs: AST::Node, inner: AST::Node, smooth_node: AST::BinaryOp).returns(PipelineConcurrentResult) }
-  def lower_bc_operation(real_lhs, inner, smooth_node)
-    case inner
-    when AST::SelectOp
-      expr = bc_error_policy(inner.expression)
-      return lower_bc_concurrent_select_prune(real_lhs, expr.expr, smooth_node) if expr.policy == :prune
+  sig { params(policy: Symbol, expr: PipelineConcurrentBcExpression, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bc_select_expression(policy, expr, plan)
+    return lower_bc_concurrent_select_prune(plan.real_lhs, expr.expr, plan.smooth_node) if policy == :prune
 
-      @services.lower_select.call(real_lhs, smooth_node, expr.expr)
-    when AST::WhereOp
-      expr = bc_error_policy(inner.expression)
-      return lower_bc_concurrent_where_prune(real_lhs, expr.expr, smooth_node) if expr.policy == :prune
+    @services.lower_select.call(plan.real_lhs, plan.smooth_node, expr.expr)
+  end
 
-      @services.lower_where.call(real_lhs, smooth_node, expr.expr)
-    when AST::EachOp
-      @services.lower_each.call(real_lhs, smooth_node, inner)
-    when AST::SumOp
-      @services.lower_sum.call(real_lhs, smooth_node, inner)
-    when AST::CountOp
-      @services.lower_count.call(real_lhs, smooth_node, inner)
-    when AST::MinOp
-      @services.lower_min.call(real_lhs, smooth_node, inner)
-    when AST::MaxOp
-      @services.lower_max.call(real_lhs, smooth_node, inner)
-    when AST::AverageOp
-      @services.lower_average.call(real_lhs, smooth_node, inner)
-    else
-      raise "lower_concurrent_bc: unsupported inner op #{inner.class}"
-    end
+  sig { params(policy: Symbol, expr: PipelineConcurrentBcExpression, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_bc_where_expression(policy, expr, plan)
+    return lower_bc_concurrent_where_prune(plan.real_lhs, expr.expr, plan.smooth_node) if policy == :prune
+
+    @services.lower_where.call(plan.real_lhs, plan.smooth_node, expr.expr)
   end
 
   sig { params(expr: AST::Node).returns(PipelineConcurrentBcExpression) }
@@ -605,64 +742,67 @@ class PipelineConcurrentLowerer
     end
   end
 
-  sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp).returns(T.nilable(PipelineConcurrentResult)) }
-  def lower_stream_source(lhs, conc_op)
-    return nil if lhs.is_a?(AST::RangeLit)
-    lhs_ti = lhs.full_type!
-    return nil unless lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?
+  sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_stream_plan(plan)
+    lhs = T.cast(plan.lhs, AST::Identifier)
+    lower_stream_terminal_plan(plan.terminal_kind, lhs, plan)
+  end
 
-    inner = conc_op.op
-    case inner
-    when AST::SelectOp
-      lower_concurrent_stream_select(T.cast(lhs, AST::Identifier), conc_op, inner)
-    when AST::WhereOp
-      lower_concurrent_stream_where(T.cast(lhs, AST::Identifier), conc_op, inner)
-    when AST::EachOp
-      lower_concurrent_stream_each(T.cast(lhs, AST::Identifier), conc_op, inner)
+  sig { params(terminal_kind: PipelineConcurrentTerminalKind, lhs: AST::Identifier, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_stream_terminal_plan(terminal_kind, lhs, plan)
+    case terminal_kind
+    when PipelineConcurrentTerminalKind::Select
+      lower_concurrent_stream_select(lhs, plan.conc_op, T.cast(plan.inner, AST::SelectOp))
+    when PipelineConcurrentTerminalKind::Where
+      lower_concurrent_stream_where(lhs, plan.conc_op, T.cast(plan.inner, AST::WhereOp))
+    when PipelineConcurrentTerminalKind::Each
+      lower_concurrent_stream_each(lhs, plan.conc_op, T.cast(plan.inner, AST::EachOp))
     else
-      nil
+      unsupported_concurrent_shape!(plan.lhs, plan.lhs.full_type!, plan.inner)
     end
   end
 
-  sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, smooth_node: AST::BinaryOp).returns(T.nilable(PipelineConcurrentResult)) }
-  def lower_list_source(lhs, conc_op, smooth_node)
-    return nil if @services.bc_target.call
-
-    bind_name, real_lhs = unwrap_binding_source(lhs)
-    real_lhs_ti = real_lhs.full_type!
-    return nil unless range_runtime_source?(real_lhs) || list_runtime_source?(real_lhs_ti)
-
+  sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_list_plan(plan)
     work = lambda do
-      lower_list_operation(real_lhs, conc_op, T.cast(conc_op.op, AST::Node), smooth_node)
+      lower_list_terminal_plan(plan.terminal_kind, plan)
     end
 
-    if bind_name
-      @services.with_optional_named_binding.call(bind_name, "__item", work)
+    lower_with_optional_binding(plan.binding_name, "__item", work)
+  end
+
+  sig { params(terminal_kind: PipelineConcurrentTerminalKind, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
+  def lower_list_terminal_plan(terminal_kind, plan)
+    case terminal_kind
+    when PipelineConcurrentTerminalKind::Select
+      lower_concurrent_list_select(plan.real_lhs, plan.conc_op, T.cast(plan.inner, AST::SelectOp))
+    when PipelineConcurrentTerminalKind::Where
+      lower_concurrent_list_where(plan.real_lhs, plan.conc_op, T.cast(plan.inner, AST::WhereOp))
+    when PipelineConcurrentTerminalKind::Count
+      lower_concurrent_list_count(plan.real_lhs, plan.conc_op, T.cast(plan.inner, AST::CountOp))
+    when PipelineConcurrentTerminalKind::Sum, PipelineConcurrentTerminalKind::Average,
+         PipelineConcurrentTerminalKind::Min, PipelineConcurrentTerminalKind::Max
+      lower_concurrent_list_reduce(plan.real_lhs, plan.conc_op, T.cast(plan.inner, T.any(AST::AverageOp, AST::MaxOp, AST::MinOp, AST::SumOp)), plan.smooth_node)
+    when PipelineConcurrentTerminalKind::Each
+      each_op = T.cast(plan.inner, AST::EachOp)
+      lower_list_each_terminal(plan.list_each_mutates_placeholder, plan.real_lhs, plan.conc_op, each_op)
     else
-      work.call
+      raise "lower_concurrent: unsupported list CONCURRENT op #{plan.inner.class}"
     end
   end
 
-  sig { params(real_lhs: AST::Node, conc_op: AST::ConcurrentOp, inner: AST::Node, smooth_node: AST::BinaryOp).returns(PipelineConcurrentResult) }
-  def lower_list_operation(real_lhs, conc_op, inner, smooth_node)
-    case inner
-    when AST::SelectOp
-      lower_concurrent_list_select(real_lhs, conc_op, inner)
-    when AST::WhereOp
-      lower_concurrent_list_where(real_lhs, conc_op, inner)
-    when AST::CountOp
-      lower_concurrent_list_count(real_lhs, conc_op, inner)
-    when AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp
-      lower_concurrent_list_reduce(real_lhs, conc_op, inner, smooth_node)
-    when AST::EachOp
-      if each_body_mutates_placeholder?(inner.body)
-        lower_concurrent_list_each_in_place(real_lhs, conc_op, inner)
-      else
-        lower_concurrent_list_each(real_lhs, conc_op, inner)
-      end
-    else
-      raise "lower_concurrent: unsupported list CONCURRENT op #{inner.class}"
-    end
+  sig { params(mutates_placeholder: T::Boolean, lhs: AST::Node, conc_op: AST::ConcurrentOp, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
+  def lower_list_each_terminal(mutates_placeholder, lhs, conc_op, each_op)
+    return lower_concurrent_list_each_in_place(lhs, conc_op, each_op) if mutates_placeholder
+
+    lower_concurrent_list_each(lhs, conc_op, each_op)
+  end
+
+  sig { params(lhs: AST::Node, lhs_type: Type).returns(T::Boolean) }
+  def runtime_stream_source?(lhs, lhs_type)
+    return false if lhs.is_a?(AST::RangeLit)
+
+    lhs_type.dynamic_stream? || lhs_type.open_stream? || lhs_type.inf_stream?
   end
 
   sig { params(lhs_ti: Type).returns(Type) }
@@ -971,17 +1111,9 @@ class PipelineConcurrentLowerer
     !lhs_type.element_type.nil?
   end
 
-  sig { params(conc_op: AST::ConcurrentOp).returns(T.nilable(PipelineConcurrentShardContext)) }
+  sig { params(conc_op: AST::ConcurrentOp).returns(T.nilable(AST::PipelineShardContext)) }
   def shard_context(conc_op)
-    raw = T.cast(conc_op.shard_context, T.nilable(T::Hash[Symbol, Object]))
-    return nil unless raw
-
-    PipelineConcurrentShardContext.new(
-      auto_detected: raw[:auto_detected] == true,
-      map_var: T.cast(raw.fetch(:map_var), AST::Node),
-      key_expr: T.cast(raw.fetch(:key_expr), AST::Node),
-      key_allocates_frame: raw[:key_allocates_frame] == true,
-    )
+    T.cast(conc_op.shard_context, T.nilable(AST::PipelineShardContext))
   end
 
   sig { params(conc_op: AST::ConcurrentOp, key: String).returns(T.nilable(AST::Node)) }

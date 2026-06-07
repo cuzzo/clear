@@ -128,9 +128,18 @@ RSpec.describe "MIR gap-burn characterization" do
 
     expect(first_id).to be_a(MIR::LoweredNodeId)
     expect(first_id).to eq(MIR::LoweredNodeId.new(value: first_id.value))
+    expect(first_id.eql?(MIR::LoweredNodeId.new(value: first_id.value))).to eq(true)
     expect(low.send(:ensure_lowered_node_id, node)).to eq(first_id)
     expect(node.lowered_node_id).to eq(first_id)
     expect(low.send(:ownership_finalized_node?, node)).to eq(true)
+  end
+
+  it "keeps typed MIR struct-init fields readable through legacy keys" do
+    field = MIR::StructInitField.new(name: "item", value: MIR::Ident.new("value"), alloc: :heap)
+
+    expect(field[:name]).to eq("item")
+    expect(field[:value]).to eq(MIR::Ident.new("value"))
+    expect(field[:alloc]).to eq(:heap)
   end
 
   it "uses value-comparable typed body ids for finalized lowered bodies" do
@@ -779,6 +788,18 @@ RSpec.describe "MIR gap-burn characterization" do
       ["other", :frame],
       ["fallback", :heap],
     )
+  end
+
+  it "keeps default catch lowering bodies typed for checker visibility" do
+    low = lowering
+    fun = fn([], return_type: Type.new(:Void))
+    fun.default_catch = [AST::PassStmt.new(tok)]
+
+    low.define_singleton_method(:lower_body) { |_body| [MIR::Suppress.new("default_body")] }
+    plan = low.send(:build_catch_clauses, fun, false)
+
+    expect(plan.clause_bodies).to eq([[MIR::Suppress.new("default_body")]])
+    expect(plan.code).to include("defer rt.freeSnapshot();")
   end
 
   it "covers lowering coercion and implicit allocation facts as typed facts" do

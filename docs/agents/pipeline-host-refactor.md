@@ -144,6 +144,53 @@ Expected effect:
 - No new weak hash records.
 - `PipelineHost` becomes mostly a dispatcher and services owner.
 
+### Slice 7: Typed Pipeline IR And Semantic Facts
+
+The P0 extraction made `PipelineHost` smaller, but the full issue is not closed
+until source/stage/terminal/execution semantics are represented before emission.
+This slice replaces lowerer-local rediscovery with a typed pipeline IR and a
+semantic-analysis pass.
+
+Planned data products:
+
+- `PipelineOperationPlan`: the checked top-level source, stages, terminal, and
+  execution mode.
+- `PipelineSourcePlan`: list, range, finite stream, open stream, bounded stream,
+  set, pool, and SoA source variants.
+- `PipelineStagePlan`: filter, transform, limit, skip, take-while, distinct,
+  unnest, tap, join, order-by, and binding-introducing stage variants.
+- `PipelineTerminalPlan`: each, scalar fold, reduce, list materialization,
+  observable fold, batch window, set index, and concurrent terminal variants.
+- `PipelineSemanticFacts`: typed capture, ownership-transfer, cleanup,
+  concurrency, bytecode, and observable facts consumed by lowerers.
+
+Implementation loop:
+
+1. Build the IR/fact records and a `PipelineSemanticAnalyzer` from the existing
+   `PipelinePlanBuilder` decisions.
+2. Move source classification, execution classification, and cleanup/concurrency
+   fact derivation into the analyzer.
+3. Change `PipelineHost#lower_pipeline` to dispatch on `PipelineOperationPlan`.
+4. Change lowerers to consume semantic facts rather than rediscovering the same
+   facts from AST/type state.
+5. Narrow the `MIRLowering` bridge to a single typed services interface; each
+   remaining adapter method must correspond to a named operation in that
+   interface.
+6. Add direct invariant tests for the IR and facts, especially stream cleanup,
+   concurrent worker/capture facts, observable terminals, and bytecode shape.
+7. Remeasure Decomplex after each substantial step. If global metrics move
+   sideways, collapse duplicated fact logic before adding more wrappers.
+
+Expected effect:
+
+- Decomplex should drop because repeated branch decisions move into one checked
+  semantic fact pass instead of being rediscovered in several lowerers.
+- SlopCop and Boobytrap should improve because uncovered branch hubs become
+  smaller typed dispatches with direct invariant specs.
+- Nil-kill should stay flat or improve because new records are `T::Struct`s with
+  typed fields, and downstream signatures should replace broad `Object` or hash
+  slots where the IR is consumed.
+
 ## Progress Log
 
 - Baseline snapshot for expanded scope:
@@ -372,3 +419,48 @@ Expected effect:
     - This is a real Type abstraction, not a lowerer workaround. It preserves
       existing batch-window bounded-optional behavior by keeping
       `stream_element_type` on that path.
+- Slice 7 completion: typed operation plan, semantic facts, and lowering bridge.
+  - `PipelinePlanBuilder` now produces a typed `PipelineOperationPlan` with
+    explicit source, terminal, execution, and `PipelineSemanticFacts` records.
+  - `PipelineHost#lower_dispatch_plan` consumes the checked plan and dispatches
+    through `lower_execution_plan`, so host dispatch no longer re-reads
+    `plan.execution` as ambient state.
+  - `PipelineLoweringBridge` replaced direct host access to broad
+    `MIRLowering`/emitter lifecycle state. The host owns the bridge; lowerers
+    receive named services rather than the general lowerer object.
+  - Batch-window, each, and concurrent lowerers now dispatch on typed
+    source/terminal plan fields instead of repeatedly rediscovering the same
+    host-level policy.
+  - Final verification:
+    - `bundle exec srb tc` passed.
+    - `COVERAGE=1 bundle exec rspec` passed: `5548 examples, 0 failures`.
+    - `ruby tools/diff_bucket_summary.rb` reported `src/**/*.rb` changed-line
+      coverage `100.0%`, changed-branch coverage `85.4%`, no src type
+      guardrail findings, and no Zig special coverage alerts.
+    - Final nil-kill collection completed the full workload in `1308s`, then
+      `NIL_KILL_TARGETS=src bundle exec tools/nil-kill infer` and
+      `NIL_KILL_TARGETS=src bundle exec tools/nil-kill report` completed with
+      `0` Sorbet errors captured.
+  - Final comparable metrics, from the current PipelineHost baseline to the
+    completed boundary:
+    - Decomplex snapshot total: `6071 -> 6063` (`-8`).
+    - Decomplex state-based branch density: `1581 -> 1575` (`-6`).
+    - Decomplex broken protocols: `458 -> 454` (`-4`).
+    - Decomplex false simplicity: `944 -> 945` (`+1`) and Flay similarity:
+      `41 -> 42` (`+1`). These are the narrow bridge/adapter tradeoffs, not
+      host semantic rediscovery.
+    - SlopCop genuine gaps: `1323 -> 1305` (`-18`).
+    - SlopCop dark arms: `3194 -> 3206` (`+12`), entirely from non-genuine
+      categories (`type_norm`, `dead`, `spurious`, `diagnostic`). The final
+      SlopCop report does not list `src/mir/lower/pipeline` in the top genuine
+      gaps.
+    - Boobytrap mostly-uncovered methods: `2 -> 1` (`-1`).
+    - Boobytrap state-based branch hotspots: `1583 -> 1575` (`-8`).
+    - Nil-kill untyped slots stayed flat: params `885 -> 885`, returns
+      `208 -> 208`, fields/ivars `858 -> 858`, collections `0 -> 0`.
+    - Nil-kill strong slots increased with the new typed surface: param strong
+      `4706 -> 4770`, return strong `3041 -> 3078`, collection strong
+      `1487 -> 1495`.
+  - Closure decision: issue #2 is complete for `PipelineHost`. Remaining
+    ownership/capture/cleanup graph consolidation belongs to issue #4, where
+    the authoritative ownership fact graph is tracked.

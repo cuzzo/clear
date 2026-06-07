@@ -94,8 +94,8 @@ class PipelineContextState < T::Struct
 
   sig { params(name: String).returns(T.nilable(String)) }
   def replacement_for_identifier(name)
-    return placeholder_name if name == "_"
-    return acc_placeholder if name == "acc"
+    return placeholder_name if name == "_" && placeholder_name
+    return acc_placeholder if name == "acc" && acc_placeholder
 
     joined = join_param_map&.[](name)
     return joined if joined

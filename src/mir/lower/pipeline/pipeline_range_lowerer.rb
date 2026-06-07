@@ -5,6 +5,7 @@ require "sorbet-runtime"
 
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
+require_relative "../../lowering/schema_registry"
 require_relative "../../mir"
 
 PipelineBcIterRange = T.type_alias { [MIR::IterRange, T.nilable(String)] }
@@ -157,7 +158,7 @@ class PipelineRangeLowerer
     sig { abstract.params(type_info: PipelineRangeTypeInput).returns(String) }
     def range_transpile_type(type_info); end
 
-    sig { abstract.returns(T.nilable(Proc)) }
+    sig { abstract.returns(MIRLoweringSchemas::SchemaLookup) }
     def range_schema_lookup; end
 
     sig { abstract.returns(String) }
@@ -187,7 +188,7 @@ class PipelineRangeLowerer
         bc_target: T.proc.returns(T::Boolean),
         next_label: T.proc.returns(String),
         transpile_type: T.proc.params(type_info: PipelineRangeTypeInput).returns(String),
-        schema_lookup: T.proc.returns(T.nilable(Proc)),
+        schema_lookup: T.proc.returns(MIRLoweringSchemas::SchemaLookup),
         runtime_name: T.proc.returns(String),
         next_observable_id: T.proc.returns(Integer),
         emit_observable_body: T.proc.params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String),
@@ -208,7 +209,7 @@ class PipelineRangeLowerer
       @bc_target = T.let(bc_target, T.proc.returns(T::Boolean))
       @next_label = T.let(next_label, T.proc.returns(String))
       @transpile_type = T.let(transpile_type, T.proc.params(type_info: PipelineRangeTypeInput).returns(String))
-      @schema_lookup = T.let(schema_lookup, T.proc.returns(T.nilable(Proc)))
+      @schema_lookup = T.let(schema_lookup, T.proc.returns(MIRLoweringSchemas::SchemaLookup))
       @runtime_name = T.let(runtime_name, T.proc.returns(String))
       @next_observable_id = T.let(next_observable_id, T.proc.returns(Integer))
       @emit_observable_body = T.let(emit_observable_body,
@@ -251,7 +252,7 @@ class PipelineRangeLowerer
       @transpile_type.call(type_info)
     end
 
-    sig { override.returns(T.nilable(Proc)) }
+    sig { override.returns(MIRLoweringSchemas::SchemaLookup) }
     def range_schema_lookup
       @schema_lookup.call
     end
