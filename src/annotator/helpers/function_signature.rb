@@ -101,7 +101,8 @@ class FunctionSignature
 
   sig { params(val: T.nilable(RequiresMap)).void }
   def requires=(val)
-    @requires = val || {}
+    @requires.clear
+    @requires.merge!(val || {})
   end
 
   sig { returns(T.nilable(T::Boolean)) }

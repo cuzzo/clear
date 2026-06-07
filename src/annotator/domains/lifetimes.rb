@@ -286,7 +286,7 @@ module Annotator
 
       # Collect all identifier names referenced (directly) in an AST subtree.
       # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
-      sig { params(nodes: T::Array[AST::Node]).returns(T::Set[String]) }
+      sig { params(nodes: T.any(AST::Node, T::Array[AST::Node])).returns(T::Set[String]) }
       def collect_body_identifier_names(nodes)
         T.bind(self, SemanticAnnotator)
 

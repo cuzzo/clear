@@ -40,6 +40,7 @@ module Capabilities
     errs = errors_for(type)
     return if errs.empty?
     error_handler.call(node, errs.first) if error_handler
+    nil
   end
 
   sig { params(type: Type).returns(T::Set[Symbol]) }

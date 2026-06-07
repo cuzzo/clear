@@ -1062,14 +1062,14 @@ module CleanupClassifier
     end
   end
 
-  sig { params(field: T.untyped).returns(T::Boolean) }
+  sig { params(field: T.any(AST::StructField, Type::TypeInput)).returns(T::Boolean) }
   private_class_method def self.cleanup_field_borrowed?(field)
     return false unless field.is_a?(AST::StructField)
 
     field.borrowed == true
   end
 
-  sig { params(field: T.untyped).returns(Type) }
+  sig { params(field: T.any(AST::StructField, Type::TypeInput)).returns(Type) }
   private_class_method def self.cleanup_field_type(field)
     field.is_a?(AST::StructField) ? field.type : Type.new(field)
   end

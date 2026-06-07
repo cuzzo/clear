@@ -168,10 +168,10 @@ Fast repo-wide reports after implementation:
 | Decomplex missing abstractions | 192 | 189 | -3 |
 | Decomplex neglected path conditions | 1583 | 1575 | -8 |
 | Decomplex state-based branch density | 1575 | 1574 | -1 |
-| SlopCop dark arms | 3206 | 3153 | -53 |
+| SlopCop dark arms | 3206 | 3143 | -63 |
 | SlopCop type-normalization arms | 934 | 888 | -46 |
-| SlopCop diagnostic arms | 769 | 760 | -9 |
-| SlopCop genuine gaps | 1305 | 1314 | +9 |
+| SlopCop diagnostic arms | 769 | 757 | -12 |
+| SlopCop genuine gaps | 1305 | 1319 | +14 |
 | Boobytrap state-based branch hotspots | 1575 | 1574 | -1 |
 | Nil-kill nil source fixes | 196 | 192 | -4 |
 | Nil-kill union / `T.any` candidates | 545 | 540 | -5 |
@@ -184,24 +184,29 @@ Fast repo-wide reports after implementation:
 | Nil-kill field/ivar untyped slots | 858 | 847 | -11 |
 | Nil-kill collection untyped slots | 0 | 0 | 0 |
 
-SlopCop genuine gaps rose by `+9` while dark arms fell by `-53` and
-type-normalization arms fell by `-46`. That is an acceptable local tradeoff for
-this issue: the refactor moved some previously type-normalization-shaped dark
-arms into ordinary testable behavior while deleting loose boundary pressure.
+SlopCop genuine gaps rose by `+14` while dark arms fell by `-63` and
+type-normalization arms fell by `-46`. That is an acceptable repo-wide category
+migration for this issue: the refactor moved some previously
+type-normalization-shaped dark arms into ordinary testable behavior while
+deleting loose boundary pressure. The post-status guardrail cleanup adds `0`
+SlopCop genuine gaps on its changed source lines.
 
 ## Verification
 
 - `bundle exec rspec --format progress`
-  - `5553 examples, 0 failures`
-  - line coverage `99.38% (46047 / 46336)`
-  - branch coverage `85.04% (18196 / 21397)`
+  - `5557 examples, 0 failures`
+  - line coverage `99.39% (46064 / 46347)`
+  - branch coverage `85.09% (18208 / 21399)`
 - `bundle exec srb tc`
   - no errors
 - `bundle exec ruby tools/diff_bucket_summary.rb origin/master --format markdown`
   - `src/**/*.rb` changed-line coverage: `100.0%`
-  - `src/**/*.rb` changed-branch coverage: `85.5%`
+  - `src/**/*.rb` changed-branch coverage: `86.2%`
   - no added `src/**/*.rb` type guardrail findings
   - no added production Zig lines require missing Loom/VOPR/wait-loop alerts
+- `ruby gems/slopcop/exe/slopcop report --output=tmp/agent-metrics/type-model-boundary/slopcop-after-guardrail-fix.md`
+  - `3143` dark arms; `1319` genuine gaps
+  - current guardrail cleanup changed-line genuine gaps: `0`
 - `NIL_KILL_TARGETS=src NK_JOBS=8 bundle exec tools/nil-kill collect -- bash tools/clear-nil-kill-runtime.sh`
   - fresh runtime recollection completed in `1333s`
 - `NIL_KILL_TARGETS=src bundle exec tools/nil-kill infer`

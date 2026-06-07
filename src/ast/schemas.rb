@@ -189,8 +189,14 @@ module Schemas
     # `fields` is ALWAYS Hash[String => AST::StructField]. Per-field
     # default value and borrowed-ness live on the StructField, so
     # `field_defaults` / `borrowed_fields` are derived, not stored.
+    FieldMetadataValue = T.type_alias { T.nilable(T.any(Type::TypeInput, AST::Locatable, T::Boolean)) }
+    FieldMetadata = T.type_alias { T::Hash[T.any(Symbol, String), FieldMetadataValue] }
+    FieldInput = T.type_alias { T.any(Type::TypeInput, AST::StructField, FieldMetadata) }
+    FieldInputMap = T.type_alias { T::Hash[T.any(Symbol, String), FieldInput] }
+    MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
+
     attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: T.untyped, type_params: T.nilable(T::Array[Symbol]), methods: T.untyped, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    sig { params(fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
     def initialize(fields: {}, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = type_params
@@ -222,7 +228,7 @@ module Schemas
     sig { returns(T::Boolean) }
     def resource? = false
 
-    sig { params(fields: T.untyped).returns(T::Hash[String, AST::StructField]) }
+    sig { params(fields: FieldInputMap).returns(T::Hash[String, AST::StructField]) }
     def normalize_fields(fields)
       fields.each_with_object({}) do |(name, field), out|
         out[name.to_s] = normalize_field(field)
@@ -230,7 +236,7 @@ module Schemas
     end
     private :normalize_fields
 
-    sig { params(field: T.untyped).returns(AST::StructField) }
+    sig { params(field: FieldInput).returns(AST::StructField) }
     def normalize_field(field)
       return field if field.is_a?(AST::StructField)
       if field.is_a?(Hash)

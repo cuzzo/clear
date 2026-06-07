@@ -241,6 +241,11 @@ Final repo-wide metrics moved in the intended direction: Decomplex total
 `0 -> 0`; `.type` guard collapses `33 -> 28`, `.return_type` `14 -> 7`,
 `full_type!()` `22 -> 21`, and `.element_type` `5 -> 0`.
 
+Post-status guardrail cleanup tightened the remaining source-boundary
+signatures without reopening the issue: `Src Type Guardrails` is clean, full
+diff source additions are `100.0%` line covered and `86.2%` branch covered, and
+the cleanup adds `0` SlopCop genuine gaps on its changed source lines.
+
 ## 4. Ownership, Capability, And Escape Facts Are Spread Across Too Many Phases
 
 ### Problem

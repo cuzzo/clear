@@ -265,7 +265,7 @@ module AST
       self[:name]
     end
 
-    sig { returns(Lexer::Token) }
+    sig { returns(T.nilable(Lexer::Token)) }
     def name_token
       self[:name_token]
     end
@@ -340,7 +340,7 @@ module AST
       self[:name]
     end
 
-    sig { returns(Lexer::Token) }
+    sig { returns(T.nilable(Lexer::Token)) }
     def name_token
       self[:name_token]
     end

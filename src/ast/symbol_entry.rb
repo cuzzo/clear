@@ -51,6 +51,8 @@ class SymbolEntry
   @next_binding_id = T.let(0, Integer)
   EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
   TypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
+  LifetimeSourceInput = T.type_alias { T.any(SymbolEntry, Symbol) }
+  LifetimeInput = T.type_alias { T.nilable(T.any(Symbol, T::Array[LifetimeSourceInput], T::Hash[Symbol, T::Array[LifetimeSourceInput]])) }
 
   class BindingFlowFacts < T::Struct
     prop :non_escaping, T::Boolean, default: false
@@ -94,23 +96,13 @@ class SymbolEntry
   sig { returns(Type) }
   attr_reader :type
 
-  # The laundering seam input is a real bounded union, not untyped:
-  # a legacy Symbol tag, a String type name, a Type, a function
-  # binding's FunctionSignature, or nil (unresolved). Normalized to a
-  # single Type. The runtime sig now enforces the accepted domain --
-  # anything outside it is a compiler bug, surfaced here.
-  sig { params(val: TypeInput).void }
-  def type=(val)
-    @type = val.nil? ? Type.new(:Untyped) : Type.new(val)
-  end
-
   sig { returns(T::Array[SymbolEntry]) }
   attr_reader :lifetime
 
   sig { returns(Integer) }
   attr_reader :binding_id
 
-  sig { params(value: T.untyped).void }
+  sig { params(value: LifetimeInput).void }
   def lifetime=(value)
     @lifetime = normalize_lifetime(value)
     @flow.non_escaping = @lifetime.length == 1 && @lifetime.first.equal?(self)
@@ -453,7 +445,7 @@ class SymbolEntry
     sources.uniq
   end
 
-  sig { params(reg: T.untyped, type: TypeInput, mutable: T.untyped, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
+  sig { params(reg: T.untyped, type: TypeInput, mutable: T::Boolean, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
@@ -461,16 +453,16 @@ class SymbolEntry
     @reg = reg
     @type = T.let(Type.new(:Untyped), Type)
     self.type = type
-    @mutable = mutable
-    @storage = storage
-    @sync = sync
-    @layout = layout
-    @rebindable = rebindable
-    @size = size
-    @capabilities = capabilities
-    @valid = valid
-    @resource = resource
-    @close_zig = close_zig
+    @mutable = T.let(mutable, T::Boolean)
+    @storage = T.let(storage, Symbol)
+    @sync = T.let(sync, T.nilable(Symbol))
+    @layout = T.let(layout, T.nilable(Symbol))
+    @rebindable = T.let(rebindable, T::Boolean)
+    @size = T.let(size, Integer)
+    @capabilities = T.let(capabilities, T::Set[Symbol])
+    @valid = T.let(valid, T::Boolean)
+    @resource = T.let(resource, T.nilable(T::Boolean))
+    @close_zig = T.let(close_zig, T.nilable(String))
     @lifetime = T.let([], T::Array[SymbolEntry])
     @flow = T.let(BindingFlowFacts.new(valid: valid, invalid_reason: invalid_reason), BindingFlowFacts)
     @sync_families = T.let(nil, T.untyped)
@@ -484,6 +476,16 @@ class SymbolEntry
     @async_result_shape = T.let(nil, T.nilable(AsyncResultShape))
   end
 
+  # The laundering seam input is a real bounded union, not untyped:
+  # a legacy Symbol tag, a String type name, a Type, a function
+  # binding's FunctionSignature, or nil (unresolved). Normalized to a
+  # single Type. The runtime sig now enforces the accepted domain --
+  # anything outside it is a compiler bug, surfaced here.
+  sig { params(val: TypeInput).void }
+  def type=(val)
+    @type = val.nil? ? Type.new(:Untyped) : Type.new(val)
+  end
+
   private
 
   sig { returns(Integer) }
@@ -493,7 +495,7 @@ class SymbolEntry
     id
   end
 
-  sig { params(value: T.untyped).returns(T::Array[SymbolEntry]) }
+  sig { params(value: LifetimeInput).returns(T::Array[SymbolEntry]) }
   def normalize_lifetime(value)
     return [] if value.nil?
     return [self] if value == :current_scope

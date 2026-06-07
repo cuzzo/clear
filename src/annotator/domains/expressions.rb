@@ -184,7 +184,8 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         # Just resolve it like an identifier
-        visit_Identifier(AST::Identifier.new(node.token, "_"))
+        result = visit_Identifier(AST::Identifier.new(node.token, "_"))
+        result if result.is_a?(SymbolEntry)
       end
 
       # =========================================================
