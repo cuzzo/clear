@@ -93,7 +93,7 @@ module FsmLowering
   # `strip_try` helper.\n  #\n  # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
   # below renders the same MIR to Zig text via MIREmitter. The
   # recursive emit path uses emit_step_stmts.
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[T.untyped]) }
+  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Emittable]) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     flat_steps = T.let([], T::Array[AST::ThenStep])
@@ -106,7 +106,7 @@ module FsmLowering
     end
 
     if no_result
-      out = []
+      out = T.let([], T::Array[MIR::Emittable])
       flat_steps.each do |step|
         chunk = lower_one_step_to_mir(step)
         out.concat(chunk) if chunk
@@ -120,7 +120,7 @@ module FsmLowering
         pre_mir.concat(chunk) if chunk
       end
 
-      result_mir = []
+      result_mir = T.let([], T::Array[MIR::Emittable])
       if last_step
         expr_type = last_step.expr.full_type!
         expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
@@ -322,7 +322,7 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: AST::ThenStep).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(step: AST::ThenStep).returns(T.nilable(T::Array[MIR::Emittable])) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step.expr)
@@ -337,6 +337,8 @@ module FsmLowering
     if mir.is_a?(Array)
       return pending + mir.compact
     end
+    return nil unless mir.is_a?(MIR::Emittable)
+
     main = wrap_step_as_stmt(step, mir)
     return pending if main.nil?
     pending + [main]
@@ -348,15 +350,14 @@ module FsmLowering
   # MIR::ExprStmt(value-as-statement). Statement-shaped nodes
   # (MIR::Let, MIR::Set, MIR::IfStmt, MIR::BgBlock, ...) pass
   # through unchanged.
-  sig { params(step: AST::ThenStep, mir: T.untyped).returns(T.untyped) }
+  sig { params(step: AST::ThenStep, mir: MIR::Emittable).returns(T.nilable(MIR::Emittable)) }
   def wrap_step_as_stmt(step, mir)
     T.bind(self, MIRLowering) rescue nil
-    return nil if mir.nil?
     binding = step.binding
     if binding
       return MIR::Let.new(binding, mir, false, nil, nil)
     end
-    return mir if mir.respond_to?(:stmt?) && mir.stmt?
+    return mir if mir.stmt?
     expr_type = step.expr.full_type!
     is_void_step = ast_void_type?(expr_type)
     MIR::ExprStmt.new(mir, !is_void_step)

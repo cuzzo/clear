@@ -2326,7 +2326,7 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
-    sig { returns(T::Array[T.untyped]) }
+    sig { returns(T::Array[T::Array[AST::Node]]) }
     def child_bodies = branches.map(&:body)
   end
 

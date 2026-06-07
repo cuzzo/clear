@@ -100,40 +100,40 @@ module MIRLoweringConcurrency
     const :pointer_captures, T::Set[String]
     const :rt_name, String
 
-    sig { returns(T::Hash[Symbol, Object]) }
+    sig { returns(T::Hash[Symbol, T.nilable(Object)]) }
     def to_transform_hash
-      {
-        node: node,
-        blk_label: names.blk_label,
-        ctx_type: names.ctx_type,
-        promise_zig: types.promise_zig,
-        id: names.id,
-        bg_rt: names.bg_rt,
-        capture_fields: capture.capture_fields,
-        captured: captured,
-        capture_close_zig: capture_close_zig,
-        pointer_captures: pointer_captures,
-        stmt_code: body.stmt_code,
-        result_line: body.result_line,
-        capture_frees: capture.capture_frees,
-        arena_init: scheduler.arena_init,
-        fresh_heap_cleanups: capture.fresh_heap_cleanups,
-        fresh_heap_cleanup_names: capture.fresh_heap_cleanup_names,
-        is_void: types.is_void,
-        alloc_var: names.alloc_var,
-        promise_var: names.promise_var,
-        ctx_var: names.ctx_var,
-        promoted_decls: capture.promoted_decls,
-        capture_inits: capture.capture_inits,
-        rt_name: rt_name,
-        pin_mode: scheduler.pin_mode,
-        parallel: node.parallel == true,
-        profile_site_id: scheduler.site_id,
-        profile_line: scheduler.site_line,
-        profile_column: scheduler.site_col,
-        inner_zig: types.inner_zig,
-        arena_init_flag: node.arena_mode == true,
-      }
+      result = T.let({}, T::Hash[Symbol, T.nilable(Object)])
+      result[:node] = node
+      result[:blk_label] = names.blk_label
+      result[:ctx_type] = names.ctx_type
+      result[:promise_zig] = types.promise_zig
+      result[:id] = names.id
+      result[:bg_rt] = names.bg_rt
+      result[:capture_fields] = capture.capture_fields
+      result[:captured] = captured
+      result[:capture_close_zig] = capture_close_zig
+      result[:pointer_captures] = pointer_captures
+      result[:stmt_code] = body.stmt_code
+      result[:result_line] = body.result_line
+      result[:capture_frees] = capture.capture_frees
+      result[:arena_init] = scheduler.arena_init
+      result[:fresh_heap_cleanups] = capture.fresh_heap_cleanups
+      result[:fresh_heap_cleanup_names] = capture.fresh_heap_cleanup_names
+      result[:is_void] = types.is_void
+      result[:alloc_var] = names.alloc_var
+      result[:promise_var] = names.promise_var
+      result[:ctx_var] = names.ctx_var
+      result[:promoted_decls] = capture.promoted_decls
+      result[:capture_inits] = capture.capture_inits
+      result[:rt_name] = rt_name
+      result[:pin_mode] = scheduler.pin_mode
+      result[:parallel] = node.parallel == true
+      result[:profile_site_id] = scheduler.site_id
+      result[:profile_line] = scheduler.site_line
+      result[:profile_column] = scheduler.site_col
+      result[:inner_zig] = types.inner_zig
+      result[:arena_init_flag] = node.arena_mode == true
+      result
     end
   end
 

@@ -391,7 +391,7 @@ module MIRHoistLowering
     MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
   ].freeze
 
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[MIR::Stmt]) }
   def flush_pending
     T.bind(self, MIRLowering) rescue nil
     stmts = function_state.pending_stmts

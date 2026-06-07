@@ -182,11 +182,19 @@ module NilKill
     end
 
     def homogeneous_lookup_hash?(code)
-      values = code.to_s.scan(/:\s*([^,\n}]+)/).flatten.map(&:strip)
+      values = hash_literal_values(code)
       return false if values.length < 2
 
       kinds = values.map { |value| literal_kind(value) }
       kinds.all? && kinds.uniq.one?
+    end
+
+    def hash_literal_values(code)
+      text = code.to_s
+      rocket_values = text.scan(/=>\s*([^,\n}]+)/).flatten.map(&:strip)
+      return rocket_values unless rocket_values.empty?
+
+      text.scan(/:\s*([^,\n}]+)/).flatten.map(&:strip)
     end
 
     def constant_key_lookup_hash?(keys)

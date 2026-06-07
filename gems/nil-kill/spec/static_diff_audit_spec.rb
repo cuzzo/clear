@@ -185,6 +185,21 @@ RSpec.describe NilKill::StaticDiffAudit do
     expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 5))
   end
 
+  it "does not treat hash-rocket symbol lookup maps as hash records" do
+    findings, = audit_for("src/static_diff_hash_rocket_lookup_map.rb", <<~RUBY, [5])
+      class StaticDiffHashRocketLookupMap
+        extend T::Sig
+
+        CAPABILITIES = T.let({
+          "@shared" => :shared,
+          "@multiowned" => :multiowned,
+        }.freeze, T::Hash[String, Symbol])
+      end
+    RUBY
+
+    expect(findings).not_to include(a_hash_including("kind" => "hash_record_candidate", "line" => 5))
+  end
+
   it "does not treat typed struct value maps as hash records" do
     findings, = audit_for("src/static_diff_struct_map.rb", <<~RUBY, [10])
       class StaticDiffStructMap
