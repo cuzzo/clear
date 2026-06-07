@@ -75,6 +75,47 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "recognizes multiline sig blocks above class methods" do
+    Dir.mktmpdir("nil-kill-multiline-sig") do |dir|
+      path = File.join(dir, "sample.rb")
+      File.write(path, <<~RUBY)
+        class Example
+          extend T::Sig
+
+          sig do
+            params(
+              value: String,
+              count: Integer
+            ).returns(T::Hash[String, Integer])
+          end
+          def self.build(value:, count:)
+            {value => count}
+          end
+
+          def self.unsigned(value)
+            value
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+      method = idx.methods.find { |entry| entry["method"] == "build" }
+      unsigned = idx.methods.find { |entry| entry["method"] == "unsigned" }
+
+      expect(method).to include(
+        "kind" => "class",
+        "has_sig" => true,
+        "sig" => include("returns(T::Hash[String, Integer])")
+      )
+      expect(method.fetch("params")).to include(
+        a_hash_including("name" => "value", "type" => "String"),
+        a_hash_including("name" => "count", "type" => "Integer")
+      )
+      expect(unsigned).to include("kind" => "class", "has_sig" => false)
+      expect(idx.summary.fetch("unsigned_methods")).to eq(1)
+    end
+  end
+
   it "attributes a type-normalizer to its method even after a nested block" do
     Dir.mktmpdir("nil-kill-normalizer-method") do |dir|
       path = File.join(dir, "sample.rb")

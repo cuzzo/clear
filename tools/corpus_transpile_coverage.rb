@@ -15,16 +15,32 @@
 #        ruby tools/branch_gap_report.rb
 
 require 'bundler/setup'
+require 'optparse'
 require_relative '../spec/coverage_bootstrap'
 CoverageBootstrap.start('corpus-transpile')
 
 require_relative '../src/backends/transpiler'
 
 ROOT = File.expand_path('..', __dir__)
+opts = { shard: nil }
+
+OptionParser.new do |o|
+  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--shard I/N]"
+  o.on("--shard I/N") do |v|
+    idx, total = v.split("/", 2).map(&:to_i)
+    abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total.positive? && idx && idx >= 0 && idx < total
+    opts[:shard] = [idx, total]
+  end
+end.parse!
+
 files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht'))
               .reject { |f| File.basename(f).start_with?('._') }
               .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
               .sort
+if opts[:shard]
+  idx, total = opts[:shard]
+  files = files.each_with_index.select { |_file, i| (i % total) == idx }.map(&:first)
+end
 
 ok = 0
 fail = 0
@@ -34,7 +50,7 @@ files.each do |path|
   begin
     importer = ModuleImporter.new(base_dir: src_dir, use_mir: true)
     result = CompilerFrontend.compile(code, importer: importer, source_dir: src_dir)
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
@@ -43,7 +59,7 @@ files.each do |path|
       importer: importer,
       source_dir: src_dir,
       debug_mode: true
-    )
+    ))
     program = lowering.lower_program(result.ast)
     MIRChecker.new.check_program!(program)
     emitter = MIREmitter.new

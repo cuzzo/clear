@@ -100,22 +100,19 @@ module LockHelper
 
   # For the Phase 3 ordering check: return the rank of a WITH capability's
   # lock type, or nil if the type has no rank declared anywhere.
-  sig { params(cap: AST::Capability).returns(T.nilable(Integer)) }
+  sig { params(cap: CapabilityHelper::WithCapabilityFact).returns(T.nilable(Integer)) }
   def rank_of_cap(cap)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = lock_identity_of(cap)
+    t = cap.lock_identity
     return nil unless t
     T.must(@lock_type_ranks)[t]
   end
 
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).void }
-  def record_lock_clause_site!(node, expanded_capabilities)
+  sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).void }
+  def record_lock_clause_site!(node, lock_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
-    fallible = expanded_capabilities.select { |c|
-      c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
-    }
-    cap_types = fallible.filter_map { |c| lock_identity_of(c) }
+    cap_types = lock_capabilities.filter_map(&:lock_identity)
     T.must(@lock_clause_sites) << LockClauseSite.new(node: node, cap_types: cap_types)
     nil
   end
@@ -127,24 +124,23 @@ module LockHelper
   # same-name; does not chase aliases or cross function boundaries (Phase
   # 2 handles cross-function type-level cycles). Opt-outs downgrade to a
   # [Note].
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).returns(T.nilable(T::Array[AST::Capability])) }
-  def check_nested_lock_reacquire!(node, expanded_capabilities)
+  sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
+  def check_nested_lock_reacquire!(node, lock_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_locks = T.let(@held_locks, T.nilable(SemanticAnnotator::HeldLockMap))
     held_locks = @held_locks
     return unless held_locks
-    expanded_capabilities.each do |cap|
-      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
-      vn = cap_var_name(cap[:var_node])
+    lock_capabilities.each do |cap|
+      vn = cap.var_name
       next unless held_locks.key?(vn)
       outer_tok = T.must(held_locks[vn]).token
       escape    = node.deadlock_escape
       if escape && escape[:kind] == :deadlock
-        note!(cap[:var_node], "POSSIBLE_DEADLOCK accepted: '#{vn}' already held by an enclosing WITH " \
+        note!(cap.var_node, "POSSIBLE_DEADLOCK accepted: '#{vn}' already held by an enclosing WITH " \
                               "(outer line #{outer_tok&.line}). Reviewer: verify this cannot actually self-acquire " \
                               "at runtime (distinct instances, sorted acquire, etc.).")
       else
-        error!(cap[:var_node], :LOCK_NESTED_REACQUIRE, name: vn, outer_line: outer_tok&.line)
+        error!(cap.var_node, :LOCK_NESTED_REACQUIRE, name: vn, outer_line: outer_tok&.line)
       end
     end
   end
@@ -157,8 +153,8 @@ module LockHelper
   # cycle detection covers those). POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE
   # on the inner WITH downgrades the error to a [Note] so the risk is
   # visible but not blocking.
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).returns(T.nilable(T::Array[AST::Capability])) }
-  def check_lock_rank_ordering!(node, expanded_capabilities)
+  sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
+  def check_lock_rank_ordering!(node, lock_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_lock_types = T.let(@held_lock_types, T.nilable(T::Array[SemanticAnnotator::HeldLockTypeEntry]))
     held_lock_types = @held_lock_types
@@ -166,8 +162,7 @@ module LockHelper
     lock_type_ranks = @lock_type_ranks
     return unless lock_type_ranks && !lock_type_ranks.empty?
     escape = node.deadlock_escape
-    expanded_capabilities.each do |cap|
-      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+    lock_capabilities.each do |cap|
       cap_rank = rank_of_cap(cap)
       next unless cap_rank
       held_lock_types.each do |entry|
@@ -175,13 +170,13 @@ module LockHelper
         next unless held_rank
         next if cap_rank > held_rank
         if escape
-          msg = "Lock rank violation: acquiring ':#{lock_identity_of(cap)}' at rank #{cap_rank} while " \
+          msg = "Lock rank violation: acquiring ':#{cap.lock_identity}' at rank #{cap_rank} while " \
                 "':#{entry.type}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
                 "the acquire path to prove LockCycle freedom by construction."
-          note!(cap[:var_node], msg + " (POSSIBLE_#{escape[:kind].to_s.upcase} accepted.)")
+          note!(cap.var_node, msg + " (POSSIBLE_#{escape[:kind].to_s.upcase} accepted.)")
         else
-          error!(cap[:var_node], :LOCK_RANK_VIOLATION,
-            cap: lock_identity_of(cap), cap_rank: cap_rank,
+          error!(cap.var_node, :LOCK_RANK_VIOLATION,
+            cap: cap.lock_identity, cap_rank: cap_rank,
             held: entry.type, held_rank: held_rank)
         end
       end
@@ -190,31 +185,19 @@ module LockHelper
 
   # ---- Phase 2 — type-level lock-cycle detection ----------------------
 
-  # Extract the lock-identity symbol for a WITH capability. Returns the
-  # inner type's base symbol (:Counter for Locked(Counter) or
-  # @shared:locked Counter), or nil if we can't determine it.
-  sig { params(cap: AST::Capability).returns(T.nilable(Symbol)) }
-  def lock_identity_of(cap)
-    T.bind(self, SemanticAnnotator) rescue nil
-    ti = cap[:resolved_type]
-    return nil unless ti
-    return nil unless ti.respond_to?(:base_type)
-    ti.base_type
-  end
-
   # held_stack is an Array of { type:, opted_out: } entries. An edge is
   # opted_out if EITHER the current WITH (the acquirer) is opted out, OR
   # the outer held scope that emitted the edge was opted out. This lets
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
-  sig { params(fn_name: String, cap: AST::Capability, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], escape: T.nilable(SemanticAnnotator::DeadlockEscape)).void }
+  sig { params(fn_name: String, cap: CapabilityHelper::WithCapabilityFact, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], escape: T.nilable(SemanticAnnotator::DeadlockEscape)).void }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
     T.bind(self, SemanticAnnotator) rescue {}
-    t = lock_identity_of(cap)
+    t = cap.lock_identity
     return unless t
     T.must(T.must(@lock_direct_acquires)[fn_name]) << t
-    site_tok = cap[:var_node].token
+    site_tok = cap.var_node.token
     acquirer_opt = !escape.nil?
     held_stack.each do |held|
       T.must(T.must(@lock_direct_edges)[fn_name]) << LockEdge.new(

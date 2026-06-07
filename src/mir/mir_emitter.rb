@@ -57,6 +57,7 @@ class MIREmitter
     when MIR::UnionTypeDef then emit_union_def(node)
     when MIR::Import      then emit_import(node)
     when MIR::TypeAlias   then emit_type_alias(node)
+    when MIR::ModuleNamespace then emit_module_namespace(node)
     when MIR::TestDef     then emit_test_def(node)
 
     # --- Statements ---
@@ -75,6 +76,9 @@ class MIREmitter
     when MIR::ContinueStmt     then "continue;"
     when MIR::Panic            then "@panic(#{node.message.inspect});"
     when MIR::AssertStmt       then emit_assert_stmt(node)
+    when MIR::AssertRaisesCheck then emit_assert_raises_check(node)
+    when MIR::TestPreamble     then emit_test_preamble
+    when MIR::DebugOnly        then emit_debug_only(node)
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
@@ -89,7 +93,6 @@ class MIREmitter
     when MIR::DiscardOwned     then emit_discard_owned(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
-    when MIR::RawZig           then node.code
     when MIR::BgBlock          then node.code
     when MIR::DoBlock          then node.code
     when MIR::CatchWrapper     then node.code
@@ -161,6 +164,10 @@ class MIREmitter
     when MIR::ListLength       then "#{paren_if_try(T.must(emit(node.expr)))}.len"
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
+    when MIR::PointerCast      then emit_pointer_cast(node)
+    when MIR::ConstCast        then "@constCast(#{emit(node.expr)})"
+    when MIR::DefaultStreamCapacity then emit_default_stream_capacity(node)
+    when MIR::NextPromiseList  then emit_next_promise_list(node)
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
     when MIR::AllocatorRef     then emit_allocator_ref(node)
     when MIR::Undef            then node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
@@ -171,6 +178,7 @@ class MIREmitter
     when MIR::ItemsAccess      then emit_items_access(node)
     when MIR::OwnedSlice       then emit_owned_slice(node)
     when MIR::LambdaExpr       then emit_lambda(node)
+    when MIR::ZigTemplate      then emit_zig_template(node)
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
     when MIR::RawBc            then emit_raw_bc_as_zig(node)
@@ -246,7 +254,7 @@ class MIREmitter
     pattern
   end
 
-  # RawBc is the :bc-target sibling of RawZig. Nothing in current lowering
+  # RawBc is the :bc-target bytecode-template carrier. Nothing in current lowering
   # emits it (Phase 0 scaffolding only). If a :bc lowering path ever feeds
   # a RawBc into a Zig-producing step, fall back to the :zig field of the
   # registry entry so emission completes. Registry entries that reach Zig
@@ -266,6 +274,31 @@ class MIREmitter
   sig { params(node: MIR::InlineZig).returns(String) }
   def emit_inline_zig(node)
     code = node.code
+    if node.allocs
+      node.allocs.each do |key, sym|
+        code = code.gsub("{#{key}}", alloc_zig(sym))
+      end
+    end
+    code
+  end
+
+  sig { params(node: MIR::ZigTemplate).returns(String) }
+  def emit_zig_template(node)
+    code = node.code.dup
+    args = node.args
+    if args.is_a?(Hash)
+      args.each do |key, value|
+        rendered = emit(value)
+        code = code.gsub("&{#{key}}") { "&#{rendered}" }
+        code = code.gsub("{#{key}}") { rendered }
+      end
+    else
+      Array(args).each_with_index do |value, index|
+        rendered = emit(value)
+        code = code.gsub("&{#{index}}") { "&#{rendered}" }
+        code = code.gsub("{#{index}}") { rendered }
+      end
+    end
     if node.allocs
       node.allocs.each do |key, sym|
         code = code.gsub("{#{key}}", alloc_zig(sym))
@@ -394,9 +427,18 @@ class MIREmitter
       else
         "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n}"
       end
+    when MIR::PolymorphicFlowSignal
+      emit_polymorphic_flow_signal(stmt)
     else
       emit(stmt)
     end
+  end
+
+  sig { params(node: MIR::PolymorphicFlowSignal).returns(String) }
+  def emit_polymorphic_flow_signal(node)
+    fields = [".kind = .#{node.kind}"]
+    fields << ".ret = #{emit(node.ret)}" if node.ret
+    "__flow.* = .{ #{fields.join(', ')} };\nreturn;"
   end
 
   sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
@@ -406,14 +448,15 @@ class MIREmitter
     case last
     when MIR::ReturnStmt
       true
-    when MIR::RawZig
-      last.code.to_s.include?("return;") || last.code.to_s.include?("return ")
+    when MIR::PolymorphicFlowSignal
+      true
     when MIR::ScopeBlock
       flow_body_terminates?(last.body || [])
     when MIR::IfStmt
-      flow_body_terminates?(last.then_body || []) &&
-        last.else_body && !last.else_body.empty? &&
-        flow_body_terminates?(last.else_body || [])
+      return false unless flow_body_terminates?(last.then_body || [])
+      return false unless last.else_body && !last.else_body.empty?
+
+      flow_body_terminates?(last.else_body || [])
     else
       false
     end
@@ -487,7 +530,7 @@ class MIREmitter
   # outer-retry shape). Parameterize the Zig error name so the same wrapper works for both families:
   # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
   # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
-  sig { params(core_call: String, conflict_action: String, retries: NilClass, zig_error_name: String).returns(String) }
+  sig { params(core_call: String, conflict_action: String, retries: T.nilable(Integer), zig_error_name: String).returns(String) }
   def wrap_conflict_handler(core_call, conflict_action, retries, zig_error_name = "UpdateRetriesExhausted")
     if retries
       <<~ZIG.rstrip
@@ -595,6 +638,12 @@ class MIREmitter
   sig { params(node: MIR::TypeAlias).returns(String) }
   def emit_type_alias(node)
     "const #{node.name} = #{node.target};"
+  end
+
+  sig { params(node: MIR::ModuleNamespace).returns(String) }
+  def emit_module_namespace(node)
+    body = emit_body(node.items || [])
+    "const #{node.name} = struct {\n#{indent_block(body, 4)}\n};"
   end
 
   sig { params(node: MIR::TestDef).returns(String) }
@@ -768,8 +817,8 @@ class MIREmitter
   sig { params(node: MIR::IfChain).returns(String) }
   def emit_if_chain(node)
     parts = node.branches.map { |br|
-      cond = emit(br[:cond])
-      body = emit_body(br[:body])
+      cond = emit(br.cond)
+      body = emit_body(br.body)
       "if (#{cond}) {\n#{body}\n}"
     }
     result = parts.join(" else ")
@@ -1276,6 +1325,47 @@ class MIREmitter
     "CheatLib.assert(#{emit(node.cond)}, #{node.message});"
   end
 
+  sig { params(node: MIR::AssertRaisesCheck).returns(String) }
+  def emit_assert_raises_check(node)
+    error_check = node.error_name ? " and !#{node.rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
+    <<~ZIG.rstrip
+      {
+          if (#{emit(node.expr)}) |_| {
+              @panic("ASSERT_RAISES: expected #{node.kind} error but none raised");
+          } else |_| {
+              if (!#{node.rt_name}.__error.matchesKind(.#{node.kind})#{error_check}) {
+                  @panic("ASSERT_RAISES: expected #{node.kind} error, got different kind");
+              }
+          }
+      }
+    ZIG
+  end
+
+  sig { returns(String) }
+  def emit_test_preamble
+    <<~ZIG.chomp
+      var da = std.heap.DebugAllocator(.{}){};
+          defer _ = da.deinit();
+          const allocator = da.allocator();
+          var global_ctx = EbrContext{};
+          defer global_ctx.deinit(allocator);
+          var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+          defer __rt_box.deinit();
+          __rt_box.wireAllocator();
+          const rt: *Runtime = &__rt_box; _ = &rt;
+    ZIG
+  end
+
+  sig { params(node: MIR::DebugOnly).returns(String) }
+  def emit_debug_only(node)
+    body = emit_body(node.body || [])
+    <<~ZIG.rstrip
+      if (@import("builtin").mode == .Debug) {
+      #{indent_block(body, 4)}
+      }
+    ZIG
+  end
+
   # Parenthesize try-expressions to prevent Zig precedence issues where
   # `try X.field` parses as `try (X.field)` instead of `(try X).field`.
   sig { params(expr: String).returns(String) }
@@ -1298,9 +1388,41 @@ class MIREmitter
     "#{node.op}#{emit(node.operand)}"
   end
 
+  sig { params(node: MIR::PointerCast).returns(String) }
+  def emit_pointer_cast(node)
+    "@as(#{node.target_type}, @ptrCast(@alignCast(#{emit(node.expr)})))"
+  end
+
+  sig { params(node: MIR::DefaultStreamCapacity).returns(String) }
+  def emit_default_stream_capacity(node)
+    workers = emit(node.worker_count)
+    "blk: { var c: usize = 4; while (c < #{workers} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
+  end
+
+  sig { params(node: MIR::NextPromiseList).returns(String) }
+  def emit_next_promise_list(node)
+    list_expr = paren_if_try(T.must(emit(node.list_expr)))
+    alloc = alloc_zig(node.alloc)
+    <<~ZIG.rstrip
+      #{node.label}: {
+          var #{node.results_var} = std.ArrayListUnmanaged(#{node.elem_zig}).empty;
+          for (#{list_expr}.items) |__p| {
+              try #{node.results_var}.append(#{alloc}, try __p.next());
+          }
+          break :#{node.label} #{node.results_var};
+      }
+    ZIG
+  end
+
   sig { params(node: MIR::StructInit).returns(String) }
   def emit_struct_init(node)
-    fields = node.fields.map { |f| ".#{f[:name]} = #{emit(f[:value])}" }.join(", ")
+    fields = node.fields.filter_map do |field|
+      name = MIR.struct_init_field_name(field)
+      value = MIR.struct_init_field_value(field)
+      next nil unless name && value
+
+      ".#{name} = #{emit(value)}"
+    end.join(", ")
     if node.zig_type
       "#{node.zig_type}{ #{fields} }"
     else

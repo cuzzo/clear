@@ -9,6 +9,7 @@ module NilKill
       @methods = {}
       @tlets = {}
       @facts = { "files" => {}, "unsigned_methods" => [], "existing_sigs" => [], "tlet_sites" => [], "dead_nil_checks" => [],
+                 "deterministic_guards" => [],
                  "struct_declarations" => [], "struct_field_static" => [], "tuple_arrays" => [], "hash_shapes" => [],
                  "collection_index_lookups" => [], "hash_record_blockers" => [],
                  "hash_record_member_calls" => [],

@@ -75,7 +75,7 @@ RSpec.describe FsmWrapperEmitter do
         "CheatLib.Promise(i64)",
         "value: i64,",
         MIR::FsmStep.new(0, 0, "__rt_b1", "_ = &__rt_b1;", [
-          MIR::RawZig.new("__ctx_0.inner.result = __ctx_0.value;", "fsm_body", MIR::OwnershipContract.empty, nil),
+          "__ctx_0.inner.result = __ctx_0.value;",
         ]),
       ),
       MIR::FsmSpawnSetup.new(
@@ -200,22 +200,70 @@ RSpec.describe FsmWrapperEmitter do
       out = FsmWrapperEmitter.render(bod)
       expect(out).to match(/if \((?:@This\(\)\.)?runStep0.+\) \|_\| \{\} else \|err\| \{[\s\S]*?__ctx_0\.alloc\.free\(__ctx_0\.needle\);[\s\S]*?return \.\{ \.Done = \{\} \};/)
     end
+
+    it "renders dispatch pre-body skip arms" do
+      dispatch = MIR::FsmDispatch.new(
+        4,
+        [
+          MIR::FsmStateArm.new(
+            0,
+            MIR::FsmTailCondSkip.new("__ctx_4.skip", 2),
+            nil,
+            nil,
+            nil,
+            MIR::FsmTailJump.new(1),
+          ),
+        ],
+        true,
+      )
+
+      out = FsmWrapperEmitter.render_dispatch(dispatch)
+
+      expect(out).to include("if (__ctx_4.skip) {")
+      expect(out).to include("__ctx_4.step = 2;")
+      expect(out).to include("continue :__sw;")
+    end
+
+    it "rejects unknown dispatch tails" do
+      expect { FsmWrapperEmitter.render_tail(Object.new, 0) }
+        .to raise_error(ArgumentError, /unknown tail/)
+    end
+  end
+
+  describe "generic FSM body" do
+    it "passes through legacy raw resume function text" do
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgRawCtx",
+        "CheatLib.Promise(i64)",
+        "",
+        [],
+        [],
+        [],
+        "fn resumeFn(_: *CheatHeader.FsmTask) CheatHeader.YieldReason { return .{ .Done = {} }; }",
+        nil,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_raw", generic_ctx, spawn_setup)
+
+      out = FsmWrapperEmitter.render(generic_body)
+
+      expect(out).to include("fn resumeFn(_: *CheatHeader.FsmTask)")
+      expect(out).to include("return .{ .Done = {} };")
+    end
   end
 
   describe "step body as MIR statements" do
     it "renders MIR::Let in body_stmts via the standard MIR emitter" do
       bind = MIR::Let.new(
         "content",
-        MIR::RawZig.new("__ctx_0.rf_buf[0..10]", "fsm_bound_expr", MIR::OwnershipContract.empty, nil),
+        MIR::InlineZig.new("__ctx_0.rf_buf[0..10]", "fsm_bound_expr"),
         false, nil, nil,
       )
       out = FsmWrapperEmitter.render(body(step1_body: [bind]))
       expect(out).to include("const content = __ctx_0.rf_buf[0..10];")
     end
 
-    it "renders MIR::RawZig in body_stmts" do
-      stmt = MIR::RawZig.new("foo();", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil)
-      out = FsmWrapperEmitter.render(body(step0_body: [stmt]))
+    it "renders plain string body_stmts" do
+      out = FsmWrapperEmitter.render(body(step0_body: ["foo();"]))
       expect(out).to include("foo();")
     end
 
@@ -226,8 +274,8 @@ RSpec.describe FsmWrapperEmitter do
 
     it "skips empty / nil emissions without leaving stray blanks" do
       stmts = [
-        MIR::RawZig.new("", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil),
-        MIR::RawZig.new("real();", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil),
+        "",
+        "real();",
         nil,
       ]
       out = FsmWrapperEmitter.render(body(step0_body: stmts))

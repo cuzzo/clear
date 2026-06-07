@@ -92,4 +92,41 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.extern_effects).to eq({})
     expect(signature.owner_type_params).to eq([])
   end
+
+  it "normalizes function signature boundary metadata to typed defaults" do
+    fn = AST::FunctionDef.new(
+      tok("generic"),
+      "generic",
+      [],
+      [],
+      Type.new(:Void),
+      nil,
+      [],
+      [],
+      nil,
+      :pub,
+      [],
+      false
+    )
+    fn.type_params = ["T"]
+
+    signature = FunctionSignature.from_function_def(fn)
+    expect(signature.type_params).to eq([:T])
+    expect(signature.requires).to eq({})
+    expect(signature.extern_effects).to eq({})
+
+    signature.requires = { "x" => Set[:LOCKED] }
+    expect(signature.requires.fetch("x")).to include(:LOCKED)
+    signature.requires = nil
+    expect(signature.requires).to eq({})
+
+    signature.effects = Set[:BLOCKING]
+    signature.heap_carry_return = true
+    signature.heap_carry_return_vars = Set["value"]
+
+    copy = signature.dup
+    expect(copy.effects).to eq(Set[:BLOCKING])
+    expect(copy.heap_carry_return).to eq(true)
+    expect(copy.heap_carry_return_vars).to eq(Set["value"])
+  end
 end

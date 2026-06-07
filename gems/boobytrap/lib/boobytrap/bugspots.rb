@@ -15,6 +15,8 @@ module Boobytrap
     FIX_RE = /\b(fix(es|ed)?|bug\s*fix|close[sd]?)\b/i
 
     Event = Struct.new(:time, :subject, :files, keyword_init: true)
+    Blast = Struct.new(:file, :score, :fixes, :avg_touched, :max_touched,
+                       :partners, keyword_init: true)
 
     module_function
 
@@ -66,6 +68,54 @@ module Boobytrap
         e.files.each { |f| scores[f] += w }
       end
       scores
+    end
+
+    # Time-decayed multi-file fix blast radius. A file whose fix commits
+    # routinely touch many sibling files is a macro-design risk: fixing
+    # one local bug tends to require cross-module edits.
+    def blast_radius(events)
+      return [] if events.empty?
+
+      times = events.map(&:time)
+      first = times.min
+      span = (times.max - first).to_f
+      acc = Hash.new do |h, file|
+        h[file] = {
+          score: 0.0,
+          fixes: 0,
+          touched_sum: 0,
+          max_touched: 0,
+          partners: Hash.new(0.0)
+        }
+      end
+
+      events.each do |e|
+        files = e.files.uniq
+        next if files.empty?
+
+        t = span.zero? ? 1.0 : (e.time - first) / span
+        w = 1.0 / (1.0 + Math.exp((-12.0 * t) + 12.0))
+        touched = files.size
+        files.each do |file|
+          row = acc[file]
+          row[:score] += w * [touched - 1, 0].max
+          row[:fixes] += 1
+          row[:touched_sum] += touched
+          row[:max_touched] = [row[:max_touched], touched].max
+          (files - [file]).each { |partner| row[:partners][partner] += w }
+        end
+      end
+
+      acc.map do |file, row|
+        Blast.new(
+          file: file,
+          score: row[:score].round(3),
+          fixes: row[:fixes],
+          avg_touched: (row[:touched_sum].to_f / row[:fixes]).round(2),
+          max_touched: row[:max_touched],
+          partners: row[:partners].sort_by { |_, v| -v }.first(5).map { |p, v| [p, v.round(3)] }
+        )
+      end.sort_by { |row| [-row.score, -row.avg_touched, row.file] }
     end
 
     def from_git(repo, fix_re: FIX_RE, max: 0)

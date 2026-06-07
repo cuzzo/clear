@@ -33,10 +33,10 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     $stderr = StringIO.new
     begin
       fe = CompilerFrontend.compile(src, importer: imp, source_dir: Dir.pwd)
-      low = MIRLowering.new(struct_schemas: fe.struct_schemas, enum_schemas: fe.enum_schemas,
+      low = MIRLowering.new(input: MIRLoweringInput.new(struct_schemas: fe.struct_schemas, enum_schemas: fe.enum_schemas,
                             union_schemas: fe.union_schemas, fn_sigs: fe.fn_sigs,
                             moved_guard_info: fe.moved_guard_info, importer: imp,
-                            source_dir: Dir.pwd, target: :bc)
+                            source_dir: Dir.pwd, target: :bc))
       prog = low.lower_program(fe.ast)
       MIRChecker.new.check_program!(prog, strict: true)
       RegisterBcEmitter.new(fe, source: src, importer: imp).compile(prog).ops

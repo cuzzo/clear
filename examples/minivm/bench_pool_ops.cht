@@ -10,7 +10,7 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
     MUTABLE iter: Int64 = 0;
     WHILE iter < 100000 DO
         MUTABLE eid: ?Id<Env> = NIL;
-        WITH EXCLUSIVE pool AS p {
+        WITH POLYMORPHIC EXCLUSIVE pool AS p {
             id: Id<Env> = p.insert(Env{ vars: {} });
             IF p[id] AS env THEN
                 env.vars["k1"] = Value{ Int64Val: iter };
@@ -20,7 +20,7 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
             eid = id;
         }
         IF eid AS id THEN
-            WITH EXCLUSIVE pool AS p {
+            WITH POLYMORPHIC EXCLUSIVE pool AS p {
                 IF p[id] AS env THEN
                     PARTIAL MATCH env.vars["k2"] OR Value.Nil START
                         Value.Int64Val AS v -> total = total + v;,

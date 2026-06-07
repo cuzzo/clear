@@ -144,6 +144,11 @@ RSpec.describe FmtVerifier do
       input = "pub fn main() void {\n  return;\n}\n"
       expect(FmtVerifier.normalize_for_compare(input)).to eq(input)
     end
+
+    it "normalizes lowering-generated temp identifiers" do
+      input = "const __guard_12 = __tmp_5_6;\n"
+      expect(FmtVerifier.normalize_for_compare(input)).to eq("const __guard_N = __tmp_N_6;\n")
+    end
   end
 
   describe ".verify_dir" do
@@ -162,6 +167,14 @@ RSpec.describe FmtVerifier do
       expect(results.length).to eq(2)
       expect(results.map(&:path)).to include(a, b)
       expect(results).to all(have_attributes(ok: true))
+    end
+  end
+
+  describe ".transpile" do
+    it "transpiles a minimal source string with the configured importer" do
+      zig = FmtVerifier.transpile("FN main() RETURNS Void -> RETURN; END\n", @tmp)
+
+      expect(zig).to include("pub fn")
     end
   end
 

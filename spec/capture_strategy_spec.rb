@@ -88,7 +88,7 @@ RSpec.describe CaptureStrategy do
   # MoveInto — user wrote GIVE x at the BG capture site
   # ----------------------------------------------------------------
   describe "MoveInto: explicit GIVE at capture site" do
-    let(:site) { CaptureStrategy::CaptureSiteInfo.new(Set.new, Set["xs"]) }
+    let(:site) { CaptureStrategy::CaptureSiteInfo.new(copied_names: Set.new, moved_names: Set["xs"]) }
 
     it "classifies @list as MoveInto when GIVE is present" do
       strat = CaptureStrategy.classify(
@@ -98,7 +98,7 @@ RSpec.describe CaptureStrategy do
       )
       expect(strat).to be_a(CaptureStrategy::MoveInto)
       expect(strat.source_name).to eq("xs")
-      expect(strat.marker_plan).to eq([[:move_mark, "xs"]])
+      expect(strat.marker_plan).to contain_exactly(have_attributes(source_name: "xs"))
     end
 
     it "classifies slice as MoveInto when GIVE is present" do
@@ -124,7 +124,7 @@ RSpec.describe CaptureStrategy do
   # FreshHeapCopy — user wrote COPY x at the BG capture site
   # ----------------------------------------------------------------
   describe "FreshHeapCopy: explicit COPY at capture site" do
-    let(:site) { CaptureStrategy::CaptureSiteInfo.new(Set["xs"], Set.new) }
+    let(:site) { CaptureStrategy::CaptureSiteInfo.new(copied_names: Set["xs"], moved_names: Set.new) }
 
     it "classifies @list as FreshHeapCopy when COPY is present" do
       strat = CaptureStrategy.classify(
@@ -134,8 +134,10 @@ RSpec.describe CaptureStrategy do
       )
       expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
       expect(strat.alloc_sym).to eq(:heap)
-      expect(strat.marker_plan).to include([:alloc_mark, "xs", :heap])
-      expect(strat.marker_plan).to include([:cleanup, "xs", :heap])
+      expect(strat.marker_plan).to contain_exactly(
+        an_instance_of(CaptureStrategy::AllocMarkPlan).and(have_attributes(ctx_init_name: "xs", alloc_sym: :heap)),
+        an_instance_of(CaptureStrategy::CleanupPlan).and(have_attributes(ctx_init_name: "xs", alloc_sym: :heap))
+      )
     end
 
     it "classifies slice as FreshHeapCopy when COPY is present" do
@@ -198,7 +200,7 @@ RSpec.describe CaptureStrategy do
   # ----------------------------------------------------------------
   describe "CaptureSiteInfo" do
     it "exposes copied?/moved? predicates" do
-      info = CaptureStrategy::CaptureSiteInfo.new(Set["a"], Set["b"])
+      info = CaptureStrategy::CaptureSiteInfo.new(copied_names: Set["a"], moved_names: Set["b"])
       expect(info.copied?("a")).to be true
       expect(info.copied?("b")).to be false
       expect(info.moved?("b")).to be true

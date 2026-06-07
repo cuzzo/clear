@@ -139,6 +139,25 @@ RSpec.describe Scope do
     expect(types.keys).to eq([:Thing])
   end
 
+  it "normalizes legacy hash struct fields into typed StructField values" do
+    default = AST::Literal.new(tok("fallback"), :INT64, 1, :stack)
+    schema = Schemas::StructSchema.new(fields: {
+      count: {
+        type: :Int64,
+        default: default,
+        borrowed: true,
+      },
+    })
+
+    field = schema.fields.fetch("count")
+    expect(field).to be_a(AST::StructField)
+    expect(field.type.resolved).to eq(:Int64)
+    expect(field.default).to equal(default)
+    expect(field.borrowed).to eq(true)
+    expect(schema.field_defaults.fetch("count")).to equal(default)
+    expect(schema.borrowed_fields).to include("count")
+  end
+
   it "returns the live function parameter symbols by name" do
     fn = AST::FunctionDef.new(tok("main"), "main", [
       AST::Param.new(name: "argc", type: Type.new(:Int64)),
@@ -161,7 +180,7 @@ RSpec.describe Scope do
     expect(scope.resolve_full_type("locked")).to equal(locked.type)
     expect(scope.resolve_full_type("write_locked")).to equal(write_locked.type)
     expect(scope.resolve_type("locked")).to equal(locked.type)
-    expect(scope.resolve_type("missing")).to eq(:Any)
+    expect(scope.resolve_type("missing").resolved).to eq(:Any)
     expect(scope.is_mutable?("locked")).to eq(true)
     expect(scope.is_mutable?("write_locked")).to eq(false)
     expect(scope.is_mutable?("missing")).to eq(true)

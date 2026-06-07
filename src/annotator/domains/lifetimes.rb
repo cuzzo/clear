@@ -27,8 +27,8 @@ module Annotator
           is_resource = info&.resource
         end
 
-        is_copy = ti&.implicitly_copyable? { |t| lookup_type_schema(t) } rescue false
-        unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource || !is_copy
+        is_copy = ti.implicitly_copyable? { |t| lookup_type_schema(t) }
+        unless ti.multiowned? || ti.shared? || ti.requires_move? || is_resource || !is_copy
           error!(node, :GIVE_ON_COPY_TYPE, type: node.value.resolved_type)
         end
 
@@ -82,7 +82,7 @@ module Annotator
           copy.alloc = container_alloc
           elem = vti.element_type
           if elem
-            es = lookup_type_schema(elem.resolved) rescue nil
+            es = lookup_type_schema(elem.resolved)
             copy.deep_copy = Schemas.union?(es) &&
               (es.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
           end
@@ -121,7 +121,7 @@ module Annotator
         inner_type = node.value.full_type!(context: "COPY value")
         stamp_type!(node, inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type)
         ti = node.full_type!(context: "COPY result")
-        resolver = ->(name) { lookup_type_schema(name) rescue nil }
+        resolver = ->(name) { lookup_type_schema(name) }
 
         # COPY of a primitive or Id<T> is a semantic no-op (value copy, no allocation).
         # All other explicit COPYs produce heap-owned data.
@@ -148,7 +148,7 @@ module Annotator
         if vti.direct_indexable_collection?
           elem = vti.element_type
           if elem
-            schema = lookup_type_schema(elem.resolved) rescue nil
+            schema = lookup_type_schema(elem.resolved)
             if Schemas.union?(schema)
               has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
               node.deep_copy = has_heap
@@ -286,7 +286,7 @@ module Annotator
 
       # Collect all identifier names referenced (directly) in an AST subtree.
       # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
-      sig { params(nodes: T::Array[AST::Node]).returns(T::Set[String]) }
+      sig { params(nodes: T.any(AST::Node, T::Array[AST::Node])).returns(T::Set[String]) }
       def collect_body_identifier_names(nodes)
         T.bind(self, SemanticAnnotator)
 
@@ -382,10 +382,7 @@ module Annotator
         return unless node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
 
         vti = node.value.full_type!(context: "assignment index value")
-        vti = Type.new(vti) if vti && !vti.is_a?(Type)
-        is_copy = vti.is_a?(Type) ?
-          (vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
-          true
+        is_copy = vti.implicitly_copyable? { |t| lookup_type_schema(t) }
         return if is_copy
         return unless find_container_source(node.value)
 
@@ -405,7 +402,7 @@ module Annotator
         rhs_info = current_scope.resolve_entry(rhs_name)
         return if rhs_info&.rc_stored? || rhs_info&.sync
 
-        type_obj = Type.new(rhs_type)
+        type_obj = rhs_type
         # A String *binding* is owned/move (CLEAR contract). implicitly_copyable?
         # returns true for a String only via the rvalue rodata exemption
         # (type.rb: string? && rodata?); escape analysis stamps the binding's
@@ -461,19 +458,22 @@ module Annotator
 
         # Path 1: stdlib functions with lifetime: "self"
         matched_def = call_node.matched_stdlib_def
-        if matched_def && matched_def.emit && !matched_def.emit.lifetime.empty?
-          lifetimes = matched_def.emit.lifetime
-          if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
-            return call_node.object
+        if matched_def
+          matched_emit = matched_def.emit
+          if matched_emit && !matched_emit.lifetime.empty?
+            lifetimes = matched_emit.lifetime
+            if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
+              return call_node.object
+            end
+            # Named param lifetime -- find by index in args list
+            args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
+            arg_types = matched_def.arg_spec
+            if arg_types.is_a?(Array)
+              idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
+              return args[idx] if idx && args[idx]
+            end
+            return nil
           end
-          # Named param lifetime -- find by index in args list
-          args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-          arg_types = matched_def.arg_spec
-          if arg_types.is_a?(Array)
-            idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
-            return args[idx] if idx && args[idx]
-          end
-          return nil
         end
 
         # Path 2: user-defined functions with return_lifetime: [...]
@@ -717,7 +717,7 @@ module Annotator
         fn_node = @fn_nodes[current_fn_ctx&.name]
         rl = fn_node&.return_lifetime
         return if rl == :wildcard
-        declared = rl.is_a?(Array) ? rl : (rl.nil? ? [] : [rl])
+        declared = rl || []
 
         declared_names = declared.flat_map do |n|
           path = get_path_to_root(n)
@@ -771,9 +771,10 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         sc = sym.scope
-        return nil unless sc
-        sc.visible_entries.each do |name, entry|
-          return name if entry.equal?(sym)
+        if sc
+          sc.visible_entries.each do |name, entry|
+            return name if entry.equal?(sym)
+          end
         end
         # Param symbols may have been refreshed via Scope.live_param_syms;
         # fall back to a function-level scan.
@@ -801,7 +802,6 @@ module Annotator
         # LONGER. Destination outlives source iff dest_depth < source.depth.
         sources.each do |source|
           next if source.scope_depth.nil?
-          next if dest_depth.nil?
           if dest_depth < T.must(source.scope_depth)
             return "Lifetime Error: cannot store value with lifetime tied to " \
                    "scope depth #{source.scope_depth} into a destination at " \
@@ -952,7 +952,6 @@ module Annotator
       def collect_bg_sources_in_expr(expr)
         T.bind(self, SemanticAnnotator)
 
-        return [] if expr.nil?
         return bg_sources_for_block(expr) if expr.is_a?(AST::BgBlock) || expr.is_a?(AST::BgStreamBlock)
         return [] if SemanticAnnotator::BG_SOURCE_OPAQUE_AST_NODES.include?(expr.class)
         return [] unless expr.is_a?(Struct)
@@ -998,7 +997,7 @@ module Annotator
       def bg_lifetime_sources(analysis)
         T.bind(self, SemanticAnnotator)
 
-        (analysis.capture_symbols || {}).each_value.reject { |info|
+        analysis.capture_symbols.each_value.reject { |info|
           info && bg_capture_independent?(info)
         }.compact
       end
@@ -1044,8 +1043,7 @@ module Annotator
       def value_copy_capture?(t)
         T.bind(self, SemanticAnnotator)
 
-        ti = t.is_a?(Type) ? t : Type.new(t)
-        ti.bg_capture_is_value_copy? { |name| lookup_type_schema(name) rescue nil }
+        t.bg_capture_is_value_copy? { |name| lookup_type_schema(name) }
       end
 
       # Produce dotted-path lifetime roots. Wildcard and nil return [] because
@@ -1110,7 +1108,8 @@ module Annotator
           matched_def = val.matched_stdlib_def
           if matched_def
             # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
-            if matched_def.emit && !matched_def.emit.lifetime.empty?
+            matched_emit = matched_def.emit
+            if matched_emit && !matched_emit.lifetime.empty?
               val.storage = :borrow if val.respond_to?(:storage=)
               node.storage = :borrow if node.respond_to?(:storage=)
               return
@@ -1177,10 +1176,8 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "move candidate")
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        return unless vt.is_a?(Type)
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
-        return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
         existing = @og&.nodes&.[](node.name)
         if existing&.specific_move_action?
           # An earlier visitor (typically visit_GiveNode) already stamped
@@ -1205,8 +1202,6 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "TAKES ownership candidate")
-        vt = Type.new(vt) if vt && !vt.is_a?(Type)
-        return unless vt.is_a?(Type)
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 
@@ -1243,11 +1238,11 @@ module Annotator
         error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)
       end
 
-      sig { params(type_info: T.any(Type, Symbol, String), sync: T.nilable(Symbol)).returns(Symbol) }
+      sig { params(type_info: Type::TypeInput, sync: T.nilable(Symbol)).returns(Symbol) }
       def classify_og_kind(type_info, sync: nil)
         T.bind(self, SemanticAnnotator)
 
-        t = type_info.is_a?(Type) ? type_info : Type.new(type_info)
+        t = Type.new(type_info)
         if t.multiowned? || t.shared?
           :rc
         elsif sync

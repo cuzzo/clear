@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "capture_strategy"
 require_relative "../ast/scope"
+require_relative "../annotator/helpers/capabilities"
 
 # BgCaptureClassifier
 # ===================
@@ -63,34 +64,33 @@ module BgCaptureClassifier
   # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
   # or ConcurrentOp -- all use the same analysis machinery and now
   # share strategy classification.
-  sig { params(a: CapabilityHelper::CaptureAnalysis, live_param_syms: T::Hash[String, SymbolEntry], schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Hash[String, Symbol])) }
+  sig { params(a: CapabilityHelper::CaptureAnalysis, live_param_syms: T::Hash[String, SymbolEntry], schema_lookup: T.nilable(Proc)).returns(T::Hash[String, CaptureStrategy::Strategy]) }
   def self.classify_one!(a, live_param_syms = {}, schema_lookup: nil)
-    return unless a && a.captures
     # Refresh capture_symbols against the live function-param entries
     # (which propagate_caller_sync! mutates in place). Without this,
     # captures into a fiber-like body inside a function with REQUIRES
     # LOCKED see a deep-copied stale entry whose storage is still
     # :stack instead of the propagated :shared.
-    if a.capture_symbols
-      a.capture_symbols.each do |name, _entry|
-        live = live_param_syms[name]
-        a.capture_symbols[name] = live if live
-      end
+    a.capture_symbols.each do |name, _entry|
+      live = live_param_syms[name]
+      a.capture_symbols[name] = live if live
     end
 
-    site_info = CaptureStrategy::CaptureSiteInfo.new(a.site_copied || Set.new,
-                                                     a.site_moved  || Set.new)
+    site_info = CaptureStrategy::CaptureSiteInfo.new(
+      copied_names: a.site_copied,
+      moved_names: a.site_moved
+    )
 
-    strategies = {}
+    strategies = T.let({}, T::Hash[String, CaptureStrategy::Strategy])
     a.captures.each do |name, type_obj|
-      sym = a.capture_symbols&.dig(name)
+      sym = a.capture_symbols[name]
       t = resolve_capture_type(type_obj, sym)
       next unless t
       strategies[name] = CaptureStrategy.classify(
         name: name,
         type: t,
         site_info: site_info,
-        is_resource: a.resource_captures&.include?(name) || false,
+        is_resource: a.resource_captures.include?(name),
         schema_lookup: schema_lookup
       )
     end
@@ -107,6 +107,7 @@ module BgCaptureClassifier
     a.alloc_mark_entries = strategies.each_with_object({}) { |(n, s), h|
       h[n] = s.alloc_sym if s.is_a?(CaptureStrategy::FreshHeapCopy)
     }
+    strategies
   end
 
   # Build a Type with the SymbolEntry's CURRENT sync/storage overlaid on
@@ -115,10 +116,10 @@ module BgCaptureClassifier
   # no live scope -- only @fn_nodes). The capture's nominal type comes
   # from the snapshot; sync/storage come from the live entry (post
   # propagate_caller_sync!).
-  sig { params(type_obj: Type, sym: SymbolEntry).returns(Type) }
+  sig { params(type_obj: T.nilable(Type), sym: T.nilable(SymbolEntry)).returns(T.nilable(Type)) }
   def self.resolve_capture_type(type_obj, sym)
     return nil unless type_obj
-    base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
+    base = Type.new(type_obj)
     return base unless sym
     base.apply_bg_capture_symbol!(storage: sym.storage, sync: sym.sync)
     base.mark_borrowed_reference! if sym.borrowed_alias

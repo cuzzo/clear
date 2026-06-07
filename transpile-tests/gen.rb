@@ -5,6 +5,7 @@ require 'bundler/setup'
 # COVERAGE=1. See spec/coverage_bootstrap.rb.
 require_relative '../spec/coverage_bootstrap'
 CoverageBootstrap.start(ENV.fetch('COVERAGE_BOOTSTRAP_NAME', 'transpile-tests'))
+require_relative '../tools/zig_coverage_support'
 
 require_relative '../src/backends/transpiler'
 
@@ -16,7 +17,7 @@ class TestGenerator
 
     result = CompilerFrontend.compile(cheat_code, importer: importer, source_dir: source_dir)
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
@@ -25,7 +26,7 @@ class TestGenerator
       importer: importer,
       source_dir: source_dir,
       debug_mode: true
-    )
+    ))
     program = lowering.lower_program(result.ast)
 
     # Post-MIR verification: catch allocator mismatches before emitting Zig.
@@ -60,7 +61,11 @@ class TestGenerator
                       cheat_code.include?("BG STREAM {") ||
                       cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
                       cheat_code.include?("@pinned") ||
+                      cheat_code.include?("@sharded") ||
+                      cheat_code.include?("SHARD(") ||
                       transpiled_body.include?("WaitGroup") ||
+                      transpiled_body.include?("PartitionedStringMap") ||
+                      transpiled_body.include?("PartitionedNumericMap") ||
                       transpiled_body.include?("concurrentList") ||
                       transpiled_body.include?("concurrentStream") ||
                       transpiled_body.include?("concurrentBounded")
@@ -229,6 +234,33 @@ OUTPUT_FILE = "zig/all-tests.zig"
 HEADER_FILE = "zig/runtime/runtime-header.zig"
 GEN_JOBS = [Integer(ENV.fetch("TRANSPILE_GEN_JOBS", ENV.fetch("JOBS", "1"))), 1].max
 
+def zig_exe
+  [
+    File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
+    File.join(ZigCoverageSupport::ZIG_DIR, 'zig-new', 'zig'),
+    File.join(ZigCoverageSupport::ZIG_DIR, 'zig', 'zig'),
+    `which zig 2>/dev/null`.strip
+  ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+end
+
+def run_generated_zig_tests!
+  puts "Running generated Zig tests#{ZigCoverageSupport.enabled? ? ' under kcov' : ''}..."
+  output, status = ZigCoverageSupport.run_zig_test(
+    zig: zig_exe,
+    build_dir: ZigCoverageSupport::ZIG_DIR,
+    args: ['all-tests.zig', 'runtime/switch.S', 'runtime/onRoot.S', '-lc'],
+    suite: 'transpile-tests',
+    name: 'all-tests'
+  )
+  print output
+  exit 1 unless status.success?
+
+  if ZigCoverageSupport.enabled?
+    merged = ZigCoverageSupport.merge!('transpile-tests')
+    puts "Merged Zig coverage: #{merged}" if merged
+  end
+end
+
 def simplecov_child_command!(name)
   CoverageBootstrap.isolate_process!(name)
   return unless defined?(SimpleCov)
@@ -284,6 +316,15 @@ end
 
 puts "Generating #{OUTPUT_FILE}..."
 
+# Iterate through all .cht files before opening the output file. Worker
+# processes inherit open file descriptors; keeping OUTPUT_FILE closed during
+# fork prevents each child from flushing a copy of the parent's header buffer.
+test_source_dir = File.expand_path(TEST_DIR)
+test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
+
+puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
+generated_blocks = generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS)
+
 File.open(OUTPUT_FILE, "w") do |f|
   # 1. Write the Runtime Header (Once)
   if File.exist?(HEADER_FILE)
@@ -300,12 +341,8 @@ File.open(OUTPUT_FILE, "w") do |f|
     exit 1
   end
 
-  # 2. Iterate through all .cht files in the test directory
-  test_source_dir = File.expand_path(TEST_DIR)
-  test_files = Dir.glob("#{TEST_DIR}/*.cht").sort
-
-  puts "  - Processing #{test_files.length} files with #{[GEN_JOBS, test_files.length].min} worker(s)"
-  generate_blocks_parallel(test_files, test_source_dir, GEN_JOBS).each do |filename, block, error|
+  # 2. Write generated test blocks in deterministic file order.
+  generated_blocks.each do |filename, block, error|
     if error
       $stderr.puts "    [ERROR] Failed to transpile #{filename}: #{error}"
       @failed_tests ||= []
@@ -324,5 +361,6 @@ if @failed_tests&.any?
 end
 
 `zig fmt zig/all-tests.zig`
+run_generated_zig_tests! if ENV['TRANSPILE_RUN_ZIG'] == '1' || ZigCoverageSupport.enabled?
 puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
 end

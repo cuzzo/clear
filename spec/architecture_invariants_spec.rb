@@ -32,7 +32,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
-      rel == "backends/pipeline_host.rb" ||
+      rel == "mir/lower/pipeline/pipeline_context.rb" ||
+      rel == "mir/lower/pipeline/pipeline_host.rb" ||
       rel == "backends/pipeline_rewriter.rb" ||
       rel == "backends/string_concat_rewriter.rb" ||
       rel == "mir/mir_lowering.rb" ||
@@ -169,7 +170,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect_order(
       "src/mir/mir_pass.rb",
       "pass_state.require!(:premir_type_checked",
-      "EscapeAnalysis.apply!",
+      "EscapeAnalysis.apply_with_facts!",
       "pass_state.mark!(:escape_analyzed)",
       "CleanupClassifier.classify",
       "pass_state.mark!(:cleanup_classified)",
@@ -233,8 +234,21 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps ownership-significant MIR node classes in an explicit registry" do
     expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
     expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
-    expect(source("src/mir/mir.rb")).to include("RawZig, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, InlineZig")
     expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
+  end
+
+  it "keeps raw Zig statement nodes out of production source" do
+    offenders = Dir.glob(File.join(ARCH_ROOT, "src", "**", "*.rb")).flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next unless line.include?("RawZig")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty, offenders.join("\n")
   end
 
   it "keeps linear MIR ownership traversal closed over statement node classes" do
@@ -257,6 +271,64 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(sink_registry).not_to include("assignment_ownership")
     expect(sink_registry).not_to include("hoist_dependency")
   end
+
+  it "keeps escape heap placement explainable through typed facts" do
+    escape = source("src/semantic/escape_analysis.rb")
+
+    expect(escape).to include("class EscapePlacementFact < T::Struct")
+    expect(escape).to include("class EscapePlacementFacts < T::Struct")
+    expect(escape).to include("def self.apply_with_facts!")
+    expect(escape).to include("result = apply_with_facts!(fn_nodes, schema_lookup)")
+    expect(escape).to include("record_placement_phase!(placements, facts")
+    expect(escape).to include("Result.new(heap_fns: placements.heap_function_names")
+  end
+
+  it "keeps WITH capability expansion behind typed fact records" do
+    capabilities = source("src/annotator/helpers/capabilities.rb")
+    execution = source("src/annotator/domains/execution_boundaries.rb")
+
+    expect(capabilities).to include("class WithCapabilityFact < T::Struct")
+    expect(capabilities).to include("class WithCapabilityExpansion < T::Struct")
+    expect(capabilities).to include("source_entry: source_entry")
+    expect(capabilities).to include("borrowed_qualifier:")
+    expect(execution).to include("capability_expansion = CapabilityHelper::WithCapabilityExpansion.new")
+    expect(execution).to include("lock_capabilities = capability_expansion.locks")
+  end
+
+  it "does not let production capability consumers rediscover raw lock facts" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/ast/ast.rb"
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("lock_identity_of") || line.include?("T::Array[AST::Capability]")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "WITH capability consumers must use WithCapabilityFact/WithCapabilityExpansion, not raw AST capability rediscovery:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not rediscover MIR ownership effects with respond_to? probes" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("respond_to?(:ownership_effect)") ||
+                    line.include?('respond_to?("ownership_effect")')
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR ownership consumers must use MIR::OwnershipEffect.of/typed facts, not optional protocol probes:\n" \
+      "#{offenders.join("\n")}"
+  end
 end
 
 RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
@@ -272,14 +344,16 @@ RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
     "src/mir/mir_lowering.rb",
     "src/mir/hoist.rb",
     "src/mir/fsm_lowering.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_materializer.rb",
   ].freeze
 
   OWNERSHIP_LOWERING_GLOBS = [
     "src/mir/mir_lowering.rb",
     "src/mir/lowering/**/*.rb",
     "src/mir/fsm_lowering.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_materializer.rb",
   ].freeze
 
   def ownership_lowering_files
@@ -498,7 +572,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/annotator/helpers/function_analysis.rb",
     "src/annotator/helpers/generic_analysis.rb",
     "src/annotator/helpers/pipe_analysis.rb",
-    "src/backends/pipeline_host.rb",
+    "src/mir/lower/pipeline/pipeline_host.rb",
     "src/backends/pipeline_rewriter.rb",
     "src/semantic/escape_analysis.rb",
     "src/mir/lowering/expressions.rb",
@@ -594,7 +668,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       %r{\Asrc/ast/ast\.rb\z},
       %r{\Asrc/ast/parser\.rb\z},
       %r{\Asrc/annotator/},
-      %r{\Asrc/backends/pipeline_host\.rb\z},
+      %r{\Asrc/mir/lower/pipeline/pipeline_context\.rb\z},
+      %r{\Asrc/mir/lower/pipeline/pipeline_host\.rb\z},
       %r{\Asrc/backends/pipeline_rewriter\.rb\z},
       %r{\Asrc/backends/string_concat_rewriter\.rb\z},
       %r{\Asrc/mir/hoist\.rb\z},
@@ -626,7 +701,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       source(rel).lines.each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
         next unless line.match?(/\.full_type\s*=(?![=~])/)
-        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = value")
+        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
         "#{rel}:#{idx + 1}: #{line.strip}"
       end
     end
@@ -642,7 +717,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(annotator).to include("type_parameters(:Stamp)")
     expect(annotator).to include("value: T.type_parameter(:Stamp)")
     expect(annotator).to include("raise \"annotation stamp missing type")
-    expect(annotator).to include("node.full_type = value")
+    expect(annotator).to include("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
     expect(annotator).to include('node.full_type!(context: "annotation stamp")')
     expect(annotator).to include("stamped.untyped?")
     expect(annotator).to include('raise "annotation stamp produced :Untyped')
@@ -846,7 +921,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(checker).to include("verify_alloc_marks_typed!(allocs)")
     expect(checker).to include("def verify_alloc_marks_typed!(allocs)")
     expect(checker).to include("ALLOC_MARK_TYPE_MISSING")
-    expect(checker).to include("ti.is_a?(Type) && !ti.untyped?")
+    expect(checker).to include("mark.type_info.untyped?")
     expect(source("src/ast/diagnostic_registry.rb")).to include("ALLOC_MARK_TYPE_MISSING")
   end
 
@@ -1009,7 +1084,8 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
 
   it "routes production ownership transfer marks through the typed transfer plan" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
-                 [File.join(ARCH_ROOT, "src/backends/pipeline_host.rb")]).sort.flat_map do |path|
+                 [File.join(ARCH_ROOT, "src/mir/lower/pipeline/pipeline_host.rb"),
+                  File.join(ARCH_ROOT, "src/mir/lower/pipeline/pipeline_materializer.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       next [] if rel == "src/mir/mir.rb"
 

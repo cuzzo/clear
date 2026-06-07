@@ -58,7 +58,7 @@ def compile_frontend(source, source_dir)
 end
 
 def build_lowering(frontend, importer, source_dir)
-  MIRLowering.new(
+  MIRLowering.new(input: MIRLoweringInput.new(
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
@@ -66,7 +66,7 @@ def build_lowering(frontend, importer, source_dir)
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,
     source_dir: source_dir,
-  )
+  ))
 end
 
 def compile_mir(source, source_dir)

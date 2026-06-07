@@ -125,6 +125,7 @@ module NilKill
         @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] })
         @store.facts["tlet_sites"].concat(idx.tlet_sites)
         @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks)
+        @store.facts["deterministic_guards"].concat(idx.deterministic_guards)
         @store.facts["struct_declarations"].concat(idx.struct_declarations)
         @store.facts["struct_field_static"].concat(idx.struct_field_static)
         @store.facts["tuple_arrays"].concat(idx.tuple_arrays)
@@ -193,6 +194,14 @@ module NilKill
           @store.actions << base_action("remove_dead_safe_nav", REVIEW, finding["path"], finding["line"], finding["reason"],
             { "code" => finding["code"] })
         end
+      end
+      @store.facts["deterministic_guards"].each do |finding|
+        next unless finding["proof_tier"] == "static_proven"
+        next if finding["predicate_kind"] == "nil_check" # already emitted through dead_nil_checks
+
+        @store.actions << base_action("replace_deterministic_guard", REVIEW, finding["path"], finding["line"],
+          "#{finding["code"]} is always #{finding["truth_value"]}: #{finding["reason"]}",
+          finding)
       end
       @store.diagnostics["sorbet_errors"].each do |diag|
         kind = %w[7002 7003 7005 7007].include?(diag["code"]) ? "annotation_conflict" : "sorbet_warning"

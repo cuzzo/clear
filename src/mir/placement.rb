@@ -46,6 +46,16 @@ module MIR
       alloc(value, :heap) == :frame
     end
 
+    sig { params(value: T.nilable(Symbol)).returns(T::Boolean) }
+    def self.explicit_heap?(value)
+      value == :heap
+    end
+
+    sig { params(value: T.nilable(Symbol)).returns(T::Boolean) }
+    def self.explicit_frame?(value)
+      value == :frame
+    end
+
     sig { params(value: T.nilable(Symbol)).returns(Symbol) }
     def self.alloc_scope(value)
       heap?(value) ? :heap : :iteration

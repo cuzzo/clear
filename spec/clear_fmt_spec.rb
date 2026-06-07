@@ -1660,6 +1660,103 @@ RSpec.describe Formatter do
     end
   end
 
+  describe "formatter helper scanners" do
+    def ft(type, raw)
+      Formatter::FormatLexer::Token.new(type, raw, 0, 0)
+    end
+
+    let(:emitter) { Formatter::Emitter.new([]) }
+
+    it "centralizes formatter root-depth and END-block keyword predicates" do
+      expect(emitter.send(:root_depth?, 0, 0)).to eq(true)
+      expect(emitter.send(:root_depth?, 1, 0)).to eq(false)
+      expect(Formatter::Emitter::END_BLOCK_OPENERS).to include("IF", "FN", "START")
+      expect(Formatter::Emitter::INLINE_END_BLOCK_OPENERS).to include("IF", "FN")
+      expect(Formatter::Emitter::INLINE_END_BLOCK_OPENERS).not_to include("START")
+    end
+
+    it "ignores nested comments when deciding whether a MATCH arm comment is top-level" do
+      toks = [
+        ft(:VAR_ID, "Pat"),
+        ft(:OP, "->"),
+        ft(:KEYWORD, "IF"),
+        ft(:VAR_ID, "x"),
+        ft(:KEYWORD, "THEN"),
+        ft(:COMMENT, "# nested"),
+        ft(:KEYWORD, "END"),
+      ]
+
+      arm = emitter.send(:build_match_arm, toks, 0, toks.length, 1, nil)
+
+      expect(arm[:multi]).to eq(true)
+    end
+
+    it "does not treat START after a statement boundary as a MATCH block" do
+      toks = Formatter::FormatLexer.new("x; START").tokenize
+      start_idx = toks.index { |t| t.type == :KEYWORD && t.raw == "START" }
+
+      expect(emitter.send(:match_block_start?, toks, start_idx)).to eq(false)
+    end
+
+    it "returns false when START has no preceding MATCH context" do
+      toks = Formatter::FormatLexer.new("START").tokenize
+
+      expect(emitter.send(:match_block_start?, toks, 0)).to eq(false)
+    end
+
+    it "skips trivia when finding the first code token in a range" do
+      toks = [
+        ft(:COMMENT, "# hi"),
+        ft(:WS, " "),
+        ft(:INDENT_OPEN, ""),
+        ft(:VAR_ID, "x"),
+      ]
+
+      expect(emitter.send(:first_code_at, toks, 0, toks.length).raw).to eq("x")
+    end
+
+    it "finds nested generic close tokens and rejects non-generic spans" do
+      nested = [
+        ft(:TYPE_ID, "Foo"), ft(:SYM, "<"), ft(:TYPE_ID, "Bar"),
+        ft(:SYM, "<"), ft(:TYPE_ID, "Baz"), ft(:SYM, ">"), ft(:SYM, ">"),
+      ]
+      with_paren = [ft(:TYPE_ID, "Foo"), ft(:SYM, "<"), ft(:SYM, "("), ft(:SYM, ">")]
+      with_equal = [ft(:TYPE_ID, "Foo"), ft(:SYM, "<"), ft(:SYM, "="), ft(:SYM, ">")]
+
+      expect(emitter.send(:find_generic_close_idx, nested, 2)).to eq(6)
+      expect(emitter.send(:find_generic_close_idx, with_paren, 2)).to be_nil
+      expect(emitter.send(:find_generic_close_idx, with_equal, 2)).to be_nil
+    end
+
+    it "skips trivia when finding the preceding code token" do
+      line = [ft(:VAR_ID, "x"), ft(:COMMENT, "# c"), ft(:INDENT_CLOSE, "")]
+
+      expect(emitter.send(:preceding_code_token, line, line.length).raw).to eq("x")
+    end
+
+    it "recognizes capability-chain colons across trivia and parenthesized args" do
+      with_trivia = [ft(:VAR_ID, "@shared"), ft(:COMMENT, "# c"), ft(:SYM, ":")]
+      multi_segment = [
+        ft(:VAR_ID, "@shared"), ft(:SYM, ":"), ft(:COMMENT, "# c"),
+        ft(:VAR_ID, "sharded"), ft(:SYM, "("), ft(:NUM, "8"), ft(:SYM, ")"),
+        ft(:SYM, ":"),
+      ]
+
+      expect(emitter.send(:capability_chain_colon?, with_trivia, 2)).to eq(true)
+      expect(emitter.send(:capability_chain_colon?, multi_segment, 7)).to eq(true)
+    end
+
+    it "returns false for malformed parenthesized capability chains" do
+      malformed = [
+        ft(:COMMENT, "# before"), ft(:SYM, "("), ft(:NUM, "8"),
+        ft(:SYM, ")"), ft(:COMMENT, "# c"), ft(:SYM, ":"),
+      ]
+
+      expect(emitter.send(:capability_chain_colon?, malformed, 5)).to eq(false)
+      expect(emitter.send(:skip_paren_group_back, [ft(:SYM, ")")], 0)).to eq(-1)
+    end
+  end
+
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../transpile-tests", __dir__)
     files = Dir.glob(File.join(root, "**", "*.cht"))

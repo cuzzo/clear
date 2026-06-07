@@ -121,6 +121,7 @@ log.txt
 
 # Zig build artifacts (top-level scratch / cache directories)
 zig/all-tests.zig
+zig/all-fuzz.zig
 zig/transpile-test.zig
 zig/zig-out
 zig/.zig-cache
@@ -131,6 +132,7 @@ zig/fiber-stack-check/pass/build
 zig/*.bc
 zig/*.o
 zig/._clear_tmp_*
+zig/._clear_cov_*
 zig/data
 
 # Transpile-tests build artifacts

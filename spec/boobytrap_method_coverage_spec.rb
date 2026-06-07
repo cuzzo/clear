@@ -49,16 +49,12 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :heap))).to eq(:heap)
 
     schema_lookup = ->(_) { nil }
-    copy_string = OpenStruct.new(
-      value: AST::CopyNode.new(tok, id("s")),
-      symbol: SymbolEntry.new(reg: "s", type: Type.new(:String), mutable: false, storage: :heap),
-    )
+    copy_string = AST::VarDecl.new(tok, "s_copy", nil, AST::CopyNode.new(tok, id("s")), false)
+    copy_string.symbol = SymbolEntry.new(reg: "s", type: Type.new(:String), mutable: false, storage: :heap)
     expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), copy_string, schema_lookup)).to include(kind: :heap_string)
 
-    borrowed_string = OpenStruct.new(
-      value: lit,
-      symbol: SymbolEntry.new(reg: "b", type: Type.new(:String), mutable: false, storage: :rodata),
-    )
+    borrowed_string = AST::VarDecl.new(tok, "b", nil, lit, false)
+    borrowed_string.symbol = SymbolEntry.new(reg: "b", type: Type.new(:String), mutable: false, storage: :rodata)
     expect(CleanupClassifier.send(:classify_owned_string, Type.new(:String), borrowed_string, schema_lookup)).to be_nil
 
     field = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: true)
@@ -86,7 +82,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     l.define_singleton_method(:stamp_allocating_result_target!) { |_expr, _name, alloc: nil| alloc }
 
     l.send(:hoist_lazy_alloc_result, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame), id("s"))
-    expect(l.instance_variable_get(:@pending_stmts).map(&:class)).to include(MIR::AllocMark, MIR::Let)
+    expect(l.function_state.pending_stmts.map(&:class)).to include(MIR::AllocMark, MIR::Let)
 
     passthrough = MIR::Ident.new("plain")
     l.send(:hoist_lazy_alloc_result, passthrough, id("plain"))
@@ -116,7 +112,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   it "covers moved-root collection helpers without source-level fuzz state" do
     l = lowering
     owned = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, needs_cleanup: true, zig_type: "Thing")
-    l.instance_variable_get(:@current_bindings)["item"] = owned
+    l.function_state.current_bindings["item"] = owned
 
     moved = AST::MoveNode.new(tok, id("item", type: Type.new(:String), moved: true))
     expect(l.send(:collect_explicit_move_roots, moved)).to eq(["item"])
@@ -135,7 +131,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     inline_mutator = MIR::InlineZig.new("x", "mutator", MIR::OwnershipContract.empty, { mutates_receiver: true }, nil)
     expect(checker.send(:expr_has_frame_alloc?, inline_mutator)).to be(false)
     expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(true)
-    expect(checker.send(:expr_has_frame_alloc?, MIR::RawZig.new("const p = frameAlloc();", "test"))).to be(true)
+    inline_frame = MIR::InlineZig.new("frameAlloc()", "frame_alloc_probe")
+    inline_frame.allocs = { alloc: :frame }
+    expect(checker.send(:expr_has_frame_alloc?, inline_frame)).to be(true)
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)
 
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_) { nil })
@@ -203,7 +201,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(target.elem_ownership).to eq(:affine)
     expect(target.elem_sync).to eq(:write_locked)
 
-    l.instance_variable_set(:@do_capture_map, { "root" => "__ctx.root" })
+    l.capture_state.do_capture_map = { "root" => "__ctx.root" }
     path = AST::GetField.new(tok, AST::GetField.new(tok, id("root"), "inner"), "leaf")
     expect(l.send(:build_field_path_zig, path)).to eq("__ctx.root.inner.leaf")
     expect(l.send(:build_field_path_zig, Object.new)).to be_a(String)
@@ -279,7 +277,11 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.define_singleton_method(:sharded_unsynced_identifier?) { |node| node.equal?(shard_id) }
     expect(a.send(:pre_scan_node_for_sharded, [id("other"), shard_id])).to be(true)
 
-    access = { map_name: "items", key_expr: lit }
+    access = AST::PipelineShardedAccess.new(
+      map_name: "items",
+      key_expr: lit,
+      map_token: tok,
+    )
     a.define_singleton_method(:sharded_get_index_access) do |node, context:|
       context == "pipeline target" && node.equal?(shard_id) ? access : nil
     end

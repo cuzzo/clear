@@ -49,4 +49,32 @@ class ReportTest < Minitest::Test
     refute_includes md, "likely bug"
     assert_includes md, "*POSSIBLE*"
   end
+
+  def test_report_renders_state_heatmap_branch_density_and_temporal_ordering
+    f = Tempfile.new(["rep_state", ".rb"])
+    f.write(<<~RB)
+      class BillingService
+        def set_user(user); @user = user; end
+        def set_cart(cart); @cart = cart; end
+        def validate_user; fail unless @user; @validated = true; end
+        def apply_discount; @discount = true if @cart; end
+        def process_payment
+          pay(@user, @cart, @discount) if @validated
+        end
+      end
+    RB
+    f.close
+
+    md = Decomplex::Report.new([f.path]).to_markdown
+
+    assert_includes md, "## State Heatmap"
+    assert_includes md, "`user`"
+    assert_includes md, "## State-Based Branch Density"
+    assert_includes md, "state-based branch decision"
+    assert_includes md, "## Temporal Ordering Pressure"
+    assert_includes md, "BillingService"
+    assert_includes md, "implicit lifecycle score"
+  ensure
+    f&.unlink
+  end
 end

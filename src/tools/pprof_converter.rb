@@ -409,6 +409,7 @@ module PprofConverter
   # path (which is a real .zig file pprof can read). Without this
   # split, runtime functions like `entryWrapper` rendered against
   # arbitrary .cht line numbers, badly misleading the user.
+  sig { params(profile_dir: String, addr2line_file: String, is_user_zig: T.nilable(T::Boolean)).returns(String) }
   def clear_source_path(profile_dir, addr2line_file, is_user_zig: nil)
     if is_user_zig.nil?
       cht = File.join(profile_dir, 'source.cht')

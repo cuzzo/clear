@@ -88,6 +88,12 @@ class CleanupEntry < Hash
   def has_moved_guard? = self[:has_moved_guard] == true
 
   sig { returns(T::Boolean) }
+  def heap? = self[:alloc] == :heap
+
+  sig { returns(T::Boolean) }
+  def frame? = self[:alloc] == :frame
+
+  sig { returns(T::Boolean) }
   def match_as? = self[:match_as] == true
 
   sig { returns(T::Boolean) }

@@ -215,13 +215,14 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
     end
 
-    it "detects discarded RawZig stdlib call with allocates:true" do
-      rz = MIR::RawZig.new("try CheatLib.clone(value)", "raw_clone", MIR::OwnershipContract.empty, { allocates: true, return: :String, return_alloc: :heap })
-      body = [
-        MIR::ExprStmt.new(rz, false),
-      ]
-      errors = checker.check_fn!(fn_def("raw_stdlib_leak", body))
-      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("RawZig block") }).to be true
+    it "detects fixed-return InlineZig leaks even when ownership effect metadata is suppressed" do
+      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
+      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone_fixed", MIR::OwnershipContract.empty, sig)
+      iz.result_ownership_bearing = false
+
+      errors = checker.check_fn!(fn_def("stdlib_fixed_leak", [MIR::ExprStmt.new(iz, false)]))
+
+      expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("clone_fixed") }).to be true
     end
 
     it "rejects InlineZig stdlib call with allocates:true returning Void without explicit ownership facts" do
@@ -648,6 +649,19 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
+    it "detects restoreLoopMark enclosing non-iteration frame allocations" do
+      loop_body = [loop_restore_defer, alloc_mark("tmp", :frame, scope: :function)]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
+      ]
+      errors = checker.check_fn!(fn_def("loop_restore_wrong_scope", body))
+      expect(errors.any? { |e|
+        e.include?("FRAME_NO_REWIND") &&
+          e.include?("not scoped to one iteration")
+      }).to be true
+    end
+
     it "detects loop with mark_per_iter flag but no restoreLoopMark defer (lowerer bug)" do
       # mark_per_iter=true but lowerer failed to emit the defer -- checker catches it
       loop_body = [alloc_mark("tmp", :frame, scope: :iteration)]
@@ -881,6 +895,21 @@ RSpec.describe MIRChecker do
       ]
       errors = checker.check_fn!(fn_def("heap_alloc_frame_cleanup", body))
       expect(errors.any? { |e| e.include?("ALLOC_CLEANUP_MISMATCH") && e.include?("data") }).to be true
+    end
+
+    it "rejects ReassignWithCleanup when its allocator disagrees with the target AllocMark" do
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
+      body = [
+        alloc_mark("data", :frame),
+        MIR::ReassignWithCleanup.new("data", MIR::Lit.new("\"next\""), "[]const u8", :heap),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("reassign_alloc_mismatch", body))
+      expect(errors.any? { |e|
+        e.include?("ALLOC_CLEANUP_MISMATCH") &&
+          e.include?("ReassignWithCleanup") &&
+          e.include?("data")
+      }).to be true
     end
 
     it "passes for matching frame alloc and frame cleanup" do
@@ -1146,10 +1175,8 @@ RSpec.describe MIRChecker do
 
     it "rejects malformed ownership contracts at the MIR node boundary" do
       iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
-      rz = MIR::RawZig.new("try items.append(rt.heapAlloc(), m);", "intrinsic", MIR::OwnershipContract.empty, takes_signature)
 
       expect { iz[:ownership_contract] = { consumes: ["m"] } }.to raise_error(TypeError, /MIR::OwnershipContract/)
-      expect { rz[:ownership_contract] = nil }.to raise_error(TypeError, /MIR::OwnershipContract/)
       expect { iz.ownership_contract.consumes << "late" }.to raise_error(FrozenError)
     end
 
@@ -1198,10 +1225,6 @@ RSpec.describe MIRChecker do
       expect(stripped.copied_consumed_bindings).to eq(["m"])
     end
 
-    it "strips try from RawZig without regex parsing" do
-      raw = MIR::RawZig.new("try rawCall()", "raw")
-      expect(raw.without_try.code).to eq("rawCall()")
-    end
   end
 
   # ===========================================================================
@@ -1236,6 +1259,18 @@ RSpec.describe MIRChecker do
       program = checked_program([fn1])
       errors = checker.check_program!(program)
       expect(errors).to be_empty
+    end
+
+    it "checks functions inside structural module namespaces" do
+      namespace = MIR::ModuleNamespace.new("helper", [
+        fn_def("bad_imported_fn", [MIR::ExprStmt.new(owned_call, true)]),
+        MIR::StructDef.new("Payload", [], nil, :pub),
+      ])
+      program = checked_program([namespace])
+
+      errors = checker.check_program!(program)
+
+      expect(errors.any? { |e| e.include?("bad_imported_fn::makeList") && e.include?("HPT_LEAK") }).to be true
     end
   end
 
@@ -1275,6 +1310,364 @@ RSpec.describe MIRChecker do
       errors = checker.ownership_registry_errors
 
       expect(errors).to be_empty
+    end
+  end
+
+  describe "checker edge coverage" do
+    def owned_operand(name, alloc: :heap)
+      MIR::OwnershipOperandFact.owned_binding(name, Type.new(:String), "spec", alloc)
+    end
+
+    def borrowed_operand(name)
+      MIR::OwnershipOperandFact.borrowed_access(name, Type.new(:String), "spec", :heap)
+    end
+
+    def consumption_fact(operands)
+      MIR::OwnershipConsumptionFact.new(
+        operands: operands,
+        target: :owned_sink,
+        target_alloc: :heap,
+        source: "spec",
+        covers_consuming_params: true,
+      )
+    end
+
+    it "covers fact and operand verifier diagnostics" do
+      bad_mark = alloc_mark("bad", :heap)
+      bad_mark.type_info = Type.new(:Untyped)
+      checker.send(:verify_alloc_marks_typed!, "bad" => [bad_mark])
+
+      reassign = MIR::ReassignWithCleanup.new("dst", MIR::Ident.new("owned"), "[]const u8", :heap)
+      reassign.ownership_consumption = consumption_fact([owned_operand("owned")])
+      checker.send(:verify_structural_ownership_contracts!, [reassign], Set.new, "owned" => [alloc_mark("owned", :heap)])
+
+      mismatched = MIR::ReassignWithCleanup.new("dst", MIR::Ident.new("frame_owned"), "[]const u8", :heap)
+      mismatched.ownership_consumption = consumption_fact([owned_operand("frame_owned", alloc: :frame)])
+      checker.send(:verify_structural_ownership_contracts!, [mismatched], Set["frame_owned"], "frame_owned" => [alloc_mark("frame_owned", :frame)])
+
+      missing_fact = MIR::Let.new("missing", MIR::Lit.new("1"), false, nil, nil)
+      empty_fact = MIR::Let.new("empty", MIR::Lit.new("1"), false, nil, nil)
+      empty_fact.ownership_consumption = consumption_fact([])
+      borrowed_fact = MIR::Let.new("borrowed", MIR::Lit.new("1"), false, nil, nil)
+      borrowed_fact.ownership_consumption = consumption_fact([borrowed_operand("borrowed")])
+      checker.send(:verify_ownership_consumption_operands!, [missing_fact, empty_fact, borrowed_fact])
+
+      implicit = MIR::ReassignWithCleanup.new("dst", MIR::DupeSlice.new(MIR::Lit.new("\"x\""), :heap), "[]const u8", :heap)
+      expect(checker.send(:structural_consumed_names, implicit)).to eq([])
+
+      owned_cleanup_source = MIR::Let.new("owned_src", MIR::Ident.new("src"), false, nil, nil)
+      owned_cleanup_source.ownership_consumption = consumption_fact([owned_operand("src")])
+      expect(checker.send(:cleanup_source_owns_value?,
+        owned_cleanup_source,
+        MIR::Cleanup.new("owned_src", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })))).to be true
+
+      nameless_cleanup_source = MIR::Let.new("nameless_src", MIR::Ident.new("src"), false, nil, nil)
+      nameless_cleanup_source.ownership_consumption = consumption_fact([
+        MIR::OwnershipOperandFact.owned_binding("", Type.new(:String), "spec", :heap),
+      ])
+      expect(checker.send(:cleanup_source_owns_value?,
+        nameless_cleanup_source,
+        MIR::Cleanup.new("nameless_src", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })))).to be false
+
+      cleanup = MIR::Cleanup.new("count", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false }))
+      checker.send(:verify_alloc_cleanup_match!,
+        { "count" => [alloc_mark("count", :heap, Type.new(:Int64))] },
+        { "count" => [cleanup] },
+        Set.new,
+        Set.new)
+
+      errors = checker.errors.join("\n")
+      expect(errors).to include("ALLOC_MARK_TYPE_MISSING")
+      expect(errors).to include("COPY_CLEANUP")
+      expect(errors).to include("OWNERSHIP_CONTRACT_WITHOUT_TRANSFER")
+      expect(errors).to include("AGGREGATE_CHILD_ALLOC_MISMATCH")
+      expect(errors).to include("OWNERSHIP_CONSUMPTION_FACT_MISSING")
+      expect(errors).to include("OWNERSHIP_CONSUMPTION_OPERAND_MISSING")
+      expect(errors).to include("OWNERSHIP_CONSUMPTION_BORROWED_OPERAND")
+      expect(errors).to include("IMPLICIT_OWNERSHIP_TRANSFER")
+    end
+
+    it "covers linear ownership traversal edge cases" do
+      state = MIRChecker::LinearOwnershipState.new
+      checker.send(:check_linear_stmt!, MIR::Panic.new("stop"), state)
+      expect(state.terminated).to be true
+
+      nested_state = MIRChecker::LinearOwnershipState.new
+      [
+        MIR::AssertRaisesCheck.new(MIR::Lit.new("expr"), "rt", :error, "E"),
+        MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])], []),
+        MIR::DeferStmt.new([MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::DeferStmt.new(MIR::ExprStmt.new(MIR::Lit.new("1"), false)),
+        MIR::StreamSpawn.new({}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotRead.new("cell", "rt", "view", "__guard", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotTransaction.new("cell", "rt", "alloc", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil, false),
+        MIR::SnapshotMultiTxn.new(".{a,b}", "rt", "alloc", "const a = views[0];", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil),
+        MIR::PolymorphicMutate.new("cell", "rt", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::PolymorphicFlowSignal.new(:return_value, MIR::Lit.new("1")),
+        MIR::PolymorphicMutateFlow.new("cell", "rt", "view", "Counter", "__ret", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], MIR::Lit.new("true"), [MIR::ExprStmt.new(MIR::Lit.new("0"), false)]),
+        MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }]),
+        fn_def("inner", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::TestDef.new("case", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::StructDef.new("S", [], [fn_def("method", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])], :private),
+      ].each do |stmt|
+        checker.send(:check_linear_stmt!, stmt, nested_state.copy)
+      end
+
+      ctx = Object.new
+      ctx.define_singleton_method(:run_body) { [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }
+      checker.send(:check_linear_stmt!, MIR::FsmB1Body.new("__blk", ctx, nil), nested_state.copy)
+
+      duplicate = checker.check_fn!(fn_def("dup_alloc", [
+        alloc_mark("x", :heap),
+        alloc_mark("x", :heap),
+      ]))
+      expect(duplicate.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("prior ownership") }).to be true
+
+      block_errors = checker.check_fn!(fn_def("block_transfer_wrong_expr", [
+        MIR::ExprStmt.new(MIR::BlockExpr.new("__blk", [
+          alloc_mark("x", :heap),
+          MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+          MIR::TransferMark.new("x", :block_result),
+          MIR::BreakStmt.new("__blk", MIR::Ident.new("y")),
+        ]), false),
+      ]))
+      expect(block_errors.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("block break expression") }).to be true
+
+      guarded_return = checker.check_fn!(fn_def("guarded_return", [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: true })),
+        MIR::TransferMark.new("x", :return),
+        MIR::ReturnStmt.new(MIR::Ident.new("x")),
+      ]))
+      expect(guarded_return.any? { |e| e.include?("OWNERSHIP_IMPLICIT_MOVE") && e.include?("guarded cleanup") }).to be true
+    end
+
+    it "covers branch state helpers and nested expression traversal" do
+      into = MIRChecker::LinearOwnershipState.new
+      terminated = MIRChecker::LinearOwnershipState.new
+      terminated.terminated = true
+      checker.send(:linear_merge_branch_states!, [terminated], into, "dead")
+      expect(into.terminated).to be true
+
+      left = MIRChecker::LinearOwnershipState.new
+      right = MIRChecker::LinearOwnershipState.new
+      right.owned.add("branch_owned")
+      checker.send(:linear_merge_branch_states!, [left, right], MIRChecker::LinearOwnershipState.new, "if")
+
+      guarded_left = MIRChecker::LinearOwnershipState.new
+      guarded_right = MIRChecker::LinearOwnershipState.new
+      [guarded_left, guarded_right].each { |state| state.guarded_finalizers.add("x") }
+      guarded_left.released.add("x")
+      checker.send(:normalize_guarded_conditional_releases!, [guarded_left, guarded_right])
+      expect(guarded_left.maybe_released).to include("x")
+
+      nested_maybe = MIRChecker::LinearOwnershipState.new
+      no_release = MIRChecker::LinearOwnershipState.new
+      [nested_maybe, no_release].each { |state| state.guarded_finalizers.add("x") }
+      nested_maybe.maybe_released.add("x")
+      checker.send(:normalize_guarded_conditional_releases!, [nested_maybe, no_release])
+      expect(no_release.maybe_released).to include("x")
+
+      expected = MIRChecker::LinearOwnershipState.new
+      actual = MIRChecker::LinearOwnershipState.new
+      actual.owned.add("x")
+      checker.send(:linear_require_same_state!, expected, actual, "loop")
+
+      outer = MIRChecker::LinearOwnershipState.new
+      inner = MIRChecker::LinearOwnershipState.new
+      inner.owned.add("local")
+      inner.alloc_kinds["local"] = :heap
+      checker.send(:prune_scope_locals!, outer, inner, "scope")
+
+      released = MIRChecker::LinearOwnershipState.new
+      released.released.add("moved")
+      checker.send(:check_linear_expr_uses!, MIR::Pipeline.new(nil, MIR::Ident.new("moved"), nil, [], nil, nil), released)
+      checker.send(:check_linear_expr_uses!, MIR::Cast.new(MIR::BlockExpr.new("__blk", []), "void", :as), released)
+
+      errors = checker.errors.join("\n")
+      expect(errors).to include("control-flow branches rejoin")
+      expect(errors).to include("nested control flow changes ownership state")
+      expect(errors).to include("scope-local owned binding")
+      expect(errors).to include("OWNERSHIP_USE_AFTER_TRANSFER")
+    end
+
+    it "covers move-mark, aggregate, and registry traversal branches" do
+      checker.send(:verify_move_mark_scope!, [MIR::MoveMark.new("x")])
+      checker.send(:verify_move_mark_scope!, [
+        MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::MoveMark.new("branch")])], [MIR::MoveMark.new("default")]),
+        MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::MoveMark.new("arm")] }]),
+      ])
+
+      aggregate = [
+        MIR::IfChain.new(
+          [MIR::IfChainBranch.new(cond: MIR::Ident.new("cond"), body: [MIR::Let.new("owner", MIR::StructInit.new("S", [{ name: "field", value: MIR::Ident.new("child") }]), false, nil, nil)])],
+          [MIR::ExprStmt.new(MIR::StructInit.new("S", [{ name: "field", value: MIR::Ident.new("child") }]), false)],
+        ),
+      ]
+      checker.send(:verify_aggregate_owned_children!, aggregate, {
+        "owner" => [alloc_mark("owner", :heap)],
+        "child" => [alloc_mark("child", :frame)],
+      })
+
+      unregistered_stmt = Class.new(Struct.new(:expr)) do
+        include MIR::Stmt
+      end
+      unregistered_owned = Class.new(Struct.new(:alloc)) do
+        include MIR::Expr
+      end
+      stub_const("MIR::SpecCheckerUnregisteredStmt", unregistered_stmt)
+      stub_const("MIR::SpecCheckerOwnershipFieldExpr", unregistered_owned)
+      registry_errors = checker.ownership_registry_errors
+
+      errors = checker.errors.join("\n")
+      expect(errors).to include("MOVEMARK_WITHOUT_GUARD")
+      expect(errors).to include("AGGREGATE_CHILD_ALLOC_MISMATCH")
+      expect(registry_errors.join("\n")).to include("LINEAR_STMT_NOT_REGISTERED")
+      expect(registry_errors.join("\n")).to include("OWNERSHIP_NODE_NOT_REGISTERED")
+    end
+
+    it "covers owned return, FSM guard, and boundary-fact branches" do
+      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
+      inline = MIR::InlineZig.new("try make()", "owned", MIR::OwnershipContract.empty, sig)
+      expect(checker.send(:owned_return_init?, inline)).to be true
+
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.required_move_guards = ["captured"]
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-TRANSFER-GUARD-WRITTEN/)
+
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.owned_result_required = true
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-OWNED-RESULT-TRANSFER/)
+
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.owned_result_required = true
+      structure.ownership_facts = [MIR::FsmOwnershipFact.new(name: "result", target: :result, target_alloc: :heap, move_guarded: true)]
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-OWNED-RESULT-GUARD-WRITTEN/)
+
+      bg = MIR::BgBlock.new("{}", {}, [], nil)
+      bg.boundary_fact = boundary_fact
+      stream = MIR::StreamSpawn.new({}, [])
+      do_block = MIR::DoBlock.new("{}", [[]])
+      checker.send(:verify_execution_boundary_facts!, [bg, stream, do_block])
+      checker.send(:verify_execution_boundary_fact!, boundary_fact(kind: :bad_kind, dispatch: :bad_dispatch), "bad")
+
+      errors = checker.errors.join("\n")
+      expect(errors).to include("FSM-consumed BG body")
+      expect(errors).to include("MIR::StreamSpawn has no typed ExecutionBoundaryFact")
+      expect(errors).to include("MIR::DoBlock has no typed ExecutionBoundaryFact array")
+      expect(errors).to include("invalid boundary kind")
+      expect(errors).to include("invalid boundary dispatch")
+    end
+
+    it "covers callable, ownership-surface, and allocator side-channel helpers" do
+      bad_signature_contract = Class.new(MIR::CallableContract) do
+        def initialize; end
+        def signature = Object.new
+        def ownership_contract = MIR::OwnershipContract.empty
+        def checked_arg_count = 0
+      end.new
+      checker.send(:verify_callable_contract!, bad_signature_contract, "badSig", "MIR::Call", Set.new, {})
+
+      bad_ownership_contract = Class.new(MIR::CallableContract) do
+        def initialize; end
+        def signature = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+        def ownership_contract = Object.new
+        def checked_arg_count = 0
+      end.new
+      checker.send(:verify_callable_contract!, bad_ownership_contract, "badOwn", "MIR::Call", Set.new, {})
+
+      checker.send(:verify_ownership_contract_operands!,
+        MIR::OwnershipContract.new(operands: [borrowed_operand("borrowed")]),
+        "contract",
+        Set.new,
+        require_operands: true)
+      checker.send(:verify_ownership_contract_operands!,
+        MIR::OwnershipContract.new(operands: [MIR::OwnershipOperandFact.owned_binding("", Type.new(:String), "spec")]),
+        "contract",
+        Set.new,
+        require_operands: true)
+
+      malformed_zig = Class.new(MIR::InlineZig) do
+        def initialize
+          super("raw()", "malformed")
+        end
+        def ownership_contract = Object.new
+      end.new
+      checker.send(:verify_explicit_ownership_contracts!, [MIR::Lit.new("not_zig"), malformed_zig], Set.new, {})
+
+      method = MIR::MethodCall.new(MIR::Ident.new("items"), "pop", [], false, MIR::CallableContract.no_ownership(0), :heap)
+      reassign = MIR::ReassignWithCleanup.new("dst", MIR::Ident.new("owned"), "[]const u8", :heap)
+      reassign.ownership_consumption = consumption_fact([owned_operand("owned")])
+      checker.send(:verify_ownership_surfaces_finalized!, [method, reassign], [])
+
+      iz = MIR::InlineZig.new("try put({val_alloc}, value)", "sink", MIR::OwnershipContract.consumes(["owned"]), nil, { val_alloc: :heap }, "map")
+      checker.send(:check_consumed_allocators_match_sink!, iz, ["owned"], "owned" => [alloc_mark("owned", :frame)])
+
+      takes_signature = FunctionSignature.new(
+        params: [AST::Param.new(name: "value", type: Type.new(:Int64), takes: true)],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+      )
+      covered_takes = MIR::InlineZig.new(
+        "try consume(value)",
+        "covered_takes",
+        MIR::OwnershipContract.new(covers_consuming_params: true),
+        takes_signature,
+      )
+      expect(checker.send(:stdlib_consumption_covered_without_owned_values?, covered_takes)).to be true
+      expect(checker.send(:inline_ownership_side_channel?, covered_takes)).to be false
+
+      walker_seen = []
+      checker.send(:walk_mir, [MIR::ExprStmt.new(MIR::Ident.new("walk"), false)]) { |node| walker_seen << node.class.name }
+      checker.send(:walk_mir_expr, MIR::Ident.new("expr")) { |node| walker_seen << node.class.name }
+      expect(walker_seen).to include("MIR::Ident")
+      expect(checker.send(:ownership_effect_label, MIR::MethodCall.new(MIR::Ident.new("items"), "append", [], false))).to eq("append")
+
+      errors = checker.errors.join("\n")
+      expect(errors).to include("callable contract does not carry a FunctionSignature")
+      expect(errors).to include("callable contract has no typed ownership contract")
+      expect(errors).to include("tries to consume borrowed operand")
+      expect(errors).to include("ownership operand with no tracked binding")
+      expect(errors).to include("ownership_contract must be MIR::OwnershipContract")
+      expect(errors).to include("MIR::MethodCall carries ownership")
+      expect(errors).to include("MIR::ReassignWithCleanup consumes")
+      expect(errors).to include("owned transfer allocator is incoherent")
+    end
+
+    it "covers frame-allocation and unhoisted-allocation helper branches" do
+      mutating_sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true)
+      mutating_sig.emit = IntrinsicEmit.new(allocates: true, mutates_receiver: true, alloc: :frame)
+      mutating_inline = MIR::InlineZig.new("try items.append({alloc}, x)", "mutating", MIR::OwnershipContract.empty, mutating_sig, { alloc: :frame }, "items")
+      frame_inline = MIR::InlineZig.new("try make({alloc})", "frame", MIR::OwnershipContract.empty, nil, { alloc: :frame }, "tmp")
+
+      expect(checker.send(:expr_has_frame_alloc?, nil)).to be false
+      expect(checker.send(:expr_has_frame_alloc?, mutating_inline)).to be false
+      expect(checker.send(:expr_has_frame_alloc?, frame_inline)).to be true
+      expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Lit.new("\"x\""), :frame))).to be true
+      expect(checker.send(:expr_has_frame_alloc?, MIR::Ident.new("plain"))).to be false
+
+      expect {
+        checker.send(:error, :SPEC_NOT_REGISTERED, "x", "bad")
+      }.to raise_error(/unregistered MIR diagnostic code/)
+
+      if_bind = MIR::IfBindStmt.new(
+        [{ expr: MIR::DupeSlice.new(MIR::Lit.new("\"x\""), :heap), capture: "cap" }],
+        [MIR::Cleanup.new("cap", CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false }))],
+        [],
+      )
+      checker.send(:check_stmt_for_unhoisted, if_bind)
+      expect(checker.errors.none? { |e| e.include?("UNHOISTED_ALLOC") }).to be true
+
+      block_expr = MIR::BlockExpr.new("__blk", [MIR::TransferMark.new("x", :block_result)])
+      expect(checker.send(:block_expr_transfers_result?, block_expr)).to be true
+      checker.send(:check_expr_sources_for_unhoisted, Object.new, "expression", owned_position: false)
     end
   end
 

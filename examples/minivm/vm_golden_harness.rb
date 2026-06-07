@@ -30,6 +30,7 @@ module MiniVM
     ROOT = File.expand_path("../..", __dir__)
     BC_RUN = File.expand_path("bc_run.rb", __dir__)
     COMPLETION_MARKER = "SCHEME: all expressions completed"
+    DEFAULT_RUN_TIMEOUT_SECONDS = Integer(ENV.fetch("MINIVM_GOLDEN_TIMEOUT_SECONDS", "10"))
 
     class PendingTarget < StandardError; end
 
@@ -511,7 +512,7 @@ module MiniVM
         source_dir = File.expand_path(source_dir)
         importer = ModuleImporter.new(base_dir: source_dir)
         fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-        lowering = MIRLowering.new(
+        lowering = MIRLowering.new(input: MIRLoweringInput.new(
           struct_schemas: fe_result.struct_schemas,
           enum_schemas: fe_result.enum_schemas,
           union_schemas: fe_result.union_schemas,
@@ -520,7 +521,7 @@ module MiniVM
           importer: importer,
           source_dir: source_dir,
           target: :bc
-        )
+        ))
         program = lowering.lower_program(fe_result.ast)
         mir_errors = MIRChecker.new.check_program!(program, strict: true)
         raise "MIR validation errors: #{mir_errors.first}" unless mir_errors.nil? || mir_errors.empty?
@@ -533,7 +534,7 @@ module MiniVM
         )
       end
 
-      def run(source, source_dir: Dir.pwd, timeout_seconds: 10, optimized: false)
+      def run(source, source_dir: Dir.pwd, timeout_seconds: DEFAULT_RUN_TIMEOUT_SECONDS, optimized: false)
         with_source_file(source, source_dir) do |path|
           env = optimized ? { "BC_OPT" => "1" } : {}
           raw, status = Open3.capture2e(env, "timeout", "--kill-after=2", timeout_seconds.to_s, "ruby", BC_RUN, path, "--run")
@@ -579,7 +580,7 @@ module MiniVM
         source_dir = File.expand_path(source_dir)
         importer = ModuleImporter.new(base_dir: source_dir)
         fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-        lowering = MIRLowering.new(
+        lowering = MIRLowering.new(input: MIRLoweringInput.new(
           struct_schemas: fe_result.struct_schemas,
           enum_schemas: fe_result.enum_schemas,
           union_schemas: fe_result.union_schemas,
@@ -588,7 +589,7 @@ module MiniVM
           importer: importer,
           source_dir: source_dir,
           target: :bc
-        )
+        ))
         program = lowering.lower_program(fe_result.ast)
         mir_errors = MIRChecker.new.check_program!(program, strict: true)
         raise "MIR validation errors: #{mir_errors.first}" unless mir_errors.nil? || mir_errors.empty?
@@ -603,7 +604,7 @@ module MiniVM
         raise PendingTarget, e.message
       end
 
-      def run(source, source_dir: Dir.pwd, timeout_seconds: 10, optimized: false)
+      def run(source, source_dir: Dir.pwd, timeout_seconds: DEFAULT_RUN_TIMEOUT_SECONDS, optimized: false)
         with_source_file(source, source_dir) do |path|
           env = optimized ? { "BC_OPT" => "1" } : {}
           raw, status = Open3.capture2e(env, "timeout", "--kill-after=2", timeout_seconds.to_s, "ruby", BC_RUN, path, "--run", "--vm=register")

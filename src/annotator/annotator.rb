@@ -165,7 +165,7 @@ class SemanticAnnotator
     when nil
       raise "annotation stamp missing type for #{node.class}"
     end
-    node.full_type = value
+    node.full_type = T.cast(value, AST::SyntheticTypeInput)
     stamped = node.full_type!(context: "annotation stamp")
     raise "annotation stamp produced :Untyped for #{node.class}" if stamped.untyped?
     value
@@ -241,12 +241,12 @@ class SemanticAnnotator
     type_parameters(:Result)
       .params(
         node: AST::WithBlock,
-        expanded_capabilities: T::Array[AST::Capability],
+        lock_capabilities: CapabilityHelper::WithCapabilityFacts,
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
-  def with_held_locks(node, expanded_capabilities, &blk)
+  def with_held_locks(node, lock_capabilities, &blk)
     previous_locks = T.let(@held_locks || {}, HeldLockMap)
     previous_types = T.let(@held_lock_types || [], T::Array[HeldLockTypeEntry])
     current_locks = T.let(previous_locks.dup, HeldLockMap)
@@ -255,13 +255,11 @@ class SemanticAnnotator
     @held_lock_types = T.let(current_types, T.nilable(T::Array[HeldLockTypeEntry]))
     opted_out = !node.deadlock_escape.nil?
 
-    expanded_capabilities.each do |capability|
-      next unless capability[:capability] == :EXCLUSIVE || capability[:capability] == :write_locked_read
-
-      variable_name = cap_var_name(capability[:var_node])
-      token = capability[:var_node].respond_to?(:token) ? capability[:var_node].token : node.token
+    lock_capabilities.each do |capability|
+      variable_name = capability.var_name
+      token = capability.var_node.respond_to?(:token) ? capability.var_node.token : node.token
       current_locks[variable_name] ||= HeldLockEntry.new(token: token)
-      lock_type = lock_identity_of(capability)
+      lock_type = capability.lock_identity
       current_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
     end
 
@@ -325,7 +323,7 @@ class SemanticAnnotator
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
-    @capability_audit = T.let({}, T.nilable(CapabilityAudit::BindingAuditStore))
+    @capability_audit = T.let({}, CapabilityAudit::BindingAuditStore)
     @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
     @call_site_context = T.let(nil, T.untyped)
     @call_site_arg_families = T.let(nil, T.untyped)
@@ -338,11 +336,11 @@ class SemanticAnnotator
     @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
     @deferred_with_validations = T.let([], T::Array[Annotator::Phases::DeferredWithValidation])
-    @predicate_call_sites = T.let([], T.nilable(T::Array[CapabilityHelper::PredicateCallSite]))
+    @predicate_call_sites = T.let([], T::Array[CapabilityHelper::PredicateCallSite])
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
-    @og = T.let(OwnershipGraph.new, T.untyped)
+    @og = T.let(OwnershipGraph.new, OwnershipGraph)
     @og_scope_depth = T.let(0, Integer)
     @synthetic_fns = T.let([], T::Array[AST::FunctionDef])
     @branch_terminated = T.let(false, T::Boolean)
@@ -447,7 +445,7 @@ private
     return true if node.respond_to?(:type) && node.type.is_a?(Type) && node.type.auto?
     return true if node.respond_to?(:return_type) && node.return_type.is_a?(Type) && node.return_type.auto?
     if node.respond_to?(:params) && node.params.is_a?(Array)
-      return true if node.params.any? { |p| p.type&.auto? }
+      return true if node.params.any? { |p| p.type.auto? }
     end
     if node.respond_to?(:each_pair)
       return node.each_pair.any? { |_, v| program_has_auto?(v) }
@@ -643,13 +641,13 @@ private
     effects_begin_function(node.name)
 
     # 1. Setup metadata
-    is_implicit_return = node.return_type.nil?
+    is_implicit_return = node.implicit_return_type?
     node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
-    declared_return = node.return_type || :Any
+    declared_return = node.annotation_return_type
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
     push_function_context!(FunctionContext.new(
-      name: node.name, return_type: node.return_type || Type.new(:Any),
+      name: node.name, return_type: node.annotation_return_type,
       lifetime: lifetime_paths, type_params: fn_type_params
     ))
 
@@ -672,9 +670,9 @@ private
       params: node.params.map { |p| AST::Param.new(
         name: p.name, type: p.type, required: p.default.nil?,
         default: p.default, mutable: p.mutable, takes: p.takes,
-        sync: p.type&.any_sync? ? p.type.sync : nil
+        sync: p.type.any_sync? ? p.type.sync : nil
       )},
-      return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
+      return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant
@@ -995,11 +993,11 @@ private
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
-          calls = scan_for_calls(branch[:body]).first
+          calls = scan_for_calls(branch.body).first
           raw = T.let(max_tier_for_calls(calls), Symbol)
-          branch[:computed_stack_tier] = (raw == :unbounded) ? :service : raw
-          validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
-          branch[:body].each { |s| traverse.call(s) }
+          branch.computed_stack_tier = (raw == :unbounded) ? :service : raw
+          validate_fiber_stack!(n, calls, branch.stack_size, branch.can_smash)
+          branch.body.each { |s| traverse.call(s) }
         end
       else
         n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
@@ -1152,11 +1150,11 @@ private
     nil
   end
 
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[String])) }
   def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
-  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: OwnershipGraph::MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
   def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
-  sig { params(name: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(name: String).returns(T.nilable(Symbol)) }
   def og_set_live(name)  = (@og[name]&.state = :live)
   sig { params(name: String).returns(T::Array[String]) }
   def og_drop(name)      = @og.drop(name)

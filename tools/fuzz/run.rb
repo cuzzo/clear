@@ -7,9 +7,10 @@
 #   ruby tools/fuzz/run.rb --generate-only               # generate only, don't run
 #   ruby tools/fuzz/run.rb --templates t1,t2             # restrict to named templates
 #
-# When COVERAGE=1, this runner is compile-only: it exercises the Ruby
-# compile/lower/emit path like transpile-tests/gen.rb without running Zig tests
-# or spawning per-file `clear` subprocesses.
+# When COVERAGE=1, this runner keeps negative cells compile-only so SimpleCov
+# does not fan out through per-file `clear` subprocesses. If ZIG_COVERAGE=1 is
+# also set, positive cells are bundled and run under kcov so the same fuzz shard
+# contributes Zig runtime coverage.
 #
 # Cells may be marked :in_dev to reserve matrix space for unlanded features
 # (e.g., LEND). They are emitted as comments and not run.
@@ -21,6 +22,7 @@ require 'etc'
 require 'open3'
 require 'rbconfig'
 require_relative 'generator'
+require_relative '../zig_coverage_support'
 # Route SimpleCov to a 'fuzz' resultset key (gen.rb defaults to
 # 'transpile-tests') so fuzz cell hits stay attributable.
 ENV['COVERAGE_BOOTSTRAP_NAME'] ||= 'fuzz' if ENV['COVERAGE'] == '1'
@@ -166,13 +168,16 @@ def run_pass_bundle(entries, out_dir)
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  build_dir = File.join(out_dir, ".bundle-#{$$}")
-  FileUtils.rm_rf(build_dir)
-  FileUtils.mkdir_p(build_dir)
-  ensure_symlink(File.join(build_dir, 'runtime'), File.join(LITEDB_ROOT, 'zig', 'runtime'))
-  ensure_symlink(File.join(build_dir, 'lib'), File.join(LITEDB_ROOT, 'zig', 'lib'))
-  ensure_symlink(File.join(build_dir, 'experimental'), File.join(LITEDB_ROOT, 'zig', 'experimental'))
-  ensure_symlink(File.join(build_dir, 'testdata'), File.join(LITEDB_ROOT, 'testdata'))
+  coverage_enabled = ZigCoverageSupport.enabled?
+  build_dir = coverage_enabled ? ZigCoverageSupport::ZIG_DIR : File.join(out_dir, ".bundle-#{$$}")
+  unless coverage_enabled
+    FileUtils.rm_rf(build_dir)
+    FileUtils.mkdir_p(build_dir)
+    ensure_symlink(File.join(build_dir, 'runtime'), File.join(LITEDB_ROOT, 'zig', 'runtime'))
+    ensure_symlink(File.join(build_dir, 'lib'), File.join(LITEDB_ROOT, 'zig', 'lib'))
+    ensure_symlink(File.join(build_dir, 'experimental'), File.join(LITEDB_ROOT, 'zig', 'experimental'))
+    ensure_symlink(File.join(build_dir, 'testdata'), File.join(LITEDB_ROOT, 'testdata'))
+  end
 
   zig_path = File.join(build_dir, 'all-fuzz.zig')
   generator = TestGenerator.new
@@ -204,14 +209,26 @@ def run_pass_bundle(entries, out_dir)
   fmt_out, fmt_status = Open3.capture2e(zig_exe, 'fmt', zig_path)
   return [[], [[zig_path, fmt_out]], [], []] unless fmt_status.success?
 
-  args = [
-    zig_exe, 'test', 'all-fuzz.zig',
+  zig_args = [
+    'all-fuzz.zig',
     'runtime/switch.S', 'runtime/onRoot.S',
     '-lc'
   ]
-  out, status = Open3.capture2e(*args, chdir: build_dir)
+  out, status =
+    if coverage_enabled
+      ZigCoverageSupport.run_zig_test(
+        zig: zig_exe,
+        build_dir: build_dir,
+        args: zig_args,
+        suite: 'fuzz',
+        name: 'all-fuzz'
+      )
+    else
+      Open3.capture2e(zig_exe, 'test', *zig_args, chdir: build_dir)
+    end
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-  puts "[fuzz] pass bundle: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  suffix = coverage_enabled ? " under kcov" : ""
+  puts "[fuzz] pass bundle#{suffix}: #{entries.size} cells in #{format('%.2f', elapsed)}s"
 
   if !status.success? || out.include?('FAIL')
     return [[], [[zig_path, out]], [], []]
@@ -225,7 +242,11 @@ def run_pass_bundle(entries, out_dir)
 
   [entries.map { |e| e[:path] }, [], [], []]
 ensure
-  FileUtils.rm_rf(build_dir) if build_dir && ENV['FUZZ_KEEP_BUNDLE'] != '1'
+  if coverage_enabled
+    FileUtils.rm_f(zig_path) if zig_path && ENV['FUZZ_KEEP_BUNDLE'] != '1'
+  elsif build_dir && ENV['FUZZ_KEEP_BUNDLE'] != '1'
+    FileUtils.rm_rf(build_dir)
+  end
 end
 
 def print_failure_excerpt(out)
@@ -408,18 +429,23 @@ def run_compile_only_negative_coverage(entries, default_workers)
   [pass, []]
 end
 
-def compile_only_coverage_run(emitted, default_workers)
+def coverage_run(emitted, out_dir, default_workers)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries, default_workers)
+  if ZigCoverageSupport.enabled?
+    pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
+  else
+    pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries, default_workers)
+    fails = []
+  end
   negative_ok, unexpected_pass = run_compile_only_negative_coverage(negative_entries, default_workers)
   mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries, default_workers)
 
   [
     pass_ok + negative_ok + mir_negative_ok,
-    [],
+    fails,
     leaks,
     mir_errors,
     unexpected_pass + mir_unexpected_pass,
@@ -554,10 +580,15 @@ end
 
 pass, fails, leaks, mir_errors, unexpected_pass =
   if ENV['COVERAGE'] == '1'
-    compile_only_coverage_run(emitted, opts[:jobs])
+    coverage_run(emitted, opts[:out], opts[:jobs])
   else
     hybrid_run(emitted, opts[:out], opts[:jobs])
   end
+
+if ZigCoverageSupport.enabled?
+  merged = ZigCoverageSupport.merge!('fuzz')
+  puts "[fuzz] merged Zig coverage: #{merged}" if merged
+end
 
 puts
 puts "=" * 60

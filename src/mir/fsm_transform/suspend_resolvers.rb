@@ -84,16 +84,24 @@ module FsmTransform
       result_var = io_tail.result_var
       result_zig_type = nil
       result_needs_cleanup = false
+      ctx_field_decls = state_decls.map(&:render)
       if finish_value_mir && result_var && result_var != "_"
-        bind_stmts << MIR::Let.new(result_var, finish_value_mir, false, nil, nil)
         ft = Type.from_node!(io_tail.call_node, context: "FSM IO tail result")
         result_zig_type = ft ? Type.new(ft).zig_type : nil
+        raise ArgumentError, "FSM IO result #{result_var} missing Zig type" unless result_zig_type
+
+        ctx_ident = MIR::Ident.new("__ctx_#{id}")
+        ctx_field_decls << "#{result_var}: #{result_zig_type} = undefined,"
+        bind_stmts << MIR::Set.new(
+          MIR::FieldGet.new(ctx_ident, result_var),
+          finish_value_mir,
+          false,
+        )
         result_needs_cleanup = ownership_bearing_result_type?(ft, lowering)
       elsif finish_value_mir
         bind_stmts << MIR::ExprStmt.new(finish_value_mir, true)
       end
 
-      ctx_field_decls = state_decls.map(&:render)
       if result_var && result_zig_type && result_needs_cleanup
         ctx_ident = MIR::Ident.new("__ctx_#{id}")
         ctx_field_decls << fsm_owned_guard_decl(result_var)
@@ -177,9 +185,10 @@ module FsmTransform
       promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
       sp_zig = Type.new(promise_ft).zig_type
       inner_type_info = T.let(nil, T.nilable(Type))
+      promise_type = Type.new(promise_ft)
       inner_zig =
-        if (pt = Type.new(promise_ft)).tense_type
-          inner_type_info = Type.new(pt.tense_type)
+        if promise_type.future? && promise_type.tense_type
+          inner_type_info = Type.new(promise_type.tense_type)
           inner_type_info.zig_type
         else
           nil
@@ -249,7 +258,7 @@ module FsmTransform
     sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }
     def ownership_bearing_result_type?(type_info, lowering)
       return false unless type_info
-      schema_lookup = lowering.instance_variable_get(:@schema_lookup) rescue nil
+      schema_lookup = lowering.respond_to?(:mir_schema_lookup) ? lowering.mir_schema_lookup : nil
       type_info.string? || type_info.heap_ptr? || type_info.collection_value? ||
         type_info.recursive_cleanup_shape?(schema_lookup)
     rescue StandardError

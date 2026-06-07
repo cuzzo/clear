@@ -12,17 +12,26 @@ require_relative "function_return"
 class FunctionSignature
     extend T::Sig
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
+  LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, AST::Node, T::Array[T.any(LifetimeSource, AST::Node)])) }
+  RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
+  ExternEffects = T.type_alias { T::Hash[Symbol, Symbol] }
+  EffectSet = T.type_alias { T::Set[Symbol] }
 
   # Static signature fields (set at creation)
-  sig { returns(T.untyped) }
-  attr_reader :visibility, :type_params, :reentrant
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
+  attr_reader :visibility
+  sig { returns(T.nilable(T::Array[Symbol])) }
+  attr_reader :type_params
+  sig { returns(T::Boolean) }
+  attr_reader :reentrant
+
+  sig { returns(T.nilable(Symbol)) }
   attr_accessor :return_strategy
 
   sig { returns(T::Array[LifetimeSource]) }
   attr_reader :return_lifetime
 
-  sig { params(val: T.untyped).void }
+  sig { params(val: LifetimeInput).void }
   def return_lifetime=(val)
     @return_lifetime = normalize_lifetime(val)
   end
@@ -38,43 +47,81 @@ class FunctionSignature
   sig { returns(Type) }
   attr_reader :return_type
 
-  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
+  sig { params(val: T.nilable(Type::TypeInput)).void }
   def return_type=(val)
-    @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
+    @return_type = val.nil? ? Type.new(:Void) : Type.new(val)
   end
 
   # EXTERN function fields
-  sig { returns(T.untyped) }
-  attr_accessor :extern, :module_alias, :extern_effects
-  sig { returns(T.untyped) }
-  attr_accessor :fn_type_params, :owner_type, :owner_type_params
+  sig { returns(T::Boolean) }
+  attr_accessor :extern
+  sig { returns(T.nilable(String)) }
+  attr_accessor :module_alias
+  sig { returns(ExternEffects) }
+  attr_accessor :extern_effects
 
-  # Computed metadata (set after annotation passes)
-  sig { returns(T.untyped) }
-  attr_accessor :needs_rt, :can_fail, :alloc_fault, :error_fallible, :effects, :stack_tier
+  sig { returns(T.nilable(T::Array[Symbol])) }
+  attr_accessor :fn_type_params
+  sig { returns(T.nilable(String)) }
+  attr_accessor :owner_type
+  sig { returns(T.nilable(T::Array[Symbol])) }
+  attr_accessor :owner_type_params
 
-  # Intrinsic marker
+  sig { returns(T::Boolean) }
+  attr_accessor :intrinsic
+  sig { returns(T.nilable(T.any(String, Symbol))) }
+  attr_accessor :zig_pattern
+
+  sig { returns(T.nilable(T::Boolean)) }
+  attr_accessor :needs_rt
+  sig { returns(T.nilable(T::Boolean)) }
+  attr_accessor :can_fail
+  sig { returns(T.nilable(T::Boolean)) }
+  attr_accessor :alloc_fault
+  sig { returns(T.nilable(T::Boolean)) }
+  attr_accessor :error_fallible
+  sig { returns(T.nilable(EffectSet)) }
+  attr_accessor :effects
+  sig { returns(T.nilable(Symbol)) }
+  attr_accessor :stack_tier
+
+  sig { returns(T.nilable(Proc)) }
+  attr_accessor :arg_validator
   sig { returns(T.untyped) }
-  attr_accessor :intrinsic, :zig_pattern
+  attr_accessor :arg_spec
+  sig { returns(T.nilable(Integer)) }
+  attr_accessor :arity
+  sig { returns(T.nilable(IntrinsicEmit)) }
+  attr_accessor :emit
+  sig { returns(FunctionReturn) }
+  attr_accessor :return_def
+
+  sig { returns(RequiresMap) }
+  attr_reader :requires
+
+  sig { params(val: T.nilable(RequiresMap)).void }
+  def requires=(val)
+    @requires.clear
+    @requires.merge!(val || {})
+  end
+
+  sig { returns(T.nilable(T::Boolean)) }
+  attr_accessor :heap_carry_return
+  sig { returns(T.nilable(T::Set[String])) }
+  attr_accessor :heap_carry_return_vars
 
   # Intrinsic signature semantics (set by the registry converter; nil
   # for ordinary user functions). `arg_validator` the custom arg
   # type-checker; `arg_spec` the raw args shape; `emit` the typed
   # codegen/dispatch metadata (IntrinsicEmit).
-  sig { returns(T.untyped) }
-  attr_accessor :arg_validator, :arg_spec, :arity, :emit
   # Strongly-typed return (FunctionReturn). Non-nil; defaults to
   # Fixed(Void). The single return facility -- resolve(receiver,
   # args, host) always yields a concrete Type. Replaced the former
   # untyped return_spec (Symbol|Hash|Proc|nil) / return_resolver Proc.
-  sig { returns(T.untyped) }
-  attr_accessor :return_def
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
   # checks survive cross-module flow.
-  sig { returns(T.untyped) }
-  attr_accessor :requires
 
   # Canonical adapter: a function binding's signature is stored as a
   # Type whose @raw is the FunctionSignature (the SymbolEntry#type
@@ -97,10 +144,10 @@ class FunctionSignature
     else
       FunctionSignature.new(
         params: fn.params,
-        return_type: fn.return_type || Type.new(:Any),
+        return_type: fn.annotation_return_type,
         return_lifetime: fn.return_lifetime,
         visibility: fn.visibility,
-        type_params: fn.type_params,
+        type_params: fn.type_params&.map(&:to_sym),
         reentrant: fn.reentrant == :reentrant
       )
     end
@@ -160,7 +207,7 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[AST::Param], return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
+  sig { params(params: T::Array[AST::Param], return_type: T.nilable(Type::TypeInput), return_lifetime: LifetimeInput, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(ExternEffects), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[Symbol]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
@@ -171,27 +218,27 @@ class FunctionSignature
     self.return_type = return_type
     @return_lifetime = T.let([], T::Array[LifetimeSource])
     self.return_lifetime = return_lifetime
-    @visibility = visibility
-    @type_params = type_params
-    @reentrant = reentrant
-    @extern = extern
-    @module_alias = module_alias
-    @extern_effects = extern_effects
-    @fn_type_params = fn_type_params
-    @owner_type = owner_type
-    @owner_type_params = owner_type_params
-    @intrinsic = intrinsic
-    @zig_pattern = zig_pattern
-    @needs_rt          = T.let(nil, T.untyped)
-    @can_fail          = T.let(nil, T.untyped)
-    @alloc_fault       = T.let(nil, T.untyped)
-    @error_fallible    = T.let(nil, T.untyped)
-    @effects           = T.let(nil, T.untyped)
-    @return_strategy   = T.let(nil, T.untyped)
-    @stack_tier        = T.let(nil, T.untyped)
-    @requires          = T.let(nil, T.untyped)
-    @heap_carry_return = T.let(nil, T.untyped)
-    @heap_carry_return_vars = T.let(nil, T.untyped)
+    @visibility = T.let(visibility, T.nilable(Symbol))
+    @type_params = T.let(type_params, T.nilable(T::Array[Symbol]))
+    @reentrant = T.let(reentrant, T::Boolean)
+    @extern = T.let(extern, T::Boolean)
+    @module_alias = T.let(module_alias, T.nilable(String))
+    @extern_effects = T.let(extern_effects || {}, ExternEffects)
+    @fn_type_params = T.let(fn_type_params, T.nilable(T::Array[Symbol]))
+    @owner_type = T.let(owner_type, T.nilable(String))
+    @owner_type_params = T.let(owner_type_params, T.nilable(T::Array[Symbol]))
+    @intrinsic = T.let(intrinsic, T::Boolean)
+    @zig_pattern = T.let(zig_pattern, T.nilable(T.any(String, Symbol)))
+    @needs_rt          = T.let(nil, T.nilable(T::Boolean))
+    @can_fail          = T.let(nil, T.nilable(T::Boolean))
+    @alloc_fault       = T.let(nil, T.nilable(T::Boolean))
+    @error_fallible    = T.let(nil, T.nilable(T::Boolean))
+    @effects           = T.let(nil, T.nilable(EffectSet))
+    @return_strategy   = T.let(nil, T.nilable(Symbol))
+    @stack_tier        = T.let(nil, T.nilable(Symbol))
+    @requires          = T.let({}, RequiresMap)
+    @heap_carry_return = T.let(nil, T.nilable(T::Boolean))
+    @heap_carry_return_vars = T.let(nil, T.nilable(T::Set[String]))
     @arg_validator     = T.let(nil, T.nilable(Proc))
     @arg_spec          = T.let(nil, T.untyped)
     @arity             = T.let(nil, T.nilable(Integer))
@@ -240,22 +287,6 @@ class FunctionSignature
     return_alloc == :frame
   end
 
-  sig { returns(T.untyped) }
-  def heap_carry_return = @heap_carry_return
-
-  sig { params(val: T.untyped).void }
-  def heap_carry_return=(val)
-    @heap_carry_return = val
-  end
-
-  sig { returns(T.untyped) }
-  def heap_carry_return_vars = @heap_carry_return_vars
-
-  sig { params(val: T.untyped).void }
-  def heap_carry_return_vars=(val)
-    @heap_carry_return_vars = val
-  end
-
   sig { returns(FunctionSignature) }
   def dup
     FunctionSignature.new(
@@ -268,6 +299,8 @@ class FunctionSignature
     ).tap do |s|
       s.needs_rt = @needs_rt
       s.can_fail = @can_fail
+      s.alloc_fault = @alloc_fault
+      s.error_fallible = @error_fallible
       s.effects = @effects
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier
@@ -284,15 +317,15 @@ class FunctionSignature
 
   private
 
-  sig { params(val: T.untyped).returns(T::Array[LifetimeSource]) }
+  sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }
   def normalize_lifetime(val)
     return [] if val.nil?
     raw = val.is_a?(Array) ? val : [val]
     raw.map do |item|
       if item.respond_to?(:name)
-        item.name.to_s
+        item.public_send(:name).to_s
       else
-        T.cast(item.is_a?(Symbol) ? item : item.to_s, LifetimeSource)
+        item.is_a?(Symbol) ? item : item.to_s
       end
     end
   end

@@ -7,7 +7,14 @@ require_relative "../src/mir/fsm_transform/segments"
 
 RSpec.describe FsmTransform::Segments do
   let(:tok) { Lexer::Token.new(:IDENTIFIER, "x", 1, 1) }
-  let(:stdlib_def) { STD_LIB.fetch("readFile") }
+  let(:stdlib_def) { intrinsic_sig(suspends: true, fsm_setup: []) }
+  let(:plain_def) { intrinsic_sig(suspends: false) }
+
+  def intrinsic_sig(suspends:, fsm_setup: nil)
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    sig.emit = IntrinsicEmit.new(suspends: suspends, fsm_setup: fsm_setup)
+    sig
+  end
 
   def typed(node, type = :Int64)
     node.full_type = Type.new(type)
@@ -34,7 +41,7 @@ RSpec.describe FsmTransform::Segments do
 
   def non_io_call
     call = typed(AST::FuncCall.new(tok, "plain", []), :String)
-    call.matched_stdlib_def = STD_LIB.fetch("print")
+    call.matched_stdlib_def = plain_def
     call
   end
 
@@ -120,19 +127,23 @@ RSpec.describe FsmTransform::Segments do
   it "detects suspends inside unsupported control-flow containers" do
     with_next = [next_expr]
     without_next = [lit]
+    while_loop = AST::WhileLoop.new(tok, lit, with_next, nil)
     for_range = AST::ForRange.new(tok, "i", lit, lit, false, with_next, nil, false)
     for_each = AST::ForEach.new(tok, "x", ident("items", type: :"Int64[]"), with_next, nil, false)
     while_bind = AST::WhileBindLoop.new(tok, ident("maybe"), "x", tok, with_next, nil)
     nested_if = AST::IfStatement.new(tok, lit, without_next, with_next, nil, nil)
     catch_block = AST::CatchBlock.new(tok, [], without_next)
+    with_block = AST::WithBlock.new(tok, [], without_next)
 
+    expect(described_class.contains_unsupported_shape?([while_loop])).to eq(true)
     expect(described_class.contains_unsupported_shape?([for_range])).to eq(true)
     expect(described_class.contains_unsupported_shape?([for_each])).to eq(true)
     expect(described_class.contains_unsupported_shape?([while_bind])).to eq(true)
     expect(described_class.contains_unsupported_shape?([nested_if])).to eq(true)
     expect(described_class.contains_unsupported_shape?([catch_block])).to eq(true)
-    expect(described_class.contains_suspend_anywhere?([for_range, for_each, while_bind, nested_if, catch_block])).
-      to eq(true)
+    expect(described_class.contains_suspend_anywhere?([while_loop])).to eq(true)
+    expect(described_class.contains_suspend_anywhere?([with_block])).to eq(true)
+    expect(described_class.contains_suspend_anywhere?([catch_block])).to eq(true)
   end
 
   it "rewrites top-level suspending pipeline heads into bind plus residual pipeline" do

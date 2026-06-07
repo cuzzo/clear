@@ -421,7 +421,7 @@ module FsmTransform
       out = []
       pipe_counter = 0
       body.each do |stmt|
-        if stmt.is_a?(AST::BinaryOp) && stmt.op == :SMOOTH &&
+        if stmt.is_a?(AST::BinaryOp) && stmt.smooth? &&
            io_suspending_call?(stmt.left)
           synth_name = "__pipe_v_#{pipe_counter}"
           pipe_counter += 1

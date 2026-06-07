@@ -50,4 +50,25 @@ RSpec.describe DiagnosticExamples do
       expect(ex[:fix]).to include("variants declared")
     end
   end
+
+  describe ".scan_fix_lines" do
+    it "returns collected fix prose and the next describe candidate index" do
+      lines = [
+        "# @example_for: ARITY_MISMATCH\n",
+        "# @fix: Add the missing argument.\n",
+        "# @fix: Keep the call arity aligned.\n",
+        "# comment between metadata and describe\n",
+        "\n",
+        "describe \"example\" do\n",
+      ]
+
+      scan = DiagnosticExamples.scan_fix_lines(lines, 1)
+
+      expect(scan.fix_lines).to eq([
+        "Add the missing argument.",
+        "Keep the call arity aligned.",
+      ])
+      expect(scan.next_idx).to eq(5)
+    end
+  end
 end

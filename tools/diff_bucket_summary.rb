@@ -8,6 +8,9 @@ require "set"
 
 ROOT = File.expand_path("..", __dir__)
 require_relative "../gems/nil-kill/lib/nil_kill"
+require_relative "loom_atomic_coverage"
+require_relative "vopr_coverage"
+require_relative "wait_loop_coverage"
 
 def sh(*args)
   IO.popen(args, chdir: ROOT, err: [:child, :out], &:read)
@@ -41,10 +44,18 @@ def numstat(base)
   end
 end
 
+def zig_test_or_harness_file?(path)
+  return false unless path.start_with?("zig/") && path.end_with?(".zig")
+
+  name = File.basename(path)
+  name.end_with?("-test.zig", "-vopr.zig", "-loom.zig") ||
+    name.start_with?("vopr-", "loom-")
+end
+
 def bucket_for(path)
   return :src_rb if path.start_with?("src/") && path.end_with?(".rb")
-  return :zig_tests if path.start_with?("zig/") && (path.end_with?("test.zig") || path.end_with?("-vopr.zig"))
-  return :zig_src if path.start_with?("zig/") && path.end_with?(".zig") && !path.end_with?("test.zig")
+  return :zig_tests if zig_test_or_harness_file?(path)
+  return :zig_src if path.start_with?("zig/") && path.end_with?(".zig")
   return :spec if path.start_with?("spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
@@ -173,6 +184,7 @@ def ruby_added_coverage(adds, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
   coverage = parse_simplecov(cov_paths)
+  source_lines_by_path = {}
   line_total = line_hit = branch_total = branch_hit = 0
   paths.each do |path|
     cov = coverage[path]
@@ -182,6 +194,12 @@ def ruby_added_coverage(adds, paths)
     adds[path].each do |line|
       hit = lines[line - 1]
       next if hit.nil?
+      source_lines = source_lines_by_path[path] ||= begin
+        full = File.join(ROOT, path)
+        File.exist?(full) ? File.readlines(full) : []
+      end
+      stripped = source_lines[line - 1].to_s.strip
+      next if stripped.empty? || stripped.start_with?("#") || stripped == "end"
 
       line_total += 1
       line_hit += 1 if hit.to_i.positive?
@@ -277,6 +295,148 @@ def zig_added_coverage(adds, paths)
   [pct(line_hit, line_total), pct(branch_hit, branch_total)]
 end
 
+SPECIAL_ZIG_SCOPE_PREFIXES = ["zig/runtime/", "zig/lib/"].freeze
+
+def special_zig_source_path?(path)
+  bucket_for(path) == :zig_src && SPECIAL_ZIG_SCOPE_PREFIXES.any? { |prefix| path.start_with?(prefix) }
+end
+
+def zig_coverage_for_path(coverage, path)
+  zig_relative = path.delete_prefix("zig/")
+  coverage[path] ||
+    coverage["./#{path}"] ||
+    coverage[zig_relative] ||
+    coverage["./#{zig_relative}"] ||
+    coverage[File.join(ROOT, path)]
+end
+
+def source_line_at(root, path, line)
+  full = File.join(root, path)
+  return "" unless File.exist?(full)
+
+  File.readlines(full)[line - 1].to_s.rstrip
+end
+
+def added_loom_site?(source)
+  stripped = source.sub(LoomAtomicCoverage::COMMENT_RE, "")
+  LoomAtomicCoverage::ATOMIC_PATTERNS.any? { |pattern| stripped.match?(pattern) }
+end
+
+def added_vopr_category(source)
+  return :retry if source.match?(VoprCoverage::RETRY_BEGIN_RE) || source.match?(VoprCoverage::RETRY_SINGLE_RE)
+
+  VoprCoverage.categorize(source.sub(VoprCoverage::COMMENT_RE, ""))
+end
+
+def covered_or_elided_for_loom?(cov, line, source)
+  return false unless cov
+
+  hits = cov[:lines][line]
+  return true if hits&.positive?
+  return false if hits.nil?
+
+  LoomAtomicCoverage.classify_artifact(cov[:lines], line, source)
+end
+
+def covered_by_zig?(cov, line)
+  return false unless cov
+
+  cov[:lines][line]&.positive? == true
+end
+
+def wait_loop_indexes(root)
+  source_files = WaitLoopCoverage.scan_source_files(["zig/runtime", "zig/lib"], root)
+  test_files = WaitLoopCoverage.scan_hammer_test_files(["zig", "zig/runtime"], root)
+  loops, issues = WaitLoopCoverage.parse_loops(source_files, root)
+  covers = WaitLoopCoverage.parse_covers(test_files, root)
+  {
+    issues: issues,
+    loop_tags: loops.map(&:tag).to_set,
+    cover_tags: covers.map(&:tag).to_set,
+  }
+end
+
+def special_coverage_alerts(adds_by_path, root: ROOT, cov_paths: nil)
+  paths = adds_by_path.keys.select { |path| special_zig_source_path?(path) }
+  return [] if paths.empty?
+
+  cov_paths ||= coverage_paths("ZIG_COVERAGE_PATHS", [
+    "zig/zig-out/coverage/merged/cobertura.xml",
+    "zig/zig-out/coverage/merged/kcov-merged/cobertura.xml",
+  ])
+  coverage = parse_coberturas(cov_paths)
+  wait_indexes = nil
+  alerts = []
+
+  paths.sort.each do |path|
+    cov = zig_coverage_for_path(coverage, path)
+    adds_by_path[path].sort.each do |line|
+      source = source_line_at(root, path, line)
+      next if source.empty?
+
+      if added_loom_site?(source) && !covered_or_elided_for_loom?(cov, line, source)
+        alerts << {
+          path: path,
+          line: line,
+          rule: "loom",
+          finding: "added atomic/interleaving site has no merged Zig coverage evidence",
+          source: source.strip,
+        }
+      end
+
+      if (category = added_vopr_category(source)) && !covered_by_zig?(cov, line)
+        alerts << {
+          path: path,
+          line: line,
+          rule: "vopr",
+          finding: "added #{VoprCoverage::CATEGORY_LABEL.fetch(category, category)} site has no merged Zig coverage evidence",
+          source: source.strip,
+        }
+      end
+
+      if (begin_match = WaitLoopCoverage::BEGIN_RE.match(source))
+        wait_indexes ||= wait_loop_indexes(root)
+        tag = begin_match[1]
+        unless wait_indexes[:cover_tags].include?(tag)
+          alerts << {
+            path: path,
+            line: line,
+            rule: "wait_loop",
+            finding: "added wait-loop tag `#{tag}` has no HAMMER-COVERS marker",
+            source: source.strip,
+          }
+        end
+      elsif (cover_match = WaitLoopCoverage::COVER_RE.match(source))
+        wait_indexes ||= wait_loop_indexes(root)
+        tag = cover_match[1]
+        unless wait_indexes[:loop_tags].include?(tag)
+          alerts << {
+            path: path,
+            line: line,
+            rule: "wait_loop",
+            finding: "added HAMMER-COVERS tag `#{tag}` has no source wait-loop marker",
+            source: source.strip,
+          }
+        end
+      end
+    end
+  end
+
+  if wait_indexes && wait_indexes[:issues].any?
+    wait_indexes[:issues].each do |issue|
+      alerts << {
+        path: "zig",
+        line: 0,
+        rule: "wait_loop",
+        finding: "wait-loop marker syntax issue: #{issue}",
+        source: "",
+      }
+    end
+  end
+
+  alerts
+end
+
 def print_table(rows)
   widths = rows.transpose.map { |col| col.map(&:length).max }
   rows.each_with_index do |row, idx|
@@ -340,55 +500,96 @@ def print_type_guardrails_markdown(findings)
   puts "_#{findings.length - 30} more findings omitted._" if findings.length > 30
 end
 
-options = parse_options(ARGV)
-base = options[:base] || default_base_ref
-stats = numstat(base)
-adds_by_path = added_lines(base)
-guardrail_findings = type_guardrail_findings(adds_by_path)
+def print_special_coverage_text(alerts)
+  puts
+  puts "Zig special coverage alerts:"
+  if alerts.empty?
+    puts "  none"
+    return
+  end
 
-bucket_order = [
-  [:total, "total"],
-  [:src_rb, "src/**/*.rb"],
-  [:zig_src, "zig/**/*.zig !(*test.zig|*-vopr.zig)"],
-  [:spec, "spec/"],
-  [:transpile_tests, "transpile-tests/"],
-  [:tools, "tools/"],
-  [:zig_tests, "zig/**/*test.zig + *-vopr.zig"],
-  [:md, "*.md"],
-  [:other, "other"],
-]
-
-grouped = Hash.new { |h, k| h[k] = [] }
-stats.each { |entry| grouped[bucket_for(entry[:path])] << entry }
-grouped[:total] = stats
-
-src_paths = grouped[:src_rb].map { |e| e[:path] }
-zig_paths = grouped[:zig_src].map { |e| e[:path] }
-zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
-src_cov = ruby_added_coverage(adds_by_path, src_paths)
-zig_cov = zig_added_coverage(adds_by_path, zig_paths)
-zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
-
-rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
-bucket_order.each do |key, label|
-  entries = grouped[key]
-  additions = entries.sum { |e| e[:additions] }
-  deletions = entries.sum { |e| e[:deletions] }
-  coverage = case key
-             when :src_rb then src_cov
-             when :zig_src then zig_cov
-             when :zig_tests then zig_test_cov
-             when :spec, :tools then ["not tracked", "not tracked"]
-             else ["", ""]
-             end
-  rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
+  alerts.first(30).each do |alert|
+    location = alert[:line].positive? ? "#{alert[:path]}:#{alert[:line]}" : alert[:path].to_s
+    puts "  #{location} #{alert[:rule]} - #{alert[:finding]}"
+    puts "    #{alert[:source]}" unless alert[:source].empty?
+  end
+  puts "  ... #{alerts.length - 30} more" if alerts.length > 30
 end
 
-if options[:format] == "markdown"
-  print_markdown(base, rows)
-  print_type_guardrails_markdown(guardrail_findings)
-else
-  puts "Diff base: #{base}...HEAD"
-  print_table(rows)
-  print_type_guardrails_text(guardrail_findings)
+def print_special_coverage_markdown(alerts)
+  puts
+  puts "## Zig Special Coverage Alerts"
+  puts
+  if alerts.empty?
+    puts "No added production Zig lines require missing Loom/VOPR/wait-loop coverage alerts."
+    return
+  end
+
+  puts "| path | rule | finding |"
+  puts "| --- | --- | --- |"
+  alerts.first(30).each do |alert|
+    location = alert[:line].positive? ? "`#{alert[:path]}:#{alert[:line]}`" : "`#{alert[:path]}`"
+    detail = [alert[:finding], alert[:source]].reject(&:empty?).join("; ")
+    puts "| #{markdown_escape(location)} | `#{markdown_escape(alert[:rule])}` | #{markdown_escape(detail)} |"
+  end
+  puts
+  puts "_#{alerts.length - 30} more alerts omitted._" if alerts.length > 30
+end
+
+if $PROGRAM_NAME == __FILE__
+  options = parse_options(ARGV)
+  base = options[:base] || default_base_ref
+  stats = numstat(base)
+  adds_by_path = added_lines(base)
+  guardrail_findings = type_guardrail_findings(adds_by_path)
+  special_alerts = special_coverage_alerts(adds_by_path)
+
+  bucket_order = [
+    [:total, "total"],
+    [:src_rb, "src/**/*.rb"],
+    [:zig_src, "zig/**/*.zig prod"],
+    [:spec, "spec/"],
+    [:transpile_tests, "transpile-tests/"],
+    [:tools, "tools/"],
+    [:zig_tests, "zig/**/*-test.zig + vopr/loom harness"],
+    [:md, "*.md"],
+    [:other, "other"],
+  ]
+
+  grouped = Hash.new { |h, k| h[k] = [] }
+  stats.each { |entry| grouped[bucket_for(entry[:path])] << entry }
+  grouped[:total] = stats
+
+  src_paths = grouped[:src_rb].map { |e| e[:path] }
+  zig_paths = grouped[:zig_src].map { |e| e[:path] }
+  zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
+  src_cov = ruby_added_coverage(adds_by_path, src_paths)
+  zig_cov = zig_added_coverage(adds_by_path, zig_paths)
+  zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
+
+  rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
+  bucket_order.each do |key, label|
+    entries = grouped[key]
+    additions = entries.sum { |e| e[:additions] }
+    deletions = entries.sum { |e| e[:deletions] }
+    coverage = case key
+               when :src_rb then src_cov
+               when :zig_src then zig_cov
+               when :zig_tests then zig_test_cov
+               when :spec, :tools then ["not tracked", "not tracked"]
+               else ["", ""]
+               end
+    rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
+  end
+
+  if options[:format] == "markdown"
+    print_markdown(base, rows)
+    print_type_guardrails_markdown(guardrail_findings)
+    print_special_coverage_markdown(special_alerts)
+  else
+    puts "Diff base: #{base}...HEAD"
+    print_table(rows)
+    print_type_guardrails_text(guardrail_findings)
+    print_special_coverage_text(special_alerts)
+  end
 end

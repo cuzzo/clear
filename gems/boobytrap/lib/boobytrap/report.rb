@@ -23,12 +23,16 @@ module Boobytrap
       events = Bugspots.events_from_git(@repo, fix_re: fix_re)
       @fix_commits = events.size
       scores = filter_paths(Bugspots.score(events))
+      @fix_scores = scores
+      @fix_max = [scores.values.max || 0.0, 1.0].max
+      @blast_radius = filter_blast(Bugspots.blast_radius(events))
       gaps =
         if resultset && ::File.exist?(resultset)
           filter_paths(CoverageGap.from_resultset(resultset, root: @repo))
         else
           {}
         end
+      @gaps = gaps
       @have_cov = !gaps.empty?
       @ranked, @unmeasured = Hotspot.rank(scores, gaps)
       @method_gaps =
@@ -48,6 +52,7 @@ module Boobytrap
         else
           []
         end
+      @state_branch_hotspots = build_state_branch_hotspots(resultset)
     end
 
     def in_scope?(rel)
@@ -58,6 +63,10 @@ module Boobytrap
 
     def filter_paths(hash)
       hash.select { |rel, _| in_scope?(rel) && current_file?(rel) }
+    end
+
+    def filter_blast(rows)
+      rows.select { |row| in_scope?(row.file) && current_file?(row.file) }
     end
 
     def current_file?(rel)
@@ -77,6 +86,10 @@ module Boobytrap
       o << "- [Hotspots (#{@ranked.size})](#hotspots-#{@ranked.size})\n"
       o << "- [Mostly Uncovered Methods (#{dark_method_count})]" \
            "(#mostly-uncovered-methods-#{dark_method_count})\n"
+      o << "- [State-Based Branch Hotspots (#{@state_branch_hotspots.size})]" \
+           "(#statebased-branch-hotspots-#{@state_branch_hotspots.size})\n"
+      o << "- [Multi-File Fix Blast Radius (#{@blast_radius.size})]" \
+           "(#multifile-fix-blast-radius-#{@blast_radius.size})\n"
       o << "- [Fixed But Unmeasured (#{@unmeasured.size})]" \
            "(#fixed-but-unmeasured-#{@unmeasured.size})\n"
       o << "- [Run Summary](#run-summary)\n\n"
@@ -93,6 +106,19 @@ module Boobytrap
              "branch gap=#{(top.gap * 100).round(1)}%).\n"
         o << "- #{near} file(s) are within 50% of the top score " \
              "(hotspot >= #{cutoff.round(4)}); triage those first.\n"
+        if (state_branch = @state_branch_hotspots.first)
+          o << "- Highest state-based branch hotspot: " \
+               "`#{state_branch[:file]}:#{state_branch[:method]}` " \
+               "(score=#{state_branch[:risk].round(2)}, " \
+               "state branches=#{state_branch[:decisions]}, " \
+               "fix_norm=#{state_branch[:fix_norm]}, " \
+               "branch gap=#{(state_branch[:branch_gap] * 100).round(1)}%).\n"
+        end
+        if (blast = @blast_radius.first)
+          o << "- Highest multi-file fix blast radius: `#{blast.file}` " \
+               "(score=#{blast.score}, avg files/fix=#{blast.avg_touched}, " \
+               "max=#{blast.max_touched}).\n"
+        end
         unless @have_cov
           o << "- WARNING: no branch-coverage resultset supplied; " \
                "only fix-churn is shown (gap assumed unknown).\n"
@@ -145,6 +171,41 @@ module Boobytrap
         o << "\n"
       end
 
+      o << "## State-Based Branch Hotspots (#{@state_branch_hotspots.size})\n"
+      o << "_Decomplex state-based branch density joined with fix-cache and branch coverage. " \
+           "These are branches over mutable/object state that are uncovered and/or historically fixed._\n\n"
+      if @state_branch_hotspots.empty?
+        o << "None.\n\n"
+      else
+        o << "| # | method | risk | state branches | refs | fix_norm | branch gap | line gap | dark branches |\n"
+        o << "|---|--------|------|----------------|------|----------|------------|----------|---------------|\n"
+        @state_branch_hotspots.first(@top).each_with_index do |h, idx|
+          o << "| #{idx + 1} | `#{h[:file]}:#{h[:method]}` | #{h[:risk].round(2)} | " \
+               "#{h[:decisions]} | `#{h[:state_refs].first(5).join(' | ')}` | " \
+               "#{h[:fix_norm]} | #{(h[:branch_gap] * 100).round(1)}% | " \
+               "#{(h[:line_gap] * 100).round(1)}% | #{h[:dark_branches]} |\n"
+        end
+        o << "\n- ...(+#{@state_branch_hotspots.size - @top} more)\n" if @state_branch_hotspots.size > @top
+        o << "\n"
+      end
+
+      o << "## Multi-File Fix Blast Radius (#{@blast_radius.size})\n"
+      o << "_Time-decayed fix commits where a file repeatedly changes with many other files. " \
+           "High rows are bug fixes whose blast radius is cross-module, not local._\n\n"
+      if @blast_radius.empty?
+        o << "None.\n\n"
+      else
+        o << "| # | file | score | fixes | avg files/fix | max files | top co-touched files |\n"
+        o << "|---|------|-------|-------|---------------|-----------|----------------------|\n"
+        @blast_radius.first(@top).each_with_index do |row, idx|
+          partners = row.partners.map { |file, score| "#{file} (#{score})" }.join("; ")
+          o << "| #{idx + 1} | `#{row.file}` | #{row.score} | #{row.fixes} | " \
+               "#{row.avg_touched} | #{row.max_touched} | #{partners} |\n"
+        end
+        o << "\n- ...(+#{@blast_radius.size - @top} more)\n" if @blast_radius.size > @top
+        o << "\n"
+      end
+
       o << "## Fixed But Unmeasured (#{@unmeasured.size})\n"
       o << "_files with recurring fixes but NO branch-coverage data -- " \
            "recurring-fix code the corpus does not measure at all; " \
@@ -164,6 +225,8 @@ module Boobytrap
       o << "- Fix commits matched: #{@fix_commits} (time span over whole history, unfiltered)\n"
       o << "- Files ranked: #{@ranked.size}; fixed-but-unmeasured: " \
            "#{@unmeasured.size}\n"
+      o << "- State-based branch hotspots: #{@state_branch_hotspots.size}; " \
+           "multi-file fix blast rows: #{@blast_radius.size}\n"
       o << "- Branch-coverage resultset: " \
            "#{@have_cov ? 'present' : 'ABSENT (fix-churn only)'}\n"
       o << "- Method: vendored bugspots " \
@@ -180,6 +243,41 @@ module Boobytrap
 
     def dark_method_count
       dark_methods.size
+    end
+
+    def build_state_branch_hotspots(resultset)
+      files = if resultset && ::File.exist?(resultset)
+                MethodGap.covered_files(resultset, root: @repo)
+              else
+                @fix_scores.keys
+              end
+      files = files.select { |rel| in_scope?(rel) && current_file?(rel) }
+      findings = DecomplexRisk.state_branch_density(
+        files.map { |rel| ::File.join(@repo, rel) },
+        root: @repo
+      )
+      method_index = @method_gaps.to_h { |m| [[m.file, m.name], m] }
+
+      findings.map do |h|
+        file = h[:file]
+        method = h[:method]
+        m = method_index[[file, method]]
+        fix_norm = (@fix_scores[file].to_f / @fix_max).round(3)
+        branch_gap = @gaps[file]&.gap.to_f
+        line_gap = m&.line_gap.to_f
+        dark = m&.uncovered_branches.to_i
+        risk = h[:score].to_f * (1.0 + fix_norm) *
+               (1.0 + branch_gap) * (1.0 + line_gap) + dark
+        h.merge(
+          file: file,
+          method: method,
+          fix_norm: fix_norm,
+          branch_gap: branch_gap,
+          line_gap: line_gap,
+          dark_branches: dark,
+          risk: risk
+        )
+      end.sort_by { |h| [-h[:risk], -h[:decisions], h[:file], h[:method]] }
     end
   end
 end

@@ -49,6 +49,7 @@ pub fn build(b: *std.Build) void {
     const ebr_mod = b.createModule(.{ .root_source_file = b.path("lib/ebr.zig") });
     const ownership_mod = b.createModule(.{ .root_source_file = b.path("lib/ownership.zig") });
     const compat_mod = b.createModule(.{ .root_source_file = b.path("lib/compat.zig") });
+    const freeze_mod = b.createModule(.{ .root_source_file = b.path("runtime/freeze.zig") });
     ebr_mod.addImport("compat", compat_mod);
 
     // -------------------------------------------------------------------------
@@ -191,6 +192,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "ffi-concurrency-test.zig", .tsan = true },
         .{ .path = "fiber-test.zig", .tsan = true },
         .{ .path = "fiber-profile-test.zig", .tsan = true },
+        .{ .path = "runtime/freeze.zig" },
         // FSM (stackless task) tests
         .{ .path = "fsm-benchmark-test.zig", .tsan = true },
         .{ .path = "fsm-concurrent-test.zig", .tsan = true },
@@ -309,35 +311,64 @@ pub fn build(b: *std.Build) void {
     // Dedicated step for VOPR-only kcov runs. Mirror of coverage-loom.
     const coverage_vopr_step = b.step("coverage-vopr", "Run VOPR-only tests under kcov (requires -Dcoverage-vopr)");
 
+    const kcov_codecov_exclude_arg = "--exclude-pattern=-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz.zig,/._clear_cov_";
+
     // When -Dcoverage is set, accumulate per-test kcov runs so a final
     // merge step can produce one zig-out/coverage/merged/cobertura.xml
     // for Codecov upload. The merge step depends on every kcov run so
     // it fires only after all per-test coverage dirs are populated.
     const merge_cmd = if (coverage)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage/merged" })
     else
         null;
     if (merge_cmd) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
+    const sanitize_cmd = if (coverage)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd.?.step);
+    }
     // Same shape as `merge_cmd`, but for the Loom-only coverage tree.
     const merge_cmd_loom = if (coverage_loom)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-loom/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-loom/merged" })
     else
         null;
     if (merge_cmd_loom) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
+    const sanitize_cmd_loom = if (coverage_loom)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-loom/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd_loom) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd_loom.?.step);
+    }
     // Same shape as `merge_cmd_loom`, but for the VOPR-only coverage tree.
     const merge_cmd_vopr = if (coverage_vopr)
-        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-vopr/merged" })
+        b.addSystemCommand(&.{ "kcov", "--merge", kcov_codecov_exclude_arg, "zig-out/coverage-vopr/merged" })
     else
         null;
     if (merge_cmd_vopr) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
+    }
+    const sanitize_cmd_vopr = if (coverage_vopr)
+        b.addSystemCommand(&.{ "ruby", "../tools/zig_coverage_sanitize.rb", "--fail-on-orphan", "zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml" })
+    else
+        null;
+    if (sanitize_cmd_vopr) |s| {
+        s.stdio = .inherit;
+        s.setCwd(b.path("."));
+        s.step.dependOn(&merge_cmd_vopr.?.step);
     }
 
     // Counts only the test_files entries that contribute to `test_step`
@@ -414,11 +445,12 @@ pub fn build(b: *std.Build) void {
 
     for (test_files, 0..) |entry, idx| {
         const filename = entry.path;
-        // Coverage runs every test-file entry, including stress /
-        // loom / vopr / hammer / fuzz entries. Those files scale their
-        // own iteration counts down when build_options.coverage is
-        // true, so kcov gets line coverage for the surface without
-        // ptracing the full stress workload.
+        // Coverage runs every regular test-file entry, including stress /
+        // hammer / fuzz entries. Loom/vopr wrappers are deliberately excluded
+        // here: under `zig test`, @import("root") resolves to the generated
+        // test runner, so root-level SimAtomic / SimRing seams are hidden.
+        // Rooted Loom/VOPR executables are wired into the regular coverage
+        // merge below instead.
         const skip_for_coverage = false;
 
         // Determine whether this iteration's test_step contribution
@@ -434,7 +466,10 @@ pub fn build(b: *std.Build) void {
         // TSan already covers.
         // Loom/vopr entries are likewise excluded from `test_step` —
         // they run only via `test_loom_vopr_step` (sharded, no TSan).
-        var include_in_test_step = !skip_for_coverage and (coverage or (!entry.tsan and !entry.hammer and !entry.loom_vopr));
+        var include_in_test_step =
+            !skip_for_coverage and
+            ((coverage and !entry.loom_vopr) or
+                (!coverage and !entry.tsan and !entry.hammer and !entry.loom_vopr));
         if (include_in_test_step) {
             const my_shard = (test_step_idx % shard_count) == shard_index;
             test_step_idx += 1;
@@ -442,63 +477,64 @@ pub fn build(b: *std.Build) void {
         }
 
         if (include_in_test_step) {
-        // Standard build (Debug, stage2 backend; coverage forces LLVM
-        // backend so kcov can read complete DWARF for project .zig
-        // sources -- stage2 emits limited DWARF that only exposes .S
-        // files and compiler_rt, leaving project files invisible to
-        // kcov regardless of include filters).
-        const unit_tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(filename),
-                .target = target,
-                .optimize = optimize,
-                .sanitize_thread = sanitize_thread,
-            }),
-            .use_llvm = if (coverage) true else null,
-        });
-        unit_tests.root_module.addImport("fiber-core", fiber_core_mod);
-        unit_tests.root_module.addImport("safety", safety_mod);
-        unit_tests.root_module.addImport("ebr", ebr_mod);
-        unit_tests.root_module.addImport("ownership", ownership_mod);
-        unit_tests.root_module.addImport("compat", compat_mod);
-        unit_tests.root_module.addImport("build_options", build_options_mod);
-        unit_tests.root_module.addAssemblyFile(switch_s);
-        unit_tests.root_module.addAssemblyFile(onroot_s);
-        unit_tests.root_module.link_libc = true;
-
-        if (coverage) {
-            // Numeric subdir keeps paths flat (test_files contains paths
-            // like "lib/atomic.zig" that would otherwise create deep
-            // dirs). kcov instruments the test binary on the fly:
-            //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
-            //
-            // jammy's apt ships kcov v38, which does not auto-create the
-            // output directory and reports "Can't open directory" if it
-            // doesn't exist. v40+ creates it on demand. Pre-create with
-            // `mkdir -p` so we work on either version.
-            const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
-            const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
-            const run_kcov = b.addSystemCommand(&.{
-                "kcov",
-                "--clean",
-                kcov_include_arg,
-                kcov_strip_arg,
-                kcov_dir,
+            // Standard build (Debug, stage2 backend; coverage forces LLVM
+            // backend so kcov can read complete DWARF for project .zig
+            // sources -- stage2 emits limited DWARF that only exposes .S
+            // files and compiler_rt, leaving project files invisible to
+            // kcov regardless of include filters).
+            const unit_tests = b.addTest(.{
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(filename),
+                    .target = target,
+                    .optimize = optimize,
+                    .sanitize_thread = sanitize_thread,
+                }),
+                .use_llvm = if (coverage) true else null,
             });
-            run_kcov.addArtifactArg(unit_tests);
-            run_kcov.stdio = .inherit;
-            run_kcov.setCwd(b.path("."));
-            run_kcov.step.dependOn(&mkdir_cmd.step);
-            test_step.dependOn(&run_kcov.step);
-            merge_cmd.?.addArg(kcov_dir);
-            merge_cmd.?.step.dependOn(&run_kcov.step);
-        } else {
-            const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
-            run_unit_tests.addArtifactArg(unit_tests);
-            run_unit_tests.stdio = .inherit;
-            run_unit_tests.setCwd(b.path("."));
-            test_step.dependOn(&run_unit_tests.step);
-        }
+            unit_tests.root_module.addImport("fiber-core", fiber_core_mod);
+            unit_tests.root_module.addImport("safety", safety_mod);
+            unit_tests.root_module.addImport("ebr", ebr_mod);
+            unit_tests.root_module.addImport("ownership", ownership_mod);
+            unit_tests.root_module.addImport("compat", compat_mod);
+            unit_tests.root_module.addImport("build_options", build_options_mod);
+            unit_tests.root_module.addAssemblyFile(switch_s);
+            unit_tests.root_module.addAssemblyFile(onroot_s);
+            unit_tests.root_module.link_libc = true;
+
+            if (coverage) {
+                // Numeric subdir keeps paths flat (test_files contains paths
+                // like "lib/atomic.zig" that would otherwise create deep
+                // dirs). kcov instruments the test binary on the fly:
+                //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
+                //
+                // jammy's apt ships kcov v38, which does not auto-create the
+                // output directory and reports "Can't open directory" if it
+                // doesn't exist. v40+ creates it on demand. Pre-create with
+                // `mkdir -p` so we work on either version.
+                const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
+                const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+                const run_kcov = b.addSystemCommand(&.{
+                    "kcov",
+                    "--clean",
+                    kcov_include_arg,
+                    kcov_strip_arg,
+                    kcov_codecov_exclude_arg,
+                    kcov_dir,
+                });
+                run_kcov.addArtifactArg(unit_tests);
+                run_kcov.stdio = .inherit;
+                run_kcov.setCwd(b.path("."));
+                run_kcov.step.dependOn(&mkdir_cmd.step);
+                test_step.dependOn(&run_kcov.step);
+                merge_cmd.?.addArg(kcov_dir);
+                merge_cmd.?.step.dependOn(&run_kcov.step);
+            } else {
+                const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
+                run_unit_tests.addArtifactArg(unit_tests);
+                run_unit_tests.stdio = .inherit;
+                run_unit_tests.setCwd(b.path("."));
+                test_step.dependOn(&run_unit_tests.step);
+            }
         }
 
         // TSan / hammer builds — only for concurrency-sensitive tests.
@@ -519,31 +555,31 @@ pub fn build(b: *std.Build) void {
             const in_shard = (idx_ref.* % shard_count) == shard_index;
             idx_ref.* += 1;
             if (in_shard) {
-            const tsan_tests = b.addTest(.{
-                .root_module = b.createModule(.{
-                    .root_source_file = b.path(filename),
-                    .target = target,
-                    .optimize = .Debug,
-                    .sanitize_thread = true,
-                }),
-                .use_llvm = true,
-            });
-            tsan_tests.root_module.addImport("fiber-core", fiber_core_mod);
-            tsan_tests.root_module.addImport("safety", safety_mod);
-            tsan_tests.root_module.addImport("ebr", ebr_mod);
-            tsan_tests.root_module.addImport("ownership", ownership_mod);
-            tsan_tests.root_module.addImport("compat", compat_mod);
-            tsan_tests.root_module.addImport("build_options", tsan_build_options_mod);
-            tsan_tests.root_module.addAssemblyFile(switch_s);
-            tsan_tests.root_module.addAssemblyFile(onroot_s);
-            tsan_tests.root_module.link_libc = true;
+                const tsan_tests = b.addTest(.{
+                    .root_module = b.createModule(.{
+                        .root_source_file = b.path(filename),
+                        .target = target,
+                        .optimize = .Debug,
+                        .sanitize_thread = true,
+                    }),
+                    .use_llvm = true,
+                });
+                tsan_tests.root_module.addImport("fiber-core", fiber_core_mod);
+                tsan_tests.root_module.addImport("safety", safety_mod);
+                tsan_tests.root_module.addImport("ebr", ebr_mod);
+                tsan_tests.root_module.addImport("ownership", ownership_mod);
+                tsan_tests.root_module.addImport("compat", compat_mod);
+                tsan_tests.root_module.addImport("build_options", tsan_build_options_mod);
+                tsan_tests.root_module.addAssemblyFile(switch_s);
+                tsan_tests.root_module.addAssemblyFile(onroot_s);
+                tsan_tests.root_module.link_libc = true;
 
-            const label = if (entry.hammer) "hammer" else "tsan";
-            const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run {s} {s}", .{ label, filename }));
-            run_tsan_tests.addArtifactArg(tsan_tests);
-            run_tsan_tests.stdio = .inherit;
-            run_tsan_tests.setCwd(b.path("."));
-            target_step.dependOn(&run_tsan_tests.step);
+                const label = if (entry.hammer) "hammer" else "tsan";
+                const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run {s} {s}", .{ label, filename }));
+                run_tsan_tests.addArtifactArg(tsan_tests);
+                run_tsan_tests.stdio = .inherit;
+                run_tsan_tests.setCwd(b.path("."));
+                target_step.dependOn(&run_tsan_tests.step);
             }
         }
 
@@ -590,6 +626,7 @@ pub fn build(b: *std.Build) void {
                         "--clean",
                         kcov_include_arg,
                         kcov_strip_arg,
+                        kcov_codecov_exclude_arg,
                         kcov_dir,
                     });
                     run_kcov.addArtifactArg(lv_tests);
@@ -607,6 +644,7 @@ pub fn build(b: *std.Build) void {
                         "--clean",
                         kcov_include_arg,
                         kcov_strip_arg,
+                        kcov_codecov_exclude_arg,
                         kcov_dir,
                     });
                     run_kcov.addArtifactArg(lv_tests);
@@ -627,9 +665,13 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    if (merge_cmd) |m| test_step.dependOn(&m.step);
-    if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
-    if (merge_cmd_vopr) |m| coverage_vopr_step.dependOn(&m.step);
+    if (sanitize_cmd) |s| {
+        test_step.dependOn(&s.step);
+    } else if (merge_cmd) |m| {
+        test_step.dependOn(&m.step);
+    }
+    if (sanitize_cmd_loom) |s| coverage_loom_step.dependOn(&s.step) else if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
+    if (sanitize_cmd_vopr) |s| coverage_vopr_step.dependOn(&s.step) else if (merge_cmd_vopr) |m| coverage_vopr_step.dependOn(&m.step);
 
     // -------------------------------------------------------------------------
     // BENCHMARKS (zig build benchmark)
@@ -663,6 +705,7 @@ pub fn build(b: *std.Build) void {
         bench_tests.root_module.addImport("ebr", ebr_mod);
         bench_tests.root_module.addImport("ownership", ownership_mod);
         bench_tests.root_module.addImport("compat", compat_mod);
+        bench_tests.root_module.addImport("freeze", freeze_mod);
         bench_tests.root_module.addAssemblyFile(switch_s);
         bench_tests.root_module.addAssemblyFile(onroot_s);
         bench_tests.root_module.link_libc = true;
@@ -792,6 +835,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             loom_kcov_dir,
         });
         run_loom_kcov.addArtifactArg(loom_exe);
@@ -842,6 +886,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             pl_loom_kcov_dir,
         });
         run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
@@ -865,6 +910,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             pl_loom_kcov_dir,
         });
         run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
@@ -924,6 +970,7 @@ pub fn build(b: *std.Build) void {
                 "--clean",
                 kcov_include_arg,
                 kcov_strip_arg,
+                kcov_codecov_exclude_arg,
                 kcov_dir,
             });
             run_kcov.addArtifactArg(exe);
@@ -942,6 +989,7 @@ pub fn build(b: *std.Build) void {
                 "--clean",
                 kcov_include_arg,
                 kcov_strip_arg,
+                kcov_codecov_exclude_arg,
                 kcov_dir,
             });
             run_kcov.addArtifactArg(exe);
@@ -980,6 +1028,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             versioned_loom_kcov_dir,
         });
         run_versioned_loom_kcov.addArtifactArg(versioned_loom_exe);
@@ -1025,6 +1074,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             vm_loom_kcov_dir,
         });
         run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
@@ -1043,6 +1093,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             vm_loom_kcov_dir,
         });
         run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
@@ -1086,6 +1137,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             ow_loom_kcov_dir,
         });
         run_ow_loom_kcov.addArtifactArg(ow_loom_exe);
@@ -1104,6 +1156,7 @@ pub fn build(b: *std.Build) void {
             "--clean",
             kcov_include_arg,
             kcov_strip_arg,
+            kcov_codecov_exclude_arg,
             ow_loom_kcov_dir,
         });
         run_ow_loom_kcov.addArtifactArg(ow_loom_exe);

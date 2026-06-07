@@ -139,4 +139,72 @@ class ReportTest < Minitest::Test
       assert_includes md, "No hotspots"
     end
   end
+
+  def test_report_flags_state_based_branch_hotspots_and_fix_blast_radius
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/hot.rb", <<~RUBY)
+        class Checkout
+          def stateful(order)
+            if @enabled
+              charge(order.total)
+            end
+            if order.paid?
+              ship
+            end
+            done
+          end
+        end
+      RUBY
+      File.write("#{dir}/src/peer.rb", "def peer; 1; end\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Add checkout", date: "2020-01-01T00:00:00")
+      File.write("#{dir}/src/hot.rb", File.read("#{dir}/src/hot.rb") + "\n# fix\n")
+      File.write("#{dir}/src/peer.rb", "def peer; 2; end\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix checkout state bug", date: "2024-01-01T00:00:00")
+
+      lines = Array.new(12)
+      [1, 2, 3, 5, 6, 8, 9].each { |i| lines[i - 1] = 1 }
+      [4, 7].each { |i| lines[i - 1] = 0 }
+      rs = {
+        "RSpec" => { "coverage" => {
+          "#{dir}/src/hot.rb" => {
+            "lines" => lines,
+            "branches" => {
+              "[:if,0,3,0,5,7]" => {
+                "[:then,1,4,2,4,21]" => 0,
+                "[:else,2,3,0,5,7]" => 1
+              },
+              "[:if,3,6,0,8,7]" => {
+                "[:then,4,7,2,7,10]" => 0,
+                "[:else,5,6,0,8,7]" => 1
+              }
+            }
+          },
+          "#{dir}/src/peer.rb" => {
+            "lines" => [1],
+            "branches" => {}
+          }
+        } }
+      }
+      path = "#{dir}/.resultset.json"
+      File.write(path, JSON.dump(rs))
+
+      md = Boobytrap::Report.new(repo: dir, resultset: path).to_markdown
+
+      assert_includes md, "## State-Based Branch Hotspots"
+      assert_includes md, "`src/hot.rb:stateful`"
+      assert_includes md, "@enabled"
+      assert_includes md, "order.paid?"
+      assert_includes md, "## Multi-File Fix Blast Radius"
+      assert_includes md, "`src/hot.rb`"
+      assert_includes md, "src/peer.rb"
+      assert_includes md, "Highest state-based branch hotspot"
+      assert_includes md, "Highest multi-file fix blast radius"
+    end
+  end
 end

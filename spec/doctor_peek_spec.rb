@@ -88,6 +88,16 @@ RSpec.describe Doctor do
       expect(out).to match(/0xleaf\s+200 B/)
     end
 
+    it "attributes leaf-only samples to <root> when there is no caller frame" do
+      File.write(File.join(@profile_dir, "alloc.txt"), <<~ALLOC)
+        # alloc-profile v2
+        0xsolo   4  400  0  0  400
+      ALLOC
+
+      out = capture_stdout { described_class.run(@profile_dir, peek: /0xsolo/) }
+      expect(out).to match(/<root>\s+400 B/)
+    end
+
     it "tells the user when no samples matched" do
       out = capture_stdout { described_class.run(@profile_dir, peek: /no_match/) }
       expect(out).to include("No samples matched")
@@ -98,6 +108,16 @@ RSpec.describe Doctor do
       $stderr = StringIO.new
       expect {
         described_class.run("/nonexistent", peek: /foo/)
+      }.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+    ensure
+      $stderr = old_stderr
+    end
+
+    it "exits 1 when run_peek is called directly on a missing directory" do
+      old_stderr = $stderr
+      $stderr = StringIO.new
+      expect {
+        described_class.run_peek("/nonexistent", /foo/)
       }.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
     ensure
       $stderr = old_stderr

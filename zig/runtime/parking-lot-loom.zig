@@ -4254,6 +4254,7 @@ pub fn testDrainChannelsSpawn() !void {
         // tasks.
         if (sched.ready_queue.pop()) |task| {
             sched.freeStack(task.base.stack);
+            task.base.deinit();
             sched.allocator.destroy(task.base);
             sched.task_slab.destroy(task);
         }

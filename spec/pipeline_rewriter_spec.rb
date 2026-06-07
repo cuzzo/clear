@@ -175,6 +175,22 @@ RSpec.describe PipelineRewriter do
     expect(call.zig_pattern).to include(".insert")
   end
 
+  it "patches the source at the deepest SMOOTH node in a skipped chain" do
+    token = Lexer::Token.new(:OP, "|>", 1, 1)
+    original_source = AST::Identifier.new(token, "items")
+    replacement_source = AST::Identifier.new(token, "__real_items")
+    where_stage = AST::WhereOp.new(token, AST::Identifier.new(token, "_"))
+    sum_stage = AST::SumOp.new(token, AST::Identifier.new(token, "_"))
+    inner = AST::BinaryOp.new(token, original_source, :SMOOTH, where_stage)
+    outer = AST::BinaryOp.new(token, inner, :SMOOTH, sum_stage)
+    rewriter = PipelineRewriter.new(SemanticAnnotator.new(source_code: ""))
+
+    rewriter.send(:patch_chain_source!, outer, replacement_source)
+
+    expect(inner.left).to equal(replacement_source)
+    expect(outer.left).to equal(inner)
+  end
+
   it "falls back to append actions for non-fold terminals" do
     token = Lexer::Token.new(:KEYWORD, "JOIN", 1, 1)
     current = AST::Identifier.new(token, "__it")

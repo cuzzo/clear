@@ -50,6 +50,19 @@ module FsmTransform
     AliasOverrideMap = T.type_alias { T::Hash[String, String] }
     AliasOverrideTable = T.type_alias { T::Hash[Integer, AliasOverrideMap] }
     SegmentSlot = T.type_alias { T.any(FsmTransform::Segments::Segment, Symbol) }
+    SplitContext = T.type_alias { T::Hash[Symbol, Object] }
+    SegmentTail = T.type_alias do
+      T.any(
+        FsmTransform::Segments::Done,
+        FsmTransform::Segments::IoSuspend,
+        FsmTransform::Segments::NextSuspend,
+        FsmTransform::Segments::LockSuspend,
+        FsmTransform::Segments::LoopBack,
+        FsmTransform::Segments::Goto,
+        FsmTransform::Segments::CondBranch,
+      )
+    end
+    SuspendTail = T.type_alias { T.any(FsmTransform::Segments::IoSuspend, FsmTransform::Segments::NextSuspend) }
 
     class SegmentList < T::Struct
       extend T::Sig
@@ -71,6 +84,11 @@ module FsmTransform
         extend T::Sig
 
       attr_reader :segments, :synthetic_fields
+
+      class Finalized < T::Struct
+        const :segments, T::Array[FsmTransform::Segments::Segment]
+        const :alias_overrides_by_index, AliasOverrideTable
+      end
 
       sig { void }
       def initialize
@@ -123,7 +141,7 @@ module FsmTransform
       end
 
       # Fill a previously-reserved index with the actual segment.
-      sig { params(idx: Integer, stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
+      sig { params(idx: Integer, stmts: T::Array[SegmentStmt], tail: SegmentTail).returns(Integer) }
       def fill(idx, stmts, tail)
         T.bind(self, T.untyped) rescue nil
         @segments[idx] = Segments::Segment.new(idx, stmts, tail)
@@ -132,7 +150,7 @@ module FsmTransform
       end
 
       # Allocate + fill in one step. Returns the index.
-      sig { params(stmts: T::Array[SegmentStmt], tail: Object).returns(Integer) }
+      sig { params(stmts: T::Array[SegmentStmt], tail: SegmentTail).returns(Integer) }
       def push(stmts, tail)
         T.bind(self, T.untyped) rescue nil
         idx = reserve_index
@@ -140,7 +158,7 @@ module FsmTransform
         idx
       end
 
-      sig { returns(T::Array[FsmTransform::Segments::Segment]) }
+      sig { returns(Finalized) }
       def finalize
         T.bind(self, T.untyped) rescue nil
         unfilled = @segments.each_with_index.select { |s, _| s == :placeholder }
@@ -148,7 +166,10 @@ module FsmTransform
           raise "RecursiveSplitter: unfilled segments at indices " \
                 "#{unfilled.map(&:last).inspect}"
         end
-        T.cast(@segments, T::Array[FsmTransform::Segments::Segment])
+        Finalized.new(
+          segments: T.cast(@segments, T::Array[FsmTransform::Segments::Segment]),
+          alias_overrides_by_index: @alias_overrides_for.dup,
+        )
       end
     end
 
@@ -160,16 +181,15 @@ module FsmTransform
     # `lowering` is used inside emit_*_fragment for cond-rendering
     # (loop / if conditions are lowered to Zig text at split time
     # since they appear in CondBranch tails as raw Zig).
-    sig { params(body: T::Array[AST::Node], lowering: Object, ctx: T.nilable(T::Hash[Symbol, Object])).returns(T.nilable(SegmentList)) }
+    sig { params(body: T::Array[AST::Node], lowering: MIRLowering, ctx: T.nilable(SplitContext)).returns(T.nilable(SegmentList)) }
     def split(body, lowering, ctx: nil)
       T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
 
       builder = Builder.new
-      builder.instance_variable_set(:@__bg_ctx, ctx)
       done_idx = builder.reserve_index
       begin
-        entry = emit_stmts(body, done_idx, builder, lowering)
+        entry = emit_stmts(body, done_idx, builder, lowering, ctx || {})
       rescue UnsupportedShape
         return nil
       end
@@ -180,8 +200,9 @@ module FsmTransform
 
       # Entry is the first segment to execute; it MUST be index 0
       # for the dispatch to enter cleanly. Reorder if needed.
-      segments = builder.finalize
-      pre_renumber_overrides = builder.instance_variable_get(:@alias_overrides_for).dup
+      finalized = builder.finalize
+      segments = finalized.segments
+      pre_renumber_overrides = finalized.alias_overrides_by_index
       mapping = nil
       if entry != 0
         segments, mapping = renumber_with_entry(segments, entry)
@@ -201,8 +222,6 @@ module FsmTransform
         synthetic_fields: synth,
         alias_overrides_by_index: alias_table,
       )
-    rescue UnsupportedShape
-      nil
     end
 
     class UnsupportedShape < StandardError; end
@@ -211,8 +230,8 @@ module FsmTransform
     # `after_idx`. Returns the entry index of the first segment
     # produced (or `after_idx` if `stmts` is empty / has no
     # control-flow that needs splitting).
-    sig { params(stmts: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_stmts(stmts, after_idx, builder, lowering)
+    sig { params(stmts: T::Array[SegmentStmt], after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_stmts(stmts, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       return after_idx if stmts.nil? || stmts.empty?
 
@@ -226,12 +245,12 @@ module FsmTransform
         return builder.push(stmts, Segments::Goto.new(after_idx))
       end
 
-      pre   = stmts[0...pivot_idx]
+      pre   = T.must(stmts[0...pivot_idx])
       pivot = stmts[pivot_idx]
       rest  = stmts[(pivot_idx + 1)..] || []
 
       # Emit `rest` first (so we know where pivot exits to).
-      rest_entry = emit_stmts(rest, after_idx, builder, lowering)
+      rest_entry = emit_stmts(rest, after_idx, builder, lowering, ctx)
 
       # Top-level NEXT/IO suspend pivots get their pre-stmts merged
       # in: the suspend's setup_stmts (rendered by the descriptor
@@ -245,7 +264,7 @@ module FsmTransform
       if sus
         emit_suspend_with_pre(sus, pre, rest_entry, builder)
       else
-        pivot_entry = emit_pivot(pivot, rest_entry, builder, lowering)
+        pivot_entry = emit_pivot(pivot, rest_entry, builder, lowering, ctx)
         if pre.empty?
           pivot_entry
         else
@@ -379,23 +398,23 @@ module FsmTransform
     end
 
     # Dispatch to the appropriate fragment emitter.
-    sig { params(stmt: T.untyped, after_idx: T.untyped, builder: T.untyped, lowering: T.untyped).returns(Integer) }
-    def emit_pivot(stmt, after_idx, builder, lowering)
+    sig { params(stmt: SegmentStmt, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_pivot(stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
-      return emit_suspend(sus, after_idx, builder) if sus
+      return emit_suspend(T.cast(sus, SuspendTail), after_idx, builder) if sus
 
       case stmt
       when AST::WhileLoop, AST::WhileBindLoop
-        emit_while_fragment(stmt, after_idx, builder, lowering)
+        emit_while_fragment(stmt, after_idx, builder, lowering, ctx)
       when AST::ForRange
-        emit_for_range_fragment(stmt, after_idx, builder, lowering)
+        emit_for_range_fragment(stmt, after_idx, builder, lowering, ctx)
       when AST::ForEach
-        emit_for_each_fragment(stmt, after_idx, builder, lowering)
+        emit_for_each_fragment(stmt, after_idx, builder, lowering, ctx)
       when AST::IfStatement
-        emit_if_fragment(stmt, after_idx, builder, lowering)
+        emit_if_fragment(stmt, after_idx, builder, lowering, ctx)
       when AST::WithBlock
-        emit_with_fragment(stmt, after_idx, builder, lowering)
+        emit_with_fragment(stmt, after_idx, builder, lowering, ctx)
       else
         raise UnsupportedShape, "Unhandled pivot kind #{stmt.class}"
       end
@@ -404,7 +423,7 @@ module FsmTransform
     # Suspend fragment: a single segment whose tail is the suspend.
     # The tail's next_index is set to after_idx so the resume
     # transitions to wherever this fragment exits.
-    sig { params(susp_tail: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(Integer) }
+    sig { params(susp_tail: SuspendTail, after_idx: Integer, builder: Builder).returns(Integer) }
     def emit_suspend(susp_tail, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
@@ -419,14 +438,14 @@ module FsmTransform
     #
     #   cond_seg: [], CondBranch(cond_zig, body_entry, after_idx)
     #   body_segs (recursive): exit to cond_seg's index
-    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: Object).returns(Integer) }
-    def emit_while_fragment(while_stmt, after_idx, builder, lowering)
+    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_while_fragment(while_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       cond_idx = builder.reserve_index
 
       body_stmts = while_stmt.do_branch.is_a?(Array) ?
                      while_stmt.do_branch : [while_stmt.do_branch]
-      body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering)
+      body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering, ctx)
 
       cond_zig = lower_to_zig(while_stmt.condition, lowering)
       raise UnsupportedShape, "While cond did not lower" if cond_zig.nil?
@@ -447,8 +466,8 @@ module FsmTransform
     #   cond_seg: [], CondBranch(ctx.__for_X < end, body_entry, after_idx)
     #   body_segs: exit to incr_seg
     #   incr_seg: [ctx.__for_X += 1; ctx.var = ctx.__for_X], Goto(cond)
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
-    def emit_for_range_fragment(for_stmt, after_idx, builder, lowering)
+    sig { params(for_stmt: AST::ForRange, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_for_range_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       var_name = for_stmt.var_name
       iter_var = "__for_#{builder.segments.length}"
@@ -472,7 +491,7 @@ module FsmTransform
       incr_idx = builder.reserve_index
 
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
-      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
+      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering, ctx)
 
       init_zig = Segments::SyntheticZig.new(parts: [
         ctx_iter, " = #{start_zig};\n", ctx_var, " = ", ctx_iter, ";",
@@ -494,8 +513,8 @@ module FsmTransform
     # fsm_foreach_descriptor (defined on Type) so adding a new
     # collection = one new branch on Type#fsm_foreach_descriptor.
     # The splitter never inspects the type directly.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
-    def emit_for_each_fragment(for_stmt, after_idx, builder, lowering)
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_for_each_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       coll_ast = for_stmt.collection
       coll_type = Type.from_node!(coll_ast, context: "FSM foreach collection")
@@ -520,14 +539,14 @@ module FsmTransform
 
       case desc.kind
       when :indexed_slice
-        emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
+        emit_for_each_indexed(for_stmt, after_idx, builder, lowering, ctx,
                               coll_zig, var_name, ctx_var, elem_zig,
                               counter, desc.slice_suffix)
       when :pool_indexed
-        emit_for_each_pool(for_stmt, after_idx, builder, lowering,
+        emit_for_each_pool(for_stmt, after_idx, builder, lowering, ctx,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
       when :iterator
-        emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
+        emit_for_each_iterator(for_stmt, after_idx, builder, lowering, ctx,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
       else
@@ -535,8 +554,8 @@ module FsmTransform
       end
     end
 
-    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: Object, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
-    def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer, desc: TypeFsmForEachDescriptor, ct: Type).returns(Integer) }
+    def emit_for_each_iterator(for_stmt, after_idx, builder, lowering, ctx,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
       T.bind(self, T.untyped) rescue nil
@@ -561,7 +580,7 @@ module FsmTransform
 
       cond_idx = builder.reserve_index
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
-      body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering)
+      body_entry = emit_stmts(body_stmts, cond_idx, builder, lowering, ctx)
 
       bind_zig = desc.deref ? "__nxt_#{counter}.*" : "__nxt_#{counter}"
       cond_pre = Segments::SyntheticZig.new(parts: [
@@ -583,8 +602,8 @@ module FsmTransform
 
     # Indexed slice: list / array. ctx.__feidx walks 0..len; body_init
     # assigns ctx.var from the slice; incr bumps the idx.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: Segments::CtxFieldRef, elem_zig: T.untyped, counter: Integer, slice_suffix: T.untyped).returns(Integer) }
-    def emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer, slice_suffix: String).returns(Integer) }
+    def emit_for_each_indexed(for_stmt, after_idx, builder, lowering, ctx,
                               coll_zig, var_name, ctx_var, elem_zig,
                               counter, slice_suffix)
       T.bind(self, T.untyped) rescue nil
@@ -598,7 +617,7 @@ module FsmTransform
       cond_idx = builder.reserve_index
       incr_idx = builder.reserve_index
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
-      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
+      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering, ctx)
 
       body_init_idx = builder.push(
         [Segments::SyntheticZig.new(parts: [ctx_var, " = #{slice_zig}[", ctx_iter, "];"])],
@@ -616,8 +635,8 @@ module FsmTransform
     # Pool indexed: like :indexed_slice but body_init has a skip-dead
     # branch that Gotos straight to incr when the slot's `alive` flag
     # is false.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: Segments::CtxFieldRef, elem_zig: T.untyped, counter: Integer).returns(Integer) }
-    def emit_for_each_pool(for_stmt, after_idx, builder, lowering,
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext, coll_zig: String, var_name: String, ctx_var: Segments::CtxFieldRef, elem_zig: String, counter: Integer).returns(Integer) }
+    def emit_for_each_pool(for_stmt, after_idx, builder, lowering, ctx,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
       T.bind(self, T.untyped) rescue nil
       iter_var = "__feidx_#{counter}"
@@ -630,7 +649,7 @@ module FsmTransform
       cond_idx = builder.reserve_index
       incr_idx = builder.reserve_index
       body_stmts = for_stmt.body.is_a?(Array) ? for_stmt.body : [for_stmt.body]
-      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering)
+      body_entry = emit_stmts(body_stmts, incr_idx, builder, lowering, ctx)
 
       assign_idx = builder.push(
         [Segments::SyntheticZig.new(parts: [ctx_var, " = #{slots_zig}[", ctx_iter, "].value;"])],
@@ -654,18 +673,18 @@ module FsmTransform
 
     # IF fragment: pre + CondBranch to then-entry / else-entry. Both
     # branches Goto to after_idx (the convergence point).
-    sig { params(if_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
-    def emit_if_fragment(if_stmt, after_idx, builder, lowering)
+    sig { params(if_stmt: AST::IfStatement, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_if_fragment(if_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       then_branch = if_stmt.then_branch.is_a?(Array) ?
                       if_stmt.then_branch : [if_stmt.then_branch]
       else_branch = if_stmt.else_branch
       else_branch = else_branch.is_a?(Array) ? else_branch : [else_branch] if else_branch
 
-      then_entry = emit_stmts(then_branch, after_idx, builder, lowering)
+      then_entry = emit_stmts(then_branch, after_idx, builder, lowering, ctx)
       else_entry =
         if else_branch
-          emit_stmts(else_branch, after_idx, builder, lowering)
+          emit_stmts(else_branch, after_idx, builder, lowering, ctx)
         else
           after_idx
         end
@@ -701,53 +720,61 @@ module FsmTransform
     # all caps' meta via lowering.fsm_cap_metadata and wrap the
     # recursive emit_stmts in a with_fiber_capture_map that adds
     # alias_name -> alias_data_ref entries.
-    sig { params(with_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_with_fragment(with_stmt, after_idx, builder, lowering)
+    sig { params(with_stmt: AST::WithBlock, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    def emit_with_fragment(with_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       caps = with_stmt.capabilities || []
       raise UnsupportedShape, "WITH with no capabilities" if caps.empty?
 
-      ctx     = builder.instance_variable_get(:@__bg_ctx) || {}
-      ctx_id  = ctx[:id]
-      captured = ctx[:captured] || {}
-      raise UnsupportedShape, "WITH split without ctx" if ctx_id.nil?
+      ctx_id_raw = ctx[:id]
+      raise UnsupportedShape, "WITH split without ctx" unless ctx_id_raw.is_a?(Integer)
 
-      caps_meta = caps.map { |c|
+      ctx_id = T.cast(ctx_id_raw, Integer)
+      captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
+      bg_rt_raw = ctx[:bg_rt]
+      raise UnsupportedShape, "WITH split without runtime" unless bg_rt_raw.is_a?(String)
+
+      bg_rt = T.cast(bg_rt_raw, String)
+
+      caps_meta = T.let([], T::Array[FsmLowering::FsmCapMetadata])
+      caps.each do |c|
         m = lowering.fsm_cap_metadata(c, with_stmt, ctx_id, captured)
         raise UnsupportedShape, "fsm_cap_metadata failed" if m.nil?
-        m
-      }
+        caps_meta << T.must(m)
+      end
 
       cap_indices = caps.map { builder.reserve_index }
       release_idx = builder.reserve_index
 
       body_stmts = with_stmt.body.is_a?(Array) ? with_stmt.body : [with_stmt.body]
-      alias_overrides = caps_meta.to_h { |m|
-        [m[:alias_name], m[:alias_data_ref]]
-      }
+      alias_overrides = T.let({}, T::Hash[String, String])
+      caps_meta.each do |m|
+        alias_overrides[m.fetch(:alias_name).to_s] = m.fetch(:alias_data_ref).to_s
+      end
       cs_entry = builder.with_alias_overrides(alias_overrides) do
         lowering.with_fiber_capture_map(
-          alias_overrides, rt_override: ctx[:bg_rt],
+          alias_overrides, rt_override: bg_rt,
         ) do
-          emit_stmts(body_stmts, release_idx, builder, lowering)
+          emit_stmts(body_stmts, release_idx, builder, lowering, ctx)
         end
       end
 
       caps.each_with_index do |cap, i|
         post_acquire = (i + 1 < caps.length) ? cap_indices[i + 1] : cs_entry
         prior        = caps[0...i]
-        builder.fill(cap_indices[i], [],
+        builder.fill(T.must(cap_indices[i]), [],
           Segments::LockSuspend.new(with_stmt, cap, prior,
                                     post_acquire, after_idx))
       end
 
-      release_lines = caps_meta.each_with_index.map { |m, i|
-        ["__ctx_#{ctx_id}.__lock_held_#{i} = false;",
-         "#{m[:lock_field_ref]}.#{m[:unlock_method]}();"]
-      }.reverse.flatten
+      release_lines = T.let([], T::Array[String])
+      caps_meta.each_with_index.to_a.reverse.each do |m, i|
+        release_lines << "__ctx_#{ctx_id}.__lock_held_#{i} = false;"
+        release_lines << "#{m.fetch(:lock_field_ref)}.#{m.fetch(:unlock_method)}();"
+      end
       builder.fill(release_idx, release_lines, Segments::Goto.new(after_idx))
 
-      cap_indices.first
+      T.must(cap_indices.first)
     end
 
     # Lower an AST expression to a Zig text fragment. The lowering

@@ -1889,26 +1889,12 @@ module DiagnosticRegistry
       cause: "The boundary dispatches work across schedulers, but one captured binding is scheduler-affine or non-atomic. That can break capability guarantees even if the emitted code happens to compile.",
       fix_hint: "Use a parallel-safe capability such as @shared where appropriate, pin the boundary instead of using @parallel, or avoid capturing the binding.",
     },
-    RAW_NO_CONTRACT: {
-      severity: :error, category: :mir,
-      template: "%{message}",
-      summary:  "RawZig is opaque to MIRChecker.",
-      cause: "`MIR::RawZig` can hide allocations, frees, and moves inside arbitrary statement text. MIRChecker cannot prove memory safety across that boundary.",
-      fix_hint: "Delete the RawZig and decompose the operation into structural MIR nodes that expose allocation, transfer, and cleanup events.",
-    },
     MIR_CALL_NO_CONTRACT: {
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "MIR call has no verifier-visible callable contract.",
       cause: "`MIR::Call`, `MIR::TailCall`, and `MIR::MethodCall` only carry emitted callee text and arguments. Without a typed callable contract, MIRChecker cannot prove whether arguments are borrowed, consumed, or returned.",
       fix_hint: "Lowering bug — attach a typed callable/effect contract to the MIR call or lower the operation into structural MIR nodes with explicit ownership events.",
-    },
-    RAW_UNJUSTIFIED: {
-      severity: :error, category: :mir,
-      template: "%{message}",
-      summary:  "RawZig used without a justifying need (use stdlib registries instead).",
-      cause: "RawZig is the unsafest emit path and must be reserved for cases the registries truly can't express. The checker found a RawZig whose call shape could be expressed via STD_LIB / POOL_METHODS / SET_METHODS / MAP_METHODS / INDEX_OPS instead.",
-      fix_hint: "Move the operation to the appropriate stdlib registry. The registries support effects, ownership, alloc, and ranged metadata — a RawZig is only justified when none of those mechanisms cover the case.",
     },
     FRAME_NO_REWIND: {
       severity: :error, category: :mir,
@@ -2103,7 +2089,7 @@ module DiagnosticRegistry
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "A consuming MIR operation has no explicit ownership contract.",
-      cause: "The stdlib registry declares a TAKES/consuming parameter, but the lowered InlineZig/RawZig node did not name the concrete binding being consumed in ownership_contract.consumes. MIRChecker cannot prove whether that binding is cleaned, transferred, double-freed, or leaked.",
+      cause: "The stdlib registry declares a TAKES/consuming parameter, but the lowered InlineZig node did not name the concrete binding being consumed in ownership_contract.consumes. MIRChecker cannot prove whether that binding is cleaned, transferred, double-freed, or leaked.",
       fix_hint: "Lowering bug — carry the consumed binding names from the annotated TAKES/GIVE site into ownership_contract.consumes, and emit matching MIR::TransferMark nodes. If the call deep-copies instead of consumes, do not mark the source moved.",
     },
     OWNERSHIP_CONTRACT_WITHOUT_TRANSFER: {

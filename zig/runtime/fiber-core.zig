@@ -35,6 +35,19 @@ pub const Context = if (builtin.cpu.arch == .x86_64) extern struct {
 // Zig will look for this in the .s file we just created.
 extern fn switch_context_asm(from: *Context, to: *Context) callconv(.c) void;
 
+extern fn __tsan_get_current_fiber() callconv(.c) ?*anyopaque;
+extern fn __tsan_create_fiber(flags: c_uint) callconv(.c) ?*anyopaque;
+extern fn __tsan_destroy_fiber(fiber: ?*anyopaque) callconv(.c) void;
+extern fn __tsan_switch_to_fiber(fiber: ?*anyopaque, flags: c_uint) callconv(.c) void;
+
+// TSan's fiber switch with flags=0 models the cooperative handoff between the
+// scheduler stack and the fiber stack. The handoff is not parallel execution:
+// scheduler writes that publish Task/Fiber fields must be visible to the fiber
+// when the assembly switch returns into it, and fiber writes must be visible
+// when it yields back. True cross-thread handoffs still go through the
+// scheduler's atomic queues before a destination thread switches to the fiber.
+const tsan_switch_flags: c_uint = 0;
+
 // 2. Public Wrapper
 pub fn switchContext(from: *Context, to: *Context) void {
     switch_context_asm(from, to);
@@ -186,6 +199,8 @@ pub const Fiber = struct {
     size_class: StackSize,
     stack_limit: usize,
     stack_guard_head: ?*safety.GuardNode = null,
+    tsan_fiber: ?*anyopaque = null,
+    parent_tsan_fiber: ?*anyopaque = null,
 
     pub fn init(memory: []u8, entry_fn: usize, size: StackSize) Fiber {
         return initWithOwner(memory, entry_fn, size, null);
@@ -230,6 +245,11 @@ pub const Fiber = struct {
         //std.debug.print("Stack limit: 0x{x}\n", .{limit});
         //std.debug.print("=================\n\n", .{});
 
+        const tsan_fiber = if (builtin.sanitize_thread)
+            __tsan_create_fiber(0) orelse @panic("TSan fiber allocation failed")
+        else
+            null;
+
         return Fiber{
             .stack = stack,
             // Point SP to the address we just wrote.
@@ -239,7 +259,18 @@ pub const Fiber = struct {
             .parent_ctx = undefined,
             .size_class = size,
             .stack_guard_head = null,
+            .tsan_fiber = tsan_fiber,
+            .parent_tsan_fiber = null,
         };
+    }
+
+    pub fn deinit(self: *Fiber) void {
+        if (builtin.sanitize_thread) {
+            if (self.tsan_fiber) |fiber| {
+                __tsan_destroy_fiber(fiber);
+                self.tsan_fiber = null;
+            }
+        }
     }
 
     // Switch FROM parent TO this fiber
@@ -249,6 +280,10 @@ pub const Fiber = struct {
         __fiber_parent_ctx = parent;
         __fiber = self;
         safety.stack_guard_head = self.stack_guard_head;
+        if (builtin.sanitize_thread) {
+            self.parent_tsan_fiber = __tsan_get_current_fiber();
+            __tsan_switch_to_fiber(self.tsan_fiber, tsan_switch_flags);
+        }
         switchContext(parent, &self.ctx);
     }
 
@@ -258,6 +293,9 @@ pub const Fiber = struct {
         __fiber_stack_limit = undefined;
         __fiber = undefined;
         safety.stack_guard_head = null;
+        if (builtin.sanitize_thread) {
+            __tsan_switch_to_fiber(self.parent_tsan_fiber, tsan_switch_flags);
+        }
         switchContext(&self.ctx, self.parent_ctx);
     }
 

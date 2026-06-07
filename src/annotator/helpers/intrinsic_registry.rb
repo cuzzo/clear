@@ -18,14 +18,14 @@ module IntrinsicRegistry
                  narrows_receiver_collection mutates_receiver allocates
                  takes_value container_borrow].freeze
   EMIT_STRSYM = %i[zig numeric_zig sharded_zig shard_direct_zig].freeze
-  EMIT_STR    = %i[reject_error fsm_finish_value elem].freeze
+  EMIT_STR    = %i[reject_error elem].freeze
   EMIT_SYM    = %i[tag builtin alloc return_alloc val_alloc key_alloc
                    shard_alloc sharded_alloc reject_when bc_op
                    error_kind error_type].freeze
   # Passthrough (no coercion): borrows (:all|Array), fallible_clauses
-  # (internal), fsm_* (FsmOps op-object arrays, not strings).
+  # (internal), fsm_* (FsmOps op-object arrays/expressions, not strings).
   EMIT_PASS   = %i[borrows fallible_clauses fsm_setup fsm_state_decls
-                   fsm_finish_block fsm_state_finalize].freeze
+                   fsm_finish_block fsm_state_finalize fsm_finish_value].freeze
   EMIT_INTARR = %i[takes_args].freeze
   EMIT_PROC   = %i[label].freeze
   EMIT_NESTED = %i[eql strcmp cleanup assert array list pool set get

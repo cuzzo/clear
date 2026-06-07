@@ -85,7 +85,7 @@ class FunctionReturn
       T.must(fixed)
     when Kind::ElementOf
       el = receiver&.element_type
-      el.is_a?(Type) ? el : Type.new(el || :Any)
+      el || Type.new(:Any)
     when Kind::OptionalOfElement
       Type.new(:"?#{T.must(T.must(receiver).element_type).resolved}")
     when Kind::IdOfElement
@@ -100,7 +100,7 @@ class FunctionReturn
       r = host.send(T.must(infer), args, nil)
       r.is_a?(Type) ? r : Type.new(r || :Any)
     else
-      Type.new(:Any)
+      raise "unknown FunctionReturn kind: #{kind.inspect}"
     end
   end
 end

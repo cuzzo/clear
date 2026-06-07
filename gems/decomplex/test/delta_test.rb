@@ -53,8 +53,33 @@ class DeltaTest < Minitest::Test
     s = D.snapshot(base_sections, RC.cluster(base_sections))
     assert_equal 3, s["total"]
     assert_equal 3, s["findings"].values.sum
+    assert_equal 3, s["details"].values.sum(&:size)
+    assert_equal 3, s["site_details"].values.sum(&:size)
     assert(s["clusters"].keys.any? { |k| k.include?("storage") },
            "the storage cluster is captured")
+  end
+
+  def test_snapshot_keeps_structured_finding_details
+    sections = [["Broken Protocols", 3,
+                 [{ pair: %w[alloc_mark cleanup],
+                    support: 4,
+                    confidence: 0.8,
+                    has: "alloc_mark",
+                    missing: "cleanup",
+                    at: "f.rb:leak:12",
+                    spans: { "f.rb:leak:12" => [12, 4, 12, 20] } }]]]
+
+    s = D.snapshot(sections, RC.cluster(sections))
+    detail = s["details"].values.flatten.first
+    site_detail = s["site_details"].values.flatten.first
+
+    assert_equal "Broken Protocols", detail["detector"]
+    assert_equal "alloc_mark", detail["has"]
+    assert_equal "cleanup", detail["missing"]
+    assert_equal 4, detail["support"]
+    assert_equal 0.8, detail["confidence"]
+    assert_equal [12, 4, 12, 20], detail["spans"]["f.rb:leak:12"]
+    assert_equal detail, site_detail
   end
 
   # ---- diff: resolved / added / persisted ---------------------------

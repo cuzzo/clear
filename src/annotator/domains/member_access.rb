@@ -115,66 +115,79 @@ module Annotator
         end
 
         raw_schema = lookup_type_schema(type)
-        struct_schema = Schemas.field_bearing?(raw_schema) ? raw_schema : nil
         if Schemas.enum?(raw_schema)
           error!(node, :ENUM_FIELD_ACCESS, enum: type)
-        elsif raw_schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(raw_schema))
-          error!(node, :UNION_FIELD_ACCESS, union: type)
-        elsif struct_schema && struct_schema.fields[node.field]
-          field_type = struct_schema.fields[node.field].type
-          # SOA tracking: record field access on pipeline variable `_`
-          if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-            @pipeline_accessed_fields << node.field
-          end
-          # For generic instances (e.g. Pair<Number>), substitute type params into field type.
-          # Handles compound types like T[], ?T, !T via apply_type_subst.
-          # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
-          type_obj = Type.new(type)
-          if type_obj.generic_instance? && struct_schema.type_params
-            subst = {}
-            struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
-              subst[param] = arg.resolved
-            end
-            field_type = apply_type_subst(field_type, subst)
-          end
-          if field_type.is_a?(Type) && field_type.indirect?
-            # A struct-pointee @indirect field is an owned heap pointer that
-            # moves like the old `%T`: bind/move the `*T`, let Zig auto-deref
-            # field access, and free once. An explicit read-deref there turns
-            # the move into a value copy and leaks the box. String/scalar and
-            # union/enum pointees still need the read-deref (Zig won't coerce
-            # `*T` -> `T` for those consumers).
-            psch = (lookup_type_schema(field_type.resolved) rescue nil)
-            struct_pointee = Schemas.struct?(psch)
-            node.indirect_field = true unless struct_pointee
-            # For non-struct pointees, the read-deref produces a value of the
-            # inner type (layout no longer applies). For struct pointees, the
-            # binding holds the *T pointer directly -- keep layout=:indirect so
-            # ti.zig_type renders "*T".
-            if !struct_pointee
-              field_type = field_type.dup
-              field_type.strip_layout!
-            end
-          end
-          if node.target.is_a?(AST::OptionalUnwrap) && field_type.is_a?(Type) && !field_type.optional?
-            field_type = Type.new(:"?#{field_type.resolved}")
-          end
-          stamp_type!(node, field_type)
-        elsif struct_schema && node.token
-          # Struct schema resolved but the requested field doesn't exist —
-          # emit a typo suggestion when one of the schema's fields is close
-          # to what the user typed. The bare error code stays as the
-          # fallback when no candidate is within Levenshtein threshold.
-          valid_fields = struct_schema.fields.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
-          emit_typo_suggestion!(
-            node.token, node.field, valid_fields,
-            "Struct '#{type}' has no field '#{node.field}'",
-            "field of #{type}",
-            category: :type, cascade: true
-          )
-        else
-          error!(node, :ILLEGAL_FIELD_LOOKUP, field: node.field, type: type)
+          return
         end
+
+        if raw_schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(raw_schema))
+          error!(node, :UNION_FIELD_ACCESS, union: type)
+          return
+        end
+
+        unless Schemas.field_bearing?(raw_schema)
+          error!(node, :ILLEGAL_FIELD_LOOKUP, field: node.field, type: type)
+          return
+        end
+
+        struct_schema = T.cast(raw_schema, T.any(Schemas::StructSchema, Schemas::ResourceSchema))
+        field_def = struct_schema.fields[node.field]
+        unless field_def
+          if node.token
+            # Struct schema resolved but the requested field doesn't exist;
+            # emit a typo suggestion when one of the fields is close.
+            valid_fields = struct_schema.fields.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+            emit_typo_suggestion!(
+              node.token, node.field, valid_fields,
+              "Struct '#{type}' has no field '#{node.field}'",
+              "field of #{type}",
+              category: :type, cascade: true
+            )
+          else
+            error!(node, :ILLEGAL_FIELD_LOOKUP, field: node.field, type: type)
+          end
+          return
+        end
+
+        field_type = field_def.type
+        # SOA tracking: record field access on pipeline variable `_`
+        if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+          @pipeline_accessed_fields << node.field
+        end
+        # For generic instances (e.g. Pair<Number>), substitute type params into field type.
+        # Handles compound types like T[], ?T, !T via apply_type_subst.
+        # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
+        type_obj = Type.new(type)
+        if type_obj.generic_instance? && struct_schema.type_params
+          subst = {}
+          struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
+            subst[param] = arg.resolved
+          end
+          field_type = apply_type_subst(field_type, subst)
+        end
+        if field_type.indirect?
+          # A struct-pointee @indirect field is an owned heap pointer that
+          # moves like the old `%T`: bind/move the `*T`, let Zig auto-deref
+          # field access, and free once. An explicit read-deref there turns
+          # the move into a value copy and leaks the box. String/scalar and
+          # union/enum pointees still need the read-deref (Zig won't coerce
+          # `*T` -> `T` for those consumers).
+          psch = lookup_type_schema(field_type.resolved)
+          struct_pointee = Schemas.struct?(psch)
+          node.indirect_field = true unless struct_pointee
+          # For non-struct pointees, the read-deref produces a value of the
+          # inner type (layout no longer applies). For struct pointees, the
+          # binding holds the *T pointer directly -- keep layout=:indirect so
+          # ti.zig_type renders "*T".
+          if !struct_pointee
+            field_type = field_type.dup
+            field_type.strip_layout!
+          end
+        end
+        if node.target.is_a?(AST::OptionalUnwrap) && !field_type.optional?
+          field_type = Type.new(:"?#{field_type.resolved}")
+        end
+        stamp_type!(node, field_type)
       end
 
       sig { params(node: AST::Slice).void }
@@ -549,7 +562,7 @@ module Annotator
         else
           recv_t.element_type
         end
-        Type.new(:"#{elem_t.resolved}[]", collection: :list, location: :heap)
+        Type.new(:"#{T.must(elem_t).resolved}[]", collection: :list, location: :heap)
       end
     end
   end

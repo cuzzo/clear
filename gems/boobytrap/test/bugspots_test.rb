@@ -54,4 +54,29 @@ class BugspotsTest < Minitest::Test
     # span 0 -> t=1 -> w = 1/(1+e^0) = 0.5
     assert_in_delta 0.5, B.score([one])["x.rb"], 1e-9
   end
+
+  def test_blast_radius_weights_recent_multi_file_fixes
+    old = B::Event.new(time: 0, subject: "fix", files: %w[src/a.rb src/b.rb])
+    new = B::Event.new(time: 1000, subject: "fix", files: %w[src/c.rb src/d.rb src/e.rb])
+
+    rows = B.blast_radius([old, new])
+    c = rows.find { |r| r.file == "src/c.rb" }
+    a = rows.find { |r| r.file == "src/a.rb" }
+
+    assert_operator c.score, :>, a.score
+    assert_equal 3.0, c.avg_touched
+    assert_equal 3, c.max_touched
+    assert_equal 2, c.partners.size
+  end
+
+  def test_blast_radius_accumulates_partners_per_file
+    e1 = B::Event.new(time: 0, subject: "fix", files: %w[src/a.rb src/b.rb])
+    e2 = B::Event.new(time: 10, subject: "fix", files: %w[src/a.rb src/b.rb src/c.rb])
+
+    a = B.blast_radius([e1, e2]).find { |r| r.file == "src/a.rb" }
+
+    assert_equal 2, a.fixes
+    assert_equal 2.5, a.avg_touched
+    assert_equal "src/b.rb", a.partners.first.first
+  end
 end

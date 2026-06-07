@@ -25,6 +25,23 @@ class Parser
     prop :observable_token, T.nilable(Lexer::Token), default: nil
   end
 
+  class DoBranchPrefix < T::Struct
+    const :pinned, T::Boolean, default: false
+    const :parallel, T::Boolean, default: false
+    const :stack_size, T.nilable(Symbol), default: nil
+    const :can_smash, T::Boolean, default: false
+  end
+
+  class BgPrefix < T::Struct
+    const :pinned, T::Boolean, default: false
+    const :parallel, T::Boolean, default: false
+    const :stack_size, T.nilable(Symbol), default: nil
+    const :arena, T::Boolean, default: false
+    const :can_smash, T::Boolean, default: false
+    const :stack_size_token, T.nilable(Lexer::Token), default: nil
+    const :can_smash_token, T.nilable(Lexer::Token), default: nil
+  end
+
   include ErrorHelper
   include FixableHelper
 
@@ -284,17 +301,13 @@ class Parser
     if first.is_a?(AST::RangeLit)
       # parse_expression consumed the range operator: 0..<3 → RangeLit(0, 3, false)
       consume(:CHAR, ']')
-      node = AST::Slice.new(first.token, lhs, first.start, first.finish)
-      node.instance_variable_set(:@exclusive, !first.inclusive)
-      node
+      AST::Slice.new(first.token, lhs, first.start, first.finish, !first.inclusive)
     elsif match?(:RANGE, '..')
       # SLICE: list[0..3] (inclusive end)
       range_token = consume(:RANGE, '..')
       last = parse_expression
       consume(:CHAR, ']')
-      node = AST::Slice.new(range_token, lhs, first, last)
-      node.instance_variable_set(:@exclusive, false)
-      node
+      AST::Slice.new(range_token, lhs, first, last, false)
     else
       # INDEX: list[0]
       # INDEX: hash["OK"]
@@ -1178,21 +1191,27 @@ class Parser
           p_name = T.must(consume(:VAR_ID)).value
           consume(:CHAR, ':')
           p_type = parse_type_annotation
-          AST::Param.new(name: p_name, type: p_type)
+          AST::UnionMethodParamRequirement.new(name: p_name, type: T.must(p_type))
         end
         ret_type = nil
         if match!(:KEYWORD, 'RETURNS')
           ret_type = parse_type_annotation
         end
         # Optional default body: FN name(...) RETURNS T -> body END
-        default_body = nil
+        default_body = T.let(nil, T.nilable(T::Array[AST::Node]))
         if match?(:ARROW, '->')
           consume(:ARROW, '->')
-          default_body = parse_block_body(['END'])
+          default_body = T.cast(parse_block_body(['END']), T::Array[AST::Node])
           consume(:KEYWORD, 'END')
         end
-        method_reqs << { token: fn_tok, name: fn_name, params: raw_params,
-                         return_type: ret_type, body: default_body, visibility: stub_vis }
+        method_reqs << AST::UnionMethodRequirement.new(
+          token: T.must(fn_tok),
+          name: fn_name,
+          params: raw_params,
+          return_type: ret_type,
+          body: default_body,
+          visibility: stub_vis,
+        )
       else
         var_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, '{')
@@ -1886,16 +1905,6 @@ class Parser
     elsif match!(:KEYWORD, 'BREAK')
       rhs = AST::OrBreak.new(previous)
 
-    # Syntax: ... OR EXIT
-    elsif match!(:KEYWORD, 'EXIT')
-      exit_token = previous
-      context = nil
-      if !match?(:CHAR, ';') && !match?(:CHAR, ')') && !match?(:KEYWORD, 'END')
-        context = parse_primary
-      end
-      rhs = AST::ThrowNode.new(exit_token, context) # Nil value implies "Use the Pipe Result"
-
-
     # Syntax: ... OR ELSE value
     elsif match!(:KEYWORD, 'ELSE')
       # Meaning: Replace the error with a default value
@@ -2463,7 +2472,7 @@ class Parser
   # supported; aggregate field types must be concrete.
   sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).void }
   def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
-    return unless type.is_a?(Type) && type.auto?
+    return unless type.auto?
     auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
     anchor = auto_tok || field_tok
     error!(anchor, :AUTO_NOT_ALLOWED_IN_FIELD, context: context_label, field: field_name)
@@ -2502,9 +2511,6 @@ class Parser
           next
         end
         @pos += 1
-        if depth == 0
-          return current.type == :CHAR && current.value == end_char
-        end
       end
     ensure
       @pos = saved
@@ -3003,6 +3009,26 @@ class Parser
   ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @locked @writeLocked @link].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
   CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_OWNERSHIP_VALUES = T.let({
+    "@multiowned" => :multiowned,
+    "@shared" => :shared,
+    "@split" => :split,
+    "@link" => :link,
+  }.freeze, T::Hash[String, Symbol])
+  CAPABILITY_SYNC_VALUES = T.let({
+    "@locked" => :locked,
+    "@writeLocked" => :write_locked,
+    "@local" => :local,
+    "@versioned" => :versioned,
+    "@atomic" => :atomic,
+    "@raw" => :raw,
+    "@symbol" => :symbol,
+  }.freeze, T::Hash[String, Symbol])
+  CAPABILITY_COLLECTION_VALUES = T.let({
+    "@list" => :list,
+    "@pool" => :pool,
+    "@set" => :set,
+  }.freeze, T::Hash[String, Symbol])
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present.
@@ -3120,55 +3146,34 @@ class Parser
   # Apply a single capability token to the result hash. Detects duplicates.
   sig { params(result: CapabilityParseResult, token: Lexer::Token, value: String, validate_shard_count: T::Boolean).void }
   def apply_capability!(result, token, value = token.value, validate_shard_count: false)
+    ownership = CAPABILITY_OWNERSHIP_VALUES[value]
+    if ownership
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
+      result.ownership = ownership
+      return
+    end
+
+    sync = CAPABILITY_SYNC_VALUES[value]
+    if sync
+      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
+      result.sync = sync
+      return
+    end
+
+    collection = CAPABILITY_COLLECTION_VALUES[value]
+    if collection
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
+      result.collection = collection
+      return
+    end
+
     case value
-    when "@multiowned"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
-      result.ownership = :multiowned
-    when "@shared"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
-      result.ownership = :shared
-    when "@split"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
-      result.ownership = :split
-    when "@link"
-      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result.ownership
-      result.ownership = :link
-    when "@locked"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :locked
-    when "@writeLocked"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :write_locked
-    when "@local"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :local
-    when "@versioned"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :versioned
-    when "@atomic"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :atomic
-    when "@raw"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :raw
-    when "@symbol"
-      error!(token, :DUPLICATE_SYNC_CAP) if result.sync
-      result.sync = :symbol
     when "@indirect"
       error!(token, :DUPLICATE_LAYOUT_CAP) if result.is_indirect
       result.is_indirect = true
     when "@soa"
       error!(token, :DUPLICATE_SOA_CAP) if result.is_soa
       result.is_soa = true
-    when "@list"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
-      result.collection = :list
-    when "@pool"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
-      result.collection = :pool
-    when "@set"
-      error!(token, :DUPLICATE_COLLECTION_CAP) if result.collection
-      result.collection = :set
     when "@sharded"
       error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result.shard_count
       consume(:CHAR, '(')
@@ -3695,10 +3700,10 @@ class Parser
   }.freeze, T::Hash[T.untyped, T.untyped])
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
-  # Returns { pinned: Bool, stack_size: Symbol|nil }.
+  # Returns a typed prefix record consumed when the branch body is parsed.
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
-  sig { returns(T.nilable(T::Hash[Symbol, T.nilable(FalseClass)])) }
+  sig { returns(DoBranchPrefix) }
   def parse_branch_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3708,7 +3713,7 @@ class Parser
     # Enter the loop on a known sigil OR on a `@<typo>` token that the
     # user clearly intended as a sigil (so the typo path can fire).
     looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash } unless
+    return DoBranchPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash) unless
       looks_like_sigil
 
     loop do
@@ -3739,7 +3744,7 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash }
+    DoBranchPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash)
   end
 
   sig { returns(T.nilable(AST::DoBlock)) }
@@ -3758,7 +3763,13 @@ class Parser
       else
         parse_expression
       end
-      branches << { body: [stmt].compact, pinned: T.must(prefix)[:pinned], parallel: T.must(prefix)[:parallel], stack_size: T.must(prefix)[:stack_size], can_smash: T.must(prefix)[:can_smash] }
+      branches << AST::DoBranch.new(
+        body: [stmt].compact,
+        pinned: prefix.pinned,
+        parallel: prefix.parallel,
+        stack_size: prefix.stack_size,
+        can_smash: prefix.can_smash,
+      )
       break unless match!(:CHAR, ',')
     end
 
@@ -3767,9 +3778,9 @@ class Parser
   end
 
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
-  # Returns { ..., stack_size_token: } where stack_size_token is the
+  # Returns a typed prefix record where stack_size_token is the
   # token of the FIRST sigil that contributed a stack_size (or nil).
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(BgPrefix) }
   def parse_bg_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3782,7 +3793,7 @@ class Parser
     # Enter the loop on a known sigil OR on `@<typo>` that the user
     # clearly intended as a BG sigil (so the typo path can fire).
     looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: nil, can_smash_token: nil } unless
+    return BgPrefix.new(pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash) unless
       looks_like_sigil
 
     loop do
@@ -3819,7 +3830,15 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: stack_size_token, can_smash_token: can_smash_token }
+    BgPrefix.new(
+      pinned: pinned,
+      parallel: parallel,
+      stack_size: stack_size,
+      arena: arena,
+      can_smash: can_smash,
+      stack_size_token: stack_size_token,
+      can_smash_token: can_smash_token,
+    )
   end
 
   sig { returns(T.untyped) }
@@ -3832,10 +3851,10 @@ class Parser
     prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    node = AST::BgBlock.new(bg_token, body, nil, T.must(prefix)[:stack_size], T.must(prefix)[:pinned], T.must(prefix)[:parallel], T.must(prefix)[:arena], T.must(prefix)[:can_smash])
+    node = AST::BgBlock.new(bg_token, body, nil, prefix.stack_size, prefix.pinned, prefix.parallel, prefix.arena, prefix.can_smash)
     node.open_brace_token = open_brace
-    node.prefix_token = T.must(prefix)[:stack_size_token]
-    node.can_smash_token = T.must(prefix)[:can_smash_token]
+    node.prefix_token = prefix.stack_size_token
+    node.can_smash_token = prefix.can_smash_token
     node
   end
 
@@ -3878,7 +3897,7 @@ class Parser
         error!(current, :EXPECTED_THEN_AFTER_AS_BG, got: current.value.inspect)
       end
 
-      steps = [{ expr: expr, binding: binding_name }]
+      steps = [AST::ThenStep.new(expr: expr, binding: binding_name)]
       while match?(:KEYWORD, 'THEN')
         consume(:KEYWORD, 'THEN')
         next_expr = parse_expression
@@ -3887,10 +3906,10 @@ class Parser
           consume(:KEYWORD, 'AS')
           next_binding = T.must(consume(:VAR_ID)).value
         end
-        steps << { expr: next_expr, binding: next_binding }
+        steps << AST::ThenStep.new(expr: next_expr, binding: next_binding)
       end
       match!(:CHAR, ';')
-      return AST::ThenChain.new(steps.first[:expr].token, steps)
+      return AST::ThenChain.new(steps.first.expr.token, steps)
     end
 
     consume(:CHAR, ';')

@@ -58,7 +58,9 @@ const build_options = @import("build_options");
 
 const SKIP_BY_DEFAULT = false;
 const test_stack_size: fc.StackSize = if (build_options.tsan) .Xl else .Large;
-const completion_timeout_ms: u64 = if (build_options.tsan) 120_000 else 30_000;
+const startup_timeout_ms: usize = if (build_options.tsan) 300_000 else 30_000;
+const completion_timeout_ms: u64 = if (build_options.tsan) 300_000 else 30_000;
+const shutdown_timeout_ms: i64 = if (build_options.tsan) 300_000 else 30_000;
 
 const test_alloc = std.heap.c_allocator;
 var global_ebr: ebr_mod.EbrContext = .{};
@@ -92,15 +94,29 @@ fn schedulerThread(a: std.mem.Allocator) void {
 
 fn abortStartedWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
-    fp.global_registry.notifyAll();
-    while (post_run_workers.load(.acquire) < n) {
-        compat.sleepNs(1 * std.time.ns_per_ms);
-    }
+    fp.global_registry.forceNotifyAll();
+    waitForWorkerRunExit(n);
     deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
     global_shutdown.store(false, .release);
     post_run_workers.store(0, .release);
     deinit_phase.store(false, .release);
+}
+
+fn waitForWorkerRunExit(n: usize) void {
+    const deadline = compat.milliTimestamp() + shutdown_timeout_ms;
+    while (post_run_workers.load(.acquire) < n) {
+        // A worker may be parked in the idle io_uring wait; keep nudging all
+        // registered schedulers so shutdown cannot depend on one race-prone wake.
+        fp.global_registry.forceNotifyAll();
+        if (compat.milliTimestamp() >= deadline) {
+            std.debug.panic(
+                "ParkingRwLock fiber hammer worker shutdown timed out: workers {d}/{d}\n",
+                .{ post_run_workers.load(.acquire), n },
+            );
+        }
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) !void {
@@ -118,7 +134,7 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
             abortStartedWorkers(threads, started);
             return error.WorkerSchedulerInitFailed;
         }
-        if (waited_ms >= 30_000) {
+        if (waited_ms >= startup_timeout_ms) {
             abortStartedWorkers(threads, started);
             return error.WorkerStartupTimedOut;
         }
@@ -129,10 +145,8 @@ fn startWorkers(threads: []std.Thread, n: usize) !void {
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
-    fp.global_registry.notifyAll();
-    while (post_run_workers.load(.acquire) < n) {
-        compat.sleepNs(1 * std.time.ns_per_ms);
-    }
+    fp.global_registry.forceNotifyAll();
+    waitForWorkerRunExit(n);
     deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
     global_shutdown.store(false, .release);
@@ -298,9 +312,9 @@ fn waitForHammerCompletion(rt: *Runtime, shared: *Shared, expected_writers: usiz
 }
 
 // Stackful fiber ParkingRwLock hammer: 4 writers + 8 readers spawned
-// across 4 worker schedulers + main = 5 schedulers via spawnBest. Each
-// writer mutates Sample{a, b} non-atomically; each reader checks the
-// invariant b == a * 2.
+// across multiple worker schedulers + main via spawnBest. Each writer
+// mutates Sample{a, b} non-atomically; each reader checks the invariant
+// b == a * 2.
 //
 // Without the WRITE_LOCKED guard on lockShared's wake-on-undo (line
 // 956 of parking-lot.zig), this fails by reporting torn_reads > 0 --
@@ -321,7 +335,12 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
         global_ebr.deinit(test_alloc);
     }
 
-    const workers = if (build_options.coverage) 1 else 4;
+    // TSan needs true cross-thread execution here, but not four worker
+    // schedulers per process. The required local stress shape runs 16
+    // TSan processes in parallel; two workers + main still gives real
+    // writer/reader overlap while avoiding scheduler startup starvation
+    // from creating ~80 io_uring-backed schedulers at once.
+    const workers = if (build_options.coverage) 1 else if (build_options.tsan) 2 else 4;
     try withMainRuntimeN(workers, struct {
         fn body(rt: *Runtime) !void {
             const NW = if (build_options.coverage) 1 else 4;

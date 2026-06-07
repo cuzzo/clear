@@ -392,4 +392,34 @@ RSpec.describe MethodRewriter do
       expect(out).to include("xs.length()")
     end
   end
+
+  describe "source span helpers" do
+    it "skips spaces and tabs when locating the opening paren" do
+      expect(MethodRewriter.next_non_ws("foo \t(xs)", 3)).to eq(5)
+    end
+
+    it "matches parens while ignoring escaped quotes inside strings" do
+      source = 'f("a\" )", y)'
+      expect(MethodRewriter.match_paren(source, 1)).to eq(source.length - 1)
+    end
+
+    it "matches parens while ignoring parens inside triple-quoted strings" do
+      source = 'f("""a)b""", y)'
+      expect(MethodRewriter.match_paren(source, 1)).to eq(source.length - 1)
+    end
+
+    it "splits args while ignoring commas behind escaped quotes" do
+      args = '"a\",b", second'
+      spans = MethodRewriter.split_args_by_comma(args)
+
+      expect(spans.map { |s, e| args[s...e].strip }).to eq(['"a\",b"', "second"])
+    end
+
+    it "splits args while ignoring commas inside triple-quoted strings" do
+      args = '"""a,b""", second'
+      spans = MethodRewriter.split_args_by_comma(args)
+
+      expect(spans.map { |s, e| args[s...e].strip }).to eq(['"""a,b"""', "second"])
+    end
+  end
 end

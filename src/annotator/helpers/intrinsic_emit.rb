@@ -30,7 +30,7 @@ class IntrinsicEmit < T::Struct
   prop :fsm_state_decls,     T.nilable(T::Array[T.untyped]), default: nil
   prop :fsm_finish_block,    T.nilable(T::Array[T.untyped]), default: nil
   prop :fsm_state_finalize,  T.nilable(T::Array[T.untyped]), default: nil
-  prop :fsm_finish_value,    T.nilable(String),              default: nil
+  prop :fsm_finish_value,    T.untyped,                      default: nil
 
   # --- Dispatch flags ---
   prop :bc,                  T::Boolean,                     default: false

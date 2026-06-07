@@ -115,6 +115,39 @@ RSpec.describe "Move semantics for heap-owning types" do
       expect(body).to include("Container{ .data = m }")
       expect(body).to include("m_moved = true")
     end
+
+    it "marks hoisted string temps moved after assigning into a cleaned field" do
+      zig = transpile(<<~CLEAR)
+        STRUCT Box { name: String }
+        FN main() RETURNS Void ->
+            MUTABLE v: Box = Box{ name: COPY "abc" };
+            v.name = v.name + COPY "d";
+            RETURN;
+        END
+      CLEAR
+      body = fn_body(zig, "clearMain")
+      expect(body).to include("defer if (!__hoist_1_moved) CheatLib.cleanup(@TypeOf(__hoist_1), rt.heapAlloc(), &__hoist_1)")
+      expect(body).to include("CheatLib.cleanup(@TypeOf(v.name), rt.heapAlloc(), &v.name)")
+      expect(body).to match(/v\.name = __hoist_1;\s*__hoist_1_moved = true;/)
+    end
+
+    it "marks copied map literal values moved after put" do
+      zig = transpile(<<~CLEAR)
+        FN run(flag: Bool) RETURNS !Int64 ->
+            x: HashMap<String> = {"a": COPY "aa", "b": COPY "bb"};
+            IF flag THEN RAISE "stop"; END
+            RETURN x.count();
+        END
+        FN main() RETURNS Void ->
+            bad: Int64 = run(TRUE) OR 0_i64;
+            RETURN;
+        END
+      CLEAR
+      body = fn_body(zig, "run")
+      expect(body).to include("errdefer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), rt.heapAlloc(), &__tmp_1)")
+      expect(body).to match(/try __hm\.put\(rt\.heapAlloc\(\), rt\.heapAlloc\(\), "a", __tmp_1\);\s*__tmp_1_moved = true;/)
+      expect(body).to match(/try __hm\.put\(rt\.heapAlloc\(\), rt\.heapAlloc\(\), "b", __tmp_2\);\s*__tmp_2_moved = true;/)
+    end
   end
 
   # =========================================================================

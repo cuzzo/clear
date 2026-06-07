@@ -1600,6 +1600,33 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "INV: recursive union indirect payload moves" do
+    it "marks local recursive union payloads moved after boxing into @indirect fields" do
+      src = <<~CLEAR
+        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+
+        FN mk() RETURNS !Node ->
+            left = Node{ One: COPY "a" };
+            right = Node{ One: COPY "b" };
+            RETURN Node.Pair{ left: left, right: right };
+        END
+
+        FN main() RETURNS Void ->
+            n: Node = mk() OR RAISE;
+            PARTIAL MATCH n START
+                Node.Pair AS p -> ASSERT TRUE, "recursive pair returned";,
+                DEFAULT -> ASSERT FALSE, "expected recursive pair";
+            END
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+
+      expect(zig).to match(/__p\.\* = left;\s+break :blk_left __p;\s+};\s+left_moved = true;/m)
+      expect(zig).to match(/__p\.\* = right;\s+break :blk_right __p;\s+};\s+right_moved = true;/m)
+    end
+  end
+
   # ===========================================================================
   # BUG-MIR-002: heap-returning call in non-TAKES argument position
   # ===========================================================================
@@ -1774,7 +1801,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("CheatLib.concurrentStreamSelect(i64, i64")
+      expect(zig).to include("CheatLib.concurrentStreamSelect(i64, i64, __BoundedConcurrentCtx1.apply, false,")
+      expect(zig).not_to include("CheatLib.concurrentStreamSelect(i64, i64, false, __BoundedConcurrentCtx1.apply")
       expect(zig).to include("__BoundedConcurrentCtx1.apply")
       expect(zig).not_to include("s.toList(")
     end
@@ -1788,8 +1816,25 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("CheatLib.concurrentStreamWhere(i64")
+      expect(zig).to include("CheatLib.concurrentStreamWhere(i64, __BoundedConcurrentCtx1.apply, false,")
+      expect(zig).not_to include("CheatLib.concurrentStreamWhere(i64, false, __BoundedConcurrentCtx1.apply")
       expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).not_to include("s.toList(")
+    end
+
+    it "orders CONCURRENT EACH stream helper arguments for the runtime wrapper" do
+      src = <<~CLEAR
+        FN f() RETURNS !Void ->
+            s: ~Int64[] = 0 ..< 5;
+            s |> CONCURRENT(workers: 2, capacity: 4) EACH {
+                print(_);
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentStreamEach(i64, __BoundedConcurrentCtx1.apply, false, rt.frameAlloc(), rt, &s, @intCast(2), @intCast(4)")
+      expect(zig).not_to include("CheatLib.concurrentStreamEach(i64, false, __BoundedConcurrentCtx1.apply")
       expect(zig).not_to include("s.toList(")
     end
   end

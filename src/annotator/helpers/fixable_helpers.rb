@@ -246,7 +246,9 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
     name = use_node.name.to_s
-    unless og_node && og_node.move_line && og_node.move_col
+    move_line = og_node.move_line
+    move_col = og_node.move_col
+    unless move_line && move_col
       msg = "USE AFTER MOVE: You can't use `#{name}`."
       return error!(use_node, :USE_OF_MOVED_VALUE, message: msg)
     end
@@ -273,7 +275,7 @@ module FixableHelper
       description: consumer_descr,
       confidence: :interactive,
       edits: [Edit.new(
-        span: Span.new(file: nil, line: og_node.move_line, col: og_node.move_col, length: name.length),
+        span: Span.new(file: nil, line: move_line, col: move_col, length: name.length),
         replacement: "(#{consumer_keyword} #{name})"
       )]
     )
@@ -335,12 +337,12 @@ module FixableHelper
       end
     end
 
-    consumer = consumer_source_text(og_node.move_line)
-    phrase   = ownership_active_phrase(og_node.move_action)
+    consumer = consumer_source_text(move_line)
+    phrase   = ownership_active_phrase(og_node.move_action || :move)
     msg = if consumer
-      "USE AFTER MOVE: You can't use `#{name}`. `#{consumer}` #{phrase} (line #{og_node.move_line})."
+      "USE AFTER MOVE: You can't use `#{name}`. `#{consumer}` #{phrase} (line #{move_line})."
     else
-      "USE AFTER MOVE: You can't use `#{name}` — it #{phrase} (line #{og_node.move_line})."
+      "USE AFTER MOVE: You can't use `#{name}` — it #{phrase} (line #{move_line})."
     end
 
     fixable!(use_node,
@@ -357,7 +359,8 @@ module FixableHelper
   sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::Node), code: Symbol).returns(NilClass) }
   def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
     T.bind(self, SemanticAnnotator) rescue nil
-    consumer = og_node && og_node.move_line ? consumer_source_text(og_node.move_line) : nil
+    loop_move_line = og_node&.move_line
+    consumer = loop_move_line ? consumer_source_text(loop_move_line) : nil
     consumer_clause = consumer ? "`#{consumer}` already TOOK it. " : ""
     msg = "USE AFTER MOVE: You can't use `#{name}` here — #{consumer_clause}" \
           "Values can only be TAKEN once; subsequent iterations have nothing left to GIVE."
@@ -373,7 +376,7 @@ module FixableHelper
     path_str = path.map(&:to_s).join('.')
     root     = path.first.to_s
     msg = if og_node && og_node.move_line
-      phrase = ownership_passive_phrase(og_node.move_action)
+      phrase = ownership_passive_phrase(og_node.move_action || :move)
       "USE AFTER MOVE: You can't use `#{path_str}`. Its owner `#{root}` #{phrase} on line #{og_node.move_line}."
     else
       "USE AFTER MOVE: You can't use `#{path_str}`. Its owner `#{root}` was already consumed elsewhere."

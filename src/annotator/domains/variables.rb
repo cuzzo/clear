@@ -43,7 +43,7 @@ module Annotator
         target = node.type
         return unless target.future? && target.observable?
         pipe = node.value
-        return unless pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH
+        return unless pipe.is_a?(AST::BinaryOp) && pipe.smooth?
         return unless pipe.observable_terminal
         pipe.observable_dest = true
         # Preserve the terminal kind set by lift_to_observable_if_terminal!.
@@ -77,18 +77,6 @@ module Annotator
           # emitted Zig wrapper would default-or-raise. Same mismatch
           # check as above.
           stamp_type!(node, target_t)
-          node_type = target_t
-          if node_type.observable?
-            if node_type.observable_terminal && node_type.observable_terminal != pipe_terminal
-              raise CompilerError.new(
-                node.token,
-                "Observable terminal mismatch on full_type: stamped " \
-                "#{node_type.observable_terminal.inspect}, pipe produced #{pipe_terminal.inspect}",
-                nil,
-              )
-            end
-            node_type.stamp_observable_terminal!(pipe_terminal)
-          end
         end
         stamp_type!(pipe, node.type)
       end
@@ -120,7 +108,7 @@ module Annotator
         # tense source; any other shape leaves it false.
         if node.type&.future? && node.type.observable?
           pipe = node.value
-          ok = pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH && pipe.observable_dest
+          ok = pipe.is_a?(AST::BinaryOp) && pipe.smooth? && pipe.observable_dest
           unless ok
             msg = "`~T@observable` bindings must be initialized by a pipeline-terminal fold " \
                   "over a tense stream (e.g. `running: ~Int64@observable = stream |> SUM _`). " \
@@ -186,7 +174,7 @@ module Annotator
         # annotator must not pre-fold a type's heap-capable provenance onto
         # the symbol -- that over-promotes (e.g. a union typed heap-capable
         # but never actually escaping).
-        is_resource, resource_close = resolve_resource_close(node, final_type)
+        is_resource, resource_close = resolve_resource_close(node)
         node.resource_close_zig = resource_close
         node_type = node.full_type!(context: "var declaration")
         node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)
@@ -272,7 +260,7 @@ module Annotator
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
         ti = node.full_type!(context: "var declaration ownership")
-        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_fn_ctx&.record_heap_use!
         end
         accumulate_stack_bytes(storage, node)
@@ -321,6 +309,7 @@ module Annotator
           node.mode = :assign
 
           verify_unrestricted!(node)
+          node.symbol = scope.entry_for_write(node.name)
           validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
           stamp_type!(node, scope.resolve_type(node.name))
 
@@ -482,7 +471,7 @@ module Annotator
         # Alias when: first arg is the SAME union type (extraction like jsonGet)
         # or first arg is a map (HashMap lookup returning union value)
         if arg_type == ret_type_obj.resolved || first_arg.full_type!(context: "union alias source").map?
-          @og.edges << OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases)
+          @og.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
         end
       end
 
@@ -599,8 +588,7 @@ module Annotator
         handle_assign_move(node)
         handle_assign_borrow(node)
 
-        target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
-        og_set_live(target_name)
+        og_set_live(node.name.name) if node.name.is_a?(AST::Identifier)
       end
 
       sig { params(identifier: AST::Identifier, node: AST::Assignment).returns(T::Boolean) }

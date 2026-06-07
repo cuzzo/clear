@@ -58,12 +58,13 @@ module VoprCoverage
   # Files out of scope by default:
   #   *-test.zig        — unit tests
   #   vopr*.zig         — VOPR shim infrastructure
+  #   loom*.zig         — Loom shim infrastructure
   #   *-loom.zig        — loom test impl side
   #   *-vopr.zig        — VOPR test impl side
   #   *-bench.zig       — benchmarks
   #   size_check.zig    — standalone build-time size-print exe
   #   runtime-header.zig — transpiler-emitted runtime, not unit-testable
-  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|[\w-]+-loom|[\w-]+-vopr|[\w-]+-bench|size_check|runtime-header)\.zig\z/
+  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|loom[\w-]*|[\w-]+-loom|[\w-]+-vopr|[\w-]+-bench|size_check|runtime-header)\.zig\z/
 
   # Pattern definitions per category.  Each entry is a literal substring
   # OR a Regexp.  All matched against the line WITH comments stripped

@@ -220,6 +220,25 @@ RSpec.describe "DEBUG_POST clauses on function signatures" do
       expect(zig).to match(/(?:pub )?fn sq\(/)
     end
 
+    it "keeps MIR call contracts verifier-clean for rt-threaded POST wrappers" do
+      zig = transpile(<<~CLEAR)
+        FN safeDouble!(x: Int64) RETURNS !Int64
+          PRE: x > 0
+          DEBUG_POST: result > x
+        ->
+          RETURN x * 2;
+        END
+
+        FN main() RETURNS !Void ->
+          y = safeDouble!(3) OR RAISE;
+          ASSERT y == 6, "safeDouble";
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("try __safeDouble_post_body(rt, x)")
+    end
+
     it "supports nested-call DEBUG_POST chains (caller and callee both have POSTs)" do
       # caller -> mid -> base; each has DEBUG_POST. Outer wrappers
       # nest cleanly: each level calls the inner of the level below

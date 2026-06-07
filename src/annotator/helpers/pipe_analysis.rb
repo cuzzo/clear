@@ -10,6 +10,25 @@ module PipeAnalysis
 
   requires_ancestor { SemanticAnnotator }
 
+  class PipeArityPlan < T::Struct
+    extend T::Sig
+
+    const :params, T::Array[AST::Param]
+    const :min_args, Integer
+    const :max_args, Integer
+    const :given_args, Integer
+
+    sig { returns(T::Boolean) }
+    def mismatch?
+      min_args < given_args || max_args > given_args
+    end
+
+    sig { returns(T::Boolean) }
+    def exact?
+      min_args == max_args
+    end
+  end
+
   # =========================================================
   # SMOOTH OPERATOR (|>)
   # =========================================================
@@ -807,21 +826,20 @@ module PipeAnalysis
   def analyze_pipe_to_named_function(node, sig, func_name)
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
-    params = sig.params
-    min_args = params.count { |p| p.required }
-    max_args = params.size
+    plan = pipe_arity_plan(sig, 1)
 
-    if min_args < 1 || max_args > 1
-      if min_args == max_args
-        error!(node, :ARITY_MISMATCH, name: func_name, expected: min_args, got: 1)
+    if plan.mismatch?
+      if plan.exact?
+        error!(node, :ARITY_MISMATCH, name: func_name, expected: plan.min_args, got: plan.given_args)
       else
-        error!(node, :ARITY_MISMATCH_RANGE, name: func_name, min: min_args, max: max_args, got: 1)
+        error!(node, :ARITY_MISMATCH_RANGE,
+          name: func_name, min: plan.min_args, max: plan.max_args, got: plan.given_args)
       end
     end
 
     # 2. Validate Type: The Input must match Parameter 1
-    if max_args >= 1
-      param = T.must(params[0])
+    if plan.max_args >= 1
+      param = T.must(plan.params[0])
       expected = param.type
       actual = node.left.resolved_type
 
@@ -838,6 +856,17 @@ module PipeAnalysis
       result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     stamp_type!(node, result_type)
+  end
+
+  sig { params(sig: FunctionSignature, given_args: Integer).returns(PipeArityPlan) }
+  def pipe_arity_plan(sig, given_args)
+    params = sig.params
+    PipeArityPlan.new(
+      params: params,
+      min_args: params.count(&:required),
+      max_args: params.size,
+      given_args: given_args,
+    )
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
@@ -1121,12 +1150,8 @@ module PipeAnalysis
     each_op = conc.op
 
     # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
-    key_type = if shard_node
-      ti = shard_node.target_map.full_type!(context: "shard target map")
-      (ti.numeric_map? && ti.key_type&.resolved) || :String
-    else
-      :String
-    end
+    ti = shard_node.target_map.full_type!(context: "shard target map")
+    key_type = (ti.numeric_map? && ti.key_type&.resolved) || :String
 
     with_new_scope do
       current_scope.declare("_", nil, key_type, true, false, nil, :stack)
@@ -1135,9 +1160,11 @@ module PipeAnalysis
 
     # key_allocates_frame / body_allocates_frame are set by LoopFrameAnalysis in
     # Pass 2 after CleanupClassifier finalizes allocators. Defaulting to false here.
-    if conc.shard_context
-      conc.shard_context[:key_allocates_frame] = false
-      conc.shard_context[:body_allocates_frame] = false
+    if (ctx = conc.shard_context)
+      conc.shard_context = T.cast(ctx, AST::PipelineShardContext).with_frame_allocations(
+        key_allocates_frame: false,
+        body_allocates_frame: false,
+      )
     end
 
     stamp_type!(node, :Void)
@@ -1191,7 +1218,7 @@ module PipeAnalysis
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
   # Accepts range inputs (unlike analyze_each_op which requires collections).
   # Visits the body, then extracts the key expression and sets shard_context.
-  sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: AST::BinaryOp).void }
+  sig { params(smooth_node: AST::BinaryOp, conc: AST::ConcurrentOp, proxy: AST::BinaryOp).void }
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.full_type!(context: "pipeline left")
@@ -1219,14 +1246,14 @@ module PipeAnalysis
   # Walks the body AST looking for map[key_expr] patterns where map is @sharded.
   # If found, sets shard_context on the ConcurrentOp so the transpiler emits
   # routed sharding instead of the normal worker pool.
-  sig { params(smooth_node: T.untyped, conc: T.untyped).void }
+  sig { params(smooth_node: AST::BinaryOp, conc: AST::ConcurrentOp).void }
   def auto_detect_sharded_access(smooth_node, conc)
     T.bind(self, SemanticAnnotator) rescue nil
     each_op = conc.op
     return unless each_op.is_a?(AST::EachOp)
 
     # Collect all GetIndex nodes that target a @sharded map
-    sharded_accesses = T.let([], T::Array[T.untyped])
+    sharded_accesses = T.let([], T::Array[AST::PipelineShardedAccess])
     walk_for_sharded_access(each_op.body, sharded_accesses)
 
     return if sharded_accesses.empty?
@@ -1234,7 +1261,7 @@ module PipeAnalysis
     # At this point, sharded_accesses should all target one map (multi-map handled upstream).
     first_access = sharded_accesses.first
     return unless first_access
-    map_name = first_access[:map_name]
+    map_name = first_access.map_name
     # Find the map's scope entry to get shard_count
     scope = lookup_scope_for(map_name)
     return unless scope
@@ -1244,32 +1271,36 @@ module PipeAnalysis
     return unless map_type.sharded? && entry&.sync.nil?
 
     # Check for multiple different key expressions on the same map
-    this_map_accesses = sharded_accesses.select { |a| a[:map_name] == map_name }
-    key_sources = this_map_accesses.map { |a| a[:key_expr].class.name + ":" + (a[:key_expr].respond_to?(:name) ? a[:key_expr].name.to_s : a[:key_expr].to_s) }.uniq
+    this_map_accesses = sharded_accesses.select { |a| a.map_name == map_name }
+    key_sources = this_map_accesses.map do |a|
+      key_expr = a.key_expr
+      key_name = key_expr.is_a?(AST::Identifier) ? key_expr.name : key_expr.to_s
+      key_expr.class.name + ":" + key_name
+    end.uniq
     if key_sources.length > 1
       note!(conc, "CONCURRENT EACH uses #{key_sources.length} different key expressions on " \
             "@sharded map '#{map_name}'. Routing is based on the first key; other accesses " \
             "with different keys may trigger cross-shard remote calls.")
     end
-    key_expr = this_map_accesses.first[:key_expr]
+    key_expr = T.must(this_map_accesses.first).key_expr
 
     # Build a synthetic map identifier node for the shard_context
-    map_ident = AST::Identifier.new(first_access[:map_token], map_name)
+    map_ident = AST::Identifier.new(first_access.map_token, map_name)
     stamp_type!(map_ident, map_type)
 
     each_op = conc.op
-    conc.shard_context = {
+    conc.shard_context = AST::PipelineShardContext.new(
       map_var: map_ident,
       shard_count: map_type.shard_count,
       key_expr: key_expr,
       auto_detected: true,  # flag so transpiler knows body uses original _ not key
       key_allocates_frame: false,   # set by LoopFrameAnalysis in Pass 2
       body_allocates_frame: false   # set by LoopFrameAnalysis in Pass 2
-    }
+    )
   end
 
   # Recursively walk AST nodes to find GetIndex on @sharded maps.
-  sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
+  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
   def walk_for_sharded_access(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|
@@ -1279,7 +1310,7 @@ module PipeAnalysis
   end
 
   # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T.untyped, results: T.untyped).void }
+  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|
@@ -1322,7 +1353,7 @@ module PipeAnalysis
     sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.resolve_entry(node.name))
   end
 
-  sig { params(node: T.untyped, context: String).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(node: T.untyped, context: String).returns(T.nilable(AST::PipelineShardedAccess)) }
   def sharded_get_index_access(node, context:)
     return nil unless node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
     return nil unless sharded_unsynced_identifier?(node.target)
@@ -1330,7 +1361,11 @@ module PipeAnalysis
     ti = node.target.full_type!(context: context)
     return nil unless ti.is_a?(Type) && ti.sharded?
 
-    { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
+    AST::PipelineShardedAccess.new(
+      map_name: node.target.name,
+      key_expr: node.index,
+      map_token: node.target.token,
+    )
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
@@ -1427,7 +1462,7 @@ module PipeAnalysis
   sig { params(lhs: T.untyped).returns(T::Boolean) }
   def shard_concurrent_source?(lhs)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs.is_a?(AST::BinaryOp) && lhs.op == :SMOOTH && lhs.right.is_a?(AST::ShardOp)
+    lhs.is_a?(AST::BinaryOp) && lhs.smooth? && lhs.right.is_a?(AST::ShardOp)
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
@@ -1443,11 +1478,11 @@ module PipeAnalysis
     if shard_concurrent_source?(node.left)
       shard_node = node.left.right
       target_info = shard_node.target_map.full_type!(context: "shard target map")
-      conc.shard_context = {
+      conc.shard_context = AST::PipelineShardContext.new(
         map_var: shard_node.target_map,
         shard_count: target_info&.shard_count,
         key_expr: shard_node.key_expr
-      }
+      )
     end
 
     # Validate workers option if present

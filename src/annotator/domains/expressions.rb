@@ -124,6 +124,7 @@ module Annotator
           when :NIL then Type.new(:NIL)
           else
             error!(node, :UNKNOWN_LITERAL)
+            Type.new(:Any)
           end
         stamp_type!(node, literal_type)
       end
@@ -183,7 +184,8 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         # Just resolve it like an identifier
-        visit_Identifier(AST::Identifier.new(node.token, "_"))
+        result = visit_Identifier(AST::Identifier.new(node.token, "_"))
+        result if result.is_a?(SymbolEntry)
       end
 
       # =========================================================
@@ -378,6 +380,12 @@ module Annotator
             error!(if_node, :IF_EXPR_ELSE_NEEDS_VALUE)
           end
         end
+        unless then_result && else_result
+          fallback = Type.new(:Any)
+          if_node.expr_mode = true
+          stamp_type!(if_node, fallback)
+          return fallback
+        end
 
         t1 = then_result.string? ? :String : then_result.resolved
         t2 = else_result.string? ? :String : else_result.resolved
@@ -386,7 +394,7 @@ module Annotator
         end
 
         result_type = (t1 == :Any) ? else_result : then_result
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(if_node, :IF_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 
@@ -423,6 +431,10 @@ module Annotator
 
         if all_types.empty?
           error!(match_node, :MATCH_EXPR_NEEDS_CASE)
+          fallback = Type.new(:Any)
+          match_node.expr_mode = true
+          stamp_type!(match_node, fallback)
+          return fallback
         end
 
         resolved_types = all_types.map { |t| t.string? ? :String : t.resolved }.uniq.reject { |t| t == :Any }
@@ -431,7 +443,7 @@ module Annotator
         end
 
         result_type = all_types.first
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(match_node, :MATCH_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 

@@ -10,6 +10,79 @@ module FunctionAnalysis
 
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
 
+  class CallSignatureSite < T::Struct
+    extend T::Sig
+
+    const :node, Object
+    const :name, String
+    prop :args, T::Array[AST::Locatable]
+
+    sig { params(signature: FunctionSignature).void }
+    def assign_signature!(signature)
+      T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
+    end
+
+    sig { params(arg: AST::Locatable).void }
+    def append_arg!(arg)
+      args << arg
+    end
+
+    sig { params(index: Integer, arg: AST::Locatable).void }
+    def replace_arg!(index, arg)
+      args[index] = arg
+    end
+  end
+
+  class CallArityPlan < T::Struct
+    extend T::Sig
+
+    const :site, CallSignatureSite
+    const :params, T::Array[AST::Param]
+    const :min_args, Integer
+    const :max_args, Integer
+    const :given_args, Integer
+
+    sig { returns(T::Boolean) }
+    def mismatch?
+      given_args < min_args || given_args > max_args
+    end
+
+    sig { returns(T::Boolean) }
+    def exact?
+      min_args == max_args
+    end
+
+    sig { returns(T::Array[AST::Param]) }
+    def injectable_defaults
+      return [] unless given_args < max_args
+
+      slice = params[given_args...max_args]
+      return [] unless slice
+
+      slice.reject(&:required)
+    end
+  end
+
+  class CallArgumentFacts < T::Struct
+    const :site, CallSignatureSite
+    const :index, Integer
+    const :param, AST::Param
+    const :arg_node, AST::Locatable
+    const :is_give, T::Boolean
+    const :inner_node, AST::Locatable
+    const :arg_type, Type
+    const :expected_type, Type
+    const :actual_type, Type
+    const :actual, T.nilable(Symbol)
+    const :path, T.nilable(T::Array[Symbol])
+  end
+
+  class EncounteredCallArgument < T::Struct
+    const :path, T::Array[Symbol]
+    const :mutable, T::Boolean
+    const :name, String
+  end
+
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
   sig { params(node: RoutineNode, body: T.untyped, declared_return: T.untyped, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
@@ -265,7 +338,7 @@ module FunctionAnalysis
   # values in this allocator (per "one collection = one allocator").
   # Returns nil when the call has no container context (plain function call,
   # or receiver storage not yet determined).
-  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(node: Object).returns(T.nilable(Symbol)) }
   def receiver_container_alloc(node)
     return nil unless node.is_a?(AST::MethodCall)
     obj = node.object
@@ -277,254 +350,301 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: T.untyped, signature: FunctionSignature).returns(T.nilable(T::Array[String])) }
+  sig { params(node: Object, signature: FunctionSignature).returns(NilClass) }
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.matched_signature = signature if node.respond_to?(:matched_signature=)
+    site = call_signature_site(node)
+    site.assign_signature!(signature)
+    plan = call_arity_plan(site, signature)
+    verify_call_arity!(plan)
+    inject_default_arguments!(plan)
+
+    encountered_args = T.let([], T::Array[EncounteredCallArgument])
+    atomic_bare_value_args = T.let([], T::Array[AST::Locatable])
+
+    site.args.each_with_index do |arg_node, i|
+      param = T.must(signature.params[i])
+      next if param.comptime
+
+      facts = call_argument_facts(site, param, arg_node, i)
+      verify_param_lifetime!(facts.arg_node, facts.param, signature)
+      verify_mutable_argument!(facts)
+      verify_takes_argument!(facts)
+      verify_link_argument!(facts)
+      verify_argument_type!(facts, signature, atomic_bare_value_args)
+      verify_argument_aliases!(facts, encountered_args)
+    end
+
+    warn_multi_atomic_bare_value_call!(site.node, atomic_bare_value_args)
+    nil
+  end
+
+  sig { params(node: Object).returns(CallSignatureSite) }
+  def call_signature_site(node)
+    CallSignatureSite.new(
+      node: node,
+      name: T.unsafe(node).name.to_s,
+      args: T.cast(T.unsafe(node).args, T::Array[AST::Locatable]),
+    )
+  end
+
+  sig { params(site: CallSignatureSite, signature: FunctionSignature).returns(CallArityPlan) }
+  def call_arity_plan(site, signature)
     params = signature.params
-    min_args = params.count { |param| param.required }
-    max_args = params.size
-    given_args = node.args.size
+    CallArityPlan.new(
+      site: site,
+      params: params,
+      min_args: params.count(&:required),
+      max_args: params.size,
+      given_args: site.args.size,
+    )
+  end
 
-    if given_args < min_args || given_args > max_args
-      if min_args == max_args
-        error!(node, :ARITY_MISMATCH, name: node.name, expected: min_args, got: given_args)
-      else
-        error!(node, :ARITY_MISMATCH_RANGE, name: node.name, min: min_args, max: max_args, got: given_args)
-      end
+  sig { params(plan: CallArityPlan).void }
+  def verify_call_arity!(plan)
+    T.bind(self, SemanticAnnotator)
+    return unless plan.mismatch?
+
+    if plan.exact?
+      error!(plan.site.node, :ARITY_MISMATCH,
+        name: plan.site.name, expected: plan.min_args, got: plan.given_args)
+    else
+      error!(plan.site.node, :ARITY_MISMATCH_RANGE,
+        name: plan.site.name, min: plan.min_args, max: plan.max_args, got: plan.given_args)
+    end
+  end
+
+  sig { params(plan: CallArityPlan).void }
+  def inject_default_arguments!(plan)
+    T.bind(self, SemanticAnnotator)
+    plan.injectable_defaults.each do |param|
+      injected = default_argument_for(param)
+      visit(injected)
+      plan.site.append_arg!(injected)
+    end
+  end
+
+  sig { params(param: AST::Param).returns(AST::Locatable) }
+  def default_argument_for(param)
+    default = param.default
+    if default.is_a?(AST::DefaultLit)
+      return AST::StructLit.new(default.token, param.type.to_s, {}, nil)
     end
 
-    if given_args < max_args
-      (params[given_args...max_args] || []).each do |param|
-        next if param.required
-        default = param.default
-        injected = case default
-        when AST::DefaultLit
-          type_name = param.type.to_s
-          AST::StructLit.new(default.token, type_name, {}, nil)
-        else
-          default.dup
-        end
-        visit(injected)
-        node.args << injected
-      end
+    T.cast(default.dup, AST::Locatable)
+  end
+
+  sig do
+    params(
+      site: CallSignatureSite,
+      param: AST::Param,
+      arg_node: AST::Locatable,
+      index: Integer,
+    ).returns(CallArgumentFacts)
+  end
+  def call_argument_facts(site, param, arg_node, index)
+    T.bind(self, SemanticAnnotator)
+    is_give = arg_node.is_a?(AST::MoveNode)
+    inner_node = is_give ? T.cast(T.unsafe(arg_node).value, AST::Locatable) : arg_node
+    arg_type = arg_node.full_type!(context: "call argument")
+    actual = arg_node.resolved_type
+    CallArgumentFacts.new(
+      site: site,
+      index: index,
+      param: param,
+      arg_node: arg_node,
+      is_give: is_give,
+      inner_node: inner_node,
+      arg_type: arg_type,
+      expected_type: param.type,
+      actual_type: arg_type,
+      actual: actual,
+      path: get_path_to_root(arg_node),
+    )
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_mutable_argument!(facts)
+    T.bind(self, SemanticAnnotator)
+    return unless param_mutable?(facts.param)
+
+    arg_node = facts.arg_node
+    unless arg_node.is_a?(AST::Identifier)
+      error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION,
+        index: facts.index + 1, param: facts.param.name)
+      return
     end
 
-    # For alias overlap
-    encountered_args = []
-    atomic_bare_value_args = []
-
-    node.args.each_with_index do |arg_node, i|
-      param = T.must(params[i])
-      next if param.comptime  # comptime type params are not type-checked
-      verify_param_lifetime!(arg_node, param, signature)
-
-      if param.mutable
-        if !arg_node.is_a?(AST::Identifier)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param.name)
-        end
-
-        if current_scope.is_immutable?(arg_node.name)
-          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param.name)
-        end
-
-        # Mark only the SymbolEntry as mutated-through-call. The callee receives a mutable reference
-        # (CLEAR's MUTABLE-by-ref calling convention), so any mutation
-        # inside the callee is observable at the caller's binding —
-        # post-annotation passes like the GUARD MUTABLE-mutation check
-        # (validate_with_guard_no_body_mutation!) need to see this.
-        #
-        # Critically, we mark only SymbolEntry state, not
-        # decl_node.var_mutated. The declaration still should not count
-        # as locally reassigned for lints, but lowering must emit Zig
-        # `var` storage so the call site can pass `&binding` as `*T`.
-        if arg_node.is_a?(AST::Identifier)
-          mark_var_mutated_via_call(arg_node.name)
-        end
-      end
-
-      is_give = arg_node.is_a?(AST::MoveNode)
-      inner_node = is_give ? arg_node.value : arg_node
-      if is_give && !param.takes
-        error!(arg_node, :GIVE_TO_BORROW_PARAM, param: param.name)
-      end
-      if param.takes || is_give
-        # Reject borrowed values passed to TAKES params.
-        # Container index access (arr[i], map[key]) returns a borrow -
-        # you cannot take ownership of data inside a container.
-        # Use .remove(i) or COPY arr[i] instead.
-        if borrowed_takes_argument?(inner_node)
-          arg_ti = inner_node.full_type!(context: "TAKES index argument")
-          arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
-          is_copy = arg_ti.is_a?(Type) ?
-            (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
-            true
-          unless is_copy
-            if inner_node.is_a?(AST::GetIndex)
-              error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
-            else
-              error!(inner_node, :TAKES_NEEDS_OWNED_BORROW)
-            end
-          end
-        end
-
-        # Ensure TAKES args are owned per the "one collection = one allocator"
-        # policy. ensure_owned_value! handles each shape (list_collection
-        # auto-COPY for @list/heap mismatch; rodata-string auto-COPY for
-        # literal-at-use-site DEFAULT; named string Identifier raises
-        # STORE_STRING_NEEDS_COPY when its source isn't heap-owned).
-        # Pass the receiver's allocator so the auto-COPY uses the
-        # container's allocator (frame list -> frame COPY, heap list ->
-        # heap COPY).
-        container_alloc = receiver_container_alloc(node) || :heap
-        owned = ensure_owned_value!(inner_node, param.type, nil, container_alloc: container_alloc)
-        node.args[i] = owned if owned
-        # If the arg was an EXISTING CopyNode (user explicit COPY), inherit
-        # the container's allocator -- a COPY into a frame list copies to
-        # frame, not heap. Single source of truth: container decides.
-        if node.args[i].is_a?(AST::CopyNode) && container_alloc != :heap
-          node.args[i].alloc = container_alloc
-        end
-
-        # `is_give` already had visit_GiveNode set the :give action;
-        # for plain TAKES (no GIVE wrapper) record :takes so the
-        # USE_OF_MOVED_VALUE diagnostic can phrase "TOOK it away".
-        # Stash the param's declared type on the OG node so the
-        # use-after-move fix-dropdown can decide whether to offer an
-        # `@shared` / `@multiowned` upgrade — irrelevant when the
-        # consumer's parameter is plain affine and won't accept a
-        # refcounted handle anyway.
-        move_if_takes_ownership!(
-          inner_node,
-          action: is_give ? :give : :takes,
-          consumer_param_type: param.type,
-        )
-        inner_node.was_moved = true
-        arg_node.was_moved = true
-        # If ensure_owned_value! wrapped the arg in a fresh CopyNode (auto-COPY
-        # for TAKES), the new wrapper at node.args[i] must also carry was_moved
-        # so the lowering can see "callee TAKES this on success" without
-        # re-deriving from CopyNode/MoveNode syntax. Single source of truth.
-        node.args[i].was_moved = true if node.args[i].respond_to?(:was_moved=)
-      end
-
-      # Weak refs must be RESOLVE'd before passing to concrete params.
-      arg_ti = T.cast(arg_node, AST::Locatable).full_type!(context: "call argument")
-      expected_raw = param.type
-      if arg_ti&.link? && expected_raw != :Any
-        param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
-        unless param_type_obj&.link?
-          arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param.name)
-        end
-      end
-
-      expected = param.type
-      actual = arg_node.resolved_type
-
-      match = false
-
-      # Case 0: fn_type structural check.
-      # resolved_type only returns the return-type symbol for fn_types, so we
-      # must compare the full Type objects to validate signature compatibility.
-      expected_type_obj = expected.is_a?(Type) ? expected : Type.new(expected || :Any)
-      if expected_type_obj.fn_type?
-        actual_type_obj = T.cast(arg_node, AST::Locatable).full_type!(context: "fn-typed argument")
-        if expected_type_obj.accepts?(actual_type_obj)
-          match = true
-        elsif actual_type_obj.fn_type? &&
-              T.must(actual_type_obj.function_signature).reentrant &&
-              !T.must(expected_type_obj.function_signature).reentrant
-          arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)
-        end
-      end
-
-      # Case 0b: strict shared-handle boundary. Type#== intentionally
-      # compares only the resolved base type for backward compatibility,
-      # so `Point@shared` would otherwise accept bare `Point`. Keep this
-      # check local to function calls: a `T@shared` parameter promises
-      # that the callee can retain/cross execution boundaries, so callers
-      # must pass a real shared handle or explicitly write SHARE x.
-      actual_type_obj = arg_ti.is_a?(Type) ? arg_ti : Type.new(actual || :Any)
-      if explicit_primitive_atomic_param?(expected_type_obj)
-        unless atomic_cell_arg?(arg_node)
-          arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :ARG_NEEDS_ATOMIC_CELL,
-            index: i + 1, fn: node.name, expected: expected_type_obj.resolved,
-            name: arg_name, actual: actual_type_obj.resolved)
-        end
-        arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
-      end
-      if atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
-        atomic_bare_value_args << arg_node
-      end
-      if atomic_cell_to_atomic_param?(arg_node, param, signature)
-        arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
-      end
-      if !match && expected_type_obj.shared? && expected_type_obj.resolved == actual_type_obj.resolved
-        unless actual_type_obj.shared?
-          hint = if arg_node.is_a?(AST::Identifier)
-            " Use SHARE #{arg_node.name} to create a shared handle."
-          else
-            " Use SHARE <expr> to create a shared handle."
-          end
-          error!(arg_node, :ARG_NEEDS_SHARED,
-            index: i + 1, fn: node.name, expected: expected_type_obj, actual: actual_type_obj, hint: hint)
-        end
-        match = true
-      end
-
-      unless match
-        if expected == :Any || actual == :Any || expected == actual
-          match = true
-        elsif any_element_collection_param?(expected_type_obj, actual_type_obj)
-          match = true
-        elsif expected_type_obj.respond_to?(:auto?) && expected_type_obj.auto?
-          # Gradual-typing tolerance: param declared Auto. The
-          # AutoUnifier (annotator's Pass C) resolves it from the
-          # observed call-site arg types AFTER this body walk
-          # completes; coercing the call-site arg here would commit
-          # to a type the unifier hasn't picked yet. Treat as a
-          # match for now; mismatch (if the resolution disagrees
-          # with this arg's actual type) surfaces when the resolved
-          # decl gets re-validated downstream.
-          match = true
-        elsif is_safe_autocast?(actual, expected)
-          arg_node.coerced_type = expected
-          check_prefixed_int_range!(arg_node, expected)
-          match = true
-        end
-      end
-
-      unless match
-        arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-        error!(arg_node, :ARGUMENT_TYPE_ERROR, fn: arg_name, index: i+1, expected: expected, got: actual)
-      end
-
-      current_path = get_path_to_root(arg_node)
-
-      next if current_path.nil?
-      is_mutable = param.mutable
-
-      encountered_args.each_with_index do |prev, prev_index|
-        # Mutable aliases conflict when their root paths overlap.
-        if (is_mutable || prev[:mutable]) && paths_overlap?(current_path, prev[:path])
-
-          error!(arg_node, :ARG_ALIAS_CONFLICT,
-            index: i+1, name: (arg_node.name rescue 'arg'), other_index: prev_index+1, path: current_path.first)
-        end
-      end
-
-      # Register this argument for future checks
-      encountered_args << {
-        path: current_path,
-        mutable: is_mutable,
-        name: arg_node.respond_to?(:name) ? arg_node.name : "arg"
-      }
+    if current_scope.is_immutable?(arg_node.name)
+      emit_immutable_arg_error!(arg_node, current_scope, facts.index + 1, facts.param.name)
     end
 
-    warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
+    mark_var_mutated_via_call(arg_node.name)
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_takes_argument!(facts)
+    T.bind(self, SemanticAnnotator)
+    if facts.is_give && !facts.param.takes
+      error!(facts.arg_node, :GIVE_TO_BORROW_PARAM, param: facts.param.name)
+    end
+    return unless facts.param.takes || facts.is_give
+
+    verify_owned_takes_argument!(facts)
+    container_alloc = receiver_container_alloc(facts.site.node) || :heap
+    owned = ensure_owned_value!(facts.inner_node, facts.param.type, nil, container_alloc: container_alloc)
+    facts.site.replace_arg!(facts.index, owned) if owned
+    current_arg = facts.site.args[facts.index]
+    current_arg.alloc = container_alloc if current_arg.is_a?(AST::CopyNode) && container_alloc != :heap
+    move_if_takes_ownership!(
+      facts.inner_node,
+      action: facts.is_give ? :give : :takes,
+      consumer_param_type: facts.param.type,
+    )
+    facts.inner_node.was_moved = true
+    facts.arg_node.was_moved = true
+    T.unsafe(current_arg).was_moved = true if current_arg&.respond_to?(:was_moved=)
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_owned_takes_argument!(facts)
+    T.bind(self, SemanticAnnotator)
+    return unless borrowed_takes_argument?(facts.inner_node)
+
+    arg_ti = facts.inner_node.full_type!(context: "TAKES index argument")
+    return if arg_ti.implicitly_copyable? { |type| lookup_type_schema(type) }
+
+    if facts.inner_node.is_a?(AST::GetIndex)
+      error!(facts.inner_node, :TAKES_NEEDS_OWNED_INDEX)
+    else
+      error!(facts.inner_node, :TAKES_NEEDS_OWNED_BORROW)
+    end
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_link_argument!(facts)
+    T.bind(self, SemanticAnnotator)
+    return unless facts.arg_type.link?
+    return if facts.expected_type.any? || facts.expected_type.link?
+
+    error!(facts.arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL,
+      name: argument_name(facts.arg_node, fallback: "Expression"), param: facts.param.name)
+  end
+
+  sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
+  def verify_argument_type!(facts, signature, atomic_bare_value_args)
+    T.bind(self, SemanticAnnotator)
+    match = fn_type_argument_match?(facts)
+    verify_atomic_argument!(facts, signature, atomic_bare_value_args)
+    match = true if shared_argument_match?(facts, matched: match)
+    match = true if basic_argument_match?(facts)
+    return if match
+
+    error!(facts.arg_node, :ARGUMENT_TYPE_ERROR,
+      fn: argument_name(facts.arg_node, fallback: "Expression"),
+      index: facts.index + 1, expected: facts.expected_type, got: facts.actual)
+  end
+
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def fn_type_argument_match?(facts)
+    T.bind(self, SemanticAnnotator)
+    return false unless facts.expected_type.fn_type?
+
+    actual_type = facts.arg_node.full_type!(context: "fn-typed argument")
+    return true if facts.expected_type.accepts?(actual_type)
+    return false unless reentrant_fn_argument_rejected?(facts.expected_type, actual_type)
+
+    error!(facts.arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM,
+      name: argument_name(facts.arg_node, fallback: "Expression"), param: facts.param.name)
+  end
+
+  sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }
+  def reentrant_fn_argument_rejected?(expected_type, actual_type)
+    return false unless actual_type.fn_type?
+
+    actual_sig = actual_type.function_signature
+    expected_sig = expected_type.function_signature
+    !!(actual_sig&.reentrant && expected_sig && !expected_sig.reentrant)
+  end
+
+  sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
+  def verify_atomic_argument!(facts, signature, atomic_bare_value_args)
+    T.bind(self, SemanticAnnotator)
+    arg_node = facts.arg_node
+    if explicit_primitive_atomic_param?(facts.expected_type)
+      unless arg_node.is_a?(AST::Identifier) && atomic_cell_arg?(arg_node)
+        error!(arg_node, :ARG_NEEDS_ATOMIC_CELL,
+          index: facts.index + 1, fn: facts.site.name, expected: facts.expected_type.resolved,
+          name: argument_name(arg_node, fallback: "Expression"), actual: facts.actual_type.resolved)
+      end
+      T.unsafe(arg_node).atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
+    end
+    atomic_bare_value_args << arg_node if atomic_cell_to_bare_value_param?(arg_node, facts.expected_type, facts.param)
+    if atomic_cell_to_atomic_param?(arg_node, facts.param, signature)
+      T.unsafe(arg_node).atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
+    end
+  end
+
+  sig { params(facts: CallArgumentFacts, matched: T::Boolean).returns(T::Boolean) }
+  def shared_argument_match?(facts, matched:)
+    T.bind(self, SemanticAnnotator)
+    return false if matched
+    return false unless facts.expected_type.shared? && facts.expected_type.resolved == facts.actual_type.resolved
+
+    arg_node = facts.arg_node
+    unless facts.actual_type.shared?
+      hint = arg_node.is_a?(AST::Identifier) ? " Use SHARE #{arg_node.name} to create a shared handle." : " Use SHARE <expr> to create a shared handle."
+      error!(arg_node, :ARG_NEEDS_SHARED,
+        index: facts.index + 1, fn: facts.site.name,
+        expected: facts.expected_type, actual: facts.actual_type, hint: hint)
+    end
+    true
+  end
+
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def basic_argument_match?(facts)
+    T.bind(self, SemanticAnnotator)
+    return true if facts.expected_type.any? || facts.actual == :Any || facts.expected_type == facts.actual
+    return true if any_element_collection_param?(facts.expected_type, facts.actual_type)
+    return true if facts.expected_type.auto?
+    return false unless is_safe_autocast?(facts.actual, facts.expected_type)
+
+    facts.arg_node.coerced_type = facts.expected_type
+    check_prefixed_int_range!(facts.arg_node, facts.expected_type)
+    true
+  end
+
+  sig { params(facts: CallArgumentFacts, encountered_args: T::Array[EncounteredCallArgument]).void }
+  def verify_argument_aliases!(facts, encountered_args)
+    T.bind(self, SemanticAnnotator)
+    current_path = facts.path
+    return if current_path.nil?
+
+    encountered_args.each_with_index do |prev, prev_index|
+      next unless (param_mutable?(facts.param) || prev.mutable) && paths_overlap?(current_path, prev.path)
+
+      error!(facts.arg_node, :ARG_ALIAS_CONFLICT,
+        index: facts.index + 1,
+        name: argument_name(facts.arg_node, fallback: "arg"),
+        other_index: prev_index + 1,
+        path: T.must(current_path.first))
+    end
+
+    encountered_args << EncounteredCallArgument.new(
+      path: current_path,
+      mutable: param_mutable?(facts.param),
+      name: argument_name(facts.arg_node, fallback: "arg"),
+    )
+  end
+
+  sig { params(node: AST::Locatable, fallback: String).returns(String) }
+  def argument_name(node, fallback:)
+    node.respond_to?(:name) ? T.unsafe(node).name.to_s : fallback
+  end
+
+  sig { params(param: AST::Param).returns(T::Boolean) }
+  def param_mutable?(param)
+    !!param.mutable
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -573,15 +693,12 @@ module FunctionAnalysis
     return true if param.atomic?
     return true if param.symbol&.atomic?
 
-    requires = signature.requires
-    families = requires && requires[param.name.to_s]
-    families.respond_to?(:include?) && families.include?(:ATOMIC)
+    signature.requires.fetch(param.name.to_s, Set.new).include?(:ATOMIC)
   end
 
   sig { params(arg_node: AST::Identifier).returns(T::Boolean) }
   def atomic_cell_arg?(arg_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     !!(sym&.atomic? && !sym.indirect?)
   end
@@ -720,14 +837,12 @@ module FunctionAnalysis
 
       # Check if the field exists in the schema
       sf = schema.fields[field_name] || schema.fields[field_sym] # handle string/sym keys
-      next_type = sf&.type
-
-      if next_type.nil?
+      if sf.nil?
         error!(node, :LIFETIME_NO_FIELD, type: current_type_name, field: field_name)
       end
 
       # Advance to the next type name (Type objects carry the resolved name)
-      current_type_name = next_type.is_a?(Type) ? next_type.resolved : next_type.to_sym
+      current_type_name = sf.type.resolved
     end
   end
 
@@ -740,8 +855,8 @@ module FunctionAnalysis
       if param.default
         if param.default.is_a?(AST::DefaultLit)
           # DEFAULT is only valid for struct-type params
-          param_type_sym = param.type&.resolved
-          schema = lookup_type_schema(param_type_sym) if param_type_sym
+          param_type_sym = param.type.resolved
+          schema = lookup_type_schema(param_type_sym)
           unless Schemas.struct?(schema)
             error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param.type)
           end
@@ -770,7 +885,7 @@ module FunctionAnalysis
       param_sync = nil
       if param.sync
         param_sync = param.sync
-      elsif param.type&.any_sync?
+      elsif param.type.any_sync?
         param_sync = param.type.sync
       elsif requires_map
         families = requires_map[param.name.to_s]
@@ -930,7 +1045,7 @@ module FunctionAnalysis
 
     # Union variant constructors (Value.Nil, Shape.Point) create new values, not borrows.
     if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
-      schema = lookup_type_schema(node.target.name.to_sym) rescue nil
+      schema = lookup_type_schema(node.target.name.to_sym)
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
@@ -938,7 +1053,7 @@ module FunctionAnalysis
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]
-    schema_resolver = ->(t) { lookup_type_schema(t) rescue nil }
+    schema_resolver = ->(t) { lookup_type_schema(t) }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
     fn_type_params = current_fn_ctx&.type_params || []
     is_type_param = fn_type_params.include?(type_info&.resolved)
@@ -957,8 +1072,9 @@ module FunctionAnalysis
     return true if node.is_a?(AST::Identifier)
 
     actual_path = get_path_to_root(node)
-    if actual_path.nil?
+    unless actual_path
       error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
+      return
     end
 
     # Multi-source semantics: returned value derives from EXACTLY one
@@ -968,7 +1084,7 @@ module FunctionAnalysis
     # of: ..." diagnostic when none match.
     matched = lifetime_paths.any? do |p|
       lifetime_syms = p.to_s.split(".").map(&:to_sym)
-      T.must(actual_path)[0...lifetime_syms.size] == lifetime_syms
+      actual_path[0...lifetime_syms.size] == lifetime_syms
     end
 
     unless matched
@@ -976,7 +1092,7 @@ module FunctionAnalysis
         "derived from: #{lifetime_paths.first}" :
         "derived from one of: #{lifetime_paths.join(' | ')}"
       error!(node, :RETURN_LIFETIME_MISMATCH,
-        sources_msg: sources_msg, actual: T.must(actual_path).join('.'))
+        sources_msg: sources_msg, actual: actual_path.join('.'))
     end
   end
 

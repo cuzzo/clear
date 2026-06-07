@@ -124,12 +124,11 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         STRUCT Other { port: Int64 }
         FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:writeLocked;
-          WITH EXCLUSIVE c AS a { a = Cfg{ port: 100 }; }
+          WITH EXCLUSIVE c AS a { a = Other{ port: 100 }; }
           RETURN;
         END
       CLEAR
-      # This one actually matches (Cfg{} == Cfg) so it should flag.
-      expect(cs.size).to eq(1)
+      expect(cs).to be_empty
     end
 
     it "swallows parser errors and returns []" do
@@ -184,6 +183,77 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         END
       CLEAR
       expect(cs).to be_empty
+    end
+  end
+
+  describe "defensive AST-level branch behavior" do
+    it "accepts inferred read captures for write-locked candidates" do
+      candidates_by_name = {
+        "c" => { sync: :write_locked, struct_name: :Cfg, n_uses: 0, disqualified: false },
+      }
+      cap = AST::Capability.new(
+        capability: :infer,
+        var_node: AST::Identifier.new(nil, "c"),
+        alias: "a",
+      )
+      body = [
+        AST::BindExpr.new(nil, "_", nil, AST::GetField.new(nil, AST::Identifier.new(nil, "a"), "port")),
+      ]
+      with_node = AST::WithBlock.new(nil, [cap], body)
+
+      AtomicPtrMigrationSuggester.classify_with_block!(with_node, candidates_by_name)
+
+      expect(candidates_by_name["c"]).to include(n_uses: 1, disqualified: false)
+    end
+
+    it "disqualifies unacceptable capabilities" do
+      candidates_by_name = {
+        "c" => { sync: :locked, struct_name: :Cfg, n_uses: 0, disqualified: false },
+      }
+      cap = AST::Capability.new(
+        capability: :SNAPSHOT,
+        var_node: AST::Identifier.new(nil, "c"),
+      )
+
+      AtomicPtrMigrationSuggester.classify_with_block!(
+        AST::WithBlock.new(nil, [cap], []),
+        candidates_by_name,
+      )
+
+      expect(candidates_by_name["c"][:disqualified]).to eq(true)
+    end
+
+    it "disqualifies acceptable captures with ineligible bodies" do
+      candidates_by_name = {
+        "c" => { sync: :locked, struct_name: :Cfg, n_uses: 0, disqualified: false },
+      }
+      cap = AST::Capability.new(
+        capability: :EXCLUSIVE,
+        var_node: AST::Identifier.new(nil, "c"),
+        alias: "a",
+      )
+
+      AtomicPtrMigrationSuggester.classify_with_block!(
+        AST::WithBlock.new(nil, [cap], []),
+        candidates_by_name,
+      )
+
+      expect(candidates_by_name["c"][:disqualified]).to eq(true)
+    end
+
+    it "handles assignment-node field writes, root replacements, and other targets" do
+      alias_id = AST::Identifier.new(nil, "a")
+      field_write = AST::Assignment.new(nil, AST::GetField.new(nil, alias_id, "port"), AST::Literal.new(nil, :INT64, 81, :stack))
+      matching_replace = AST::Assignment.new(nil, AST::Identifier.new(nil, "a"), AST::StructLit.new(nil, "Cfg", {}, :stack, nil))
+      mismatched_replace = AST::Assignment.new(nil, AST::Identifier.new(nil, "a"), AST::StructLit.new(nil, "Other", {}, :stack, nil))
+      other_target = AST::Assignment.new(nil, AST::GetField.new(nil, AST::Identifier.new(nil, "other"), "port"), AST::Literal.new(nil, :INT64, 81, :stack))
+      call_stmt = AST::FuncCall.new(nil, "print", [AST::GetField.new(nil, alias_id, "port")])
+
+      expect(AtomicPtrMigrationSuggester.stmt_eligible?(field_write, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.stmt_eligible?(matching_replace, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.stmt_eligible?(mismatched_replace, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.stmt_eligible?(other_target, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.stmt_eligible?(call_stmt, "a", :Cfg)).to eq(true)
     end
   end
 end

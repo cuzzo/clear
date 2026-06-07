@@ -368,6 +368,40 @@ module Decomplex
       }
     end
 
+    def findings(limit_sites: 12)
+      writes_by_field = @writes.group_by(&:norm)
+      reads_by_field  = @reads.group_by(&:norm)
+      reder_by_field  = @re_derivations.group_by(&:field)
+
+      metrics.map do |m|
+        ws = writes_by_field[m.name] || []
+        rs = reads_by_field[m.name] || []
+        ds = reder_by_field[m.name] || []
+        sites = (ws + rs).map { |s| "#{s.file}:#{s.defn}:#{s.line}" } +
+                ds.map { |s| "#{s.file}:#{s.defn}:#{s.line}" }
+        spans = (ws + rs).to_h do |s|
+          ["#{s.file}:#{s.defn}:#{s.line}", s.span]
+        end
+        {
+          at: sites.first,
+          field: m.name,
+          writes: m.writes,
+          reads: m.reads,
+          re_derivations: m.re_derivations,
+          scatter: m.scatter,
+          write_scatter: m.write_scatter,
+          read_scatter: m.read_scatter,
+          receiver_types: m.receiver_types,
+          messiness: m.messiness,
+          pressure: m.pressure,
+          top_writers: ws.first(4).map { |s| "#{s.file}:#{s.defn}:#{s.line}" },
+          top_readers: rs.first(4).map { |s| "#{s.file}:#{s.defn}:#{s.line}" },
+          sites: sites.first(limit_sites),
+          spans: spans
+        }
+      end
+    end
+
     # ---- Run all phases ------------------------------------------------
 
     def run

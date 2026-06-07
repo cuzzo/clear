@@ -13,7 +13,7 @@ module Annotator
       def self.function_signature(node, return_lifetime:)
         signature = FunctionSignature.new(
           params: node.params.map { |param| function_param(param) },
-          return_type: node.return_type || Type.new(:Any),
+          return_type: node.annotation_return_type,
           return_lifetime: return_lifetime,
           visibility: node.visibility,
           reentrant: node.reentrant == :reentrant
@@ -26,7 +26,7 @@ module Annotator
       def self.extern_function_signature(node)
         FunctionSignature.new(
           params: node.params.map { |param| extern_param(param) },
-          return_type: node.return_type || Type.new(:Any),
+          return_type: node.annotation_return_type,
           visibility: :pub,
           extern: true,
           module_alias: node.from_module,
@@ -47,7 +47,7 @@ module Annotator
           default: param.default,
           mutable: param.mutable,
           takes: param.takes || false,
-          sync: param.type&.any_sync? ? param.type.sync : nil
+          sync: param.type.any_sync? ? param.type.sync : nil
         )
       end
       private_class_method :function_param

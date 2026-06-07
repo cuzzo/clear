@@ -2,10 +2,14 @@
 require "sorbet-runtime"
 
 module MIRLoweringExpressions
-    extend T::Sig
-    extend T::Helpers
+  extend T::Sig
+  extend T::Helpers
 
   requires_ancestor { MIRLowering }
+
+  StructLitFieldType = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
+  StructLitTypeSubst = T.type_alias { T::Hash[Symbol, Type::TypeInput] }
+  UnionVariantFieldTypes = T.type_alias { T::Hash[String, Type::TypeInput] }
 
   class OrExitFacts < T::Struct
     const :kind, T.nilable(String)
@@ -31,6 +35,34 @@ module MIRLoweringExpressions
   class UnitVariantAccess < T::Struct
     const :type_name, Symbol
     const :variant_name, String
+  end
+
+  class BinaryMirOperands < T::Struct
+    const :left, MIR::Node
+    const :right, MIR::Node
+  end
+
+  class BinaryOperandFacts < T::Struct
+    const :node, AST::BinaryOp
+    const :op, Symbol
+    const :left, MIR::Node
+    const :right, MIR::Node
+    const :left_type, Type
+    const :right_type, Type
+    const :int_arithmetic, BinaryIntArithmeticFacts
+    const :left_unit_variant, T.nilable(UnitVariantAccess)
+    const :right_unit_variant, T.nilable(UnitVariantAccess)
+  end
+
+  class BinaryOperationPlan < T::Struct
+    const :kind, Symbol
+    const :facts, BinaryOperandFacts
+    const :builtin, T.nilable(Symbol), default: nil
+    const :op_str, T.nilable(String), default: nil
+    const :type_arg, T.nilable(String), default: nil
+    const :variant, T.nilable(UnitVariantAccess), default: nil
+    const :tag_source, T.nilable(Symbol), default: nil
+    const :union_error_type, T.nilable(Symbol), default: nil
   end
 
   class FieldAccessPlan < T::Struct
@@ -123,6 +155,25 @@ module MIRLoweringExpressions
     MUL: :intMul
   }.freeze, T::Hash[Symbol, Symbol])
 
+  STRING_COMPARISON_OPS = T.let({
+    EQ: "==",
+    NEQ: "!=",
+    LT: "<",
+    LTE: "<=",
+    GT: ">",
+    GTE: ">=",
+  }.freeze, T::Hash[Symbol, String])
+
+  BINARY_PLAN_EMITTERS = T.let({
+    pow: :emit_power_binary_plan,
+    builtin: :emit_builtin_binary_plan,
+    symbol_comparison: :emit_symbol_binary_plan,
+    string_comparison: :emit_string_binary_comparison,
+    unit_variant_comparison: :emit_unit_variant_comparison,
+    union_equality_error: :raise_union_equality_error,
+    standard: :emit_standard_binary_plan,
+  }.freeze, T::Hash[Symbol, Symbol])
+
   sig { params(node: AST::Literal).returns(T.untyped) }
   def lower_literal(node)
     T.bind(self, MIRLowering) rescue nil
@@ -168,12 +219,6 @@ module MIRLoweringExpressions
   sig { params(node: AST::Identifier).returns(T.untyped) }
   def lower_identifier(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
-    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
-    @do_capture_map = T.let(@do_capture_map, T.untyped)
-    @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
-    @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
     # Pipeline bindings ($u, $v, $item, ...) are substituted by PipelineHost
     # before reaching the MIR lowering. If one arrives here it means it was
     # used outside its pipeline context (after the pipeline expression ended,
@@ -188,16 +233,16 @@ module MIRLoweringExpressions
     return MIR::FnRef.new(zig_safe_name(node.name)) if node.respond_to?(:fn_ref) && node.fn_ref
 
     # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle
-    rc_map = @rc_unwrap_map || {}
+    rc_map = capability_state.rc_unwrap_map || {}
     return MIR::Ident.new(rc_map[node.name]) if rc_map.key?(node.name)
 
     # Inside a WITH EXCLUSIVE block, rewrite original var name to the unwrapped inner alias
-    locked_map = @locked_unwrap_map || {}
+    locked_map = capability_state.locked_unwrap_map || {}
     alias_name = locked_map[node.name]
     return MIR::Ident.new(alias_name) if alias_name.is_a?(String)
 
     # Inside a DO block branch, access captured outer variables via ctx pointer
-    capture_map = @do_capture_map || {}
+    capture_map = capture_state.do_capture_map || {}
     if capture_map.key?(node.name)
       ident = MIR::Ident.new(capture_map[node.name])
       if atomic_capture_load?(node)
@@ -209,13 +254,13 @@ module MIRLoweringExpressions
     # Use disambiguated Zig name if the declaration was renamed to avoid
     # same-name collision in the MIR checker (see lower_var_decl).
     decl_node = node.symbol&.reg
-    zig_name = (@decl_zig_name_map && decl_node && @decl_zig_name_map[decl_node.object_id]) ||
+    zig_name = (decl_node && function_state.decl_zig_names[decl_node.object_id]) ||
                zig_safe_name(node.name)
     ident = MIR::Ident.new(zig_name)
 
     # Atomic reads normally lower to `.load()`, but raw emission and
     # atomic-borrow call sites need the cell reference itself.
-    if node.symbol&.atomic? && !@atomic_emit_raw
+    if node.symbol&.atomic? && !capability_state.atomic_emit_raw
       return ident if node.atomic_borrow
       # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
       # cell pointer and AtomicPtr has no `.load()` method.
@@ -244,15 +289,16 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::Identifier).returns(T::Boolean) }
   def atomic_capture_load?(node)
+    T.bind(self, MIRLowering) rescue nil
     sym = node.symbol
-    !!(sym&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && sym.layout != :indirect)
+    !!(sym&.atomic? && !capability_state.atomic_emit_raw && !node.atomic_borrow && sym.layout != :indirect)
   end
 
-  sig { params(ft: Object, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
+  sig { params(ft: Type, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
   def recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
-    lowering = T.cast(self, MIRLowering)
-    !!(ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
-      !lowering.ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
+    T.bind(self, MIRLowering) rescue nil
+    !!(ft.recursive_cleanup_shape?(mir_schema_lookup) &&
+      !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
 
   sig { params(node: AST::UnaryOp).returns(MIR::UnaryOp) }
@@ -271,7 +317,7 @@ module MIRLoweringExpressions
   def lower_binary_op(node)
     T.bind(self, MIRLowering) rescue nil
     # Pipeline operator: x |> f -> f(x), or complex pipeline ops
-    return lower_smooth(node) if node.op == :SMOOTH
+    return lower_smooth(node) if node.smooth?
 
     # Error chain: expr OR handler
     return lower_or_rescue(node) if node.op == :OR_RESCUE
@@ -279,6 +325,8 @@ module MIRLoweringExpressions
     # Named pipeline binding (AS $v): passthrough to LHS value.
     # The $v registration is handled by the pipeline host at the binding point.
     return lower(node.left) if node.op == :BIND_VAR
+
+    return lower_lazy_boolean_op(node) if node.op == :AND || node.op == :OR
 
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
@@ -288,131 +336,245 @@ module MIRLoweringExpressions
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
 
-    left = lower(node.left)
-    right = lower(node.right)
+    emit_binary_operation_plan(binary_operation_plan(node))
+  end
 
-    # Power operator
-    if node.op == :POW
-      type_arg = Type.from_node!(node.left, context: "power lhs").resolved == :Int64 ? "i64" : "f64"
-      return MIR::Call.new(
-        "std.math.pow",
-        [MIR::Ident.new(type_arg), left, right],
-        false,
-        false,
-        MIR::CallableContract.no_ownership(3),
-      )
+  sig { params(node: AST::BinaryOp).returns(BinaryOperationPlan) }
+  def binary_operation_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    facts = binary_operand_facts(node)
+    classify_binary_operation(facts)
+  end
+
+  sig { params(node: AST::BinaryOp).returns(BinaryOperandFacts) }
+  def binary_operand_facts(node)
+    T.bind(self, MIRLowering) rescue nil
+    BinaryOperandFacts.new(
+      node: node,
+      op: T.cast(node.op, Symbol),
+      left: T.cast(lower(node.left), MIR::Node),
+      right: T.cast(lower(node.right), MIR::Node),
+      left_type: Type.from_node!(node.left, context: "binary lhs"),
+      right_type: Type.from_node!(node.right, context: "binary rhs"),
+      int_arithmetic: binary_int_arithmetic_facts(node),
+      left_unit_variant: unit_variant_access(node.left),
+      right_unit_variant: unit_variant_access(node.right),
+    )
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(BinaryOperationPlan) }
+  def classify_binary_operation(facts)
+    T.bind(self, MIRLowering) rescue nil
+    return BinaryOperationPlan.new(kind: :pow, facts: facts, type_arg: binary_power_type_arg(facts)) if facts.op == :POW
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intMod) if signed_integer_modulo?(facts)
+
+    string_plan = classify_string_binary_operation(facts)
+    return string_plan if string_plan
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intDiv) if integer_division?(facts)
+
+    builtin = direct_binary_builtin(facts)
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: builtin) if builtin
+
+    unit_plan = classify_unit_variant_comparison(facts)
+    return unit_plan if unit_plan
+
+    union_error_type = invalid_union_equality_type(facts)
+    return BinaryOperationPlan.new(kind: :union_equality_error, facts: facts, union_error_type: union_error_type) if union_error_type
+
+    op_str = ZigTypeMapper::ZIG_OPS[facts.op]
+    raise "MIRLowering: unknown binary op #{facts.op}" unless op_str
+
+    BinaryOperationPlan.new(kind: :standard, facts: facts, op_str: op_str)
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(String) }
+  def binary_power_type_arg(facts)
+    facts.left_type.resolved == :Int64 ? "i64" : "f64"
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
+  def signed_integer_modulo?(facts)
+    facts.op == :MOD && facts.left_type.resolved == :Int64
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_string_binary_operation(facts)
+    return nil unless facts.left_type.string? || facts.right_type.string?
+
+    if facts.left_type.symbol? && facts.right_type.symbol?
+      return nil unless facts.op == :EQ || facts.op == :NEQ
+      return BinaryOperationPlan.new(kind: :symbol_comparison, facts: facts)
     end
 
-    # Modulo on signed int — routed through the builtin registry so the :bc
-    # target can dispatch to MOD_I64 via MIR::InlineBc instead of parsing a
-    # "@mod" callee string at codegen time.
-    if node.op == :MOD
-      if Type.from_node!(node.left, context: "mod lhs").resolved == :Int64
-        return emit_builtin(:intMod, [left, right])
-      end
+    op_str = string_comparison_operator(facts.op)
+    return nil unless op_str
+
+    BinaryOperationPlan.new(kind: :string_comparison, facts: facts, op_str: op_str)
+  end
+
+  sig { params(op: Symbol).returns(T.nilable(String)) }
+  def string_comparison_operator(op)
+    STRING_COMPARISON_OPS[op]
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
+  def integer_division?(facts)
+    facts.op == :DIV && facts.left_type.integer? && facts.right_type.integer?
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(Symbol)) }
+  def direct_binary_builtin(facts)
+    direct = WRAPPING_BUILTINS[facts.op] || CHECKED_BUILTINS[facts.op]
+    return direct if direct
+
+    fn = INTEGER_ARITHMETIC_BUILTINS[facts.op]
+    return nil unless fn
+    return nil unless facts.int_arithmetic.both_int
+    return nil if facts.int_arithmetic.has_comptime_number_literal
+    return nil if facts.int_arithmetic.has_float_coercion
+
+    fn
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_unit_variant_comparison(facts)
+    return nil unless facts.op == :EQ || facts.op == :NEQ
+    lhs_uv = facts.left_unit_variant
+    rhs_uv = facts.right_unit_variant
+    op_str = facts.op == :EQ ? "==" : "!="
+    if lhs_uv && !rhs_uv
+      return BinaryOperationPlan.new(kind: :unit_variant_comparison, facts: facts, op_str: op_str, variant: lhs_uv, tag_source: :right)
     end
-
-    # String comparison
-    left_ti = Type.from_node!(node.left, context: "binary lhs")
-    right_ti = Type.from_node!(node.right, context: "binary rhs")
-    if left_ti.string? || right_ti.string?
-
-      # Symbol == symbol: O(1) pointer+length comparison. No allocation possible,
-      # so no hoist_alloc needed. Falls through to content comparison if either
-      # side is a plain string (cross-type comparison stays correct).
-      if left_ti.symbol? && right_ti.symbol?
-        cmp_node = case node.op
-              when :EQ  then emit_builtin(:symbolEql, [left, right])
-              when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:symbolEql, [left, right]))
-              end
-        return cmp_node if cmp_node
-      end
-
-      # General string comparison: hoist allocating sub-expressions so heap strings get cleanup.
-      # (e.g. ASSERT f() == "x" -- f() returns a heap string that needs freeing)
-      left = place_value_for_destination(left, node.left, :heap, node.left.full_type!) if node.left.is_a?(AST::BinaryOp) && node.left.op == :OR_RESCUE
-      right = place_value_for_destination(right, node.right, :heap, node.right.full_type!) if node.right.is_a?(AST::BinaryOp) && node.right.op == :OR_RESCUE
-      left = hoist_alloc(left, node.left)
-      right = hoist_alloc(right, node.right)
-      cmp_node = case node.op
-            when :EQ  then emit_builtin(:eql, [left, right])
-            when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:eql, [left, right]))
-            when :LT  then MIR::BinOp.new("<",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :LTE then MIR::BinOp.new("<=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :GT  then MIR::BinOp.new(">",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :GTE then MIR::BinOp.new(">=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            end
-      return cmp_node if cmp_node
+    if rhs_uv && !lhs_uv
+      return BinaryOperationPlan.new(kind: :unit_variant_comparison, facts: facts, op_str: op_str, variant: rhs_uv, tag_source: :left)
     end
+    nil
+  end
 
-    # Integer division — same rationale as :MOD above (registry instead of
-    # raw "@divTrunc" callee string).
-    if node.op == :DIV && left_ti.integer? && right_ti.integer?
-      return emit_builtin(:intDiv, [left, right])
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(Symbol)) }
+  def invalid_union_equality_type(facts)
+    T.bind(self, MIRLowering)
+    return nil unless facts.op == :EQ || facts.op == :NEQ
+
+    left_resolved = facts.left_type.resolved
+    right_resolved = facts.right_type.resolved
+    return left_resolved if union_schemas.key?(left_resolved)
+    return right_resolved if union_schemas.key?(right_resolved)
+
+    nil
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_binary_operation_plan(plan)
+    T.bind(self, MIRLowering) rescue nil
+    emitter = BINARY_PLAN_EMITTERS[plan.kind]
+    raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
+
+    T.cast(T.unsafe(self).__send__(emitter, plan), MIR::Node)
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
+  def emit_power_binary_plan(plan)
+    facts = plan.facts
+    MIR::Call.new(
+      "std.math.pow",
+      [MIR::Ident.new(T.must(plan.type_arg)), facts.left, facts.right],
+      false,
+      false,
+      MIR::CallableContract.no_ownership(3),
+    )
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_builtin_binary_plan(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    emit_builtin(T.must(plan.builtin), [facts.left, facts.right])
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_symbol_binary_plan(plan)
+    emit_symbol_binary_comparison(plan.facts)
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
+  def emit_standard_binary_plan(plan)
+    facts = plan.facts
+    MIR::BinOp.new(T.must(plan.op_str), facts.left, facts.right)
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(MIR::Node) }
+  def emit_symbol_binary_comparison(facts)
+    T.bind(self, MIRLowering)
+    cmp = emit_builtin(:symbolEql, [facts.left, facts.right])
+    facts.op == :NEQ ? MIR::UnaryOp.new("!", cmp) : cmp
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_string_binary_comparison(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    operands = string_comparison_operands(facts)
+    eql_call = emit_builtin(:eql, [operands.left, operands.right])
+    return eql_call if facts.op == :EQ
+    return MIR::UnaryOp.new("!", eql_call) if facts.op == :NEQ
+
+    MIR::BinOp.new(
+      T.must(plan.op_str),
+      emit_builtin(:strcmp, [operands.left, operands.right]),
+      MIR::Lit.new("0"),
+    )
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(BinaryMirOperands) }
+  def string_comparison_operands(facts)
+    T.bind(self, MIRLowering)
+    node = facts.node
+    left = string_comparison_operand(facts.left, node.left)
+    right = string_comparison_operand(facts.right, node.right)
+    BinaryMirOperands.new(left: hoist_alloc(left, node.left), right: hoist_alloc(right, node.right))
+  end
+
+  sig { params(value: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+  def string_comparison_operand(value, ast_node)
+    T.bind(self, MIRLowering)
+    if ast_node.is_a?(AST::BinaryOp) && ast_node.op == :OR_RESCUE
+      return place_value_for_destination(value, ast_node, :heap, ast_node.full_type!)
     end
+    value
+  end
 
-    # Wrapping operators
-    if (fn = WRAPPING_BUILTINS[node.op])
-      return emit_builtin(fn, [left, right])
-    end
+  sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
+  def emit_unit_variant_comparison(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    tag_target = plan.tag_source == :left ? facts.left : facts.right
+    MIR::BinOp.new(
+      T.must(plan.op_str),
+      active_tag_call(tag_target),
+      MIR::Lit.new(".#{T.must(plan.variant).variant_name}"),
+    )
+  end
 
-    # Checked operators
-    if (fn = CHECKED_BUILTINS[node.op])
-      return emit_builtin(fn, [left, right])
-    end
+  sig { params(plan: BinaryOperationPlan).returns(T.noreturn) }
+  def raise_union_equality_error(plan)
+    type_name = T.must(plan.union_error_type)
+    Kernel.raise "BinaryOp #{plan.facts.op} on union '#{type_name}': Zig `==` does not " \
+          "work on tagged unions. Either compare against a unit variant " \
+          "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
+          "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
+          "to discriminate the active variant.\n" \
+          "(See transpile-tests/255_union_equality.cht.)"
+  end
 
-    # Default integer arithmetic: checked in debug
-    if (fn = INTEGER_ARITHMETIC_BUILTINS[node.op])
-      int_facts = binary_int_arithmetic_facts(node)
-      if int_facts.both_int && !int_facts.has_comptime_number_literal && !int_facts.has_float_coercion
-        return emit_builtin(fn, [left, right])
-      end
-    end
-
-    # Union value compared to a unit variant: Zig's `==` doesn't work on
-    # tagged unions, so we lower to `std.meta.activeTag(<v>) == .<Variant>`.
-    # This is the only EQ shape we structurally accept on unions; comparing
-    # two arbitrary union values is ambiguous (which payload field counts?)
-    # and Refuse below points users at MATCH, which CLEAR already supports.
-    if %i[EQ NEQ].include?(node.op)
-      lhs_uv = unit_variant_access(node.left)
-      rhs_uv = unit_variant_access(node.right)
-      if lhs_uv && !rhs_uv
-        op_str = node.op == :EQ ? "==" : "!="
-        tag_call = active_tag_call(right)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv.variant_name}"))
-      elsif rhs_uv && !lhs_uv
-        op_str = node.op == :EQ ? "==" : "!="
-        tag_call = active_tag_call(left)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv.variant_name}"))
-      end
-    end
-
-    # Refuse: any EQ/NEQ where either side is a union/struct value that
-    # Zig's `==` doesn't accept. Falling through to `MIR::BinOp("==", ...)`
-    # would emit a Zig error the user can't easily map back to their
-    # CLEAR source. Raise a CLEAR-level diagnostic instead, naming the
-    # type and pointing at MATCH (the canonical CLEAR pattern for
-    # discriminating tagged values).
-    if %i[EQ NEQ].include?(node.op)
-      left_resolved = left_ti.resolved
-      right_resolved = right_ti.resolved
-      union_lhs = @union_schemas&.key?(left_resolved)
-      union_rhs = @union_schemas&.key?(right_resolved)
-      if union_lhs || union_rhs
-        type_name = union_lhs ? left_resolved : right_resolved
-        raise "BinaryOp #{node.op} on union '#{type_name}': Zig `==` does not " \
-              "work on tagged unions. Either compare against a unit variant " \
-              "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
-              "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
-              "to discriminate the active variant.\n" \
-              "(See transpile-tests/255_union_equality.cht.)"
-      end
-    end
-
-    # Standard operators
+  sig { params(node: AST::BinaryOp).returns(MIR::BinOp) }
+  def lower_lazy_boolean_op(node)
+    T.bind(self, MIRLowering) rescue nil
     op_str = ZigTypeMapper::ZIG_OPS[node.op]
-    raise "MIRLowering: unknown binary op #{node.op}" unless op_str
+    raise "MIRLowering: unknown boolean op #{node.op}" unless op_str
+
+    left = lower(node.left)
+    right = lower_scoped { lower(node.right) }
     MIR::BinOp.new(op_str, left, right)
   end
 
@@ -423,15 +585,15 @@ module MIRLoweringExpressions
   sig { params(node: T.untyped).returns(T.nilable(UnitVariantAccess)) }
   def unit_variant_access(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @union_schemas = T.let(@union_schemas, T.untyped)
     return nil unless node.is_a?(AST::GetField)
     return nil unless node.target.is_a?(AST::Identifier)
     type_name = node.target.name.to_sym
-    schema = @union_schemas&.dig(type_name)
+    schema = union_schemas.dig(type_name)
     return nil unless schema.is_a?(Schemas::UnionSchema)
-    var_data = schema.variants[node.field]
-    return nil unless schema.variants.key?(node.field)
+    field_key = union_variant_key(schema, node.field)
+    return nil unless field_key
+
+    var_data = schema.variants[field_key]
     # Unit variants have nil / Symbol / Type variant data. Inline-struct
     # variants are Hashes with :kind => :inline_struct; payload variants
     # like `Idle: Int64` are Symbols/Types -- both could appear at this
@@ -444,6 +606,19 @@ module MIRLoweringExpressions
     UnitVariantAccess.new(type_name: type_name, variant_name: node.field)
   end
 
+  sig { params(schema: Schemas::UnionSchema, field: T.any(String, Symbol)).returns(T.nilable(T.any(String, Symbol))) }
+  def union_variant_key(schema, field)
+    return field if schema.variants.key?(field)
+
+    field_s = field.to_s
+    return field_s if schema.variants.key?(field_s)
+
+    field_sym = field_s.to_sym
+    return field_sym if schema.variants.key?(field_sym)
+
+    nil
+  end
+
   # ================================================================
   # Pipeline (SMOOTH) operator
   # ================================================================
@@ -451,8 +626,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def lower_smooth(node)
     T.bind(self, MIRLowering) rescue nil
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
+    function_state.current_decl_alloc = T.let(function_state.current_decl_alloc, T.nilable(Symbol))
     rhs = node.right
 
     return lower_complex_smooth(node) if AST.pipeline_complex_op?(rhs)
@@ -469,7 +643,11 @@ module MIRLoweringExpressions
     source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
     mir_result = pipeline_host.lower_pipeline(node)
     result_type = Type.from_node!(node, context: "pipeline result ownership")
-    sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
+    sink_alloc = if result_type.observable?
+      :heap
+    elsif ownership_tracked_transfer_type?(result_type)
+      function_state.current_decl_alloc || placement_for_node(node)
+    end
     return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
 
     Kernel.raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
@@ -481,7 +659,7 @@ module MIRLoweringExpressions
     left = T.cast(lower(node.left), MIR::Node)
     ft = node.left.full_type!
     collect_method = (ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
-    collect_alloc = @current_decl_alloc == :heap ? :heap : :frame
+    collect_alloc = function_state.current_decl_or_frame_alloc
     collect_args = collect_method == "materializeNext" ? [MIR::AllocatorRef.new(collect_alloc)] : []
     collect_type = smooth_collect_type(ft, collect_method)
     collect_alloc_fact = collect_method == "materializeNext" ? collect_alloc : nil
@@ -529,11 +707,11 @@ module MIRLoweringExpressions
   def smooth_collect_block(left, ft, collect_method, collect_args, collect_type, collect_alloc_fact)
     T.bind(self, MIRLowering) rescue nil
     acc_zig = transpile_type(ft)
-    @block_expr_counter += 1
-    label = "__collect_blk_#{@block_expr_counter}"
-    collect_var = "__collect_acc_#{@block_expr_counter}"
-    val_var = "__collect_val_#{@block_expr_counter}"
-    left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
+    block_id = lowering_counters.next_block_expr_id
+    label = "__collect_blk_#{block_id}"
+    collect_var = "__collect_acc_#{block_id}"
+    val_var = "__collect_val_#{block_id}"
+    left_effect = MIR::OwnershipEffect.of(left)
     collect_source_alloc = ft.observable? ? :heap : (left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap)
     collect_cleanup = CleanupEntry.build(:uniform, alloc: collect_source_alloc,
       has_moved_guard: false, zig_type: acc_zig)
@@ -582,7 +760,7 @@ module MIRLoweringExpressions
     [
       MIR::Let.new("__snap_input", left, false, nil, nil),
       MIR::ExprStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
+        MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "captureSnapshot", [
           MIR::Ident.new(snap_zig_type),
           MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
         ], false, MIR::CallableContract.no_ownership(2)), false)
@@ -694,7 +872,7 @@ module MIRLoweringExpressions
     # Default: expr OR fallback -> error union catch or optional orelse.
     # The fallback is evaluated lazily (only when left short-circuits to it),
     # so any allocations done while lowering it must NOT escape to outer
-    # @pending_stmts. AST::BinaryOp#lazy_fields declares :right as lazy when
+    # function_state.pending_stmts. AST::BinaryOp#lazy_fields declares :right as lazy when
     # op == :OR_RESCUE; descend() consults that and wraps the right side in
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
@@ -719,7 +897,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def or_fallback_expected_type(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
+    function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
     left_type = Type.from_node!(node.left, context: "OR fallback left type")
     success = left_type.success_type
     return success if success && !success.any?
@@ -731,7 +909,7 @@ module MIRLoweringExpressions
       return eu_success if eu_success && !eu_success.any?
     end
 
-    @current_expected_type || node.full_type!(context: "OR fallback expected type")
+    function_state.current_expected_type || node.full_type!(context: "OR fallback expected type")
   end
 
   sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
@@ -742,9 +920,9 @@ module MIRLoweringExpressions
 
     return value unless ast_node.is_a?(AST::Locatable)
     ti = ast_node.full_type!(context: "OR fallback materialization")
-    return value unless ti.string? || ti.recursive_cleanup_shape?(@schema_lookup) || ti.needs_cleanup?(@schema_lookup)
+    return value unless ti.string? || ti.recursive_cleanup_shape?(mir_schema_lookup) || ti.needs_cleanup?(mir_schema_lookup)
 
-    alloc = @current_decl_alloc || :heap
+    alloc = function_state.current_decl_alloc || :heap
     copied = MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
     hoist_alloc(copied, ast_node, err_cleanup: false)
   end
@@ -785,8 +963,6 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetField).returns(T.untyped) }
   def lower_get_field(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @union_schemas = T.let(@union_schemas, T.untyped)
     constructor = unit_variant_constructor(node)
     return constructor if constructor
 
@@ -810,14 +986,16 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetField).returns(T.nilable(MIR::StructInit)) }
   def unit_variant_constructor(node)
     T.bind(self, MIRLowering) rescue nil
-    @union_schemas = T.let(@union_schemas, T.untyped)
     target_node = node.target
     return nil unless target_node.is_a?(AST::Identifier)
 
-    schema = @union_schemas.dig(target_node.name.to_sym)
+    schema = union_schemas.dig(target_node.name.to_sym)
     return nil unless schema.is_a?(Schemas::UnionSchema)
 
-    var_data = schema.variants[node.field]
+    field_key = union_variant_key(schema, node.field)
+    return nil unless field_key
+
+    var_data = schema.variants[field_key]
     return nil if Schemas.inline_struct?(var_data)
 
     MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
@@ -826,15 +1004,13 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetField, target: MIR::Node).returns(FieldAccessPlan) }
   def field_access_plan(node, target)
     T.bind(self, MIRLowering) rescue nil
-    @union_schemas = T.let(@union_schemas, T.untyped)
-
     target_node = node.target
     ti = Type.from_node!(target_node, context: "field target")
 
-    rc_map = @rc_unwrap_map || {}
-    locked_map = @locked_unwrap_map || {}
-    is_rc_unwrapped = target_node.is_a?(AST::Identifier) && rc_map.key?(target_node.name)
-    is_locked_unwrapped = target_node.is_a?(AST::Identifier) && locked_map.key?(target_node.name)
+    rc_map = capability_state.rc_unwrap_map || {}
+    locked_map = capability_state.locked_unwrap_map || {}
+    is_rc_unwrapped = T.let(target_node.is_a?(AST::Identifier) ? rc_map.key?(target_node.name.to_s) : false, T::Boolean)
+    is_locked_unwrapped = T.let(target_node.is_a?(AST::Identifier) ? locked_map.key?(target_node.name.to_s) : false, T::Boolean)
 
     target_sync = if target_node.is_a?(AST::OptionalUnwrap)
       target_node.target.symbol&.sync
@@ -844,8 +1020,8 @@ module MIRLoweringExpressions
     path = field_access_path(ti, target_sync, is_rc_unwrapped, is_locked_unwrapped)
 
     target_type_sym = ti.resolved.to_s.to_sym
-    union_schema = @union_schemas.dig(target_type_sym)
-    union_variants = Schemas.union?(union_schema) ? union_schema.variants : nil
+    union_schema = union_schemas.dig(target_type_sym)
+    union_variants = union_schema.is_a?(Schemas::UnionSchema) ? union_schema.variants : nil
     field_str = node.field.to_s
     union_payload = union_variants && (union_variants.key?(node.field) ||
                                        union_variants.key?(field_str) ||
@@ -920,7 +1096,9 @@ module MIRLoweringExpressions
     if facts.kind
       stmts << MIR::Set.new(runtime_error_field("kind"), MIR::Ident.new(".#{facts.kind}"))
       if facts.error_name
-        name_id = MIR::InlineZig.new("@intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+        name_id = MIR::Call.new("@intFromEnum", [
+          MIR::FieldGet.new(MIR::Ident.new("ErrorName"), facts.error_name),
+        ], false, false, MIR::CallableContract.no_ownership(1))
         stmts << MIR::Set.new(runtime_error_field("error_name"), name_id)
       elsif facts.clear_type
         stmts << MIR::Set.new(runtime_error_field("error_name"), MIR::Lit.new("0"))
@@ -970,15 +1148,14 @@ module MIRLoweringExpressions
     ti.nil? || !ti.integer?
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def float_coercion?(node)
-    return false unless node.respond_to?(:coerced_type)
-    coerced = node.coerced_type
+    coerced = node.coerced_type_info
     return false if coerced.nil?
-    Type.new(coerced).integer? != true
+    coerced.integer? != true
   end
 
-  sig { params(node: AST::GetIndex).returns(T.untyped) }
+  sig { params(node: AST::GetIndex).returns(MIR::Node) }
   def lower_get_index(node)
     T.bind(self, MIRLowering) rescue nil
     plan = index_access_plan(node)
@@ -1009,11 +1186,10 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(plan: IndexAccessPlan).returns(T.untyped) }
+  sig { params(plan: IndexAccessPlan).returns(MIR::Node) }
   def index_access_value(plan)
     T.bind(self, MIRLowering) rescue nil
-    @shard_context = T.let(@shard_context, T.untyped)
-    @target = T.let(@target, T.untyped)
+    shard = shard_context
 
     # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
     # Zig only -- BC has no Arc-wrapping (values are uniformly value-typed
@@ -1024,7 +1200,7 @@ module MIRLoweringExpressions
     target = plan.target
     index = plan.index
     ti = plan.type_info
-    if ti.rc_map? && @target != :bc
+    if ti.rc_map? && !bc_target?
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -1041,7 +1217,7 @@ module MIRLoweringExpressions
       # only inside a SHARD pipeline body where the shard index var
       # is computed by the surrounding loop -- direct dispatch skips
       # routing.
-      shard_direct = @shard_context && plan.target_name == @shard_context[:map]
+      shard_direct = shard && plan.target_name == shard[:map]
       template_kind = if shard_direct then :shard_direct_zig
                       elsif (map_ft.sharded? || map_ft.striped?) && op[:sharded_zig]
                         :sharded_zig
@@ -1059,8 +1235,8 @@ module MIRLoweringExpressions
       val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
       if shard_direct
         return MIR::ShardedMapGet.new(target, index,
-          MIR::Ident.new(@shard_context[:idx]),
-          MIR::Ident.new(@shard_context[:key]),
+          MIR::Ident.new(shard[:idx]),
+          MIR::Ident.new(shard[:key]),
           kind, op, key_zig, val_zig, alloc_metadata, template_kind)
       end
       MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, alloc_metadata, template_kind)
@@ -1071,7 +1247,7 @@ module MIRLoweringExpressions
       # `elem` field carries the element type name so bc_emitter can
       # stamp the capture slot's struct hint when this gets bound via
       # `IF pool[id] AS env`.
-      elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
+      elem_t = ti.element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
       pool_get_def = T.must(IntrinsicRegistry.sig(POOL_METHODS, "get")).dup
       pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
@@ -1087,7 +1263,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(MIR::Node) }
   def index_collection_value(target, index, plan)
     T.bind(self, MIRLowering) rescue nil
     ti = plan.type_info
@@ -1101,13 +1277,13 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, ti: Type).returns(MIR::Node) }
   def lower_direct_or_builtin_index_get(target, index, ast_node, ti)
     T.bind(self, MIRLowering) rescue nil
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1117,32 +1293,31 @@ module MIRLoweringExpressions
   # Resolves field-name -> Type for both struct and union schemas. Returns {}
   # when no schema is registered (e.g. tuple-style literals) so callers can
   # safely lookup without nil checks.
-  sig { params(node: AST::StructLit).returns(T::Hash[String, T.untyped]) }
+  sig { params(node: AST::StructLit).returns(T::Hash[String, StructLitFieldType]) }
   def struct_lit_field_types(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @schema_lookup = T.let(@schema_lookup, T.untyped)
-    schema = @schema_lookup&.call(node.name.to_sym)
-    return {} unless schema
-    subst = struct_lit_type_subst(schema, node)
-    if schema.respond_to?(:variants) && schema.variants
-      schema.variants.each_with_object({}) { |(k, t), h| h[k.to_s] = substitute_mir_type(t, subst) }
-    elsif schema.respond_to?(:fields) && schema.fields
+    schema = mir_schema_lookup.call(node.name.to_sym)
+    case schema
+    when Schemas::UnionSchema
+      union_subst = T.let({}, StructLitTypeSubst)
+      schema.variants.each_with_object({}) { |(k, t), h| h[k.to_s] = substitute_mir_type(t, union_subst) }
+    when Schemas::StructSchema
+      struct_subst = struct_lit_type_subst(schema, node)
       schema.fields.each_with_object({}) do |(k, f), h|
-        raw = f.respond_to?(:type) ? f.type : f
-        h[k.to_s] = substitute_mir_type(raw, subst)
+        raw = f.is_a?(AST::StructField) ? f.type : f
+        h[k.to_s] = substitute_mir_type(raw, struct_subst)
       end
     else
       {}
     end
   end
 
-  sig { params(schema: T.untyped, node: AST::StructLit).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(schema: T.any(Schemas::StructSchema, Schemas::InlineStructVariant), node: AST::StructLit).returns(StructLitTypeSubst) }
   def struct_lit_type_subst(schema, node)
-    params = schema.respond_to?(:type_params) ? schema.type_params : nil
+    params = schema.is_a?(Schemas::StructSchema) ? schema.type_params : nil
     args = node.type_args || []
     return {} unless params&.any? && args.any?
-    out = T.let({}, T::Hash[Symbol, T.untyped])
+    out = T.let({}, StructLitTypeSubst)
     params.zip(args).each do |param, arg|
       next unless param
       out[param.to_sym] = arg
@@ -1150,10 +1325,14 @@ module MIRLoweringExpressions
     out
   end
 
-  sig { params(raw_type: T.untyped, subst: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(raw_type: StructLitFieldType, subst: StructLitTypeSubst).returns(StructLitFieldType) }
   def substitute_mir_type(raw_type, subst)
     return raw_type if subst.empty?
-    t = raw_type.is_a?(Type) ? Type.new(raw_type) : Type.new(raw_type)
+    return raw_type unless raw_type
+    return raw_type if raw_type.is_a?(Schemas::InlineStructVariant)
+
+    type_input = raw_type
+    t = Type.new(type_input)
     resolved = t.resolved
     if subst.key?(resolved)
       replacement = Type.new(subst.fetch(resolved))
@@ -1162,7 +1341,7 @@ module MIRLoweringExpressions
     end
 
     if t.generic_instance?
-      new_args = t.generic_args.map { |arg| substitute_mir_type(arg, subst) }
+      new_args = t.generic_args.map { |arg| T.cast(substitute_mir_type(arg, subst), Type::TypeInput) }
       replacement = Type.generic_instance_of(t.generic_base, new_args)
       copy_type_capabilities(t, replacement)
       return replacement
@@ -1170,7 +1349,7 @@ module MIRLoweringExpressions
 
     if t.array?
       element_type = T.must(t.element_type)
-      new_element = substitute_mir_type(element_type, subst)
+      new_element = T.cast(substitute_mir_type(element_type, subst), Type::TypeInput)
       return raw_type if Type.surface_name(element_type) == Type.surface_name(new_element)
 
       replacement = Type.array_of(new_element, capacity: t.capacity)
@@ -1180,7 +1359,7 @@ module MIRLoweringExpressions
 
     if t.error_union?
       payload_type = T.must(t.payload_type)
-      new_payload = substitute_mir_type(payload_type, subst)
+      new_payload = T.cast(substitute_mir_type(payload_type, subst), Type::TypeInput)
       return raw_type if Type.surface_name(payload_type) == Type.surface_name(new_payload)
 
       replacement = Type.error_union_of(new_payload)
@@ -1190,7 +1369,7 @@ module MIRLoweringExpressions
 
     if t.optional?
       wrapped_type = T.must(t.wrapped_type)
-      new_wrapped = substitute_mir_type(wrapped_type, subst)
+      new_wrapped = T.cast(substitute_mir_type(wrapped_type, subst), Type::TypeInput)
       return raw_type if Type.surface_name(wrapped_type) == Type.surface_name(new_wrapped)
 
       replacement = Type.optional_of(new_wrapped)
@@ -1200,7 +1379,7 @@ module MIRLoweringExpressions
 
     if t.tense?
       tense_type = t.tense_type
-      new_tense_type = substitute_mir_type(tense_type, subst)
+      new_tense_type = T.cast(substitute_mir_type(tense_type, subst), Type::TypeInput)
       return raw_type if Type.surface_name(tense_type) == Type.surface_name(new_tense_type)
 
       replacement = Type.tense_of(new_tense_type)
@@ -1220,26 +1399,26 @@ module MIRLoweringExpressions
   # opposed to a fixed-capacity array (`[N]T`) or an owning container
   # (`@list` / `@set` / `@pool`). Comptime selector handles ArrayList -> .items
   # vs slice passthrough at zero cost.
-  sig { params(ft: T.untyped, k: T.untyped, node: AST::StructLit).returns(T::Boolean) }
+  sig { params(ft: T.nilable(Type), k: T.any(String, Symbol), node: AST::StructLit).returns(T::Boolean) }
   def struct_field_wants_slice?(ft, k, node)
     T.bind(self, MIRLowering) rescue nil
-    return true if node.borrowed_field_names&.include?(k)
+    return true if node.borrowed_field_names&.include?(k.to_s)
     aggregate_field_wants_dynamic_slice?(ft)
   end
 
-  sig { params(ft: T.untyped).returns(T::Boolean) }
+  sig { params(ft: T.nilable(Type)).returns(T::Boolean) }
   def aggregate_field_wants_dynamic_slice?(ft)
-    return false unless ft.is_a?(Type)
+    return false unless ft
     ft.array? && ft.dynamic? && !ft.collection? && !ft.string?
   end
 
-  sig { params(val: T.untyped, ft: T.untyped, borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(val: MIR::Node, ft: T.nilable(Type), borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.nilable(AST::Node)).returns(MIR::Node) }
   def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc, ast_node = nil)
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
-    source = T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
-      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val
+    source = T.cast(T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
+      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val, MIR::Node)
     T.cast(T.unsafe(self).with_ownership_consumption(
       MIR::OwnedSlice.new(source, sink_alloc),
       T.unsafe(self).mir_ident_names(source),
@@ -1251,36 +1430,36 @@ module MIRLoweringExpressions
   sig { params(node: AST::StructLit).returns(T.untyped) }
   def lower_struct_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     hoisted = []
     field_types = struct_lit_field_types(node)
     struct_alloc = alloc_for_node(node)
 
     fields = node.fields.map { |k, v|
       ft = field_types[k.to_s]
+      field_type_input = T.let(ft.is_a?(Schemas::InlineStructVariant) ? nil : ft, T.nilable(Type::TypeInput))
       borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
       field_node = borrowed_field && v.is_a?(AST::CopyNode) ? v.value : v
-      field_sink_alloc = aggregate_field_sink_alloc(ft, field_node, struct_alloc)
+      field_sink_alloc = aggregate_field_sink_alloc(field_type_input, field_node, struct_alloc)
       move_mark_field!(field_node)
+      expected_ft = field_type_input ? (field_type_input.is_a?(Type) ? field_type_input : Type.new(field_type_input)) : nil
       val = with_decl_alloc(field_sink_alloc) do
-        with_expected_type(ft) do
+        with_expected_type(expected_ft) do
         if borrowed_field
-          aggregate_dynamic_slice_field_value(lower(field_node), ft, true, field_sink_alloc, field_node)
+          aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
           hoist_alloc(make_rc_retain(field_node), field_node, err_cleanup: true)
-        elsif field_node.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
-          hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), ft.zig_type, nil, :full_value, field_sink_alloc),
+        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection?
+          hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
         else
-          field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, ft)
-          if struct_field_wants_slice?(ft, k, node)
-            field_value = aggregate_dynamic_slice_field_value(field_value, ft, borrowed_field, field_sink_alloc, field_node)
+          field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, field_type_input)
+          if struct_field_wants_slice?(expected_ft, k, node)
+            field_value = aggregate_dynamic_slice_field_value(field_value, expected_ft, borrowed_field, field_sink_alloc, field_node)
           end
           field_alloc = mir_owned_alloc(field_value)
           lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
-          if recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
-            hoist_alloc(MIR::DeepCopy.new(lowered, ft.zig_type, nil, :full_value, field_sink_alloc),
+          if expected_ft && recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
+            hoist_alloc(MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc),
               field_node, err_cleanup: true)
           else
             lowered
@@ -1292,8 +1471,7 @@ module MIRLoweringExpressions
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
         zig_t = transpile_type(v.full_type!.resolved.to_s)
-        @block_expr_counter += 1
-        temp = "__ind_#{@block_expr_counter}_#{k}"
+        temp = "__ind_#{lowering_counters.next_block_expr_id}_#{k}"
         hc = T.cast(with_ownership_consumption_for_value(
           MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
           val,
@@ -1344,9 +1522,6 @@ module MIRLoweringExpressions
   sig { params(node: AST::UnionVariantLit).returns(T.untyped) }
   def lower_union_variant_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @union_schemas = T.let(@union_schemas, T.untyped)
     # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
     hoisted = []
     variant_alloc = alloc_for_node(node)
@@ -1355,13 +1530,14 @@ module MIRLoweringExpressions
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
       ft = variant_field_types[k.to_s]
+      expected_ft = ft ? (ft.is_a?(Type) ? ft : Type.new(ft)) : nil
       field_sink_alloc = aggregate_field_sink_alloc(ft, v, variant_alloc)
       # err_cleanup: union owns its payload on success; only clean up on error.
       move_mark_field!(v)
       val = with_decl_alloc(field_sink_alloc) do
-        with_expected_type(ft) do
+        with_expected_type(expected_ft) do
         materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
-        materialized = aggregate_dynamic_slice_field_value(materialized, ft, false, field_sink_alloc, v)
+        materialized = aggregate_dynamic_slice_field_value(materialized, expected_ft, false, field_sink_alloc, v)
         hoist_alloc(materialized, v, err_cleanup: true)
         end
       end
@@ -1374,12 +1550,11 @@ module MIRLoweringExpressions
         # Borrowed field access has no owned local to transfer, so the
         # indirect cell needs an independent copy. Identifier payloads move
         # into the cell and are guarded by ordinary ownership transfer marks.
-        needs_deep_cleanup = @union_schemas.key?(field_sym) && v.is_a?(AST::GetField)
+        needs_deep_cleanup = union_schemas.key?(field_sym) && v.is_a?(AST::GetField)
         if needs_deep_cleanup
           val = MIR::DeepCopy.new(val, zig_t, nil, :full_value, :heap)
         end
-        @block_expr_counter += 1
-        temp = "__ind_#{@block_expr_counter}_#{k}"
+        temp = "__ind_#{lowering_counters.next_block_expr_id}_#{k}"
         hc = T.cast(with_ownership_consumption_for_value(
           MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
           val,
@@ -1435,14 +1610,12 @@ module MIRLoweringExpressions
     wrap_indirect_field_hoists(hoisted, result)
   end
 
-  sig { params(hoisted: T::Array[T.untyped], result: T.untyped).returns(T.untyped) }
+  sig { params(hoisted: T::Array[MIR::Node], result: MIR::Node).returns(MIR::Node) }
   def wrap_indirect_field_hoists(hoisted, result)
     T.bind(self, MIRLowering) rescue nil
     return result if hoisted.empty?
 
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @block_expr_counter += 1
-    label = "__ind_blk_#{@block_expr_counter}"
+    label = "__ind_blk_#{lowering_counters.next_block_expr_id}"
     local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
       names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
@@ -1454,10 +1627,11 @@ module MIRLoweringExpressions
       hoisted.concat(ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name]))
     end
     hoisted << MIR::BreakStmt.new(label, result)
-    @lowered_alloc_names = T.let(@lowered_alloc_names, T.untyped)
-    @lowered_guarded_cleanup_names = T.let(@lowered_guarded_cleanup_names, T.untyped)
-    inherited_alloc_names = (@lowered_alloc_names || Set.new).dup
-    inherited_guarded_names = (@lowered_guarded_cleanup_names || Set.new).dup
+    inherited_alloc_names = function_state.lowered_alloc_names.dup
+    inherited_guarded_names = function_state.lowered_guarded_cleanup_names.dup
+    function_state.guarded_cleanup_names.each_key do |name|
+      inherited_guarded_names << name.to_s
+    end
     MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(
       hoisted,
       inherited_alloc_names,
@@ -1465,28 +1639,28 @@ module MIRLoweringExpressions
     ))
   end
 
-  sig { params(node: AST::UnionVariantLit).returns(T::Hash[String, T.untyped]) }
+  sig { params(node: AST::UnionVariantLit).returns(UnionVariantFieldTypes) }
   def union_variant_lit_field_types(node)
     T.bind(self, MIRLowering) rescue nil
-    @union_schemas = T.let(@union_schemas, T.untyped)
-    schema = @union_schemas[node.union_name.to_sym]
+    schema = union_schemas[node.union_name.to_sym]
     return {} unless schema.is_a?(Schemas::UnionSchema)
     variant_data = schema.variants[node.variant_name.to_sym] || schema.variants[node.variant_name.to_s]
     return {} unless variant_data
 
     if Schemas.inline_struct?(variant_data)
-      variant_data.fields.each_with_object({}) do |(k, f), h|
-        h[k.to_s] = f.respond_to?(:type) ? f.type : f
+      fields = T.cast(variant_data, Schemas::InlineStructVariant).fields
+      fields.each_with_object(T.let({}, UnionVariantFieldTypes)) do |(k, field_type), h|
+        h[k.to_s] = field_type
       end
     elsif node.fields.length == 1
       key = node.fields.keys.first.to_s
-      { key => Type.from_node(variant_data) }
+      { key => Type.from_node(T.cast(variant_data, Type::TypeInput)) }
     else
       {}
     end
   end
 
-  sig { params(_field_type: T.untyped, value: T.untyped, aggregate_alloc: Symbol).returns(Symbol) }
+  sig { params(_field_type: T.nilable(Type::TypeInput), value: AST::Node, aggregate_alloc: Symbol).returns(Symbol) }
   def aggregate_field_sink_alloc(_field_type, value, aggregate_alloc)
     T.bind(self, MIRLowering) rescue nil
     if value.is_a?(AST::Identifier)
@@ -1504,44 +1678,37 @@ module MIRLoweringExpressions
   sig { params(node: AST::StringConcat).returns(MIR::ConcatStr) }
   def lower_string_concat(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @rt_name = T.let(@rt_name, T.untyped)
     parts = node.parts.map { |p| hoist_alloc(lower(p), p) }
     alloc = alloc_for_node(node)
-    MIR::ConcatStr.new(parts, alloc, @rt_name)
+    MIR::ConcatStr.new(parts, alloc, runtime_binding_name)
   end
 
   sig { params(node: AST::BlockExpr).returns(MIR::BlockExpr) }
   def lower_block_expr(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    @block_expr_counter += 1
-    label = "__blk_#{@block_expr_counter}"
+    label = "__blk_#{lowering_counters.next_block_expr_id}"
     transfer_name = T.let(nil, T.nilable(String))
     if node.result.is_a?(AST::Identifier)
       raw_name = node.result.name.to_s
-      entry = @current_bindings[raw_name]
+      entry = function_state.bindings[raw_name]
       transfer_name = zig_safe_name(raw_name)
       if entry&.needs_cleanup?
         entry[:has_moved_guard] = true
-        (@guarded_cleanup_names ||= {})[transfer_name] = true
+        function_state.guarded_cleanup_names[transfer_name] = true
       end
     end
     body = lower_body(node.body)
     result = lower(node.result)
     if transfer_name
-      cleanup = T.must(body).find do |stmt|
+      cleanup = body.find do |stmt|
         (stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)) && stmt.name.to_s == transfer_name
       end
       if cleanup
-        cleanup.cleanup_entry[:has_moved_guard] = true
-        T.must(body).concat(ownership_transfer_marks(transfer_name, :block_result, move_guarded: true))
+        T.cast(cleanup, T.any(MIR::Cleanup, MIR::ErrCleanup)).cleanup_entry[:has_moved_guard] = true
+        body.concat(ownership_transfer_marks(transfer_name, :block_result, move_guarded: true))
       end
     end
-    T.must(body) << MIR::BreakStmt.new(label, result)
+    body << MIR::BreakStmt.new(label, result)
     MIR::BlockExpr.new(label, body)
   end
 
@@ -1566,7 +1733,7 @@ module MIRLoweringExpressions
     target = lower(node.target)
     start_expr = lower(node.start)
     end_expr = lower(node.end)
-    exclusive = node.instance_variable_get(:@exclusive)
+    exclusive = node.exclusive
 
     target_ti = Type.from_node!(node.target, context: "slice target")
     if target_ti.direct_indexable_collection?
@@ -1584,11 +1751,9 @@ module MIRLoweringExpressions
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
-  sig { params(node: AST::Assert).returns(T.any(MIR::AssertStmt, MIR::InlineBc, MIR::InlineZig)) }
+  sig { params(node: AST::Assert).returns(T.any(MIR::AssertStmt, MIR::InlineBc, MIR::Call)) }
   def lower_assert(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @target = T.let(@target, T.untyped)
     # Specialized lowering for `ASSERT a == b` — dispatch to one of
     # Zig's stdlib testing helpers so failures get a structured diff
     # instead of a bare `assertion failed` panic. Falls back to
@@ -1599,7 +1764,7 @@ module MIRLoweringExpressions
     # test register-pending forever. The CheatLib.assert fallback path
     # below evaluates the condition as a normal MIR expression and
     # routes through the runtime's bool-assert opcode.
-    if @target != :bc && (eq_lowering = try_lower_equality_assert(node))
+    if !bc_target? && (eq_lowering = try_lower_equality_assert(node))
       return eq_lowering
     end
 
@@ -1632,7 +1797,7 @@ module MIRLoweringExpressions
   # diagnostic output (field-by-field for structs, length+index for
   # slices, in-context highlight for strings) is rendered by Zig's
   # stdlib.
-  sig { params(node: AST::Assert).returns(T.nilable(MIR::InlineZig)) }
+  sig { params(node: AST::Assert).returns(T.nilable(MIR::Call)) }
   def try_lower_equality_assert(node)
     T.bind(self, MIRLowering) rescue nil
     cond = node.condition
@@ -1663,10 +1828,21 @@ module MIRLoweringExpressions
     args << left_zig
     args << right_zig
 
-    code = "try std.testing.#{helper}(#{args.join(', ')});"
-    iz = MIR::InlineZig.new(code, "assert_eq_#{helper}")
-    iz.stdlib_def = FunctionSignature.intrinsic_contract(borrows: :all, can_fail: true)
-    iz
+    args_mir = args.map { |arg| MIR::Lit.new(arg) }
+    params = args_mir.each_index.map do |idx|
+      AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
+    end
+    sig = FunctionSignature.new(params: params, return_type: Type.new(:Void), intrinsic: true)
+    sig.can_fail = true
+    sig.emit = IntrinsicEmit.new(borrows: :all)
+    contract = MIR::OwnershipContract.new(covers_consuming_params: true)
+    MIR::Call.new(
+      "std.testing.#{helper}",
+      args_mir,
+      true,
+      false,
+      MIR::CallableContract.new(sig, contract, args_mir.length),
+    )
   end
 
   # Picks the most specific Zig stdlib equality helper for the given
@@ -1717,9 +1893,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::Raise).returns(MIR::ScopeBlock) }
   def lower_raise(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @rt_name = T.let(@rt_name, T.untyped)
-    rt = MIR::Ident.new(@rt_name)
+    rt = MIR::Ident.new(runtime_binding_name)
     kind = ".#{node.kind || :Unknown}"
     # error_name is a u32 id into the per-program ErrorName enum. Emit
     # `@intFromEnum(ErrorName.Foo)` when a specific type is named; use
@@ -1747,28 +1921,26 @@ module MIRLoweringExpressions
   # Memory / capability expressions
   # ================================================================
 
-  sig { params(node: AST::CopyNode).returns(T.untyped) }
+  sig { params(node: AST::CopyNode).returns(MIR::Node) }
   def lower_copy(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @schema_lookup = T.let(@schema_lookup, T.untyped)
-    @union_schemas = T.let(@union_schemas, T.untyped)
-    @current_sink_type = T.let(@current_sink_type, T.nilable(Type))
-    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
+    function_state.current_sink_type = T.let(function_state.current_sink_type, T.nilable(Type))
+    function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
     ti = copy_source_type_info(node.value)
-    sink_type = @current_sink_type || @current_expected_type
+    sink_type = function_state.current_sink_type || function_state.current_expected_type
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     # Copy placement is destination-driven. Auto-COPY sites may stamp alloc
     # directly; otherwise the active sink allocator flows through
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
-    alloc = @current_decl_alloc || node.alloc || :heap
+    alloc = function_state.current_decl_alloc || node.alloc || :heap
 
     if ti.any_rc?
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
-    elsif ti.optional? && ti.needs_cleanup?(@schema_lookup)
+    elsif ti.optional? && ti.needs_cleanup?(mir_schema_lookup)
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
@@ -1777,13 +1949,13 @@ module MIRLoweringExpressions
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif dst_ti.collection? && !dst_ti.string?
       MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
-    elsif @union_schemas&.key?(ti.resolved)
+    elsif union_schemas.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
     elsif ti.any_sync?
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.collection_value?
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.collection? || (ti.struct? && ti.needs_promotion?(@schema_lookup))
+    elsif ti.collection? || (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
@@ -1799,7 +1971,7 @@ module MIRLoweringExpressions
     if source.is_a?(AST::GetIndex)
       target_ti = Type.from_node!(source.target, context: "COPY index target")
       elem = target_ti.element_type
-      return elem.is_a?(Type) ? elem : Type.new(elem) if elem
+      return elem if elem
     end
 
     sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
@@ -1843,31 +2015,23 @@ module MIRLoweringExpressions
   sig { params(v: T.untyped).void }
   def move_mark_field!(v)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
-    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    @pending_stmts = T.let(@pending_stmts, T.untyped)
     return unless v.is_a?(AST::Identifier)
     ti = v.full_type!(context: "field move mark")
     tracked = ti && !ti.primitive? && !ti.void? && !ti.any? &&
-              (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup))
+              (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(mir_schema_lookup))
     return unless tracked
     nm = zig_safe_name(v.name)
-    nm = @fn_name_rename_map[nm] if @fn_name_rename_map&.key?(nm)
-    entry = @current_bindings[v.name.to_s] || CleanupEntry::NONE
+    rename_map = function_state.rename_map
+    nm = rename_map.fetch(nm, nm)
+    entry = function_state.bindings[v.name.to_s] || CleanupEntry::NONE
     return unless entry.present?
     entry[:has_moved_guard] = true
-    (@guarded_cleanup_names ||= {})[nm] = true
+    function_state.guarded_cleanup_names[nm] = true
   end
 
   sig { params(node: AST::MoveNode).returns(MIR::Ident) }
   def lower_move(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    @pending_stmts = T.let(@pending_stmts, T.untyped)
     if node.value.is_a?(AST::Identifier)
       # Route through lower_identifier so BG capture-map rewrites apply:
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.

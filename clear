@@ -32,6 +32,7 @@ require 'digest'
 require 'set'
 require 'json'
 require_relative 'src/tools/clear_build_support'
+require_relative 'tools/zig_coverage_support'
 
 # Coverage bootstrap MUST run before any src/ require so SimpleCov can
 # instrument every file the subcommand loads. No-op unless COVERAGE=1.
@@ -147,7 +148,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -215,15 +216,19 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # MIR is the only pipeline (--mir flag no longer needed)
 
   cache_key = Digest::SHA256.hexdigest(source)[0, 16]
-  build_dir = File.join(ZIG_DIR, ".clear-cache", cache_key)
+  coverage_module_mode = module_mode && zig_coverage
+  build_dir = coverage_module_mode ? ZIG_DIR : File.join(ZIG_DIR, ".clear-cache", cache_key)
+  cleanup_paths = []
   FileUtils.mkdir_p(build_dir)
-  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-  ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
-  cache_dir = File.join(build_dir, '.zig-cache')
-  global_cache_dir = File.join(build_dir, '.global-zig-cache')
+  unless coverage_module_mode
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+  end
+  cache_dir = coverage_module_mode ? File.join(ZIG_DIR, ".clear-cache", "#{cache_key}-coverage-cache") : File.join(build_dir, '.zig-cache')
+  global_cache_dir = coverage_module_mode ? File.join(ZIG_DIR, ".clear-cache", "#{cache_key}-coverage-global-cache") : File.join(build_dir, '.global-zig-cache')
 
-  tmp_name = "._clear_tmp_#{base_name}.zig"
+  tmp_name = coverage_module_mode ? "._clear_cov_#{base_name}_#{$$}.zig" : "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
 
   begin
@@ -267,17 +272,33 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # multi-package build.zig.
   zig_code = zig_code.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
   ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
+  cleanup_paths << tmp_zig if coverage_module_mode
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
-  # and check if a matching .zig file exists in the source directory.
+  # and check for either a sibling module.zig or packages/module/src/lib.zig.
   extern_modules = source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
-  ffi_modules = extern_modules.select { |m|
-    # Skip standard library modules (std.json, std.fs, etc.)
-    !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
-  }
+  ffi_modules = extern_modules.filter_map do |m|
+    next if m.start_with?('std.')
+
+    sibling = File.join(source_dir, "#{m}.zig")
+    src_mod = if File.exist?(sibling)
+                sibling
+              else
+                ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
+              end
+    src_mod ? [m, src_mod] : nil
+  end
 
   # Copy FFI modules to build dir for compilation
-  ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(build_dir, "#{m}.zig")) }
+  ffi_modules.each do |m, src_mod|
+    dst_mod = File.join(build_dir, "#{m}.zig")
+    preexisting = File.exist?(dst_mod)
+    if coverage_module_mode && preexisting && File.read(dst_mod) != File.read(src_mod)
+      error "Coverage build cannot place FFI module #{m}.zig in #{build_dir}: file already exists"
+    end
+    FileUtils.cp(src_mod, dst_mod)
+    cleanup_paths << dst_mod if coverage_module_mode && !preexisting
+  end
 
   # Transpile package modules to .zig files
   pkg_modules = pkg_requires.map do |pkg_name|
@@ -311,7 +332,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
+    preexisting_pkg = File.exist?(pkg_zig_file)
+    if coverage_module_mode && preexisting_pkg && File.read(pkg_zig_file) != pkg_zig
+      error "Coverage build cannot place package module #{pkg_name}.zig in #{build_dir}: file already exists"
+    end
     ClearBuildSupport.write_if_changed(pkg_zig_file, pkg_zig)
+    cleanup_paths << pkg_zig_file if coverage_module_mode && !preexisting_pkg
     pkg_name
   end
 
@@ -340,8 +366,20 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
 
   cmd = cmd_parts.join(' ')
-  compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-  success = $?.success?
+  if coverage_module_mode
+    compile_output, compile_status = ZigCoverageSupport.run_zig_test(
+      zig: ZIG,
+      build_dir: build_dir,
+      args: cmd_parts.drop(2),
+      suite: zig_coverage_suite,
+      name: zig_coverage_name || base_name,
+      run_dir: zig_coverage_run_dir
+    )
+    success = compile_status.success?
+  else
+    compile_output = `cd #{build_dir} && #{cmd} 2>&1`
+    success = $?.success?
+  end
 
   # Move binary to output location (zig puts it in the build dir)
   if success && !module_mode
@@ -358,6 +396,10 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     profile_dir_path = output + ".profile"
     FileUtils.mkdir_p(profile_dir_path) if File.directory?(File.dirname(profile_dir_path))
     FileUtils.cp(tmp_zig, File.join(profile_dir_path, "transpiled.zig")) rescue nil
+  end
+
+  if coverage_module_mode && ENV['ZIG_COVERAGE_KEEP_BUNDLE'] != '1'
+    cleanup_paths.each { |path| FileUtils.rm_f(path) }
   end
 
   unless success
@@ -695,6 +737,8 @@ when 'test'
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
+  coverage_mode = test_args.delete('--coverage')
+  ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
   test_args.delete('--mir')  # No-op: MIR is the only pipeline
 
   # `--tag <name>` (repeatable). Translates to Zig's `--test-filter "#<name>"`
@@ -711,7 +755,7 @@ when 'test'
   end
 
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame] [--tag <name>]" unless source
+  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
   frame_env = frame_debug ? "CLEAR_FRAME_DEBUG=1 " : ""
 
   if File.directory?(source)
@@ -728,64 +772,73 @@ when 'test'
     leak_seen = {}
     # Each --tag becomes a `--test-filter "#<tag>"` (Zig's substring
     # filter; multiple are OR'd, matching any-of semantics).
-    tag_filter_args = tag_filters.flat_map { |t| ['--test-filter', "\"##{t}\""] }
-    zig_test_cmd = [
-      ZIG, 'test',
-      'all-tests.zig',
-      *RUNTIME_FILES,
-      '-lc',
-      *tag_filter_args
-    ].join(' ')
-
+    tag_filter_args = tag_filters.flat_map { |t| ['--test-filter', "##{t}"] }
+    zig_test_args = ['all-tests.zig', 'runtime/switch.S', 'runtime/onRoot.S', '-lc', *tag_filter_args]
     zig_test_status = nil
     zig_output = +""
-    IO.popen("cd #{ZIG_DIR} && #{zig_test_cmd} 2>&1") do |io|
-      io.each_line do |line|
-        zig_output << line
-        # Zig test result format: "N/M all-tests.test.NAME...OK" or "...FAIL"
-        # Result may be on the same line (inline) or a standalone "OK"/"FAIL" line.
-        if line =~ %r{^(\d+)/(\d+)\s+all-tests\.test\.(.+?)\.\.\.\s*(.*)$}
-          current_test = $3
-          result = $4.strip
-        else
-          result = nil
-          # Standalone result line (test printed output before result)
-          result = line.strip if current_test && line.strip =~ /^(OK|FAIL)\b/
-        end
+    handle_zig_line = lambda do |line|
+      # Zig test result format: "N/M all-tests.test.NAME...OK" or "...FAIL"
+      # Result may be on the same line (inline) or a standalone "OK"/"FAIL" line.
+      if line =~ %r{^(\d+)/(\d+)\s+all-tests\.test\.(.+?)\.\.\.\s*(.*)$}
+        current_test = $3
+        result = $4.strip
+      else
+        result = nil
+        # Standalone result line (test printed output before result)
+        result = line.strip if current_test && line.strip =~ /^(OK|FAIL)\b/
+      end
 
-        # Track leaks: GPA output appears after the test's OK/FAIL line,
-        # so attribute to last_completed_test when current_test is nil.
-        if line.include?('[gpa] (err)') && line.include?('leaked')
-          leaker = current_test || last_completed_test
-          if leaker && !leak_seen[leaker]
-            leak_seen[leaker] = true
-            leak_tests << leaker
-          end
-        end
-
-        next unless current_test
-
-        if result == 'OK'
-          print "\e[32m.\e[0m"
-          passed += 1
-          last_completed_test = current_test
-          current_test = nil
-        elsif result =~ /^FAIL/ || line.include?('Segmentation fault at address')
-          print "\e[31mF\e[0m"
-          failed += 1
-          failed_names << current_test
-          last_completed_test = current_test
-          current_test = nil
-        elsif line.include?('error: the following test command crashed')
-          print "\e[31mF\e[0m"
-          failed += 1
-          failed_names << current_test
-          last_completed_test = current_test
-          current_test = nil
+      # Track leaks: GPA output appears after the test's OK/FAIL line,
+      # so attribute to last_completed_test when current_test is nil.
+      if line.include?('[gpa] (err)') && line.include?('leaked')
+        leaker = current_test || last_completed_test
+        if leaker && !leak_seen[leaker]
+          leak_seen[leaker] = true
+          leak_tests << leaker
         end
       end
-      Process.wait(io.pid)
-      zig_test_status = $?
+
+      next unless current_test
+
+      if result == 'OK'
+        print "\e[32m.\e[0m"
+        passed += 1
+        last_completed_test = current_test
+        current_test = nil
+      elsif result =~ /^FAIL/ || line.include?('Segmentation fault at address')
+        print "\e[31mF\e[0m"
+        failed += 1
+        failed_names << current_test
+        last_completed_test = current_test
+        current_test = nil
+      elsif line.include?('error: the following test command crashed')
+        print "\e[31mF\e[0m"
+        failed += 1
+        failed_names << current_test
+        last_completed_test = current_test
+        current_test = nil
+      end
+    end
+
+    if coverage_mode
+      zig_output, zig_test_status = ZigCoverageSupport.run_zig_test(
+        zig: ZIG,
+        build_dir: ZIG_DIR,
+        args: zig_test_args,
+        suite: 'examples-benchmarks',
+        name: 'clear-test-directory'
+      )
+      zig_output.each_line { |line| handle_zig_line.call(line) }
+    else
+      zig_test_cmd = ([ZIG, 'test', *zig_test_args]).join(' ')
+      IO.popen("cd #{ZIG_DIR} && #{zig_test_cmd} 2>&1") do |io|
+        io.each_line do |line|
+          zig_output << line
+          handle_zig_line.call(line)
+        end
+        Process.wait(io.pid)
+        zig_test_status = $?
+      end
     end
 
     unless zig_test_status&.success?
@@ -812,6 +865,10 @@ when 'test'
       puts "  \e[32m\e[1mMEMORY LEAKS: 0\e[0m"
     end
     puts
+    if coverage_mode
+      merged = ZigCoverageSupport.merge!('examples-benchmarks')
+      puts "Merged Zig coverage: #{merged}" if merged
+    end
     exit(failed_names.any? ? 1 : 0)
   else
     source = File.expand_path(source)
@@ -831,20 +888,40 @@ when 'test'
     # directory-relative paths; top-level zig/*.zig symlinks are no longer
     # sufficient after the Zig 0.16 runtime/layout changes.
     base_name = File.basename(source, '.cht')
-    build_dir = File.join(ZIG_DIR, ".build-#{$$}")
+    build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
+    cleanup_paths = []
     FileUtils.mkdir_p(build_dir)
-    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
-    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
-    ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+    unless coverage_mode
+      ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+      ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+      ClearBuildSupport.ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
+    end
     source_dir = File.dirname(File.expand_path(source))
     extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
-    ffi_modules = extern_modules.select { |m|
-      !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
-    }
-    ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(build_dir, "#{m}.zig")) }
-    tmp_name = "._clear_tmp_#{base_name}.zig"
+    ffi_modules = extern_modules.filter_map do |m|
+      next if m.start_with?('std.')
+
+      sibling = File.join(source_dir, "#{m}.zig")
+      src_mod = if File.exist?(sibling)
+                  sibling
+                else
+                  ClearBuildSupport.find_zig_package_source(m, start_dir: source_dir)
+                end
+      src_mod ? [m, src_mod] : nil
+    end
+    ffi_modules.each do |m, src_mod|
+      dst_mod = File.join(build_dir, "#{m}.zig")
+      preexisting = File.exist?(dst_mod)
+      if coverage_mode && preexisting && File.read(dst_mod) != File.read(src_mod)
+        error "Coverage test cannot place FFI module #{m}.zig in #{build_dir}: file already exists"
+      end
+      FileUtils.cp(src_mod, dst_mod)
+      cleanup_paths << dst_mod if coverage_mode && !preexisting
+    end
+    tmp_name = coverage_mode ? "._clear_cov_#{base_name}_#{$$}.zig" : "._clear_tmp_#{base_name}.zig"
     tmp_zig = File.join(build_dir, tmp_name)
     File.write(tmp_zig, zig_code)
+    cleanup_paths << tmp_zig if coverage_mode
 
     # Compile and run with zig test. Tag filters: each --tag adds a
     # `--test-filter "#<tag>"` (Zig's substring filter). When tag
@@ -857,29 +934,61 @@ when 'test'
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
     if tag_filters.empty?
-      cmd_parts += ['--test-filter', "\"#{File.basename(source)}\""]
+      cmd_parts += ['--test-filter', File.basename(source)]
     else
-      tag_filters.each { |t| cmd_parts += ['--test-filter', "\"##{t}\""] }
+      tag_filters.each { |t| cmd_parts += ['--test-filter', "##{t}"] }
     end
-    cmd = cmd_parts.join(' ')
-    compile_output = `cd #{build_dir} && #{cmd} 2>&1`
-    success = $?.success?
-    FileUtils.rm_rf(build_dir)
+    if coverage_mode
+      compile_output, compile_status = ZigCoverageSupport.run_zig_test(
+        zig: ZIG,
+        build_dir: build_dir,
+        args: cmd_parts.drop(2),
+        suite: 'examples-benchmarks',
+        name: source.delete_prefix("#{CLEAR_ROOT}/"),
+        run_dir: source_dir
+      )
+      success = compile_status.success?
+      cleanup_paths.each { |path| FileUtils.rm_f(path) } unless ENV['ZIG_COVERAGE_KEEP_BUNDLE'] == '1'
+    else
+      cmd = cmd_parts.join(' ')
+      compile_output = `cd #{build_dir} && #{cmd} 2>&1`
+      success = $?.success?
+      FileUtils.rm_rf(build_dir)
+    end
 
     if !success || compile_output.include?('FAIL')
       $stderr.puts "\e[31m\e[1mTEST FAILED\e[0m"
       $stderr.puts compile_output
       exit 1
     end
+    if coverage_mode
+      merged = ZigCoverageSupport.merge!('examples-benchmarks')
+      puts "Merged Zig coverage: #{merged}" if merged
+    end
     puts compile_output unless compile_output.strip.empty?
     exit 0
   end
 
 when 'benchmark'
-  source = ARGV[1]
-  error "Usage: clear benchmark <file.cht>" unless source
+  bench_args = ARGV[1..] || []
+  coverage_mode = bench_args.delete('--coverage')
+  ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
+  source = bench_args.first
+  error "Usage: clear benchmark <file.cht> [--coverage]" unless source
   # Benchmark mode: same as test but also runs BENCHMARK/SMASH blocks
-  do_build(source, module_mode: true, default_stack: 'Large')
+  do_build(
+    source,
+    module_mode: true,
+    default_stack: 'Large',
+    zig_coverage: coverage_mode,
+    zig_coverage_suite: 'examples-benchmarks',
+    zig_coverage_name: source,
+    zig_coverage_run_dir: File.dirname(File.expand_path(source))
+  )
+  if coverage_mode
+    merged = ZigCoverageSupport.merge!('examples-benchmarks')
+    puts "Merged Zig coverage: #{merged}" if merged
+  end
   puts "Benchmarks complete."
 
 when 'profile'

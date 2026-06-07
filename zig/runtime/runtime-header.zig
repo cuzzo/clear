@@ -20,7 +20,7 @@ extern "c" fn memchr(s: [*]const u8, c: c_int, n: usize) ?[*]const u8;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
-const freeze_mod = @import("../experimental/freeze.zig");
+const freeze_mod = @import("freeze.zig");
 
 /// Lock-free observable accumulators (AtomicSum, AtomicCount,
 /// Observable<T>, StreamSet, ...). Re-exported so CLEAR programs

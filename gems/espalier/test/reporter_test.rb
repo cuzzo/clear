@@ -129,4 +129,30 @@ class ReporterTest < Minitest::Test
       assert_includes report, "## Cross-Tool Overlap"
     end
   end
+
+  def test_state_owner_pressure_explicitly_flags_state_heavy_owners
+    manifest = [
+      {
+        module: "StateBucket",
+        file: "src/state_bucket.rb",
+        type: :class,
+        state: Array.new(6) { |idx| { name: "@s#{idx}", type: "Object", properties: [] } },
+        functions: Array.new(6) do |idx|
+          {
+            name: "mutate_#{idx}",
+            signature: "def mutate_#{idx}(value)",
+            EFFECTS: { reads: [], writes: ["@s#{idx}"] },
+            DELEGATIONS: {}
+          }
+        end
+      }
+    ]
+
+    report = Espalier::Reporter.new(manifest, root: Dir.pwd).to_markdown
+
+    assert_includes report, "## State Owner Pressure"
+    assert_includes report, "flags"
+    assert_includes report, "state-heavy"
+    assert_includes report, "many-mutators"
+  end
 end

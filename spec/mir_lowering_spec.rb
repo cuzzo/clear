@@ -17,7 +17,7 @@ RSpec.describe MIRLowering do
   let(:emitter) { MIREmitter.new }
 
   def lowering(**opts)
-    MIRLowering.new(**opts)
+    MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 
   def emit(mir_node)
@@ -78,12 +78,13 @@ RSpec.describe MIRLowering do
 
   def capture_analysis(captures: {}, capture_symbols: {}, close_patterns: {},
                        pointer_captures: Set.new, string_captures: Set.new,
-                       resource_captures: Set.new, strategies: nil)
+                       resource_captures: Set.new, strategies: {})
+    typed_captures = captures.to_h { |name, type| [name.to_s, type.is_a?(Type) ? type : Type.new(type)] }
     CapabilityHelper::CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
-      captures: captures, capture_symbols: capture_symbols,
+      captures: typed_captures, capture_symbols: capture_symbols,
       close_patterns: close_patterns,
       pointer_captures: pointer_captures, string_captures: string_captures,
       resource_captures: resource_captures,
@@ -182,6 +183,22 @@ RSpec.describe MIRLowering do
     [low, result]
   end
 
+  def lower_source_mir(src)
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+    low = lowering(
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      moved_guard_info: result.moved_guard_info,
+      importer: importer,
+      source_dir: Dir.pwd,
+      debug_mode: true
+    )
+    low.lower_program(result.ast)
+  end
+
   def lower_fixture_mir(path)
     low, result = compile_fixture_lowering(path)
     low.lower_program(result.ast)
@@ -249,12 +266,47 @@ RSpec.describe MIRLowering do
       expect(out).to include("__worker")
     end
 
+    it "builds typed BG lowering, scheduler, and FSM transform plans" do
+      low = lowering
+      id = MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: 12)
+      node = AST::BgBlock.new(tok, [], nil, nil, true, nil, true, nil)
+      node.full_type = :"~Void"
+
+      names = low.send(:bg_lowering_names, id)
+      types = low.send(:bg_type_plan, node)
+      capture = low.send(:bg_capture_materialization, names, nil, {}, {}, Set.new)
+      scheduler = low.send(:bg_scheduler_plan, node, names, "rt")
+      body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+      ctx = MIRLoweringConcurrency::BgFsmTransformContext.new(
+        node: node,
+        names: names,
+        types: types,
+        capture: capture,
+        body: body,
+        scheduler: scheduler,
+        captured: {},
+        capture_close_zig: {},
+        pointer_captures: Set.new,
+        rt_name: "rt",
+      )
+
+      expect(names.ctx_type).to eq("__BgCtx12")
+      expect(types.promise_zig).to include("Promise")
+      expect(capture.capture_inits).to include(".inner = __bg12_promise.inner")
+      expect(scheduler.dispatch).to eq(true)
+      expect(scheduler.arena_init).to eq("__rt_bg12.arena_mode = true;")
+      expect(low.send(:bg_runtime_suppress_line, body, capture, scheduler, names)).to eq("")
+      expect(low.send(:bg_alloc_expr, node, "rt")).to eq("rt.getSched().allocator")
+      expect(ctx.to_transform_hash.fetch(:ctx_type)).to eq("__BgCtx12")
+      expect(ctx.to_transform_hash.fetch(:parallel)).to eq(false)
+    end
+
     it "strips leading try when assigning a BG value result" do
       fake = Object.new
       fake.extend(MIRLoweringConcurrency)
       expr = make_lit(:INT64, 1)
       step = MIRLoweringConcurrency::BgBodyStep.new(expr: expr, binding: nil)
-      lowered = MIR::RawZig.new("try compute()", "spec")
+      lowered = MIR::InlineZig.new("try compute()", "spec")
 
       fake.define_singleton_method(:escaping_value_alloc) { |_inner| :heap }
       fake.define_singleton_method(:with_decl_alloc) { |_alloc, &blk| blk.call }
@@ -266,7 +318,8 @@ RSpec.describe MIRLowering do
       fake.define_singleton_method(:ownership_marks_for_transferred_temp) { |_mir, target_alloc:| [] }
 
       body = []
-      result = fake.send(:lower_bg_value_result, step, body, 7, Type.new(:Int64))
+      id = MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: 7)
+      result = fake.send(:lower_bg_value_result, step, body, id, Type.new(:Int64))
       expect(result).to eq("__ctx_7.inner.result = compute();")
       expect(body).to include(an_instance_of(MIR::Set))
     end
@@ -286,7 +339,7 @@ RSpec.describe MIRLowering do
       fake.extend(MIRLoweringControlFlow)
       fake.define_singleton_method(:lower) { |value| value }
       fake.define_singleton_method(:emit_expr) { |_value| ".Fallback" }
-      arm = Struct.new(:value, :extra_values).new(Object.new, [])
+      arm = AST::MatchCase.new(kind: :eq, value: AST::Identifier.new(tok, "fallback"), body: [], extra_values: [])
 
       expect(fake.send(:union_match_case_variants, arm)).to eq(["Fallback"])
     end
@@ -334,7 +387,7 @@ RSpec.describe MIRLowering do
     it "translates MIR::SuppressCleanup to explicit transfer and move marks when a cleanup guard is visible" do
       suppress = MIR::SuppressCleanup.new(tok, "buf")
       l = lowering
-      l.instance_variable_set(:@guarded_cleanup_names, { "buf" => true })
+      l.function_state.guarded_cleanup_names = { "buf" => true }
       result = l.lower(suppress)
       expect(result).to contain_exactly(
         an_instance_of(MIR::TransferMark),
@@ -650,6 +703,66 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::BinOp)
       expect(emit(result)).to eq("(true and false)")
     end
+
+    it "keeps boolean RHS pending MIR inside the short-circuit boundary" do
+      low = lowering
+      left = make_lit(:BOOLEAN, false, full_type: :Boolean)
+      right = make_id("rhs", full_type: :Boolean)
+      node = make_binop(left, :AND, right)
+      original_lower = low.method(:lower)
+
+      low.define_singleton_method(:lower) do |child|
+        if child.equal?(right)
+          pending = function_state.pending_stmts
+          pending << MIR::AllocMark.new("__rhs_tmp", :heap, Type.new(:String))
+          pending << MIR::Let.new("__rhs_tmp", MIR::DupeSlice.new(MIR::Lit.new("\"rhs\""), :heap), false, nil, nil)
+          MIR::Lit.new("true")
+        else
+          original_lower.call(child)
+        end
+      end
+
+      result = low.lower(node)
+      expect(result).to be_a(MIR::BinOp)
+      expect(result.right).to be_a(MIR::BlockExpr)
+      expect(low.flush_pending).to be_empty
+
+      zig = emit(result)
+      expect(zig).to include("false and __lazy_")
+      expect(zig).to include("break :__lazy_")
+    end
+  end
+
+  describe "assignment allocator provenance" do
+    it "uses declaration identity for same-name branch reassignment cleanup allocators" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN make() RETURNS String ->
+          RETURN "b" + "c";
+        END
+
+        FN main() RETURNS Void ->
+          IF TRUE THEN
+            MUTABLE s = "a";
+            s = s + "x";
+          ELSE
+            MUTABLE s = make();
+            s = s + "y";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      errors = MIRChecker.new.check_program!(mir)
+      expect(errors).to be_empty
+
+      zig = emit(mir)
+      expect(zig).to match(/var s: \[\]const u8 = .*rt\.frameAlloc\(\)/)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(s), rt.frameAlloc(), &s)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(s), rt.heapAlloc(), &s)")
+
+      expect(zig).to match(/var s_L\d+: \[\]const u8 = try make\(rt\)/)
+      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf\(s_L\d+\), rt\.heapAlloc\(\), &s_L\d+\)/)
+    end
   end
 
   # =========================================================================
@@ -771,54 +884,31 @@ RSpec.describe MIRLowering do
       expect(zig).to include("Empty: void")
     end
 
-    it "filters Zig type definition blocks by visible imported names" do
-      source = <<~ZIG
-        const Keep = struct {
-            value: i64,
-        };
-        const Drop = enum {
-            A,
-        };
-        const AlsoKeep = union(enum) {
-            One: i64,
-        };
-      ZIG
-
-      filtered = lowering.send(:keep_zig_const_blocks, source, Set["Keep", "AlsoKeep"])
-
-      expect(filtered).to include("const Keep")
-      expect(filtered).to include("const AlsoKeep")
-      expect(filtered).not_to include("const Drop")
-    end
-
-    it "emits only public or same-directory package-visible imported type definitions once" do
+    it "selects only public or same-directory package-visible imported type items once" do
       pub_struct = AST::StructDef.new(tok, "PubThing", {}, :pub, nil)
       pkg_enum = AST::EnumDef.new(tok, "PkgThing", [:A], nil)
       private_struct = AST::StructDef.new(tok, "PrivateThing", {}, :private, nil)
       inline_union = AST::UnionDef.new(tok, "Value", { Pair: Schemas::InlineStructVariant.new(fields: {}) }, :pub)
       ast = AST::Program.new(tok, [pub_struct, pkg_enum, private_struct, inline_union])
-      type_defs = <<~ZIG
-        const PubThing = struct {};
-        const PkgThing = enum { A };
-        const PrivateThing = struct {};
-        const Value = union(enum) { Pair: Value_Pair };
-        const Value_Pair = struct {};
-      ZIG
-      mod = ModuleImporter::CompiledModule.new(ast, nil, nil, Dir.pwd, {}, {}, {}, type_defs)
+      type_items = [
+        MIR::StructDef.new("PubThing", [], nil, :pub),
+        MIR::EnumDef.new("PkgThing", ["A"], nil),
+        MIR::StructDef.new("PrivateThing", [], nil, :private),
+        MIR::UnionTypeDef.new("Value", [{ name: "Pair", zig_type: "Value_Pair" }], :pub),
+        MIR::StructDef.new("Value_Pair", [], nil, :private),
+      ]
+      mod = ModuleImporter::CompiledModule.new(ast, nil, nil, Dir.pwd, {}, {}, {}, nil, nil, type_items)
       low = lowering
 
-      same_dir_defs = low.send(:visible_type_defs, mod, same_dir: true)
-      second_pass = low.send(:visible_type_defs, mod, same_dir: true)
-      other_dir_defs = lowering.send(:visible_type_defs, mod, same_dir: false)
+      same_dir_names = low.send(:visible_type_items, mod, same_dir: true).map(&:name)
+      second_pass = low.send(:visible_type_items, mod, same_dir: true)
+      other_dir_names = lowering.send(:visible_type_items, mod, same_dir: false).map(&:name)
 
-      expect(same_dir_defs).to include("const PubThing")
-      expect(same_dir_defs).to include("const PkgThing")
-      expect(same_dir_defs).to include("const Value")
-      expect(same_dir_defs).to include("const Value_Pair")
-      expect(same_dir_defs).not_to include("const PrivateThing")
-      expect(second_pass).to be_nil
-      expect(other_dir_defs).to include("const PubThing")
-      expect(other_dir_defs).not_to include("const PkgThing")
+      expect(same_dir_names).to include("PubThing", "PkgThing", "Value", "Value_Pair")
+      expect(same_dir_names).not_to include("PrivateThing")
+      expect(second_pass).to eq([])
+      expect(other_dir_names).to include("PubThing", "Value", "Value_Pair")
+      expect(other_dir_names).not_to include("PkgThing")
     end
   end
 
@@ -862,6 +952,30 @@ RSpec.describe MIRLowering do
       node.var_used = false
       result = lowering.lower(node)
       expect(result.suppression).to eq("_ = unused;")
+    end
+
+    it "delegates set declarations with SMOOTH values to expression lowering" do
+      delegate = Class.new do
+        include MIRLoweringVariables
+
+        attr_reader :lowered_node
+
+        def lower(node)
+          @lowered_node = node
+          MIR::Ident.new("lowered_smooth")
+        end
+      end.new
+      source = make_id("items", full_type: :"Int64[]")
+      stage = AST::DistinctOp.new(tok, make_id("_"))
+      smooth = AST::BinaryOp.new(tok, source, :SMOOTH, stage)
+      smooth.full_type = Type.new(:"Int64[]", collection: :set)
+      node = AST::VarDecl.new(tok, "unique", nil, smooth, false)
+      node.full_type = Type.new(:"Int64[]", collection: :set)
+
+      result = delegate.send(:lower_var_decl_init, node, node.full_type, "Set_i64", false, :frame)
+
+      expect(result.name).to eq("lowered_smooth")
+      expect(delegate.lowered_node).to equal(smooth)
     end
 
     it "lowers BindExpr in decl mode" do
@@ -1168,6 +1282,24 @@ RSpec.describe MIRLowering do
     end
   end
 
+  describe "intrinsic receiver allocation lowering" do
+    it "hoists frame-returning string intrinsics before direct string length" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          line = "SET:12345:payload";
+          total = substr(line, 4_i64, 5_i64).length();
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      zig = emit(mir)
+      expect(zig).to include("CheatLib.substr")
+      expect(zig).to match(/const __tmp_\d+ = .*CheatLib\.substr/)
+      expect(zig).to match(/@intCast\(__tmp_\d+\.len\)/)
+    end
+  end
+
   # =========================================================================
   # Control flow
   # =========================================================================
@@ -1366,6 +1498,26 @@ RSpec.describe MIRLowering do
       expect(result.default_body).to eq([])
     end
 
+    it "omits unreachable defaults for exhaustive enum switches" do
+      expr = make_id("op", full_type: :Op)
+      get = AST::GetField.new(tok, make_id("Op"), "Get")
+      get.full_type = :Op
+      put = AST::GetField.new(tok, make_id("Op"), "Put")
+      put.full_type = :Op
+      cases = [
+        AST::MatchCase.new(kind: :eq, value: get, body: [make_lit(:NUMBER, 1.0)]),
+        AST::MatchCase.new(kind: :eq, value: put, body: [make_lit(:NUMBER, 2.0)]),
+      ]
+      node = AST::MatchStatement.new(tok, expr, cases, [make_lit(:NUMBER, 3.0)], nil, nil, false, nil)
+      node.full_type = :Void
+
+      result = lowering(enum_schemas: { Op: [:Get, :Put] }).lower(node)
+
+      expect(result).to be_a(MIR::SwitchStmt)
+      expect(result.default_body).to be_nil
+      expect(emit(result)).not_to include("else =>")
+    end
+
     it "lowers expression-mode match to a BlockExpr" do
       expr = make_id("x", full_type: :Int64)
       cases = [AST::MatchCase.new(kind: :eq, value: make_lit(:INT64, 1, full_type: :Int64), body: [make_lit(:INT64, 10, full_type: :Int64)])]
@@ -1417,8 +1569,8 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::IfChain)
-      expect(result.branches.first[:cond]).to be_a(MIR::Lit)
-      expect(emit(result.branches.first[:cond])).to eq("true")
+      expect(result.branches.first.cond).to be_a(MIR::Lit)
+      expect(emit(result.branches.first.cond)).to eq("true")
     end
   end
 
@@ -1485,13 +1637,13 @@ RSpec.describe MIRLowering do
                                     mutable: true, storage: :stack, sync: :locked)
 
       # CleanupClassifier is the cleanup-recipe authority; lowering inherits
-      # from @current_bindings (INV-14). Drive it as the pipeline does
+      # from FunctionState current bindings (INV-14). Drive it as the pipeline does
       # rather than the removed destination-synthesis fallback.
       fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [node],
                                 nil, nil, nil, nil, false)
       low = lowering
-      low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
+      low.function_state.current_bindings =
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil })
 
       result = low.lower(node)
       expect(result).to be_a(Array)
@@ -1651,6 +1803,59 @@ RSpec.describe MIRLowering do
       expect(zig).to include("Node{")
       expect(zig).not_to include("create(Node)")
       expect(zig).to include(".value = 1.0")
+    end
+
+    it "lowers borrowed dynamic array fields as borrowed items access" do
+      source = make_id("items", full_type: Type.array_of(:Int64))
+      node = AST::StructLit.new(tok, "Window", { "items" => source }, nil, nil)
+      node.full_type = :Window
+      node.borrowed_field_names = Set["items"]
+
+      result = lowering(struct_schemas: {
+        Window: Schemas::StructSchema.new(fields: { "items" => Type.array_of(:Int64) }),
+      }).lower(node)
+
+      field_value = MIR.struct_init_field_value(result.fields.first)
+      expect(field_value).to be_a(MIR::ItemsAccess)
+      expect(field_value.expr).to eq(MIR::Ident.new("items"))
+      expect(field_value.safe).to eq(true)
+    end
+  end
+
+  describe "indirect aggregate field ownership" do
+    it "moves recursive union locals when they are boxed into indirect inline-variant fields" do
+      src = <<~CLEAR
+        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+
+        FN mk() RETURNS !Node ->
+            left = Node{ One: COPY "a" };
+            right = Node{ One: COPY "b" };
+            RETURN Node.Pair{ left: left, right: right };
+        END
+      CLEAR
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+      low = lowering(
+        struct_schemas: result.struct_schemas,
+        enum_schemas: result.enum_schemas,
+        union_schemas: result.union_schemas,
+        fn_sigs: result.fn_sigs,
+        moved_guard_info: result.moved_guard_info,
+        importer: importer,
+        source_dir: Dir.pwd
+      )
+      program = low.lower_program(result.ast)
+      mk_fn = program.items.find { |item| item.is_a?(MIR::FnDef) && item.name == "mk" }
+      hoisted_return = mk_fn.body.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s.start_with?("__hoist_") }
+      block = hoisted_return.init
+
+      expect(block).to be_a(MIR::BlockExpr)
+      expect(block.body).to include(
+        an_instance_of(MIR::TransferMark).and(have_attributes(name: "left", target: :owned_sink)),
+        an_instance_of(MIR::MoveMark).and(have_attributes(name: "left")),
+        an_instance_of(MIR::TransferMark).and(have_attributes(name: "right", target: :owned_sink)),
+        an_instance_of(MIR::MoveMark).and(have_attributes(name: "right"))
+      )
     end
   end
 
@@ -2001,6 +2206,20 @@ RSpec.describe MIRLowering do
       expect(zig).to include("defer if (__held")
       expect(zig).to include("const left")
       expect(zig).to include("const right")
+
+      materialization = MIRLoweringCapabilities::WithBindingMaterialization.new(
+        bindings: [],
+        fallible_clauses: [],
+      )
+      lowering.send(:materialize_sorted_lock_bindings,
+        with_node,
+        materialization,
+        caps,
+        clause,
+        "__with_label")
+
+      expect(materialization.bindings.first).to include("acquireOrErr")
+      expect(materialization.fallible_clauses.map(&:var_name)).to eq(["a", "b"])
     end
   end
 
@@ -2064,7 +2283,20 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::IfBindStmt)
       then_zig = result.then_body.map { |stmt| emit(stmt) }.join("\n")
       expect(emit(result.bindings.first[:expr])).to include("CheatLib.weakRcUpgrade")
+      expect(result.then_body[0]).to be_a(MIR::AllocMark)
+      expect(result.then_body[0].name).to eq("node")
+      expect(result.then_body[1]).to be_a(MIR::Cleanup)
+      expect(result.then_body[1].name).to eq("node")
       expect(then_zig).to include("break;")
+    end
+
+    it "stamps frame allocation scopes inside IF-bind bodies" do
+      mark = MIR::AllocMark.new("tmp", :frame, Type.new(:String), :iteration)
+      if_bind = MIR::IfBindStmt.new([{ expr: MIR::Ident.new("maybe"), capture: "value" }], [mark], nil)
+
+      lowering.send(:stamp_loop_frame_alloc_scopes!, [if_bind], :function)
+
+      expect(mark.scope).to eq(:function)
     end
 
     it "lowers FOR EACH over maps through keyIterator optional binding" do
@@ -2136,6 +2368,40 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "function calls" do
+    it "does not invent ownership cleanup for copy-only union call results" do
+      mir = lower_source_mir(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        UNION Item { Boxed: Box, Raw: Int64, Empty }
+
+        FN makeItem(i: Int64) RETURNS Item ->
+          RETURN Item{ Raw: i };
+        END
+
+        FN scoreItem(item: Item) RETURNS Int64 ->
+          PARTIAL MATCH item START
+            Item.Raw AS v -> RETURN v;,
+            DEFAULT -> RETURN 0_i64;
+          END
+          RETURN 0_i64;
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE total = 0_i64;
+          MUTABLE i = 0_i64;
+          WHILE i < 3_i64 DO
+            total = total + scoreItem(makeItem(i));
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      main = mir.items.find { |item| item.is_a?(MIR::FnDef) && item.name == "clearMain" }
+      alloc_names = collect_mir_nodes(main.body, MIR::AllocMark).map(&:name)
+      expect(alloc_names).not_to include(a_string_matching(/__tmp/))
+    end
+
     it "treats owned-return calls as allocating even when the result type is scalar-shaped" do
       call = MIR::Call.new("ownedScalar", [], false, true)
       call.result_type = Type.new(:Int64)
@@ -2307,6 +2573,20 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include("makeList")
+    end
+
+    it "wraps non-empty @list literals in declared sync and ownership capabilities" do
+      items = [make_lit(:NUMBER, 1, full_type: :Int64), make_lit(:NUMBER, 2, full_type: :Int64)]
+      items.each { |i| i.coerced_type = :Int64 }
+      node = AST::ListLit.new(tok, items, nil)
+      node.full_type = Type.new(:"Int64[]", collection: :list, ownership: :shared, sync: :locked)
+
+      low = lowering
+      result = low.send(:with_expected_type, node.full_type) { low.lower(node) }
+      zig = emit(result)
+      expect(result).to be_a(MIR::CapWrap)
+      expect(zig).to include("CheatLib.lockedCreate(std.ArrayListUnmanaged(i64)")
+      expect(zig).to include("CheatLib.arcCreate(CheatLib.Locked(std.ArrayListUnmanaged(i64))")
     end
   end
 
@@ -2543,13 +2823,13 @@ RSpec.describe MIRLowering do
     it "lowers single-branch DoBlock with WaitGroup" do
       body_lit = make_lit(:NUMBER, 42, full_type: :Int64)
       body_lit.coerced_type = :Int64
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_lit],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2569,8 +2849,8 @@ RSpec.describe MIRLowering do
       lit2 = make_lit(:NUMBER, 2, full_type: :Int64)
       lit2.coerced_type = :Int64
       branches = [
-        { body: [lit1], capture_analysis: nil, pinned: false, stack_size: nil, computed_stack_tier: nil },
-        { body: [lit2], capture_analysis: nil, pinned: true, stack_size: nil, computed_stack_tier: nil }
+        AST::DoBranch.new(body: [lit1], capture_analysis: nil, pinned: false, stack_size: nil, computed_stack_tier: nil),
+        AST::DoBranch.new(body: [lit2], capture_analysis: nil, pinned: true, stack_size: nil, computed_stack_tier: nil),
       ]
       node = AST::DoBlock.new(tok, branches)
       node.full_type = :Void
@@ -2591,13 +2871,13 @@ RSpec.describe MIRLowering do
       body_id = make_id("x", full_type: :Int64)
       captures_hash = { "x" => :Int64 }
       analysis = capture_analysis(captures: captures_hash)
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_id],
         capture_analysis: analysis,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2632,13 +2912,13 @@ RSpec.describe MIRLowering do
         string_captures: Set.new,
         resource_captures: Set.new
       )
-      branch = {
+      branch = AST::DoBranch.new(
         body: [nested_bg],
         capture_analysis: branch_analysis,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2659,13 +2939,13 @@ RSpec.describe MIRLowering do
       decl.var_used = true
       decl.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
                                     mutable: true, storage: :stack, sync: :locked)
-      branch = {
+      branch = AST::DoBranch.new(
         body: [decl],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2674,8 +2954,8 @@ RSpec.describe MIRLowering do
       fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [decl],
                                 nil, nil, nil, nil, false)
       low = lowering
-      low.instance_variable_set(:@current_bindings,
-        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil }))
+      low.function_state.current_bindings =
+        CleanupClassifier.classify(fn, schema_lookup: ->(_) { nil })
 
       zig = emit(low.lower(node))
       expect(zig).to include("blk_copy_")
@@ -2686,13 +2966,13 @@ RSpec.describe MIRLowering do
     it "lowers DoBlock with stack tier" do
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
       body_lit.coerced_type = :Int64
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_lit],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: :large
-      }
+        computed_stack_tier: :large,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2750,6 +3030,30 @@ RSpec.describe MIRLowering do
       expect(zig).to include(".x = &x")
     end
 
+    it "keeps nested BG pointer capture initializers pointed at rewritten outer refs" do
+      body_id = make_id("x", full_type: :Int64)
+      analysis = capture_analysis(
+        captures: { "x" => :Int64 },
+        capture_symbols: {},
+        close_patterns: {},
+        pointer_captures: Set["x"],
+        string_captures: Set.new,
+        resource_captures: Set.new
+      )
+      node = AST::BgBlock.new(tok, [body_id], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+      node.capture_analysis = analysis
+      low = lowering
+      low.capture_state.do_capture_map = { "x" => "__ctx_outer.x" }
+
+      zig = emit(low.lower(node))
+
+      expect(zig).to include("x: @TypeOf(&__ctx_outer.x)")
+      expect(zig).to include(".x = &__ctx_outer.x")
+    ensure
+      low&.capture_state&.do_capture_map = nil
+    end
+
     it "lowers pinned BgBlock with submitSpawn" do
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
       body_lit.coerced_type = :Int64
@@ -2791,8 +3095,8 @@ RSpec.describe MIRLowering do
       step2 = make_lit(:NUMBER, 2, full_type: :Int64)
       step2.coerced_type = :Int64
       chain = AST::ThenChain.new(tok, [
-        { expr: step1, binding: "a" },
-        { expr: step2, binding: nil }
+        AST::ThenStep.new(expr: step1, binding: "a"),
+        AST::ThenStep.new(expr: step2, binding: nil),
       ])
       chain.full_type = :Int64
       node = AST::BgBlock.new(tok, [chain], nil, nil, nil, nil, nil, nil)
@@ -2831,7 +3135,12 @@ RSpec.describe MIRLowering do
       node.full_type = :"~?Int64[]"
       node.capture_analysis = capture_analysis(
         captures: { "items" => Type.new(:"Int64[]@list") },
-        strategies: { "items" => CaptureStrategy::Refuse.new(:list_borrow_without_transfer, "items") }
+        strategies: {
+          "items" => CaptureStrategy::Refuse.new(
+            reason: :list_borrow_without_transfer,
+            owner_name: "items"
+          )
+        }
       )
 
       expect { lowering.lower(node) }
@@ -3132,7 +3441,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::AssertRaisesCheck)
       zig = emit(result)
       expect(zig).to include("ASSERT_RAISES")
       expect(zig).to include("matchesKind(.Runtime)")
@@ -3170,6 +3479,191 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       expect { lowering.lower(node) }.to raise_error(/no importer available/)
+    end
+
+    it "lowers local require to visible type items plus a structural module namespace" do
+      imported_fn_ast = AST::FunctionDef.new(tok, "helper_value", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
+      imported_fn_ast.needs_rt = false
+      imported_fn_ast.can_fail = false
+      imported_ast = AST::Program.new(tok, [
+        AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
+        imported_fn_ast,
+      ])
+      imported_type = MIR::StructDef.new("PublicType", [], nil, :pub)
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        [imported_type],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+      node = AST::RequireNode.new(tok, "helper.cht", "helper", :local)
+
+      result = lowering(importer: importer, source_dir: Dir.pwd).lower(node)
+
+      expect(result).to include(imported_type)
+      namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
+      expect(namespace.name).to eq("helper")
+      expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
+      expect(emit(namespace)).to include("const helper = struct")
+    end
+
+    it "emits a repeated local require module only once" do
+      imported_fn = MIR::FnDef.new(
+        "helper_value",
+        [],
+        "i64",
+        [MIR::ReturnStmt.new(MIR::Lit.new("7"))],
+        :pub, false, nil
+      )
+      imported_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, []),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [imported_fn],
+        [],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+      low = lowering(importer: importer, source_dir: Dir.pwd)
+
+      first = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
+      second = low.lower(AST::RequireNode.new(tok, "grid.cht", "grid", :local))
+
+      expect(first).to include(an_instance_of(MIR::ModuleNamespace))
+      expect(second).to eq([])
+    end
+
+    it "falls back to a structural namespace for BC local require when no helper functions exist" do
+      imported_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, []),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [],
+        [],
+      )
+      importer = ModuleImporter.new(base_dir: Dir.pwd)
+      importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
+
+      result = lowering(importer: importer, source_dir: Dir.pwd, target: :bc)
+        .lower(AST::RequireNode.new(tok, "empty.cht", "empty", :local))
+
+      expect(result).to contain_exactly(an_instance_of(MIR::ModuleNamespace))
+    end
+
+    it "reconstructs imported module items from AST without nesting requires" do
+      private_fn = AST::FunctionDef.new(tok, "private_helper", [], nil, :Void, nil, [], nil, nil, :private, nil, false)
+      imported_ast = AST::Program.new(tok, [
+        private_fn,
+        AST::RequireNode.new(tok, "math", "math", :package),
+        AST::ExternFnDecl.new(tok, "puts", [], Type.new(:Void), "c", nil),
+        make_lit(:NUMBER, 1),
+      ])
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      items = lowering.send(:imported_module_items, imported_mod)
+
+      expect(items).not_to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
+      expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
+    end
+
+    it "hoists imported module requires as dependency items" do
+      imported_ast = AST::Program.new(tok, [
+        AST::RequireNode.new(tok, "math", "math", :package),
+      ])
+      imported_mod = ModuleImporter::CompiledModule.new(
+        imported_ast,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      items = lowering.send(:imported_module_dependency_items, imported_mod)
+
+      expect(items).to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
+    end
+
+    it "filters imported type items and BC helper items defensively" do
+      public_struct = AST::StructDef.new(tok, "PublicType", {}, :pub, nil)
+      struct_item = MIR::StructDef.new("PublicType", [], nil, :pub)
+      mixed_type_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        [Object.new, MIR::Lit.new("1"), struct_item],
+      )
+      nil_type_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+      no_ast_mod = ModuleImporter::CompiledModule.new(nil, nil, nil, Dir.pwd, {}, {}, {}, nil, nil, nil)
+      orphan_fn = MIR::FnDef.new("orphan", [], "void", [], :pub, false, nil)
+      ast_without_fns_mod = ModuleImporter::CompiledModule.new(
+        AST::Program.new(tok, [public_struct]),
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        nil,
+        nil,
+      )
+
+      expect(lowering.send(:visible_type_items, nil_type_mod)).to eq([])
+      expect(lowering.send(:visible_type_items, mixed_type_mod)).to eq([struct_item])
+      expect(lowering.send(:imported_module_items, no_ast_mod)).to eq([])
+      expect(lowering.send(:imported_bc_helper_fns, no_ast_mod, [struct_item, orphan_fn])).to eq([orphan_fn])
+      expect(lowering.send(:imported_bc_helper_fns, ast_without_fns_mod, [])).to eq([])
     end
   end
 
@@ -3273,6 +3767,13 @@ RSpec.describe MIRLowering do
         # with heapAlloc, calling running.next() in the body."
         required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
       },
+      "transpile-tests/306_observable_default.cht" => {
+        description: "inline observable aggregate COLLECT accumulator ownership",
+        required_patterns: [
+          /const __collect_acc_\d+/,
+          /CheatLib\.cleanup\(@TypeOf\(__collect_acc_\d+\), rt\.heapAlloc\(\), &__collect_acc_\d+\)/
+        ]
+      },
       "transpile-tests/329_versioned_snapshot_mutable.cht" => {
         description: "versioned mutable snapshot update conflict handling",
         required_patterns: [/\.update\(rt, rt\.heapAlloc\(\)/, /MvccConflict/]
@@ -3301,6 +3802,15 @@ RSpec.describe MIRLowering do
           expect(zig).to match(pattern)
         end
       end
+    end
+
+    it "keeps nested concurrent pipeline sources checker-clean" do
+      mir = lower_fixture_mir("examples/parallel_du/du.cht")
+      expect_checker_clean(mir)
+
+      zig = emit(mir)
+      expect(zig).to include("concurrentListSelect")
+      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&pipe_src_list\)/)
     end
 
   end
@@ -3368,15 +3878,15 @@ RSpec.describe MIRLowering do
 
       expect(collect_mir_nodes(mir, MIR::BatchWindowPush)).not_to be_empty
       expect(collect_mir_nodes(mir, MIR::BatchWindowFlush)).not_to be_empty
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include("pipeline_legacy_host")
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include("pipeline_legacy_host")
 
       zig = emit(mir)
       expect(zig).to include("CheatLib.BatchWindow(i64).init")
       expect(zig).to include(".freeBatch(")
     end
 
-    it "lowers non-mutual THUNK recursion through structural MIR instead of RawZig" do
+    it "lowers non-mutual THUNK recursion through structural MIR instead of opaque Zig" do
       mir = lower_fixture_mir("transpile-tests/526_non_mutual_thunk_trampoline.cht")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::ThunkTrampoline)
@@ -3391,11 +3901,11 @@ RSpec.describe MIRLowering do
       expect(thunk.recurse_arg_inits.length).to eq(1)
       expect(thunk.recurse_arg_inits.first).to include("current.n")
       expect(thunk.yield_line).to eq("rt.checkYield();")
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include(:thunk_trampoline_body)
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include(:thunk_trampoline_body)
     end
 
-    it "lowers mutual THUNK recursion through structural MIR instead of RawZig" do
+    it "lowers mutual THUNK recursion through structural MIR instead of opaque Zig" do
       mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.cht")
 
       thunk_nodes = collect_mir_nodes(mir, MIR::MutualThunkTrampoline)
@@ -3423,8 +3933,8 @@ RSpec.describe MIRLowering do
       expect(odd_arm.fetch(:target_variant)).to eq("is_even")
       expect(odd_arm.fetch(:target_arg_inits).first).to include("f.n")
 
-      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
-      expect(raw_reasons).not_to include(:thunk_trampoline_body)
+      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
+      expect(inline_reasons).not_to include(:thunk_trampoline_body)
     end
 
     it "collects named observables by calling next directly" do
@@ -3575,7 +4085,7 @@ RSpec.describe MIRLowering do
 
     context "lazy fallback scoping (descend + lower_scoped)" do
       # The fallback expression is evaluated lazily. Any allocations done
-      # while lowering it must NOT escape to outer @pending_stmts -- they
+      # while lowering it must NOT escape to outer FunctionState pending statements -- they
       # belong to the orelse/catch fallback branch and must only run when
       # that branch is actually taken. AST::BinaryOp#lazy_fields declares
       # :right as lazy when op == :OR_RESCUE; descend() wraps the right
@@ -3584,9 +4094,9 @@ RSpec.describe MIRLowering do
         # Allocating fallback: a StructLit whose String field gets a
         # CopyNode-wrapped rodata literal. Lowering the field invokes
         # hoist_alloc which pushes a `Let __tmp = DeepCopy(...)` into
-        # @pending_stmts. With lazy scoping that hoisted Let must land
+        # FunctionState pending statements. With lazy scoping that hoisted Let must land
         # inside the MIR::BlockExpr wrapping the fallback, NOT in outer
-        # @pending_stmts.
+        # FunctionState pending statements.
         left = make_id("opt_node", full_type: :"?Node")
         lit  = make_lit(:STRING, "?", full_type: Type.new(:String, location: :rodata))
         copy = AST::CopyNode.new(tok, lit)
@@ -3599,7 +4109,7 @@ RSpec.describe MIRLowering do
 
         l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
         result = l.lower(node)
-        expect(l.instance_variable_get(:@pending_stmts)).to be_empty
+        expect(l.function_state.pending_stmts).to be_empty
         expect(result).to be_a(MIR::Orelse)
         expect(result.fallback).to be_a(MIR::BlockExpr)
         expect(result.fallback.body.any? { |stmt| stmt.is_a?(MIR::AllocMark) }).to be true
@@ -3627,7 +4137,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
 
   def lowering(**opts)
-    MIRLowering.new(**opts)
+    MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 
   def typed_node(type)
@@ -3760,12 +4270,24 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(body.first.target).to eq(MIR::Ident.new("slot"))
   end
 
+  it "wraps bound THEN steps as MIR lets" do
+    l = lowering
+    expr = AST::Literal.new(tok, :INT64, 1, nil)
+    expr.full_type = Type.new(:Int64)
+    step = AST::ThenStep.new(expr: expr, binding: "saved")
+
+    wrapped = l.send(:wrap_step_as_stmt, step, MIR::Lit.new("1"))
+
+    expect(wrapped).to be_a(MIR::Let)
+    expect(wrapped.name).to eq("saved")
+  end
+
   it "unwraps cast and try nodes when recording FSM result transfers" do
     l = lowering
     entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@current_bindings, { "owned" => entry })
-    l.instance_variable_set(:@fn_name_rename_map, {})
-    l.instance_variable_set(:@guarded_cleanup_names, {})
+    l.function_state.current_bindings = { "owned" => entry }
+    l.function_state.fn_name_rename_map = {}
+    l.function_state.guarded_cleanup_names = {}
     ast = AST::Identifier.new(tok, "owned")
     ast.full_type = Type.new(:String)
     mir = MIR::Cast.new(MIR::TryExpr.new(MIR::Ident.new("owned")), "[]const u8", :as)
@@ -3775,14 +4297,14 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
       .to eq([["owned", :heap, true]])
     expect(entry.has_moved_guard?).to eq(true)
-    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned" => true)
+    expect(l.function_state.guarded_cleanup_names).to include("owned" => true)
   end
 
   it "guards renamed FSM result cleanups and records consumed owned fields" do
     l = lowering
     cleanup = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@fn_name_rename_map, { "owned" => "owned_renamed" })
-    l.instance_variable_set(:@guarded_cleanup_names, {})
+    l.function_state.fn_name_rename_map = { "owned" => "owned_renamed" }
+    l.function_state.guarded_cleanup_names = {}
 
     l.guard_fsm_result_cleanup!(
       [MIR::Cleanup.new("owned", cleanup)],
@@ -3790,11 +4312,11 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     )
 
     expect(cleanup.has_moved_guard?).to eq(true)
-    expect(l.instance_variable_get(:@guarded_cleanup_names)).to include("owned_renamed" => true)
+    expect(l.function_state.guarded_cleanup_names).to include("owned_renamed" => true)
 
     binding = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
-    l.instance_variable_set(:@current_bindings, { "owned" => binding })
-    l.instance_variable_set(:@guarded_cleanup_names, { "owned_renamed" => true })
+    l.function_state.current_bindings = { "owned" => binding }
+    l.function_state.guarded_cleanup_names = { "owned_renamed" => true }
     owned = AST::Identifier.new(tok, "owned")
     owned.full_type = Type.new(:String)
     ast = AST::StructLit.new(tok, "Box", { "value" => owned }, :heap, [])

@@ -175,7 +175,7 @@ module Pprof
     # order/length of `add_sample_type` calls. `labels` is a hash of
     # string key -> string-or-int (str labels are interned; int labels
     # render as numeric).
-    sig { params(location_ids: Array, values: Array, labels: Hash).returns(T.untyped) }
+    sig { params(location_ids: Array, values: Array, labels: Hash).returns(String) }
     def add_sample(location_ids, values, labels = {})
       @samples << { location_ids: location_ids, values: values, labels: labels }
     end

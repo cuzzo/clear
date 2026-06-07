@@ -1,4 +1,5 @@
 require "rspec"
+require "ostruct"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
@@ -21,6 +22,8 @@ require_relative "../src/mir/mir"
 # 9. Negative tests (primitives, Copy unions, strings)
 
 RSpec.describe CleanupClassifier do
+  let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }
+
   def cleanup_for(src, fn_name)
     result = compile_mir_frontend(src)
     ast = result.ast
@@ -32,6 +35,36 @@ RSpec.describe CleanupClassifier do
       fn_node,
       schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
+  end
+
+  def schema_lookup_for(schemas = {})
+    ->(name) {
+      schemas[name] ||
+        (name.respond_to?(:to_sym) ? schemas[name.to_sym] : nil) ||
+        (name.respond_to?(:to_s) ? schemas[name.to_s] : nil)
+    }
+  end
+
+  def cleanup_identifier(name, type: Type.new(:String), storage: :heap, moved: false)
+    node = AST::Identifier.new(tok, name)
+    node.full_type = type
+    node.storage = storage
+    node.was_moved = moved
+    node.symbol = SymbolEntry.new(reg: name, type: type, mutable: true, storage: storage)
+    node
+  end
+
+  def string_type_without_recursive_cleanup
+    type = Type.new(:String)
+    type.define_singleton_method(:needs_cleanup?) { |_lookup| false }
+    type.define_singleton_method(:recursive_cleanup_shape?) { |_lookup| false }
+    type
+  end
+
+  def heap_storage_node(value = nil)
+    node = OpenStruct.new(value: value)
+    node.define_singleton_method(:heap_storage?) { true }
+    node
   end
 
   # =========================================================================
@@ -226,6 +259,13 @@ RSpec.describe CleanupClassifier do
         expect(entry[:kind]).to eq(:uniform)
         expect(entry[:match_as]).to eq(true)
       end
+
+      it "skips unit and indirect payloads" do
+        indirect_ty = Type.new(:Box, layout: :indirect)
+
+        expect(CleanupClassifier.send(:match_as_entry_for, nil, :U, "None")).to be_nil
+        expect(CleanupClassifier.send(:match_as_entry_for, indirect_ty, :U, "Box")).to be_nil
+      end
     end
   end
 
@@ -242,6 +282,195 @@ RSpec.describe CleanupClassifier do
       expect(entry[:kind]).to eq(:uniform)
       expect(entry[:alloc]).to eq(:frame)
       expect(entry[:has_moved_guard]).to eq(true)
+    end
+  end
+
+  describe "classifier edge branches" do
+    it "stamps pre-cleanups for auto-lock strings and heap-owned string fields" do
+      auto_field = AST::GetField.new(tok, cleanup_identifier("locked_box"), "name")
+      auto_field.full_type = string_type_without_recursive_cleanup
+      auto_assign = AST::Assignment.new(tok, auto_field, AST::Literal.new(tok, :STRING, "next", :rodata))
+      auto_assign.auto_lock = true
+
+      CleanupClassifier.stamp_field_pre_cleanups!([auto_assign], {}, schema_lookup: schema_lookup_for)
+      expect(auto_assign.field_pre_cleanup).to eq(:heap)
+
+      heap_field = AST::GetField.new(tok, cleanup_identifier("box", storage: :heap), "label")
+      heap_field.full_type = string_type_without_recursive_cleanup
+      heap_assign = AST::Assignment.new(tok, heap_field, AST::Literal.new(tok, :STRING, "next", :rodata))
+      bindings = {
+        "box" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      }
+
+      CleanupClassifier.stamp_field_pre_cleanups!([heap_assign], bindings, schema_lookup: schema_lookup_for)
+      expect(heap_assign.field_pre_cleanup).to eq(:heap)
+    end
+
+    it "covers defensive no-cleanup fallback and transferred payload recipes" do
+      bad_type = Object.new
+      bad_type.define_singleton_method(:to_s) { raise "bad type" }
+      expect(CleanupClassifier.send(:no_cleanup_alloc_entry, bad_type, schema_lookup_for)).to be_nil
+
+      moved_string = CleanupClassifier.send(:transferred_payload_entry, Type.new(:String), schema_lookup_for)
+      expect(moved_string[:kind]).to eq(:heap_string)
+
+      resource_schema = Schemas::ResourceSchema.new(close_zig: "{0}.close()")
+      resource = CleanupClassifier.send(
+        :takes_param_base_entry,
+        Type.new(:Fileish),
+        schema_lookup_for(Fileish: resource_schema),
+      )
+      expect(resource[:kind]).to eq(:resource)
+      expect(resource[:resource_close_zig]).to eq("{0}.close()")
+    end
+
+    it "recognizes MATCH TAKES method-style variants as owned AS bindings" do
+      source = cleanup_identifier("ast", type: Type.new(:Value), storage: :heap, moved: true)
+      case_value = AST::MethodCall.new(tok, cleanup_identifier("Value", type: Type.new(:Value)), "Items", [])
+      match_case = AST::MatchCase.new(kind: :literal, value: case_value, body: [], binding: "items")
+      non_variant_case = AST::MatchCase.new(
+        kind: :literal,
+        value: AST::Literal.new(tok, :NUMBER, "1", :stack),
+        body: [],
+        binding: "ignored",
+      )
+      match = AST::MatchStatement.new(tok, source, [match_case, non_variant_case], nil, nil, nil, false, true)
+      schema = Schemas::UnionSchema.new(variants: { "Items" => Type.new(:"String[]") })
+      bindings = {
+        "ast" => CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: true),
+      }
+
+      CleanupClassifier.send(:walk_match_as_bindings, [match], schema_lookup_for(Value: schema), bindings)
+      expect(bindings["items"][:kind]).to eq(:uniform)
+      expect(bindings["items"][:match_as]).to eq(true)
+      expect(bindings["items"][:alloc]).to eq(:frame)
+      expect(bindings["ignored"]).to be_nil
+    end
+
+    it "classifies ownership-transferring capture bindings and heap call fallbacks" do
+      weak_value = cleanup_identifier("weak", type: Type.new(:"?String[]"))
+      resolve = AST::ResolveNode.new(tok, weak_value)
+      resolve.full_type = Type.new(:"?String[]")
+      if_bind = AST::IfBind.new(
+        tok,
+        [AST::Binding.new(expr: resolve, name: "items", name_token: tok)],
+        [],
+        nil,
+      )
+      bindings = {}
+
+      CleanupClassifier.send(:walk_capture_bindings, [if_bind], schema_lookup_for, bindings)
+      expect(bindings["items"][:alloc]).to eq(:heap)
+      expect(bindings["items"][:elem_zig_type]).to eq(Type.new(:String).zig_type)
+
+      fn_call = AST::FuncCall.new(tok, "make", [])
+      fn_call.define_singleton_method(:heap_storage?) { true }
+      expect(CleanupClassifier.send(:capture_expr_heap?, fn_call, schema_lookup_for)).to be(true)
+
+      method_call = AST::MethodCall.new(tok, cleanup_identifier("receiver", storage: :frame), "make", [])
+      method_call.define_singleton_method(:heap_storage?) { true }
+      expect(CleanupClassifier.send(:capture_expr_heap?, method_call, schema_lookup_for)).to be(true)
+
+      receiver_owned = AST::MethodCall.new(tok, cleanup_identifier("receiver", storage: :heap), "maybe", [])
+      expect(CleanupClassifier.send(:capture_expr_heap?, receiver_owned, schema_lookup_for)).to be(true)
+    end
+
+    it "marks owned return calls and NEXT optionals as fixed heap cleanups" do
+      call = AST::FuncCall.new(tok, "makeString", [])
+      returned = AST::VarDecl.new(tok, "result", Type.new(:"!String"), call, false)
+      returned.symbol = SymbolEntry.new(reg: "result", type: Type.new(:"!String"), mutable: false, storage: :heap)
+
+      owned_return = CleanupClassifier.send(
+        :classify_owned_return_call,
+        Type.new(:"!String"),
+        returned,
+        schema_lookup_for,
+      )
+      expect(owned_return[:kind]).to eq(:heap_string)
+      expect(owned_return[:fixed_alloc]).to eq(true)
+
+      next_expr = AST::NextExpr.new(tok, cleanup_identifier("promise", type: Type.new(:"~String")))
+      optional_node = AST::VarDecl.new(tok, "maybe", Type.new(:"?String"), next_expr, false)
+      optional_node.symbol = SymbolEntry.new(reg: "maybe", type: Type.new(:"?String"), mutable: false, storage: :frame)
+
+      optional = CleanupClassifier.send(
+        :classify_optional,
+        Type.new(:"?String"),
+        schema_lookup_for,
+        node: optional_node,
+      )
+      expect(optional[:alloc]).to eq(:heap)
+      expect(optional[:fixed_alloc]).to eq(true)
+    end
+
+    it "classifies owned array literals and binary string concatenation" do
+      list_lit = AST::ListLit.new(tok, [AST::Literal.new(tok, :STRING, "x", :rodata)], :frame)
+      array_node = OpenStruct.new(
+        value: list_lit,
+        symbol: SymbolEntry.new(reg: "items", type: Type.new(:"String[]"), mutable: false, storage: :frame),
+        storage: :frame,
+      )
+      array_entry = CleanupClassifier.send(
+        :classify_array_struct_strings,
+        Type.new(:"String[]"),
+        array_node,
+        schema_lookup_for,
+      )
+      expect(array_entry[:kind]).to eq(:uniform)
+      expect(array_entry[:alloc]).to eq(:frame)
+
+      concat = AST::BinaryOp.new(
+        tok,
+        cleanup_identifier("left", type: Type.new(:String)),
+        :ADD,
+        cleanup_identifier("right", type: Type.new(:String)),
+      )
+      concat.string_concat = true
+      string_node = AST::VarDecl.new(tok, "joined", Type.new(:String), concat, false)
+      string_entry = CleanupClassifier.send(
+        :classify_owned_string,
+        Type.new(:String),
+        string_node,
+        schema_lookup_for,
+      )
+      expect(string_entry[:kind]).to eq(:heap_string)
+    end
+
+    it "skips heap-composite cleanup when fields have no cleanup or borrow it" do
+      no_cleanup_schema = Schemas::StructSchema.new(fields: {
+        "inner" => AST::StructField.new(type: Type.new(:Inner), default: nil, borrowed: false),
+      })
+      no_cleanup = CleanupClassifier.send(
+        :classify_heap_composite,
+        Type.new(:Box),
+        heap_storage_node,
+        schema_lookup_for(Box: no_cleanup_schema),
+        nil,
+      )
+      expect(no_cleanup).to be_nil
+
+      borrowed_value = cleanup_identifier("name", type: Type.new(:String), storage: :borrow)
+      struct_lit = AST::StructLit.new(tok, "Box", { "name" => borrowed_value }, :heap, [])
+      borrowed_schema = Schemas::StructSchema.new(fields: {
+        "name" => AST::StructField.new(type: Type.new(:String), default: nil, borrowed: false),
+      })
+      borrowed_cleanup = CleanupClassifier.send(
+        :classify_heap_composite,
+        Type.new(:Box),
+        heap_storage_node(struct_lit),
+        schema_lookup_for(Box: borrowed_schema),
+        nil,
+      )
+      expect(borrowed_cleanup).to be_nil
+    end
+
+    it "treats borrowed inline struct fields as non-cleanup-bearing" do
+      inline = Schemas::InlineStructVariant.new(fields: {
+        "borrowed" => Type.new(:String),
+      })
+      inline.fields["borrowed"] = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: true)
+
+      expect(CleanupClassifier.send(:elem_has_cleanup_fields?, inline, schema_lookup_for)).to eq(false)
     end
   end
 

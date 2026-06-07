@@ -43,9 +43,9 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
       END
     CLEAR
 
-    expect(conc.shard_context[:map_var].name).to eq("counts")
-    expect(conc.shard_context[:shard_count]).to eq(4)
-    expect(conc.shard_context[:auto_detected]).to be true
+    expect(conc.shard_context.map_var.name).to eq("counts")
+    expect(conc.shard_context.shard_count).to eq(4)
+    expect(conc.shard_context.auto_detected).to be true
   end
 
   it "keeps normal concurrent each when multiple @sharded maps are used" do
@@ -99,6 +99,6 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
       CLEAR
     }.to output(/different key expressions/).to_stderr
 
-    expect(conc.shard_context[:map_var].name).to eq("counts")
+    expect(conc.shard_context.map_var.name).to eq("counts")
   end
 end

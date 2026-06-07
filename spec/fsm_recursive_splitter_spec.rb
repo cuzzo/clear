@@ -138,6 +138,68 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     end
   end
 
+  describe "edge guards" do
+    it "raises if a reserved builder segment is finalized unfilled" do
+      builder = FsmTransform::RecursiveSplitter::Builder.new
+      builder.reserve_index
+
+      expect { builder.finalize }.to raise_error(/unfilled segments/)
+    end
+
+    it "rejects catch blocks and unhandled pivot statements" do
+      catch_block = AST::CatchBlock.new(nil, [], nil)
+      expect(FsmTransform::RecursiveSplitter.contains_unsupported?([catch_block]))
+        .to eq(true)
+
+      builder = FsmTransform::RecursiveSplitter::Builder.new
+      expect {
+        FsmTransform::RecursiveSplitter.emit_pivot(AST::PassStmt.new(nil), 0, builder, lowering, {})
+      }.to raise_error(FsmTransform::RecursiveSplitter::UnsupportedShape, /Unhandled pivot kind/)
+    end
+
+    it "rejects unsupported and unknown foreach descriptor shapes" do
+      promise = ident("p")
+      next_expr = AST::NextExpr.new(nil, promise)
+
+      unsupported_coll = AST::Identifier.new(nil, "unsupported_items")
+      unsupported_coll.full_type = Type.new(:Any)
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", unsupported_coll, [next_expr])], lowering)).to be_nil
+
+      unknown_type = Type.new(:UnknownCollection)
+      unknown_type.define_singleton_method(:fsm_foreach_descriptor) do
+        TypeFsmForEachDescriptor.new(kind: :unknown, var_zig_type: "i64")
+      end
+      unknown_coll = AST::Identifier.new(nil, "unknown_items")
+      unknown_coll.full_type = unknown_type
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", unknown_coll, [next_expr])], lowering)).to be_nil
+    end
+
+    it "returns nil when expression lowering fails" do
+      bad_lowering = Class.new {
+        def lower(_node)
+          raise "bad lower"
+        end
+      }.new
+
+      expect(FsmTransform::RecursiveSplitter.lower_to_zig(ident("x"), bad_lowering))
+        .to be_nil
+    end
+
+    it "remaps loop-back tails and passes through unknown tails" do
+      remapped = FsmTransform::RecursiveSplitter.remap_tail(
+        FsmTransform::Segments::LoopBack.new(4),
+        { 4 => 1 },
+      )
+      passthrough = Object.new
+
+      expect(remapped.target_index).to eq(1)
+      expect(FsmTransform::RecursiveSplitter.remap_tail(passthrough, {}))
+        .to equal(passthrough)
+    end
+  end
+
   describe "WhileLoop with NEXT" do
     it "produces cond + body + done" do
       promise = ident("p")
@@ -216,6 +278,55 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       sus_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
       expect(sus_seg.tail.next_index).to eq(cond_seg.index)
     end
+
+    it "synthesizes indexed-slice state for list collections" do
+      promise = ident("p")
+      next_expr = AST::NextExpr.new(nil, promise)
+      coll = AST::Identifier.new(nil, "items")
+      coll.full_type = Type.new(:"Int64[]", collection: :list)
+
+      segment_list = FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)
+      segs = segments_for(segment_list)
+
+      expect(segment_list.synthetic_fields).to include(/v: i64/)
+      expect(segment_list.synthetic_fields).to include(/__feidx_\d+: usize/)
+      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
+      expect(cond_seg).not_to be_nil
+      rendered_cond = FsmTransform::Segments.render_synthetic_zig(cond_seg.tail.cond_ast, "__ctx_9")
+      expect(rendered_cond).to match(/__ctx_9\.__feidx_\d+ < items\.items\.len/)
+      assign_seg = segs.find { |s|
+        s.stmts.any? { |st|
+          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("items.items[__ctx_9.__feidx_")
+        }
+      }
+      expect(assign_seg).not_to be_nil
+    end
+
+    it "synthesizes pool slot state and skips dead slots" do
+      promise = ident("p")
+      next_expr = AST::NextExpr.new(nil, promise)
+      coll = AST::Identifier.new(nil, "items")
+      coll.full_type = Type.new(:"Int64[]", collection: :pool)
+
+      segment_list = FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)
+      segs = segments_for(segment_list)
+
+      expect(segment_list.synthetic_fields).to include(/v: i64/)
+      expect(segment_list.synthetic_fields).to include(/__feidx_\d+: usize/)
+      skip_seg = segs.find { |s|
+        s.tail.is_a?(FsmTransform::Segments::CondBranch) &&
+          FsmTransform::Segments.render_synthetic_zig(s.tail.cond_ast, "__ctx_9").include?("!items.slots[__ctx_9.__feidx_")
+      }
+      expect(skip_seg).not_to be_nil
+      assign_seg = segs.find { |s|
+        s.stmts.any? { |st|
+          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?(".value")
+        }
+      }
+      expect(assign_seg).not_to be_nil
+    end
   end
 
   describe "IF with suspend in then-branch" do
@@ -234,6 +345,20 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # else_index falls through to Done (no else branch given)
       done_idx = segs.find_index { |s| s.tail.is_a?(FsmTransform::Segments::Done) }
       expect(cond_seg.tail.else_index).to eq(done_idx)
+    end
+
+    it "recursively splits a suspending else branch" do
+      promise = ident("p")
+      then_next = AST::NextExpr.new(nil, promise)
+      else_next = AST::NextExpr.new(nil, promise)
+      stmts = [if_stmt(ident("flag"), [then_next], [else_next])]
+      segment_list = FsmTransform::RecursiveSplitter.split(stmts, lowering)
+      segs = segments_for(segment_list)
+
+      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
+      expect(cond_seg).not_to be_nil
+      expect(segs[cond_seg.tail.then_index].tail).to be_a(FsmTransform::Segments::NextSuspend)
+      expect(segs[cond_seg.tail.else_index].tail).to be_a(FsmTransform::Segments::NextSuspend)
     end
   end
 

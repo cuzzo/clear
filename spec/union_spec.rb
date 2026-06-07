@@ -703,7 +703,8 @@ RSpec.describe SemanticAnnotator do
           expect(union_node).to be_a(AST::UnionDef)
           expect(union_node.methods).to be_an(Array)
           expect(union_node.methods.length).to eq(1)
-          expect(union_node.methods.first[:name]).to eq("area")
+          expect(union_node.methods.first).to be_a(AST::UnionMethodRequirement)
+          expect(union_node.methods.first.name).to eq("area")
         end
 
         it "raises UNION_METHOD_MISSING when the required function does not exist" do

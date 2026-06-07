@@ -45,13 +45,18 @@ class MIRPass
 
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
+  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   attr_reader :cleanup_bindings
+
+  sig { returns(EscapeAnalysis::EscapePlacementFacts) }
+  attr_reader :escape_placement_facts
 
   sig { params(fn_nodes: FnNodes, schema_lookup: Proc).void }
   def initialize(fn_nodes:, schema_lookup:)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
+    @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
   end
 
   sig { params(bindings: T::Hash[String, CleanupEntry], name: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -75,10 +80,11 @@ class MIRPass
     pass_state = MIRPassState.for!(ast)
     pass_state.require!(:premir_type_checked, consumer: "MIRPass")
 
-    # Dead-simple escape analysis: mark SymbolEntry#storage = :heap for the
-    # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
-    heap_fns, @bg_heap_upgraded = EscapeAnalysis.apply!(@fn_nodes, @schema_lookup)
-    @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
+    # Escape analysis writes final SymbolEntry#storage and now also returns the
+    # typed placement table explaining which phase forced each heap placement.
+    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup)
+    @escape_placement_facts = escape_result.placements
+    @bg_heap_upgraded = T.let(escape_result.bg_heap, T.untyped)
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
     pass_state.mark!(:escape_analyzed)
 
@@ -208,7 +214,7 @@ class MIRPass
   def params_need_runtime_cleanup?(params)
     params.any? do |param|
       next false unless param.takes
-      ti = param.type || Type.new(:Any)
+      ti = param.type
       next true if ti.any?
       next false if ti.primitive? || ti.id_handle?
       true
@@ -319,7 +325,6 @@ class MIRPass
     return false if ti&.any_rc? || ti&.any_sync?
 
     if node.is_a?(AST::Identifier)
-      return false unless fn.params.any? { |param| param.name.to_s == node.name.to_s }
       return false if fn.params.any? { |param| param.name.to_s == node.name.to_s && param.takes }
       return !!(ti&.string? || ti&.recursive_cleanup_shape?(@schema_lookup))
     end
@@ -661,17 +666,28 @@ class MIRPass
   def stamp_reassign_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
-    entry = bindings[stmt.name.to_s]
+    entry = cleanup_entry_for_binding_node(stmt, bindings)
     return unless entry && entry.kind != :resource
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
     # otherwise leak). needs_cleanup? alone misses the moved-out case.
-    return unless entry.needs_cleanup? || entry.alloc == :heap
+    return unless entry.needs_cleanup? || entry.heap?
 
     ti = stmt.full_type!
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
+  end
+
+  sig { params(node: AST::Node, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(CleanupEntry)) }
+  def cleanup_entry_for_binding_node(node, bindings)
+    symbol = node.respond_to?(:symbol) ? node.symbol : nil
+    decl = symbol&.reg
+    if decl && decl.respond_to?(:mir_binding_entry)
+      entry = decl.mir_binding_entry
+      return entry if entry
+    end
+    bindings[node.public_send(:name).to_s] if node.respond_to?(:name)
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.

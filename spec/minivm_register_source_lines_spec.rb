@@ -136,7 +136,7 @@ RSpec.describe "Per-statement source-line attribution" do
 
     imp = ModuleImporter.new(base_dir: src_dir)
     fe = CompilerFrontend.compile(src, importer: imp, source_dir: src_dir)
-    lo = MIRLowering.new(
+    lo = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: fe.struct_schemas,
       enum_schemas: fe.enum_schemas,
       union_schemas: fe.union_schemas,
@@ -145,7 +145,7 @@ RSpec.describe "Per-statement source-line attribution" do
       importer: imp,
       source_dir: src_dir,
       target: :bc
-    )
+    ))
     prog = lo.lower_program(fe.ast)
     MIRChecker.new.check_program!(prog, strict: true)
     bc = RegisterBcEmitter.new(fe, source: src).compile(prog)
@@ -177,7 +177,7 @@ RSpec.describe "Per-statement source-line attribution" do
 
     imp = ModuleImporter.new(base_dir: src_dir)
     fe = CompilerFrontend.compile(src, importer: imp, source_dir: src_dir)
-    lo = MIRLowering.new(
+    lo = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: fe.struct_schemas,
       enum_schemas: fe.enum_schemas,
       union_schemas: fe.union_schemas,
@@ -186,7 +186,7 @@ RSpec.describe "Per-statement source-line attribution" do
       importer: imp,
       source_dir: src_dir,
       target: :bc
-    )
+    ))
     prog = lo.lower_program(fe.ast)
     MIRChecker.new.check_program!(prog, strict: true)
     bc = RegisterBcEmitter.new(fe, source: src).compile(prog)
@@ -218,7 +218,7 @@ RSpec.describe "Per-statement source-line attribution" do
       File.write(File.join(dir, "main.cht"), src)
       imp = ModuleImporter.new(base_dir: dir)
       fe = CompilerFrontend.compile(src, importer: imp, source_dir: dir)
-      lo = MIRLowering.new(
+      lo = MIRLowering.new(input: MIRLoweringInput.new(
         struct_schemas: fe.struct_schemas,
         enum_schemas: fe.enum_schemas,
         union_schemas: fe.union_schemas,
@@ -227,7 +227,7 @@ RSpec.describe "Per-statement source-line attribution" do
         importer: imp,
         source_dir: dir,
         target: :bc
-      )
+      ))
       prog = lo.lower_program(fe.ast)
       MIRChecker.new.check_program!(prog, strict: true)
       bc = RegisterBcEmitter.new(fe, source: src).compile(prog)

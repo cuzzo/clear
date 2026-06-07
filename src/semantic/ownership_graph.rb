@@ -14,9 +14,12 @@
 #   fork_lightweight / merge(other)    — branch analysis (IF/ELSE)
 
 require "sorbet-runtime"
+require_relative "../ast/type"
 
 class OwnershipGraph
     extend T::Sig
+
+  MoveConsumerParamType = T.type_alias { T.nilable(Type::TypeInput) }
 
   class LightweightSnapshot < T::Struct
     extend T::Sig
@@ -54,28 +57,41 @@ class OwnershipGraph
     end
   end
 
-  Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
-                    :move_line, :move_col, :move_action,
-                    :move_consumer_param_type,
-                    keyword_init: true) do
+  class Node < T::Struct
     extend T::Sig
+
+    prop :path, String, default: ""
+    prop :kind, Symbol, default: :affine
+    prop :state, Symbol, default: :live
+    prop :type_info, Type, factory: -> { Type.new(:Any) }
+    prop :scope_depth, Integer, default: 0
+    prop :line, Integer, default: 0
+    prop :move_line, T.nilable(Integer), default: nil
+    prop :move_col, T.nilable(Integer), default: nil
+    prop :move_action, T.nilable(Symbol), default: nil
+    prop :move_consumer_param_type, MoveConsumerParamType, default: nil
+
     sig { returns(T::Boolean) }
     def live?;    state == :live; end
-	    sig { returns(T::Boolean) }
-	    def moved?;   state == :moved; end
-	    sig { returns(T::Boolean) }
-	    def specific_move_action?; moved? && !move_action.nil? && move_action != :move; end
-	    sig { returns(T::Boolean) }
-	    def dropped?; state == :dropped; end
+    sig { returns(T::Boolean) }
+    def moved?;   state == :moved; end
+    sig { returns(T::Boolean) }
+    def specific_move_action?; moved? && !move_action.nil? && move_action != :move; end
+    sig { returns(T::Boolean) }
+    def dropped?; state == :dropped; end
     # Carrier struct: member stays :type_info; expose the project-wide
     # canonical accessor name so readers use one name everywhere.
-    sig { returns(T.untyped) }
+    sig { returns(Type) }
     def full_type; type_info; end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: Type).returns(Type) }
     def full_type=(val); self.type_info = val; end
   end
 
-  Edge = Struct.new(:from, :to, :kind, keyword_init: true)
+  class Edge < T::Struct
+    const :from, String
+    const :to, String
+    const :kind, Symbol
+  end
   # Edge kinds:
   #   :borrows     — immutable borrow (y borrows x)
   #   :borrows_mut — mutable borrow (y mutably borrows x)
@@ -85,12 +101,12 @@ class OwnershipGraph
 
   sig { void }
   def initialize
-    @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
+    @nodes = T.let({}, T::Hash[String, OwnershipGraph::Node])           # path => Node
     @edges = T.let([], T::Array[OwnershipGraph::Edge])           # Array of Edge
-    @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # target_path => [Edge]
-    @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # source_path => [Edge]
-    @children = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])    # parent_path => Set of child paths
-    @completed_nodes = T.let({}, T::Hash[T.untyped, T.untyped])
+    @edges_by_target = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[String, T::Array[OwnershipGraph::Edge]])  # target_path => [Edge]
+    @edges_by_source = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[String, T::Array[OwnershipGraph::Edge]])  # source_path => [Edge]
+    @children = T.let(Hash.new { |h, k| h[k] = T.let(Set.new, T::Set[String]) }, T::Hash[String, T::Set[String]])    # parent_path => Set of child paths
+    @completed_nodes = T.let({}, T::Hash[String, OwnershipGraph::Node])
   end
 
   sig { returns(T::Hash[String, OwnershipGraph::Node]) }
@@ -105,11 +121,12 @@ class OwnershipGraph
 
   # ── Edge index helpers ────────────────────────────────────────────
 
-  sig { params(edge: OwnershipGraph::Edge).returns(T::Array[OwnershipGraph::Edge]) }
+  sig { params(edge: OwnershipGraph::Edge).returns(OwnershipGraph::Edge) }
   def add_edge(edge)
     @edges << edge
-    @edges_by_target[edge.to] << edge
-    @edges_by_source[edge.from] << edge
+    edges_to(edge.to) << edge
+    edges_from(edge.from) << edge
+    edge
   end
 
   sig { params(edge: OwnershipGraph::Edge).returns(T.nilable(OwnershipGraph::Edge)) }
@@ -131,7 +148,7 @@ class OwnershipGraph
     # Register as child of parent path (e.g., "x.child" is child of "x")
     if path.include?('.')
       parent = path.rpartition('.').first
-      @children[parent].add(path)
+      children_for(parent).add(path)
     end
   end
 
@@ -154,7 +171,7 @@ class OwnershipGraph
     invalidate(from, source)
   end
 
-  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
   def mark_moved(path, at_token: nil, action: :move, consumer_param_type: nil)
     source = @nodes[path]
     return unless source
@@ -200,7 +217,10 @@ class OwnershipGraph
     owned = owned_children(path).reverse
     to_cleanup = (owned + [path]).select { |p| @nodes[p]&.live? }
 
-    to_cleanup.each { |p| @nodes[p].state = :dropped if @nodes[p] }
+    to_cleanup.each do |p|
+      node_to_drop = @nodes[p]
+      node_to_drop.state = :dropped if node_to_drop
+    end
 
     # Remove borrow edges from/to dropped paths
     dropped_set = to_cleanup.to_set
@@ -215,7 +235,7 @@ class OwnershipGraph
     paths = @nodes.select { |_path, node| node.scope_depth >= scope_depth }.keys
     return 0 if paths.empty?
 
-    @completed_nodes = paths.to_h { |path| [path, @nodes[path]] } if archive
+    @completed_nodes = paths.to_h { |path| [path, T.must(@nodes[path])] } if archive
     path_set = paths.to_set
     paths.each { |path| @nodes.delete(path) }
     @edges.select { |edge| path_set.include?(edge.from) || path_set.include?(edge.to) }.each { |edge| remove_edge(edge) }
@@ -230,7 +250,7 @@ class OwnershipGraph
     # Check this path and all ancestors
     current = path
     loop do
-      return false if @edges_by_target[current].any? { |e| e.kind == :borrows || e.kind == :borrows_mut }
+      return false if edges_to(current).any? { |e| e.kind == :borrows || e.kind == :borrows_mut }
       break unless current.include?('.')
       current = current.rpartition('.').first
     end
@@ -262,9 +282,12 @@ class OwnershipGraph
     @nodes.each do |k, v|
       key = k.to_s
       states[key] = v.state
-      move_lines[key] = v.move_line if v.move_line
-      move_cols[key] = v.move_col if v.move_col
-      move_actions[key] = v.move_action if v.move_action
+      move_line = v.move_line
+      move_col = v.move_col
+      move_action = v.move_action
+      move_lines[key] = move_line if move_line
+      move_cols[key] = move_col if move_col
+      move_actions[key] = move_action if move_action
     end
     LightweightSnapshot.new(
       states: states,
@@ -297,9 +320,9 @@ class OwnershipGraph
 
   # Merge a branch's graph state back. Both branches must agree on
   # moved/dropped state; conflicts are returned as error strings.
-  sig { params(other: OwnershipGraph).returns(T::Array[T.untyped]) }
+  sig { params(other: OwnershipGraph).returns(T::Array[String]) }
   def merge(other)
-    errors = []
+    errors = T.let([], T::Array[String])
     all_paths = (@nodes.keys + other.nodes.keys).uniq
 
     all_paths.each do |path|
@@ -324,11 +347,11 @@ class OwnershipGraph
 
     # Merge edges: add new ones from other
     existing = @edges.map { |e| [e.from, e.to, e.kind] }.to_set
-    other.instance_variable_get(:@edges).each do |e|
+    other.edges.each do |e|
       key = [e.from, e.to, e.kind]
       unless existing.include?(key)
         existing.add(key)
-        add_edge(e.dup)
+        add_edge(Edge.new(from: e.from, to: e.to, kind: e.kind))
       end
     end
 
@@ -338,7 +361,7 @@ class OwnershipGraph
   # ── Queries ───────────────────────────────────────────────────────
 
   # Get the node for a path.
-  sig { params(path: T.untyped).returns(T.nilable(OwnershipGraph::Node)) }
+  sig { params(path: String).returns(T.nilable(OwnershipGraph::Node)) }
   def [](path)
     @nodes[path] || @completed_nodes[path]
   end
@@ -363,12 +386,12 @@ class OwnershipGraph
       node.move_action = move_source.move_action
     end
     node.state = :moved
-    @children[path].each do |child|
+    children_for(path).each do |child|
       invalidate(child, move_source)  # recurse for nested children
     end
   end
 
-  sig { params(node: OwnershipGraph::Node, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Integer)) }
+  sig { params(node: OwnershipGraph::Node, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: MoveConsumerParamType).returns(T.nilable(Integer)) }
   def record_move_site(node, at_token, action, consumer_param_type: nil)
     node.move_action = action
     node.move_consumer_param_type = consumer_param_type if consumer_param_type
@@ -380,7 +403,7 @@ class OwnershipGraph
 
   sig { params(path: String, result: T::Array[String]).returns(T::Set[String]) }
   def collect_descendants(path, result)
-    @children[path].each do |child|
+    children_for(path).each do |child|
       result << child
       collect_descendants(child, result)
     end
@@ -388,7 +411,7 @@ class OwnershipGraph
 
   sig { params(path: String).returns(T.nilable(String)) }
   def find_borrow_conflict(path)
-    b = @edges_by_target[path].find { |e| e.kind == :borrows || e.kind == :borrows_mut }
+    b = edges_to(path).find { |e| e.kind == :borrows || e.kind == :borrows_mut }
     return nil unless b
     borrower_node = @nodes[b.from]
     line_info = borrower_node ? " (declared at line #{borrower_node.line})" : ""
@@ -397,8 +420,23 @@ class OwnershipGraph
 
   sig { params(path: String).returns(T.nilable(String)) }
   def find_mutable_borrow(path)
-    b = @edges_by_target[path].find { |e| e.kind == :borrows_mut }
+    b = edges_to(path).find { |e| e.kind == :borrows_mut }
     return nil unless b
     "cannot borrow '#{path}': mutably borrowed by '#{b.from}'"
+  end
+
+  sig { params(path: String).returns(T::Array[OwnershipGraph::Edge]) }
+  def edges_to(path)
+    @edges_by_target[path] ||= T.let([], T::Array[OwnershipGraph::Edge])
+  end
+
+  sig { params(path: String).returns(T::Array[OwnershipGraph::Edge]) }
+  def edges_from(path)
+    @edges_by_source[path] ||= T.let([], T::Array[OwnershipGraph::Edge])
+  end
+
+  sig { params(path: String).returns(T::Set[String]) }
+  def children_for(path)
+    @children[path] ||= T.let(Set.new, T::Set[String])
   end
 end

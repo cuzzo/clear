@@ -60,6 +60,41 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }.to raise_error(ArgumentError, /Unsupported segment tail/)
   end
 
+  it "routes descriptor binds through prebuilt MIR jump tail next_step values" do
+    descriptor = MIR::SuspendDescriptor.new(
+      [],
+      [MIR::ExprStmt.new(MIR::Lit.new("bindLegacy()"), false)],
+      MIR::FsmTailYield.new(2, "WaitForLock"),
+      [],
+      nil,
+      nil,
+      false,
+    )
+    segment_specs = [
+      {
+        index: 0,
+        body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("beforeLegacy()"), false)],
+        tail: MIR::FsmTailJump.new(2),
+        descriptor: descriptor,
+        fn_name: "runLegacy0",
+      },
+      {
+        index: 2,
+        body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("afterLegacy()"), false)],
+        tail: MIR::FsmTailDone.new(nil),
+        descriptor: nil,
+        fn_name: "runLegacy2",
+      },
+    ]
+
+    out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+      base_ctx, segment_specs, [], lowering_double))
+
+    run_after = out[/fn runLegacy2.*?fn resumeFn/m]
+    expect(run_after).to include("bindLegacy()")
+    expect(run_after).to include("afterLegacy()")
+  end
+
   describe "two-segment IO shape (B2-IO)" do
     # Build the descriptor by hand to exercise the assembly without
     # depending on the IO resolver. Setup = a single ExprStmt; bind

@@ -172,6 +172,20 @@ pub fn SplitStream(
             index: usize,
         };
 
+        fn lockInner(inner: *Inner) void {
+            while (true) {
+                inner.mutex.lock() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
+                return;
+            }
+        }
+
+        fn lockSharedInner(inner: *Inner) void {
+            while (true) {
+                inner.mutex.lockShared() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
+                return;
+            }
+        }
+
         fn destroyChunk(inner: *Inner, chunk: *Chunk) void {
             for (0..chunk.write_len) |i| {
                 cleanupValue(inner.alloc, &chunk.values[i]);
@@ -397,7 +411,7 @@ pub fn SplitStream(
 
         pub fn push(self: *Self, val: T) !void {
             var published = false;
-            self.inner.mutex.lock() catch unreachable;
+            lockInner(self.inner);
 
             if (self.inner.active_subscribers.load(.acquire) == 0) {
                 self.inner.mutex.unlock();
@@ -436,7 +450,7 @@ pub fn SplitStream(
                 task.status.store(.Blocked, .release);
                 self.inner.mutex.unlock();
                 task.base.yield();
-                self.inner.mutex.lock() catch unreachable;
+                lockInner(self.inner);
             }
             // HAMMER-WAIT-LOOP-END: tag=streams.push-backpressure-park
 
@@ -467,7 +481,7 @@ pub fn SplitStream(
         }
 
         pub fn close(self: *Self) void {
-            self.inner.mutex.lock() catch unreachable;
+            lockInner(self.inner);
             const already_closed = self.inner.closed.load(.acquire) != 0;
             if (self.inner.chunks_tail.load(.acquire)) |tail| {
                 _ = publishChunk(self.inner, tail);
@@ -483,7 +497,7 @@ pub fn SplitStream(
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
-            self.inner.mutex.lock() catch unreachable;
+            lockInner(self.inner);
             self.inner.err = err;
             self.inner.err_set.store(1, .release);
             wakeAllParkedSubscribers(self.inner);
@@ -494,7 +508,7 @@ pub fn SplitStream(
         pub fn retain(self: Self) Self {
             std.debug.assert(self.active);
 
-            self.inner.mutex.lock() catch unreachable;
+            lockInner(self.inner);
             // CLONE / retain → explicit reader.
             const subscriber_id = allocSubscriber(self.inner, self.next_seq, 1) catch unreachable;
             self.inner.mutex.unlock();
@@ -533,7 +547,7 @@ pub fn SplitStream(
                 // Phase 1: shared read attempt. Multiple subscribers can concurrently
                 // walk chunks and read values; the writer (push/close/setError) takes
                 // exclusive. Each subscriber atomically updates only its own seq.
-                self.inner.mutex.lockShared() catch unreachable;
+                lockSharedInner(self.inner);
 
                 if (self.inner.err_set.load(.acquire) != 0) {
                     const err = self.inner.err;
@@ -583,7 +597,7 @@ pub fn SplitStream(
                 // Phase 2: need to park. Take exclusive to write SubscriberRecord
                 // park state. Re-check after upgrading — a writer may have published
                 // between unlockShared and lock acquire.
-                self.inner.mutex.lock() catch unreachable;
+                lockInner(self.inner);
 
                 if (self.inner.err_set.load(.acquire) != 0) {
                     const err = self.inner.err;
@@ -625,7 +639,7 @@ pub fn SplitStream(
 
             var should_destroy = false;
             var should_signal_close = false;
-            self.inner.mutex.lock() catch unreachable;
+            lockInner(self.inner);
             if (self.subscriber_id != InvalidSubscriber) {
                 var record = &self.inner.subscribers.items[self.subscriber_id];
                 record.active.store(0, .release);

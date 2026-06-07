@@ -178,6 +178,7 @@ module FiberCtxBuilder
         CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
                         MIR::Ident.new(source_ref), nil, cleanup, nil, nil, nil)
       elsif pointer_captures.include?(name)
+        source_ref = source_overrides[name] || name
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
         # Capture by pointer so writes inside the fiber body land on the
         # outer instance, not on a copied struct.
@@ -197,15 +198,16 @@ module FiberCtxBuilder
         # through (parameters are Zig-const, so `&pool` is `*const T`).
         sym = analysis&.capture_symbols&.dig(name)
         if sym&.is_param
-          CaptureSpec.new(name, "@TypeOf(#{name})", name,
-                          MIR::Ident.new(name), nil, nil, nil, nil, nil)
+          CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
+                          MIR::Ident.new(source_ref), nil, nil, nil, nil, nil)
         else
-          CaptureSpec.new(name, "@TypeOf(&#{name})", "&#{name}",
-                          MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil, nil, nil, nil)
+          CaptureSpec.new(name, "@TypeOf(&#{source_ref})", "&#{source_ref}",
+                          MIR::AddressOf.new(MIR::Ident.new(source_ref)), nil, nil, nil, nil, nil)
         end
       else
-        CaptureSpec.new(name, "@TypeOf(#{name})", name,
-                        MIR::Ident.new(name), nil, nil, nil, nil, nil)
+        source_ref = source_overrides[name] || name
+        CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
+                        MIR::Ident.new(source_ref), nil, nil, nil, nil, nil)
       end
     end
     map = captured.keys.to_h { |n| [n, "#{body_access_prefix}.#{n}"] }

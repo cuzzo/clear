@@ -101,4 +101,91 @@ class SequenceMineTest < Minitest::Test
     refute_includes mids, "extend"
     refute_includes mids, "private_class_method"
   end
+
+  def test_test_dsl_calls_are_not_protocol_events
+    r = scan(<<~RB)
+      describe "pipeline" do
+        let(:item) { build_item }
+
+        it "checks matcher chains" do
+          expect(build_item).to eq(item)
+          expect(build_item).not_to be_nil
+          expect(build_item).to be_a(Item)
+          expect { run_pipeline }.to raise_error(RuntimeError)
+        end
+      end
+    RB
+
+    mids = r.co_called_pairs(min_support: 1).flat_map { |h| h[:pair] }.uniq
+    %w[
+      be_a be_nil describe eq expect it let not_to raise_error to
+    ].each do |mid|
+      refute_includes mids, mid
+    end
+    assert_includes mids, "build_item"
+    assert_includes mids, "run_pipeline"
+  end
+
+  def test_passive_zero_arg_readers_are_not_protocol_events
+    r = scan(<<~RB)
+      def a(node); node.name; node.type; visit(node); end
+      def b(node); node.name; node.type; visit(node); end
+      def c(node); node.name; node.type; visit(node); end
+      def d(node); node.name; node.type; visit(node); end
+      def e(node); node.name; visit(node); end
+    RB
+
+    mids = r.co_called_pairs(min_support: 1).flat_map { |h| h[:pair] }.uniq
+    refute_includes mids, "name"
+    refute_includes mids, "type"
+    assert_empty r.broken_protocol(min_support: 4)
+  end
+
+  def test_unqualified_passive_zero_arg_readers_are_not_protocol_events
+    r = scan(<<~RB)
+      def a(node); runtime_binding_name; lowering_counters; visit(node); end
+      def b(node); runtime_binding_name; lowering_counters; visit(node); end
+      def c(node); runtime_binding_name; lowering_counters; visit(node); end
+      def d(node); runtime_binding_name; lowering_counters; visit(node); end
+      def e(node); runtime_binding_name; visit(node); end
+      def f(node); lowering_counters(); visit(node); end
+    RB
+
+    mids = r.co_called_pairs(min_support: 1).flat_map { |h| h[:pair] }.uniq
+    refute_includes mids, "runtime_binding_name"
+    refute_includes mids, "lowering_counters"
+    assert_empty r.broken_protocol(min_support: 4)
+  end
+
+  def test_zero_arg_lifecycle_calls_remain_protocol_events
+    r = scan(<<~RB)
+      def a(lock); lock.acquire; work(lock); lock.release; end
+      def b(lock); lock.acquire; work(lock); lock.release; end
+      def c(lock); lock.acquire; work(lock); lock.release; end
+      def d(lock); lock.acquire; work(lock); lock.release; end
+      def leak(lock); lock.acquire; work(lock); end
+    RB
+
+    bp = r.broken_protocol(min_support: 4)
+    hit = bp.find { |h| h[:at].include?("leak") }
+    refute_nil hit
+    assert_equal "acquire", hit[:has]
+    assert_equal "release", hit[:missing]
+  end
+
+  def test_unqualified_zero_arg_lifecycle_calls_remain_protocol_events
+    r = scan(<<~RB)
+      def a; acquire; release; end
+      def b; acquire; release; end
+      def c; acquire; release; end
+      def d; acquire; release; end
+      def leak; acquire; end
+    RB
+
+    bp = r.broken_protocol(min_support: 4)
+    hit = bp.find { |h| h[:at].include?("leak") }
+    refute_nil hit
+    assert_equal "acquire", hit[:has]
+    assert_equal "release", hit[:missing]
+  end
 end

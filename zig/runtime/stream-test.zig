@@ -27,6 +27,52 @@ const qs = @import("queues.zig");
 const test_stack_size: fc.StackSize =
     if (build_options.coverage or build_options.tsan) .Large else .Standard;
 
+fn splitHammerIdleWait() void {
+    // TSan records every intercepted sleep stack in StackDepot. This hammer
+    // runs many scheduler threads across many local burn-in processes, so a
+    // tight nanosleep polling loop can crash libtsan itself before it finds
+    // user-code races.
+    if (build_options.tsan) {
+        std.atomic.spinLoopHint();
+    } else {
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+}
+
+fn splitHammerFutexWaitOnce(value: *std.atomic.Value(u32), expected: u32) void {
+    const timeout = std.os.linux.timespec{ .sec = 0, .nsec = std.time.ns_per_ms };
+    if (value.load(.acquire) == expected) {
+        _ = std.os.linux.futex_4arg(
+            &value.raw,
+            .{ .cmd = .WAIT, .private = true },
+            expected,
+            &timeout,
+        );
+    }
+}
+
+fn splitHammerFutexWait(value: *std.atomic.Value(u32), expected: u32) void {
+    while (value.load(.acquire) == expected) {
+        splitHammerFutexWaitOnce(value, expected);
+    }
+}
+
+fn splitHammerFutexWakeAll(value: *std.atomic.Value(u32)) void {
+    _ = std.os.linux.futex_3arg(
+        &value.raw,
+        .{ .cmd = .WAKE, .private = true },
+        std.math.maxInt(u32),
+    );
+}
+
+fn splitHammerWakeRemoteSchedulers(idle_ticks: *usize) void {
+    if ((idle_ticks.* & 0xff) == 0) {
+        fp.global_registry.forceNotifyAll();
+    }
+    idle_ticks.* +%= 1;
+    splitHammerIdleWait();
+}
+
 fn fakeSched() *CheatHeader.scheduler.Scheduler {
     return @ptrFromInt(@as(usize, @alignOf(CheatHeader.scheduler.Scheduler)));
 }
@@ -147,72 +193,54 @@ fn listMapErrorOnFive(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!i64 {
 
 fn listReduceConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*ListReduceState, @ptrCast(@alignCast(raw_args.?)));
-    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null);
-    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
-    state.average = try CheatLib.concurrentListReduce(i64, f64, listMapF64,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
-    state.min = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
-    state.max = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
+    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null);
+    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
+    state.average = try CheatLib.concurrentListReduce(i64, f64, listMapF64, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
+    state.min = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
+    state.max = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
 
     const empty = state.items[0..0];
-    state.empty_count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
-        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null);
-    state.empty_sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
-    state.empty_average = try CheatLib.concurrentListReduce(i64, f64, listMapF64,
-        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
-    state.empty_min = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
-    state.empty_max = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
+    state.empty_count = try CheatLib.concurrentListCount(i64, listKeepGtTwo, rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null);
+    state.empty_sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
+    state.empty_average = try CheatLib.concurrentListReduce(i64, f64, listMapF64, rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
+    state.empty_min = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
+    state.empty_max = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
 }
 
 fn listReduceParallelConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*ListReduceState, @ptrCast(@alignCast(raw_args.?)));
-    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
-        rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null);
-    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
-        rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null, 0, .sum);
+    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo, rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null);
+    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64, rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null, 0, .sum);
 }
 
 fn listReduceErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*ListReduceErrorState, @ptrCast(@alignCast(raw_args.?)));
-    _ = CheatLib.concurrentListCount(i64, listKeepErrorOnFive,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null) catch |err| {
+    _ = CheatLib.concurrentListCount(i64, listKeepErrorOnFive, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null) catch |err| {
         state.count_err = err;
     };
-    _ = CheatLib.concurrentListReduce(i64, i64, listMapErrorOnFive,
-        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum) catch |err| {
+    _ = CheatLib.concurrentListReduce(i64, i64, listMapErrorOnFive, rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum) catch |err| {
         state.reduce_err = err;
     };
 }
 
 fn boundedSelectConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedSelectState, @ptrCast(@alignCast(raw_args.?)));
-    state.results = try CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapDouble,
-        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
+    state.results = try CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapDouble, rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
 }
 
 fn boundedWhereConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedSelectState, @ptrCast(@alignCast(raw_args.?)));
-    state.results = try CheatLib.concurrentBoundedWhere(i64, 4, boundedKeepGtTwo,
-        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
+    state.results = try CheatLib.concurrentBoundedWhere(i64, 4, boundedKeepGtTwo, rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
 }
 
 fn boundedEachConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedEachState, @ptrCast(@alignCast(raw_args.?)));
-    try CheatLib.concurrentBoundedEach(i64, 4, boundedAccumulate,
-        rt, &state.items, 2, 3, false, .{}, state);
+    try CheatLib.concurrentBoundedEach(i64, 4, boundedAccumulate, rt, &state.items, 2, 3, false, .{}, state);
 }
 
 fn boundedSelectErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
-    var result = CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapErrorOnThree,
-        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+    var result = CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapErrorOnThree, rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
         state.err = err;
         return;
     };
@@ -221,8 +249,7 @@ fn boundedSelectErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void
 
 fn boundedWhereErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
-    var result = CheatLib.concurrentBoundedWhere(i64, 4, boundedWhereErrorOnThree,
-        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+    var result = CheatLib.concurrentBoundedWhere(i64, 4, boundedWhereErrorOnThree, rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
         state.err = err;
         return;
     };
@@ -231,8 +258,7 @@ fn boundedWhereErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void 
 
 fn boundedEachErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
-    CheatLib.concurrentBoundedEach(i64, 4, boundedEachErrorOnThirty,
-        rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+    CheatLib.concurrentBoundedEach(i64, 4, boundedEachErrorOnThirty, rt, &state.items, 2, 3, false, .{}, null) catch |err| {
         state.err = err;
         return;
     };
@@ -263,11 +289,11 @@ test "Stream has inner and alloc fields (no head — ring buffer tracks position
     const fields = @typeInfo(S).@"struct".fields;
     var found_inner = false;
     var found_alloc = false;
-    var found_head  = false;
+    var found_head = false;
     inline for (fields) |f| {
         if (std.mem.eql(u8, f.name, "inner")) found_inner = true;
         if (std.mem.eql(u8, f.name, "alloc")) found_alloc = true;
-        if (std.mem.eql(u8, f.name, "head"))  found_head  = true;
+        if (std.mem.eql(u8, f.name, "head")) found_head = true;
     }
     try std.testing.expect(found_inner);
     try std.testing.expect(found_alloc);
@@ -277,19 +303,19 @@ test "Stream has inner and alloc fields (no head — ring buffer tracks position
 test "Stream.Inner has ring buffer fields, wg, closed, err (no items ArrayList)" {
     const Inner = CheatLib.Stream(f64).Inner;
     const fields = @typeInfo(Inner).@"struct".fields;
-    var found_buf    = false;
-    var found_head   = false;
-    var found_tail   = false;
+    var found_buf = false;
+    var found_head = false;
+    var found_tail = false;
     var found_closed = false;
-    var found_wg     = false;
-    var found_items  = false;
+    var found_wg = false;
+    var found_items = false;
     inline for (fields) |f| {
-        if (std.mem.eql(u8, f.name, "buf"))    found_buf    = true;
-        if (std.mem.eql(u8, f.name, "head"))   found_head   = true;
-        if (std.mem.eql(u8, f.name, "tail"))   found_tail   = true;
+        if (std.mem.eql(u8, f.name, "buf")) found_buf = true;
+        if (std.mem.eql(u8, f.name, "head")) found_head = true;
+        if (std.mem.eql(u8, f.name, "tail")) found_tail = true;
         if (std.mem.eql(u8, f.name, "closed")) found_closed = true;
-        if (std.mem.eql(u8, f.name, "wg"))     found_wg     = true;
-        if (std.mem.eql(u8, f.name, "items"))  found_items  = true;
+        if (std.mem.eql(u8, f.name, "wg")) found_wg = true;
+        if (std.mem.eql(u8, f.name, "items")) found_items = true;
     }
     try std.testing.expect(found_buf);
     try std.testing.expect(found_head);
@@ -343,9 +369,9 @@ test "Stream.push works for bool type (ring buffer)" {
 
     stream.inner.closed.store(true, .release);
 
-    try std.testing.expectEqual(@as(?bool, true),  try stream.next());
+    try std.testing.expectEqual(@as(?bool, true), try stream.next());
     try std.testing.expectEqual(@as(?bool, false), try stream.next());
-    try std.testing.expectEqual(@as(?bool, null),  try stream.next());
+    try std.testing.expectEqual(@as(?bool, null), try stream.next());
 
     alloc.destroy(stream.inner);
 }
@@ -402,7 +428,7 @@ test "Stream(f64) and Stream(bool) are distinct types" {
 }
 
 test "Stream(f64) and BoundedStream(f64, 3) are distinct types" {
-    const S  = CheatLib.Stream(f64);
+    const S = CheatLib.Stream(f64);
     const BS = CheatLib.BoundedStream(f64, 3);
     try std.testing.expect(S != BS);
 }
@@ -1169,19 +1195,15 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     if (!build_options.tsan and !build_options.coverage) return error.SkipZigTest;
 
     const allocator = std.testing.allocator;
-    // Under TSan, libtsan's stackdepot fills up under heavy parallel atomic ops
-    // (16 subscribers × 4096 reads × 8 schedulers ≈ hundreds of thousands of
-    // tracked atomic ops). When the depot saturates, libtsan crashes itself
-    // (SEGV inside sanitizer_stackdepot.cpp:hash). The race detection itself
-    // is sound — just the bookkeeping runs out of room. Reduce to a scale
-    // TSan can keep up with while still exercising the multi-scheduler
-    // pubsub pattern. Non-TSan builds keep the full 16/4096/7 stress shape.
+    // Keep the pre-existing TSan stress shape. This test already has a
+    // dedicated TSan workload; do not shrink it further for stability.
     const subscriber_count = if (build_options.coverage) 3 else if (build_options.tsan) 8 else 16;
     const message_count = if (build_options.coverage) 64 else if (build_options.tsan) 1024 else 4096;
     // kcov ptraces every scheduler OS thread. This hammer's real cross-thread
     // coverage belongs to the TSan lane; under kcov keep the same spawnBest /
     // SplitStream surface on the active scheduler so coverage stays bounded.
     const worker_count = if (build_options.coverage) 0 else if (build_options.tsan) 3 else 7;
+    const lock_timeout_ms: i64 = if (build_options.tsan) 300_000 else 30_000;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -1203,16 +1225,16 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     // scheduler.zig:543 -- a cross-scheduler shutdown UAF that leaks
     // the stolen-stack's Fiber and surfaces as `(empty stack trace)`
     // in DebugAllocator's leak report.
-    var post_run_workers = std.atomic.Value(usize).init(0);
-    var deinit_phase = std.atomic.Value(bool).init(false);
+    var post_run_workers = std.atomic.Value(u32).init(0);
+    var deinit_phase = std.atomic.Value(u32).init(0);
 
     const WorkerCtx = struct {
         allocator: std.mem.Allocator,
         global_ctx: *EbrContext,
         stack_pool: *fm.StackPool,
         shutdown: *std.atomic.Value(bool),
-        post_run_workers: *std.atomic.Value(usize),
-        deinit_phase: *std.atomic.Value(bool),
+        post_run_workers: *std.atomic.Value(u32),
+        deinit_phase: *std.atomic.Value(u32),
     };
 
     const workerMain = struct {
@@ -1223,7 +1245,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
             // The default Debug timeout is 100ms, which under TSan-instrumented
             // multi-scheduler stress is sometimes too aggressive — read-lock
             // acquires can take >100ms. Bump for this stress test only.
-            if (build_options.tsan or build_options.coverage) worker_sched.lock_timeout_ms = 30_000;
+            if (build_options.tsan or build_options.coverage) worker_sched.lock_timeout_ms = lock_timeout_ms;
             fp.active_scheduler = &worker_sched;
             fp.scheduler_running = true;
             worker_sched.run();
@@ -1232,12 +1254,11 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
             // Phase 1: announce we have left run() and will issue no
             // more cross-scheduler submits.
             _ = ctx.post_run_workers.fetchAdd(1, .release);
+            splitHammerFutexWakeAll(ctx.post_run_workers);
             // Phase 2: block until every peer has reached the fence.
             // Past this point no peer is in a submitRemote* path, so
             // freeing our SPSC channels in worker_sched.deinit is safe.
-            while (!ctx.deinit_phase.load(.acquire)) {
-                compat.sleepNs(std.time.ns_per_ms);
-            }
+            splitHammerFutexWait(ctx.deinit_phase, 0);
             worker_sched.deinit();
         }
     }.run;
@@ -1256,7 +1277,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         workers[i] = try std.Thread.spawn(.{}, workerMain, .{&worker_ctx});
     }
     while (fp.global_registry.count() < worker_count) {
-        compat.sleepNs(std.time.ns_per_ms);
+        splitHammerIdleWait();
     }
 
     var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -1265,7 +1286,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         fp.global_registry.deinit(allocator);
     }
     sched.global_shutdown = &shutdown;
-    if (build_options.tsan or build_options.coverage) sched.lock_timeout_ms = 30_000;
+    if (build_options.tsan or build_options.coverage) sched.lock_timeout_ms = lock_timeout_ms;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
@@ -1298,8 +1319,11 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     }
 
     const ready_deadline = compat.milliTimestamp() + 15_000;
+    var ready_idle_ticks: usize = 0;
     while (ready.load(.acquire) < subscriber_count and compat.milliTimestamp() < ready_deadline) {
-        if (!sched.pollOne()) compat.sleepNs(std.time.ns_per_ms);
+        if (!sched.pollOne()) {
+            splitHammerWakeRemoteSchedulers(&ready_idle_ticks);
+        }
     }
     try std.testing.expectEqual(@as(usize, subscriber_count), ready.load(.acquire));
 
@@ -1318,8 +1342,11 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     // correct (no races, no deadlock), just slow under instrumentation.
     const deadline_ms: i64 = if (build_options.tsan or build_options.coverage) 600_000 else 15_000;
     const deadline = compat.milliTimestamp() + deadline_ms;
+    var completed_idle_ticks: usize = 0;
     while (completed.load(.acquire) < expected_completed and compat.milliTimestamp() < deadline) {
-        if (!sched.pollOne()) compat.sleepNs(std.time.ns_per_ms);
+        if (!sched.pollOne()) {
+            splitHammerWakeRemoteSchedulers(&completed_idle_ticks);
+        }
     }
 
     shutdown.store(true, .release);
@@ -1329,10 +1356,13 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     // fence (no peer is still in submitRemoteStackFree), then release
     // the deinit barrier so all workers can free their channels in
     // parallel without racing each other's submits.
-    while (post_run_workers.load(.acquire) < worker_count) {
-        compat.sleepNs(std.time.ns_per_ms);
+    const expected_workers = @as(u32, @intCast(worker_count));
+    while (post_run_workers.load(.acquire) < expected_workers) {
+        fp.global_registry.forceNotifyAll();
+        splitHammerFutexWaitOnce(&post_run_workers, post_run_workers.load(.acquire));
     }
-    deinit_phase.store(true, .release);
+    deinit_phase.store(1, .release);
+    splitHammerFutexWakeAll(&deinit_phase);
 
     for (&workers) |*worker| worker.join();
 

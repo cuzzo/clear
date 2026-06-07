@@ -152,7 +152,7 @@ end
 elapsed = Benchmark.realtime do
   importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
   frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-  lowering = MIRLowering.new(
+  lowering = MIRLowering.new(input: MIRLoweringInput.new(
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
@@ -160,7 +160,7 @@ elapsed = Benchmark.realtime do
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,
     source_dir: source_dir,
-  )
+  ))
   mod = lowering.lower_module(frontend.ast)
   items = (mod[:items] + mod[:type_items]).flatten
   checker = MIRChecker.new

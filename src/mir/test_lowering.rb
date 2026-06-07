@@ -18,30 +18,14 @@ require "sorbet-runtime"
 #                                 explicit MIR::Suppress (otherwise
 #                                 Zig flags them as unused).
 #
-# All methods rely on MIRLowering instance state (@rt_name,
-# @active_stubs, @current_bindings, @decl_zig_name_map, etc.) and
+# All methods rely on MIRLowering typed state (runtime name,
+# @active_stubs, function_state.current_bindings, function_state.decl_zig_name_map, etc.) and
 # call into shared lowering helpers (lower, lower_body, emit_expr).
 # This module is purely organizational — zero behavior change from
 # the inline definitions it replaces.
 
 module TestLowering
     extend T::Sig
-
-  # Per-test preamble emitted as InlineZig at the start of every
-  # synthesized MIR::TestDef body. Allocates a fresh DebugAllocator,
-  # EBR context, and Runtime so each Zig `test "..."` block runs in
-  # isolation.
-  TEST_PREAMBLE = T.let((<<~ZIG).chomp, String)
-    var da = std.heap.DebugAllocator(.{}){};
-        defer _ = da.deinit();
-        const allocator = da.allocator();
-        var global_ctx = EbrContext{};
-        defer global_ctx.deinit(allocator);
-        var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-        defer __rt_box.deinit();
-        __rt_box.wireAllocator();
-        const rt: *Runtime = &__rt_box; _ = &rt;
-  ZIG
 
   sig { params(node: AST::TestBlock).returns(T::Array[T.untyped]) }
   def lower_test_block(node)
@@ -110,7 +94,7 @@ module TestLowering
 
       (when_block.benchmarks || []).each do |b|
         name = "#{ctx.test_name}: #{when_desc}: benchmark#{tag_suffix}"
-        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + T.must(when_setup_mir) + [lower(b)]
+        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + when_setup_mir + [lower(b)]
         tests << MIR::TestDef.new(name, body)
       end
 
@@ -121,7 +105,7 @@ module TestLowering
   end
 
   # Emits the MIR::TestDef for a single TEST THAT — handles the
-  # PENDING short-circuit, scopes @current_bindings to the synthetic
+  # PENDING short-circuit, scopes function_state.current_bindings to the synthetic
   # wrapper so cleanup classification finds locals, composes hooks
   # around the body, and prepends only the LET decls actually
   # referenced by the body or the active hook bodies (lazy).
@@ -131,12 +115,13 @@ module TestLowering
     full_name = "#{env.ctx.test_name}: #{env.when_desc}: #{test_that.description}#{env.tag_suffix}"
 
     if test_that.pending
-      skip_iz = MIR::InlineZig.new("return error.SkipZigTest;", "pending_skip")
-      skip_iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-      return MIR::TestDef.new(full_name, [env.ctx.fresh_preamble, skip_iz])
+      return MIR::TestDef.new(full_name, [
+        env.ctx.fresh_preamble,
+        MIR::ReturnStmt.new(MIR::Ident.new("error.SkipZigTest")),
+      ])
     end
 
-    # Scope @current_bindings to the synthesized test wrapper so
+    # Scope function_state.current_bindings to the synthesized test wrapper so
     # lower_var_decl finds the cleanup entry MIRPass classified for
     # locals declared inside the TEST THAT body.
     body_mir = with_test_that_bindings(test_that) { lower_body(test_that.body) }
@@ -176,18 +161,18 @@ module TestLowering
     MIR::TestDef.new(full_name, body)
   end
 
-  # Scope @current_bindings to the cleanup-classifier's synthetic FN
+  # Scope function_state.current_bindings to the cleanup-classifier's synthetic FN
   # wrapper for the duration of the block. Restored unconditionally.
   sig { params(test_that: AST::TestThat, blk: T.untyped).returns(T.untyped) }
   def with_test_that_bindings(test_that, &blk)
     T.bind(self, MIRLowering) rescue nil
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    prev = @current_bindings
+    prev = function_state.current_bindings
     synth_fn = test_that.respond_to?(:synthetic_fn) ? test_that.synthetic_fn : nil
-    @current_bindings = (synth_fn&.cleanup_bindings) || {}
+    function_state.current_bindings = (synth_fn&.cleanup_bindings) || {}
     blk.call
   ensure
-    @current_bindings = prev
+    T.bind(self, MIRLowering) rescue nil
+    function_state.current_bindings = T.must(prev)
   end
 
   # Per-TEST-block context object — pre-lowered TEST-level data
@@ -216,15 +201,11 @@ module TestLowering
       )
     end
 
-    # Build a fresh InlineZig preamble (allocator + Runtime + EBR
-    # context) for one Zig `test` block. Each call returns a new
-    # MIR::InlineZig instance because downstream passes mutate the
-    # stdlib_def hash.
-    sig { returns(MIR::InlineZig) }
+    # Build the allocator + Runtime + EBR context preamble for one Zig
+    # `test` block.
+    sig { returns(MIR::TestPreamble) }
     def fresh_preamble
-      iz = MIR::InlineZig.new(TEST_PREAMBLE, "test_preamble")
-      iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-      iz
+      MIR::TestPreamble.new(nil)
     end
 
     # Emit the BEFORE/AFTER ALL hooks in `bodies` as standalone Zig
@@ -237,7 +218,7 @@ module TestLowering
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
       (bodies || []).each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
-        tests << MIR::TestDef.new(name, [fresh_preamble] + T.must(@lowering.lower_body(body)))
+        tests << MIR::TestDef.new(name, [fresh_preamble] + @lowering.lower_body(body))
       end
     end
   end
@@ -328,29 +309,10 @@ module TestLowering
     node.each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
   end
 
-  sig { params(node: AST::AssertRaises).returns(MIR::InlineZig) }
+  sig { params(node: AST::AssertRaises).returns(MIR::AssertRaisesCheck) }
   def lower_assert_raises(node)
     T.bind(self, MIRLowering) rescue nil
-    @rt_name = T.let(@rt_name, T.untyped)
-    rt_name = @rt_name
-    kind = node.kind
-    # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
-    expr_zig = emit_expr(lower(node.expression))
-    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
-    ar_code = [
-      "{",
-      "    if (#{expr_zig}) |_| {",
-      "        @panic(\"ASSERT_RAISES: expected #{kind} error but none raised\");",
-      "    } else |_| {",
-      "        if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {",
-      "            @panic(\"ASSERT_RAISES: expected #{kind} error, got different kind\");",
-      "        }",
-      "    }",
-      "}",
-    ].join("\n")
-    iz = MIR::InlineZig.new(ar_code, "assert_raises")
-    iz.stdlib_def = FunctionSignature.borrowing_intrinsic
-    iz
+    MIR::AssertRaisesCheck.new(lower(node.expression), runtime_binding_name, node.kind, node.error_name)
   end
 
   # Build the MIR replacement for a stubbed call site, or nil if `fn_name`
@@ -362,7 +324,6 @@ module TestLowering
   sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
-    @rt_name = T.let(@rt_name, T.untyped)
     stub_info = (@active_stubs || {})[fn_name]
     return nil unless stub_info
 
@@ -404,7 +365,7 @@ module TestLowering
       # invocation must thread the runtime through and `try` because
       # the lambda's return type is `anyerror!T`.
       args_mir = call_inputs.map { |a| lower(a) }
-      MIR::Call.new(stub_info[:var], [MIR::Ident.new(@rt_name)] + args_mir, true)
+      MIR::Call.new(stub_info[:var], [MIR::Ident.new(runtime_binding_name)] + args_mir, true)
     end
   end
 
@@ -412,20 +373,18 @@ module TestLowering
   # need MIR::Suppress in a stub replacement (otherwise Zig flags them as
   # unused). Only top-level Identifiers count -- nested expressions
   # (FieldGet, FuncCall, literals, ...) are evaluated implicitly. Routes
-  # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
+  # through function_state.decl_zig_name_map / function_state.fn_name_rename_map so suppressed names
   # match the actual Zig var (cleanup-classification may suffix-rename
   # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
   sig { params(node: T.untyped).returns(T::Array[String]) }
   def stub_local_idents(node)
     T.bind(self, MIRLowering) rescue nil
-    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
-    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     return [] unless node.is_a?(AST::Identifier)
     name = node.name
     return [] unless name.is_a?(String)
     decl = node.symbol&.reg
-    renamed = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) ||
-              (@fn_name_rename_map && @fn_name_rename_map[name]) ||
+    renamed = (decl && function_state.decl_zig_names[decl.object_id]) ||
+              function_state.rename_map[name] ||
               name
     [renamed]
   end

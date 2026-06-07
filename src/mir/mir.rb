@@ -192,6 +192,46 @@ module MIR
       )
     end
 
+    sig do
+      params(
+        emits_allocating: T::Boolean,
+        heap_return_alloc: T::Boolean,
+        fixed_void_without_alloc_metadata: T::Boolean,
+        mutates_receiver_without_heap_return: T::Boolean,
+        result_owns: T.nilable(T::Boolean),
+        result_type: T.nilable(Type),
+        alloc: T.nilable(Symbol),
+        target_var: T.nilable(String)
+      ).returns(OwnershipEffect)
+    end
+    def self.from_callable_facts(emits_allocating:, heap_return_alloc:,
+                                 fixed_void_without_alloc_metadata:,
+                                 mutates_receiver_without_heap_return:,
+                                 result_owns:, result_type:, alloc:, target_var:)
+      active = emits_allocating || heap_return_alloc
+      explicitly_not_owned = heap_return_alloc && result_owns == false
+      unknown_owned_result = heap_return_alloc && result_owns.nil? &&
+                             result_type && !owned_result_type?(result_type)
+      missing_allocator = alloc.nil? && !heap_return_alloc
+      blocked = fixed_void_without_alloc_metadata ||
+                mutates_receiver_without_heap_return ||
+                explicitly_not_owned ||
+                unknown_owned_result ||
+                missing_allocator
+
+      return none unless active
+      return none if blocked
+
+      owned(alloc: alloc, target_var: target_var)
+    end
+
+    sig { params(type_info: Type).returns(T::Boolean) }
+    def self.owned_result_type?(type_info)
+      ti = type_info.success_type || type_info
+      ti = ti.wrapped_type || ti if ti.optional?
+      ti.ownership_bearing?
+    end
+
     sig { params(name: String).returns(OwnershipEffect) }
     def with_target(name)
       OwnershipEffect.new(
@@ -291,6 +331,54 @@ module MIR
     end
   end
 
+  class LoweredNodeId < T::Struct
+    extend T::Sig
+
+    const :value, Integer
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      return false unless other.is_a?(LoweredNodeId)
+
+      other.value == value
+    end
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
+
+    sig { returns(Integer) }
+    def hash
+      value.hash
+    end
+
+  end
+
+  class LoweredBodyId < T::Struct
+    extend T::Sig
+
+    const :node_ids, T::Array[LoweredNodeId]
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      return false unless other.is_a?(LoweredBodyId)
+
+      other.node_ids == node_ids
+    end
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
+
+    sig { returns(Integer) }
+    def hash
+      node_ids.hash
+    end
+
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -321,6 +409,8 @@ module MIR
     def explicit_ownership_contract; nil; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
     attr_accessor :ownership_consumption
+    sig { returns(T.nilable(LoweredNodeId)) }
+    attr_accessor :lowered_node_id
 
     private
 
@@ -350,6 +440,16 @@ module MIR
     def owned_effect_for_alloc(alloc, cleanup_kind: :uniform)
       OwnershipEffect.owned(alloc: alloc, cleanup_kind: cleanup_kind)
     end
+  end
+
+  module NamedEmittable
+      extend T::Sig
+      extend T::Helpers
+
+    interface!
+
+    sig { abstract.returns(T.any(String, Symbol)) }
+    def name; end
   end
 
   module Stmt
@@ -383,7 +483,210 @@ module MIR
   end
 
   Node = T.type_alias { Emittable }
-  NodeRoot = T.type_alias { T.any(Node, T::Array[T.untyped]) }
+  NodeRoot = T.type_alias { T.any(Node, T::Array[Node]) }
+  ZigTemplateArgs = T.type_alias { T.any(T::Array[Emittable], T::Hash[Symbol, Emittable]) }
+  NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
+
+  class OwnershipEffect
+    OwnershipEffectInput = T.type_alias { T.nilable(T.any(Emittable, Object)) }
+
+    sig { params(node: OwnershipEffectInput).returns(OwnershipEffect) }
+    def self.of(node)
+      mir_node = [node].grep(MIR::Emittable).first
+      mir_node&.ownership_effect || none
+    end
+
+    sig { params(node: OwnershipEffectInput).returns(T::Boolean) }
+    def self.hoistable_owned_result?(node)
+      effect = of(node)
+      effect.produces_owned && effect.requires_hoist
+    end
+
+    sig { params(node: OwnershipEffectInput).returns(T.nilable(Symbol)) }
+    def self.alloc_of(node)
+      of(node).alloc
+    end
+
+    sig { params(effects: T::Array[OwnershipEffect]).returns(OwnershipEffect) }
+    def self.from_effects(effects)
+      owned = effects.select(&:produces_owned)
+      effect_when(!owned.empty?, owned(alloc: converged_effect_alloc(owned), cleanup_kind: :uniform))
+    end
+
+    sig { params(children: T::Array[Emittable]).returns(OwnershipEffect) }
+    def self.from_children(children)
+      from_effects(children.map(&:ownership_effect))
+    end
+
+    sig do
+      params(
+        left: OwnershipEffect,
+        right: OwnershipEffect,
+        result_type: T.nilable(Type),
+        fallback_is_literal: T::Boolean,
+        left_never_success: T::Boolean
+      ).returns(OwnershipEffect)
+    end
+    def self.from_try_fallback(left, right, result_type:, fallback_is_literal:, left_never_success:)
+      first_active_effect([
+        [same_owned_alloc?(left, right), left],
+        [owned_cleanup_result?(left, result_type), left],
+        [left.produces_owned && fallback_is_literal, left],
+        [right.produces_owned && left_never_success, right],
+      ])
+    end
+
+    sig { params(left: OwnershipEffect, right: OwnershipEffect, result_type: T.nilable(Type)).returns(OwnershipEffect) }
+    def self.from_optional_fallback(left, right, result_type:)
+      first_active_effect([
+        [same_owned_alloc?(left, right), left],
+        [owned_cleanup_result?(left, result_type), left],
+      ])
+    end
+
+    sig { params(left: OwnershipEffect, right: OwnershipEffect).returns(OwnershipEffect) }
+    def self.from_required_branch_pair(left, right)
+      effect_when(same_owned_alloc?(left, right), left)
+    end
+
+    sig { params(sink_alloc: T.nilable(Symbol), inner: T.nilable(Object)).returns(OwnershipEffect) }
+    def self.from_pipeline(sink_alloc:, inner:)
+      first_active_effect([
+        [!sink_alloc.nil?, owned(alloc: sink_alloc)],
+        [true, of(inner)],
+      ])
+    end
+
+    sig { params(body: T.nilable(T::Array[Emittable]), result_type: T.nilable(Type)).returns(OwnershipEffect) }
+    def self.from_block_body(body, result_type:)
+      stmts = body || []
+      break_stmt = stmts.reverse.grep(MIR::BreakStmt).first
+      value = break_stmt&.value
+      first_active_effect([
+        [true, transferred_break_ident_effect(stmts, value)],
+        [true, of(value)],
+        [true, block_result_transfer_effect(stmts)],
+        [cleanup_result_type?(result_type), owned(alloc: nil, cleanup_kind: :uniform)],
+      ])
+    end
+
+    ActiveEffectCandidate = T.type_alias { [T::Boolean, OwnershipEffect] }
+
+    sig { params(active: T::Boolean, effect: OwnershipEffect).returns(OwnershipEffect) }
+    private_class_method def self.effect_when(active, effect)
+      first_active_effect([[active, effect]])
+    end
+
+    sig { params(candidates: T::Array[ActiveEffectCandidate]).returns(OwnershipEffect) }
+    private_class_method def self.first_active_effect(candidates)
+      candidates.find { |active, effect| active && effect.produces_owned }&.last || none
+    end
+
+    sig { params(effects: T::Array[OwnershipEffect]).returns(T.nilable(Symbol)) }
+    private_class_method def self.converged_effect_alloc(effects)
+      allocs = effects.map(&:alloc).compact.uniq
+      unique_symbol_or_nil(allocs)
+    end
+
+    sig { params(symbols: T::Array[Symbol]).returns(T.nilable(Symbol)) }
+    private_class_method def self.unique_symbol_or_nil(symbols)
+      { 1 => symbols.first }[symbols.uniq.length]
+    end
+
+    sig { params(left: OwnershipEffect, right: OwnershipEffect).returns(T::Boolean) }
+    private_class_method def self.same_owned_alloc?(left, right)
+      left.produces_owned && right.produces_owned && left.alloc == right.alloc
+    end
+
+    sig { params(effect: OwnershipEffect, result_type: T.nilable(Type)).returns(T::Boolean) }
+    private_class_method def self.owned_cleanup_result?(effect, result_type)
+      effect.produces_owned && cleanup_result_type?(result_type)
+    end
+
+    sig { params(result_type: T.nilable(Type)).returns(T::Boolean) }
+    private_class_method def self.cleanup_result_type?(result_type)
+      result_type&.needs_cleanup?(nil) == true
+    end
+
+    sig { params(stmts: T::Array[Emittable], value: T.nilable(Object)).returns(OwnershipEffect) }
+    private_class_method def self.transferred_break_ident_effect(stmts, value)
+      ident = [value].grep(MIR::Ident).first
+      name = (ident&.name || "").to_s
+      mark = stmts.grep(MIR::AllocMark).find { |stmt| stmt.name.to_s == name }
+      transfer = stmts.grep(MIR::TransferMark).find { |stmt| stmt.name.to_s == name }
+      let = stmts.grep(MIR::Let).find { |stmt| stmt.name.to_s == name }
+      init_effect = of(let&.init)
+      cleanup_kind = { true => init_effect.cleanup_kind || :uniform, false => :uniform }[init_effect.produces_owned] || :uniform
+      active = T.must(!name.empty? && !mark.nil? && !transfer.nil?)
+      effect_when(active,
+        owned(alloc: mark&.alloc, cleanup_kind: cleanup_kind, target_var: name))
+    end
+
+    sig { params(stmts: T::Array[Emittable]).returns(OwnershipEffect) }
+    private_class_method def self.block_result_transfer_effect(stmts)
+      transferred_allocs = stmts.grep(MIR::TransferMark)
+        .select { |stmt| [:owned_sink, :block_result].include?(stmt.target) }
+        .filter_map(&:target_alloc)
+      effect_when(!transferred_allocs.empty?,
+        owned(alloc: unique_symbol_or_nil(transferred_allocs), cleanup_kind: :uniform))
+    end
+  end
+
+  StructInitFieldValue = T.type_alias { T.any(String, Symbol, Emittable) }
+
+  class StructInitField < T::Struct
+    extend T::Sig
+
+    const :name, T.any(String, Symbol)
+    const :value, Emittable
+    const :alloc, T.nilable(Symbol), default: nil
+
+    sig { params(key: Symbol).returns(T.nilable(StructInitFieldValue)) }
+    def [](key)
+      case key
+      when :name then name
+      when :value then value
+      when :alloc then alloc
+      end
+    end
+  end
+
+  sig { params(name: T.any(String, Symbol), value: Emittable).returns(StructInitField) }
+  def self.named_field(name, value)
+    StructInitField.new(name: name, value: value)
+  end
+
+  sig { params(expr: Emittable, capture: T.any(String, Symbol)).returns(NamedMirField) }
+  def self.if_binding(expr, capture)
+    binding = T.let({}, NamedMirField)
+    binding[:expr] = expr
+    binding[:capture] = capture
+    binding
+  end
+
+  sig { params(field: Object).returns(T.nilable(T.any(String, Symbol))) }
+  def self.struct_init_field_name(field)
+    return field.name if field.is_a?(StructInitField)
+    return T.cast(field[:name], T.nilable(T.any(String, Symbol))) if field.is_a?(Hash)
+
+    nil
+  end
+
+  sig { params(field: Object).returns(T.nilable(Emittable)) }
+  def self.struct_init_field_value(field)
+    return field.value if field.is_a?(StructInitField)
+    return T.cast(field[:value], T.nilable(Emittable)) if field.is_a?(Hash)
+
+    nil
+  end
+
+  sig { params(field: Object).returns(T.nilable(Symbol)) }
+  def self.struct_init_field_alloc(field)
+    return field.alloc if field.is_a?(StructInitField)
+    return T.cast(field[:alloc], T.nilable(Symbol)) if field.is_a?(Hash)
+
+    nil
+  end
 
   sig { params(root: T.nilable(NodeRoot), blk: T.proc.params(arg0: Node).void).void }
   def self.each_node(root, &blk)
@@ -459,7 +762,7 @@ module MIR
       @placeholders = T.let(placeholders.dup.freeze, T::Hash[T.any(Symbol, String), Symbol])
     end
 
-    sig { params(value: T.untyped).returns(T.nilable(InlineAllocMetadata)) }
+    sig { params(value: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
     def self.from(value)
       return nil unless value
       return value if value.is_a?(InlineAllocMetadata)
@@ -663,6 +966,7 @@ module MIR
   # Struct type definition.
   # Zig: const Name = struct { fields; methods };
   StructDef = Struct.new(:name, :fields, :methods, :visibility) do
+    include NamedEmittable
     include Stmt
   end
 
@@ -683,14 +987,31 @@ module MIR
   # Enum type definition.
   # Zig: const Name = enum { A, B, C };
   EnumDef = Struct.new(:name, :variants, :visibility) do
+    include NamedEmittable
     include Stmt
   end
 
   # Tagged union type definition.
   # Zig: const Name = union(enum) { A: type, B: void };
+  class UnionTypeVariant < T::Struct
+    extend T::Sig
+
+    const :name, T.any(String, Symbol)
+    const :zig_type, String
+
+    sig { params(key: Symbol).returns(T.nilable(T.any(String, Symbol))) }
+    def [](key)
+      case key
+      when :name then name
+      when :zig_type then zig_type
+      end
+    end
+  end
+
   UnionTypeDef = Struct.new(:name, :variants, :visibility) do
+    include NamedEmittable
     include Stmt
-    # variants: [{ name: String, zig_type: String }]
+    # variants: [UnionTypeVariant] (legacy hash variants are still readable)
     # unit variants have zig_type "void"
   end
 
@@ -703,7 +1024,20 @@ module MIR
   # Type alias.
   # Zig: const Name = target;
   TypeAlias = Struct.new(:name, :target) do
+    include NamedEmittable
     include Stmt
+  end
+
+  # Inline module namespace for local/stdlib REQUIRE.
+  # Zig: const Name = struct { ... };
+  # The body is structural MIR, not pre-rendered Zig text, so imported function
+  # bodies remain visible to traversal/checker/emitter code.
+  ModuleNamespace = Struct.new(:name, :items) do
+    extend T::Sig
+    include Stmt
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs(items || [])
   end
 
   # Test block.
@@ -878,21 +1212,28 @@ module MIR
     end
   end
 
+  class IfChainBranch < T::Struct
+    extend T::Sig
+
+    prop :cond, Emittable
+    prop :body, T::Array[Emittable]
+  end
+
   # If-chain statement (for union/string MATCH).
   # Zig: if (cond1) { ... } else if (cond2) { ... } else { ... }
   IfChain = Struct.new(:branches, :default_body) do
     extend T::Sig
     include Stmt
-    # branches: [{ cond: MIR expr, body: [MIR stmt] }]
+    # branches: [MIR::IfChainBranch]
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      compact_child_exprs(branches&.map { |branch| branch[:cond] } || [])
+      compact_child_exprs(branches&.map(&:cond) || [])
     end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
       branches&.each_with_index do |branch, index|
-        slots << body_slot(:"branches_#{index}", branch[:body], ->(new_body) { branch[:body] = new_body })
+        slots << body_slot(:"branches_#{index}", branch.body, ->(new_body) { branch.body = new_body })
       end
       slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
       slots
@@ -952,6 +1293,24 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([cond])
+  end
+
+  AssertRaisesCheck = Struct.new(:expr, :rt_name, :kind, :error_name) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  TestPreamble = Struct.new(:unused) do
+    include Stmt
+  end
+
+  DebugOnly = Struct.new(:body) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # In-place sort.
@@ -1026,7 +1385,7 @@ module MIR
   DeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    # body: single MIR stmt, or a RawZig for inline defer
+    # body: single MIR stmt, or a plain string for transitional inline defer
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
@@ -1071,75 +1430,10 @@ module MIR
     def child_exprs = compact_child_exprs([expr])
   end
 
-  # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
-  # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
-  #
-  # WARNING: RawZig BYPASSES ownership verification. The MIR checker cannot
-  # see inside raw Zig code. Any allocation, deallocation, or ownership
-  # transfer inside a RawZig block is INVISIBLE to the checker.
-  #
-  # SAFETY RULES:
-  #   - NEVER allocate heap memory inside RawZig without a matching
-  #     MIR::AllocMark + MIR::Cleanup outside it (leak).
-  #   - NEVER free/deinit a binding inside RawZig that has a Cleanup
-  #     outside it (double-free).
-  #   - NEVER move ownership of a binding into RawZig without a
-  #     MIR::MoveMark + guarded Cleanup outside it (double-free or leak).
-  #   - NEVER return a frame-allocated value from RawZig without
-  #     MIR::EscapePromote outside it (use-after-free).
-  #   - ALWAYS declare ownership_contract so the checker can cross-reference.
-  #
-  # ownership_contract: MIR::OwnershipContract
-  #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
-  #   produces: bindings the raw block creates (must have MIR::AllocMark + MIR::Drop)
-  #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
-  RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
-    extend T::Sig
-    include Stmt
-
-    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped).void }
-    def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil)
-      super(code, reason, ownership_contract, stdlib_def)
-    end
-
-    sig { params(contract: OwnershipContract).returns(OwnershipContract) }
-    def ownership_contract=(contract)
-      self[:ownership_contract] = contract
-    end
-
-    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
-    def []=(key, value)
-      validate_ownership_contract!(value) if key == :ownership_contract || key == 2
-      super
-    end
-
-    sig { returns(T::Boolean) }
-    def expr?; true; end  # can appear in expression position too
-
-    sig { returns(OwnershipContract) }
-    def explicit_ownership_contract
-      ownership_contract
-    end
-
-    sig { returns(RawZig) }
-    def without_try
-      RawZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def)
-    end
-
-    private
-
-    sig { params(value: T.untyped).void }
-    def validate_ownership_contract!(value)
-      return if value.is_a?(OwnershipContract)
-
-      raise TypeError, "ownership_contract must be MIR::OwnershipContract"
-    end
-  end
-
   # Non-mutual THUNK trampoline body. This is still emitted as a local
   # synchronous frame machine, but the MIR now exposes the frame layout,
   # base cases, recursive step, combine op, and yield policy instead of
-  # hiding the entire function body in RawZig.
+  # hiding the entire function body in opaque Zig text.
   ThunkTrampoline = Struct.new(
     :fn_name,
     :ret_zig,
@@ -1531,9 +1825,9 @@ module MIR
   #
   # `body_stmts` is a list of MIR statement nodes (or plain Strings
   # as a transitional escape hatch). The wrapper renderer uses the
-  # standard MIREmitter to walk each one, so all MIR statement
-  # types -- MIR::Let, MIR::Set, MIR::DeferStmt, MIR::RawZig,
-  # MIR::ExprStmt, etc. -- are valid here. Plain strings are
+  # standard MIREmitter to walk each one, so structural MIR statement
+  # types such as MIR::Let, MIR::Set, MIR::DeferStmt, and MIR::ExprStmt
+  # are valid here. Plain strings are
   # accepted because MIREmitter.emit handles them as a base case;
   # they exist so the lowering can pass through Zig text from the
   # surrounding fiber-body lowering without a forced wrap.
@@ -2392,6 +2686,15 @@ module MIR
     end
   end
 
+  # Statement scoped to PolymorphicMutateFlow callback emission.
+  # It writes the private __flow result and returns from the callback.
+  PolymorphicFlowSignal = Struct.new(:kind, :ret) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([ret])
+  end
+
   # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
   # F2 -> {...} END`. Lowers to a comptime `if (@hasField/@hasDecl)`
   # chain, one branch per family, each branch containing the matching
@@ -2604,7 +2907,7 @@ module MIR
     sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
     def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
 
-    sig { params(callee: String, args: T::Array[T.untyped], try_wrap: T::Boolean, owned_return: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
+    sig { params(callee: String, args: T::Array[Emittable], try_wrap: T::Boolean, owned_return: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
     def initialize(callee, args, try_wrap, owned_return = false, callable_contract = nil)
       super(callee, args, try_wrap, owned_return, callable_contract)
       @never_success = T.let(false, T::Boolean)
@@ -2789,12 +3092,13 @@ module MIR
     extend T::Sig
     include Expr
     # zig_type: String or nil (nil -> anonymous .{})
-    # fields: [{ name: String, value: MIR expr }]
+    # fields: [MIR::StructInitField] (legacy hash fields are still readable)
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([], T::Array[T.untyped])
+      values = T.let([], T::Array[Object])
       fields&.each do |field|
-        values << field[:value] if field.respond_to?(:[])
+        value = MIR.struct_init_field_value(field)
+        values << T.cast(value, Object) if value
       end
       compact_child_exprs(values)
     end
@@ -2802,12 +3106,7 @@ module MIR
     def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      effects = child_exprs.map { |child| child.respond_to?(:ownership_effect) ? child.ownership_effect : OwnershipEffect.none }
-      owned = effects.select(&:produces_owned)
-      return OwnershipEffect.none if owned.empty?
-
-      allocs = owned.map(&:alloc).compact.uniq
-      OwnershipEffect.owned(alloc: allocs.one? ? allocs.first : nil, cleanup_kind: :uniform)
+      OwnershipEffect.from_children(child_exprs)
     end
 
   end
@@ -2888,34 +3187,7 @@ module MIR
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      break_stmt = body&.reverse&.find { |stmt| stmt.is_a?(BreakStmt) }
-      return OwnershipEffect.none unless break_stmt.is_a?(BreakStmt)
-      if break_stmt.value.is_a?(Ident)
-        name = break_stmt.value.name.to_s
-        mark = body&.find { |stmt| stmt.is_a?(AllocMark) && stmt.name.to_s == name }
-        transfer = body&.find { |stmt| stmt.is_a?(TransferMark) && stmt.name.to_s == name }
-        if mark && transfer
-          let = body&.find { |stmt| stmt.is_a?(Let) && stmt.name.to_s == name }
-          init_effect = let&.init&.respond_to?(:ownership_effect) ? let.init.ownership_effect : OwnershipEffect.none
-          cleanup_kind = init_effect.produces_owned ? (init_effect.cleanup_kind || :uniform) : :uniform
-          return OwnershipEffect.owned(alloc: mark.alloc, cleanup_kind: cleanup_kind, target_var: name)
-        end
-      end
-      value_effect = break_stmt.value.ownership_effect
-      return value_effect if value_effect.produces_owned
-      transferred_allocs = T.let([], T::Array[Symbol])
-      body&.each do |stmt|
-        next unless stmt.is_a?(TransferMark)
-        next unless stmt.target == :owned_sink || stmt.target == :block_result
-        transferred_allocs << stmt.target_alloc if stmt.target_alloc
-      end
-      unless transferred_allocs.empty?
-        uniq = transferred_allocs.uniq
-        return OwnershipEffect.owned(alloc: uniq.one? ? uniq.first : nil, cleanup_kind: :uniform)
-      end
-      return OwnershipEffect.owned(alloc: nil, cleanup_kind: :uniform) if result_type&.needs_cleanup?(nil)
-
-      OwnershipEffect.none
+      OwnershipEffect.from_block_body(body, result_type: result_type)
     end
   end
 
@@ -2954,7 +3226,7 @@ module MIR
     def owned_position_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      expr.ownership_effect
+      OwnershipEffect.of(expr)
     end
 
     sig { returns(Emittable) }
@@ -2976,7 +3248,7 @@ module MIR
     def owned_position_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      expr.ownership_effect
+      OwnershipEffect.of(expr)
     end
   end
 
@@ -3004,17 +3276,13 @@ module MIR
     def owned_position_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      left = expr.ownership_effect
-      right = catch_body.ownership_effect
-      if left.produces_owned && right.produces_owned && left.alloc == right.alloc
-        return left
-      end
-
-      return left if left.produces_owned && result_type&.needs_cleanup?(nil)
-      return left if left.produces_owned && catch_body.is_a?(Lit)
-      return right if right.produces_owned && expr.respond_to?(:never_success) && expr.never_success
-
-      OwnershipEffect.none
+      OwnershipEffect.from_try_fallback(
+        OwnershipEffect.of(expr),
+        OwnershipEffect.of(catch_body),
+        result_type: result_type,
+        fallback_is_literal: catch_body.is_a?(Lit),
+        left_never_success: expr.is_a?(Call) && expr.never_success,
+      )
     end
   end
 
@@ -3040,15 +3308,11 @@ module MIR
     def owned_position_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      left = expr.ownership_effect
-      right = fallback.ownership_effect
-      if left.produces_owned && right.produces_owned && left.alloc == right.alloc
-        return left
-      end
-
-      return left if left.produces_owned && result_type&.needs_cleanup?(nil)
-
-      OwnershipEffect.none
+      OwnershipEffect.from_optional_fallback(
+        OwnershipEffect.of(expr),
+        OwnershipEffect.of(fallback),
+        result_type: result_type,
+      )
     end
   end
 
@@ -3088,11 +3352,10 @@ module MIR
     def owned_position_source_exprs = ownership_source_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      left = then_expr.ownership_effect
-      right = else_expr.ownership_effect
-      return OwnershipEffect.none unless left.produces_owned && right.produces_owned
-      return OwnershipEffect.none unless left.alloc == right.alloc
-      left
+      OwnershipEffect.from_required_branch_pair(
+        OwnershipEffect.of(then_expr),
+        OwnershipEffect.of(else_expr),
+      )
     end
   end
 
@@ -3162,6 +3425,59 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Pointer cast with Zig's required alignment assertion.
+  # Zig: @as(target_type, @ptrCast(@alignCast(expr)))
+  PointerCast = Struct.new(:expr, :target_type) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Const-removing cast for APIs that legitimately mutate through a slice.
+  # Zig: @constCast(expr)
+  ConstCast = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+  end
+
+  # Default bounded-channel capacity for streaming CONCURRENT.
+  # Rounds worker_count * 4 up to a power of two in 4..64.
+  DefaultStreamCapacity = Struct.new(:worker_count) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([worker_count])
+  end
+
+  # NEXT on a promise list (~T[]@list): await each promise into a new
+  # ArrayListUnmanaged(T) owned by `alloc`.
+  NextPromiseList = Struct.new(:list_expr, :elem_zig, :label, :results_var, :alloc) do
+    extend T::Sig
+    include Expr
+
+    sig { params(list_expr: Emittable, elem_zig: String, label: String, results_var: String, alloc: Symbol, result_type: Type).void }
+    def initialize(list_expr, elem_zig, label, results_var, alloc, result_type)
+      super(list_expr, elem_zig, label, results_var, alloc)
+      @result_type = T.let(result_type, Type)
+    end
+
+    sig { returns(Type) }
+    def result_type
+      @result_type
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([list_expr])
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
   end
 
   # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
@@ -3287,7 +3603,7 @@ module MIR
   end
 
   # Pipeline IR node. Wraps the pre-computed MIR output of a |> chain.
-  # Phase 1: inner carries old-path MIR (RawZig or MIR tree); all other fields nil.
+  # Phase 1: inner carries old-path MIR; all other fields nil.
   # Future phases: source_type, stages, sink, sink_alloc encode streaming structure.
   #
   # ast_node:    original |> BinaryOp AST node
@@ -3311,11 +3627,7 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      inner_effect = inner.respond_to?(:ownership_effect) ? inner.ownership_effect : OwnershipEffect.none
-      return inner_effect if inner_effect.produces_owned
-
-      return OwnershipEffect.owned(alloc: sink_alloc) if sink_alloc
-      OwnershipEffect.none
+      OwnershipEffect.from_pipeline(sink_alloc: sink_alloc, inner: inner)
     end
   end
 
@@ -3332,7 +3644,7 @@ module MIR
   #   - NEVER call a function that frees memory without a corresponding
   #     MIR::Cleanup marker outside the InlineZig.
   #   - NEVER embed multi-statement code -- InlineZig is for expressions only.
-  #     Use RawZig (with ownership_contract) for statement-level escape hatches.
+  #     Statement-level opaque Zig is not a valid MIR surface.
   #   - All CheatLib.* calls MUST go through BUILTIN_OPS or STD_LIB registries,
   #     not be emitted as raw InlineZig strings.
   #   - Pure expressions (casts, ranges, field access, Zig builtins) are safe
@@ -3395,7 +3707,7 @@ module MIR
       nil
     end
 
-    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
+    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(Object), allocs: T.nilable(Object), target_var: T.nilable(String)).void }
     def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
       super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
       @audit_metadata = T.let(InlineZigAuditMetadata.new(opaque_ownership_operations: false), InlineZigAuditMetadata)
@@ -3407,14 +3719,14 @@ module MIR
       self[:ownership_contract] = contract
     end
 
-    sig { params(allocs: T.untyped).returns(T.nilable(InlineAllocMetadata)) }
+    sig { params(allocs: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
     def allocs=(allocs)
       normalized = InlineAllocMetadata.from(allocs)
       self[:allocs] = normalized
       normalized
     end
 
-    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
+    sig { params(key: T.any(Symbol, Integer), value: Object).returns(Object) }
     def []=(key, value)
       validate_ownership_contract!(value) if key == :ownership_contract || key == 2
       value = InlineAllocMetadata.from(value) if key == :allocs || key == 4
@@ -3423,34 +3735,30 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      return OwnershipEffect.none unless stdlib_def&.emits_allocating? || stdlib_def&.heap_return_alloc?
-      return OwnershipEffect.none if stdlib_def&.fixed_return? && stdlib_def.return_type.void? && !has_alloc_metadata?
-      return OwnershipEffect.none if stdlib_def&.mutates_receiver? && !stdlib_def&.heap_return_alloc?
+      return OwnershipEffect.none unless stdlib_def
+
       result_owns = result_ownership_bearing
-      return OwnershipEffect.none if stdlib_def&.heap_return_alloc? && result_owns == false
-      return OwnershipEffect.none if heap_return_not_owned?(result_owns)
-      alloc = if stdlib_def&.heap_return_alloc?
+      heap_return = stdlib_def.heap_return_alloc? == true
+      alloc = if heap_return
         :heap
       elsif allocs.is_a?(InlineAllocMetadata)
         allocs.single_alloc
       else
         nil
       end
-      return OwnershipEffect.none unless alloc || stdlib_def&.heap_return_alloc?
-      OwnershipEffect.owned(alloc: alloc, target_var: target_var)
-    end
-
-    sig { params(result_owns: T.nilable(T::Boolean)).returns(T::Boolean) }
-    def heap_return_not_owned?(result_owns)
-      !!(stdlib_def&.heap_return_alloc? && result_owns.nil? &&
-        result_type && !owned_result_type?(T.must(result_type)))
-    end
-
-    sig { params(type_info: Type).returns(T::Boolean) }
-    def owned_result_type?(type_info)
-      ti = type_info.success_type || type_info
-      ti = ti.wrapped_type || ti if ti.optional?
-      ti.ownership_bearing?
+      fixed_void = !!(stdlib_def.fixed_return? == true &&
+                      stdlib_def.return_type.void? &&
+                      !has_alloc_metadata?)
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: stdlib_def.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: fixed_void,
+        mutates_receiver_without_heap_return: stdlib_def.mutates_receiver? && !heap_return,
+        result_owns: result_owns,
+        result_type: result_type,
+        alloc: alloc,
+        target_var: target_var
+      )
     end
 
     sig { returns(T::Boolean) }
@@ -3475,7 +3783,10 @@ module MIR
 
     sig { returns(InlineZig) }
     def without_try
-      out = InlineZig.new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var)
+      out = T.cast(
+        T.unsafe(self.class).new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var),
+        InlineZig,
+      )
       owns = result_ownership_bearing
       out.result_ownership_bearing = owns unless owns.nil?
       out.result_type = Type.new(result_type) if result_type
@@ -3486,11 +3797,48 @@ module MIR
 
     private
 
-    sig { params(value: T.untyped).void }
+    sig { params(value: Object).void }
     def validate_ownership_contract!(value)
       return if value.is_a?(OwnershipContract)
 
       raise TypeError, "ownership_contract must be MIR::OwnershipContract"
+    end
+  end
+
+  # Registry-backed Zig template with structured MIR children. This is the
+  # production replacement for creating ad hoc InlineZig nodes in lowerers:
+  # the Zig text comes from an audited template, while args remain traversable.
+  class ZigTemplate < InlineZig
+    extend T::Sig
+    extend T::Generic
+
+    Elem = type_member { { fixed: Object } }
+
+    sig { returns(ZigTemplateArgs) }
+    attr_reader :args
+
+    sig { params(code: String, args: ZigTemplateArgs, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(FunctionSignature), allocs: T.nilable(InlineAllocMetadata), target_var: T.nilable(String)).void }
+    def initialize(code, args, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
+      @args = T.let(args, ZigTemplateArgs)
+      super(code, reason, ownership_contract, stdlib_def, allocs, target_var)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      template_args = args
+      values = template_args.is_a?(Hash) ? template_args.values : template_args
+      compact_child_exprs(T.cast(values, T::Array[Object]))
+    end
+
+    sig { returns(ZigTemplate) }
+    def without_try
+      out = ZigTemplate.new(code.delete_prefix("try "), args, reason, ownership_contract, stdlib_def, allocs, target_var)
+      owns = result_ownership_bearing
+      out.result_ownership_bearing = owns unless owns.nil?
+      out.result_type = Type.new(result_type) if result_type
+      out.mark_opaque_ownership_operations! if opaque_ownership_operations
+      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
+      out
     end
   end
 
@@ -3516,11 +3864,19 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect
       sig = FunctionSignature.unwrap(stdlib_def)
-      return OwnershipEffect.none unless sig&.emits_allocating? || sig&.heap_return_alloc?
-      return OwnershipEffect.none if sig&.fixed_return? && sig.return_type.void?
-      return OwnershipEffect.none if sig&.mutates_receiver? && !sig&.heap_return_alloc?
+      return OwnershipEffect.none unless sig
 
-      OwnershipEffect.owned(alloc: sig&.heap_return_alloc? ? :heap : nil)
+      heap_return = sig.heap_return_alloc? == true
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: sig.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: sig.fixed_return? && sig.return_type.void?,
+        mutates_receiver_without_heap_return: sig.mutates_receiver? && !heap_return,
+        result_owns: nil,
+        result_type: sig.return_type,
+        alloc: heap_return ? :heap : nil,
+        target_var: nil
+      )
     end
   end
 
@@ -3549,11 +3905,9 @@ module MIR
     def child_exprs = compact_child_exprs([message])
   end
 
-  # Raw bytecode. Sibling to RawZig for the :bc target. Nothing in
+  # Raw bytecode. Bytecode-template carrier for the :bc target. Nothing in
   # mir_lowering emits this yet — Phase 0 scaffolding only (see
-  # examples/minivm/MIR_MIGRATION.md). Phase 3 will start emitting it
-  # by target-aware rewriting of RawZig sites that have a :bc_raw
-  # registry mapping.
+  # examples/minivm/MIR_MIGRATION.md).
   #
   # template: Array of Symbol | String | Array. bc_emitter walks the
   #   template: a Symbol is an opcode name (emit_op(OPCODE)), a String
@@ -3564,10 +3918,9 @@ module MIR
   # stdlib_def: the registry hash the template came from (ownership
   #   semantics so the checker can reason about it).
   #
-  # Same invisibility rule as RawZig applies: the checker cannot see
-  # inside the template. When Phase 3 lands, every bc_raw template should
-  # come from a registry entry whose ownership effects are declared in
-  # stdlib_def, making INV-5 enforceable uniformly.
+  # The checker cannot see inside the template. When this is used, every
+  # template should come from a registry entry whose ownership effects are
+  # declared in stdlib_def, making INV-5 enforceable uniformly.
   RawBc = Struct.new(:template, :args, :stdlib_def) do
     extend T::Sig
     include Stmt
@@ -3662,7 +4015,7 @@ module MIR
       T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
     end
   end
-  [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
+  [InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
     k.prepend(StdlibDefFsCoercion)
   end
 
@@ -3683,11 +4036,12 @@ module MIR
     AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
     ReassignMark, FieldCleanupMark, ReassignWithCleanup,
     *LEGACY_OWNERSHIP_NODE_TYPES,
-    ReturnMark, DiscardOwned, RawZig, InlineZig,
+    ReturnMark, DiscardOwned, InlineZig, ZigTemplate,
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
     RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
+    NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,
     ShardedMapPut, ShardedMapGet,

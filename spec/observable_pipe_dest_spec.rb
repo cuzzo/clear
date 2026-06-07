@@ -9,8 +9,8 @@ require_relative "../src/ast/ast"
 #     running: ~Int64@observable = stream |> SUM _;
 #
 # without rejecting the assignment as a type mismatch. The pipe
-# BinaryOp gets `observable_dest = true` so pipeline_generator.rb
-# (Commit 4) emits the accumulator-and-fiber codegen path.
+# BinaryOp gets `observable_dest = true` so the MIR pipeline lowerers emit the
+# accumulator-and-fiber codegen path.
 RSpec.describe "observable pipe destination (Commit 3)" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize

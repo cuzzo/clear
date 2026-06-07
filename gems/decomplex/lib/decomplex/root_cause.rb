@@ -27,7 +27,7 @@ module Decomplex
     # buckets every detector's findings already use).
     TUPLE_FIELDS = %i[members guards pattern].freeze
     NAME_ARRAY_FIELDS = %i[pair names].freeze
-    NAME_STR_FIELDS = %i[derived source contract canon predicate
+    NAME_STR_FIELDS = %i[field derived source contract canon predicate
                          detail ref_name has missing].freeze
     STOPWORDS = %w[nil true false self end do if then else self_ it
                    new to_s call each map].freeze

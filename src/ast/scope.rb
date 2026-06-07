@@ -9,6 +9,8 @@ class Scope
     extend T::Sig
 
   EMPTY_CAPABILITIES = T.let(Set.new.freeze, T::Set[Symbol])
+  RegInput = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
+  MutabilityInput = T.type_alias { T.nilable(T.any(T::Boolean, Lexer::Token)) }
   ScopeTypeSchema = T.type_alias do
     T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
   end
@@ -104,13 +106,13 @@ class Scope
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[T.untyped], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
+  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
       reg: reg,
       type: type,
-      mutable: is_mutable,
+      mutable: !!is_mutable,
       storage: storage,
       sync: sync,
       layout: layout,
@@ -339,13 +341,13 @@ class Scope
     base_type
   end
 
-  sig { params(name: String).returns(T.any(Type, Symbol)) }
+  sig { params(name: String).returns(Type) }
   def resolve_type(name)
     entry = resolve_entry(name)
-    entry ? entry.type : :Any
+    entry ? entry.type : Type.new(:Any)
   end
 
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).returns(T::Boolean) }
   def is_mutable?(name)
     entry = resolve_entry(name)
     entry ? entry.mutable : true
@@ -436,7 +438,7 @@ module ScopeHelper
   def lookup_scope_for(name)
     # Search from Top (last) to Bottom (first)
     scope_stack.reverse_each do |scope|
-      return scope if scope.resolve_type(name) != :Any || scope.entry?(name)
+      return scope if scope.entry?(name)
     end
     nil
   end

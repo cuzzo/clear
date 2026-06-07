@@ -53,13 +53,15 @@ RSpec.describe LSP::Position do
   end
 
   describe ".range_for_span" do
-    Span = Struct.new(:file, :line, :col, :length, keyword_init: true) do
-      def end_line; line; end
-      def end_col;  col + length; end
+    let(:span_class) do
+      Struct.new(:file, :line, :col, :length, keyword_init: true) do
+        def end_line; line; end
+        def end_col;  col + length; end
+      end
     end
 
     it "converts a single-line Span to an LSP range" do
-      span = Span.new(file: nil, line: 2, col: 3, length: 5)
+      span = span_class.new(file: nil, line: 2, col: 3, length: 5)
       r = LSP::Position.range_for_span(span, "row1\n  hello\n")
       expect(r).to eq(
         start: { line: 1, character: 2 },

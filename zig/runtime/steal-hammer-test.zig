@@ -199,6 +199,7 @@ pub fn main() !void {
                     _ = sched.active_tasks.fetchSub(1, .monotonic);
                     sched.releaseTaskEbr(task);
                     sched.freeStack(task.base.stack);
+                    task.base.deinit();
                     sched.allocator.destroy(task.base);
                     sched.task_slab.destroy(task);
                 },

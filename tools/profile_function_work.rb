@@ -51,7 +51,7 @@ frontend_time = Benchmark.realtime do
   frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
 end
 
-lowering = MIRLowering.new(
+lowering = MIRLowering.new(input: MIRLoweringInput.new(
   struct_schemas: frontend.struct_schemas,
   enum_schemas: frontend.enum_schemas,
   union_schemas: frontend.union_schemas,
@@ -59,7 +59,7 @@ lowering = MIRLowering.new(
   moved_guard_info: frontend.moved_guard_info,
   importer: importer,
   source_dir: source_dir,
-)
+))
 
 rows = []
 frontend.fn_nodes.each do |name, fn|

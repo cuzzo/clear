@@ -131,9 +131,9 @@ module AtomicMigrationSuggester
 
   def stmt_eligible?(stmt, alias_name, field_name)
     case stmt
-    when AST::Assignment, AST::BindExpr
-      # `alias.field = expr` — Assignment's target / BindExpr's name
-      # is the GetField path; the RHS lives on `.value`.
+    when AST::Assignment
+      # `alias.field = expr` — Assignment's target is the GetField path;
+      # the RHS lives on `.value`.
       target = stmt.name
       return false unless target.is_a?(AST::GetField)
       return false unless target.target.is_a?(AST::Identifier) && target.target.name == alias_name
@@ -149,6 +149,20 @@ module AtomicMigrationSuggester
         # itself — atomic.store is fine.
         true
       end
+    when AST::BindExpr
+      target = stmt.name
+      if target.is_a?(AST::GetField)
+        return false unless target.target.is_a?(AST::Identifier) && target.target.name == alias_name
+        return false unless target.field.to_s == field_name
+        rhs = stmt.value
+        return eligible_compound_rhs?(rhs, alias_name, field_name) if references_alias?(rhs, alias_name)
+        return true
+      end
+
+      # Read-only bind (`tmp = alias.field`) is eligible; rebinding the alias
+      # itself is not a read and cannot be rewritten to an atomic load.
+      return false if target == alias_name
+      rhs_uses_alias_only_for_field_get?(stmt, alias_name, field_name)
     else
       # Read-only statements (e.g., `print(inner.value);`) are eligible
       # iff every alias reference is the field read; atomic.load covers

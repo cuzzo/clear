@@ -42,7 +42,7 @@ module Annotator
 
         signature = SignatureRegistry.extern_function_signature(node)
         if node.owner_type
-          type_schema = current_scope.types[node.owner_type.to_sym]&.dig(:schema)
+          type_schema = current_scope.resolve_type_definition(node.owner_type.to_sym)
           type_schema.methods[node.name] = signature if Schemas.struct?(type_schema) || Schemas.resource?(type_schema)
         else
           current_scope.declare(node.name, nil, signature, false, false, nil, :static)

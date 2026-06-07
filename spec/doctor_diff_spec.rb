@@ -56,6 +56,28 @@ RSpec.describe Doctor do
       expect(out).to include("New allocation sites")
     end
 
+    it "resolves diff allocation leaves through the current binary when present" do
+      File.write(@after.sub(/\.profile\z/, ""), "")
+      File.write(File.join(@before, "alloc.txt"), <<~ALLOC)
+        # alloc-profile v2
+        0x100   100   1000   0   0   100
+        0x200   100   1000   0   0   100
+      ALLOC
+      File.write(File.join(@after,  "alloc.txt"), <<~ALLOC)
+        # alloc-profile v2
+        0x100   200   2000   0   0   200
+        0x200   200   2000   0   0   200
+      ALLOC
+      allow(IO).to receive(:popen).and_return(
+        "mod.hotPath__anon_1\nfile:1\n??\n??:0\n"
+      )
+
+      out = capture_stdout { described_class.run(@after, diff: @before) }
+
+      expect(out).to include("hotPath")
+      expect(out).to include("0x200")
+    end
+
     it "calls out eliminated allocation sites" do
       File.write(File.join(@before, "alloc.txt"), <<~ALLOC)
         # alloc-profile v2
@@ -96,6 +118,27 @@ RSpec.describe Doctor do
       expect(out).to include("newly contended")
     end
 
+    it "labels eliminated, regressed, and improved lock contention deltas" do
+      tab = "\t"
+      hdr = "# lock-profile v3\n"
+      File.write(File.join(@before, "locks.txt"),
+                 hdr +
+                 "0xgone#{tab}10#{tab}3#{tab}3000#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n" \
+                 "0xreg#{tab}10#{tab}1#{tab}1000#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n" \
+                 "0ximp#{tab}10#{tab}5#{tab}5000#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n")
+      File.write(File.join(@after, "locks.txt"),
+                 hdr +
+                 "0xgone#{tab}10#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n" \
+                 "0xreg#{tab}10#{tab}3#{tab}3000#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n" \
+                 "0ximp#{tab}10#{tab}1#{tab}1000#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n")
+
+      out = capture_stdout { described_class.run(@after, diff: @before) }
+
+      expect(out).to include("contention eliminated")
+      expect(out).to include("regression")
+      expect(out).to include("improved")
+    end
+
     it "emits an MVCC Δ table when retries appear" do
       tab = "\t"
       hdr = "# mvcc-profile v2\n"
@@ -107,6 +150,31 @@ RSpec.describe Doctor do
       out = capture_stdout { described_class.run(@after, diff: @before) }
       expect(out).to include("MVCC Δ")
       expect(out).to include("new retry storm")
+    end
+
+    it "labels eliminated, increased, and decreased MVCC retry deltas" do
+      tab = "\t"
+      hdr = "# mvcc-profile v2\n"
+      File.write(File.join(@before, "mvcc.txt"),
+                 hdr +
+                 "0xgone#{tab}64#{tab}100#{tab}10#{tab}5#{tab}0#{tab}0#{tab}-\n" \
+                 "0xmore#{tab}64#{tab}100#{tab}10#{tab}1#{tab}0#{tab}0#{tab}-\n" \
+                 "0xless#{tab}64#{tab}100#{tab}10#{tab}5#{tab}0#{tab}0#{tab}-\n")
+      File.write(File.join(@after, "mvcc.txt"),
+                 hdr +
+                 "0xgone#{tab}64#{tab}100#{tab}10#{tab}0#{tab}0#{tab}0#{tab}-\n" \
+                 "0xmore#{tab}64#{tab}100#{tab}10#{tab}3#{tab}0#{tab}0#{tab}-\n" \
+                 "0xless#{tab}64#{tab}100#{tab}10#{tab}2#{tab}0#{tab}0#{tab}-\n")
+
+      out = capture_stdout { described_class.run(@after, diff: @before) }
+
+      expect(out).to include("retries eliminated")
+      expect(out).to include("more contention")
+      expect(out).to include("less contention")
+    end
+
+    it "formats megabyte deltas" do
+      expect(described_class.bytes_pretty(2 * 1024 * 1024)).to eq("2.0 MB")
     end
 
     it "supports --ignore as the inverse of --focus" do

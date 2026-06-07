@@ -79,6 +79,7 @@ test "Scheduler.deinit releases task stacks left in internal queues" {
     try sched.fiber_pool.append(alloc, try makeDeinitCleanupTask(&sched, .Micro));
     try sched.ready_queue.push(alloc, try makeDeinitCleanupTask(&sched, .Micro));
     try sched.pinned_queue.append(alloc, try makeDeinitCleanupTask(&sched, .Micro));
+    try sched.yield_queue.append(alloc, try makeDeinitCleanupTask(&sched, .Micro));
 
     sched.deinit();
 }

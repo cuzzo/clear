@@ -82,7 +82,7 @@ def run_phase(phase, source, source_dir, importer)
     MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
   when "lower"
     frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
@@ -90,11 +90,11 @@ def run_phase(phase, source, source_dir, importer)
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,
       source_dir: source_dir,
-    )
+    ))
     lowering.lower_module(frontend.ast)
   when "checker"
     frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
@@ -102,7 +102,7 @@ def run_phase(phase, source, source_dir, importer)
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,
       source_dir: source_dir,
-    )
+    ))
     mod = lowering.lower_module(frontend.ast)
     checker = MIRChecker.new
     (mod[:items] + mod[:type_items]).flatten.each do |item|

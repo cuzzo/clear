@@ -50,4 +50,19 @@ class FlaySimilarityTest < Minitest::Test
     RB
     assert(out.any? { |h| h[:clone_type] == :type3 })
   end
+
+  def test_typed_struct_field_declarations_are_not_clone_pressure
+    out = scan(<<~RB, mass: 4, fuzzy: 1)
+      class Left < T::Struct
+        const :name, String
+        prop :active, T::Boolean
+      end
+
+      class Right < T::Struct
+        const :path, String
+        prop :ready, T::Boolean
+      end
+    RB
+    assert_empty out
+  end
 end

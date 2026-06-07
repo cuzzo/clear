@@ -29,9 +29,9 @@ class FunctionContext
   sig { returns(T::Array[LifetimeSource]) }
   attr_reader :lifetime
 
-  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
+  sig { params(val: T.nilable(Type::TypeInput)).void }
   def return_type=(val)
-    @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
+    @return_type = val.nil? ? Type.new(:Void) : Type.new(val)
   end
 
   sig { void }
@@ -79,7 +79,7 @@ class FunctionContext
     self.conditional_depth -= 1
   end
 
-  sig { params(name: String, return_type: T.any(Symbol, String, Type, FunctionSignature, NilClass), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
+  sig { params(name: String, return_type: T.nilable(Type::TypeInput), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type: nil, lifetime: [], type_params: [])
     @name = name
     @return_type = T.let(Type.new(:Void), Type)

@@ -10,7 +10,7 @@ RSpec.describe "MIRLowering body finalization performance" do
     attr_reader :normalize_body_calls, :normalize_nested_calls, :append_nested_calls, :finalize_node_calls
 
     def initialize(**opts)
-      super(**opts)
+      super(input: MIRLoweringInput.new(**opts))
       @normalize_body_calls = 0
       @normalize_nested_calls = 0
       @append_nested_calls = 0

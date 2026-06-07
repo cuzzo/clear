@@ -51,7 +51,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[T.untyped, T.untyped]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
@@ -61,7 +61,7 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[T.untyped, T.untyped]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
@@ -84,7 +84,7 @@ class ZigTranspiler
       end
     end
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: T.must(result).struct_schemas,
       enum_schemas: T.must(result).enum_schemas,
       union_schemas: T.must(result).union_schemas,
@@ -93,7 +93,7 @@ class ZigTranspiler
       importer: @importer,
       source_dir: @source_dir,
       debug_mode: @default_stack_size == "Large"
-    )
+    ))
 
     needs_c_alloc = use_c_allocator
     program = lowering.lower_program(T.must(result).ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
@@ -163,7 +163,7 @@ class ZigTranspiler
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: T.must(result).struct_schemas,
       enum_schemas: T.must(result).enum_schemas,
       union_schemas: T.must(result).union_schemas,
@@ -171,7 +171,7 @@ class ZigTranspiler
       moved_guard_info: T.must(result).moved_guard_info,
       importer: @importer,
       source_dir: @source_dir
-    )
+    ))
 
     mod_result = lowering.lower_module(T.must(result).ast)
 
