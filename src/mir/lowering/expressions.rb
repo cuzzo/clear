@@ -561,7 +561,7 @@ module MIRLoweringExpressions
     label = "__collect_blk_#{block_id}"
     collect_var = "__collect_acc_#{block_id}"
     val_var = "__collect_val_#{block_id}"
-    left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
+    left_effect = MIR::OwnershipEffect.of(left)
     collect_source_alloc = ft.observable? ? :heap : (left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap)
     collect_cleanup = CleanupEntry.build(:uniform, alloc: collect_source_alloc,
       has_moved_guard: false, zig_type: acc_zig)

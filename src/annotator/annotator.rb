@@ -241,12 +241,12 @@ class SemanticAnnotator
     type_parameters(:Result)
       .params(
         node: AST::WithBlock,
-        expanded_capabilities: T::Array[AST::Capability],
+        lock_capabilities: CapabilityHelper::WithCapabilityFacts,
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
-  def with_held_locks(node, expanded_capabilities, &blk)
+  def with_held_locks(node, lock_capabilities, &blk)
     previous_locks = T.let(@held_locks || {}, HeldLockMap)
     previous_types = T.let(@held_lock_types || [], T::Array[HeldLockTypeEntry])
     current_locks = T.let(previous_locks.dup, HeldLockMap)
@@ -255,13 +255,11 @@ class SemanticAnnotator
     @held_lock_types = T.let(current_types, T.nilable(T::Array[HeldLockTypeEntry]))
     opted_out = !node.deadlock_escape.nil?
 
-    expanded_capabilities.each do |capability|
-      next unless capability[:capability] == :EXCLUSIVE || capability[:capability] == :write_locked_read
-
-      variable_name = cap_var_name(capability[:var_node])
-      token = capability[:var_node].respond_to?(:token) ? capability[:var_node].token : node.token
+    lock_capabilities.each do |capability|
+      variable_name = capability.var_name
+      token = capability.var_node.respond_to?(:token) ? capability.var_node.token : node.token
       current_locks[variable_name] ||= HeldLockEntry.new(token: token)
-      lock_type = lock_identity_of(capability)
+      lock_type = capability.lock_identity
       current_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
     end
 
@@ -325,7 +323,7 @@ class SemanticAnnotator
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
-    @capability_audit = T.let({}, T.nilable(CapabilityAudit::BindingAuditStore))
+    @capability_audit = T.let({}, CapabilityAudit::BindingAuditStore)
     @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
     @call_site_context = T.let(nil, T.untyped)
     @call_site_arg_families = T.let(nil, T.untyped)
@@ -338,7 +336,7 @@ class SemanticAnnotator
     @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
     @deferred_with_validations = T.let([], T::Array[Annotator::Phases::DeferredWithValidation])
-    @predicate_call_sites = T.let([], T.nilable(T::Array[CapabilityHelper::PredicateCallSite]))
+    @predicate_call_sites = T.let([], T::Array[CapabilityHelper::PredicateCallSite])
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -1152,11 +1150,11 @@ private
     nil
   end
 
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[String])) }
   def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
-  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: OwnershipGraph::MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
   def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
-  sig { params(name: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(name: String).returns(T.nilable(Symbol)) }
   def og_set_live(name)  = (@og[name]&.state = :live)
   sig { params(name: String).returns(T::Array[String]) }
   def og_drop(name)      = @og.drop(name)

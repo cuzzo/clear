@@ -80,6 +80,48 @@ RSpec.describe "annotator branch gap burndown" do
     node
   end
 
+  def with_capability_fact(cap, var_name: nil, type: Type.new(:Counter), sync: :locked, storage: :stack)
+    var_node = cap[:var_node]
+    fact_var_name = var_name || (var_node.respond_to?(:name) ? var_node.name : "cap")
+    old_scope = cap[:old_scope]
+    source_entry = old_scope&.resolve_entry(fact_var_name)
+    capability = cap[:capability]
+    lock_capability = CapabilityHelper::LOCK_CAPABILITIES.include?(capability)
+    restrict_capability = capability == :RESTRICT
+    borrowed_capability = capability == :BORROWED
+    snapshot_capability = capability == :SNAPSHOT
+    field_target = var_node.is_a?(AST::GetField)
+    deferred_lock_param = source_entry&.is_param == true && sync.nil? && lock_capability
+    CapabilityHelper::WithCapabilityFact.new(
+      source: cap,
+      capability: capability,
+      var_node: var_node,
+      var_name: fact_var_name,
+      alias_name: (cap[:alias] || (var_node.respond_to?(:name) ? var_node.name : "cap")).to_s,
+      alias_explicit: !cap[:alias].nil?,
+      alias_mutable: cap[:alias_mutable] == true,
+      resolved_type: type,
+      old_scope: old_scope,
+      source_entry: source_entry,
+      field_target: field_target,
+      sync: sync,
+      storage: storage,
+      layout: nil,
+      source_type: source_entry ? Type.new(source_entry.type) : Type.new(type),
+      lock_identity_value: Type.new(type).base_type,
+      lock_capability: lock_capability,
+      restrict_capability: restrict_capability,
+      borrowed_capability: borrowed_capability,
+      snapshot_capability: snapshot_capability,
+      view_capability: CapabilityHelper::VIEW_CAPABILITIES.include?(capability),
+      deferred_lock_param: deferred_lock_param,
+      sync_alias_unwrapped: (field_target && !sync.nil?) ||
+        (!field_target && (!sync.nil? || deferred_lock_param)),
+      plain_restrict_alias: restrict_capability && !cap[:alias].nil? && sync.nil?,
+      borrowed_qualifier: nil,
+    )
+  end
+
   it "annotates default fixed-array literals with their target type" do
     ann = quiet_annotator
     lit = AST::DefaultArrayLit.new(token(:KEYWORD, "DEFAULT"), Type.array_of(:Bool, capacity: 3), :heap)
@@ -195,7 +237,8 @@ RSpec.describe "annotator branch gap burndown" do
     with_node.arms = [{ family: :VERSIONED, body: [], lock_error_clauses: [] }]
     with_node.snapshot_mode = nil
 
-    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded << cap }
+    fact_builder = method(:with_capability_fact)
+    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded.add(fact_builder.call(cap)) }
     ann.define_singleton_method(:check_nested_lock_reacquire!) { |_node, _caps| nil }
     ann.define_singleton_method(:check_lock_rank_ordering!) { |_node, _caps| nil }
     ann.define_singleton_method(:record_with_acquire!) { |_fn, _cap, _held, _escape| nil }
@@ -1290,33 +1333,34 @@ RSpec.describe "annotator branch gap burndown" do
 
     locked_var = AST::Identifier.new(token, "locked")
     locked_var.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: :locked)
-    cap_ann.send(:declare_capability_scope!, AST::Capability.new(
+    locked_var.full_type = Type.new(:Counter, sync: :locked)
+    cap_ann.send(:declare_capability_scope!, cap_ann.send(:with_capability_fact, AST::Capability.new(
       capability: :EXCLUSIVE, var_node: locked_var, alias: "inner",
       old_scope: Scope.new, resolved_type: Type.new(:Counter)
-    ))
+    )))
 
     plain_var = AST::Identifier.new(token, "plain")
     plain_var.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
     plain_var.full_type = Type.new(:Counter)
-    cap_ann.send(:declare_capability_scope!, AST::Capability.new(
+    cap_ann.send(:declare_capability_scope!, cap_ann.send(:with_capability_fact, AST::Capability.new(
       capability: :EXCLUSIVE, var_node: plain_var, old_scope: Scope.new,
       resolved_type: Type.new(:Counter)
-    ))
+    )))
 
     borrowed_var = AST::Identifier.new(token, "borrowed")
     borrowed_var.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
     borrowed_var.full_type = Type.new(:Counter)
-    cap_ann.send(:declare_capability_scope!, AST::Capability.new(
+    cap_ann.send(:declare_capability_scope!, cap_ann.send(:with_capability_fact, AST::Capability.new(
       capability: :BORROWED, var_node: borrowed_var, old_scope: Scope.new,
       resolved_type: Type.new(:Counter)
-    ))
+    )))
 
     sync_field = AST::GetField.new(token, AST::Identifier.new(token, "env"), "cell")
     sync_field.full_type = Type.new(:Counter, sync: :locked)
-    cap_ann.send(:declare_capability_scope!, AST::Capability.new(
+    cap_ann.send(:declare_capability_scope!, cap_ann.send(:with_capability_fact, AST::Capability.new(
       capability: :EXCLUSIVE, var_node: sync_field, alias: "cell",
       old_scope: Scope.new, resolved_type: sync_field.full_type
-    ))
+    )))
 
     borrowed_scope = Scope.new
     borrowed_entry = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack, sync: :write_locked)
@@ -1324,10 +1368,10 @@ RSpec.describe "annotator branch gap burndown" do
     borrowed_lock = AST::Identifier.new(token, "borrowed_lock")
     borrowed_lock.symbol = borrowed_entry
     borrowed_lock.full_type = Type.new(:Counter, sync: :write_locked)
-    cap_ann.send(:declare_capability_scope!, AST::Capability.new(
+    cap_ann.send(:declare_capability_scope!, cap_ann.send(:with_capability_fact, AST::Capability.new(
       capability: :BORROWED, var_node: borrowed_lock,
       old_scope: borrowed_scope, resolved_type: Type.new(:Counter)
-    ))
+    )))
 
     expect(direct_errors(cap_ann).map { |e| e[1] }).to include(:WITH_CAP_BINDING_LOST)
     borrowed_error = direct_errors(cap_ann).find { |e| e[1] == :WITH_BORROWED_ON_QUALIFIED_VAR }
@@ -1386,7 +1430,7 @@ RSpec.describe "annotator branch gap burndown" do
     cap_ann.define_singleton_method(:visit) { |_node| nil }
     cap_ann.send(:validate_and_visit_with_guards!, guarded)
 
-    expanded = []
+    expanded = CapabilityHelper::WithCapabilityExpansion.new
     atomic_var = mk_var.call("atomic_var", Type.new(:Int64, sync: :atomic), sync: :atomic)
     atomic_cap = AST::Capability.new(capability: :infer, var_node: atomic_var)
     cap_ann.send(:acquire_capability!, with_node, atomic_cap, expanded)
@@ -2521,6 +2565,64 @@ RSpec.describe "annotator branch gap burndown" do
     expect(direct_errors(ann).map { |err| err[1] }).to include(:LOCAL_VAR_NOT_IN_PARALLEL, :MULTIOWNED_NOT_IN_PARALLEL)
   end
 
+  it "keeps capture analysis facts typed and mergeable" do
+    parent = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "outer" => Type.new(:String) },
+      capture_symbols: {
+        "outer" => SymbolEntry.new(reg: "outer", type: Type.new(:String), mutable: false, storage: :stack)
+      },
+      site_copied: Set["outer"],
+      strategies: {
+        "blocked" => CaptureStrategy::Refuse.new(reason: :heap_backed_without_transfer, owner_name: "blocked")
+      }
+    )
+    nested = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "inner" => Type.new(:Int64) },
+      capture_symbols: {
+        "inner" => SymbolEntry.new(reg: "inner", type: Type.new(:Int64), mutable: false, storage: :stack)
+      },
+      close_patterns: { "inner" => "{0}.deinit()" },
+      pointer_captures: Set["inner"],
+      string_captures: Set["outer"],
+      resource_captures: Set["inner"],
+      site_moved: Set["inner"],
+      move_mark_names: Set["inner"],
+      alloc_mark_entries: { "inner" => :heap }
+    )
+
+    parent.merge_nested!(nested)
+
+    site_info = CaptureStrategy::CaptureSiteInfo.new(
+      copied_names: parent.site_copied,
+      moved_names: parent.site_moved
+    )
+
+    expect((parent.capture_symbols.keys + parent.captures.keys).uniq.sort).to eq(%w[inner outer])
+    expect(site_info.copied_names).to include("outer")
+    expect(site_info.moved_names).to include("inner")
+    expect(parent.strategies.select { |_name, strategy| strategy.is_a?(CaptureStrategy::Refuse) }.keys).to eq(["blocked"])
+    expect(parent.close_patterns["inner"]).to eq("{0}.deinit()")
+    expect(parent.pointer_captures).to include("inner")
+    expect(parent.string_captures).to include("outer")
+    expect(parent.resource_captures).to include("inner")
+    expect(parent.move_mark_names).to include("inner")
+    expect(parent.alloc_mark_entries["inner"]).to eq(:heap)
+  end
+
+  it "applies capture fact helpers only when their local predicate is active" do
+    ann = quiet_annotator
+    names = Set.new
+    patterns = {}
+
+    ann.send(:add_capture_name_when, names, "inactive", false)
+    ann.send(:set_capture_close_pattern_when, patterns, "inactive", "drop()", false)
+    ann.send(:add_capture_name_when, names, "active", true)
+    ann.send(:set_capture_close_pattern_when, patterns, "active", "drop()", true)
+
+    expect(names).to eq(Set["active"])
+    expect(patterns).to eq("active" => "drop()")
+  end
+
   it "covers lock handler reachability branch matrix directly" do
     ann = quiet_annotator
 
@@ -2746,7 +2848,8 @@ RSpec.describe "annotator branch gap burndown" do
     ann.instance_variable_get(:@function_context_stack) << fn_ctx
     ann.instance_variable_set(:@fn_direct_effects, { "with_fn" => Set.new })
 
-    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded << cap }
+    fact_builder = method(:with_capability_fact)
+    ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded.add(fact_builder.call(cap)) }
     ann.define_singleton_method(:check_nested_lock_reacquire!) { |_node, _caps| nil }
     ann.define_singleton_method(:check_lock_rank_ordering!) { |_node, _caps| nil }
     ann.define_singleton_method(:record_with_acquire!) { |_fn, _cap, _held, _escape| nil }
@@ -3317,6 +3420,36 @@ RSpec.describe "annotator branch gap burndown" do
 
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:STATIC_UNKNOWN_METHOD, :STATIC_UNKNOWN_TYPE, :INTRINSIC_NO_OVERLOAD, :INTRINSIC_REJECTED)
+  end
+
+  it "reifies WITH capabilities into typed facts before local phase consumers read them" do
+    ann = quiet_annotator
+    locked_type = Type.new(:Counter, sync: :locked)
+    symbol = SymbolEntry.new(reg: nil, type: locked_type, mutable: true, storage: :stack, sync: :locked)
+    var = typed_identifier("cell", locked_type, symbol: symbol)
+    cap = AST::Capability.new(
+      capability: :EXCLUSIVE,
+      var_node: var,
+      alias: "guard",
+      alias_mutable: true,
+      resolved_type: locked_type,
+      old_scope: Scope.new,
+    )
+
+    fact = ann.send(:with_capability_fact, cap)
+
+    expect(fact).to be_a(CapabilityHelper::WithCapabilityFact)
+    expect(fact).to have_attributes(
+      capability: :EXCLUSIVE,
+      var_name: "cell",
+      alias_name: "guard",
+      alias_explicit: true,
+      alias_mutable: true,
+      sync: :locked,
+      storage: :stack,
+    )
+    expect(fact.lock_capability?).to eq(true)
+    expect(fact.lock_identity).to eq(:Counter)
   end
 
   it "covers whole-program schema lookup fallback directly" do

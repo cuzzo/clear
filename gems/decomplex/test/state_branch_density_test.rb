@@ -75,4 +75,59 @@ class StateBranchDensityTest < Minitest::Test
     assert_equal 2, row[:spans].size
     assert_match(/order\.status/, row[:predicate])
   end
+
+  def test_ignores_typed_struct_const_fact_readers_but_keeps_props
+    rows = scan(<<~RB)
+      class CapabilityFact < T::Struct
+        const :alias_mutable, T::Boolean
+        prop :remaining, Integer
+      end
+
+      sig { params(fact: CapabilityFact).void }
+      def declare(fact)
+        mark if fact.alias_mutable
+        warn if fact.remaining
+      end
+    RB
+
+    row = rows.find { |h| h[:method] == "declare" }
+    refute_nil row
+    assert_equal 1, row[:decisions]
+    assert_includes row[:state_refs], "fact.remaining"
+    refute_includes row[:state_refs], "fact.alias_mutable"
+  end
+
+  def test_ignores_multiline_sig_typed_struct_const_fact_readers
+    rows = scan(<<~RB)
+      class Fact < T::Struct
+        const :active, T::Boolean
+      end
+
+      sig do
+        params(
+          fact: Fact,
+        ).void
+      end
+      def declare(fact)
+        save if fact.active
+      end
+    RB
+
+    assert_empty rows
+  end
+
+  def test_ignores_typed_struct_const_fact_readers_in_bang_methods
+    rows = scan(<<~RB)
+      class Fact < T::Struct
+        const :active, T::Boolean
+      end
+
+      sig { params(fact: Fact).void }
+      def declare!(fact)
+        save if fact.active
+      end
+    RB
+
+    assert_empty rows
+  end
 end

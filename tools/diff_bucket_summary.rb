@@ -184,6 +184,7 @@ def ruby_added_coverage(adds, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
   coverage = parse_simplecov(cov_paths)
+  source_lines_by_path = {}
   line_total = line_hit = branch_total = branch_hit = 0
   paths.each do |path|
     cov = coverage[path]
@@ -193,6 +194,12 @@ def ruby_added_coverage(adds, paths)
     adds[path].each do |line|
       hit = lines[line - 1]
       next if hit.nil?
+      source_lines = source_lines_by_path[path] ||= begin
+        full = File.join(ROOT, path)
+        File.exist?(full) ? File.readlines(full) : []
+      end
+      stripped = source_lines[line - 1].to_s.strip
+      next if stripped.empty? || stripped.start_with?("#") || stripped == "end"
 
       line_total += 1
       line_hit += 1 if hit.to_i.positive?

@@ -45,13 +45,18 @@ class MIRPass
 
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
+  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   attr_reader :cleanup_bindings
+
+  sig { returns(EscapeAnalysis::EscapePlacementFacts) }
+  attr_reader :escape_placement_facts
 
   sig { params(fn_nodes: FnNodes, schema_lookup: Proc).void }
   def initialize(fn_nodes:, schema_lookup:)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
+    @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
   end
 
   sig { params(bindings: T::Hash[String, CleanupEntry], name: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -75,10 +80,11 @@ class MIRPass
     pass_state = MIRPassState.for!(ast)
     pass_state.require!(:premir_type_checked, consumer: "MIRPass")
 
-    # Dead-simple escape analysis: mark SymbolEntry#storage = :heap for the
-    # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
-    heap_fns, @bg_heap_upgraded = EscapeAnalysis.apply!(@fn_nodes, @schema_lookup)
-    @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
+    # Escape analysis writes final SymbolEntry#storage and now also returns the
+    # typed placement table explaining which phase forced each heap placement.
+    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup)
+    @escape_placement_facts = escape_result.placements
+    @bg_heap_upgraded = T.let(escape_result.bg_heap, T.untyped)
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
     pass_state.mark!(:escape_analyzed)
 

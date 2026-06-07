@@ -48,16 +48,18 @@ module Annotator
           end
         end
 
-        expanded_capabilities = []
+        capability_expansion = CapabilityHelper::WithCapabilityExpansion.new
         node.capabilities.each do |cap|
-          acquire_capability!(node, cap, expanded_capabilities)
+          acquire_capability!(node, cap, capability_expansion)
         end
+        expanded_capabilities = capability_expansion.all
+        lock_capabilities = capability_expansion.locks
 
-        check_nested_lock_reacquire!(node, expanded_capabilities)
+        check_nested_lock_reacquire!(node, lock_capabilities)
 
         # Run local rank checks before edge accumulation so ranked violations
         # produce direct diagnostics instead of later SCC errors.
-        check_lock_rank_ordering!(node, expanded_capabilities)
+        check_lock_rank_ordering!(node, lock_capabilities)
 
         # WITH MATCH records blocking effects per arm, but lock-cycle edges stay
         # conservative at the outer level because any LOCKED-eligible call may
@@ -65,8 +67,7 @@ module Annotator
         fn_name_for_lock = current_fn_ctx&.name || "<top>"
         held_entries_now = @held_lock_types || []
         is_match_form = !node.arms.nil?
-        expanded_capabilities.each do |cap|
-          next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+        lock_capabilities.each do |cap|
           record_with_acquire!(fn_name_for_lock, cap, held_entries_now, node.deadlock_escape)
           unless is_match_form
             # Exclusive lock acquisition may suspend the fiber on contention.
@@ -149,22 +150,22 @@ module Annotator
             finalize_scope(node)
           end
         end
-        with_held_locks(node, expanded_capabilities) do
+        with_held_locks(node, lock_capabilities) do
           is_snapshot_txn_body ? with_snapshot_transaction_body(node, &with_body) : with_body.call
         end
 
         # Release borrows after the WITH block exits
         expanded_capabilities.each do |cap|
-          vname = cap_var_name(cap[:var_node])
-          if cap[:capability] == :RESTRICT
+          vname = cap.var_name
+          if cap.restrict?
             @og.release_borrow("__restrict_#{vname}")
-          elsif cap[:capability] == :BORROWED
+          elsif cap.borrowed?
             @og.release_borrow("__borrowed_#{vname}")
           end
         end
 
         validate_no_multi_object_atomic!(node)
-        validate_lock_error_clause!(node, expanded_capabilities)
+        validate_lock_error_clause!(node, lock_capabilities)
         # MVCC: SNAPSHOT-transaction bodies lower to
         # `Versioned.update[Multi](rt, alloc, ...)` (heap-allocates a new
         # version + retires the old via EBR), and a WITH MATCH with a
@@ -178,7 +179,7 @@ module Annotator
         # Queue this WITH for the post-pass handler-reachability check. Running
         # it here (during annotation) is too early — cycle information isn't
         # known until compute_lock_cycles! has propagated through function_call_graph.
-        record_lock_clause_site!(node, expanded_capabilities)
+        record_lock_clause_site!(node, lock_capabilities)
 
         @with_block_depth -= 1
         stamp_type!(node, :Void)
@@ -342,8 +343,8 @@ module Annotator
         error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
       end
 
-      sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).void }
-      def validate_lock_error_clause!(node, expanded_capabilities)
+      sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).void }
+      def validate_lock_error_clause!(node, lock_capabilities)
         T.bind(self, SemanticAnnotator)
 
         clause = node.lock_error_clause
@@ -393,9 +394,7 @@ module Annotator
         # syntax shape); a future polish pass could note the dead clause.
 
         has_guard = (node.capabilities || []).any? { |c| c[:guard_expr] }
-        has_fallible = has_guard || is_snapshot_txn || expanded_capabilities.any? { |c|
-          c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
-        }
+        has_fallible = has_guard || is_snapshot_txn || !lock_capabilities.empty?
         unless has_fallible
           error!(node, :ON_RETRY_NEEDS_FALLIBLE_CAP, hint: "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
                  "The declared capabilities never produce a lock-acquire error.")

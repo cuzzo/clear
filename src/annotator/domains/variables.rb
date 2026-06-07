@@ -471,7 +471,7 @@ module Annotator
         # Alias when: first arg is the SAME union type (extraction like jsonGet)
         # or first arg is a map (HashMap lookup returning union value)
         if arg_type == ret_type_obj.resolved || first_arg.full_type!(context: "union alias source").map?
-          @og.edges << OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases)
+          @og.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
         end
       end
 
@@ -588,8 +588,7 @@ module Annotator
         handle_assign_move(node)
         handle_assign_borrow(node)
 
-        target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
-        og_set_live(target_name)
+        og_set_live(node.name.name) if node.name.is_a?(AST::Identifier)
       end
 
       sig { params(identifier: AST::Identifier, node: AST::Assignment).returns(T::Boolean) }

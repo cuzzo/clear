@@ -1,5 +1,6 @@
 require "tmpdir"
 require "fileutils"
+require "pathname"
 
 require_relative "../tools/loom_atomic_coverage"
 require_relative "../tools/vopr_coverage"
@@ -65,6 +66,37 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/parking-lot-loom.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/vopr-loom-runner.zig")).to eq(:zig_tests)
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
+  end
+
+  it "does not count non-executable Ruby additions in diff line coverage" do
+    source_path = File.join(@tmp, "ruby_probe.rb")
+    File.write(source_path, <<~RUBY)
+      # documentation line
+
+      end
+      covered_call
+      uncovered_call
+    RUBY
+    rel_path = Pathname.new(source_path).relative_path_from(Pathname.new(ROOT)).to_s
+    coverage_path = File.join(@tmp, "ruby-resultset.json")
+    File.write(coverage_path, JSON.generate(
+      "coverage-tools" => {
+        "coverage" => {
+          File.join(ROOT, rel_path) => {
+            "lines" => [0, 0, 0, 1, 0],
+            "branches" => {},
+          },
+        },
+      },
+    ))
+    old_paths = ENV["RUBY_COVERAGE_PATHS"]
+    ENV["RUBY_COVERAGE_PATHS"] = coverage_path
+
+    begin
+      expect(ruby_added_coverage({ rel_path => Set[1, 2, 3, 4, 5] }, [rel_path])).to eq(["50.0%", "N/A"])
+    ensure
+      old_paths ? ENV["RUBY_COVERAGE_PATHS"] = old_paths : ENV.delete("RUBY_COVERAGE_PATHS")
+    end
   end
 
   it "alerts when an added production Zig atomic site lacks merged coverage evidence" do

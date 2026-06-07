@@ -38,14 +38,33 @@ require "sorbet-runtime"
 module CaptureStrategy
     extend T::Sig
 
+  class AllocMarkPlan < T::Struct
+    const :ctx_init_name, String
+    const :alloc_sym, Symbol
+  end
+
+  class CleanupPlan < T::Struct
+    const :ctx_init_name, String
+    const :alloc_sym, Symbol
+  end
+
+  class MoveMarkPlan < T::Struct
+    const :source_name, String
+  end
+
+  MarkerPlanEntry = T.type_alias { T.any(AllocMarkPlan, CleanupPlan, MoveMarkPlan) }
+
   # A capture that can be byte-copied into the ctx struct: primitives,
   # strings (CLEAR treats []const u8 as copyable), enums, small
   # all-primitive structs. No markers required; no runtime ownership
   # transfer; the fiber sees a value equal to but independent of the
   # outer binding.
-  ByValue = Struct.new(:zig_type, :ctx_init_name) do
+  class ByValue < T::Struct
     extend T::Sig
-    sig { returns(T::Array[T.untyped]) }
+    const :zig_type, String
+    const :ctx_init_name, String
+
+    sig { returns(T::Array[MarkerPlanEntry]) }
     def marker_plan = []
     sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
@@ -56,9 +75,12 @@ module CaptureStrategy
   # ref, which is released on fiber cleanup via the existing
   # retain/release machinery. No new markers required beyond the
   # existing RC discipline.
-  RcClone = Struct.new(:zig_type, :ctx_init_name) do
+  class RcClone < T::Struct
     extend T::Sig
-    sig { returns(T::Array[T.untyped]) }
+    const :zig_type, String
+    const :ctx_init_name, String
+
+    sig { returns(T::Array[MarkerPlanEntry]) }
     def marker_plan = []
     sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
@@ -68,12 +90,18 @@ module CaptureStrategy
   # fiber's ctx owns a freshly-allocated heap copy; the outer binding is
   # untouched. Emits a new AllocMark inside the BG body and pairs it
   # with a fiber-scope Cleanup. INV #1 / INV #2 verify the pair.
-  FreshHeapCopy = Struct.new(:zig_type, :ctx_init_name, :alloc_sym) do
+  class FreshHeapCopy < T::Struct
     extend T::Sig
-    sig { returns(T::Array[T.untyped]) }
+    const :zig_type, String
+    const :ctx_init_name, String
+    const :alloc_sym, Symbol
+
+    sig { returns(T::Array[MarkerPlanEntry]) }
     def marker_plan
-      [ [:alloc_mark, ctx_init_name, alloc_sym],
-        [:cleanup,    ctx_init_name, alloc_sym] ]
+      [
+        AllocMarkPlan.new(ctx_init_name: ctx_init_name, alloc_sym: alloc_sym),
+        CleanupPlan.new(ctx_init_name: ctx_init_name, alloc_sym: alloc_sym),
+      ]
     end
     sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = true
@@ -85,11 +113,15 @@ module CaptureStrategy
   # machinery already covers this: after MoveMark, the outer Cleanup
   # must be guarded (defer if (!x_moved) cleanup(x)), and the ctx's
   # cleanup path takes over on fiber exit.
-  MoveInto = Struct.new(:zig_type, :ctx_init_name, :source_name) do
+  class MoveInto < T::Struct
     extend T::Sig
-    sig { returns(T::Array[T.untyped]) }
+    const :zig_type, String
+    const :ctx_init_name, String
+    const :source_name, String
+
+    sig { returns(T::Array[MarkerPlanEntry]) }
     def marker_plan
-      [ [:move_mark, source_name] ]
+      [MoveMarkPlan.new(source_name: source_name)]
     end
     sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = true
@@ -100,13 +132,18 @@ module CaptureStrategy
   # at lowering time; do not produce MIR. The diagnostic is a
   # CLEAR-level error with a source span, so the user sees their own
   # code, not a Zig type error later.
-  Refuse = Struct.new(:reason, :owner_name) do
+  class Refuse < T::Struct
     extend T::Sig
-    sig { returns(T::Array[T.untyped]) }
+    const :reason, Symbol
+    const :owner_name, String
+
+    sig { returns(T::Array[MarkerPlanEntry]) }
     def marker_plan = []
     sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
   end
+
+  Strategy = T.type_alias { T.any(ByValue, RcClone, FreshHeapCopy, MoveInto, Refuse) }
 
   # Carries the per-capture user-supplied annotations (COPY / GIVE)
   # collected at the BG site. Populated by the parser / AST walker; read
@@ -115,16 +152,19 @@ module CaptureStrategy
   #
   # copied_names  : Set<String>   -- names the user wrapped in COPY at BG site
   # moved_names   : Set<String>   -- names the user wrapped in GIVE at BG site
-  CaptureSiteInfo = Struct.new(:copied_names, :moved_names) do
+  class CaptureSiteInfo < T::Struct
     extend T::Sig
+    const :copied_names, T::Set[String]
+    const :moved_names, T::Set[String]
+
     sig { params(name: String).returns(T::Boolean) }
-    def copied?(name) = copied_names&.include?(name) || false
+    def copied?(name) = copied_names.include?(name)
     sig { params(name: String).returns(T::Boolean) }
-    def moved?(name)  = moved_names&.include?(name)  || false
+    def moved?(name)  = moved_names.include?(name)
 
     sig { returns(CaptureStrategy::CaptureSiteInfo) }
     def self.empty
-      new(Set.new, Set.new)
+      new(copied_names: Set.new, moved_names: Set.new)
     end
   end
 
@@ -139,7 +179,7 @@ module CaptureStrategy
   #                                     (File, TCPClient, etc.); the
   #                                     existing resource_captures machinery
   #                                     handles the ownership transfer.
-  sig { params(name: String, type: Type, site_info: CaptureStrategy::CaptureSiteInfo, rt_name: String, is_resource: T::Boolean, schema_lookup: T.nilable(Proc)).returns(T.untyped) }
+  sig { params(name: String, type: Type, site_info: CaptureStrategy::CaptureSiteInfo, rt_name: String, is_resource: T::Boolean, schema_lookup: T.nilable(Proc)).returns(Strategy) }
   def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false, schema_lookup: nil)
     zig_t = field_zig_type(type)
 
@@ -148,12 +188,12 @@ module CaptureStrategy
     #    second-guess: if the user wrote GIVE on a primitive, MoveInto
     #    still works because MoveMark on a primitive is a no-op.)
     if site_info.moved?(name)
-      return MoveInto.new(zig_t, name, name)
+      return MoveInto.new(zig_type: zig_t, ctx_init_name: name, source_name: name)
     end
 
     if site_info.copied?(name)
       alloc_sym = fiber_copy_alloc_for(type)
-      return FreshHeapCopy.new(zig_t, name, alloc_sym)
+      return FreshHeapCopy.new(zig_type: zig_t, ctx_init_name: name, alloc_sym: alloc_sym)
     end
 
     # 2. Resource captures (File, TCPClient, etc.) already have their
@@ -161,31 +201,31 @@ module CaptureStrategy
     #    close_patterns machinery emits the right defer for the fiber.
     #    Treat as MoveInto so the outer scope's cleanup is suppressed.
     if is_resource
-      return MoveInto.new(zig_t, name, name)
+      return MoveInto.new(zig_type: zig_t, ctx_init_name: name, source_name: name)
     end
 
     # 3. A plain promise handle (~T) is an owned affine capability. Capturing
     #    it into a fiber transfers the one right to NEXT it. Shared promises
     #    and stream cursors are handled by their own sharing/resource rules.
     if owned_affine_promise_handle?(type)
-      return MoveInto.new(zig_t, name, name)
+      return MoveInto.new(zig_type: zig_t, ctx_init_name: name, source_name: name)
     end
 
     # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
     #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
     #    safely via the existing retain/release discipline.
-    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
+    return RcClone.new(zig_type: zig_t, ctx_init_name: name) if safe_shared_across_fibers?(type)
 
     # 4b. Scheduler-affine synchronized collections are safe only when
     #     the boundary analysis pins the fiber. They are not Rc/Arc values
     #     and must fall through to FiberCtxBuilder's pointer-capture path.
-    return ByValue.new(zig_t, name) if pinned_sync_collection?(type)
+    return ByValue.new(zig_type: zig_t, ctx_init_name: name) if pinned_sync_collection?(type)
 
     # 5. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
     #    whose fields are all themselves value-like (resolved via
     #    schema_lookup).
-    return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
+    return ByValue.new(zig_type: zig_t, ctx_init_name: name) if value_like?(type, schema_lookup)
 
     # 6. Owned aggregate values that are safe to duplicate get a fresh
     #    fiber-owned copy. The predicate is type-driven and recursive:
@@ -194,12 +234,12 @@ module CaptureStrategy
     #    classifier edits.
     if deep_copy_capture?(type, schema_lookup)
       alloc_sym = fiber_copy_alloc_for(type)
-      return FreshHeapCopy.new(zig_t, name, alloc_sym)
+      return FreshHeapCopy.new(zig_type: zig_t, ctx_init_name: name, alloc_sym: alloc_sym)
     end
 
     # 7. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
-    Refuse.new(refuse_reason_for(type), name)
+    Refuse.new(reason: refuse_reason_for(type), owner_name: name)
   end
 
   # --- Helpers: purely local predicates, no external side effects. ---

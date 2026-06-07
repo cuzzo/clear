@@ -144,6 +144,19 @@ RSpec.describe OwnershipGraph do
     end
   end
 
+  describe "#add_edge" do
+    it "indexes manually added borrow edges" do
+      graph.declare("x")
+      edge = OwnershipGraph::Edge.new(from: "alias", to: "x", kind: :borrows)
+
+      expect(graph.add_edge(edge)).to eq(edge)
+      expect(graph.can_write?("x")).to be false
+
+      graph.release_borrow("alias")
+      expect(graph.can_write?("x")).to be true
+    end
+  end
+
   describe "#drop" do
     it "drops a live node and returns cleanup paths" do
       graph.declare("x")

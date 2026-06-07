@@ -5,6 +5,7 @@
 # local node predicate and the only output is SymbolEntry#storage = :heap.
 
 require "sorbet-runtime"
+require "set"
 
 require_relative "../ast/type"
 require_relative "../ast/ast"
@@ -21,6 +22,13 @@ module EscapeAnalysis
   AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
   AssignmentTarget = T.type_alias { T.any(String, Symbol, AST::Node) }
 
+  class EscapePlacementFact < T::Struct
+    const :fn_name, String
+    const :symbol_name, String
+    const :binding_id, Integer
+    const :reason, Symbol
+  end
+
   class FunctionFacts < T::Struct
     extend T::Sig
 
@@ -32,11 +40,57 @@ module EscapeAnalysis
 
     sig { returns(Integer) }
     def heap_symbol_count
-      count = T.let(0, Integer)
-      fn.params.each { |param| count += 1 if EscapeAnalysis.send(:symbol_heap?, param.symbol) }
-      symbols.each_value { |sym| count += 1 if EscapeAnalysis.send(:symbol_heap?, sym) }
-      count
+      heap_symbol_ids.length
     end
+
+    sig { returns(T::Hash[String, SymbolEntry]) }
+    def heap_symbols
+      out = T.let({}, T::Hash[String, SymbolEntry])
+      fn.params.each do |param|
+        sym = param.symbol
+        out[param.name.to_s] = sym if EscapeAnalysis.send(:symbol_heap?, sym) && sym
+      end
+      symbols.each do |name, sym|
+        out[name] = sym if EscapeAnalysis.send(:symbol_heap?, sym)
+      end
+      out
+    end
+
+    sig { returns(T::Set[Integer]) }
+    def heap_symbol_ids
+      heap_symbols.each_value.map(&:binding_id).to_set
+    end
+  end
+
+  class EscapePlacementFacts < T::Struct
+    extend T::Sig
+
+    prop :placements, T::Array[EscapePlacementFact], factory: -> { [] }
+
+    sig { params(facts: FunctionFacts, before_heap_ids: T::Set[Integer], reason: Symbol).void }
+    def record_new_heap_symbols!(facts, before_heap_ids, reason)
+      facts.heap_symbols.each do |name, sym|
+        next if before_heap_ids.include?(sym.binding_id)
+
+        placements << EscapePlacementFact.new(
+          fn_name: facts.fn.name.to_s,
+          symbol_name: name,
+          binding_id: sym.binding_id,
+          reason: reason
+        )
+      end
+    end
+
+    sig { returns(T::Set[String]) }
+    def heap_function_names
+      placements.map(&:fn_name).to_set
+    end
+  end
+
+  class Result < T::Struct
+    const :heap_fns, T::Set[String]
+    const :bg_heap, T::Set[String]
+    const :placements, EscapePlacementFacts
   end
 
   class EscapeContext < T::Struct
@@ -92,13 +146,19 @@ module EscapeAnalysis
 
   sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(HeapResult) }
   def self.apply!(fn_nodes, schema_lookup = nil)
+    result = apply_with_facts!(fn_nodes, schema_lookup)
+    [result.heap_fns, result.bg_heap]
+  end
+
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(Result) }
+  def self.apply_with_facts!(fn_nodes, schema_lookup = nil)
     validate_escape_sink_handlers!
     validate_derived_placement_handlers!
     validate_escape_sinks!
     propagate_caller_sync!(fn_nodes)
 
-    heap_fns = T.let(Set.new, T::Set[String])
     bg_heap = T.let(Set.new, T::Set[String])
+    placements = EscapePlacementFacts.new
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
 
     fn_nodes.each do |name, fn|
@@ -106,28 +166,48 @@ module EscapeAnalysis
     end
 
     facts_by_name.each_value do |facts|
-      mark_heap_return_facts!(facts, schema_lookup)
+      record_placement_phase!(placements, facts, :owning_return) do
+        mark_heap_return_facts!(facts, schema_lookup)
+      end
     end
 
     facts_by_name.each_value do |facts|
       fn = facts.fn
-      mark_param_receiver_allocations_heap!(fn.body) if fn.body
-      mark_recursive_aggregate_owners_heap!(facts, schema_lookup) if fn.body
+      record_placement_phase!(placements, facts, :receiver_backing_storage) do
+        mark_param_receiver_allocations_heap!(fn.body) if fn.body
+      end
+      record_placement_phase!(placements, facts, :recursive_aggregate_owner) do
+        mark_recursive_aggregate_owners_heap!(facts, schema_lookup) if fn.body
+      end
     end
 
     fn_nodes.each do |name, fn|
       next unless fn.body
       facts = T.must(facts_by_name[name])
-      before = facts.heap_symbol_count
-      mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
-      mark_loop_receiver_allocations_heap!(fn.body)
-      propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
-      propagate_hoist_dependencies!(facts)
-      heap_fns << name if facts.heap_symbol_count > before
+      record_placement_phase!(placements, facts, :escape_sink) do
+        mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
+      end
+      record_placement_phase!(placements, facts, :loop_receiver_backing_storage) do
+        mark_loop_receiver_allocations_heap!(fn.body)
+      end
+      record_placement_phase!(placements, facts, :assignment_ownership) do
+        propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
+      end
+      record_placement_phase!(placements, facts, :hoist_dependency) do
+        propagate_hoist_dependencies!(facts)
+      end
     end
 
-    [heap_fns, bg_heap]
+    Result.new(heap_fns: placements.heap_function_names, bg_heap: bg_heap, placements: placements)
   end
+
+  sig { params(placements: EscapePlacementFacts, facts: FunctionFacts, reason: Symbol, blk: T.proc.void).void }
+  def self.record_placement_phase!(placements, facts, reason, &blk)
+    before = facts.heap_symbol_ids
+    blk.call
+    placements.record_new_heap_symbols!(facts, before, reason)
+  end
+  private_class_method :record_placement_phase!
 
   sig { void }
   def self.validate_escape_sink_handlers!
@@ -806,7 +886,7 @@ module EscapeAnalysis
     )
   end
 
-  sig { params(receiver: T.untyped).returns(T::Boolean) }
+  sig { params(receiver: AST::Node).returns(T::Boolean) }
   private_class_method def self.receiver_is_param?(receiver)
     root = AST.root_identifier(receiver)
     sym = root&.symbol

@@ -1,8 +1,8 @@
 register instructions:
 0000 ICONST r0 0 ; I:7
-0003 NCALL ret=string s0 Int64.toString argc=1 r0
-0010 SCONST s1 1 ; S:5:x is
-0013 SCONCAT s0 s1 s0
+0003 SCONST s0 1 ; S:5:x is
+0006 NCALL ret=string s1 Int64.toString argc=1 r0
+0013 SCONCAT s0 s0 s1
 0017 SRET s0
 0019 HALT
 consts:

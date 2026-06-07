@@ -78,12 +78,13 @@ RSpec.describe MIRLowering do
 
   def capture_analysis(captures: {}, capture_symbols: {}, close_patterns: {},
                        pointer_captures: Set.new, string_captures: Set.new,
-                       resource_captures: Set.new, strategies: nil)
+                       resource_captures: Set.new, strategies: {})
+    typed_captures = captures.to_h { |name, type| [name.to_s, type.is_a?(Type) ? type : Type.new(type)] }
     CapabilityHelper::CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
-      captures: captures, capture_symbols: capture_symbols,
+      captures: typed_captures, capture_symbols: capture_symbols,
       close_patterns: close_patterns,
       pointer_captures: pointer_captures, string_captures: string_captures,
       resource_captures: resource_captures,
@@ -3099,7 +3100,12 @@ RSpec.describe MIRLowering do
       node.full_type = :"~?Int64[]"
       node.capture_analysis = capture_analysis(
         captures: { "items" => Type.new(:"Int64[]@list") },
-        strategies: { "items" => CaptureStrategy::Refuse.new(:list_borrow_without_transfer, "items") }
+        strategies: {
+          "items" => CaptureStrategy::Refuse.new(
+            reason: :list_borrow_without_transfer,
+            owner_name: "items"
+          )
+        }
       )
 
       expect { lowering.lower(node) }

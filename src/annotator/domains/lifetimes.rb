@@ -997,7 +997,7 @@ module Annotator
       def bg_lifetime_sources(analysis)
         T.bind(self, SemanticAnnotator)
 
-        (analysis.capture_symbols || {}).each_value.reject { |info|
+        analysis.capture_symbols.each_value.reject { |info|
           info && bg_capture_independent?(info)
         }.compact
       end

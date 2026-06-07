@@ -170,7 +170,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect_order(
       "src/mir/mir_pass.rb",
       "pass_state.require!(:premir_type_checked",
-      "EscapeAnalysis.apply!",
+      "EscapeAnalysis.apply_with_facts!",
       "pass_state.mark!(:escape_analyzed)",
       "CleanupClassifier.classify",
       "pass_state.mark!(:cleanup_classified)",
@@ -270,6 +270,64 @@ RSpec.describe "architecture invariants: MIR pass order" do
     sink_registry = escape[/ESCAPE_SINK_HANDLERS = T\.let\(\{.*?\n  \}\.freeze, EscapeHandlerRegistry\)/m]
     expect(sink_registry).not_to include("assignment_ownership")
     expect(sink_registry).not_to include("hoist_dependency")
+  end
+
+  it "keeps escape heap placement explainable through typed facts" do
+    escape = source("src/semantic/escape_analysis.rb")
+
+    expect(escape).to include("class EscapePlacementFact < T::Struct")
+    expect(escape).to include("class EscapePlacementFacts < T::Struct")
+    expect(escape).to include("def self.apply_with_facts!")
+    expect(escape).to include("result = apply_with_facts!(fn_nodes, schema_lookup)")
+    expect(escape).to include("record_placement_phase!(placements, facts")
+    expect(escape).to include("Result.new(heap_fns: placements.heap_function_names")
+  end
+
+  it "keeps WITH capability expansion behind typed fact records" do
+    capabilities = source("src/annotator/helpers/capabilities.rb")
+    execution = source("src/annotator/domains/execution_boundaries.rb")
+
+    expect(capabilities).to include("class WithCapabilityFact < T::Struct")
+    expect(capabilities).to include("class WithCapabilityExpansion < T::Struct")
+    expect(capabilities).to include("source_entry: source_entry")
+    expect(capabilities).to include("borrowed_qualifier:")
+    expect(execution).to include("capability_expansion = CapabilityHelper::WithCapabilityExpansion.new")
+    expect(execution).to include("lock_capabilities = capability_expansion.locks")
+  end
+
+  it "does not let production capability consumers rediscover raw lock facts" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/ast/ast.rb"
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("lock_identity_of") || line.include?("T::Array[AST::Capability]")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "WITH capability consumers must use WithCapabilityFact/WithCapabilityExpansion, not raw AST capability rediscovery:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not rediscover MIR ownership effects with respond_to? probes" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("respond_to?(:ownership_effect)") ||
+                    line.include?('respond_to?("ownership_effect")')
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR ownership consumers must use MIR::OwnershipEffect.of/typed facts, not optional protocol probes:\n" \
+      "#{offenders.join("\n")}"
   end
 end
 

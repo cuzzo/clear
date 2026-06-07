@@ -8,6 +8,7 @@ require "sorbet-runtime"
 #   CapabilityAudit    — "Architecture Consultant" that warns about over-engineered capabilities
 
 require 'set'
+require_relative "../../semantic/capture_strategy"
 
 # ============================================================================
 # Capabilities — Static validation of capability combinations
@@ -87,6 +88,113 @@ module CapabilityHelper
     const :pred_expr, AST::Locatable
     const :call, T.any(AST::FuncCall, AST::MethodCall)
     const :callee, String
+  end
+
+  LOCK_CAPABILITIES = T.let(Set[:EXCLUSIVE, :write_locked_read].freeze, T::Set[Symbol])
+  VIEW_CAPABILITIES = T.let(Set[:VIEW, :MATERIALIZED_VIEW].freeze, T::Set[Symbol])
+  BORROWED_STORAGE_QUALIFIERS = T.let({
+    shared: "@shared",
+    multiowned: "@multiowned",
+  }.freeze, T::Hash[Symbol, String])
+
+  class WithCapabilityFact < T::Struct
+    extend T::Sig
+
+    const :source, AST::Capability
+    const :capability, Symbol
+    const :var_node, AST::Locatable
+    const :var_name, String
+    const :alias_name, String
+    const :alias_explicit, T::Boolean
+    const :alias_mutable, T::Boolean
+    const :resolved_type, Type
+    const :old_scope, T.nilable(Scope)
+    const :source_entry, T.nilable(SymbolEntry)
+    const :field_target, T::Boolean
+    const :sync, T.nilable(Symbol)
+    const :storage, T.nilable(Symbol)
+    const :layout, T.nilable(Symbol)
+    const :source_type, Type
+    const :lock_identity_value, T.nilable(Symbol)
+    const :lock_capability, T::Boolean
+    const :restrict_capability, T::Boolean
+    const :borrowed_capability, T::Boolean
+    const :snapshot_capability, T::Boolean
+    const :view_capability, T::Boolean
+    const :deferred_lock_param, T::Boolean
+    const :sync_alias_unwrapped, T::Boolean
+    const :plain_restrict_alias, T::Boolean
+    const :borrowed_qualifier, T.nilable(String)
+
+    sig { returns(T::Boolean) }
+    def lock_capability?
+      lock_capability
+    end
+
+    sig { returns(T::Boolean) }
+    def restrict?
+      restrict_capability
+    end
+
+    sig { returns(T::Boolean) }
+    def borrowed?
+      borrowed_capability
+    end
+
+    sig { returns(T::Boolean) }
+    def snapshot?
+      snapshot_capability
+    end
+
+    sig { returns(T::Boolean) }
+    def view?
+      view_capability
+    end
+
+    sig { returns(T::Boolean) }
+    def deferred_lock_param?
+      deferred_lock_param
+    end
+
+    sig { returns(T::Boolean) }
+    def unwraps_sync_alias?
+      sync_alias_unwrapped
+    end
+
+    sig { returns(T::Boolean) }
+    def declares_plain_restrict_alias?
+      plain_restrict_alias
+    end
+
+    sig { returns(Type) }
+    def declared_source_type
+      source_type
+    end
+
+    sig { returns(T.nilable(String)) }
+    def borrowed_rejection_qualifier
+      borrowed_qualifier
+    end
+
+    sig { returns(T.nilable(Symbol)) }
+    def lock_identity
+      lock_identity_value
+    end
+  end
+
+  WithCapabilityFacts = T.type_alias { T::Array[WithCapabilityFact] }
+
+  class WithCapabilityExpansion < T::Struct
+    extend T::Sig
+
+    prop :all, WithCapabilityFacts, factory: -> { [] }
+    prop :locks, WithCapabilityFacts, factory: -> { [] }
+
+    sig { params(fact: WithCapabilityFact).void }
+    def add(fact)
+      all << fact
+      locks << fact if fact.lock_capability?
+    end
   end
 
   # WITH can be applied to an Identifier or a GetField (`obj.field`).
@@ -380,10 +488,9 @@ module CapabilityHelper
   def record_predicate_call_site!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    @predicate_call_sites = T.let(@predicate_call_sites, T.nilable(T::Array[PredicateCallSite]))
     ctx = @current_predicate_context
     return unless ctx
-    T.must(@predicate_call_sites) << PredicateCallSite.new(
+    predicate_call_sites_store << PredicateCallSite.new(
       kind: ctx.kind,
       with_node: ctx.with_node,
       fn_node: ctx.fn_node,
@@ -396,8 +503,7 @@ module CapabilityHelper
   sig { void }
   def validate_predicate_purity!
     T.bind(self, SemanticAnnotator) rescue nil
-    @predicate_call_sites = T.let(@predicate_call_sites, T.nilable(T::Array[PredicateCallSite]))
-    T.must(@predicate_call_sites).each do |site|
+    predicate_call_sites_store.each do |site|
       call = site.call
       callee = site.callee
       reason = predicate_impurity_reason(call, callee)
@@ -417,6 +523,13 @@ module CapabilityHelper
       error!(call, :PURE_FN_CANNOT_CALL_IMPURE, surface: surface, callee: callee, reason: reason, hint: hint)
     end
   end
+
+  sig { returns(T::Array[PredicateCallSite]) }
+  def predicate_call_sites_store
+    T.bind(self, SemanticAnnotator) rescue nil
+    T.cast(instance_variable_get(:@predicate_call_sites), T::Array[PredicateCallSite])
+  end
+  private :predicate_call_sites_store
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
@@ -677,7 +790,7 @@ module CapabilityHelper
   # @param node [AST::WithBlock] the WITH block (for error reporting)
   # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
   # @param expanded [Array] accumulator for resolved capabilities
-  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: T::Array[AST::Capability]).void }
+  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: WithCapabilityExpansion).void }
   def acquire_capability!(node, cap, expanded)
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
@@ -768,12 +881,13 @@ module CapabilityHelper
         # real resolved_type -- the cap.resolved_type || old_scope
         # fallback chain becomes dead.
         visit(field_node) rescue nil
-        expanded << AST::Capability.new(
+        expanded_cap = AST::Capability.new(
           capability: cap[:capability],
           var_node: field_node,
           old_scope: cap[:old_scope],
           resolved_type: field_node.full_type!(context: "WITH wildcard field")
         )
+        expanded.add(with_capability_fact(expanded_cap))
       end
       # The per-field caps above each alias the base variable name; the
       # base binding must remain the struct type (a field cap declaring
@@ -781,15 +895,77 @@ module CapabilityHelper
       # Re-assert the whole-struct cap last so the base keeps its type.
       base_t = var_node.target.full_type!(context: "WITH wildcard base")
       base_t = Type.new(base_t) unless base_t.is_a?(Type)
-      expanded << AST::Capability.new(
+      expanded_cap = AST::Capability.new(
         capability: cap[:capability],
         var_node: var_node.target,
         old_scope: cap[:old_scope],
         resolved_type: base_t
       )
+      expanded.add(with_capability_fact(expanded_cap))
     else
-      expanded << cap
+      expanded.add(with_capability_fact(cap))
     end
+  end
+
+  sig { params(cap: AST::Capability).returns(WithCapabilityFact) }
+  def with_capability_fact(cap)
+    T.bind(self, SemanticAnnotator) rescue nil
+    var_node = T.cast(cap[:var_node], AST::Locatable)
+    var_name = cap_var_name(var_node)
+    alias_value = cap[:alias]
+    alias_explicit = T.let(!alias_value.nil?, T::Boolean)
+    resolved = cap.resolved_type
+    old_scope = T.cast(cap[:old_scope], T.nilable(Scope))
+    source_entry = old_scope&.resolve_entry(var_name)
+    source_type = source_entry ? Type.new(source_entry.type) : Type.new(resolved)
+    capability = T.cast(cap[:capability], Symbol)
+    lock_capability = LOCK_CAPABILITIES.include?(capability)
+    restrict_capability = capability == :RESTRICT
+    borrowed_capability = capability == :BORROWED
+    snapshot_capability = capability == :SNAPSHOT
+    view_capability = VIEW_CAPABILITIES.include?(capability)
+    field_target = var_node.is_a?(AST::GetField)
+    sync = cap_var_sync(var_node)
+    deferred_lock_param = source_entry&.is_param == true && sync.nil? && lock_capability
+    sync_alias_unwrapped = (field_target && !sync.nil?) ||
+      (!field_target && (!sync.nil? || deferred_lock_param))
+    WithCapabilityFact.new(
+      source: cap,
+      capability: capability,
+      var_node: var_node,
+      var_name: var_name,
+      alias_name: (alias_value || var_name).to_s,
+      alias_explicit: alias_explicit,
+      alias_mutable: cap[:alias_mutable] == true,
+      resolved_type: Type.new(resolved),
+      old_scope: old_scope,
+      source_entry: source_entry,
+      field_target: field_target,
+      sync: sync,
+      storage: cap_var_storage(var_node),
+      layout: cap_var_layout(var_node),
+      source_type: source_type,
+      lock_identity_value: Type.new(resolved).base_type,
+      lock_capability: lock_capability,
+      restrict_capability: restrict_capability,
+      borrowed_capability: borrowed_capability,
+      snapshot_capability: snapshot_capability,
+      view_capability: view_capability,
+      deferred_lock_param: deferred_lock_param,
+      sync_alias_unwrapped: sync_alias_unwrapped,
+      plain_restrict_alias: restrict_capability && alias_explicit && sync.nil?,
+      borrowed_qualifier: borrowed_capability ? borrowed_source_qualifier(source_entry) : nil,
+    )
+  end
+
+  sig { params(entry: T.nilable(SymbolEntry)).returns(T.nilable(String)) }
+  def borrowed_source_qualifier(entry)
+    return nil unless entry
+    storage_qualifier = BORROWED_STORAGE_QUALIFIERS[entry.storage]
+    return storage_qualifier if storage_qualifier
+    return "@locked" if entry.locked?
+    return "@writeLocked" if entry.write_locked?
+    nil
   end
 
   # Declare a resolved capability into the current scope.
@@ -802,160 +978,142 @@ module CapabilityHelper
     AST.root_identifier(var_node)&.name || "__unknown"
   end
 
-  sig { params(cap: AST::Capability).returns(T.nilable(String)) }
-  def declare_capability_scope!(cap)
+  sig { params(fact: WithCapabilityFact).returns(T.nilable(String)) }
+  def declare_capability_scope!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
     @og = T.let(@og, T.any(OwnershipGraph, T.untyped))
-    var_name = cap_var_name(cap[:var_node])
-    source_entry = cap[:old_scope]&.resolve_entry(var_name)
-    # Sync may live on the binding (Identifier path) or on the field's
-    # declared type (GetField path) — cap_var_sync covers both.
-    syn = cap_var_sync(cap[:var_node])
-    # Parameters without propagated sync still declare their inner aliases; the
-    # deferred validation emits the real error later if sync stays nil.
-    deferred_param = source_entry&.is_param && syn.nil? &&
-      (cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read)
-    is_field = cap[:var_node].is_a?(AST::GetField)
+    declare_unwrapped_capability_alias!(fact) if fact.unwraps_sync_alias?
+    declare_capability_binding_or_error!(fact)
+    declare_capability_projection!(fact)
+    nil
+  end
 
-    if syn && is_field
-      # WITH on a sync-wrapped struct field. The alias holds the unwrapped
-      # inner value (post-`.acquire().get()`). Resolve the bare inner type
-      # from the field's declared type and declare the alias.
-      inner_type = cap[:var_node].full_type!(context: "WITH capability field alias")
-      if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
-        inner_type = inner_type.bare_data_type
-      end
-      alias_name = cap[:alias] || var_name
-      current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
-      record_capture_local!(alias_name) if cap[:alias]
-      current_scope.local_entry!(alias_name).mark_non_escaping!
-      og_declare(alias_name, nil, inner_type)
-      unless current_scope.declare_with_new_capability(cap)
-        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
-               capability: cap[:capability], name: cap[:var_node].name)
-      end
-    elsif (syn || deferred_param) && !is_field
-      # The WITH alias represents the unwrapped inner value for the
-      # lifetime of the lock. Its type must be the bare data shape — no
-      # sync/ownership wrappers — so downstream lowerings (method calls,
-      # field access) don't re-emit Arc / Locked indirection on top of
-      # the already-unwrapped guard pointer.
-      inner_type = cap[:old_scope].resolve_type(var_name)
-      if inner_type.any_sync? || inner_type.ownership != :affine
-        inner_type = inner_type.bare_data_type
-      end
-      alias_name = cap[:alias] || var_name
-      current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
-      record_capture_local!(alias_name) if cap[:alias]
-      current_scope.local_entry!(alias_name).mark_non_escaping!
-      og_declare(alias_name, nil, inner_type)
-      unless current_scope.declare_with_new_capability(cap)
-        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
-               capability: cap[:capability], name: cap[:var_node].name)
-      end
-    else
-      unless current_scope.declare_with_new_capability(cap)
-        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
-               capability: cap[:capability], name: cap[:var_node].name)
-      end
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_capability_binding_or_error!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return if current_scope.declare_with_new_capability(fact.source)
+
+    error!(fact.var_node, :WITH_CAP_BINDING_LOST,
+      capability: fact.capability, name: fact.var_name)
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_capability_projection!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    case fact.capability
+    when :RESTRICT
+      declare_restrict_capability!(fact)
+    when :VIEW, :MATERIALIZED_VIEW
+      declare_view_capability!(fact)
+    when :SNAPSHOT
+      declare_snapshot_capability!(fact)
+    when :BORROWED
+      declare_borrowed_capability!(fact)
     end
-    # Register borrows and create alias bindings for RESTRICT and BORROWED.
-    if cap[:capability] == :RESTRICT
-      @og.borrow("__restrict_#{var_name}", var_name, mutable: true)
-      # Mark source as mutated so transpiler emits `var` (not `const`)
-      # when a mutable borrow exists — needed for &p to yield a mutable pointer.
-      if cap[:alias_mutable]
-        mark_var_mutated(var_name)
-      end
-      # Create alias binding if AS was used (for plain locals without sync)
-      if cap[:alias] && !syn
-        alias_name = cap[:alias]
-        is_mutable = !!cap[:alias_mutable]
-        resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || Type.new(:Any)) : cap.resolved_type)
-        current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
-        record_capture_local!(alias_name)
-        sym = current_scope.local_entry!(alias_name)
-        sym.mark_non_escaping!
-        sym.mark_borrowed_alias!  # RESTRICT alias: fiber capture is stack-UAF
-        og_declare(alias_name, nil, resolved_type)
-      end
-    elsif cap[:capability] == :VIEW || cap[:capability] == :MATERIALIZED_VIEW
-      # Observables Phase 2.3 / 2.4. Bind alias to `?T` where T is the
-      # inner element type of the tense source. VIEW is immutable +
-      # non_escaping (borrow); MATERIALIZED_VIEW is owned and may escape.
-      st = Type.new(cap.resolved_type)
-      inner = st.tense_type
-      # Wrap as ?T so the binding is null until the first item lands.
-      # If `inner` is already optional (FIND yields `~?T@observable`,
-      # whose tense_type is `?T`), don't double-wrap into `??T`.
-      bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
-      alias_name = cap[:alias] || var_name
-      current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
-      record_capture_local!(alias_name)
-      sym = current_scope.local_entry!(alias_name)
-      if cap[:capability] == :VIEW
-        sym.mark_non_escaping!
-        sym.mark_borrowed_alias!
-      end
-      og_declare(alias_name, nil, bind_type_sym)
-    elsif cap[:capability] == :SNAPSHOT
-      # MVCC L5. The alias holds the inner T of a `T@versioned` cell --
-      # for a read-only SNAPSHOT, this is a borrow into the
-      # currently-published version (kept alive by EBR for the duration
-      # of the WITH); for a MUTABLE SNAPSHOT it is a fresh copy that
-      # `Shared.update[Multi]` will publish on commit.
-      #
-      # Either way, the alias is `non_escaping` + `borrowed_alias` --
-      # escape would either pin EBR unboundedly (read) or detach a
-      # half-committed value from the txn boundary (mutable). Every
-      # escape vector (RETURN, struct/union/collection store, BG/DO
-      # capture, GIVE, COPY-to-non-temp, pipeline-binding crossing the
-      # WITH) is rejected by the existing non_escaping checks at the
-      # use site.
-      st = Type.new(cap.resolved_type)
-      # Strip Group-1 sigils so the alias's `.type` is the bare inner T.
-      # The alias's SymbolEntry already keeps sync/layout=nil (declare
-      # call below passes neither), but type-side downstream paths
-      # (resolve_type / full_type readers) shouldn't see leftover
-      # @versioned / @indirect:atomic flags on the alias's Type.
-      inner_type = st.bare_data_type
-      alias_name = cap[:alias] || var_name
-      is_mutable = !!cap[:alias_mutable]
-      current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
-      record_capture_local!(alias_name)
-      sym = current_scope.local_entry!(alias_name)
-      sym.mark_non_escaping!
-      sym.mark_borrowed_alias!
-      og_declare(alias_name, nil, inner_type)
-    elsif cap[:capability] == :BORROWED
-      # BORROWED guarantees the aliased data is stable for the borrow duration.
-      # @shared/@locked/@multiowned types can be concurrently written — the
-      # stability guarantee cannot be upheld. Reject them at the borrow site.
-      source_sym = cap[:old_scope]&.resolve_entry(var_name)
-      if source_sym
-        bad_storage = source_sym.rc_stored?
-        bad_sync    = source_sym.locked? || source_sym.write_locked?
-        if bad_storage || bad_sync
-          qualifier = if source_sym.storage == :shared then "@shared"
-                      elsif source_sym.storage == :multiowned then "@multiowned"
-                      elsif source_sym.locked? then "@locked"
-                      else "@writeLocked"
-                      end
-          remediation = "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
-                        "modified concurrently. Use WITH #{var_name} { } to access it safely instead."
-          error!(cap[:var_node], :WITH_BORROWED_ON_QUALIFIED_VAR, qualifier: qualifier, name: var_name, remediation: remediation)
-        end
-      end
-      alias_name = cap[:alias] || var_name
-      resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || Type.new(:Any)) : cap.resolved_type)
-      current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
-      record_capture_local!(alias_name) if cap[:alias]
-      sym = current_scope.local_entry!(alias_name)
-      sym.mark_non_escaping!
-      sym.mark_borrowed_alias!  # BORROWED alias: fiber capture is stack-UAF
-      og_declare(alias_name, nil, resolved_type)
-      @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
-    end
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_unwrapped_capability_alias!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    alias_name = fact.alias_name
+    inner_type = unwrapped_capability_alias_type(fact)
+    current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+    record_capture_local!(alias_name) if fact.alias_explicit
+    current_scope.local_entry!(alias_name).mark_non_escaping!
+    og_declare(alias_name, nil, inner_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).returns(Type) }
+  def unwrapped_capability_alias_type(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    source_type = fact.field_target ?
+      fact.var_node.full_type!(context: "WITH capability field alias") :
+      fact.declared_source_type
+    capability_alias_type(source_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_restrict_capability!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    @og.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
+    mark_var_mutated(fact.var_name) if fact.alias_mutable
+    declare_restrict_alias!(fact) if fact.declares_plain_restrict_alias?
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_restrict_alias!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    alias_name = fact.alias_name
+    resolved_type = capability_alias_type(capability_source_type(fact))
+    current_scope.declare(alias_name, nil, resolved_type, fact.alias_mutable, false, nil, :stack)
+    record_capture_local!(alias_name)
+    sym = current_scope.local_entry!(alias_name)
+    sym.mark_non_escaping!
+    sym.mark_borrowed_alias!
+    og_declare(alias_name, nil, resolved_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_view_capability!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    inner = Type.new(fact.resolved_type).tense_type
+    bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
+    alias_name = fact.alias_name
+    current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
+    record_capture_local!(alias_name)
+    declare_view_borrow_constraints!(alias_name) if fact.capability == :VIEW
+    og_declare(alias_name, nil, bind_type_sym)
+  end
+
+  sig { params(alias_name: String).void }
+  def declare_view_borrow_constraints!(alias_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    sym = current_scope.local_entry!(alias_name)
+    sym.mark_non_escaping!
+    sym.mark_borrowed_alias!
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_snapshot_capability!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    alias_name = fact.alias_name
+    inner_type = Type.new(fact.resolved_type).bare_data_type
+    current_scope.declare(alias_name, nil, inner_type, fact.alias_mutable, false, nil, :stack)
+    record_capture_local!(alias_name)
+    sym = current_scope.local_entry!(alias_name)
+    sym.mark_non_escaping!
+    sym.mark_borrowed_alias!
+    og_declare(alias_name, nil, inner_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).void }
+  def declare_borrowed_capability!(fact)
+    T.bind(self, SemanticAnnotator) rescue nil
+    qualifier = fact.borrowed_rejection_qualifier
+    emit_borrowed_rejection!(fact, qualifier) if qualifier
+    alias_name = fact.alias_name
+    resolved_type = capability_alias_type(capability_source_type(fact))
+    current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
+    record_capture_local!(alias_name) if fact.alias_explicit
+    sym = current_scope.local_entry!(alias_name)
+    sym.mark_non_escaping!
+    sym.mark_borrowed_alias!
+    og_declare(alias_name, nil, resolved_type)
+    @og.borrow("__borrowed_#{fact.var_name}", fact.var_name, mutable: false)
+  end
+
+  sig { params(fact: WithCapabilityFact, qualifier: String).void }
+  def emit_borrowed_rejection!(fact, qualifier)
+    T.bind(self, SemanticAnnotator) rescue nil
+    remediation = "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
+                  "modified concurrently. Use WITH #{fact.var_name} { } to access it safely instead."
+    error!(fact.var_node, :WITH_BORROWED_ON_QUALIFIED_VAR,
+      qualifier: qualifier, name: fact.var_name, remediation: remediation)
+  end
+
+  sig { params(fact: WithCapabilityFact).returns(Type) }
+  def capability_source_type(fact)
+    fact.resolved_type.untyped? ? fact.declared_source_type : fact.resolved_type
   end
 
   sig { params(type: T.untyped).returns(Type) }
@@ -969,45 +1127,58 @@ module CapabilityHelper
     end
   end
 
-  CaptureAnalysis = Struct.new(
-    :has_local,
-    :has_rc,
-    :has_shared,
-    :has_sharded,
-    :has_affine_locked,
-    :has_outer_ref,
-    :has_non_escaping_capture,
-    :captures,
-    :capture_symbols,
-    :close_patterns,
-    :pointer_captures,
-    :string_captures,
-    :resource_captures,
-    :site_moved,
-    :site_copied,
-    :strategies,
-    :move_mark_names,
-    :alloc_mark_entries,
-    keyword_init: true
-  ) do
+  class CaptureAnalysis < T::Struct
     extend T::Sig
+
+    prop :has_local, T::Boolean, default: false
+    prop :has_rc, T::Boolean, default: false
+    prop :has_shared, T::Boolean, default: false
+    prop :has_sharded, T::Boolean, default: false
+    prop :has_affine_locked, T::Boolean, default: false
+    prop :has_outer_ref, T::Boolean, default: false
+    prop :has_non_escaping_capture, T::Boolean, default: false
+    prop :captures, T::Hash[String, Type], factory: -> { {} }
+    prop :capture_symbols, T::Hash[String, SymbolEntry], factory: -> { {} }
+    prop :close_patterns, T::Hash[String, String], factory: -> { {} }
+    prop :pointer_captures, T::Set[String], factory: -> { Set.new }
+    prop :string_captures, T::Set[String], factory: -> { Set.new }
+    prop :resource_captures, T::Set[String], factory: -> { Set.new }
+    prop :site_moved, T::Set[String], factory: -> { Set.new }
+    prop :site_copied, T::Set[String], factory: -> { Set.new }
+    prop :strategies, T::Hash[String, CaptureStrategy::Strategy], factory: -> { {} }
+    prop :move_mark_names, T::Set[String], factory: -> { Set.new }
+    prop :alloc_mark_entries, T::Hash[String, Symbol], factory: -> { {} }
+
     sig { returns(Symbol) }
     def pin_reason; has_sharded ? :sharded : :shared; end
+
+    sig { params(nested: CaptureAnalysis).void }
+    def merge_nested!(nested)
+      captures.merge!(nested.captures) { |_name, old, _new| old }
+      capture_symbols.merge!(nested.capture_symbols) { |_name, old, _new| old }
+      close_patterns.merge!(nested.close_patterns) { |_name, old, _new| old }
+      pointer_captures.merge(nested.pointer_captures)
+      string_captures.merge(nested.string_captures)
+      resource_captures.merge(nested.resource_captures)
+      site_moved.merge(nested.site_moved)
+      site_copied.merge(nested.site_copied)
+      strategies.merge!(nested.strategies) { |_name, old, _new| old }
+      move_mark_names.merge(nested.move_mark_names)
+      alloc_mark_entries.merge!(nested.alloc_mark_entries) { |_name, old, _new| old }
+    end
   end
 
-  CaptureContext = Struct.new(:analysis, :outer_scope, :locals, :is_parallel, :mark_moves, keyword_init: true)
+  class CaptureContext < T::Struct
+    const :analysis, CaptureAnalysis
+    const :outer_scope, Scope
+    const :locals, T::Set[String]
+    const :is_parallel, T::Boolean
+    const :mark_moves, T::Boolean
+  end
 
   sig { returns(CapabilityHelper::CaptureAnalysis) }
   def new_capture_analysis
-    CaptureAnalysis.new(
-      has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_affine_locked: false, has_outer_ref: false,
-      has_non_escaping_capture: false,
-      captures: {}, capture_symbols: {}, close_patterns: {},
-      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
-      site_moved: Set.new, site_copied: Set.new,
-      strategies: nil, move_mark_names: nil, alloc_mark_entries: nil
-    )
+    CaptureAnalysis.new
   end
 
   sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
@@ -1018,7 +1189,7 @@ module CapabilityHelper
       analysis: new_capture_analysis,
       outer_scope: current_scope,
       locals: Set.new,
-      is_parallel: is_parallel,
+      is_parallel: !!is_parallel,
       mark_moves: mark_moves
     )
     (@capture_stack ||= []) << ctx
@@ -1088,29 +1259,45 @@ module CapabilityHelper
       result.captures[name] = cap_type
       result.capture_symbols[name] = info
       t = cap_type
-      result.pointer_captures << name if t.needs_pointer_passing?
-      result.string_captures << name if t.string?
-      result.resource_captures << name if t.resource? || info.close_zig
-      if t.captured_plain_string_map_needs_deinit? && !info.close_zig
-        result.resource_captures << name
-        result.close_patterns[name] ||= "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())"
-      end
+      close_pattern = info.close_zig
+      add_capture_name_when(result.pointer_captures, name, t.needs_pointer_passing?)
+      add_capture_name_when(result.string_captures, name, t.string?)
+      add_capture_name_when(result.resource_captures, name, t.resource? || !close_pattern.nil?)
+      string_map_cleanup = t.captured_plain_string_map_needs_deinit? && close_pattern.nil?
+      add_capture_name_when(result.resource_captures, name, string_map_cleanup)
+      set_capture_close_pattern_when(
+        result.close_patterns,
+        name,
+        "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())",
+        string_map_cleanup
+      )
     end
-    result.close_patterns[name] ||= info.close_zig if info.close_zig
-    result.has_local = true if info.local?
-    result.has_rc = true if info.storage == :multiowned
+    close_pattern = info.close_zig
+    set_capture_close_pattern_when(result.close_patterns, name, close_pattern || "", !close_pattern.nil?)
+    result.has_local ||= info.local?
+    result.has_rc ||= info.storage == :multiowned
     ti = info.type
-    is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
-    unless is_dashmap || info.atomic?
-      result.has_shared = true if info.locked? || info.write_locked? || info.local?
-      result.has_shared = true if info.rc_stored?
-      result.has_affine_locked = true if info.affine_locked_capture?
-      if ti.is_a?(Type) && ti.sharded?
-        result.has_sharded = true
-        result.has_shared = true
-      end
-    end
+    sync_capture = !(ti.striped? && (ti.shared? || ti.multiowned?)) && !info.atomic?
+    sharded_capture = sync_capture && ti.sharded?
+    result.has_shared ||= sharded_capture ||
+                           (sync_capture && (info.locked? || info.write_locked? || info.local? || info.rc_stored?))
+    result.has_affine_locked ||= sync_capture && info.affine_locked_capture?
+    result.has_sharded ||= sharded_capture
     audit_mark_captured(name, parallel: ctx.is_parallel)
+  end
+
+  sig { params(names: T::Set[String], name: String, active: T::Boolean).void }
+  def add_capture_name_when(names, name, active)
+    return unless active
+
+    names << name
+  end
+
+  sig { params(patterns: T::Hash[String, String], name: String, pattern: String, active: T::Boolean).void }
+  def set_capture_close_pattern_when(patterns, name, pattern, active)
+    return unless active
+
+    patterns[name] ||= pattern
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
@@ -1194,7 +1381,9 @@ module CapabilityAudit
   sig { returns(BindingAuditStore) }
   def capability_audit_init!
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = {}
+    store = capability_audit_store
+    store.clear
+    store
   end
 
   # Record a capability binding for later audit.
@@ -1282,8 +1471,7 @@ module CapabilityAudit
   sig { returns(BindingAuditStore) }
   def capability_audit_store
     T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.nilable(BindingAuditStore))
-    T.must(@capability_audit)
+    T.cast(instance_variable_get(:@capability_audit), BindingAuditStore)
   end
   private :capability_audit_store
 

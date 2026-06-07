@@ -168,7 +168,7 @@ module MIRLoweringVariables
       facts.annotation,
       var_decl_suppression(safe_name, node, facts, init)
     )
-    init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    init_effect = MIR::OwnershipEffect.of(init)
     if (node.respond_to?(:container_borrow) && node.container_borrow) || node.symbol&.borrow_provenance?
       # Borrowed container views never transfer ownership into the binding.
     elsif ownership_tracked_transfer_type?(facts.ft) && !init_effect.produces_owned
@@ -210,7 +210,7 @@ module MIRLoweringVariables
     return init unless facts.has_mir_drop
     return init unless facts.ft.string?
 
-    effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(init)
     return init if effect.produces_owned
     return init if ast_value.is_a?(AST::Identifier) && AST.moved?(ast_value)
 
@@ -424,7 +424,7 @@ module MIRLoweringVariables
     drop_entry = facts.binding_entry
     build_drop_entry!(drop_entry, node.full_type!, node)
     drop_entry = drop_entry.with_moved_guard if facts.ft.bounded_stream?
-    init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    init_effect = MIR::OwnershipEffect.of(init)
     node_alloc = MIR::Placement.explicit_heap?(facts.decl_alloc) ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || facts.decl_alloc)
     drop_entry = drop_entry.with_alloc(node_alloc)
     function_state.bindings[node.name.to_s] = drop_entry

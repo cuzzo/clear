@@ -42,7 +42,13 @@ RSpec.describe "MIR gap-burn characterization" do
 
     fresh_analysis = double(
       captures: { "owned" => Type.new(:String) },
-      strategies: { "owned" => CaptureStrategy::FreshHeapCopy.new("[]const u8", "owned", :heap) },
+      strategies: {
+        "owned" => CaptureStrategy::FreshHeapCopy.new(
+          zig_type: "[]const u8",
+          ctx_init_name: "owned",
+          alloc_sym: :heap
+        )
+      },
       pointer_captures: Set.new,
       capture_symbols: {},
     )
@@ -140,6 +146,91 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(field[:name]).to eq("item")
     expect(field[:value]).to eq(MIR::Ident.new("value"))
     expect(field[:alloc]).to eq(:heap)
+  end
+
+  it "classifies callable ownership effects from typed facts" do
+    none = MIR::OwnershipEffect.from_callable_facts(
+      emits_allocating: false,
+      heap_return_alloc: false,
+      fixed_void_without_alloc_metadata: false,
+      mutates_receiver_without_heap_return: false,
+      result_owns: nil,
+      result_type: nil,
+      alloc: nil,
+      target_var: nil
+    )
+    expect(none.produces_owned).to eq(false)
+
+    rejected = MIR::OwnershipEffect.from_callable_facts(
+      emits_allocating: true,
+      heap_return_alloc: true,
+      fixed_void_without_alloc_metadata: false,
+      mutates_receiver_without_heap_return: false,
+      result_owns: false,
+      result_type: Type.new(:String),
+      alloc: :heap,
+      target_var: "out"
+    )
+    expect(rejected.produces_owned).to eq(false)
+
+    owned = MIR::OwnershipEffect.from_callable_facts(
+      emits_allocating: true,
+      heap_return_alloc: true,
+      fixed_void_without_alloc_metadata: false,
+      mutates_receiver_without_heap_return: false,
+      result_owns: true,
+      result_type: Type.new(:String),
+      alloc: :heap,
+      target_var: "out"
+    )
+    expect(owned).to have_attributes(produces_owned: true, alloc: :heap, target_var: "out")
+  end
+
+  it "derives aggregate and block ownership effects through the typed fact API" do
+    heap_child = MIR::DupeSlice.new(MIR::Lit.new("\"owned\""), :heap)
+    inert_child = MIR::Lit.new("0")
+
+    aggregate = MIR::OwnershipEffect.from_children([heap_child, inert_child])
+
+    expect(MIR::OwnershipEffect.of(nil)).to eq(MIR::OwnershipEffect.none)
+    expect(MIR::OwnershipEffect.hoistable_owned_result?(heap_child)).to eq(true)
+    expect(aggregate).to have_attributes(produces_owned: true, alloc: :heap, cleanup_kind: :uniform)
+
+    block_effect = MIR::OwnershipEffect.from_block_body([
+      MIR::Let.new("tmp", heap_child, false, Type.new(:String), nil),
+      MIR::AllocMark.new("tmp", :heap, Type.new(:String), :heap),
+      MIR::TransferMark.new("tmp", :block_result, :heap),
+      MIR::BreakStmt.new("__blk", MIR::Ident.new("tmp")),
+    ], result_type: Type.new(:String))
+
+    expect(block_effect).to have_attributes(
+      produces_owned: true,
+      alloc: :heap,
+      cleanup_kind: :heap_string,
+      target_var: "tmp",
+    )
+  end
+
+  it "derives ownership effects for fallback expressions without node-local rediscovery" do
+    heap_left = MIR::DupeSlice.new(MIR::Lit.new("\"left\""), :heap)
+    heap_right = MIR::DupeSlice.new(MIR::Lit.new("\"right\""), :heap)
+    frame_right = MIR::DupeSlice.new(MIR::Lit.new("\"frame\""), :frame)
+
+    expect(MIR::OwnershipEffect.from_required_branch_pair(
+      MIR::OwnershipEffect.of(heap_left),
+      MIR::OwnershipEffect.of(heap_right),
+    ).alloc).to eq(:heap)
+    expect(MIR::OwnershipEffect.from_required_branch_pair(
+      MIR::OwnershipEffect.of(heap_left),
+      MIR::OwnershipEffect.of(frame_right),
+    ).produces_owned).to eq(false)
+    expect(MIR::OwnershipEffect.from_try_fallback(
+      MIR::OwnershipEffect.of(heap_left),
+      MIR::OwnershipEffect.none,
+      result_type: Type.new(:String),
+      fallback_is_literal: true,
+      left_never_success: false,
+    ).alloc).to eq(:heap)
   end
 
   it "uses value-comparable typed body ids for finalized lowered bodies" do
@@ -717,6 +808,51 @@ RSpec.describe "MIR gap-burn characterization" do
     foreign = AST::FuncCall.new(tok, "foreign", [])
     foreign.matched_signature = sig
     expect(EscapeAnalysis.send(:call_result_is_heap?, foreign, {}, nil)).to eq(true)
+  end
+
+  it "records typed escape placement facts for promoted return bindings" do
+    local_type = Type.new(:String)
+    decl = AST::VarDecl.new(tok, "local", local_type, lit("owned", type: :String), false)
+    entry = SymbolEntry.new(reg: decl, type: local_type, mutable: false, storage: :frame)
+    decl.symbol = entry
+    decl.full_type = local_type
+
+    returned = id("local", type: local_type, storage: :frame)
+    returned.symbol = entry
+    analyzed_fn = fn([decl, AST::ReturnNode.new(tok, returned)], return_type: local_type)
+
+    result = EscapeAnalysis.apply_with_facts!({ "main" => analyzed_fn }, nil)
+
+    expect(entry.storage).to eq(:heap)
+    expect(result.heap_fns).to include("main")
+    fact = result.placements.placements.find { |placement| placement.symbol_name == "local" }
+    expect(fact).to have_attributes(
+      fn_name: "main",
+      binding_id: entry.binding_id,
+      reason: :owning_return
+    )
+  end
+
+  it "retains escape placement facts on MIRPass as a phase artifact" do
+    local_type = Type.new(:String)
+    decl = AST::VarDecl.new(tok, "local", local_type, lit("owned", type: :String), false)
+    entry = SymbolEntry.new(reg: decl, type: local_type, mutable: false, storage: :frame)
+    decl.symbol = entry
+    decl.full_type = local_type
+    returned = id("local", type: local_type, storage: :frame)
+    returned.symbol = entry
+    analyzed_fn = fn([decl, AST::ReturnNode.new(tok, returned)], return_type: local_type)
+    program = AST::Program.new(tok, [analyzed_fn])
+    MIRPassState::ORDER.take_while { |stage| stage != :escape_analyzed }.each do |stage|
+      MIRPassState.for!(program).mark!(stage)
+    end
+    pass = MIRPass.new(fn_nodes: { "main" => analyzed_fn }, schema_lookup: ->(_name) { nil })
+
+    pass.transform!(program)
+
+    facts = pass.escape_placement_facts.placements
+    expect(facts.map(&:symbol_name)).to include("local")
+    expect(facts.map(&:reason)).to include(:owning_return)
   end
 
   it "finalizes rt for heap-carrying string payload alias returns" do
@@ -1623,14 +1759,14 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:capture_ownership_mirror_node?, mirror, "__ctx_3")).to eq(true)
 
     refused = {
-      "ptr" => CaptureStrategy::Refuse.new(:pointer_passed_without_transfer, "ptr"),
-      "pool" => CaptureStrategy::Refuse.new(:pool_borrow_without_transfer, "pool"),
-      "slice" => CaptureStrategy::Refuse.new(:array_borrow_without_transfer, "slice"),
-      "heap" => CaptureStrategy::Refuse.new(:heap_backed_without_transfer, "heap"),
-      "mystery" => CaptureStrategy::Refuse.new(:unknown_capture_shape, "mystery"),
+      "ptr" => CaptureStrategy::Refuse.new(reason: :pointer_passed_without_transfer, owner_name: "ptr"),
+      "pool" => CaptureStrategy::Refuse.new(reason: :pool_borrow_without_transfer, owner_name: "pool"),
+      "slice" => CaptureStrategy::Refuse.new(reason: :array_borrow_without_transfer, owner_name: "slice"),
+      "heap" => CaptureStrategy::Refuse.new(reason: :heap_backed_without_transfer, owner_name: "heap"),
+      "mystery" => CaptureStrategy::Refuse.new(reason: :unknown_capture_shape, owner_name: "mystery"),
     }
     bg = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
-    bg.capture_analysis = double(strategies: refused)
+    bg.capture_analysis = CapabilityHelper::CaptureAnalysis.new(strategies: refused)
 
     expect {
       low.send(:enforce_bg_capture_strategies!, bg, {})

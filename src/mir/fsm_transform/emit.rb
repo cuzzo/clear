@@ -426,7 +426,7 @@ module FsmTransform
 
     sig { params(sources: T::Array[FsmStructureSource]).returns(T::Array[MIR::Node]) }
     def collect_fsm_nodes(sources)
-      roots = sources.reject { |source| source.is_a?(String) }
+      roots = T.let(sources.filter_map { |source| source if source.is_a?(MIR::Emittable) }, T::Array[MIR::Node])
       out = T.let([], T::Array[MIR::Node])
       MIR.each_node(roots) { |node| out << node }
       out

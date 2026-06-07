@@ -73,11 +73,8 @@ module MIRLoweringConcurrency
 
   sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
   def execution_boundary_fact(kind, dispatch, analysis)
-    symbols = T.let(analysis&.capture_symbols || {}, T::Hash[String, SymbolEntry])
-    captured = T.let(
-      T.cast(analysis&.captures, T.nilable(T::Hash[String, T.any(Type, Symbol, String)])) || {},
-      T::Hash[String, T.any(Type, Symbol, String)],
-    )
+    symbols = T.let(analysis ? analysis.capture_symbols : {}, T::Hash[String, SymbolEntry])
+    captured = T.let(analysis ? analysis.captures : {}, T::Hash[String, Type])
     names = T.let((symbols.keys + captured.keys).map(&:to_s).uniq.sort, T::Array[String])
     MIR::ExecutionBoundaryFact.new(
       kind: kind,
@@ -131,10 +128,7 @@ module MIRLoweringConcurrency
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String).returns(T::Array[MIR::Stmt]) }
   def capture_ownership_mirror_nodes(caps, analysis, receiver)
-    captured = T.let(
-      T.cast(analysis&.captures, T.nilable(T::Hash[String, T.any(Type, Symbol, String)])) || {},
-      T::Hash[String, T.any(Type, Symbol, String)],
-    )
+    captured = T.let(analysis ? analysis.captures : {}, T::Hash[String, Type])
     caps.specs.filter_map do |spec|
       next nil unless spec.body_cleanup_zig
 
@@ -161,7 +155,9 @@ module MIRLoweringConcurrency
   def fiber_capture_source_overrides(analysis, base = {})
     T.bind(self, MIRLowering) rescue nil
     out = base.dup
-    (analysis&.capture_symbols || {}).each do |name, sym|
+    return out unless analysis
+
+    analysis.capture_symbols.each do |name, sym|
       decl = sym&.reg
       mapped = decl ? function_state.decl_zig_names[decl.object_id] : nil
       out[name.to_s] ||= mapped if mapped
@@ -169,7 +165,7 @@ module MIRLoweringConcurrency
     out
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(body: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def finalized_boundary_body_for_emit(body)
     T.bind(self, MIRLowering) rescue nil
     prev_alloc_names = function_state.lowered_alloc_names
@@ -181,7 +177,7 @@ module MIRLoweringConcurrency
     function_state.lowered_guarded_cleanup_names = T.must(prev_guarded_names)
   end
 
-  sig { params(node: T.untyped, receiver: String).returns(T::Boolean) }
+  sig { params(node: MIR::Node, receiver: String).returns(T::Boolean) }
   def capture_ownership_mirror_node?(node, receiver)
     return false unless node.is_a?(MIR::AllocMark) || node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
 
@@ -271,18 +267,7 @@ module MIRLoweringConcurrency
         AST.each_capture_analysis(branch[:body]) do |nested|
           next if nested.equal?(analysis)
           nested = T.cast(nested, CapabilityHelper::CaptureAnalysis)
-          analysis.captures ||= {}
-          analysis.capture_symbols ||= {}
-          analysis.close_patterns ||= {}
-          analysis.pointer_captures ||= Set.new
-          analysis.string_captures ||= Set.new
-          analysis.resource_captures ||= Set.new
-          analysis.captures.merge!(nested.captures || {}) { |_k, old, _new| old }
-          analysis.capture_symbols.merge!(nested.capture_symbols || {}) { |_k, old, _new| old }
-          analysis.close_patterns.merge!(nested.close_patterns || {}) { |_k, old, _new| old }
-          analysis.pointer_captures.merge(nested.pointer_captures || Set.new)
-          analysis.string_captures.merge(nested.string_captures || Set.new)
-          analysis.resource_captures.merge(nested.resource_captures || Set.new)
+          analysis.merge_nested!(nested)
         end
       end
       boundary_facts << execution_boundary_fact(
@@ -411,9 +396,9 @@ module MIRLoweringConcurrency
     bg_rt = "__rt_bg#{id}"
 
     analysis = node.capture_analysis
-    captured = analysis&.captures || {}
-    capture_close_zig = analysis&.close_patterns || {}
-    pointer_captures = analysis&.pointer_captures || Set.new
+    captured = analysis ? analysis.captures : {}
+    capture_close_zig = analysis ? analysis.close_patterns : {}
+    pointer_captures = analysis ? analysis.pointer_captures : Set.new
 
     rt_name = runtime_binding_name
 
@@ -752,8 +737,9 @@ module MIRLoweringConcurrency
   sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), _captured: T::Hash[String, Type]).void }
   def enforce_bg_capture_strategies!(node, _captured)
     T.bind(self, MIRLowering) rescue nil
-    refused = (node.capture_analysis&.strategies || {}).select do |_name, strat|
-      strat.is_a?(CaptureStrategy::Refuse)
+    strategies = node.capture_analysis ? node.capture_analysis.strategies : {}
+    refused = strategies.select do |_name, strategy|
+      strategy.is_a?(CaptureStrategy::Refuse)
     end
     return if refused.empty?
     lines = refused.map do |name, strat|
@@ -844,7 +830,7 @@ module MIRLoweringConcurrency
         # handle as arg 0 inside STREAM_SPAWN and inside the producer
         # frame the channel binds to a synthetic slot consumed by
         # MIR::StreamYield via lower_yield.
-        captures_map = node.capture_analysis&.captures || {}
+        captures_map = node.capture_analysis ? node.capture_analysis.captures : {}
         spawn = MIR::StreamSpawn.new(captures_map, run_body)
         spawn.boundary_fact = execution_boundary_fact(:stream_spawn, :local, node.capture_analysis)
         return spawn
@@ -866,7 +852,7 @@ module MIRLoweringConcurrency
 
     analysis = node.capture_analysis
     rt_name = runtime_binding_name
-    enforce_bg_capture_strategies!(node, analysis&.captures || {})
+    enforce_bg_capture_strategies!(node, analysis ? analysis.captures : {})
 
     # Capture handling delegated to FiberCtxBuilder -- same builder
     # BG/DO/CONCURRENT use. BG STREAM's site-specific extras are the
@@ -949,7 +935,7 @@ module MIRLoweringConcurrency
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    bg = MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
+    bg = MIR::BgBlock.new(sg_code, analysis ? analysis.captures : {}, stream_run_body || [])
     bg.result_type = Type.new(tense_t)
     bg.boundary_fact = execution_boundary_fact(:bg_stream, :local, analysis)
     bg

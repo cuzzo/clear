@@ -248,6 +248,22 @@ the cleanup adds `0` SlopCop genuine gaps on its changed source lines.
 
 ## 4. Ownership, Capability, And Escape Facts Are Spread Across Too Many Phases
 
+Status: Implemented. Typed ownership graph records, escape-placement facts,
+closed background-capture strategy records, typed capture-analysis/context
+records, `WITH` capability facts, MIR ownership-effect facts,
+checker/backend consumption guardrails, and Decomplex immutable-fact precision
+are implemented. Final verification and metric comparisons are tracked in
+`docs/agents/ownership-capability-escape-facts-plan.md`.
+
+The final repo-wide reports show the intended direction for issue #4:
+Decomplex state-based branch density `1574 -> 1569`, broken protocols
+`458 -> 409`, root-cause clusters `478 -> 473`; SlopCop genuine gaps
+`1319 -> 1196` and dark arms `3143 -> 2919`; Boobytrap state-based branch
+hotspots `1574 -> 1569`, multi-file fix blast radius `1971 -> 98`, and fixed
+but unmeasured `1878 -> 5`; nil-kill param untyped slots `866 -> 860`, return
+untyped slots `202 -> 199`, field/ivar untyped slots `847 -> 809`, and weak
+collection slots `481 -> 465`.
+
 ### Problem
 
 The reports point repeatedly at ownership and capability state: `MIR#ownership_effect`,
@@ -277,20 +293,29 @@ conditions and backend side effects.
 
 ### /plan
 
+Detailed implementation checklist:
+`docs/agents/ownership-capability-escape-facts-plan.md`.
+
 1. Define one authoritative ownership fact graph over stable IDs. It should
    model owners, borrows, moves, aliases, cleanup obligations, escapes,
-   capabilities, and synchronization requirements.
+   capabilities, and synchronization requirements. **Done for the current
+   issue #4 scope through typed ownership graph nodes/edges, escape placement
+   facts, capture strategy records, WITH capability facts, and MIR ownership
+   effects.**
 2. Make annotation produce preliminary facts, MIR construction attach those
    facts to stable MIR entities, and ownership checking validate the final
-   graph.
+   graph. **Done for the touched ownership/capability/escape surfaces.**
 3. Forbid backend emission from inventing ownership facts. Backend code may
    consume facts and request checked operations, but it should not be a semantic
-   source of truth.
+   source of truth. **Guarded by architecture invariants.**
 4. Make mutation windows explicit. Once an ownership fact table is frozen for a
    phase, downstream passes should either read it immutably or produce a new
-   transformed table.
+   transformed table. **Done for the implemented phase records; escape
+   analysis remains the single sanctioned `SymbolEntry#storage` writer.**
 5. Add invariant tests for invalid moves, double cleanup, escaping borrows,
-   background captures, capability violations, and sync requirements.
+   background captures, capability violations, and sync requirements. **Done
+   across focused ownership graph, MIR gap burn, capability, and architecture
+   invariant coverage.**
 
 ## 5. Weak Hash Records And Untyped Phase Bags Hide Compiler State
 

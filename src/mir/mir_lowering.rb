@@ -860,7 +860,7 @@ class MIRLowering
 
   sig { params(mir: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def heap_owned_result?(mir, ast_node)
-    effect = mir.respond_to?(:ownership_effect) ? mir.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(mir)
     return true if effect.produces_owned && MIR::Placement.heap?(effect.alloc)
 
     node = ast_node
@@ -1699,7 +1699,7 @@ class MIRLowering
     source_expr = ownership_contract_source_node(expr)
     return true if source_expr.is_a?(MIR::BgBlock)
 
-    effect = source_expr.respond_to?(:ownership_effect) ? source_expr.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(source_expr)
     return true if effect.produces_owned
 
     source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating? == true
@@ -1786,7 +1786,7 @@ class MIRLowering
       return
     end
 
-    effect = source_expr.respond_to?(:ownership_effect) ? source_expr.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(source_expr)
     unless effect.produces_owned
       return unless source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating?
 
@@ -1918,7 +1918,7 @@ class MIRLowering
       return nil
     end
 
-    effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(init)
     alloc = effect.alloc || mir_owned_alloc(init) || :heap
     stamp_allocating_result_target!(init, name, alloc: alloc)
     type_info = node.annotation || mir_alloc_mark_type_info(init, nil, context: "implicit MIR allocation fact")
@@ -3443,7 +3443,7 @@ class MIRLowering
                                context: "pipeline allocation", known_allocating: false,
                                accept_owned_call: false, include_cleanup: false)
     owns_call_result = accept_owned_call && value.is_a?(MIR::Call) && value.owned_return?
-    effect = value.respond_to?(:ownership_effect) ? value.ownership_effect : MIR::OwnershipEffect.none
+    effect = MIR::OwnershipEffect.of(value)
     return nil unless known_allocating || mir_allocates?(value) || owns_call_result || effect.produces_owned
 
     alloc = effect.alloc || mir_owned_alloc(value) || fallback_alloc

@@ -24,6 +24,7 @@ module Decomplex
       @mass = mass
       @fuzzy = fuzzy
       @method_spans = {}
+      @source_lines = {}
     end
 
     def scan
@@ -49,6 +50,7 @@ module Decomplex
     def finding_for(item)
       locs = item.locations
       return nil if locs.size < 2
+      return nil if typed_struct_schema_cluster?(locs)
 
       type = clone_type(item)
       return nil unless type
@@ -91,6 +93,20 @@ module Decomplex
             [loc.line, 0, loc.line, 1]
           end
       end
+    end
+
+    def typed_struct_schema_cluster?(locs)
+      locs.all? { |loc| typed_struct_schema_line?(loc.file, loc.line) }
+    end
+
+    def typed_struct_schema_line?(file, line)
+      source_line(file, line).match?(/\A\s*(?:const|prop)\s+:[A-Za-z_]\w*\b/)
+    end
+
+    def source_line(file, line)
+      (@source_lines[file] ||= File.readlines(file))[line - 1].to_s
+    rescue StandardError
+      ""
     end
 
     def method_span_for(file, line)

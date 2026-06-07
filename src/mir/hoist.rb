@@ -485,9 +485,7 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_produces_owned_result?(node)
-    return false unless node
-    effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
-    return true if effect.produces_owned && effect.requires_hoist
+    return true if MIR::OwnershipEffect.hoistable_owned_result?(node)
     return owned_call_result_requires_cleanup?(node) if node.is_a?(MIR::Call)
     return true if node.is_a?(MIR::BgBlock)
 
@@ -649,7 +647,7 @@ module MIRHoistLowering
     when MIR::BlockExpr
       inferred = block_expr_result_type(mir)
       return inferred if inferred
-      effect = mir.ownership_effect
+      effect = MIR::OwnershipEffect.of(mir)
       return Type.new(:String, location: effect.alloc || alloc) if effect.cleanup_kind == :heap_string
       raise "#{context}: allocating MIR::BlockExpr has no result type"
     when MIR::Orelse, MIR::IfOptional
@@ -737,11 +735,11 @@ module MIRHoistLowering
     function_state.lowered_guarded_cleanup_names.add(plan.name)
   end
 
-  sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }
+  sig { params(expr: MIR::Node).returns([T::Array[MIR::Node], MIR::Ident]) }
   def hoist_normalized_value_expr(expr)
     T.bind(self, MIRLowering) rescue nil
     name = "__tmp_#{lowering_counters.next_tmp_id}"
-    [T.let([MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped]), MIR::Ident.new(name)]
+    [T.let([MIR::Let.new(name, expr, false, nil, nil)], T::Array[MIR::Node]), MIR::Ident.new(name)]
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -1079,10 +1077,8 @@ module MIRHoistLowering
       expr.target_var = name
       expr.allocs = expr.allocs.with_all(alloc) if alloc && expr.allocs
     else
-      if alloc && expr.respond_to?(:ownership_effect)
-        if expr.ownership_effect.produces_owned && expr.respond_to?(:alloc=)
-          expr.alloc = alloc
-        end
+      if alloc && MIR::OwnershipEffect.of(expr).produces_owned && expr.respond_to?(:alloc=)
+        expr.alloc = alloc
       end
       expr.ownership_source_exprs.each do |child|
         has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
@@ -1125,8 +1121,7 @@ module MIRHoistLowering
 
   sig { params(mir: T.untyped).returns(T.nilable(Symbol)) }
   def mir_owned_alloc(mir)
-    return nil unless mir && mir.respond_to?(:ownership_effect)
-    mir.ownership_effect.alloc
+    MIR::OwnershipEffect.alloc_of(mir)
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -1226,9 +1221,7 @@ module MIRHoistLowering
 
   sig { params(mir: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_ownership_effect(mir, alloc: :heap)
-    return nil unless mir.respond_to?(:ownership_effect)
-
-    effect = mir.ownership_effect
+    effect = MIR::OwnershipEffect.of(mir)
 
     if mir.is_a?(MIR::BlockExpr)
       # BlockExpr#ownership_effect is the ownership fact that retains the

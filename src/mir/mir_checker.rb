@@ -1292,7 +1292,7 @@ class MIRChecker
     return true if cleanup.cleanup_entry.match_as?
     return true if allocating_expr?(init)
     return true if value_constructor_expr?(init)
-    return true if init.respond_to?(:ownership_effect) && init.ownership_effect.produces_owned
+    return true if MIR::OwnershipEffect.of(init).produces_owned
     return true if owned_return_init?(init)
     return true if expr_owned_result_alloc(init)
     return true if structural_consumed_names(node).any?
@@ -1365,8 +1365,7 @@ class MIRChecker
 
   sig { params(init: T.untyped).returns(T.nilable(Symbol)) }
   def expr_owned_result_alloc(init)
-    return nil unless init && init.respond_to?(:ownership_effect)
-    effect = init.ownership_effect
+    effect = MIR::OwnershipEffect.of(init)
     return nil unless effect.requires_hoist
 
     effect.alloc
@@ -1660,7 +1659,7 @@ class MIRChecker
     return unless node
 
     MIR.each_surface_node(node) do |expr|
-      effect = expr.ownership_effect
+      effect = MIR::OwnershipEffect.of(expr)
       if effect.produces_owned
         leaks << error(:HPT_LEAK, ownership_effect_label(expr),
           "owned-result expression not bound to variable (leak)")
@@ -2595,8 +2594,7 @@ class MIRChecker
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def allocating_expr?(expr)
-    return false unless expr && expr.respond_to?(:ownership_effect)
-    effect = expr.ownership_effect
+    effect = MIR::OwnershipEffect.of(expr)
     effect.produces_owned && effect.requires_hoist && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
   end
 
