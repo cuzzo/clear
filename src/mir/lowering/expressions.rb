@@ -37,6 +37,34 @@ module MIRLoweringExpressions
     const :variant_name, String
   end
 
+  class BinaryMirOperands < T::Struct
+    const :left, MIR::Node
+    const :right, MIR::Node
+  end
+
+  class BinaryOperandFacts < T::Struct
+    const :node, AST::BinaryOp
+    const :op, Symbol
+    const :left, MIR::Node
+    const :right, MIR::Node
+    const :left_type, Type
+    const :right_type, Type
+    const :int_arithmetic, BinaryIntArithmeticFacts
+    const :left_unit_variant, T.nilable(UnitVariantAccess)
+    const :right_unit_variant, T.nilable(UnitVariantAccess)
+  end
+
+  class BinaryOperationPlan < T::Struct
+    const :kind, Symbol
+    const :facts, BinaryOperandFacts
+    const :builtin, T.nilable(Symbol), default: nil
+    const :op_str, T.nilable(String), default: nil
+    const :type_arg, T.nilable(String), default: nil
+    const :variant, T.nilable(UnitVariantAccess), default: nil
+    const :tag_source, T.nilable(Symbol), default: nil
+    const :union_error_type, T.nilable(Symbol), default: nil
+  end
+
   class FieldAccessPlan < T::Struct
     extend T::Sig
 
@@ -125,6 +153,25 @@ module MIRLoweringExpressions
     ADD: :intAdd,
     SUB: :intSub,
     MUL: :intMul
+  }.freeze, T::Hash[Symbol, Symbol])
+
+  STRING_COMPARISON_OPS = T.let({
+    EQ: "==",
+    NEQ: "!=",
+    LT: "<",
+    LTE: "<=",
+    GT: ">",
+    GTE: ">=",
+  }.freeze, T::Hash[Symbol, String])
+
+  BINARY_PLAN_EMITTERS = T.let({
+    pow: :emit_power_binary_plan,
+    builtin: :emit_builtin_binary_plan,
+    symbol_comparison: :emit_symbol_binary_plan,
+    string_comparison: :emit_string_binary_comparison,
+    unit_variant_comparison: :emit_unit_variant_comparison,
+    union_equality_error: :raise_union_equality_error,
+    standard: :emit_standard_binary_plan,
   }.freeze, T::Hash[Symbol, Symbol])
 
   sig { params(node: AST::Literal).returns(T.untyped) }
@@ -289,132 +336,235 @@ module MIRLoweringExpressions
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
 
-    left = lower(node.left)
-    right = lower(node.right)
+    emit_binary_operation_plan(binary_operation_plan(node))
+  end
 
-    # Power operator
-    if node.op == :POW
-      type_arg = Type.from_node!(node.left, context: "power lhs").resolved == :Int64 ? "i64" : "f64"
-      return MIR::Call.new(
-        "std.math.pow",
-        [MIR::Ident.new(type_arg), left, right],
-        false,
-        false,
-        MIR::CallableContract.no_ownership(3),
-      )
+  sig { params(node: AST::BinaryOp).returns(BinaryOperationPlan) }
+  def binary_operation_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    facts = binary_operand_facts(node)
+    classify_binary_operation(facts)
+  end
+
+  sig { params(node: AST::BinaryOp).returns(BinaryOperandFacts) }
+  def binary_operand_facts(node)
+    T.bind(self, MIRLowering) rescue nil
+    BinaryOperandFacts.new(
+      node: node,
+      op: T.cast(node.op, Symbol),
+      left: T.cast(lower(node.left), MIR::Node),
+      right: T.cast(lower(node.right), MIR::Node),
+      left_type: Type.from_node!(node.left, context: "binary lhs"),
+      right_type: Type.from_node!(node.right, context: "binary rhs"),
+      int_arithmetic: binary_int_arithmetic_facts(node),
+      left_unit_variant: unit_variant_access(node.left),
+      right_unit_variant: unit_variant_access(node.right),
+    )
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(BinaryOperationPlan) }
+  def classify_binary_operation(facts)
+    T.bind(self, MIRLowering) rescue nil
+    return BinaryOperationPlan.new(kind: :pow, facts: facts, type_arg: binary_power_type_arg(facts)) if facts.op == :POW
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intMod) if signed_integer_modulo?(facts)
+
+    string_plan = classify_string_binary_operation(facts)
+    return string_plan if string_plan
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intDiv) if integer_division?(facts)
+
+    builtin = direct_binary_builtin(facts)
+    return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: builtin) if builtin
+
+    unit_plan = classify_unit_variant_comparison(facts)
+    return unit_plan if unit_plan
+
+    union_error_type = invalid_union_equality_type(facts)
+    return BinaryOperationPlan.new(kind: :union_equality_error, facts: facts, union_error_type: union_error_type) if union_error_type
+
+    op_str = ZigTypeMapper::ZIG_OPS[facts.op]
+    raise "MIRLowering: unknown binary op #{facts.op}" unless op_str
+
+    BinaryOperationPlan.new(kind: :standard, facts: facts, op_str: op_str)
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(String) }
+  def binary_power_type_arg(facts)
+    facts.left_type.resolved == :Int64 ? "i64" : "f64"
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
+  def signed_integer_modulo?(facts)
+    facts.op == :MOD && facts.left_type.resolved == :Int64
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_string_binary_operation(facts)
+    return nil unless facts.left_type.string? || facts.right_type.string?
+
+    if facts.left_type.symbol? && facts.right_type.symbol?
+      return nil unless facts.op == :EQ || facts.op == :NEQ
+      return BinaryOperationPlan.new(kind: :symbol_comparison, facts: facts)
     end
 
-    # Modulo on signed int — routed through the builtin registry so the :bc
-    # target can dispatch to MOD_I64 via MIR::InlineBc instead of parsing a
-    # "@mod" callee string at codegen time.
-    if node.op == :MOD
-      if Type.from_node!(node.left, context: "mod lhs").resolved == :Int64
-        return emit_builtin(:intMod, [left, right])
-      end
+    op_str = string_comparison_operator(facts.op)
+    return nil unless op_str
+
+    BinaryOperationPlan.new(kind: :string_comparison, facts: facts, op_str: op_str)
+  end
+
+  sig { params(op: Symbol).returns(T.nilable(String)) }
+  def string_comparison_operator(op)
+    STRING_COMPARISON_OPS[op]
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
+  def integer_division?(facts)
+    facts.op == :DIV && facts.left_type.integer? && facts.right_type.integer?
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(Symbol)) }
+  def direct_binary_builtin(facts)
+    direct = WRAPPING_BUILTINS[facts.op] || CHECKED_BUILTINS[facts.op]
+    return direct if direct
+
+    fn = INTEGER_ARITHMETIC_BUILTINS[facts.op]
+    return nil unless fn
+    return nil unless facts.int_arithmetic.both_int
+    return nil if facts.int_arithmetic.has_comptime_number_literal
+    return nil if facts.int_arithmetic.has_float_coercion
+
+    fn
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_unit_variant_comparison(facts)
+    return nil unless facts.op == :EQ || facts.op == :NEQ
+    lhs_uv = facts.left_unit_variant
+    rhs_uv = facts.right_unit_variant
+    op_str = facts.op == :EQ ? "==" : "!="
+    if lhs_uv && !rhs_uv
+      return BinaryOperationPlan.new(kind: :unit_variant_comparison, facts: facts, op_str: op_str, variant: lhs_uv, tag_source: :right)
     end
-
-    # String comparison
-    left_ti = Type.from_node!(node.left, context: "binary lhs")
-    right_ti = Type.from_node!(node.right, context: "binary rhs")
-    if left_ti.string? || right_ti.string?
-
-      # Symbol == symbol: O(1) pointer+length comparison. No allocation possible,
-      # so no hoist_alloc needed. Falls through to content comparison if either
-      # side is a plain string (cross-type comparison stays correct).
-      if left_ti.symbol? && right_ti.symbol?
-        cmp_node = case node.op
-              when :EQ  then emit_builtin(:symbolEql, [left, right])
-              when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:symbolEql, [left, right]))
-              end
-        return cmp_node if cmp_node
-      end
-
-      # General string comparison: hoist allocating sub-expressions so heap strings get cleanup.
-      # (e.g. ASSERT f() == "x" -- f() returns a heap string that needs freeing)
-      left = place_value_for_destination(left, node.left, :heap, node.left.full_type!) if node.left.is_a?(AST::BinaryOp) && node.left.op == :OR_RESCUE
-      right = place_value_for_destination(right, node.right, :heap, node.right.full_type!) if node.right.is_a?(AST::BinaryOp) && node.right.op == :OR_RESCUE
-      left = hoist_alloc(left, node.left)
-      right = hoist_alloc(right, node.right)
-      cmp_node = case node.op
-            when :EQ  then emit_builtin(:eql, [left, right])
-            when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:eql, [left, right]))
-            when :LT  then MIR::BinOp.new("<",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :LTE then MIR::BinOp.new("<=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :GT  then MIR::BinOp.new(">",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            when :GTE then MIR::BinOp.new(">=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
-            end
-      return cmp_node if cmp_node
+    if rhs_uv && !lhs_uv
+      return BinaryOperationPlan.new(kind: :unit_variant_comparison, facts: facts, op_str: op_str, variant: rhs_uv, tag_source: :left)
     end
+    nil
+  end
 
-    # Integer division — same rationale as :MOD above (registry instead of
-    # raw "@divTrunc" callee string).
-    if node.op == :DIV && left_ti.integer? && right_ti.integer?
-      return emit_builtin(:intDiv, [left, right])
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(Symbol)) }
+  def invalid_union_equality_type(facts)
+    T.bind(self, MIRLowering)
+    return nil unless facts.op == :EQ || facts.op == :NEQ
+
+    left_resolved = facts.left_type.resolved
+    right_resolved = facts.right_type.resolved
+    return left_resolved if union_schemas.key?(left_resolved)
+    return right_resolved if union_schemas.key?(right_resolved)
+
+    nil
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_binary_operation_plan(plan)
+    T.bind(self, MIRLowering) rescue nil
+    emitter = BINARY_PLAN_EMITTERS[plan.kind]
+    raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
+
+    T.cast(T.unsafe(self).__send__(emitter, plan), MIR::Node)
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
+  def emit_power_binary_plan(plan)
+    facts = plan.facts
+    MIR::Call.new(
+      "std.math.pow",
+      [MIR::Ident.new(T.must(plan.type_arg)), facts.left, facts.right],
+      false,
+      false,
+      MIR::CallableContract.no_ownership(3),
+    )
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_builtin_binary_plan(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    emit_builtin(T.must(plan.builtin), [facts.left, facts.right])
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_symbol_binary_plan(plan)
+    emit_symbol_binary_comparison(plan.facts)
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
+  def emit_standard_binary_plan(plan)
+    facts = plan.facts
+    MIR::BinOp.new(T.must(plan.op_str), facts.left, facts.right)
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(MIR::Node) }
+  def emit_symbol_binary_comparison(facts)
+    T.bind(self, MIRLowering)
+    cmp = emit_builtin(:symbolEql, [facts.left, facts.right])
+    facts.op == :NEQ ? MIR::UnaryOp.new("!", cmp) : cmp
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_string_binary_comparison(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    operands = string_comparison_operands(facts)
+    eql_call = emit_builtin(:eql, [operands.left, operands.right])
+    return eql_call if facts.op == :EQ
+    return MIR::UnaryOp.new("!", eql_call) if facts.op == :NEQ
+
+    MIR::BinOp.new(
+      T.must(plan.op_str),
+      emit_builtin(:strcmp, [operands.left, operands.right]),
+      MIR::Lit.new("0"),
+    )
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(BinaryMirOperands) }
+  def string_comparison_operands(facts)
+    T.bind(self, MIRLowering)
+    node = facts.node
+    left = string_comparison_operand(facts.left, node.left)
+    right = string_comparison_operand(facts.right, node.right)
+    BinaryMirOperands.new(left: hoist_alloc(left, node.left), right: hoist_alloc(right, node.right))
+  end
+
+  sig { params(value: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+  def string_comparison_operand(value, ast_node)
+    T.bind(self, MIRLowering)
+    if ast_node.is_a?(AST::BinaryOp) && ast_node.op == :OR_RESCUE
+      return place_value_for_destination(value, ast_node, :heap, ast_node.full_type!)
     end
+    value
+  end
 
-    # Wrapping operators
-    if (fn = WRAPPING_BUILTINS[node.op])
-      return emit_builtin(fn, [left, right])
-    end
+  sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
+  def emit_unit_variant_comparison(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    tag_target = plan.tag_source == :left ? facts.left : facts.right
+    MIR::BinOp.new(
+      T.must(plan.op_str),
+      active_tag_call(tag_target),
+      MIR::Lit.new(".#{T.must(plan.variant).variant_name}"),
+    )
+  end
 
-    # Checked operators
-    if (fn = CHECKED_BUILTINS[node.op])
-      return emit_builtin(fn, [left, right])
-    end
-
-    # Default integer arithmetic: checked in debug
-    if (fn = INTEGER_ARITHMETIC_BUILTINS[node.op])
-      int_facts = binary_int_arithmetic_facts(node)
-      if int_facts.both_int && !int_facts.has_comptime_number_literal && !int_facts.has_float_coercion
-        return emit_builtin(fn, [left, right])
-      end
-    end
-
-    # Union value compared to a unit variant: Zig's `==` doesn't work on
-    # tagged unions, so we lower to `std.meta.activeTag(<v>) == .<Variant>`.
-    # This is the only EQ shape we structurally accept on unions; comparing
-    # two arbitrary union values is ambiguous (which payload field counts?)
-    # and Refuse below points users at MATCH, which CLEAR already supports.
-    if %i[EQ NEQ].include?(node.op)
-      lhs_uv = unit_variant_access(node.left)
-      rhs_uv = unit_variant_access(node.right)
-      if lhs_uv && !rhs_uv
-        op_str = node.op == :EQ ? "==" : "!="
-        tag_call = active_tag_call(right)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv.variant_name}"))
-      elsif rhs_uv && !lhs_uv
-        op_str = node.op == :EQ ? "==" : "!="
-        tag_call = active_tag_call(left)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv.variant_name}"))
-      end
-    end
-
-    # Refuse: any EQ/NEQ where either side is a union/struct value that
-    # Zig's `==` doesn't accept. Falling through to `MIR::BinOp("==", ...)`
-    # would emit a Zig error the user can't easily map back to their
-    # CLEAR source. Raise a CLEAR-level diagnostic instead, naming the
-    # type and pointing at MATCH (the canonical CLEAR pattern for
-    # discriminating tagged values).
-    if %i[EQ NEQ].include?(node.op)
-      left_resolved = left_ti.resolved
-      right_resolved = right_ti.resolved
-      union_lhs = union_schemas.key?(left_resolved)
-      union_rhs = union_schemas.key?(right_resolved)
-      if union_lhs || union_rhs
-        type_name = union_lhs ? left_resolved : right_resolved
-        raise "BinaryOp #{node.op} on union '#{type_name}': Zig `==` does not " \
-              "work on tagged unions. Either compare against a unit variant " \
-              "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
-              "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
-              "to discriminate the active variant.\n" \
-              "(See transpile-tests/255_union_equality.cht.)"
-      end
-    end
-
-    # Standard operators
-    op_str = ZigTypeMapper::ZIG_OPS[node.op]
-    raise "MIRLowering: unknown binary op #{node.op}" unless op_str
-    MIR::BinOp.new(op_str, left, right)
+  sig { params(plan: BinaryOperationPlan).returns(T.noreturn) }
+  def raise_union_equality_error(plan)
+    type_name = T.must(plan.union_error_type)
+    Kernel.raise "BinaryOp #{plan.facts.op} on union '#{type_name}': Zig `==` does not " \
+          "work on tagged unions. Either compare against a unit variant " \
+          "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
+          "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
+          "to discriminate the active variant.\n" \
+          "(See transpile-tests/255_union_equality.cht.)"
   end
 
   sig { params(node: AST::BinaryOp).returns(MIR::BinOp) }
@@ -998,15 +1148,14 @@ module MIRLoweringExpressions
     ti.nil? || !ti.integer?
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def float_coercion?(node)
-    return false unless node.respond_to?(:coerced_type)
-    coerced = node.coerced_type
+    coerced = node.coerced_type_info
     return false if coerced.nil?
-    Type.new(coerced).integer? != true
+    coerced.integer? != true
   end
 
-  sig { params(node: AST::GetIndex).returns(T.untyped) }
+  sig { params(node: AST::GetIndex).returns(MIR::Node) }
   def lower_get_index(node)
     T.bind(self, MIRLowering) rescue nil
     plan = index_access_plan(node)
@@ -1037,7 +1186,7 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(plan: IndexAccessPlan).returns(T.untyped) }
+  sig { params(plan: IndexAccessPlan).returns(MIR::Node) }
   def index_access_value(plan)
     T.bind(self, MIRLowering) rescue nil
     shard = shard_context
@@ -1114,7 +1263,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(MIR::Node) }
   def index_collection_value(target, index, plan)
     T.bind(self, MIRLowering) rescue nil
     ti = plan.type_info
@@ -1128,7 +1277,7 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, ti: Type).returns(MIR::Node) }
   def lower_direct_or_builtin_index_get(target, index, ast_node, ti)
     T.bind(self, MIRLowering) rescue nil
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
@@ -1250,26 +1399,26 @@ module MIRLoweringExpressions
   # opposed to a fixed-capacity array (`[N]T`) or an owning container
   # (`@list` / `@set` / `@pool`). Comptime selector handles ArrayList -> .items
   # vs slice passthrough at zero cost.
-  sig { params(ft: T.untyped, k: T.untyped, node: AST::StructLit).returns(T::Boolean) }
+  sig { params(ft: T.nilable(Type), k: T.any(String, Symbol), node: AST::StructLit).returns(T::Boolean) }
   def struct_field_wants_slice?(ft, k, node)
     T.bind(self, MIRLowering) rescue nil
-    return true if node.borrowed_field_names&.include?(k)
+    return true if node.borrowed_field_names&.include?(k.to_s)
     aggregate_field_wants_dynamic_slice?(ft)
   end
 
-  sig { params(ft: T.untyped).returns(T::Boolean) }
+  sig { params(ft: T.nilable(Type)).returns(T::Boolean) }
   def aggregate_field_wants_dynamic_slice?(ft)
-    return false unless ft.is_a?(Type)
+    return false unless ft
     ft.array? && ft.dynamic? && !ft.collection? && !ft.string?
   end
 
-  sig { params(val: T.untyped, ft: T.untyped, borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(val: MIR::Node, ft: T.nilable(Type), borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.nilable(AST::Node)).returns(MIR::Node) }
   def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc, ast_node = nil)
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
-    source = T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
-      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val
+    source = T.cast(T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
+      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val, MIR::Node)
     T.cast(T.unsafe(self).with_ownership_consumption(
       MIR::OwnedSlice.new(source, sink_alloc),
       T.unsafe(self).mir_ident_names(source),

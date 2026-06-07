@@ -60,14 +60,14 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
   end
 
   it "registers synthesized union default method signatures after declared functions" do
-    req = {
+    req = AST::UnionMethodRequirement.new(
       name: "describe",
       token: tok("describe"),
       visibility: :pub,
-      params: [param("value", Type.new(:Int64))],
+      params: [AST::UnionMethodParamRequirement.new(name: "value", type: Type.new(:Int64))],
       return_type: Type.new(:String),
       body: [AST::Literal.new(tok("default"), :STRING, "default", :stack)],
-    }
+    )
     union = AST::UnionDef.new(tok("Choice"), "Choice", { Item: Type.new(:Int64) }, :pub)
     union.methods = [req]
     annotator = SemanticAnnotator.new

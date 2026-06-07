@@ -6,7 +6,7 @@ module Annotator
     module ControlFlow
       extend T::Sig
 
-      MatchSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
+      MatchSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
       MatchPayload = T.type_alias { T.any(Type, Symbol, Schemas::InlineStructVariant, NilClass) }
       BranchSnapshot = T.type_alias { T.nilable(OwnershipGraph::LightweightSnapshot) }
 
@@ -14,6 +14,27 @@ module Annotator
         const :drops, BasicObject
         const :snapshot, BranchSnapshot
         const :terminated, T::Boolean
+      end
+
+      class MatchSubjectPlan < T::Struct
+        extend T::Sig
+
+        const :expr_type, Type
+        const :type_name, Symbol
+        const :schema, T.nilable(MatchSchema)
+        const :enum_subject, T::Boolean
+        const :union_subject, T::Boolean
+        const :union_subst, T::Hash[Symbol, Symbol]
+
+        sig { returns(T::Boolean) }
+        def enum?
+          enum_subject
+        end
+
+        sig { returns(T::Boolean) }
+        def union?
+          union_subject
+        end
       end
 
       sig { params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean).returns(T::Array[BasicObject]) }
@@ -318,6 +339,317 @@ module Annotator
         end
       end
 
+      sig { params(node: AST::MatchStatement).returns(MatchSubjectPlan) }
+      def match_subject_plan(node)
+        T.bind(self, SemanticAnnotator)
+
+        expr_t = Type.new(node.expr.resolved_type || :Any)
+        node.string_match = true if expr_t.string?
+        type_name = T.cast(expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved, Symbol)
+        schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
+        is_enum = Schemas.enum?(schema)
+        is_union = Schemas.union?(schema)
+        MatchSubjectPlan.new(
+          expr_type: expr_t,
+          type_name: type_name,
+          schema: schema,
+          enum_subject: is_enum,
+          union_subject: is_union,
+          union_subst: match_union_substitution(expr_t, schema, is_union),
+        )
+      end
+
+      sig { params(expr_t: Type, schema: T.nilable(MatchSchema), is_union: T::Boolean).returns(T::Hash[Symbol, Symbol]) }
+      def match_union_substitution(expr_t, schema, is_union)
+        return {} unless is_union
+        return {} unless expr_t.generic_instance?
+
+        union_schema = T.cast(schema, Schemas::UnionSchema)
+        type_params = union_schema.type_params || []
+        return {} if type_params.empty?
+
+        subst = T.let({}, T::Hash[Symbol, Symbol])
+        type_params.zip(expr_t.generic_args).each { |p, a| subst[p] = a.resolved }
+        subst
+      end
+
+      sig { params(plan: MatchSubjectPlan).returns(Schemas::UnionSchema) }
+      def match_union_schema(plan)
+        T.cast(plan.schema, Schemas::UnionSchema)
+      end
+
+      sig { params(plan: MatchSubjectPlan).returns(Schemas::EnumSchema) }
+      def match_enum_schema(plan)
+        T.cast(plan.schema, Schemas::EnumSchema)
+      end
+
+      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
+      def consume_match_subject_if_takes!(node, plan)
+        T.bind(self, SemanticAnnotator)
+        return unless node.takes && plan.union? && node.expr.is_a?(AST::Identifier)
+
+        source_name = node.expr.name
+        graph_node = @og[source_name]
+        return unless graph_node && graph_node.kind != :borrowed
+
+        node.expr.was_moved = true
+        og_set_moved(source_name, at_token: node.expr.token, action: :takes)
+      end
+
+      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Array[T.proc.returns(BasicObject)]) }
+      def match_branch_logic(node, plan)
+        T.bind(self, SemanticAnnotator)
+        branches = T.let([], T::Array[T.proc.returns(BasicObject)])
+        node.cases.each do |match_case|
+          branches << Kernel.proc {
+            analyze_match_case!(node, match_case, plan)
+            with_conditional_context { visit_stmts(match_case.body) }
+            collect_scope_drops(node: node)
+          }
+        end
+        if node.default_case
+          branches << Kernel.proc {
+            with_conditional_context { visit_stmts(node.default_case) }
+            collect_scope_drops(node: node)
+          }
+        end
+        branches
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
+      def analyze_match_case!(node, match_case, plan)
+        T.bind(self, SemanticAnnotator)
+        case match_case.kind
+        when :when
+          analyze_when_match_case!(node, match_case)
+        when :struct_pattern
+          pattern = match_case.value
+          annotate_struct_pattern!(node, pattern) if pattern.is_a?(AST::StructPattern)
+        else
+          analyze_value_match_case!(node, match_case, plan)
+        end
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase).void }
+      def analyze_when_match_case!(node, match_case)
+        T.bind(self, SemanticAnnotator)
+        visit(match_case.value)
+        return if match_case.value.resolved_type == :Bool
+
+        error!(node, :WHEN_NEEDS_BOOL, got: match_case.value.resolved_type)
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
+      def analyze_value_match_case!(node, match_case, plan)
+        T.bind(self, SemanticAnnotator)
+
+        visit_match_patterns!(node, match_case)
+        validate_match_pattern_types!(node, match_case, plan)
+        declare_match_payload_binding!(node, match_case, plan)
+        declare_match_destructure_bindings!(node, match_case, plan)
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase).void }
+      def visit_match_patterns!(node, match_case)
+        T.bind(self, SemanticAnnotator)
+        with_match_pattern_context do
+          visit(match_case.value)
+          match_case.extra_values&.each do |ev|
+            if ev.is_a?(AST::StructPattern)
+              annotate_struct_pattern!(node, ev)
+            else
+              visit(ev)
+            end
+          end
+        end
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
+      def validate_match_pattern_types!(node, match_case, plan)
+        T.bind(self, SemanticAnnotator)
+        [match_case.value, *(match_case.extra_values || [])].each do |pat|
+          next if match_pattern_type_matches_subject?(pat, node, plan)
+
+          error!(node, :MATCH_CASE_TYPE_MISMATCH, case: pat.resolved_type, expr: node.expr.resolved_type)
+        end
+      end
+
+      sig { params(pattern: AST::Node, node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Boolean) }
+      def match_pattern_type_matches_subject?(pattern, node, plan)
+        case_type = Type.new(pattern.resolved_type || :Any)
+        return true if pattern.resolved_type == node.expr.resolved_type
+        return true if node.expr.resolved_type == :Any || pattern.resolved_type == :Any
+        return true if plan.expr_type.generic_instance? && plan.expr_type.generic_base == pattern.resolved_type
+        return true if plan.expr_type.string? && case_type.string?
+
+        false
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
+      def declare_match_payload_binding!(node, match_case, plan)
+        T.bind(self, SemanticAnnotator)
+        binding = match_case.binding
+        return unless binding
+
+        if plan.enum?
+          error!(node, :MATCH_ENUM_CAPTURE, binding: binding)
+          return
+        end
+        return unless plan.union?
+
+        union_schema = match_union_schema(plan)
+        variant_name = match_variant_name(match_case.value)
+        verify_match_multi_arm_payloads!(node, match_case, union_schema, variant_name, plan.union_subst, kind: 'AS', name: binding)
+        return unless variant_name
+
+        declare_union_payload_binding!(node, match_case, plan, variant_name, binding)
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan, variant_name: String, binding: String).void }
+      def declare_union_payload_binding!(node, match_case, plan, variant_name, binding)
+        T.bind(self, SemanticAnnotator)
+        raw_payload = match_union_schema(plan).variants[variant_name]
+        if raw_payload.nil?
+          error!(node, :MATCH_UNIT_CAPTURE, binding: binding, variant: variant_name)
+          return
+        end
+
+        payload_type = match_payload_binding_type(plan, variant_name, raw_payload, match_case)
+        current_scope.declare(binding, nil, payload_type, false, false, nil, :stack)
+        og_declare(binding, nil, payload_type)
+        classify_ownership!(current_scope.local_entry!(binding))
+        borrow_match_payload_binding!(binding) unless node.takes
+      end
+
+      sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }
+      def match_payload_binding_type(plan, variant_name, raw_payload, match_case)
+        T.bind(self, SemanticAnnotator)
+        if Schemas.inline_struct?(raw_payload)
+          return Type.new(:"#{plan.type_name}_#{variant_name}")
+        end
+        if raw_payload.is_a?(Type) && raw_payload.indirect?
+          inner_type = raw_payload.dup
+          inner_type.strip_layout!
+          match_case.indirect_payload_as = true
+          return apply_type_subst(inner_type, plan.union_subst)
+        end
+        apply_type_subst(raw_payload, plan.union_subst)
+      end
+
+      sig { params(binding: String).void }
+      def borrow_match_payload_binding!(binding)
+        T.bind(self, SemanticAnnotator)
+        @og[binding].kind = :borrowed
+        current_scope.entry_for_write!(binding).storage = :borrow
+      end
+
+      sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
+      def declare_match_destructure_bindings!(node, match_case, plan)
+        T.bind(self, SemanticAnnotator)
+        destructure = match_case.destructure
+        return unless destructure && plan.union?
+
+        stamp_type!(destructure, node.expr.full_type!(context: "union destructure subject"))
+        variant_name = match_variant_name(match_case.value)
+        union_schema = match_union_schema(plan)
+        verify_match_multi_arm_payloads!(node, match_case, union_schema, variant_name, plan.union_subst, kind: 'destructure', name: '{ ... }')
+        return unless variant_name
+
+        payload_schema = match_payload_struct_schema(plan, variant_name)
+        declare_match_destructure_fields!(node, destructure, T.must(payload_schema), variant_name) if Schemas.struct?(payload_schema)
+      end
+
+      sig { params(plan: MatchSubjectPlan, variant_name: String).returns(T.nilable(MatchSchema)) }
+      def match_payload_struct_schema(plan, variant_name)
+        T.bind(self, SemanticAnnotator)
+        raw_payload = match_union_schema(plan).variants[variant_name]
+        if Schemas.inline_struct?(raw_payload)
+          return Schemas::StructSchema.new(
+            fields: raw_payload.fields.transform_values { |t| AST::StructField.new(type: t) },
+          )
+        end
+
+        payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
+        payload_type_sym = plan.union_subst.fetch(payload_type_sym, payload_type_sym)
+        T.cast(lookup_type_schema(payload_type_sym), T.nilable(MatchSchema))
+      end
+
+      sig { params(node: AST::MatchStatement, destructure: AST::StructPattern, payload_schema: MatchSchema, variant_name: String).void }
+      def declare_match_destructure_fields!(node, destructure, payload_schema, variant_name)
+        T.bind(self, SemanticAnnotator)
+        struct_schema = T.cast(payload_schema, Schemas::StructSchema)
+        destructure.fields.each do |field|
+          next unless field.bind?
+          unless struct_schema.fields.key?(field.name)
+            emit_unknown_destructure_field!(node, field, struct_schema, variant_name)
+            next
+          end
+          field_type = struct_schema.fields[field.name].type
+          current_scope.declare(field.name, nil, field_type, false, false, nil, :stack)
+          og_declare(field.name, nil, field_type)
+        end
+      end
+
+      sig { params(node: AST::MatchStatement, field: AST::PatternField, payload_schema: Schemas::StructSchema, variant_name: String).void }
+      def emit_unknown_destructure_field!(node, field, payload_schema, variant_name)
+        T.bind(self, SemanticAnnotator)
+        name_tok = field.name_token
+        if name_tok
+          valid_fields = payload_schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
+          emit_typo_suggestion!(
+            name_tok, field.name, valid_fields,
+            "MATCH destructure: field '#{field.name}' is not on variant #{variant_name}",
+            "field of variant #{variant_name}",
+            category: :type, cascade: true
+          )
+        else
+          error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: field.name, variant: variant_name)
+        end
+      end
+
+      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
+      def reject_duplicate_match_patterns!(node, plan)
+        T.bind(self, SemanticAnnotator)
+        return unless plan.enum? || plan.union?
+
+        seen = T.let({}, T::Hash[String, T::Boolean])
+        node.cases.each do |match_case|
+          next if match_case.kind == :when || match_case.kind == :struct_pattern
+          match_variant_names(match_case).each do |name|
+            error!(node, :MATCH_DUPLICATE_PATTERN, variant: name) if seen[name]
+            seen[name] = true
+          end
+        end
+      end
+
+      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
+      def check_match_exhaustiveness!(node, plan)
+        T.bind(self, SemanticAnnotator)
+        return unless node.exhaustive
+
+        unless plan.enum? || plan.union?
+          emit_match_partial_fix!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: plan.expr_type.resolved)
+        end
+        error!(node, :MATCH_FORBIDS_DEFAULT) if node.default_case
+        error!(node, :MATCH_FORBIDS_WHEN) if node.cases.any? { |match_case| match_case.kind == :when }
+        emit_missing_match_variants!(node, plan)
+      end
+
+      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
+      def emit_missing_match_variants!(node, plan)
+        T.bind(self, SemanticAnnotator)
+        return unless plan.enum? || plan.union?
+
+        covered = node.cases.flat_map { |match_case| match_variant_names(match_case) }.to_set
+        all_variants = plan.enum? ? match_enum_schema(plan).variants : match_union_schema(plan).variants.keys.to_set
+        missing = all_variants - covered
+        return if missing.empty?
+
+        type_label = plan.enum? ? "enum" : "union"
+        emit_match_partial_fix!(node, :MATCH_NON_EXHAUSTIVE,
+          kind: type_label, name: plan.type_name, missing: missing.sort.join(', '))
+      end
+
       sig { params(node: AST::PassStmt).returns(Symbol) }
       def visit_PassStmt(node)
         T.bind(self, SemanticAnnotator)
@@ -330,254 +662,18 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         visit(node.expr)
+        plan = match_subject_plan(node)
+        consume_match_subject_if_takes!(node, plan)
 
-        # Determine whether the subject is an enum or union for exhaustiveness / payload capture
-        expr_t    = Type.new(node.expr.resolved_type || :Any)
-        node.string_match = true if expr_t.string?
-        type_name = expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved
-        schema    = lookup_type_schema(type_name)
-        is_enum   = Schemas.enum?(schema)
-        is_union  = Schemas.union?(schema)
-
-        # Build type-param substitution for generic union payload capture
-        # e.g. Option<Number> → { T: :Float64 }
-        union_subst = {}
-        if is_union && expr_t.generic_instance? && schema.type_params&.any?
-          schema.type_params.zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
-        end
-
-        # MATCH TAKES is the only ownership-consuming match form. Plain MATCH and
-        # PARTIAL MATCH borrow their subjects; they never infer ownership transfer.
-        if node.takes && is_union && node.expr.is_a?(AST::Identifier)
-          source_name = node.expr.name
-          if @og[source_name] && @og[source_name].kind != :borrowed
-            node.expr.was_moved = true
-            og_set_moved(source_name, at_token: node.expr.token, action: :takes)
-          end
-        end
-
-        branch_logic = node.cases.map do |c|
-          proc {
-            if c.kind == :when
-              visit(c.value)
-              unless c.value.resolved_type == :Bool
-                error!(node, :WHEN_NEEDS_BOOL, got: c.value.resolved_type)
-              end
-            elsif c.kind == :struct_pattern
-              annotate_struct_pattern!(node, c.value)
-            else
-              # Suppress inline-struct "needs braces" error: variant names in MATCH cases are
-              # patterns (tag identifiers), not constructors — they don't need field values.
-              with_match_pattern_context do
-                visit(c.value)
-                # Multi-pattern arm: visit + type-check each extra pattern
-                # too. A `{ field }` destructure goes through the SAME
-                # handler as a single :struct_pattern arm so it is typed
-                # (and its binds declared), not just visited.
-                c.extra_values&.each do |ev|
-                  if ev.is_a?(AST::StructPattern)
-                    annotate_struct_pattern!(node, ev)
-                  else
-                    visit(ev)
-                  end
-                end
-              end
-              expr_t2 = Type.new(node.expr.resolved_type || :Any)
-              # Type-check the head pattern, then each extra. Patterns share
-              # the arm's body so they must all have the same subject type.
-              [c.value, *(c.extra_values || [])].each do |pat|
-                case_t2 = Type.new(pat.resolved_type || :Any)
-                base_match = expr_t2.generic_instance? && expr_t2.generic_base == pat.resolved_type
-                string_match = expr_t2.string? && case_t2.string?
-                unless pat.resolved_type == node.expr.resolved_type ||
-                       node.expr.resolved_type == :Any ||
-                       pat.resolved_type == :Any ||
-                       base_match ||
-                       string_match
-                  error!(node, :MATCH_CASE_TYPE_MISMATCH, case: pat.resolved_type, expr: node.expr.resolved_type)
-                end
-              end
-              case_t2 = Type.new(c.value.resolved_type || :Any)
-
-              # Payload capture: `Shape.Circle AS r ->` (or multi-pattern
-              # arm: `R.Ok, R.Other AS r ->`). For multi-arm bindings, every
-              # variant in the arm must produce a payload of the SAME shape
-              # (same payload type, or same inline-struct fields), since one
-              # binding `r` is shared across all patterns in the body.
-              if c.binding
-                if is_enum
-                  error!(node, :MATCH_ENUM_CAPTURE, binding: c.binding)
-                elsif is_union
-                  variant_name = match_variant_name(c.value)
-                  # Verify each extra variant's payload matches the head's.
-                  # Apply union_subst before comparing so generic instances
-                  # (`Mixed<Int64>` where one variant is `T` and another is
-                  # `Int64`) compare equal post-substitution. Variants are
-                  # typically stored as Type instances; normalize through
-                  # `.resolved` to produce a Symbol that can be compared.
-                  verify_match_multi_arm_payloads!(node, c, schema, variant_name, union_subst, kind: 'AS', name: c.binding)
-                  if variant_name
-                    raw_payload = schema.variants[variant_name]
-                    if raw_payload.nil?
-                      error!(node, :MATCH_UNIT_CAPTURE, binding: c.binding, variant: variant_name)
-                    elsif Schemas.inline_struct?(raw_payload)
-                      synthetic_type = :"#{type_name}_#{variant_name}"
-                      current_scope.declare(c.binding, nil, Type.new(synthetic_type), false, false, nil, :stack)
-                      og_declare(c.binding, nil, Type.new(synthetic_type))
-                      classify_ownership!(current_scope.local_entry!(c.binding))
-                    elsif raw_payload.is_a?(Type) && raw_payload.indirect?
-                      # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
-                      inner_type = raw_payload.dup
-                      inner_type.strip_layout!
-                      inner_type = apply_type_subst(inner_type, union_subst)
-                      current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
-                      og_declare(c.binding, nil, inner_type)
-                      classify_ownership!(current_scope.local_entry!(c.binding))
-                      c.indirect_payload_as = true  # transpiler must emit subject.Variant.* (deref *T)
-                    else
-                      payload_type = apply_type_subst(raw_payload, union_subst)
-                      current_scope.declare(c.binding, nil, payload_type, false, false, nil, :stack)
-                      og_declare(c.binding, nil, payload_type)
-                      classify_ownership!(current_scope.local_entry!(c.binding))
-                    end
-                    # MATCH AS: borrow view into the source union's payload.
-                    # MATCH TAKES: owned extraction - source is consumed.
-                    unless node.takes
-                      @og[c.binding].kind = :borrowed
-                      current_scope.entry_for_write!(c.binding).storage = :borrow
-                    end
-                  end
-                end
-              end
-
-              # Union variant destructuring: `Result.Ok{ value, count } ->`
-              # Declares each named field as a local binding with the correct type.
-              # For multi-arm `R.A, R.B { x } ->`, every variant must carry
-              # the SAME payload (same inline-struct fields and types) — the
-              # destructured names are shared across all patterns' bodies.
-              if c.destructure && is_union
-                # The destructure pattern's type IS the subject it
-                # destructures (the MATCH union expr) — same principle as
-                # annotate_struct_pattern!; not a guess. Binds are declared
-                # below; this only types the pattern node itself.
-                stamp_type!(c.destructure, node.expr.full_type!(context: "union destructure subject"))
-                variant_name = match_variant_name(c.value)
-                verify_match_multi_arm_payloads!(node, c, schema, variant_name, union_subst, kind: 'destructure', name: '{ ... }')
-                if variant_name
-                  raw_payload = schema.variants[variant_name]
-                  # Resolve the payload's field schema (inline struct or named type)
-                  payload_schema = if Schemas.inline_struct?(raw_payload)
-                    Schemas::StructSchema.new(
-                      fields: raw_payload.fields.transform_values { |t| AST::StructField.new(type: t) })
-                  else
-                    payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
-                    payload_type_sym = union_subst.fetch(payload_type_sym, payload_type_sym)
-                    lookup_type_schema(payload_type_sym)
-                  end
-
-                  if Schemas.struct?(payload_schema)
-                    c.destructure.fields.each do |f|
-                      next unless f.bind?
-                      unless payload_schema.fields.key?(f.name)
-                        name_tok = f.name_token
-                        if name_tok
-                          valid_fields = payload_schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
-                          emit_typo_suggestion!(
-                            name_tok, f.name, valid_fields,
-                            "MATCH destructure: field '#{f.name}' is not on variant #{variant_name}",
-                            "field of variant #{variant_name}",
-                            category: :type, cascade: true
-                          )
-                        else
-                          error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f.name, variant: variant_name)
-                        end
-                        next
-                      end
-                      field_def = payload_schema.fields[f.name]
-                      field_type = field_def.type
-                      current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
-                      og_declare(f.name, nil, field_type)
-                    end
-                  end
-                end
-              end
-            end
-            with_conditional_context { visit_stmts(c.body) }
-            collect_scope_drops(node: node)
-          }
-        end
-
-        if node.default_case
-          branch_logic << proc {
-            with_conditional_context { visit_stmts(node.default_case) }
-            collect_scope_drops(node: node)
-          }
-        end
-
-        all_drops = analyze_control_flow_branches(branch_logic)
+        all_drops = analyze_control_flow_branches(match_branch_logic(node, plan))
 
         if node.default_case
           node.default_drops = T.must(all_drops).pop
         end
         node.case_drops = all_drops
 
-        # Duplicate-pattern detection (enum/union only). A variant repeated
-        # across arms — or twice in a single multi-pattern arm — would
-        # produce invalid Zig (`.A, .A => ...` or two `.A` prongs); catch
-        # at annotate-time so the error names the user-side mistake.
-        if is_enum || is_union
-          seen = {}
-          node.cases.each do |c|
-            next if c.kind == :when || c.kind == :struct_pattern
-            match_variant_names(c).each do |name|
-              if seen[name]
-                error!(node, :MATCH_DUPLICATE_PATTERN, variant: name)
-              end
-              seen[name] = true
-            end
-          end
-        end
-
-        # Exhaustiveness check — enforced for plain MATCH (the default).
-        # PARTIAL MATCH bypasses these checks and allows DEFAULT, WHEN, and
-        # non-enum/union subjects.
-        if node.exhaustive
-          # MATCH requires an enum or union subject. Non-discriminated types
-          # (Int64, String, ...) can never be statically exhaustive; the user
-          # must opt in to PARTIAL MATCH.
-          unless is_enum || is_union
-            type_label = expr_t.resolved
-            emit_match_partial_fix!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: type_label)
-          end
-
-          # MATCH forbids DEFAULT — the whole point of an exhaustive MATCH is
-          # that every variant is explicitly named. If you want a fallback,
-          # write `PARTIAL MATCH`.
-          if node.default_case
-            error!(node, :MATCH_FORBIDS_DEFAULT)
-          end
-
-          # MATCH forbids WHEN guards — they're runtime conditions that break
-          # static exhaustiveness. Use `PARTIAL MATCH` for guard-style cases.
-          if node.cases.any? { |c| c.kind == :when }
-            error!(node, :MATCH_FORBIDS_WHEN)
-          end
-
-          # Every variant must appear exactly once. Multi-pattern arms
-          # contribute one entry per pattern so they count toward
-          # exhaustiveness like single arms would.
-          covered = node.cases.flat_map do |c|
-            match_variant_names(c)
-          end.to_set
-
-          all_variants = is_enum ? schema.variants : schema.variants.keys.to_set
-          missing = all_variants - covered
-          unless missing.empty?
-            type_label2 = is_enum ? "enum" : "union"
-            emit_match_partial_fix!(node, :MATCH_NON_EXHAUSTIVE,
-              kind: type_label2, name: type_name, missing: missing.sort.join(', '))
-          end
-        end
+        reject_duplicate_match_patterns!(node, plan)
+        check_match_exhaustiveness!(node, plan)
 
         # Store case result types so use sites can promote to expression mode.
         node.case_result_types = node.cases.map { |c| expr_result_type(c.body) }

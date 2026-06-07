@@ -20,6 +20,16 @@ module GenericAnalysis
   BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   TypeShape = T.type_alias { T.any(Type, Symbol, String) }
+  GenericSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
+
+  class TypeAnnotationFacts < T::Struct
+    const :node, Object
+    const :type_obj, Type
+    const :is_param, T::Boolean
+    const :inner, Type
+    const :inner_array, T::Boolean
+    const :fn_type_params, T::Array[Symbol]
+  end
 
   # ----------------------------------------
   # Type param list validation
@@ -69,188 +79,197 @@ module GenericAnalysis
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
-  sig { params(node: T.untyped, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
+  sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, SemanticAnnotator) rescue nil
-    # FN types are structurally typed; their nested param/return types are validated
-    # when they are parsed. No named-type schema lookup is needed here.
     return if type_obj.fn_type?
 
-    # --- Capability validation (moved from parser for separation of concerns) ---
-
-    # Ownership/sync capabilities are not allowed on function parameters,
-    # except plain @shared. Concrete `T @shared` accepts an Arc handle.
-    # Polymorphic shared-family contracts use `SHARED T`; callers with
-    # bare/local/multiowned values must use SHARE at the call site.
-    # :affine is the default (not a user-set capability). :link is
-    # structural (allowed on params).
-    # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
-    if is_param
-      has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
-      primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
-      has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
-      if has_ownership_cap || has_sync_cap
-        error!(node, :FN_PARAM_NO_CAPABILITY)
-      end
-    end
-
-    if type_obj.split? && !type_obj.stream?
-      error!(node, :ATSPLIT_STREAM_ONLY)
-    end
-
-    # @list/@pool/@set require an array type.
-    # `~T[]@set:observable` (and friends) is a tense-wrapped collection
-    # produced by a pipeline-terminal observable; the array shape lives
-    # on the inner tense_type, not the outer tense wrapper. Accept those
-    # by also checking tense_type.array?.
-    inner_array = type_obj.tense? && type_obj.tense_type&.array?
-    if type_obj.list_requires_array_shape?
-      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list')
-    end
-    if type_obj.pool? && !type_obj.array? && !inner_array
-      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@pool', example: 'User[]@pool or User[N]@pool')
-    end
-    if type_obj.set_collection? && !type_obj.array? && !inner_array
-      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set')
-    end
-
-    # `~T[]@observable` (without `@set`) silently miscompiled before --
-    # tense_observable? returned false for the array shape, the
-    # observable carve-out skipped it, and execution fell through to
-    # the promise_list path emitting `ArrayList(Promise(T))`, which
-    # is not an observable backing at all. Reject explicitly: the
-    # only observable shape over an array today is `@set:observable`
-    # (DISTINCT terminal). Plain array observables are not supported.
-    if type_obj.observable_array_without_set?
-      error!(node, :OBSERVABLE_REQUIRES_SET)
-    end
-
-    # I2: sync / ownership wrappers on `~T@observable` are nonsensical.
-    # The observable IS the synchronization primitive (lock-free atomic
-    # accumulator owned by a single producer fiber); wrapping it in
-    # @locked / @writeLocked / @shared / @multiowned would either build
-    # double-locking around an already-lock-free type, or attempt to
-    # share a heap pointer whose lifecycle is owned by the binding's
-    # scope (UAF risk). The DISTINCT carve-out (`~T[]@set:observable`)
-    # is the only collection shape and `@set` is a data-shape sigil,
-    # not a sync wrapper -- explicitly allowed below.
-    if type_obj.tense? && type_obj.observable?
-      offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
-      offending_own = type_obj.ownership if %i[multiowned shared split].include?(type_obj.ownership)
-      if offending_sync || offending_own
-        labels = []
-        labels << "sync wrapper :#{offending_sync}" if offending_sync
-        labels << "ownership wrapper :#{offending_own}" if offending_own
-        # A19: explain the WHY in the same message so users don't
-        # have to read source comments to understand the constraint.
-        # Two cases, both surfaced:
-        #   - sync (@locked / @writeLocked): the observable is itself
-        #     lock-free (atomic accumulator); wrapping it in a lock
-        #     would double-synchronize for no benefit, and the lock's
-        #     guard semantics conflict with WITH VIEW (which is meant
-        #     to be a non-blocking single-load).
-        #   - ownership (@shared / @multiowned / @split): the wrapper
-        #     is a heap pointer owned by the producing scope. The
-        #     producer fiber's `defer ctx.acc.finish()` and the scope's
-        #     wait()-then-destroy() cleanup template assume one owner.
-        #     Sharing the pointer across owners would race the
-        #     producer's lifetime against an unbounded set of readers
-        #     and corrupt the WaitGroup bridge.
-        explain = if offending_sync && offending_own
-          "The observable is already a lock-free single-producer accumulator (extra sync is redundant) AND its heap-pointer lifetime is owned by the producing scope (sharing it across owners would race the producer's `finish()` against the cleanup-side `wait(); destroy()`)."
-        elsif offending_sync
-          "The observable is already a lock-free single-producer accumulator; layering :#{offending_sync} on top would double-synchronize, and its guard semantics conflict with WITH VIEW (which is meant to be a non-blocking single-load)."
-        else
-          "The observable's heap-pointer lifetime is owned by the producing scope (the producer fiber's `defer ctx.acc.finish()` plus the scope's `wait(); destroy()` cleanup assume exactly one owner). Sharing it via :#{offending_own} would race the producer's lifetime against the destroy and corrupt the WaitGroup bridge."
-        end
-        error!(node, :OBSERVABLE_NOT_COMBINABLE, labels: labels.join(' / '), explain: explain)
-      end
-    end
-
-    # @soa requires a fixed-size array (or collection, which handles its own SOA).
-    if type_obj.soa_requires_fixed_array?
-      error!(node, :SOA_NEEDS_FIXED_ARRAY)
-    end
-
-    # @sharded requires N >= 2.
-    shard_count = type_obj.shard_count
-    if shard_count && shard_count < 2
-      error!(node, :SHARDED_NEEDS_2_PLUS, got: shard_count)
-    end
-
-    # Pools require a fixed capacity: Entity[1000]@pool, not Entity[]@pool.
-    if type_obj.pool? && !type_obj.fixed?
-      error!(node, :POOL_NEEDS_FIXED_CAPACITY, element: type_obj.element_type&.resolved)
-    end
-
-    # Unwrap error-union and optional wrappers to get the inner type
-    inner = if type_obj.error_union?
-      type_obj.payload_type
-    elsif type_obj.optional?
-      type_obj.wrapped_type
-    else
-      type_obj
-    end
-    return unless inner.is_a?(Type)
-
-    if inner.generic_instance?
-      base_name = inner.generic_base
-
-      # Id<T> is a compiler intrinsic — no schema needed
-      return if base_name == :Id
-
-      schema = lookup_type_schema(base_name)
-
-      if schema.nil?
-        tok = node.token
-        if tok
-          emit_typo_suggestion!(
-            tok, base_name.to_s, all_known_type_names,
-            "Unknown type '#{base_name}'",
-            "closest declared type",
-            category: :type, cascade: true
-          )
-        else
-          error!(node, :UNKNOWN_TYPE, name: base_name)
-        end
-      end
-
-      unless schema.respond_to?(:type_params) && schema.type_params
-        error!(node, :GENERIC_NOT_GENERIC, type: base_name)
-      end
-
-      expected = schema.type_params.length
-      actual   = inner.generic_args.length
-      if actual != expected
-        error!(node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual)
-      end
-
-      fn_tps = current_fn_ctx&.type_params || []
-      inner.generic_args.each do |arg|
-        next if BUILTIN_TYPES.include?(arg.resolved)
-        next if fn_tps.include?(arg.resolved)  # Cache<T> in a generic fn — T is valid
-        arg_schema = lookup_type_schema(arg.resolved)
-        if arg_schema.nil?
-          error!(node, :GENERIC_UNKNOWN_TYPE_ARG, type: arg.resolved)
-        end
-        if arg_schema.respond_to?(:type_params) && arg_schema.type_params&.any?
-          params_hint = arg_schema.type_params.map(&:to_s).join(', ')
-          error!(node, :GENERIC_MISSING_TYPE_ARGS, type: arg.resolved, type2: arg.resolved, hint: params_hint)
-        end
-      end
-
-    else
-      # Plain type name — check if it's a generic struct/union missing args
-      base_name = inner.resolved
-      return if (current_fn_ctx&.type_params || []).include?(base_name)  # T itself is valid
-      schema = lookup_type_schema(base_name)
-      if schema.respond_to?(:type_params) && schema.type_params&.any?
-        params_hint = schema.type_params.map(&:to_s).join(', ')
-        error!(node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
-      end
-    end
-
+    facts = type_annotation_facts(node, type_obj, is_param)
+    validate_param_annotation_capabilities!(facts)
+    validate_collection_annotation_capabilities!(facts)
+    validate_observable_annotation_capabilities!(facts)
+    validate_shape_annotation_capabilities!(facts)
+    validate_generic_annotation!(facts)
     nil
+  end
+
+  sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
+  def type_annotation_facts(node, type_obj, is_param)
+    T.bind(self, SemanticAnnotator)
+    fn_tps = current_fn_ctx&.type_params || []
+    TypeAnnotationFacts.new(
+      node: node,
+      type_obj: type_obj,
+      is_param: is_param,
+      inner: type_annotation_inner(type_obj),
+      inner_array: type_obj.tense? && type_obj.tense_type&.array? == true,
+      fn_type_params: fn_tps,
+    )
+  end
+
+  sig { params(type_obj: Type).returns(Type) }
+  def type_annotation_inner(type_obj)
+    return T.must(type_obj.payload_type) if type_obj.error_union?
+    return T.must(type_obj.wrapped_type) if type_obj.optional?
+
+    type_obj
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_param_annotation_capabilities!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return unless facts.is_param
+
+    type_obj = facts.type_obj
+    has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
+    primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
+    has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
+    error!(facts.node, :FN_PARAM_NO_CAPABILITY) if has_ownership_cap || has_sync_cap
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_collection_annotation_capabilities!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    type_obj = facts.type_obj
+    error!(facts.node, :ATSPLIT_STREAM_ONLY) if type_obj.split? && !type_obj.stream?
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list') if type_obj.list_requires_array_shape?
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@pool', example: 'User[]@pool or User[N]@pool') if type_obj.pool? && !type_obj.array? && !facts.inner_array
+    error!(facts.node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set') if type_obj.set_collection? && !type_obj.array? && !facts.inner_array
+    error!(facts.node, :OBSERVABLE_REQUIRES_SET) if type_obj.observable_array_without_set?
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_observable_annotation_capabilities!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    type_obj = facts.type_obj
+    return unless type_obj.tense? && type_obj.observable?
+
+    offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
+    offending_own = type_obj.ownership if %i[multiowned shared split].include?(type_obj.ownership)
+    return unless offending_sync || offending_own
+
+    labels = observable_capability_labels(offending_sync, offending_own)
+    explain = observable_capability_explanation(offending_sync, offending_own)
+    error!(facts.node, :OBSERVABLE_NOT_COMBINABLE, labels: labels.join(' / '), explain: explain)
+  end
+
+  sig { params(offending_sync: T.nilable(Symbol), offending_own: T.nilable(Symbol)).returns(T::Array[String]) }
+  def observable_capability_labels(offending_sync, offending_own)
+    labels = T.let([], T::Array[String])
+    labels << "sync wrapper :#{offending_sync}" if offending_sync
+    labels << "ownership wrapper :#{offending_own}" if offending_own
+    labels
+  end
+
+  sig { params(offending_sync: T.nilable(Symbol), offending_own: T.nilable(Symbol)).returns(String) }
+  def observable_capability_explanation(offending_sync, offending_own)
+    if offending_sync && offending_own
+      return "The observable is already a lock-free single-producer accumulator (extra sync is redundant) AND its heap-pointer lifetime is owned by the producing scope (sharing it across owners would race the producer's `finish()` against the cleanup-side `wait(); destroy()`)."
+    end
+    if offending_sync
+      return "The observable is already a lock-free single-producer accumulator; layering :#{offending_sync} on top would double-synchronize, and its guard semantics conflict with WITH VIEW (which is meant to be a non-blocking single-load)."
+    end
+    "The observable's heap-pointer lifetime is owned by the producing scope (the producer fiber's `defer ctx.acc.finish()` plus the scope's `wait(); destroy()` cleanup assume exactly one owner). Sharing it via :#{offending_own} would race the producer's lifetime against the destroy and corrupt the WaitGroup bridge."
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_shape_annotation_capabilities!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    type_obj = facts.type_obj
+    error!(facts.node, :SOA_NEEDS_FIXED_ARRAY) if type_obj.soa_requires_fixed_array?
+
+    shard_count = type_obj.shard_count
+    error!(facts.node, :SHARDED_NEEDS_2_PLUS, got: shard_count) if shard_count && shard_count < 2
+    error!(facts.node, :POOL_NEEDS_FIXED_CAPACITY, element: type_obj.element_type&.resolved) if type_obj.pool? && !type_obj.fixed?
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_generic_annotation!(facts)
+    if facts.inner.generic_instance?
+      validate_generic_instance_annotation!(facts)
+    else
+      validate_plain_type_annotation!(facts)
+    end
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_generic_instance_annotation!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    inner = facts.inner
+    base_name = inner.generic_base
+    return if base_name == :Id
+
+    schema = annotation_schema_for!(facts.node, base_name)
+    type_params = schema_type_params(schema)
+    error!(facts.node, :GENERIC_NOT_GENERIC, type: base_name) if type_params.empty?
+
+    expected = type_params.length
+    actual = inner.generic_args.length
+    error!(facts.node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual) if actual != expected
+    inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
+  end
+
+  sig { params(facts: TypeAnnotationFacts, arg: Type).void }
+  def validate_generic_type_arg!(facts, arg)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return if BUILTIN_TYPES.include?(arg.resolved)
+    return if facts.fn_type_params.include?(arg.resolved)
+
+    arg_schema = T.cast(lookup_type_schema(arg.resolved), T.nilable(GenericSchema))
+    error!(facts.node, :GENERIC_UNKNOWN_TYPE_ARG, type: arg.resolved) if arg_schema.nil?
+    type_params = schema_type_params(arg_schema)
+    return if type_params.empty?
+
+    params_hint = type_params.map(&:to_s).join(', ')
+    error!(facts.node, :GENERIC_MISSING_TYPE_ARGS, type: arg.resolved, type2: arg.resolved, hint: params_hint)
+  end
+
+  sig { params(facts: TypeAnnotationFacts).void }
+  def validate_plain_type_annotation!(facts)
+    T.bind(self, SemanticAnnotator) rescue nil
+    base_name = facts.inner.resolved
+    return if facts.fn_type_params.include?(base_name)
+
+    schema = T.cast(lookup_type_schema(base_name), T.nilable(GenericSchema))
+    type_params = schema_type_params(schema)
+    return if type_params.empty?
+
+    params_hint = type_params.map(&:to_s).join(', ')
+    error!(facts.node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
+  end
+
+  sig { params(node: Object, base_name: Symbol).returns(T.nilable(GenericSchema)) }
+  def annotation_schema_for!(node, base_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    schema = T.cast(lookup_type_schema(base_name), T.nilable(GenericSchema))
+    return schema if schema
+
+    tok = type_annotation_token(node)
+    if tok
+      emit_typo_suggestion!(
+        tok, base_name.to_s, all_known_type_names,
+        "Unknown type '#{base_name}'",
+        "closest declared type",
+        category: :type, cascade: true
+      )
+    else
+      error!(node, :UNKNOWN_TYPE, name: base_name)
+    end
+    nil
+  end
+
+  sig { params(node: Object).returns(T.nilable(Lexer::Token)) }
+  def type_annotation_token(node)
+    return nil unless node.respond_to?(:token)
+
+    T.cast(T.unsafe(node).token, T.nilable(Lexer::Token))
+  end
+
+  sig { params(schema: T.nilable(GenericSchema)).returns(T::Array[Symbol]) }
+  def schema_type_params(schema)
+    return [] unless schema&.respond_to?(:type_params)
+
+    T.cast(T.unsafe(schema).type_params || [], T::Array[Symbol])
   end
 
   # ----------------------------------------

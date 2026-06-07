@@ -96,12 +96,12 @@ module FsmLowering
   sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[T.untyped]) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
-    flat_steps = []
+    flat_steps = T.let([], T::Array[AST::ThenStep])
     stmts.each do |stmt|
       if stmt.is_a?(AST::ThenChain)
         stmt.steps.each { |s| flat_steps << s }
       else
-        flat_steps << { expr: stmt, binding: nil }
+        flat_steps << AST::ThenStep.new(expr: stmt, binding: nil)
       end
     end
 
@@ -122,20 +122,20 @@ module FsmLowering
 
       result_mir = []
       if last_step
-        expr_type = last_step[:expr].full_type!
+        expr_type = last_step.expr.full_type!
         expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
         result_alloc = escaping_value_alloc(expr_t)
-        last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
-        last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, expr_t) if last_mir
-        last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
+        last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
+        last_mir = place_value_for_destination(last_mir, last_step.expr, result_alloc, expr_t) if last_mir
+        last_mir = hoist_alloc(last_mir, last_step.expr, err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
         result_mir.concat(last_pending)
 
-        last_is_assign = last_step[:expr].is_a?(AST::Assignment)
+        last_is_assign = last_step.expr.is_a?(AST::Assignment)
         is_step_void = ast_void_type?(expr_type)
 
         if last_is_assign || is_step_void
-          stmt_mir = wrap_step_as_stmt({ expr: last_step[:expr], binding: nil }, last_mir)
+          stmt_mir = wrap_step_as_stmt(AST::ThenStep.new(expr: last_step.expr, binding: nil), last_mir)
           result_mir << stmt_mir if stmt_mir
         elsif last_mir
           # Synthetic: __ctx_<id>.inner.result = <expr-without-try>;
@@ -157,7 +157,7 @@ module FsmLowering
           # allocator, no dupe.
           result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
           result_set = MIR::Set.new(target, result_value, false)
-          transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
+          transfer_facts = fsm_result_transfer_facts(last_mir, last_step.expr)
           capture_state.last_fsm_result_transfer_facts.concat(transfer_facts)
           guard_fsm_result_cleanup!(result_mir, transfer_facts)
           transfer_names = transfer_facts.map(&:name).uniq
@@ -172,9 +172,10 @@ module FsmLowering
           end
           result_mir << result_set
           result_mir.concat(transfer_facts.flat_map(&:marks))
-          if last_step[:expr].is_a?(AST::Identifier)
+          last_expr = last_step.expr
+          if last_expr.is_a?(AST::Identifier)
             guard_map = capture_state.current_fsm_owned_result_guards
-            guard_name = guard_map&.[](last_step[:expr].name.to_s)
+            guard_name = guard_map&.[](last_expr.name.to_s)
             if guard_name
               result_mir << MIR::Set.new(
                 MIR::FieldGet.new(ctx_ident, guard_name),
@@ -321,10 +322,10 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: T::Hash[Symbol, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(step: AST::ThenStep).returns(T.nilable(T::Array[T.untyped])) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
-    mir = lower(step[:expr])
+    mir = lower(step.expr)
     return nil if mir.nil?
     pending = flush_pending
     # `lower_var_decl` may return an Array (e.g. [AllocMark, Let,
@@ -347,15 +348,16 @@ module FsmLowering
   # MIR::ExprStmt(value-as-statement). Statement-shaped nodes
   # (MIR::Let, MIR::Set, MIR::IfStmt, MIR::BgBlock, ...) pass
   # through unchanged.
-  sig { params(step: T::Hash[Symbol, T.untyped], mir: T.untyped).returns(T.untyped) }
+  sig { params(step: AST::ThenStep, mir: T.untyped).returns(T.untyped) }
   def wrap_step_as_stmt(step, mir)
     T.bind(self, MIRLowering) rescue nil
     return nil if mir.nil?
-    if step[:binding]
-      return MIR::Let.new(step[:binding], mir, false, nil, nil)
+    binding = step.binding
+    if binding
+      return MIR::Let.new(binding, mir, false, nil, nil)
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
-    expr_type = step[:expr].full_type!
+    expr_type = step.expr.full_type!
     is_void_step = ast_void_type?(expr_type)
     MIR::ExprStmt.new(mir, !is_void_step)
   end

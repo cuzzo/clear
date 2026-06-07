@@ -993,11 +993,11 @@ private
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
-          calls = scan_for_calls(branch[:body]).first
+          calls = scan_for_calls(branch.body).first
           raw = T.let(max_tier_for_calls(calls), Symbol)
-          branch[:computed_stack_tier] = (raw == :unbounded) ? :service : raw
-          validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
-          branch[:body].each { |s| traverse.call(s) }
+          branch.computed_stack_tier = (raw == :unbounded) ? :service : raw
+          validate_fiber_stack!(n, calls, branch.stack_size, branch.can_smash)
+          branch.body.each { |s| traverse.call(s) }
         end
       else
         n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)

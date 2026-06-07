@@ -10,6 +10,25 @@ module PipeAnalysis
 
   requires_ancestor { SemanticAnnotator }
 
+  class PipeArityPlan < T::Struct
+    extend T::Sig
+
+    const :params, T::Array[AST::Param]
+    const :min_args, Integer
+    const :max_args, Integer
+    const :given_args, Integer
+
+    sig { returns(T::Boolean) }
+    def mismatch?
+      min_args < given_args || max_args > given_args
+    end
+
+    sig { returns(T::Boolean) }
+    def exact?
+      min_args == max_args
+    end
+  end
+
   # =========================================================
   # SMOOTH OPERATOR (|>)
   # =========================================================
@@ -807,21 +826,20 @@ module PipeAnalysis
   def analyze_pipe_to_named_function(node, sig, func_name)
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
-    params = sig.params
-    min_args = params.count { |p| p.required }
-    max_args = params.size
+    plan = pipe_arity_plan(sig, 1)
 
-    if min_args < 1 || max_args > 1
-      if min_args == max_args
-        error!(node, :ARITY_MISMATCH, name: func_name, expected: min_args, got: 1)
+    if plan.mismatch?
+      if plan.exact?
+        error!(node, :ARITY_MISMATCH, name: func_name, expected: plan.min_args, got: plan.given_args)
       else
-        error!(node, :ARITY_MISMATCH_RANGE, name: func_name, min: min_args, max: max_args, got: 1)
+        error!(node, :ARITY_MISMATCH_RANGE,
+          name: func_name, min: plan.min_args, max: plan.max_args, got: plan.given_args)
       end
     end
 
     # 2. Validate Type: The Input must match Parameter 1
-    if max_args >= 1
-      param = T.must(params[0])
+    if plan.max_args >= 1
+      param = T.must(plan.params[0])
       expected = param.type
       actual = node.left.resolved_type
 
@@ -838,6 +856,17 @@ module PipeAnalysis
       result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     stamp_type!(node, result_type)
+  end
+
+  sig { params(sig: FunctionSignature, given_args: Integer).returns(PipeArityPlan) }
+  def pipe_arity_plan(sig, given_args)
+    params = sig.params
+    PipeArityPlan.new(
+      params: params,
+      min_args: params.count(&:required),
+      max_args: params.size,
+      given_args: given_args,
+    )
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
@@ -1189,7 +1218,7 @@ module PipeAnalysis
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
   # Accepts range inputs (unlike analyze_each_op which requires collections).
   # Visits the body, then extracts the key expression and sets shard_context.
-  sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: AST::BinaryOp).void }
+  sig { params(smooth_node: AST::BinaryOp, conc: AST::ConcurrentOp, proxy: AST::BinaryOp).void }
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.full_type!(context: "pipeline left")
@@ -1217,7 +1246,7 @@ module PipeAnalysis
   # Walks the body AST looking for map[key_expr] patterns where map is @sharded.
   # If found, sets shard_context on the ConcurrentOp so the transpiler emits
   # routed sharding instead of the normal worker pool.
-  sig { params(smooth_node: T.untyped, conc: T.untyped).void }
+  sig { params(smooth_node: AST::BinaryOp, conc: AST::ConcurrentOp).void }
   def auto_detect_sharded_access(smooth_node, conc)
     T.bind(self, SemanticAnnotator) rescue nil
     each_op = conc.op

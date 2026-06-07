@@ -347,7 +347,7 @@ class Scope
     entry ? entry.type : Type.new(:Any)
   end
 
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).returns(T::Boolean) }
   def is_mutable?(name)
     entry = resolve_entry(name)
     entry ? entry.mutable : true

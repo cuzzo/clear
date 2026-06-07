@@ -599,7 +599,7 @@ module AST
       slots << BodySlot.new(node.default_case, ->(body) { node.default_case = body }) if node.default_case
     when DoBlock
       node.branches.each do |branch|
-        slots << BodySlot.new(branch[:body], ->(body) { branch[:body] = body }) if branch[:body]
+        slots << BodySlot.new(branch.body, ->(body) { branch.body = body })
       end
     end
     slots
@@ -803,7 +803,7 @@ module AST
     walk_body(body) do |node|
       if node.is_a?(DoBlock)
         node.branches.each do |b|
-          yield b[:capture_analysis] if b[:capture_analysis]
+          yield b.capture_analysis if b.capture_analysis
         end
       end
       _expr_each_concurrent_capture(node, &block)
@@ -2263,18 +2263,39 @@ module AST
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
+  class UnionMethodParamRequirement < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :type, Type
+
+    sig { returns(AST::Param) }
+    def to_param
+      AST::Param.new(name: name, type: type, default: nil, mutable: false, takes: false)
+    end
+  end
+
+  class UnionMethodRequirement < T::Struct
+    const :token, Lexer::Token
+    const :name, String
+    const :params, T::Array[UnionMethodParamRequirement]
+    const :return_type, T.nilable(Type), default: nil
+    const :body, T.nilable(T::Array[AST::Node]), default: nil
+    const :visibility, Symbol, default: :package
+  end
+
   # UnionDef: UNION Name { Variant1: Type, Variant2: Type, UnitVariant }
   # Declares a Zig tagged union (union(enum)). variants is a Hash of
   # { "VariantName" => value } where value is:
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
   #   Schemas::InlineStructVariant                 — inline struct payload
-  # methods (optional): Array of { token:, name:, params: [{name:, type:},...], return_type: }
+  # methods (optional): Array of UnionMethodRequirement records.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T"], or nil
-    attr_accessor :methods       # Array of method requirement hashes, or nil
+    attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
   end
 
   # UnionVariantLit: TypeName.VariantName{ field: val, ... }
@@ -2287,8 +2308,18 @@ module AST
   # type_name: AST::Identifier (the type), method_name: String, args: Array of ASTNode
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) { include Locatable }
 
+  class DoBranch < T::Struct
+    prop :body, T::Array[AST::Node], factory: -> { [] }
+    prop :pinned, T::Boolean, default: false
+    const :parallel, T::Boolean, default: false
+    const :stack_size, T.nilable(Symbol), default: nil
+    const :can_smash, T::Boolean, default: false
+    prop :computed_stack_tier, T.nilable(Symbol), default: nil
+    prop :capture_analysis, T.nilable(Object), default: nil
+  end
+
   # DoBlock: fork-join parallel execution.
-  # branches: Array of { body: Array<ASTNode>, pinned: Boolean, stack_size: :standard | :micro | :large | :xl | nil }
+  # branches: Array of DoBranch records.
   # pinned=true      → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
   # stack_size nil   → defaults to :standard (16 KB total: 12 KB stack + 4 KB arena)
   DoBlock           = Struct.new(:token, :branches) do
@@ -2296,7 +2327,7 @@ module AST
     include Locatable
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
-    def child_bodies = branches.filter_map { |b| b[:body] }
+    def child_bodies = branches.map(&:body)
   end
 
   # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).
@@ -2327,8 +2358,13 @@ module AST
     attr_accessor :open_brace_token, :prefix_token, :can_smash_token
   end
 
+  class ThenStep < T::Struct
+    prop :expr, AST::Node
+    const :binding, T.nilable(String), default: nil
+  end
+
   # ThenChain: sequential chaining of steps inside a BG block fiber.
-  # steps: Array of { expr: ASTNode, binding: String | nil }
+  # steps: Array of ThenStep records.
   # Each step may bind its result to a name for use in subsequent steps.
   # The last step's type determines the ThenChain's full_type.
   ThenChain         = Struct.new(:token, :steps) { include Locatable }

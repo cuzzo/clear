@@ -43,6 +43,14 @@ module MIRLoweringConcurrency
     const :bg_rt, String
   end
 
+  class BgTypePlan < T::Struct
+    const :async_shape, AsyncResultShape
+    const :inner_type, Type
+    const :inner_zig, String
+    const :promise_zig, String
+    const :is_void, T::Boolean
+  end
+
   class BgBodyMaterialization < T::Struct
     const :stmt_code, String
     const :result_line, String
@@ -61,6 +69,72 @@ module MIRLoweringConcurrency
     const :fresh_heap_decls, String
     const :fresh_heap_cleanups, String
     const :fresh_heap_cleanup_names, T::Array[String]
+    const :capture_frees, String
+    const :promoted_decls, String
+  end
+
+  class BgSchedulerPlan < T::Struct
+    const :task_cfg, String
+    const :pin_mode, T.nilable(T.any(T::Boolean, Symbol))
+    const :site_id, Integer
+    const :site_line, Integer
+    const :site_col, Integer
+    const :dispatch, T.any(Symbol, T::Boolean)
+    const :profiled_task_cfg, String
+    const :spawn_call, String
+    const :profile_comment, String
+    const :arena_init, String
+  end
+
+  class BgFsmTransformContext < T::Struct
+    extend T::Sig
+
+    const :node, AST::BgBlock
+    const :names, BgLoweringNames
+    const :types, BgTypePlan
+    const :capture, BgCaptureMaterialization
+    const :body, BgBodyMaterialization
+    const :scheduler, BgSchedulerPlan
+    const :captured, T::Hash[String, Type]
+    const :capture_close_zig, T::Hash[String, String]
+    const :pointer_captures, T::Set[String]
+    const :rt_name, String
+
+    sig { returns(T::Hash[Symbol, Object]) }
+    def to_transform_hash
+      {
+        node: node,
+        blk_label: names.blk_label,
+        ctx_type: names.ctx_type,
+        promise_zig: types.promise_zig,
+        id: names.id,
+        bg_rt: names.bg_rt,
+        capture_fields: capture.capture_fields,
+        captured: captured,
+        capture_close_zig: capture_close_zig,
+        pointer_captures: pointer_captures,
+        stmt_code: body.stmt_code,
+        result_line: body.result_line,
+        capture_frees: capture.capture_frees,
+        arena_init: scheduler.arena_init,
+        fresh_heap_cleanups: capture.fresh_heap_cleanups,
+        fresh_heap_cleanup_names: capture.fresh_heap_cleanup_names,
+        is_void: types.is_void,
+        alloc_var: names.alloc_var,
+        promise_var: names.promise_var,
+        ctx_var: names.ctx_var,
+        promoted_decls: capture.promoted_decls,
+        capture_inits: capture.capture_inits,
+        rt_name: rt_name,
+        pin_mode: scheduler.pin_mode,
+        parallel: node.parallel == true,
+        profile_site_id: scheduler.site_id,
+        profile_line: scheduler.site_line,
+        profile_column: scheduler.site_col,
+        inner_zig: types.inner_zig,
+        arena_init_flag: node.arena_mode == true,
+      }
+    end
   end
 
   sig { params(parallel: T.nilable(T::Boolean), pinned: T.nilable(T.any(T::Boolean, Symbol))).returns(Symbol) }
@@ -261,19 +335,19 @@ module MIRLoweringConcurrency
     branch_parts = node.branches.each_with_index.map { |branch, i|
       ctx_type = "__DoBranchCtx#{id}_#{i}"
       ctx_var = "__do#{id}_ctx#{i}"
-      analysis = branch[:capture_analysis]
-      pinned = branch[:pinned]
+      analysis = branch.capture_analysis
+      pinned = branch.pinned
       if analysis
-        AST.each_capture_analysis(branch[:body]) do |nested|
+        AST.each_capture_analysis(branch.body) do |nested|
           next if nested.equal?(analysis)
           nested = T.cast(nested, CapabilityHelper::CaptureAnalysis)
-          analysis.merge_nested!(nested)
+          T.cast(analysis, CapabilityHelper::CaptureAnalysis).merge_nested!(nested)
         end
       end
       boundary_facts << execution_boundary_fact(
         :do_branch,
-        execution_boundary_dispatch(branch[:parallel], pinned),
-        analysis,
+        execution_boundary_dispatch(branch.parallel, pinned),
+        T.cast(analysis, T.nilable(CapabilityHelper::CaptureAnalysis)),
       )
 
       # Capture handling delegated to FiberCtxBuilder -- same builder
@@ -299,7 +373,7 @@ module MIRLoweringConcurrency
       body_code = with_fiber_capture_map(caps.capture_map,
                                          capture_symbols: caps.capture_symbols,
                                          rt_override: "__rt") do
-        body_stmts = branch[:body].flat_map { |e|
+        body_stmts = branch.body.flat_map { |e|
           mir = lower(e)
           pending = flush_pending
           nodes = mir.is_a?(Array) ? mir.compact : do_branch_stmt_nodes(e, mir)
@@ -310,7 +384,7 @@ module MIRLoweringConcurrency
       end
       all_branch_bodies << (branch_mir || [])
 
-      task_cfg = task_config_zig(branch[:stack_size], branch[:computed_stack_tier])
+      task_cfg = task_config_zig(branch.stack_size, branch.computed_stack_tier)
       spawn_fn = pinned ? "try #{wg_var}.sched.submitSpawn" : "try CheatHeader.spawnBest"
 
       <<~ZIG.chomp
@@ -373,52 +447,99 @@ module MIRLoweringConcurrency
       ]
     end
 
-    [wrap_step_as_stmt({ expr: expr, binding: nil }, mir)]
+    [wrap_step_as_stmt(AST::ThenStep.new(expr: expr, binding: nil), mir)]
   end
 
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }
   def lower_bg_block(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_background_block_id
-
-    tense_t = Type.new(node.full_type!)
-    async_shape = T.unsafe(node).async_result_shape || AsyncResultShape.promise(tense_t.tense_type, shared: tense_t.shared_promise?)
-    inner_t = Type.new(async_shape.payload_type)
-    inner_zig = inner_t.zig_type
-    promise_zig = async_shape.handle_zig_type
-    is_void = inner_zig == "void"
-
-    ctx_type = "__BgCtx#{id}"
-    alloc_var = "__bg#{id}_alloc"
-    promise_var = "__bg#{id}_promise"
-    ctx_var = "__bg#{id}_ctx"
-    blk_label = "__bg#{id}"
-    bg_rt = "__rt_bg#{id}"
-
+    names = bg_lowering_names(id)
+    types = bg_type_plan(node)
     analysis = node.capture_analysis
-    captured = analysis ? analysis.captures : {}
-    capture_close_zig = analysis ? analysis.close_patterns : {}
-    pointer_captures = analysis ? analysis.pointer_captures : Set.new
-
+    captured = T.let(analysis ? analysis.captures : {}, T::Hash[String, Type])
+    capture_close_zig = T.let(analysis ? analysis.close_patterns : {}, T::Hash[String, String])
+    pointer_captures = T.let(analysis ? analysis.pointer_captures : Set.new, T::Set[String])
     rt_name = runtime_binding_name
 
-    # Strategies + site_info come from BgCaptureClassifier (one writer,
-    # all consumers read). lower_bg_block reads from
-    # analysis.strategies directly -- enforce_bg_capture_strategies!
-    # below picks up the same field.
     enforce_bg_capture_strategies!(node, captured)
+    capture = bg_capture_materialization(
+      names, analysis, captured, capture_close_zig, pointer_captures
+    )
+    body = bg_body_materialization(
+      node, capture.caps, analysis, pointer_captures,
+      names.bg_rt, id, types.is_void, types.inner_type
+    )
+    scheduler = bg_scheduler_plan(node, names, rt_name)
 
-    # Capture handling delegated to FiberCtxBuilder -- the same builder
-    # DO branches and pipeline_host CONCURRENT callbacks call. Only the
-    # site-specific control fields (Promise.inner / alloc) and the
-    # body access prefix (__ctx_<id> for BG) are added here.
+    if bg_uses_fsm_transform?(node)
+      ctx = BgFsmTransformContext.new(
+        node: node,
+        names: names,
+        types: types,
+        capture: capture,
+        body: body,
+        scheduler: scheduler,
+        captured: captured,
+        capture_close_zig: capture_close_zig,
+        pointer_captures: pointer_captures,
+        rt_name: rt_name,
+      )
+      transform_result = FsmTransform.transform(node, ctx.to_transform_hash, self)
+      return fsm_bg_block_from_transform!(node, transform_result, captured, analysis) if transform_result
+    end
+
+    emit_stackful_bg_block(node, names, types, capture, body, scheduler, rt_name, captured, analysis)
+  end
+
+  sig { params(id: MIRLoweringGeneratedId).returns(BgLoweringNames) }
+  def bg_lowering_names(id)
+    raw_id = id.value
+    BgLoweringNames.new(
+      id: raw_id,
+      ctx_type: "__BgCtx#{raw_id}",
+      alloc_var: "__bg#{raw_id}_alloc",
+      promise_var: "__bg#{raw_id}_promise",
+      ctx_var: "__bg#{raw_id}_ctx",
+      blk_label: "__bg#{raw_id}",
+      bg_rt: "__rt_bg#{raw_id}",
+    )
+  end
+
+  sig { params(node: AST::BgBlock).returns(BgTypePlan) }
+  def bg_type_plan(node)
+    tense_t = Type.new(node.full_type!)
+    async_shape = T.cast(T.unsafe(node).async_result_shape, T.nilable(AsyncResultShape)) ||
+                  AsyncResultShape.promise(tense_t.tense_type, shared: tense_t.shared_promise?)
+    inner_t = Type.new(async_shape.payload_type)
+    inner_zig = inner_t.zig_type
+    BgTypePlan.new(
+      async_shape: async_shape,
+      inner_type: inner_t,
+      inner_zig: inner_zig,
+      promise_zig: async_shape.handle_zig_type,
+      is_void: inner_zig == "void",
+    )
+  end
+
+  sig do
+    params(
+      names: BgLoweringNames,
+      analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
+      captured: T::Hash[String, Type],
+      capture_close_zig: T::Hash[String, String],
+      pointer_captures: T::Set[String],
+    ).returns(BgCaptureMaterialization)
+  end
+  def bg_capture_materialization(names, analysis, captured, capture_close_zig, pointer_captures)
+    T.bind(self, MIRLowering) rescue nil
     promoted_names = T.let({}, T::Hash[String, String])
     outer_capture_map = fiber_capture_source_overrides(analysis, capture_state.do_capture_map || {})
     caps = FiberCtxBuilder.build(analysis,
-                                 body_access_prefix: "__ctx_#{id}",
+                                 body_access_prefix: "__ctx_#{names.id}",
                                  promoted_names: promoted_names,
-                                 fresh_heap_alloc: alloc_var,
-                                 fresh_heap_id: id.value,
+                                 fresh_heap_alloc: names.alloc_var,
+                                 fresh_heap_id: names.id,
                                  source_overrides: outer_capture_map,
                                  schema_lookup: mir_schema_lookup)
 
@@ -442,7 +563,7 @@ module MIRLoweringConcurrency
       "#{s.name}: #{ftype},"
     }
     capture_fields = (capture_fields + capture_moved_guard_fields(caps.specs)).join("\n        ")
-    capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
+    capture_inits = ([".inner = #{names.promise_var}.inner", ".alloc = #{names.alloc_var}"] +
                      caps.specs.map { |s|
                        outer_ref = outer_capture_map[s.name]
                        init_val = if s.dupe_decl_zig || promoted_names[s.name] || outer_ref.nil?
@@ -457,120 +578,103 @@ module MIRLoweringConcurrency
     fresh_heap_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
     fresh_heap_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                    ")
     fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? spec.name : nil }
-
-    body_materialization = bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t)
-    stmt_code = body_materialization.stmt_code
-    result_line = body_materialization.result_line
-    run_body = body_materialization.run_body
-
-    arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
-
     capture_frees = captured.filter_map { |name, _|
-      if capture_close_zig[name]
-        "defer #{capture_close_zig[name].gsub('{0}', "__ctx_#{id}.#{name}")};"
+      close_zig = capture_close_zig[name]
+      if close_zig
+        "defer #{close_zig.gsub('{0}', "__ctx_#{names.id}.#{name}")};"
       end
     }.join("\n                    ")
     capture_frees = [capture_frees, fresh_heap_cleanups].reject(&:empty?).join("\n                    ")
 
-    promoted_decls = fresh_heap_decls
+    BgCaptureMaterialization.new(
+      caps: caps,
+      capture_fields: capture_fields,
+      capture_inits: capture_inits,
+      fresh_heap_decls: fresh_heap_decls,
+      fresh_heap_cleanups: fresh_heap_cleanups,
+      fresh_heap_cleanup_names: fresh_heap_cleanup_names,
+      capture_frees: capture_frees,
+      promoted_decls: fresh_heap_decls,
+    )
+  end
 
+  sig { params(node: AST::BgBlock, names: BgLoweringNames, rt_name: String).returns(BgSchedulerPlan) }
+  def bg_scheduler_plan(node, names, rt_name)
+    T.bind(self, MIRLowering) rescue nil
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
-    pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
-    bg_site_id = id.value + 1
-    bg_site_line = node.token&.line || 0
-    bg_site_col = node.token&.column || 0
+    pin_mode = node.pinned
+    site_id = names.id + 1
+    site_line = node.token&.line || 0
+    site_col = node.token&.column || 0
+    dispatch = node.parallel ? :parallel : ((pin_mode == false || pin_mode.nil?) ? :local : pin_mode)
+    profiled_task_cfg = task_config_with_profile(task_cfg, site_id, dispatch)
+    BgSchedulerPlan.new(
+      task_cfg: task_cfg,
+      pin_mode: pin_mode,
+      site_id: site_id,
+      site_line: site_line,
+      site_col: site_col,
+      dispatch: dispatch,
+      profiled_task_cfg: profiled_task_cfg,
+      spawn_call: fiber_spawn_call_zig(rt_name, names.ctx_type, names.ctx_var, profiled_task_cfg, dispatch),
+      profile_comment: bg_profile_site_comment(site_id, site_line, site_col, dispatch, :stack),
+      arena_init: node.arena_mode ? "#{names.bg_rt}.arena_mode = true;" : "",
+    )
+  end
 
-    # Universal transform path (CLAUDE.md Invariant 13). The
-    # transform inspects the AST body via Segments.split, produces
-    # a typed segment graph, and Emit.build builds the wrapper
-    # body. Runs FIRST -- before any per-shape use_fsm_* branch --
-    # so shape detection lives in one place. Returns nil for
-    # graphs the transform doesn't yet cover; the matching legacy
-    # branch below fires for those. As migration stages land, the
-    # nil-returning surface shrinks until the legacy branches are
-    # deleted entirely (Stage 4).
-    #
-    # The transform handles per-shape pin_mode constraints
-    # itself: B1 / B2-IO / B2-NEXT-CHAIN reject :shared (matching
-    # legacy use_fsm / use_fsm_io / use_fsm_next), B2-WITH
-    # accepts :shared (matching legacy use_fsm_with). The outer
-    # guard is just `spawn_form == :fsm`.
-    # Skip the FSM transform for the :bc target. The bytecode VM has no
-    # state-machine runtime; the FSM path consumes the body into Zig text
-    # and leaves run_body=[] which the bc emitter cannot lower. The
-    # legacy stackful-fiber lowering below populates run_body so the bc
-    # emitter has structured MIR to walk -- the BG body executes
-    # synchronously inline in the bc VM (single-threaded, deterministic).
-    if node.spawn_form == :fsm && !bc_target?
-      transform_ctx = {
-        node: node,
-        blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,
-        id: id.value, bg_rt: bg_rt, capture_fields: capture_fields,
-        captured: captured, capture_close_zig: capture_close_zig,
-        pointer_captures: pointer_captures,
-        stmt_code: stmt_code, result_line: result_line,
-        capture_frees: capture_frees, arena_init: arena_init,
-        # FreshHeapCopy body cleanups (master's `defer CheatLib.cleanup
-        # (...)` lines) need to lift to destroyTask in the FSM path so
-        # they fire once when the ctx tears down, not on each segment
-        # return. Thread them separately from capture_frees so the
-        # transform can emit them as destroy lines (see emit.rb).
-        fresh_heap_cleanups: fresh_heap_cleanups,
-        fresh_heap_cleanup_names: fresh_heap_cleanup_names,
-        is_void: is_void, alloc_var: alloc_var, promise_var: promise_var,
-        ctx_var: ctx_var, promoted_decls: promoted_decls,
-        capture_inits: capture_inits, rt_name: rt_name, pin_mode: pin_mode,
-        parallel: !!node.parallel,
-        profile_site_id: bg_site_id, profile_line: bg_site_line,
-        profile_column: bg_site_col,
-        inner_zig: inner_zig, arena_init_flag: !!node.arena_mode,
-      }
-      transform_result = FsmTransform.transform(node, transform_ctx, self)
-      return fsm_bg_block_from_transform!(node, transform_result, captured, analysis) if transform_result
-    end
+  sig { params(node: AST::BgBlock).returns(T::Boolean) }
+  def bg_uses_fsm_transform?(node)
+    T.bind(self, MIRLowering)
+    target_is_bc = !!bc_target?
+    !!(node.spawn_form == :fsm && !target_is_bc)
+  end
 
-    # Non-FSM BG bodies and FSM shapes not yet covered by FsmTransform lower to
-    # the stackful fiber path below. This is a distinct execution model, not a
-    # verifier shortcut: run_body remains structured MIR so ownership is still
-    # visible to MIRChecker.
-
-    bg_dispatch = node.parallel ? :parallel : ((pin_mode == false || pin_mode.nil?) ? :local : pin_mode)
-    profiled_task_cfg = task_config_with_profile(task_cfg, bg_site_id, bg_dispatch)
-    spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, profiled_task_cfg, bg_dispatch)
-    profile_comment = bg_profile_site_comment(bg_site_id, bg_site_line, bg_site_col, bg_dispatch, :stack)
-
+  sig do
+    params(
+      node: AST::BgBlock,
+      names: BgLoweringNames,
+      types: BgTypePlan,
+      capture: BgCaptureMaterialization,
+      body: BgBodyMaterialization,
+      scheduler: BgSchedulerPlan,
+      rt_name: String,
+      captured: T::Hash[String, Type],
+      analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
+    ).returns(MIR::BgBlock)
+  end
+  def emit_stackful_bg_block(node, names, types, capture, body, scheduler, rt_name, captured, analysis)
     bg_code = <<~ZIG.chomp
-      #{blk_label}: {
-          #{profile_comment}
-          const #{ctx_type} = struct {
-              inner: *#{promise_zig}.Inner,
+      #{names.blk_label}: {
+          #{scheduler.profile_comment}
+          const #{names.ctx_type} = struct {
+              inner: *#{types.promise_zig}.Inner,
               alloc: std.mem.Allocator,
-              #{capture_fields}
-              fn run(__raw_rt_#{id}: *anyopaque, __raw_args_#{id}: ?*anyopaque) anyerror!void {
-                  const #{bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_#{id})));
-                  #{(stmt_code + result_line + capture_frees + arena_init).include?(bg_rt) ? "" : "_ = &#{bg_rt};"}
-                  #{arena_init}
-                  const __ctx_#{id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_#{id}.?)));
-                  defer __ctx_#{id}.alloc.destroy(__ctx_#{id});
-                  defer __ctx_#{id}.inner.wg.done();
-                  errdefer |fiber_err| __ctx_#{id}.inner.result = fiber_err;
-                  #{capture_frees}
-                  #{stmt_code}
-                  #{result_line}
-                  #{is_void ? "__ctx_#{id}.inner.result = {};" : ""}
+              #{capture.capture_fields}
+              fn run(__raw_rt_#{names.id}: *anyopaque, __raw_args_#{names.id}: ?*anyopaque) anyerror!void {
+                  const #{names.bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_#{names.id})));
+                  #{bg_runtime_suppress_line(body, capture, scheduler, names)}
+                  #{scheduler.arena_init}
+                  const __ctx_#{names.id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_#{names.id}.?)));
+                  defer __ctx_#{names.id}.alloc.destroy(__ctx_#{names.id});
+                  defer __ctx_#{names.id}.inner.wg.done();
+                  errdefer |fiber_err| __ctx_#{names.id}.inner.result = fiber_err;
+                  #{capture.capture_frees}
+                  #{body.stmt_code}
+                  #{body.result_line}
+                  #{types.is_void ? "__ctx_#{names.id}.inner.result = {};" : ""}
               }
           };
-          const #{alloc_var} = #{node.pinned == true || node.pinned == :local ? "#{rt_name}.getSched().allocator" : "#{rt_name}.heapAlloc()"};
-          const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
-          #{promoted_decls}
-          const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
-          errdefer #{alloc_var}.destroy(#{ctx_var});
-          #{ctx_var}.* = .{ #{capture_inits} };
-          #{spawn_call}
-          break :#{blk_label} #{promise_var};
+          const #{names.alloc_var} = #{bg_alloc_expr(node, rt_name)};
+          const #{names.promise_var} = try #{types.promise_zig}.spawn(#{names.alloc_var}, #{rt_name}.getSched());
+          #{capture.promoted_decls}
+          const #{names.ctx_var} = try #{names.alloc_var}.create(#{names.ctx_type});
+          errdefer #{names.alloc_var}.destroy(#{names.ctx_var});
+          #{names.ctx_var}.* = .{ #{capture.capture_inits} };
+          #{scheduler.spawn_call}
+          break :#{names.blk_label} #{names.promise_var};
       }
     ZIG
-    bg = MIR::BgBlock.new(bg_code, captured, run_body || [])
+    bg = MIR::BgBlock.new(bg_code, captured, body.run_body)
     bg.result_type = Type.new(node.full_type!)
     bg.boundary_fact = execution_boundary_fact(
       :bg,
@@ -578,6 +682,17 @@ module MIRLoweringConcurrency
       analysis,
     )
     bg
+  end
+
+  sig { params(body: BgBodyMaterialization, capture: BgCaptureMaterialization, scheduler: BgSchedulerPlan, names: BgLoweringNames).returns(String) }
+  def bg_runtime_suppress_line(body, capture, scheduler, names)
+    text = body.stmt_code + body.result_line + capture.capture_frees + scheduler.arena_init
+    text.include?(names.bg_rt) ? "" : "_ = &#{names.bg_rt};"
+  end
+
+  sig { params(node: AST::BgBlock, rt_name: String).returns(String) }
+  def bg_alloc_expr(node, rt_name)
+    node.pinned == true || node.pinned == :local ? "#{rt_name}.getSched().allocator" : "#{rt_name}.heapAlloc()"
   end
 
   sig do
@@ -614,10 +729,7 @@ module MIRLoweringConcurrency
     steps = T.let([], T::Array[BgBodyStep])
     node.body.each do |stmt|
       if stmt.is_a?(AST::ThenChain)
-        stmt.steps.each do |raw_step|
-          step = T.cast(raw_step, T::Hash[Symbol, T.any(AST::Node, String, NilClass)])
-          steps << BgBodyStep.new(expr: T.cast(step[:expr], AST::Node), binding: T.cast(step[:binding], T.nilable(String)))
-        end
+        stmt.steps.each { |step| steps << BgBodyStep.new(expr: step.expr, binding: step.binding) }
       else
         steps << BgBodyStep.new(expr: stmt, binding: nil)
       end
@@ -941,15 +1053,15 @@ module MIRLoweringConcurrency
     bg
   end
 
-  sig { params(node: AST::YieldExpr).returns(T.untyped) }
+  sig { params(node: AST::YieldExpr).returns(MIR::Emittable) }
   def lower_yield(node)
     T.bind(self, MIRLowering) rescue nil
     stream_local = capture_state.current_stream_local || "__stream_local"
-    lowered = with_decl_alloc(:heap) do
+    lowered = T.cast(with_decl_alloc(:heap) do
       value = lower(node.expr)
       place_value_for_destination(value, node.expr, :heap, node.expr.full_type!)
-    end
-    lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if lowered && mir_allocates?(lowered)
+    end, MIR::Node)
+    lowered = T.cast(hoist_alloc(lowered, node.expr, err_cleanup: true), MIR::Node) if mir_allocates?(lowered)
     transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
     # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
@@ -1095,9 +1207,9 @@ module MIRLoweringConcurrency
 
     receiver = plan.inner
     if promise_type.stream? && !receiver.is_a?(MIR::Ident)
-      tmp_id = lowering_counters.next_tmp_id
-      label = "__next_recv_#{tmp_id}"
-      temp = "__next_source_#{tmp_id}"
+      receiver_tmp_id = lowering_counters.next_tmp_id
+      label = "__next_recv_#{receiver_tmp_id}"
+      temp = "__next_source_#{receiver_tmp_id}"
       block = MIR::BlockExpr.new(label, [
         MIR::Let.new(temp, receiver, true, nil, nil),
         MIR::BreakStmt.new(label,

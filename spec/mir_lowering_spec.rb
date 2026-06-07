@@ -266,6 +266,41 @@ RSpec.describe MIRLowering do
       expect(out).to include("__worker")
     end
 
+    it "builds typed BG lowering, scheduler, and FSM transform plans" do
+      low = lowering
+      id = MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: 12)
+      node = AST::BgBlock.new(tok, [], nil, nil, true, nil, true, nil)
+      node.full_type = :"~Void"
+
+      names = low.send(:bg_lowering_names, id)
+      types = low.send(:bg_type_plan, node)
+      capture = low.send(:bg_capture_materialization, names, nil, {}, {}, Set.new)
+      scheduler = low.send(:bg_scheduler_plan, node, names, "rt")
+      body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+      ctx = MIRLoweringConcurrency::BgFsmTransformContext.new(
+        node: node,
+        names: names,
+        types: types,
+        capture: capture,
+        body: body,
+        scheduler: scheduler,
+        captured: {},
+        capture_close_zig: {},
+        pointer_captures: Set.new,
+        rt_name: "rt",
+      )
+
+      expect(names.ctx_type).to eq("__BgCtx12")
+      expect(types.promise_zig).to include("Promise")
+      expect(capture.capture_inits).to include(".inner = __bg12_promise.inner")
+      expect(scheduler.dispatch).to eq(true)
+      expect(scheduler.arena_init).to eq("__rt_bg12.arena_mode = true;")
+      expect(low.send(:bg_runtime_suppress_line, body, capture, scheduler, names)).to eq("")
+      expect(low.send(:bg_alloc_expr, node, "rt")).to eq("rt.getSched().allocator")
+      expect(ctx.to_transform_hash.fetch(:ctx_type)).to eq("__BgCtx12")
+      expect(ctx.to_transform_hash.fetch(:parallel)).to eq(false)
+    end
+
     it "strips leading try when assigning a BG value result" do
       fake = Object.new
       fake.extend(MIRLoweringConcurrency)
@@ -2788,13 +2823,13 @@ RSpec.describe MIRLowering do
     it "lowers single-branch DoBlock with WaitGroup" do
       body_lit = make_lit(:NUMBER, 42, full_type: :Int64)
       body_lit.coerced_type = :Int64
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_lit],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2814,8 +2849,8 @@ RSpec.describe MIRLowering do
       lit2 = make_lit(:NUMBER, 2, full_type: :Int64)
       lit2.coerced_type = :Int64
       branches = [
-        { body: [lit1], capture_analysis: nil, pinned: false, stack_size: nil, computed_stack_tier: nil },
-        { body: [lit2], capture_analysis: nil, pinned: true, stack_size: nil, computed_stack_tier: nil }
+        AST::DoBranch.new(body: [lit1], capture_analysis: nil, pinned: false, stack_size: nil, computed_stack_tier: nil),
+        AST::DoBranch.new(body: [lit2], capture_analysis: nil, pinned: true, stack_size: nil, computed_stack_tier: nil),
       ]
       node = AST::DoBlock.new(tok, branches)
       node.full_type = :Void
@@ -2836,13 +2871,13 @@ RSpec.describe MIRLowering do
       body_id = make_id("x", full_type: :Int64)
       captures_hash = { "x" => :Int64 }
       analysis = capture_analysis(captures: captures_hash)
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_id],
         capture_analysis: analysis,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2877,13 +2912,13 @@ RSpec.describe MIRLowering do
         string_captures: Set.new,
         resource_captures: Set.new
       )
-      branch = {
+      branch = AST::DoBranch.new(
         body: [nested_bg],
         capture_analysis: branch_analysis,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2904,13 +2939,13 @@ RSpec.describe MIRLowering do
       decl.var_used = true
       decl.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
                                     mutable: true, storage: :stack, sync: :locked)
-      branch = {
+      branch = AST::DoBranch.new(
         body: [decl],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: nil
-      }
+        computed_stack_tier: nil,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -2931,13 +2966,13 @@ RSpec.describe MIRLowering do
     it "lowers DoBlock with stack tier" do
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
       body_lit.coerced_type = :Int64
-      branch = {
+      branch = AST::DoBranch.new(
         body: [body_lit],
         capture_analysis: nil,
         pinned: false,
         stack_size: nil,
-        computed_stack_tier: :large
-      }
+        computed_stack_tier: :large,
+      )
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
@@ -3060,8 +3095,8 @@ RSpec.describe MIRLowering do
       step2 = make_lit(:NUMBER, 2, full_type: :Int64)
       step2.coerced_type = :Int64
       chain = AST::ThenChain.new(tok, [
-        { expr: step1, binding: "a" },
-        { expr: step2, binding: nil }
+        AST::ThenStep.new(expr: step1, binding: "a"),
+        AST::ThenStep.new(expr: step2, binding: nil),
       ])
       chain.full_type = :Int64
       node = AST::BgBlock.new(tok, [chain], nil, nil, nil, nil, nil, nil)
@@ -4233,6 +4268,18 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(body.length).to eq(1)
     expect(body.first).to be_a(MIR::Set)
     expect(body.first.target).to eq(MIR::Ident.new("slot"))
+  end
+
+  it "wraps bound THEN steps as MIR lets" do
+    l = lowering
+    expr = AST::Literal.new(tok, :INT64, 1, nil)
+    expr.full_type = Type.new(:Int64)
+    step = AST::ThenStep.new(expr: expr, binding: "saved")
+
+    wrapped = l.send(:wrap_step_as_stmt, step, MIR::Lit.new("1"))
+
+    expect(wrapped).to be_a(MIR::Let)
+    expect(wrapped.name).to eq("saved")
   end
 
   it "unwraps cast and try nodes when recording FSM result transfers" do

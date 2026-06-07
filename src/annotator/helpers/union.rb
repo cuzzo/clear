@@ -10,40 +10,39 @@ module UnionAnalysis
   # Validate that all required methods for a union type exist and have
   # compatible signatures. Synthesizes default functions for stubs with
   # default bodies that have no concrete override.
-  sig { params(node: AST::UnionDef).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: AST::UnionDef).void }
   def validate_union_methods!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     union_name = node.name
 
     # Detect duplicate method stub declarations.
-    seen_names = {}
-    node.methods.each do |req|
-      if seen_names.key?(req[:name])
-        error!(req[:token], :UNION_METHOD_DUPLICATE, union: union_name, method: req[:name])
+    seen_names = T.let({}, T::Hash[String, T::Boolean])
+    method_requirements = T.cast(node.methods || [], T::Array[AST::UnionMethodRequirement])
+    method_requirements.each do |req|
+      if seen_names.key?(req.name)
+        error!(req.token, :UNION_METHOD_DUPLICATE, union: union_name, method: req.name)
       end
-      seen_names[req[:name]] = true
+      seen_names[req.name] = true
     end
 
-    node.methods.each do |req|
-      fn_name = req[:name]
-      req_tok = req[:token]
-      req_vis = req[:visibility] || :package
+    method_requirements.each do |req|
+      fn_name = req.name
+      req_tok = req.token
+      req_vis = req.visibility
 
       scope = lookup_scope_for(fn_name)
       local = scope&.resolve_entry(fn_name)
 
       if local.nil?
-        if req[:body]
+        if req.body
           # No concrete override — synthesize a top-level function from the default body.
-          fn_params = req[:params].map { |rp|
-            AST::Param.new(name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false)
-          }
+          fn_params = req.params.map(&:to_param)
           fn_node = AST::FunctionDef.new(
-            req[:token], req[:name], fn_params, [], req[:return_type],
-            nil, req[:body], nil, nil, req_vis, nil, nil
+            req.token, req.name, fn_params, [], req.return_type,
+            nil, T.must(req.body), nil, nil, req_vis, nil, nil
           )
-          @synthetic_fns = T.let(@synthetic_fns, T.untyped)
-          @synthetic_fns << fn_node
+          synthetic_fns = T.cast(T.unsafe(self).instance_variable_get(:@synthetic_fns), T::Array[AST::FunctionDef])
+          synthetic_fns << fn_node
           next
         else
           error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
@@ -67,13 +66,13 @@ module UnionAnalysis
       end
 
       # Arity check
-      if req[:params].length != sig.params.length
-        error!(req_tok, :UNION_METHOD_WRONG_ARITY, union: union_name, method: fn_name, expected_arity: req[:params].length, fn: fn_name, got_arity: sig.params.length)
+      if req.params.length != sig.params.length
+        error!(req_tok, :UNION_METHOD_WRONG_ARITY, union: union_name, method: fn_name, expected_arity: req.params.length, fn: fn_name, got_arity: sig.params.length)
       end
 
       # Parameter type checks
-      req[:params].each_with_index do |rp, i|
-        req_t  = to_type(rp[:type]).resolved
+      req.params.each_with_index do |rp, i|
+        req_t  = to_type(rp.type).resolved
         sp = sig.params[i]
         next unless sp
         sig_t  = to_type(sp[:type]).resolved
@@ -83,8 +82,8 @@ module UnionAnalysis
       end
 
       # Return type check
-      if req[:return_type]
-        req_ret = to_type(req[:return_type]).resolved
+      if req.return_type
+        req_ret = to_type(req.return_type).resolved
         sig_ret = sig.return_type.resolved
         unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
           error!(req_tok, :UNION_METHOD_RETURN_TYPE, union: union_name, method: fn_name, expected: req_ret, fn: fn_name, got: sig_ret)

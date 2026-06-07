@@ -1548,6 +1548,24 @@ RSpec.describe "annotator branch gap burndown" do
     ], return_type: Type.new(:Void))
     takes_ann.send(:verify_function_signature!, takes_call, signature)
     expect(copy_arg.alloc).to eq(:frame)
+    site = takes_ann.send(:call_signature_site, takes_call)
+    arity = takes_ann.send(:call_arity_plan, site, signature)
+    expect(site.name).to eq("append")
+    expect(arity.mismatch?).to be(false)
+    expect(arity.injectable_defaults).to eq([])
+    facts = takes_ann.send(:call_argument_facts, site, signature.params[1], copy_arg, 1)
+    expect(facts.expected_type.resolved).to eq(:String)
+    expect(facts.is_give).to be(false)
+    expect(takes_ann.send(:param_mutable?, AST::Param.new(name: "m", type: Type.new(:Int64), mutable: "MUTABLE"))).to be(true)
+    default_param = AST::Param.new(
+      name: "fallback",
+      type: Type.new(:Widget),
+      required: false,
+      default: AST::DefaultLit.new(token(:DEFAULT, "DEFAULT"))
+    )
+    default_arg = takes_ann.send(:default_argument_for, default_param)
+    expect(default_arg).to be_a(AST::StructLit)
+    expect(default_arg.name).to eq("Widget")
 
     capture_ann = quiet_annotator
     capture_fn = function_def("captures")
@@ -2384,10 +2402,15 @@ RSpec.describe "annotator branch gap burndown" do
 
     union = AST::UnionDef.new(token(:UNION, "UNION"), "Choice", {}, :package)
     union.methods = [
-      { token: token(:VAR_ID, "not_a_function"), name: "not_a_function", params: [], return_type: Type.new(:Int64) },
-      { token: token(:VAR_ID, "missing_no_body"), name: "missing_no_body", params: [], return_type: Type.new(:Int64) },
-      { token: token(:VAR_ID, "short"), name: "short", params: [{ name: "x", type: Type.new(:Int64) }], return_type: Type.new(:Int64) },
-      { token: token(:VAR_ID, "no_return"), name: "no_return", params: [], return_type: nil },
+      AST::UnionMethodRequirement.new(token: token(:VAR_ID, "not_a_function"), name: "not_a_function", params: [], return_type: Type.new(:Int64)),
+      AST::UnionMethodRequirement.new(token: token(:VAR_ID, "missing_no_body"), name: "missing_no_body", params: [], return_type: Type.new(:Int64)),
+      AST::UnionMethodRequirement.new(
+        token: token(:VAR_ID, "short"),
+        name: "short",
+        params: [AST::UnionMethodParamRequirement.new(name: "x", type: Type.new(:Int64))],
+        return_type: Type.new(:Int64),
+      ),
+      AST::UnionMethodRequirement.new(token: token(:VAR_ID, "no_return"), name: "no_return", params: [], return_type: nil),
     ]
 
     ann.send(:validate_union_methods!, union)
@@ -3466,5 +3489,125 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:lookup_type_schema) { |_type| raise StandardError, "schema failed" }
 
     ann.send(:run_whole_program_semantics!)
+  end
+
+  it "covers extracted match payload and call validation edge branches directly" do
+    ann = quiet_annotator
+    subject = typed_identifier("shape", Type.new(:Shape))
+    node = AST::MatchStatement.new(token(:KEYWORD, "MATCH"), subject, [], nil, [], nil, true, false)
+    unit_case = AST::MatchCase.new(
+      kind: :eq,
+      value: AST::GetField.new(token(:DOT, "."), AST::Identifier.new(token(:TYPE_ID, "Shape"), "Shape"), "Done"),
+      binding: "payload",
+    )
+
+    enum_plan = Annotator::Domains::ControlFlow::MatchSubjectPlan.new(
+      expr_type: Type.new(:Color),
+      type_name: :Color,
+      schema: Schemas::EnumSchema.new(variants: [:Red]),
+      enum_subject: true,
+      union_subject: false,
+      union_subst: {},
+    )
+    ann.send(:declare_match_payload_binding!, node, unit_case, enum_plan)
+
+    union_schema = Schemas::UnionSchema.new(
+      variants: {
+        "Done" => nil,
+        "Box" => Type.new(:Payload, layout: :indirect),
+        "Named" => Type.new(:NamedPayload),
+      },
+    )
+    union_plan = Annotator::Domains::ControlFlow::MatchSubjectPlan.new(
+      expr_type: Type.new(:Shape),
+      type_name: :Shape,
+      schema: union_schema,
+      enum_subject: false,
+      union_subject: true,
+      union_subst: { Payload: :PayloadImpl, NamedPayload: :NamedPayloadImpl },
+    )
+    ann.send(:declare_union_payload_binding!, node, unit_case, union_plan, "Done", "payload")
+
+    indirect_case = AST::MatchCase.new(kind: :eq, value: unit_case.value, binding: "payload")
+    payload_type = ann.send(:match_payload_binding_type, union_plan, "Box", T.must(union_schema.variants["Box"]), indirect_case)
+    expect(payload_type.resolved).to eq(:PayloadImpl)
+    expect(payload_type.indirect?).to eq(false)
+    expect(indirect_case.indirect_payload_as).to eq(true)
+
+    ann.define_singleton_method(:lookup_type_schema) do |name|
+      name == :NamedPayloadImpl ? Schemas::StructSchema.new(fields: { "value" => Type.new(:Int64) }) : nil
+    end
+    expect(ann.send(:match_payload_struct_schema, union_plan, "Named")).to be_a(Schemas::StructSchema)
+
+    mutable_param = AST::Param.new(name: "slot", type: Type.new(:Int64), mutable: true)
+    call_site = FunctionAnalysis::CallSignatureSite.new(
+      node: AST::FuncCall.new(token(:VAR_ID, "update"), "update", []),
+      name: "update",
+      args: [],
+    )
+    literal_arg = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    literal_arg.full_type = Type.new(:Int64)
+    mutable_facts = FunctionAnalysis::CallArgumentFacts.new(
+      site: call_site,
+      index: 0,
+      param: mutable_param,
+      arg_node: literal_arg,
+      is_give: false,
+      inner_node: literal_arg,
+      arg_type: Type.new(:Int64),
+      expected_type: Type.new(:Int64),
+      actual_type: Type.new(:Int64),
+      actual: :Int64,
+      path: nil,
+    )
+    ann.send(:verify_mutable_argument!, mutable_facts)
+
+    ann.define_singleton_method(:receiver_container_alloc) { |_node| nil }
+    ann.define_singleton_method(:ensure_owned_value!) { |_node, *_args, **_kwargs| nil }
+    ann.define_singleton_method(:move_if_takes_ownership!) { |_node, **_kwargs| nil }
+    moved_inner = AST::Identifier.new(token(:IDENTIFIER, "owned"), "owned")
+    moved_inner.full_type = Type.new(:Int64)
+    move_arg = AST::MoveNode.new(token(:KEYWORD, "GIVE"), moved_inner)
+    move_arg.full_type = Type.new(:Int64)
+    borrow_param = AST::Param.new(name: "borrowed", type: Type.new(:Int64), takes: false)
+    give_facts = FunctionAnalysis::CallArgumentFacts.new(
+      site: FunctionAnalysis::CallSignatureSite.new(node: AST::FuncCall.new(token(:VAR_ID, "borrow"), "borrow", [move_arg]), name: "borrow", args: [move_arg]),
+      index: 0,
+      param: borrow_param,
+      arg_node: move_arg,
+      is_give: true,
+      inner_node: moved_inner,
+      arg_type: Type.new(:Int64),
+      expected_type: Type.new(:Int64),
+      actual_type: Type.new(:Int64),
+      actual: :Int64,
+      path: nil,
+    )
+    ann.send(:verify_takes_argument!, give_facts)
+
+    atomic_type = Type.new(:Int64, sync: :atomic)
+    atomic_arg = AST::Identifier.new(token(:IDENTIFIER, "cell"), "cell")
+    atomic_arg.full_type = atomic_type
+    atomic_arg.symbol = SymbolEntry.new(reg: nil, type: atomic_type, mutable: true, storage: :stack, sync: :atomic)
+    atomic_param = AST::Param.new(name: "cell", type: atomic_type, sync: :atomic)
+    atomic_facts = FunctionAnalysis::CallArgumentFacts.new(
+      site: FunctionAnalysis::CallSignatureSite.new(node: AST::FuncCall.new(token(:VAR_ID, "load"), "load", [atomic_arg]), name: "load", args: [atomic_arg]),
+      index: 0,
+      param: atomic_param,
+      arg_node: atomic_arg,
+      is_give: false,
+      inner_node: atomic_arg,
+      arg_type: atomic_type,
+      expected_type: atomic_type,
+      actual_type: atomic_type,
+      actual: :Int64,
+      path: [:cell],
+    )
+    ann.send(:verify_atomic_argument!, atomic_facts, FunctionSignature.new(params: [atomic_param], return_type: Type.new(:Void)), [])
+    expect(atomic_arg.atomic_borrow).to eq(true)
+
+    expect(ann.send(:observable_capability_explanation, nil, :shared)).to include("heap-pointer lifetime")
+    codes = direct_errors(ann).map { |e| e[1] }
+    expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, :GIVE_TO_BORROW_PARAM)
   end
 end

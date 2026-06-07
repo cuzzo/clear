@@ -212,7 +212,7 @@ class FunctionCFG
         stmt.branches.each do |b|
           branch_block = cfg.new_block
           current_block.add_successor(branch_block)
-          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg,
+          branch_exit = build_body(b.body, branch_block, exit_target, cfg,
                                    break_target: break_target, continue_target: continue_target)
           branch_exit.add_successor(join_block) if branch_exit
         end

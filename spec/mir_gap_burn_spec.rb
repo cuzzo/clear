@@ -499,7 +499,7 @@ RSpec.describe "MIR gap-burn characterization" do
     match_case = AST::MatchCase.new(kind: :literal, value: one, body: [AST::BreakNode.new(tok)])
     match_stmt = AST::MatchStatement.new(tok, id("tag", type: :Int64), [match_case], [AST::ContinueNode.new(tok)], nil, nil, false, false)
     with_stmt = AST::WithBlock.new(tok, [], [AST::BreakNode.new(tok)], nil)
-    do_stmt = AST::DoBlock.new(tok, [{ body: [AST::BreakNode.new(tok)], pinned: false, stack_size: nil }])
+    do_stmt = AST::DoBlock.new(tok, [AST::DoBranch.new(body: [AST::BreakNode.new(tok)], pinned: false, stack_size: nil)])
     bg_stmt = AST::BgBlock.new(tok, [AST::ReturnNode.new(tok, nil)], nil, nil, false, false, nil, false)
     call = AST::FuncCall.new(tok, "fails", [])
 
@@ -2379,10 +2379,13 @@ RSpec.describe "MIR gap-burn characterization" do
     right_sym = lit("b", type: Type.new(:String, sync: :symbol))
     sym_neq = AST::BinaryOp.new(tok, left_sym, :NEQ, right_sym)
     expect(low.send(:lower_binary_op, sym_neq)).to be_a(MIR::UnaryOp)
+    sym_plan = low.send(:binary_operation_plan, sym_neq)
+    expect(sym_plan.kind).to eq(:symbol_comparison)
 
     %i[LT LTE GT GTE].each do |op|
       cmp = AST::BinaryOp.new(tok, lit("a"), op, lit("b"))
       expect(low.send(:lower_binary_op, cmp)).to be_a(MIR::BinOp)
+      expect(low.send(:binary_operation_plan, cmp).kind).to eq(:string_comparison)
     end
 
     unit = AST::GetField.new(tok, id("Result"), "Done")
@@ -2390,9 +2393,28 @@ RSpec.describe "MIR gap-burn characterization" do
     result_value = id("result", type: :Result)
     unit_eq = AST::BinaryOp.new(tok, unit, :EQ, result_value)
     expect(low.send(:lower_binary_op, unit_eq).right.value).to eq(".Done")
+    expect(low.send(:binary_operation_plan, unit_eq).kind).to eq(:unit_variant_comparison)
+    rhs_unit_eq = AST::BinaryOp.new(tok, result_value, :EQ, unit)
+    rhs_plan = low.send(:binary_operation_plan, rhs_unit_eq)
+    expect(rhs_plan.kind).to eq(:unit_variant_comparison)
+    expect(rhs_plan.tag_source).to eq(:left)
 
     union_eq = AST::BinaryOp.new(tok, result_value, :EQ, id("other", type: :Result))
     expect { low.send(:lower_binary_op, union_eq) }.to raise_error(/BinaryOp EQ on union 'Result'/)
+    expect(low.send(:binary_operation_plan, union_eq).kind).to eq(:union_equality_error)
+
+    float_pow = AST::BinaryOp.new(tok, lit(2.0, type: :Float64), :POW, lit(3.0, type: :Float64))
+    pow_plan = low.send(:binary_operation_plan, float_pow)
+    expect(pow_plan.kind).to eq(:pow)
+    expect(pow_plan.type_arg).to eq("f64")
+    expect(low.send(:emit_binary_operation_plan, pow_plan).callee).to eq("std.math.pow")
+
+    low.define_singleton_method(:place_value_for_destination) do |_value, *_args|
+      MIR::Ident.new("__placed")
+    end
+    or_rescue = AST::BinaryOp.new(tok, lit("fallback"), :OR_RESCUE, lit("fallback"))
+    or_rescue.full_type = Type.new(:String)
+    expect(low.send(:string_comparison_operand, MIR::Ident.new("value"), or_rescue).name).to eq("__placed")
 
     low.define_singleton_method(:pipeline_host) do
       Object.new.tap { |host| host.define_singleton_method(:lower_pipeline) { |_node| nil } }

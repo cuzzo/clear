@@ -90,7 +90,7 @@ module Hoist
     when AST::IfStatement                     then [stmt.then_branch, stmt.else_branch].compact
     when AST::MatchStatement                  then stmt.cases.map(&:body) + [stmt.default_case].compact
     when AST::WithBlock                       then [stmt.body]
-    when AST::DoBlock                         then stmt.branches.map { |b| b[:body] }.compact
+    when AST::DoBlock                         then stmt.branches.map(&:body)
     when AST::BgBlock, AST::BgStreamBlock      then [stmt.body]
     else []
     end

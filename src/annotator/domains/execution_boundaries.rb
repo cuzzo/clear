@@ -654,12 +654,12 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         node.branches.each do |branch|
-          full_analysis = with_fiber_capture_analysis(is_parallel: branch[:parallel]) do
-            visit_stmts(branch[:body])
+          full_analysis = with_fiber_capture_analysis(is_parallel: branch.parallel) do
+            visit_stmts(branch.body)
           end
-          branch[:capture_analysis] = full_analysis
+          branch.capture_analysis = full_analysis
 
-          if branch[:parallel]
+          if branch.parallel
             error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if full_analysis.has_local
             error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if full_analysis.has_rc
           end
@@ -669,10 +669,10 @@ module Annotator
                    "Move the DO block outside the WITH block, or use COPY to get an owned value.")
           end
 
-          analysis = (!branch[:pinned] && !branch[:parallel] && full_analysis.has_shared) ? full_analysis : nil
+          analysis = (!branch.pinned && !branch.parallel && full_analysis.has_shared) ? full_analysis : nil
 
-          if analysis && !branch[:pinned]
-            branch[:pinned] = true
+          if analysis && !branch.pinned
+            branch.pinned = true
             note!(node, "DO branch auto-pinned — captures shared/locked resource. Use @parallel to distribute.")
           end
         end
@@ -829,16 +829,16 @@ module Annotator
         # via try/errdefer in the generated Zig code.
         last_type = T.let(Type.new(:Void), Type)
         node.steps.each do |step|
-          visit(step[:expr])
-          step_type = T.cast(step[:expr], AST::Locatable).full_type!(context: "THEN step")
+          visit(step.expr)
+          step_type = step.expr.full_type!(context: "THEN step")
 
-          if step[:binding]
+          if step.binding
             # Unwrap error union for the binding: !T -> T
             bind_type = step_type
             bind_type = step_type.payload_type if step_type.error_union?
 
             current_scope.declare(
-              step[:binding],
+              step.binding,
               nil,
               bind_type,
               false,  # immutable
@@ -846,7 +846,7 @@ module Annotator
               nil,
               :stack
             )
-            record_capture_local!(step[:binding].to_s)
+            record_capture_local!(step.binding.to_s)
           end
 
           last_type = step_type

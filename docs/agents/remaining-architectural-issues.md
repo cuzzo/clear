@@ -319,6 +319,27 @@ Detailed implementation checklist:
 
 ## 5. Weak Hash Records And Untyped Phase Bags Hide Compiler State
 
+Status: Implemented for the planned compiler phase-bag scope. The detailed
+implementation and metric record is in
+`docs/agents/hash-records-branch-hubs-plan.md`.
+
+The memory-safety-critical phase bags are no longer broadly hash-shaped:
+pipeline operation state, MIR lowering state, type-boundary facts, ownership
+graph records, escape placement facts, capture strategy records, `WITH`
+capability facts, MIR ownership effects, union method requirements,
+BG/concurrency branch bodies, and THEN/FSM binding steps now use typed records
+or typed phase interfaces.
+
+Final nil-kill verification shows the intended direction for the issue #5
+surface: hash-record struct candidates `178 -> 173`, pressure records
+`273 -> 257`, weak collection slots `465 -> 457`, param untyped slots `860 ->
+854`, return untyped slots `199 -> 199`, field/ivar untyped slots `809 -> 808`,
+and collection untyped slots `0 -> 0`. The top candidate changed from
+compiler-relevant `BodyRecord` pressure to tools-local `AddrsRecord` pressure.
+Remaining records are either tooling-local (`doctor`, `pprof`,
+`stack_verifier`) or residual MIR/FSM emitter records that should be attacked
+only if the reports converge on them again.
+
 ### Problem
 
 Nil-kill reports many weak hash record candidates, including repeated
@@ -346,20 +367,59 @@ ambiguous phase state.
 
 ### /plan
 
-1. Promote the highest-pressure hash records into named typed records. Start
-   with records involved in MIR lowering, concurrency, ownership, captures, and
-   function bodies.
-2. Name records by domain, not by generic shape. Prefer
-   `ConcurrentBodyPlan`, `FunctionBodyShape`, `CapturePlan`, or
-   `AllocationPlan` over generic `BodyRecord`.
-3. Delete the old hash path when a typed record lands. Do not allow both shapes
-   to remain live unless there is a temporary adapter with a removal date.
-4. Distinguish absent, unresolved, invalid, and intentionally empty fields with
-   explicit variants rather than nil or missing keys.
-5. Use nil-kill to verify that the migration removes untyped slots, weak
-   collection lookups, and repeated guard code.
+Detailed implementation checklist:
+`docs/agents/hash-records-branch-hubs-plan.md`.
+
+1. [x] Promote the memory-safety-critical hash/phase bags already touched by
+   issues #1-#4: MIR lowering contexts, pipeline operation facts, ownership
+   graph state, capture strategy records, escape placement facts, capability
+   facts, and MIR ownership effects.
+2. [x] Promote the remaining compiler-relevant `BodyRecord` candidates into
+   domain records. Start with union/synthetic function body records and
+   BG/concurrency branch-body records because they still affect phase behavior.
+   Implemented with typed union requirement records and `AST::DoBranch`.
+3. [x] Promote `BindingRecord`-style FSM and execution-boundary steps into
+   typed step records with explicit `binding`, `expr`, and transition fields.
+   Implemented with `AST::ThenStep` and downstream consumers in annotation,
+   execution-boundary handling, MIR lowering, hoist, and FSM lowering.
+4. [x] Audit weak collection slots that remain in compiler phases. Prioritize
+   fields/ivars and collection slots that still carry phase state across
+   annotation, MIR lowering, FSM, concurrency, or checking.
+   Final nil-kill shows weak collection slots dropped `465 -> 457`; the
+   remaining high-pressure entries are not part of the completed phase-bag
+   target.
+5. [x] Leave low-risk tooling-only records such as pprof/doctor allocation
+   summaries for a later tools cleanup unless they remain in the top nil-kill
+   pressure list after compiler records are removed.
+   Final nil-kill's top pressure shifted to tools-local `AddrsRecord`.
+6. [x] Use nil-kill after each slice to verify that hash-record candidates,
+   pressure records, weak collection slots, and untyped field/ivar slots drop.
+   The acceptance criterion for closing this issue is not zero hashes; it is
+   that the remaining hash pressure is either tooling-local or explicitly
+   documented as harmless.
 
 ## 6. Branch Hubs Mix Classification, Diagnostics, Mutation, And Emission
+
+Status: Implemented for the planned top branch-hub scope. The detailed
+implementation and metric record is in
+`docs/agents/hash-records-branch-hubs-plan.md`.
+
+The targeted hubs now use typed facts, classifier/plan records, and narrow
+executors: `MIR#ownership_effect`, `PipelineHost`, broad MIR-lowering state,
+`visit_MatchStatement`, `lower_binary_op`, `validate_type_annotation!`,
+`verify_function_signature!`, and `lower_bg_block`.
+
+Final Decomplex shows the tradeoff explicitly. Hidden protocol/path pressure
+improved: neglected path conditions `1783 -> 1708`, broken protocols `807 ->
+794`, missing abstractions `312 -> 311`, and root-cause clusters `653 -> 652`.
+Aggregate state-based branch density rose `2334 -> 2374`, and Boobytrap
+state-based branch hotspots rose `1569 -> 1609`, because the large hubs were
+split into named classifier/helper decisions that are now individually visible.
+That is an accepted essential-pressure exception for this issue, backed by full
+coverage verification: full unit coverage is 99.4% lines and 85.35% branches;
+changed source lines are 100.0% covered and changed source branches are 90.8%
+covered. SlopCop dark arms still moved in the right direction, `3286 -> 3068`;
+genuine gaps were effectively flat, `1314 -> 1316`.
 
 ### Problem
 
@@ -387,17 +447,36 @@ decisions become typed values.
 
 ### /plan
 
-1. Convert the highest-risk branch hubs to classifier-plan-executor shape.
-2. Make classifiers return sealed variants or typed plan records. Avoid returning
-   loosely tagged hashes.
-3. Move diagnostics into structured reason objects created during
-   classification or validation.
-4. Keep executors narrow. They should switch over already-classified variants
-   and perform limited mutation.
-5. Prioritize branch hubs that are also uncovered or fix-cache hotspots:
-   `ownership_effect`, `lower_binary_op`, `visit_MatchStatement`,
-   `validate_type_annotation!`, `verify_function_signature!`, `lower_match`,
-   `lower_bg_block`, and pipeline lowering methods.
+Detailed implementation checklist:
+`docs/agents/hash-records-branch-hubs-plan.md`.
+
+1. [x] Remove the `ownership_effect` branch hub as a top state-based hotspot by
+   moving MIR ownership effects into typed facts.
+2. [x] Remove `PipelineHost` as a second compiler branch hub by making it
+   consume typed pipeline operation plans through a narrow lowering bridge.
+3. [x] Reduce broad MIR-lowering branch ownership by splitting major state and
+   ownership/capture/escape decisions into typed phase records.
+4. [x] Convert `visit_MatchStatement` to classifier-plan-executor shape. The
+   classifier should produce typed match-arm, binding, destructure, ownership,
+   and diagnostic plans before annotation mutates scope or ownership state.
+5. [x] Convert `lower_binary_op` to typed operation classification. Arithmetic,
+   string, symbol, collection, comparison, and special numeric cases should
+   become typed operation plans consumed by a narrower emitter/lowerer.
+6. [x] Convert `validate_type_annotation!` and `verify_function_signature!` to
+   typed validation-result objects with structured diagnostic reasons. Avoid
+   recomputing schema/type/reentrancy predicates inside mutation-heavy
+   validators.
+7. [x] Convert `lower_bg_block` and remaining concurrency branch hubs to typed
+   capture/scheduler/arena/parallelism plans that are validated before emission.
+8. [x] Triage FSM emission, hoist, intrinsic lowering, and residual
+   MIR-lowering helper hubs with the same pattern only where Decomplex,
+   Boobytrap, and SlopCop agree. Do not refactor branch count cosmetically when
+   the branch is essential and already covered.
+   The residual list is not part of this closed scope unless future reports
+   converge on a specific helper again.
+9. [x] Close this issue only when the top branch-hub targets above either move
+   to typed classifier-plan-executor records or are explicitly documented as
+   essential branch pressure with adequate invariant coverage.
 
 ## 7. Coverage Gaps Mask Architectural Defects In Memory-Sensitive Areas
 

@@ -601,8 +601,9 @@ RSpec.describe SemanticAnnotator do
 
       it "sets stack_size :micro on the branch" do
         branch = ast.statements.last.branches.first
-        expect(branch[:stack_size]).to eq(:micro)
-        expect(branch[:pinned]).to eq(false)
+        expect(branch).to be_a(AST::DoBranch)
+        expect(branch.stack_size).to eq(:micro)
+        expect(branch.pinned).to eq(false)
       end
     end
 
@@ -610,7 +611,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + "DO { @large -> work() }" }
 
       it "sets stack_size :large on the branch" do
-        expect(ast.statements.last.branches.first[:stack_size]).to eq(:large)
+        expect(ast.statements.last.branches.first.stack_size).to eq(:large)
       end
     end
 
@@ -618,7 +619,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + "DO { @xl -> work() }" }
 
       it "sets stack_size :xl on the branch" do
-        expect(ast.statements.last.branches.first[:stack_size]).to eq(:xl)
+        expect(ast.statements.last.branches.first.stack_size).to eq(:xl)
       end
     end
 
@@ -626,7 +627,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + "DO { @standard -> work() }" }
 
       it "sets stack_size :standard on the branch" do
-        expect(ast.statements.last.branches.first[:stack_size]).to eq(:standard)
+        expect(ast.statements.last.branches.first.stack_size).to eq(:standard)
       end
     end
 
@@ -634,7 +635,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + "DO { work() }" }
 
       it "leaves stack_size nil" do
-        expect(ast.statements.last.branches.first[:stack_size]).to be_nil
+        expect(ast.statements.last.branches.first.stack_size).to be_nil
       end
     end
 
@@ -643,8 +644,8 @@ RSpec.describe SemanticAnnotator do
 
       it "sets both stack_size :micro and pinned true" do
         branch = ast.statements.last.branches.first
-        expect(branch[:stack_size]).to eq(:micro)
-        expect(branch[:pinned]).to eq(true)
+        expect(branch.stack_size).to eq(:micro)
+        expect(branch.pinned).to eq(true)
       end
     end
 
@@ -653,8 +654,8 @@ RSpec.describe SemanticAnnotator do
 
       it "sets both pinned true and stack_size :large (order-independent)" do
         branch = ast.statements.last.branches.first
-        expect(branch[:stack_size]).to eq(:large)
-        expect(branch[:pinned]).to eq(true)
+        expect(branch.stack_size).to eq(:large)
+        expect(branch.pinned).to eq(true)
       end
     end
 
@@ -667,9 +668,9 @@ RSpec.describe SemanticAnnotator do
 
       it "assigns the right sizes to each branch" do
         branches = ast.statements.last.branches
-        expect(branches[0][:stack_size]).to eq(:micro)
-        expect(branches[1][:stack_size]).to eq(:large)
-        expect(branches[2][:stack_size]).to be_nil
+        expect(branches[0].stack_size).to eq(:micro)
+        expect(branches[1].stack_size).to eq(:large)
+        expect(branches[2].stack_size).to be_nil
       end
     end
 
