@@ -1227,7 +1227,7 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(label: String).returns(Integer) }
   def numeric_label_id(label)
-    label.each_byte.reduce(0) { |memo, byte| ((memo * 131) + byte) & 0x7fffffff }
+    label.delete("^0-9").to_i
   end
 
   sig { params(id: Integer, ctx_name: String, fields: T::Array[MIR::FieldDef], fn: MIR::FnDef, specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(PipelineConcurrentCallback) }
