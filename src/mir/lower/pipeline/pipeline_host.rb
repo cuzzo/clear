@@ -45,38 +45,36 @@ class PipelineHost
     @pipeline_context = T.let(PipelineContextState.empty, PipelineContextState)
     @mir_mode = T.let(false, T::Boolean)
     @each_idx_counter = T.let(0, Integer)
-    @sh_counter = T.let(nil, T.nilable(Integer))
-    @bounded_conc_counter = T.let(nil, T.nilable(Integer))
     @pipe_label_counter = T.let(0, Integer)
     @pipe_temp_counter = T.let(0, Integer)
     @current_pipe_label = T.let(nil, T.nilable(String))
     @do_rt_name = T.let(nil, T.nilable(String))
     @materializer = T.let(PipelineMaterializer.new(host: build_materializer_host), PipelineMaterializer)
     @range_lowerer = T.let(PipelineRangeLowerer.new(host: build_range_lowerer_host), PipelineRangeLowerer)
-    @binding_chain_lowerer = T.let(PipelineBindingChainLowerer.new(services: build_binding_chain_services), PipelineBindingChainLowerer)
-    @plan_builder = T.let(PipelinePlanBuilder.new(services: build_plan_services), PipelinePlanBuilder)
-    @scalar_lowerer = T.let(PipelineScalarLowerer.new(services: build_scalar_services), PipelineScalarLowerer)
-    @list_lowerer = T.let(PipelineListLowerer.new(services: build_list_services), PipelineListLowerer)
-    @concurrent_lowerer = T.let(PipelineConcurrentLowerer.new(services: build_concurrent_services), PipelineConcurrentLowerer)
-    @batch_window_lowerer = T.let(PipelineBatchWindowLowerer.new(services: build_batch_window_services), PipelineBatchWindowLowerer)
-    @set_index_lowerer = T.let(PipelineSetIndexLowerer.new(services: build_set_index_services), PipelineSetIndexLowerer)
-    @each_lowerer = T.let(PipelineEachLowerer.new(services: build_each_services), PipelineEachLowerer)
+    @binding_chain_lowerer = T.let(build_binding_chain_lowerer, PipelineBindingChainLowerer)
+    @plan_builder = T.let(build_plan_builder, PipelinePlanBuilder)
+    @scalar_lowerer = T.let(build_scalar_lowerer, PipelineScalarLowerer)
+    @list_lowerer = T.let(build_list_lowerer, PipelineListLowerer)
+    @concurrent_lowerer = T.let(build_concurrent_lowerer, PipelineConcurrentLowerer)
+    @batch_window_lowerer = T.let(build_batch_window_lowerer, PipelineBatchWindowLowerer)
+    @set_index_lowerer = T.let(build_set_index_lowerer, PipelineSetIndexLowerer)
+    @each_lowerer = T.let(build_each_lowerer, PipelineEachLowerer)
   end
 
   private
 
-  sig { returns(PipelinePlanServices) }
-  def build_plan_services
-    PipelinePlanServices.new(
+  sig { returns(PipelinePlanBuilder) }
+  def build_plan_builder
+    PipelinePlanBuilder.new(
       lowering_target: -> { @lowering_bridge.lowering_target },
       range_chain: ->(node) { unwrap_range_chain(node) },
       binding_chain: ->(node) { @binding_chain_lowerer.unwrap_chain(node) },
     )
   end
 
-  sig { returns(PipelineScalarServices) }
-  def build_scalar_services
-    PipelineScalarServices.new(
+  sig { returns(PipelineScalarLowerer) }
+  def build_scalar_lowerer
+    PipelineScalarLowerer.new(
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
@@ -87,9 +85,9 @@ class PipelineHost
     )
   end
 
-  sig { returns(PipelineListServices) }
-  def build_list_services
-    PipelineListServices.new(
+  sig { returns(PipelineListLowerer) }
+  def build_list_lowerer
+    PipelineListLowerer.new(
       visit_mir: ->(node) { visit_mir(node) },
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
@@ -125,9 +123,9 @@ class PipelineHost
     )
   end
 
-  sig { returns(PipelineBindingChainServices) }
-  def build_binding_chain_services
-    PipelineBindingChainServices.new(
+  sig { returns(PipelineBindingChainLowerer) }
+  def build_binding_chain_lowerer
+    PipelineBindingChainLowerer.new(
       bc_target: -> { bc_target? },
       next_label: -> { next_pipe_label },
       set_current_label: ->(label) { @current_pipe_label = label },
@@ -159,9 +157,9 @@ class PipelineHost
     with_named_binding(entry.name, entry.zig) { apply_named_bindings(entries, index + 1, &blk) }
   end
 
-  sig { returns(PipelineEachServices) }
-  def build_each_services
-    PipelineEachServices.new(
+  sig { returns(PipelineEachLowerer) }
+  def build_each_lowerer
+    PipelineEachLowerer.new(
       bc_target: -> { bc_target? },
       visit_mir: ->(node) { visit_mir(node) },
       visit_body_with_placeholder: ->(body_stmts, placeholder) {
@@ -187,9 +185,9 @@ class PipelineHost
     )
   end
 
-  sig { returns(PipelineSetIndexServices) }
-  def build_set_index_services
-    PipelineSetIndexServices.new(
+  sig { returns(PipelineSetIndexLowerer) }
+  def build_set_index_lowerer
+    PipelineSetIndexLowerer.new(
       bc_target: -> { bc_target? },
       visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
@@ -234,9 +232,9 @@ class PipelineHost
     )
   end
 
-  sig { returns(PipelineBatchWindowServices) }
-  def build_batch_window_services
-    PipelineBatchWindowServices.new(
+  sig { returns(PipelineBatchWindowLowerer) }
+  def build_batch_window_lowerer
+    PipelineBatchWindowLowerer.new(
       bc_target: -> { bc_target? },
       visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
@@ -276,9 +274,9 @@ class PipelineHost
     )
   end
 
-  sig { returns(PipelineConcurrentServices) }
-  def build_concurrent_services
-    PipelineConcurrentServices.new(
+  sig { returns(PipelineConcurrentLowerer) }
+  def build_concurrent_lowerer
+    PipelineConcurrentLowerer.new(
       bc_target: -> { bc_target? },
       visit_mir: ->(node) {
         visit_mir(node)

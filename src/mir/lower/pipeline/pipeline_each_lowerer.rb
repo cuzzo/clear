@@ -37,7 +37,8 @@ class PipelineEachPlan < T::Struct
   const :bc_target, T::Boolean
 end
 
-class PipelineEachServices < T::Struct
+class PipelineEachLowerer < T::Struct
+  extend T::Sig
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_body_with_placeholder, T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable])
@@ -47,15 +48,6 @@ class PipelineEachServices < T::Struct
   const :lower_sharded_each, T.proc.params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock)
   const :ast_stmts_use_placeholder, T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean)
   const :next_index_name, T.proc.returns(String)
-end
-
-class PipelineEachLowerer
-  extend T::Sig
-
-  sig { params(services: PipelineEachServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineEachServices)
-  end
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachResult) }
   def lower(list_node, each_op)
@@ -67,8 +59,8 @@ class PipelineEachLowerer
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachPlan) }
   def each_plan(list_node, each_op)
     lhs_type = list_node.full_type!
-    bc_target = @services.bc_target.call
-    range_chain = @services.range_chain.call(list_node)
+    bc_target = self.bc_target.call
+    range_chain = self.range_chain.call(list_node)
 
     PipelineEachPlan.new(
       source_kind: each_source_kind(list_node, lhs_type, range_chain, bc_target),
@@ -89,14 +81,14 @@ class PipelineEachLowerer
   def lower_source_plan(source_kind, plan)
     case source_kind
     when PipelineEachSourceKind::Sharded
-      @services.lower_sharded_each.call(plan.list_node, plan.each_op)
+      self.lower_sharded_each.call(plan.list_node, plan.each_op)
     when PipelineEachSourceKind::Soa
       lower_soa_each(plan.list_node, plan.lhs_type, plan.each_op)
     when PipelineEachSourceKind::Pool
       lower_pool_each(plan.list_node, plan.lhs_type, plan.each_op, bc_target: plan.bc_target)
     when PipelineEachSourceKind::RangeChain
       chain = T.must(plan.range_chain)
-      @services.lower_each_range.call(chain.source, chain.stages, plan.each_op)
+      self.lower_each_range.call(chain.source, chain.stages, plan.each_op)
     when PipelineEachSourceKind::List
       lower_list_each(plan.list_node, plan.each_op, bc_target: plan.bc_target)
     when PipelineEachSourceKind::Set
@@ -130,8 +122,8 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, lhs_type: Type, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_soa_each(list_node, lhs_type, each_op)
-    source_mir = @services.visit_mir.call(list_node)
-    soa = @services.soa_body.call(each_op.body)
+    source_mir = self.visit_mir.call(list_node)
+    soa = self.soa_body.call(each_op.body)
     alive_guard = T.let([], T::Array[MIR::Emittable])
     if lhs_type.pool?
       alive_guard << MIR::IfStmt.new(
@@ -164,8 +156,8 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, lhs_type: Type, each_op: AST::EachOp, bc_target: T::Boolean).returns(T.any(MIR::ForStmt, MIR::ScopeBlock)) }
   def lower_pool_each(list_node, lhs_type, each_op, bc_target:)
-    source_mir = @services.visit_mir.call(list_node)
-    pool_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
+    source_mir = self.visit_mir.call(list_node)
+    pool_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
     if bc_target && list_node.is_a?(AST::Identifier)
       return lower_bc_indexed_each(list_node, pool_body_mir, skip_nil: true)
     end
@@ -191,7 +183,7 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, body_mir: T::Array[MIR::Emittable], skip_nil: T::Boolean).returns(MIR::ForStmt) }
   def lower_bc_indexed_each(list_node, body_mir, skip_nil:)
-    idx_name = @services.next_index_name.call
+    idx_name = self.next_index_name.call
     src_ident = MIR::Ident.new(T.cast(list_node, AST::Identifier).name.to_s)
     body = T.let([
       MIR::Let.new("__each_item",
@@ -218,8 +210,8 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp, bc_target: T::Boolean).returns(MIR::ScopeBlock) }
   def lower_list_each(list_node, each_op, bc_target:)
-    source_mir = @services.visit_mir.call(list_node)
-    list_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
+    source_mir = self.visit_mir.call(list_node)
+    list_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
     if bc_target && list_node.is_a?(AST::Identifier)
       return MIR::ScopeBlock.new([lower_bc_indexed_each(list_node, list_body_mir, skip_nil: false)])
     end
@@ -234,8 +226,8 @@ class PipelineEachLowerer
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_set_each(list_node, each_op)
-    source_mir = @services.visit_mir.call(list_node)
-    set_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
+    source_mir = self.visit_mir.call(list_node)
+    set_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
     MIR::ScopeBlock.new([
       MIR::Let.new("__each_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
       MIR::Let.new("__each_iter",
@@ -252,11 +244,11 @@ class PipelineEachLowerer
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ForStmt) }
   def lower_range_literal_each(list_node, each_op)
     range = T.cast(list_node, AST::RangeLit)
-    start_mir = @services.visit_mir.call(T.cast(range.start, AST::Node))
-    end_mir = @services.visit_mir.call(T.cast(range.finish, AST::Node))
+    start_mir = self.visit_mir.call(T.cast(range.start, AST::Node))
+    end_mir = self.visit_mir.call(T.cast(range.finish, AST::Node))
     end_expr = range.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
-    range_body_mir = @services.visit_body_with_placeholder.call(each_op.body, "__each_item")
-    capture_name = @services.ast_stmts_use_placeholder.call(each_op.body) ? "__each_item" : "_"
+    range_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
+    capture_name = self.ast_stmts_use_placeholder.call(each_op.body) ? "__each_item" : "_"
 
     MIR::ForStmt.new(
       MIR::IterRange.new(start_mir, end_expr, :i64),

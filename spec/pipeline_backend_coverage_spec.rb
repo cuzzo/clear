@@ -32,7 +32,7 @@ class PipelineConcurrentCoverageHost
   end
 
   def services
-    PipelineConcurrentServices.new(
+    PipelineConcurrentLowerer.new(
       bc_target: -> { concurrent_bc_target? },
       visit_mir: ->(node) { concurrent_visit_mir(node) },
       visit_mir_with_placeholder: ->(node, _placeholder) { concurrent_visit_mir(node) },
@@ -240,7 +240,7 @@ class PipelineBatchWindowCoverageHost
   end
 
   def services
-    PipelineBatchWindowServices.new(
+    PipelineBatchWindowLowerer.new(
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
@@ -297,7 +297,7 @@ class PipelineSetIndexCoverageHost
   end
 
   def services
-    PipelineSetIndexServices.new(
+    PipelineSetIndexLowerer.new(
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { set_index_visit_mir(node) },
       visit_mir_with_placeholder: ->(node, _placeholder) { set_index_visit_mir(node) },
@@ -385,7 +385,7 @@ class PipelineEachCoverageHost
   end
 
   def services
-    PipelineEachServices.new(
+    PipelineEachLowerer.new(
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { each_visit_mir(node) },
       visit_body_with_placeholder: ->(_body_stmts, placeholder) {
@@ -715,7 +715,7 @@ RSpec.describe "pipeline backend coverage" do
 
   describe PipelineConcurrentLowerer do
     let(:concurrent_host) { PipelineConcurrentCoverageHost.new }
-    let(:concurrent_lowerer) { described_class.new(services: concurrent_host.services) }
+    let(:concurrent_lowerer) { concurrent_host.services }
 
     def concurrent_smooth(lhs, op)
       result_type = if op.is_a?(AST::ConcurrentOp) && op.op.is_a?(AST::SelectOp)
@@ -935,7 +935,7 @@ RSpec.describe "pipeline backend coverage" do
 
   describe PipelineBatchWindowLowerer do
     let(:batch_host) { PipelineBatchWindowCoverageHost.new }
-    let(:batch_lowerer) { described_class.new(services: batch_host.services) }
+    let(:batch_lowerer) { batch_host.services }
 
     def string_lit(value)
       typed(AST::Literal.new(tok, :STRING, value, nil), Type.new(:String))
@@ -1028,7 +1028,7 @@ RSpec.describe "pipeline backend coverage" do
 
   describe PipelineSetIndexLowerer do
     let(:set_index_host) { PipelineSetIndexCoverageHost.new }
-    let(:set_index_lowerer) { described_class.new(services: set_index_host.services) }
+    let(:set_index_lowerer) { set_index_host.services }
 
     def set_index_smooth(lhs, op, type: Type.new(:Any))
       typed(AST::BinaryOp.new(tok, lhs, :SMOOTH, op), type)
@@ -1110,11 +1110,9 @@ RSpec.describe "pipeline backend coverage" do
   describe PipelinePlanBuilder do
     def plan_builder(target:, range_chains:, binding_chains:)
       PipelinePlanBuilder.new(
-        services: PipelinePlanServices.new(
-          lowering_target: -> { target },
-          range_chain: ->(node) { range_chains[node.object_id] },
-          binding_chain: ->(node) { binding_chains[node.object_id] },
-        ),
+        lowering_target: -> { target },
+        range_chain: ->(node) { range_chains[node.object_id] },
+        binding_chain: ->(node) { binding_chains[node.object_id] },
       )
     end
 
@@ -1206,7 +1204,7 @@ RSpec.describe "pipeline backend coverage" do
 
   describe PipelineEachLowerer do
     let(:each_host) { PipelineEachCoverageHost.new }
-    let(:each_lowerer) { described_class.new(services: each_host.services) }
+    let(:each_lowerer) { each_host.services }
 
     def each_op(body = [AST::FuncCall.new(tok, "touch", [id("_")])])
       AST::EachOp.new(tok, body)
@@ -1733,9 +1731,9 @@ RSpec.describe "pipeline backend coverage" do
       expect(lowerer.send(:inner_capture_required?, chain)).to be true
     end
 
-    it "keeps host service adapters and terminal wrappers narrow" do
-      list_services = pipeline_host.send(:build_list_services)
-      expect(list_services.owning_pipeline_temp_stmts.call(
+    it "keeps host lowerer adapters and terminal wrappers narrow" do
+      list_lowerer = pipeline_host.send(:build_list_lowerer)
+      expect(list_lowerer.owning_pipeline_temp_stmts.call(
         "__owned",
         MIR::Ident.new("source"),
         Type.new(:String),
@@ -1743,8 +1741,8 @@ RSpec.describe "pipeline backend coverage" do
         :heap,
       )).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::Let), a_kind_of(MIR::ErrCleanup))
 
-      binding_services = pipeline_host.send(:build_binding_chain_services)
-      reduced = binding_services.visit_mir_with_reduce_placeholders.call(
+      binding_lowerer = pipeline_host.send(:build_binding_chain_lowerer)
+      reduced = binding_lowerer.visit_mir_with_reduce_placeholders.call(
         typed(AST::BinaryOp.new(tok, id("_"), :ADD, id("acc"))),
         "__item",
         "__acc",
@@ -1812,21 +1810,21 @@ RSpec.describe "pipeline backend coverage" do
       expect(sharded_calls).to eq([[site.list, each]])
     end
 
-    it "exercises PipelineHost service records and range adapter wrappers" do
+    it "exercises PipelineHost lowerer adapters and range adapter wrappers" do
       stub_pipeline_host_mir_visitors(pipeline_host)
       list = id("items", type: Type.new(:"Int64[]", collection: :list))
       select_smooth = typed(AST::BinaryOp.new(tok, list, :SMOOTH, AST::SelectOp.new(tok, id("_"))), Type.new(:"Int64[]"))
       sum_smooth = typed(AST::BinaryOp.new(tok, list, :SMOOTH, AST::SumOp.new(tok, id("_"))), Type.new(:Int64))
 
-      each_services = pipeline_host.send(:build_each_services)
-      expect(each_services.ast_stmts_use_placeholder.call([AST::FuncCall.new(tok, "touch", [id("_")])])).to be true
-      expect(each_services.next_index_name.call).to eq("__each_i_1")
+      each_lowerer = pipeline_host.send(:build_each_lowerer)
+      expect(each_lowerer.ast_stmts_use_placeholder.call([AST::FuncCall.new(tok, "touch", [id("_")])])).to be true
+      expect(each_lowerer.next_index_name.call).to eq("__each_i_1")
 
-      concurrent_services = pipeline_host.send(:build_concurrent_services)
-      expect(concurrent_services.lower_select.call(list, select_smooth, id("_"))).to be_a(MIR::BlockExpr)
-      expect(concurrent_services.lower_where.call(list, select_smooth, id("_", type: Type.new(:Bool)))).to be_a(MIR::BlockExpr)
-      expect(concurrent_services.lower_each.call(list, select_smooth, AST::EachOp.new(tok, []))).to be_a(MIR::ScopeBlock)
-      expect(concurrent_services.lower_sum.call(list, sum_smooth, AST::SumOp.new(tok, id("_")))).to be_a(MIR::BlockExpr)
+      concurrent_lowerer = pipeline_host.send(:build_concurrent_lowerer)
+      expect(concurrent_lowerer.lower_select.call(list, select_smooth, id("_"))).to be_a(MIR::BlockExpr)
+      expect(concurrent_lowerer.lower_where.call(list, select_smooth, id("_", type: Type.new(:Bool)))).to be_a(MIR::BlockExpr)
+      expect(concurrent_lowerer.lower_each.call(list, select_smooth, AST::EachOp.new(tok, []))).to be_a(MIR::ScopeBlock)
+      expect(concurrent_lowerer.lower_sum.call(list, sum_smooth, AST::SumOp.new(tok, id("_")))).to be_a(MIR::BlockExpr)
 
       expect(pipeline_host.send(:visit_pipeline_expr_mir, list, id("_"), "__item")).to be_a(MIR::Ident)
       expect(pipeline_host.send(:ast_uses_bare_placeholder?, AST::FuncCall.new(tok, "touch", [id("_")]))).to be true
@@ -1847,9 +1845,9 @@ RSpec.describe "pipeline backend coverage" do
       expect(pipeline_host.send(:observable_alloc_expr, "Obs", "new", [MIR::AllocatorRef.new(:heap)])).to be_a(MIR::TryCatch)
     end
 
-    it "lowers uncovered materialized list terminal shapes through typed services" do
+    it "lowers uncovered materialized list terminal shapes through a typed lowerer" do
       labels = []
-      services = PipelineListServices.new(
+      lowerer = PipelineListLowerer.new(
         visit_mir: ->(node) {
           case node
           when AST::Literal then MIR::Lit.new(node.value.to_s)
@@ -1894,7 +1892,6 @@ RSpec.describe "pipeline backend coverage" do
           [MIR::Let.new(name, source, false, type_info, nil)]
         },
       )
-      lowerer = PipelineListLowerer.new(services: services)
       items = id("items", type: Type.new(:"Int64[]"))
 
       where_site = PipelineHost::PipelineSite.new(

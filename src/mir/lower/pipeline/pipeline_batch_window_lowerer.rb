@@ -33,7 +33,8 @@ class PipelineBatchWindowPlan < T::Struct
   const :stream_pop_method, T.nilable(String)
 end
 
-class PipelineBatchWindowServices < T::Struct
+class PipelineBatchWindowLowerer < T::Struct
+  extend T::Sig
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_mir_with_placeholder, T.proc.params(node: AST::Node, placeholder: String).returns(MIR::Node)
@@ -42,10 +43,6 @@ class PipelineBatchWindowServices < T::Struct
   const :set_current_label, T.proc.params(label: String).void
   const :transpile_type, T.proc.params(type_info: PipelineBatchWindowTypeInput).returns(String)
   const :pipeline_alloc, T.proc.params(smooth_node: AST::BinaryOp).returns(Symbol)
-end
-
-class PipelineBatchWindowLowerer
-  extend T::Sig
 
   BATCH_WINDOW_TIME_NS = T.let([
     ["ms", 1_000_000],
@@ -54,11 +51,6 @@ class PipelineBatchWindowLowerer
     ["h", 3_600_000_000_000],
   ].to_h.freeze, T::Hash[String, Integer])
   BATCH_WINDOW_TIME_UNITS = T.let(["min", "ms", "s", "h"].freeze, T::Array[String])
-
-  sig { params(services: PipelineBatchWindowServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineBatchWindowServices)
-  end
 
   sig { params(list_node: AST::Node, smooth_node: AST::BinaryOp, bw_node: AST::BatchWindowOp).returns(MIR::BlockExpr) }
   def lower(list_node, smooth_node, bw_node)
@@ -75,11 +67,11 @@ class PipelineBatchWindowLowerer
       source_kind: source_kind_for(list_node, lhs_type),
       list_node: list_node,
       smooth_node: smooth_node,
-      element_zig: @services.transpile_type.call(batch_element_type(lhs_type).to_s),
-      result_zig: @services.transpile_type.call(bw_node.expression.full_type!.to_s),
+      element_zig: self.transpile_type.call(batch_element_type(lhs_type).to_s),
+      result_zig: self.transpile_type.call(bw_node.expression.full_type!.to_s),
       size_mir: batch_size_mir(bw_node),
-      expr_mir: @services.visit_mir_with_placeholder.call(T.cast(bw_node.expression, AST::Node), placeholder_var),
-      alloc: @services.pipeline_alloc.call(smooth_node),
+      expr_mir: self.visit_mir_with_placeholder.call(T.cast(bw_node.expression, AST::Node), placeholder_var),
+      alloc: self.pipeline_alloc.call(smooth_node),
       placeholder_var: placeholder_var,
       timeout_ns: batch_window_timeout_ns(bw_node),
       stream_pop_method: runtime_stream_pop_method(lhs_type),
@@ -109,7 +101,7 @@ class PipelineBatchWindowLowerer
 
   sig { params(list_node: AST::Node, lhs_type: Type).returns(PipelineBatchWindowSourceKind) }
   def source_kind_for(list_node, lhs_type)
-    if @services.bc_target.call
+    if self.bc_target.call
       return PipelineBatchWindowSourceKind::BcInfiniteStream if list_node.is_a?(AST::Identifier) && lhs_type.inf_stream?
 
       return PipelineBatchWindowSourceKind::BcMaterialized
@@ -145,7 +137,7 @@ class PipelineBatchWindowLowerer
     size = T.cast(bw_node.options["size"], T.nilable(AST::Node))
     return MIR::Lit.new("0") unless size
 
-    @services.visit_mir.call(size)
+    self.visit_mir.call(size)
   end
 
   sig { params(bw_node: AST::BatchWindowOp).returns(String) }
@@ -185,9 +177,9 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_bc_infinite_stream(plan)
-    label = @services.next_label.call
-    @services.set_current_label.call(label)
-    source_mir = @services.visit_mir.call(plan.list_node)
+    label = self.next_label.call
+    self.set_current_label.call(label)
+    source_mir = self.visit_mir.call(plan.list_node)
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__bw_drained", MIR::MakeList.new(plan.element_zig, [], plan.alloc), true, nil, nil),
@@ -207,7 +199,7 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_bc_materialized(plan)
-    @services.pipeline_block.call(plan.list_node, lambda do |items, label|
+    self.pipeline_block.call(plan.list_node, lambda do |items, label|
       [
         *bc_materialized_window_stmts(plan, MIR::Ident.new(items), append_uses_allocator: true),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
@@ -217,9 +209,9 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_zig_runtime_stream(plan)
-    label = @services.next_label.call
-    @services.set_current_label.call(label)
-    source_mir = @services.visit_mir.call(plan.list_node)
+    label = self.next_label.call
+    self.set_current_label.call(label)
+    source_mir = self.visit_mir.call(plan.list_node)
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__bw_src", source_mir, true, nil, "_ = &__bw_src;"),
@@ -239,9 +231,9 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_zig_bounded_stream(plan)
-    label = @services.next_label.call
-    @services.set_current_label.call(label)
-    source_mir = @services.visit_mir.call(plan.list_node)
+    label = self.next_label.call
+    self.set_current_label.call(label)
+    source_mir = self.visit_mir.call(plan.list_node)
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__bw_bsrc", source_mir, false, nil, nil),
@@ -261,7 +253,7 @@ class PipelineBatchWindowLowerer
 
   sig { params(plan: PipelineBatchWindowPlan).returns(MIR::BlockExpr) }
   def lower_zig_materialized(plan)
-    @services.pipeline_block.call(plan.list_node, lambda do |items, label|
+    self.pipeline_block.call(plan.list_node, lambda do |items, label|
       [
         *batch_window_setup_stmts(plan),
         MIR::ForStmt.new(

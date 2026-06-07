@@ -97,26 +97,18 @@ class PipelineOperationPlan < T::Struct
   const :facts, PipelineSemanticFacts
 end
 
-class PipelinePlanServices < T::Struct
+class PipelinePlanBuilder < T::Struct
+  extend T::Sig
   const :lowering_target, T.proc.returns(Symbol)
   const :range_chain, T.proc.params(node: AST::Node).returns(T.nilable(PipelineRangeChain))
   const :binding_chain, T.proc.params(node: AST::BinaryOp).returns(T.nilable(PipelineBindingUnnestChain))
-end
-
-class PipelinePlanBuilder
-  extend T::Sig
-
-  sig { params(services: PipelinePlanServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelinePlanServices)
-  end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(PipelineOperationPlan)) }
   def build(node)
     lhs = T.cast(node.left, AST::Node)
     rhs = T.cast(node.right, AST::Node)
     site = PipelineSite.new(list: lhs, options: node)
-    bc_target = @services.lowering_target.call == :bc
+    bc_target = self.lowering_target.call == :bc
 
     if soa_scalar_fold?(lhs, rhs)
       return operation(
@@ -130,7 +122,7 @@ class PipelinePlanBuilder
     end
 
     if AST.pipeline_range_fold?(rhs)
-      range_chain = @services.range_chain.call(lhs)
+      range_chain = self.range_chain.call(lhs)
       if range_chain
         return operation(
           PipelineExecutionKind::FusedRangeFold,
@@ -145,7 +137,7 @@ class PipelinePlanBuilder
     end
 
     if rhs.is_a?(AST::ReduceOp)
-      range_chain = @services.range_chain.call(lhs)
+      range_chain = self.range_chain.call(lhs)
       if range_chain
         return operation(
           PipelineExecutionKind::FusedRangeReduce,
@@ -159,7 +151,7 @@ class PipelinePlanBuilder
       end
     end
 
-    binding_chain = @services.binding_chain.call(node)
+    binding_chain = self.binding_chain.call(node)
     if binding_chain
       return operation(
         PipelineExecutionKind::BindingChain,
@@ -183,7 +175,7 @@ class PipelinePlanBuilder
     lhs_type = lhs.full_type!
     lhs_type.soa_linear_collection? &&
       AST.pipeline_range_fold?(rhs) &&
-      @services.lowering_target.call != :bc
+      self.lowering_target.call != :bc
   end
 
   sig do

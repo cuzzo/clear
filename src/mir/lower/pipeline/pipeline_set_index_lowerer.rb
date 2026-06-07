@@ -30,7 +30,8 @@ class PipelineIndexPreparedValue < T::Struct
   const :owns_heap, T::Boolean
 end
 
-class PipelineSetIndexServices < T::Struct
+class PipelineSetIndexLowerer < T::Struct
+  extend T::Sig
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_mir_with_placeholder, T.proc.params(node: AST::Node, placeholder: String).returns(MIR::Node)
@@ -47,17 +48,8 @@ class PipelineSetIndexServices < T::Struct
   const :pipeline_owned_cleanup_entry, T.proc.params(value: MIR::Node, ast_node: T.nilable(AST::Node)).returns(T.nilable(CleanupEntry))
   const :pipeline_index_insert_with_ownership, T.proc.params(insert: MIR::IndexInsert, value: MIR::Node, value_owns: T::Boolean, target_alloc: Symbol).returns(MIR::IndexInsert)
   const :index_temp_name, T.proc.returns(String)
-end
-
-class PipelineSetIndexLowerer
-  extend T::Sig
 
   HEAP_ALLOC = "rt.heapAlloc()"
-
-  sig { params(services: PipelineSetIndexServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineSetIndexServices)
-  end
 
   sig { params(list_node: AST::Node, smooth_node: AST::BinaryOp, distinct_node: AST::DistinctOp).returns(MIR::BlockExpr) }
   def lower_distinct(list_node, smooth_node, distinct_node)
@@ -66,15 +58,15 @@ class PipelineSetIndexLowerer
       return observable if observable
     end
 
-    elem_zig = @services.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
+    elem_zig = self.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
     set_zig = "CheatLib.Set(#{elem_zig})"
     alloc = :heap
-    expr_mir = @services.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), "it")
+    expr_mir = self.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), "it")
 
-    range_chain = @services.range_chain.call(list_node)
+    range_chain = self.range_chain.call(list_node)
     return lower_range_distinct(range_chain, distinct_node, set_zig, alloc) if range_chain
 
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -89,22 +81,22 @@ class PipelineSetIndexLowerer
   sig { params(list_node: AST::Node, smooth_node: AST::BinaryOp, expr_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_index(list_node, smooth_node, expr_node)
     lhs_type = list_node.full_type!
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    alloc = self.pipeline_alloc.call(smooth_node)
 
-    range_chain = @services.range_chain.call(list_node)
+    range_chain = self.range_chain.call(list_node)
     if range_chain
       elem_type = index_stream_element_type(list_node, lhs_type, range_chain.source)
-      elem_zig = @services.transpile_type.call(elem_type.to_s)
+      elem_zig = self.transpile_type.call(elem_type.to_s)
       map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
       return lower_stream_index(range_chain, expr_node, elem_zig, elem_type, alloc, map_type, Type.from_node!(smooth_node, context: "INDEX result"))
     end
 
     elem_type = T.must(list_node.full_type!.element_type)
-    elem_zig = @services.transpile_type.call(elem_type.resolved.to_s)
-    expr_mir = @services.visit_mir_with_placeholder.call(expr_node, "it")
+    elem_zig = self.transpile_type.call(elem_type.resolved.to_s)
+    expr_mir = self.visit_mir_with_placeholder.call(expr_node, "it")
     map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
 
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         index_result_let(map_type, alloc),
         MIR::ForStmt.new(
@@ -129,33 +121,33 @@ class PipelineSetIndexLowerer
 
   sig { params(list_node: AST::Node, smooth_node: AST::BinaryOp, distinct_node: AST::DistinctOp).returns(T.nilable(MIR::BlockExpr)) }
   def lower_observable_distinct(list_node, smooth_node, distinct_node)
-    range_chain = @services.range_chain.call(list_node)
+    range_chain = self.range_chain.call(list_node)
     return nil unless range_chain
 
-    prefix = @services.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
-    @services.range_fold_observable_distinct.call(
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
+    self.range_fold_observable_distinct.call(
       prefix,
       distinct_node,
       smooth_node,
-      @services.next_label.call,
+      self.next_label.call,
       range_chain.source,
     )
   end
 
   sig { params(range_chain: PipelineRangeChain, distinct_node: AST::DistinctOp, set_zig: String, alloc: Symbol).returns(MIR::BlockExpr) }
   def lower_range_distinct(range_chain, distinct_node, set_zig, alloc)
-    prefix = @services.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
     item_var = prefix.item_var
-    key_expr_mir = @services.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), item_var)
-    label = @services.next_label.call
+    key_expr_mir = self.visit_mir_with_placeholder.call(T.cast(distinct_node.expression, AST::Node), item_var)
+    label = self.next_label.call
     source_type = range_chain.source.full_type!
     defer_deinit = source_type.bounded_stream? ? prefix.deinit_stmt : nil
 
-    if @services.bc_target.call && range_chain.source.is_a?(AST::Identifier) && source_type.runtime_stream?
+    if self.bc_target.call && range_chain.source.is_a?(AST::Identifier) && source_type.runtime_stream?
       return MIR::BlockExpr.new(label, [
         *prefix.outer_setup_stmts,
         MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
-        prefix.loop_stmt(@services.visit_mir.call(range_chain.source), [
+        prefix.loop_stmt(self.visit_mir.call(range_chain.source), [
           MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
           distinct_insert_stmt(alloc, uses_allocator: false),
         ]),
@@ -212,17 +204,17 @@ class PipelineSetIndexLowerer
         ], false, false, MIR::CallableContract.no_ownership(3)), nil)]
     end, PipelineRangeSkipHook)
 
-    prefix = @services.lazy_range_prefix.call(range_chain.source, range_chain.stages, on_skip)
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, on_skip)
     item_var = prefix.item_var
-    expr_mir = @services.visit_mir_with_placeholder.call(expr_node, item_var)
-    label = @services.next_label.call
+    expr_mir = self.visit_mir_with_placeholder.call(expr_node, item_var)
+    label = self.next_label.call
     source_type = range_chain.source.full_type!
     defer_deinit = source_type.bounded_stream? ? prefix.deinit_stmt : nil
 
-    if @services.bc_target.call
+    if self.bc_target.call
       iter = bc_index_iter(range_chain.source)
       if iter
-        return @services.typed_block_expr.call(label, [
+        return self.typed_block_expr.call(label, [
           *prefix.outer_setup_stmts,
           index_result_let(map_type, :heap),
           prefix.loop_stmt(iter, build_index_gop_body(
@@ -238,7 +230,7 @@ class PipelineSetIndexLowerer
       end
     end
 
-    @services.typed_block_expr.call(label, [
+    self.typed_block_expr.call(label, [
       *prefix.setup_stmts,
       index_result_let(map_type, :heap),
       *([defer_deinit].compact),
@@ -257,13 +249,13 @@ class PipelineSetIndexLowerer
   sig { params(range_source: AST::Node).returns(T.nilable(MIR::Emittable)) }
   def bc_index_iter(range_source)
     if range_source.is_a?(AST::RangeLit)
-      start_mir = @services.visit_mir.call(T.cast(range_source.start, AST::Node))
-      end_mir = @services.visit_mir.call(T.cast(range_source.finish, AST::Node))
+      start_mir = self.visit_mir.call(T.cast(range_source.start, AST::Node))
+      end_mir = self.visit_mir.call(T.cast(range_source.finish, AST::Node))
       end_expr = range_source.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
       return MIR::IterRange.new(start_mir, end_expr, :i64)
     end
 
-    return @services.visit_mir.call(range_source) if range_source.is_a?(AST::Identifier)
+    return self.visit_mir.call(range_source) if range_source.is_a?(AST::Identifier)
 
     nil
   end
@@ -301,20 +293,20 @@ class PipelineSetIndexLowerer
       elem_zig_type,
       alloc,
     )
-    owned_insert = @services.pipeline_index_insert_with_ownership.call(insert, prepared.value, prepared.owns_heap, alloc)
+    owned_insert = self.pipeline_index_insert_with_ownership.call(insert, prepared.value, prepared.owns_heap, alloc)
     body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       *prepared.setup_stmts,
       owned_insert,
     ], T::Array[MIR::Emittable])
-    entry = @services.pipeline_owned_cleanup_entry.call(expr_mir, expr_node)
+    entry = self.pipeline_owned_cleanup_entry.call(expr_mir, expr_node)
     body << MIR::Cleanup.new("idx_key", entry) if entry
     body
   end
 
   sig { params(item_var: String, elem_zig_type: String, alloc: Symbol, item_type: T.nilable(Type), value_ownership: PipelineIndexValueOwnership).returns(PipelineIndexPreparedValue) }
   def index_prepared_value(item_var, elem_zig_type, alloc, item_type, value_ownership)
-    item_owns = item_type ? @services.cleanup_bearing_type.call(item_type) : true
+    item_owns = item_type ? self.cleanup_bearing_type.call(item_type) : true
     item_value = index_item_value(item_var, elem_zig_type, alloc, value_ownership)
     if preserve_owned_index_item?(item_owns, value_ownership)
       return PipelineIndexPreparedValue.new(
@@ -334,9 +326,9 @@ class PipelineSetIndexLowerer
 
   sig { params(item_value: MIR::Node, alloc: Symbol, item_owns: T::Boolean).returns(PipelineIndexPreparedValue) }
   def copied_index_value(item_value, alloc, item_owns)
-    fact = @services.pipeline_alloc_mark_fact.call(
+    fact = self.pipeline_alloc_mark_fact.call(
       item_value,
-      @services.index_temp_name.call,
+      self.index_temp_name.call,
       alloc,
       nil,
       "INDEX bucket item",

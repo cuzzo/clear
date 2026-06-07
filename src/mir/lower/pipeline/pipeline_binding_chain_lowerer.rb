@@ -48,7 +48,8 @@ class PipelineBindingFoldPlan < T::Struct
   const :result_expr, MIR::Node
 end
 
-class PipelineBindingChainServices < T::Struct
+class PipelineBindingChainLowerer < T::Struct
+  extend T::Sig
   const :bc_target, T.proc.returns(T::Boolean)
   const :next_label, T.proc.returns(String)
   const :set_current_label, T.proc.params(label: String).void
@@ -59,15 +60,6 @@ class PipelineBindingChainServices < T::Struct
   const :transpile_type, T.proc.params(type_info: PipelineTypeInput).returns(String)
   const :with_named_bindings, T.proc.params(bindings: T::Hash[String, String], blk: T.proc.returns(MIR::BlockExpr)).returns(MIR::BlockExpr)
   const :ast_uses_placeholder, T.proc.params(node: AST::Node).returns(T::Boolean)
-end
-
-class PipelineBindingChainLowerer
-  extend T::Sig
-
-  sig { params(services: PipelineBindingChainServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineBindingChainServices)
-  end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(PipelineBindingUnnestChain)) }
   def unwrap_chain(node)
@@ -116,18 +108,18 @@ class PipelineBindingChainLowerer
   sig { params(chain: PipelineBindingUnnestChain, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower(chain, smooth_node)
     outer_name = chain.outer_binding
-    outer_zig = @services.pipe_binding_zig_name.call(outer_name)
+    outer_zig = self.pipe_binding_zig_name.call(outer_name)
     inner_name = chain.inner_binding
-    inner_zig = inner_name ? @services.pipe_binding_zig_name.call(inner_name) : "__bc_inner"
-    label = @services.next_label.call
-    @services.set_current_label.call(label)
+    inner_zig = inner_name ? self.pipe_binding_zig_name.call(inner_name) : "__bc_inner"
+    label = self.next_label.call
+    self.set_current_label.call(label)
     names = binding_names(label)
     bindings = T.let({ outer_name => outer_zig }, T::Hash[String, String])
     bindings[inner_name] = inner_zig if inner_name
 
-    @services.with_named_bindings.call(bindings, lambda do
-      source_mir = @services.visit_mir.call(chain.source)
-      unnest_mir = @services.visit_mir.call(chain.unnest_expr)
+    self.with_named_bindings.call(bindings, lambda do
+      source_mir = self.visit_mir.call(chain.source)
+      unnest_mir = self.visit_mir.call(chain.unnest_expr)
       fold_plan = lower_binding_fold(chain.fold, chain.stages, inner_zig, smooth_node, names)
       loop_body = binding_loop_body(chain, inner_zig, fold_plan.loop_body_stmts)
       inner_loop = MIR::ForStmt.new(
@@ -156,7 +148,7 @@ class PipelineBindingChainLowerer
 
   sig { params(label: String).returns(PipelineBindingNames) }
   def binding_names(label)
-    suffix = @services.bc_target.call ? "_#{label.sub('__pblk', 'b')}" : ""
+    suffix = self.bc_target.call ? "_#{label.sub('__pblk', 'b')}" : ""
     PipelineBindingNames.new(
       source: "__bc_src#{suffix}",
       unnest: "__bc_unn#{suffix}",
@@ -181,11 +173,11 @@ class PipelineBindingChainLowerer
     return true if chain.fold.is_a?(AST::FindOp)
 
     fold_expr = fold_expression(chain.fold)
-    return true if fold_expr && @services.ast_uses_placeholder.call(fold_expr)
+    return true if fold_expr && self.ast_uses_placeholder.call(fold_expr)
 
     chain.stages.any? do |stage|
       stage.is_a?(AST::WhereOp) &&
-        @services.ast_uses_placeholder.call(T.cast(stage.expression, AST::Node))
+        self.ast_uses_placeholder.call(T.cast(stage.expression, AST::Node))
     end
   end
 
@@ -269,7 +261,7 @@ class PipelineBindingChainLowerer
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::FindOp
       result_ft = Type.new(smooth_node.full_type!)
-      find_zig = result_ft.optional? ? @services.transpile_type.call(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
+      find_zig = result_ft.optional? ? self.transpile_type.call(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
       pred = visit_placeholder_expr(T.cast(fold.expression, AST::Node), placeholder)
       init = [
         MIR::Let.new(names.result, MIR::Undef.new(nil), true, Type.new(find_zig), nil),
@@ -317,6 +309,6 @@ class PipelineBindingChainLowerer
 
   sig { params(expr: AST::Node, placeholder: String).returns(MIR::Node) }
   def visit_placeholder_expr(expr, placeholder)
-    @services.visit_mir_with_placeholder.call(expr, placeholder)
+    self.visit_mir_with_placeholder.call(expr, placeholder)
   end
 end

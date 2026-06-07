@@ -174,7 +174,8 @@ class PipelineConcurrentSourcePointer < T::Struct
   const :pointer, MIR::Emittable
 end
 
-class PipelineConcurrentServices < T::Struct
+class PipelineConcurrentLowerer < T::Struct
+  extend T::Sig
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_mir_with_placeholder, T.proc.params(node: AST::Node, placeholder: String).returns(MIR::Node)
@@ -208,18 +209,6 @@ class PipelineConcurrentServices < T::Struct
   const :lower_max, T.proc.params(lhs: AST::Node, smooth_node: AST::BinaryOp, inner: AST::MaxOp).returns(PipelineConcurrentResult)
   const :lower_average, T.proc.params(lhs: AST::Node, smooth_node: AST::BinaryOp, inner: AST::AverageOp).returns(PipelineConcurrentResult)
   const :with_optional_named_binding, T.proc.params(clear_name: T.nilable(String), zig_var: String, blk: T.proc.returns(PipelineConcurrentResult)).returns(PipelineConcurrentResult)
-end
-
-class PipelineConcurrentLowerer
-  extend T::Sig
-
-  sig { params(services: PipelineConcurrentServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineConcurrentServices)
-    @bounded_conc_counter = T.let(0, Integer)
-    @shard_counter = T.let(0, Integer)
-  end
-
   sig { params(smooth_node: AST::BinaryOp, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentResult) }
   def lower(smooth_node, conc_op)
     lower_plan(concurrent_plan(smooth_node, conc_op))
@@ -285,10 +274,10 @@ class PipelineConcurrentLowerer
   end
   def concurrent_source_kind(lhs, real_lhs, lhs_type, real_lhs_type, conc_op)
     return PipelineConcurrentSourceKind::ShardEach if shard_context(conc_op)
-    return PipelineConcurrentSourceKind::BcMaterialized if @services.bc_target.call && !stream_type?(lhs_type)
+    return PipelineConcurrentSourceKind::BcMaterialized if self.bc_target.call && !stream_type?(lhs_type)
     return PipelineConcurrentSourceKind::BoundedStream if bounded_identifier_stream?(lhs)
     return PipelineConcurrentSourceKind::RuntimeStream if runtime_stream_source?(lhs, lhs_type)
-    if !@services.bc_target.call && (range_runtime_source?(real_lhs) || list_runtime_source?(real_lhs_type))
+    if !self.bc_target.call && (range_runtime_source?(real_lhs) || list_runtime_source?(real_lhs_type))
       return PipelineConcurrentSourceKind::RuntimeList
     end
 
@@ -348,7 +337,7 @@ class PipelineConcurrentLowerer
     cb = build_bounded_concurrent_callback_pointer(conc, item_t)
     invoke = bounded_invocation(conc, cb)
 
-    source_mir = @services.visit_mir.call(list_node)
+    source_mir = self.visit_mir.call(list_node)
     setup = if list_node.is_a?(AST::Identifier)
       [MIR::Let.new("__sh_each_src", MIR::AddressOf.new(source_mir), false, nil, nil)]
     else
@@ -359,7 +348,7 @@ class PipelineConcurrentLowerer
     end
 
     helper = lhs_type.pool? ? :concurrentShardedPoolEachInPlace : :concurrentShardedListEachInPlace
-    call = @services.emit_builtin.call(helper, [
+    call = self.emit_builtin.call(helper, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(shard_count.to_s),
       *invoke.sharded_each_args(MIR::Ident.new("__sh_each_src"), MIR::Lit.new("false")),
@@ -382,24 +371,23 @@ class PipelineConcurrentLowerer
     each_op = T.cast(conc_op.op, AST::EachOp)
     range_node = ctx.auto_detected ? T.cast(lhs, AST::RangeLit) : T.cast(T.cast(lhs, AST::BinaryOp).left, AST::RangeLit)
 
-    @shard_counter += 1
-    id = @shard_counter
+    id = self.numeric_label_id(self.next_label.call)
     idx_var = "__sh#{id}_i"
     key_var = "__sh#{id}_key"
 
-    start_mir = @services.visit_mir.call(T.cast(range_node.start, AST::Node))
-    end_mir = @services.visit_mir.call(T.cast(range_node.finish, AST::Node))
+    start_mir = self.visit_mir.call(T.cast(range_node.start, AST::Node))
+    end_mir = self.visit_mir.call(T.cast(range_node.finish, AST::Node))
     end_expr = range_node.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
 
-    head = @services.lower_head_with_placeholder.call(ctx.key_expr, idx_var)
-    body_mir = @services.visit_body_with_placeholder.call(each_op.body, key_var)
+    head = self.lower_head_with_placeholder.call(ctx.key_expr, idx_var)
+    body_mir = self.visit_body_with_placeholder.call(each_op.body, key_var)
 
     inner = T.let([], T::Array[MIR::Emittable])
     if ctx.key_allocates_frame
-      inner.concat(shard_loop_mark_pair("__sh#{id}_loop_mark", @services.do_rt_name.call))
+      inner.concat(shard_loop_mark_pair("__sh#{id}_loop_mark", self.do_rt_name.call))
     end
     inner.concat(head.pending)
-    fact = @services.pipeline_alloc_mark_fact.call(
+    fact = self.pipeline_alloc_mark_fact.call(
       head.value,
       key_var,
       :heap,
@@ -420,18 +408,18 @@ class PipelineConcurrentLowerer
     MIR::ForStmt.new(
       MIR::IterRange.new(start_mir, end_expr, :i64),
       idx_var,
-      @services.append_ownership_transfers.call(inner),
+      self.append_ownership_transfers.call(inner),
       nil,
     )
   end
 
   sig { params(lhs: AST::Node, inner_expr: AST::Node, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_bc_concurrent_select_prune(lhs, inner_expr, smooth_node)
-    res_zig = @services.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
-    alloc = @services.pipeline_alloc.call(smooth_node)
-    expr_mir = @services.visit_mir_with_placeholder.call(inner_expr, "it")
+    res_zig = self.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
+    alloc = self.pipeline_alloc.call(smooth_node)
+    expr_mir = self.visit_mir_with_placeholder.call(inner_expr, "it")
 
-    @services.pipeline_block.call(lhs, lambda do |items, label|
+    self.pipeline_block.call(lhs, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
@@ -453,11 +441,11 @@ class PipelineConcurrentLowerer
   sig { params(lhs: AST::Node, inner_expr: AST::Node, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_bc_concurrent_where_prune(lhs, inner_expr, smooth_node)
     elem_type = T.must(lhs.full_type!.element_type).resolved.to_s
-    elem_zig = @services.transpile_type.call(elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
-    pred_mir = @services.visit_mir_with_placeholder.call(inner_expr, "it")
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
+    pred_mir = self.visit_mir_with_placeholder.call(inner_expr, "it")
 
-    @services.pipeline_block.call(lhs, lambda do |items, label|
+    self.pipeline_block.call(lhs, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
@@ -501,7 +489,7 @@ class PipelineConcurrentLowerer
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Emittable) }
   def bounded_concurrent_worker_count_mir(conc_op)
     workers = concurrent_option(conc_op, "workers")
-    return @services.visit_mir.call(workers) if workers
+    return self.visit_mir.call(workers) if workers
 
     MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
   end
@@ -514,7 +502,7 @@ class PipelineConcurrentLowerer
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Emittable) }
   def bounded_concurrent_parallel_mir(conc_op)
     par = concurrent_option(conc_op, "parallel")
-    par ? @services.visit_mir.call(par) : MIR::Lit.new("false")
+    par ? self.visit_mir.call(par) : MIR::Lit.new("false")
   end
 
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Emittable) }
@@ -522,7 +510,7 @@ class PipelineConcurrentLowerer
     batch = concurrent_option(conc_op, "batch")
     return MIR::Lit.new("1") unless batch
 
-    MIR::Cast.new(@services.visit_mir.call(batch), nil, :intCast)
+    MIR::Cast.new(self.visit_mir.call(batch), nil, :intCast)
   end
 
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::StructInit) }
@@ -530,14 +518,13 @@ class PipelineConcurrentLowerer
     size_node = concurrent_option(conc_op, "size")
     size_name = size_node.is_a?(AST::Identifier) ? size_node.name.downcase.to_sym : nil
     MIR::StructInit.new(nil, [
-      MIR.named_field("stack_size", MIR::Ident.new(".#{@services.task_config_variant.call(size_name)}")),
+      MIR.named_field("stack_size", MIR::Ident.new(".#{self.task_config_variant.call(size_name)}")),
     ])
   end
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type, return_type: T.any(Type, Symbol), body_kind: Symbol).returns(PipelineConcurrentCallback) }
   def build_bounded_concurrent_callback(conc_op, item_type, return_type, body_kind)
-    @bounded_conc_counter += 1
-    id = @bounded_conc_counter
+    id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
     specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
@@ -553,7 +540,7 @@ class PipelineConcurrentLowerer
     ], T::Array[MIR::Param])
 
     body = callback_prelude(specs)
-    if @services.bc_target.call
+    if self.bc_target.call
       specs.each do |spec|
         body << MIR::Let.new(spec.name,
           MIR::FieldGet.new(MIR::Ident.new("ctx"), spec.name),
@@ -570,7 +557,7 @@ class PipelineConcurrentLowerer
 
   sig { params(lhs: AST::Identifier, _id: Integer).returns(PipelineConcurrentSourcePointer) }
   def bounded_stream_items_setup(lhs, _id)
-    source = @services.visit_mir.call(lhs)
+    source = self.visit_mir.call(lhs)
     PipelineConcurrentSourcePointer.new(
       setup: [],
       pointer: MIR::AddressOf.new(MIR::FieldGet.new(source, "items")),
@@ -580,7 +567,7 @@ class PipelineConcurrentLowerer
   sig { params(lhs: AST::Identifier).returns(T::Array[MIR::Emittable]) }
   def bounded_stream_source_move(lhs)
     name = lhs.name.to_s
-    return [] unless @services.guarded_cleanup_name.call(name)
+    return [] unless self.guarded_cleanup_name.call(name)
 
     MIR::OwnershipTransferPlan.new(
       name: name,
@@ -598,15 +585,15 @@ class PipelineConcurrentLowerer
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
 
-    call = @services.emit_builtin.call(:concurrentBoundedSelect, [
+    call = self.emit_builtin.call(:concurrentBoundedSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
-      *invoke.bounded_allocating_args(source.pointer, @services.pipeline_result_alloc.call),
+      *invoke.bounded_allocating_args(source.pointer, self.pipeline_result_alloc.call),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
       after_context: [
         *source.setup,
@@ -623,14 +610,14 @@ class PipelineConcurrentLowerer
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
 
-    call = @services.emit_builtin.call(:concurrentBoundedWhere, [
+    call = self.emit_builtin.call(:concurrentBoundedWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
-      *invoke.bounded_allocating_args(source.pointer, @services.pipeline_result_alloc.call),
+      *invoke.bounded_allocating_args(source.pointer, self.pipeline_result_alloc.call),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
       after_context: [
         *source.setup,
@@ -647,7 +634,7 @@ class PipelineConcurrentLowerer
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
 
-    call = @services.emit_builtin.call(:concurrentBoundedEach, [
+    call = self.emit_builtin.call(:concurrentBoundedEach, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
       *invoke.bounded_each_args(source.pointer),
@@ -674,7 +661,7 @@ class PipelineConcurrentLowerer
 
   sig { params(binding_name: T.nilable(String), item_name: String, work: T.proc.returns(PipelineConcurrentResult)).returns(PipelineConcurrentResult) }
   def lower_with_optional_binding(binding_name, item_name, work)
-    return @services.with_optional_named_binding.call(binding_name, item_name, work) if binding_name
+    return self.with_optional_named_binding.call(binding_name, item_name, work) if binding_name
 
     work.call
   end
@@ -689,17 +676,17 @@ class PipelineConcurrentLowerer
       expr = T.must(plan.bc_expression)
       lower_bc_where_expression(expr.policy, expr, plan)
     when PipelineConcurrentTerminalKind::Each
-      @services.lower_each.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::EachOp))
+      self.lower_each.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::EachOp))
     when PipelineConcurrentTerminalKind::Sum
-      @services.lower_sum.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::SumOp))
+      self.lower_sum.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::SumOp))
     when PipelineConcurrentTerminalKind::Count
-      @services.lower_count.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::CountOp))
+      self.lower_count.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::CountOp))
     when PipelineConcurrentTerminalKind::Min
-      @services.lower_min.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MinOp))
+      self.lower_min.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MinOp))
     when PipelineConcurrentTerminalKind::Max
-      @services.lower_max.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MaxOp))
+      self.lower_max.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::MaxOp))
     when PipelineConcurrentTerminalKind::Average
-      @services.lower_average.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::AverageOp))
+      self.lower_average.call(plan.real_lhs, plan.smooth_node, T.cast(plan.inner, AST::AverageOp))
     else
       raise "lower_concurrent_bc: unsupported inner op #{plan.inner.class}"
     end
@@ -709,14 +696,14 @@ class PipelineConcurrentLowerer
   def lower_bc_select_expression(policy, expr, plan)
     return lower_bc_concurrent_select_prune(plan.real_lhs, expr.expr, plan.smooth_node) if policy == :prune
 
-    @services.lower_select.call(plan.real_lhs, plan.smooth_node, expr.expr)
+    self.lower_select.call(plan.real_lhs, plan.smooth_node, expr.expr)
   end
 
   sig { params(policy: Symbol, expr: PipelineConcurrentBcExpression, plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
   def lower_bc_where_expression(policy, expr, plan)
     return lower_bc_concurrent_where_prune(plan.real_lhs, expr.expr, plan.smooth_node) if policy == :prune
 
-    @services.lower_where.call(plan.real_lhs, plan.smooth_node, expr.expr)
+    self.lower_where.call(plan.real_lhs, plan.smooth_node, expr.expr)
   end
 
   sig { params(expr: AST::Node).returns(PipelineConcurrentBcExpression) }
@@ -818,7 +805,7 @@ class PipelineConcurrentLowerer
 
   sig { params(lhs: AST::Identifier, id: Integer).returns(PipelineConcurrentSourcePointer) }
   def stream_concurrent_source_setup_mir(lhs, id)
-    src = @services.visit_mir.call(lhs)
+    src = self.visit_mir.call(lhs)
     PipelineConcurrentSourcePointer.new(setup: [], pointer: MIR::AddressOf.new(src))
   end
 
@@ -827,7 +814,7 @@ class PipelineConcurrentLowerer
     cap_node = concurrent_option(conc_op, "capacity")
     return MIR::DefaultStreamCapacity.new(MIR::Ident.new(n_workers_zig)) unless cap_node
 
-    MIR::Cast.new(@services.lower_mir.call(cap_node), nil, :intCast)
+    MIR::Cast.new(self.lower_mir.call(cap_node), nil, :intCast)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
@@ -838,22 +825,22 @@ class PipelineConcurrentLowerer
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @services.emit_expr.call(n_workers_mir)
+    n_workers_zig = self.emit_expr.call(n_workers_mir)
     capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @services.emit_builtin.call(:concurrentStreamSelect, [
+    call = self.emit_builtin.call(:concurrentStreamSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       *invoke.stream_allocating_args(
         source.pointer,
         capacity,
-        @services.pipeline_result_alloc.call,
+        self.pipeline_result_alloc.call,
         MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
       ),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
       after_context: [
         *source.setup,
@@ -869,21 +856,21 @@ class PipelineConcurrentLowerer
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @services.emit_expr.call(n_workers_mir)
+    n_workers_zig = self.emit_expr.call(n_workers_mir)
     capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @services.emit_builtin.call(:concurrentStreamWhere, [
+    call = self.emit_builtin.call(:concurrentStreamWhere, [
       MIR::Ident.new(item_t.zig_type),
       *invoke.stream_allocating_args(
         source.pointer,
         capacity,
-        @services.pipeline_result_alloc.call,
+        self.pipeline_result_alloc.call,
         MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
       ),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
       after_context: [
         *source.setup,
@@ -899,15 +886,15 @@ class PipelineConcurrentLowerer
     invoke = bounded_each_invocation(conc_op, item_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = @services.emit_expr.call(n_workers_mir)
+    n_workers_zig = self.emit_expr.call(n_workers_mir)
     capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
 
-    call = @services.emit_builtin.call(:concurrentStreamEach, [
+    call = self.emit_builtin.call(:concurrentStreamEach, [
       MIR::Ident.new(item_t.zig_type),
       *invoke.stream_each_args(
         source.pointer,
         capacity,
-        @services.pipeline_result_alloc.call,
+        self.pipeline_result_alloc.call,
         MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
       ),
     ])
@@ -937,16 +924,16 @@ class PipelineConcurrentLowerer
     item_t = concurrent_list_item_type(lhs)
     result_t = Type.new(inner.expression.full_type!)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListSelect, [
+    call = self.emit_builtin.call(:concurrentListSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
-      *invoke.bounded_allocating_args(MIR::Ident.new("pipe_items"), @services.pipeline_result_alloc.call),
+      *invoke.bounded_allocating_args(MIR::Ident.new("pipe_items"), self.pipeline_result_alloc.call),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: setup_stmts,
       after_context: [MIR::BreakStmt.new(label, call)],
     ), Type.from_node!(conc_op, context: "list concurrent SELECT result"))
@@ -956,15 +943,15 @@ class PipelineConcurrentLowerer
   def lower_concurrent_list_where(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListWhere, [
+    call = self.emit_builtin.call(:concurrentListWhere, [
       MIR::Ident.new(item_t.zig_type),
-      *invoke.bounded_allocating_args(MIR::Ident.new("pipe_items"), @services.pipeline_result_alloc.call),
+      *invoke.bounded_allocating_args(MIR::Ident.new("pipe_items"), self.pipeline_result_alloc.call),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: setup_stmts,
       after_context: [MIR::BreakStmt.new(label, call)],
     ), Type.from_node!(conc_op, context: "list concurrent WHERE result"))
@@ -974,15 +961,15 @@ class PipelineConcurrentLowerer
   def lower_concurrent_list_count(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListCount, [
+    call = self.emit_builtin.call(:concurrentListCount, [
       MIR::Ident.new(item_t.zig_type),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: setup_stmts,
       after_context: [MIR::BreakStmt.new(label, call)],
     ), Type.from_node!(conc_op, context: "list concurrent COUNT result"))
@@ -996,9 +983,9 @@ class PipelineConcurrentLowerer
     kind = list_reduce_kind(inner)
     initial = list_reduce_initial(kind, result_zig, result_t)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListReduce, [
+    call = self.emit_builtin.call(:concurrentListReduce, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_zig),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
@@ -1006,8 +993,8 @@ class PipelineConcurrentLowerer
       MIR::Ident.new(".#{kind}"),
     ])
 
-    label = @services.next_label.call
-    @services.typed_block_expr.call(label, invoke.scoped_body(
+    label = self.next_label.call
+    self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: setup_stmts,
       after_context: [MIR::BreakStmt.new(label, call)],
     ), result_t)
@@ -1017,9 +1004,9 @@ class PipelineConcurrentLowerer
   def lower_concurrent_list_each(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     invoke = bounded_each_invocation(conc_op, item_t)
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListEach, [
+    call = self.emit_builtin.call(:concurrentListEach, [
       MIR::Ident.new(item_t.zig_type),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
     ])
@@ -1034,9 +1021,9 @@ class PipelineConcurrentLowerer
   def lower_concurrent_list_each_in_place(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     invoke = bounded_pointer_invocation(conc_op, item_t)
-    setup_stmts = @services.source_setup.call(lhs)
+    setup_stmts = self.source_setup.call(lhs)
 
-    call = @services.emit_builtin.call(:concurrentListEachInPlace, [
+    call = self.emit_builtin.call(:concurrentListEachInPlace, [
       MIR::Ident.new(item_t.zig_type),
       *invoke.bounded_each_args(MIR::ConstCast.new(MIR::Ident.new("pipe_items"))),
     ])
@@ -1049,8 +1036,7 @@ class PipelineConcurrentLowerer
 
   sig { params(conc_op: AST::ConcurrentOp, item_type: Type).returns(PipelineConcurrentCallback) }
   def build_bounded_concurrent_callback_pointer(conc_op, item_type)
-    @bounded_conc_counter += 1
-    id = @bounded_conc_counter
+    id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
     specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
@@ -1066,7 +1052,7 @@ class PipelineConcurrentLowerer
     ], T::Array[MIR::Param])
 
     body = callback_prelude(specs)
-    body.concat(@services.callback_body_mir.call(
+    body.concat(self.callback_body_mir.call(
       T.cast(conc_op.op, AST::EachOp).body,
       "__item",
       capture_map,
@@ -1205,7 +1191,7 @@ class PipelineConcurrentLowerer
     case body_kind
     when :expr
       expr_node = callback_expression(conc_op)
-      expr_mir = @services.callback_expr_mir.call(expr_node, "__item", capture_map, capture_symbols, "__rt")
+      expr_mir = self.callback_expr_mir.call(expr_node, "__item", capture_map, capture_symbols, "__rt")
       expr_mir.try_wrap = false if expr_mir.is_a?(MIR::Call) || expr_mir.is_a?(MIR::MethodCall)
       expr_type = expr_node.full_type!
       if expr_type && Type.new(expr_type).integer? && ret_type.float?
@@ -1214,7 +1200,7 @@ class PipelineConcurrentLowerer
       [MIR::ReturnStmt.new(expr_mir)]
     when :each
       [
-        *@services.callback_body_mir.call(
+        *self.callback_body_mir.call(
           T.cast(conc_op.op, AST::EachOp).body,
           "__item",
           capture_map,
@@ -1237,6 +1223,11 @@ class PipelineConcurrentLowerer
     else
       raise "concurrent callback expression expected expression op, got #{op.class}"
     end
+  end
+
+  sig { params(label: String).returns(Integer) }
+  def numeric_label_id(label)
+    label.each_byte.reduce(0) { |memo, byte| ((memo * 131) + byte) & 0x7fffffff }
   end
 
   sig { params(id: Integer, ctx_name: String, fields: T::Array[MIR::FieldDef], fn: MIR::FnDef, specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(PipelineConcurrentCallback) }
@@ -1273,8 +1264,8 @@ class PipelineConcurrentLowerer
     case kind
     when :sum then MIR::Lit.new("0")
     when :average then MIR::Lit.new("0.0")
-    when :min then @services.agg_min_sentinel_mir.call(result_zig)
-    when :max then @services.agg_max_sentinel_mir.call(result_zig, result_type)
+    when :min then self.agg_min_sentinel_mir.call(result_zig)
+    when :max then self.agg_max_sentinel_mir.call(result_zig, result_type)
     else raise "lower_concurrent_list_reduce: unsupported reduce kind #{kind}"
     end
   end

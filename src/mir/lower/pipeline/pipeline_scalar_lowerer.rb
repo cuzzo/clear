@@ -21,19 +21,11 @@ PipelineMaterializedScalarOp = T.type_alias do
   )
 end
 
-class PipelineScalarServices < T::Struct
+class PipelineScalarLowerer < T::Struct
+  extend T::Sig
   const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
   const :transpile_type, T.proc.params(type_info: PipelineTypeInput).returns(String)
-end
-
-class PipelineScalarLowerer
-  extend T::Sig
-
-  sig { params(services: PipelineScalarServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineScalarServices)
-  end
 
   sig { params(site: PipelineSite, op: PipelineMaterializedScalarOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -63,7 +55,7 @@ class PipelineScalarLowerer
   def lower_count(site, count_node)
     list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, T.cast(count_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -81,7 +73,7 @@ class PipelineScalarLowerer
   def lower_sum(site, sum_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, T.cast(sum_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -97,7 +89,7 @@ class PipelineScalarLowerer
   def lower_average(site, avg_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, T.cast(avg_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
@@ -119,7 +111,7 @@ class PipelineScalarLowerer
   def lower_min(site, min_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, T.cast(min_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
           MIR::BinOp.new("==",
@@ -145,7 +137,7 @@ class PipelineScalarLowerer
   def lower_max(site, max_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, T.cast(max_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
           MIR::BinOp.new("==",
@@ -171,7 +163,7 @@ class PipelineScalarLowerer
   def lower_any(site, any_node)
     list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, T.cast(any_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -189,7 +181,7 @@ class PipelineScalarLowerer
   def lower_all(site, all_node)
     list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, T.cast(all_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -206,9 +198,9 @@ class PipelineScalarLowerer
   sig { params(site: PipelineSite, find_node: AST::FindOp).returns(MIR::BlockExpr) }
   def lower_find(site, find_node)
     list_node = site.list
-    elem_zig_type = @services.transpile_type.call(T.must(list_node.full_type!.element_type).resolved.to_s)
+    elem_zig_type = self.transpile_type.call(T.must(list_node.full_type!.element_type).resolved.to_s)
     pred_mir = visit_pipeline_expr_mir(list_node, T.cast(find_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("find_result",
           MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil),
@@ -232,6 +224,6 @@ class PipelineScalarLowerer
 
   sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node) }
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
-    @services.visit_expr.call(list_node, expr_node, placeholder)
+    self.visit_expr.call(list_node, expr_node, placeholder)
   end
 end

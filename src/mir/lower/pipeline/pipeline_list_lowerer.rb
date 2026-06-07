@@ -25,7 +25,8 @@ PipelineListTerminalOp = T.type_alias do
   )
 end
 
-class PipelineListServices < T::Struct
+class PipelineListLowerer < T::Struct
+  extend T::Sig
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
   const :visit_reduce_expr, T.proc.params(expr_node: AST::Node, item_placeholder: String, acc_placeholder: String).returns(MIR::Node)
@@ -42,15 +43,6 @@ class PipelineListServices < T::Struct
   const :borrowed_pipeline_value, T.proc.params(value: MIR::Node, type_info: Type, alloc: Symbol).returns(MIR::Node)
   const :cleanup_bearing_type, T.proc.params(type_info: Type).returns(T::Boolean)
   const :owning_pipeline_temp_stmts, T.proc.params(name: String, source: MIR::Node, type_info: Type, zig_type: String, alloc: Symbol).returns(T::Array[MIR::Emittable])
-end
-
-class PipelineListLowerer
-  extend T::Sig
-
-  sig { params(services: PipelineListServices).void }
-  def initialize(services:)
-    @services = T.let(services, PipelineListServices)
-  end
 
   sig { params(site: PipelineSite, op: PipelineListTerminalOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -102,18 +94,18 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
-    elem_zig = @services.transpile_type.call(elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
-            @services.append_owned_value_stmt.call("res_list", alloc,
-              @services.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
+            self.append_owned_value_stmt.call("res_list", alloc,
+              self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
           ], nil),
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
@@ -126,17 +118,17 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     res_type = expr_node.full_type!
-    res_zig = @services.transpile_type.call(res_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    res_zig = self.transpile_type.call(res_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("val", expr_mir, false, nil, nil),
-          @services.append_owned_value_stmt.call("res_list", alloc,
-            @services.borrowed_pipeline_value.call(MIR::Ident.new("val"), Type.new(res_type), alloc)),
+          self.append_owned_value_stmt.call("res_list", alloc,
+            self.borrowed_pipeline_value.call(MIR::Ident.new("val"), Type.new(res_type), alloc)),
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
       ]
@@ -147,16 +139,16 @@ class PipelineListLowerer
   def lower_limit(site, limit_node)
     list_node = site.list
     smooth_node = site.options
-    source_shape = @services.source_shape.call(list_node)
+    source_shape = self.source_shape.call(list_node)
     elem_type = source_shape.element_type.resolved.to_s
-    elem_zig = @services.transpile_type.call(elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
-    count_mir = @services.visit_mir.call(T.cast(limit_node.count, AST::Node))
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
+    count_mir = self.visit_mir.call(T.cast(limit_node.count, AST::Node))
 
     if source_shape.bc_infinite_stream?
-      label = @services.next_label.call
-      source_mir = @services.visit_mir.call(list_node)
-      @services.set_current_label.call(label)
+      label = self.next_label.call
+      source_mir = self.visit_mir.call(list_node)
+      self.set_current_label.call(label)
       return MIR::BlockExpr.new(label, [
         MIR::Let.new("__lim_src", source_mir, false, nil, nil),
         MIR::Let.new("__lim_n", count_mir, false, nil, nil),
@@ -178,7 +170,7 @@ class PipelineListLowerer
       ])
     end
 
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("lim_requested",
           MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
@@ -193,8 +185,8 @@ class PipelineListLowerer
             MIR::Lit.new("0"), MIR::Ident.new("lim_actual"), nil),
           "it",
           [
-            @services.append_owned_value_stmt.call("lim_result", alloc,
-              @services.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
+            self.append_owned_value_stmt.call("lim_result", alloc,
+              self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
           ],
           nil
         ),
@@ -208,10 +200,10 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
-    elem_zig = @services.transpile_type.call(elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
@@ -219,8 +211,8 @@ class PipelineListLowerer
           MIR::Let.new("matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
             [MIR::BreakStmt.new(nil, nil)], nil),
-          @services.append_owned_value_stmt.call("res_list", alloc,
-            @services.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
+          self.append_owned_value_stmt.call("res_list", alloc,
+            self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
       ]
@@ -230,10 +222,10 @@ class PipelineListLowerer
   sig { params(site: PipelineSite, skip_node: AST::SkipOp).returns(MIR::BlockExpr) }
   def lower_skip(site, skip_node)
     list_node = site.list
-    label = @services.next_label.call
-    source_mir = @services.visit_mir.call(list_node)
-    @services.set_current_label.call(label)
-    count_mir = @services.visit_mir.call(T.cast(skip_node.count, AST::Node))
+    label = self.next_label.call
+    source_mir = self.visit_mir.call(list_node)
+    self.set_current_label.call(label)
+    count_mir = self.visit_mir.call(T.cast(skip_node.count, AST::Node))
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__skip_src", source_mir, false, nil, nil),
@@ -256,10 +248,10 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     inner_elem_type = T.must(unnest_node.full_type!.element_type).resolved.to_s
-    inner_zig = @services.transpile_type.call(inner_elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    inner_zig = self.transpile_type.call(inner_elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     expr_mir = visit_pipeline_expr_mir(list_node, T.cast(unnest_node.expression, AST::Node))
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(inner_zig, [], alloc), true, nil, nil),
@@ -282,10 +274,10 @@ class PipelineListLowerer
   sig { params(site: PipelineSite, reduce_node: AST::ReduceOp).returns(MIR::BlockExpr) }
   def lower_reduce(site, reduce_node)
     list_node = site.list
-    acc_zig = @services.transpile_type.call(reduce_node.full_type!)
-    init_mir = @services.visit_mir.call(T.cast(reduce_node.initial_value, AST::Node))
-    expr_mir = @services.visit_reduce_expr.call(T.cast(reduce_node.expression, AST::Node), "it", "acc")
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    acc_zig = self.transpile_type.call(reduce_node.full_type!)
+    init_mir = self.visit_mir.call(T.cast(reduce_node.initial_value, AST::Node))
+    expr_mir = self.visit_reduce_expr.call(T.cast(reduce_node.expression, AST::Node), "it", "acc")
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -301,11 +293,11 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     expr_type_str = window_node.expression.full_type!.to_s
-    res_zig = @services.transpile_type.call(expr_type_str)
-    alloc = @services.pipeline_alloc.call(smooth_node)
-    size_mir = @services.visit_mir.call(T.cast(window_node.size, AST::Node))
-    expr_mir = @services.visit_expr.call(list_node, T.cast(window_node.expression, AST::Node), "window_slice")
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    res_zig = self.transpile_type.call(expr_type_str)
+    alloc = self.pipeline_alloc.call(smooth_node)
+    size_mir = self.visit_mir.call(T.cast(window_node.size, AST::Node))
+    expr_mir = self.visit_expr.call(list_node, T.cast(window_node.expression, AST::Node), "window_slice")
+    self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
@@ -353,19 +345,19 @@ class PipelineListLowerer
     list_node = site.list
     smooth_node = site.options
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
-    elem_zig = @services.transpile_type.call(elem_type)
-    alloc = @services.pipeline_alloc.call(smooth_node)
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     key_expr = T.cast(order_node.expression, AST::Node)
-    key_a = @services.visit_expr.call(list_node, key_expr, "a")
-    key_b = @services.visit_expr.call(list_node, key_expr, "b")
-    @services.pipeline_block.call(list_node, lambda do |items, label|
+    key_a = self.visit_expr.call(list_node, key_expr, "a")
+    key_b = self.visit_expr.call(list_node, key_expr, "b")
+    self.pipeline_block.call(list_node, lambda do |items, label|
       result_name = "#{label}_ord_result"
       [
         MIR::Let.new(result_name,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &#{result_name};"),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          @services.append_owned_value_stmt.call(result_name, alloc,
-            @services.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
+          self.append_owned_value_stmt.call(result_name, alloc,
+            self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
         ], nil),
         MIR::Sort.new(elem_zig,
           MIR::FieldGet.new(MIR::Ident.new(result_name), "items"),
@@ -379,18 +371,18 @@ class PipelineListLowerer
   def lower_join(site, join_node)
     list_node = site.list
     left_type_info = T.must(list_node.full_type!.element_type)
-    left_zig = @services.transpile_type.call(left_type_info.resolved.to_s)
-    right_src_mir = @services.visit_mir.call(T.cast(join_node.right_source, AST::Node))
+    left_zig = self.transpile_type.call(left_type_info.resolved.to_s)
+    right_src_mir = self.visit_mir.call(T.cast(join_node.right_source, AST::Node))
     right_type_info = join_node.right_source.full_type!
-    right_zig = @services.transpile_type.call(right_type_info.element_type.resolved.to_s)
+    right_zig = self.transpile_type.call(right_type_info.element_type.resolved.to_s)
     result_zig = "struct { left: #{left_zig}, right: ?#{right_zig} }"
-    alloc = @services.pipeline_result_alloc.call
-    left_owns = @services.cleanup_bearing_type.call(left_type_info)
-    right_owns = @services.cleanup_bearing_type.call(right_type_info.element_type)
+    alloc = self.pipeline_result_alloc.call
+    left_owns = self.cleanup_bearing_type.call(left_type_info)
+    right_owns = self.cleanup_bearing_type.call(right_type_info.element_type)
     pred_mir = join_predicate_mir(list_node, join_node)
-    label = @services.next_label.call
-    source_mir = @services.visit_mir.call(list_node)
-    @services.set_current_label.call(label)
+    label = self.next_label.call
+    source_mir = self.visit_mir.call(list_node)
+    self.set_current_label.call(label)
 
     left_value = left_owns ? MIR::Ident.new("__jl_owned") : MIR::Ident.new("__jl")
     right_value = MIR::Ident.new("__match")
@@ -416,7 +408,7 @@ class PipelineListLowerer
             MIR::BreakStmt.new(nil, nil),
           ], nil),
         ], nil),
-        *(left_owns ? @services.owning_pipeline_temp_stmts.call("__jl_owned", MIR::Ident.new("__jl"), left_type_info, left_zig, alloc) : []),
+        *(left_owns ? self.owning_pipeline_temp_stmts.call("__jl_owned", MIR::Ident.new("__jl"), left_type_info, left_zig, alloc) : []),
         MIR::ExprStmt.new(MIR::MethodCall.new(
           MIR::Ident.new("res_list"), "append",
            [MIR::AllocatorRef.new(alloc),
@@ -434,10 +426,10 @@ class PipelineListLowerer
   sig { params(site: PipelineSite, tap_op: AST::TapOp).returns(MIR::BlockExpr) }
   def lower_tap(site, tap_op)
     list_node = site.list
-    label = @services.next_label.call
-    source_mir = @services.visit_mir.call(list_node)
-    @services.set_current_label.call(label)
-    body_mir = @services.visit_body.call(tap_op.body, "__tap_item")
+    label = self.next_label.call
+    source_mir = self.visit_mir.call(list_node)
+    self.set_current_label.call(label)
+    body_mir = self.visit_body.call(tap_op.body, "__tap_item")
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__tap_src", source_mir, false, nil, nil),
@@ -450,7 +442,7 @@ class PipelineListLowerer
 
   sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node) }
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
-    @services.visit_expr.call(list_node, expr_node, placeholder)
+    self.visit_expr.call(list_node, expr_node, placeholder)
   end
 
   sig { params(list_node: AST::Node, join_node: AST::JoinOp).returns(MIR::Node) }
@@ -461,11 +453,11 @@ class PipelineListLowerer
       left_param = params[0].name
       right_param = params[1].name
       join_params = T.let({ left_param => "__jl", right_param => "__jr" }, T::Hash[String, String])
-      return @services.visit_join_lambda.call(T.cast(key_expr.body, AST::Node), join_params)
+      return self.visit_join_lambda.call(T.cast(key_expr.body, AST::Node), join_params)
     end
 
-    left_key_mir = @services.visit_expr.call(list_node, key_expr, "__jl")
-    right_key_mir = @services.visit_expr.call(list_node, key_expr, "__jr")
+    left_key_mir = self.visit_expr.call(list_node, key_expr, "__jl")
+    right_key_mir = self.visit_expr.call(list_node, key_expr, "__jr")
     MIR::Call.new("CheatLib.eql", [left_key_mir, right_key_mir], false)
   end
 
@@ -476,7 +468,7 @@ class PipelineListLowerer
       marks.concat(MIR::OwnershipTransferPlan.new(
         name: "__jl_owned",
         target: :owned_sink,
-        target_alloc: @services.pipeline_result_alloc.call,
+        target_alloc: self.pipeline_result_alloc.call,
         move_guarded: true,
       ).marks)
     end
@@ -484,7 +476,7 @@ class PipelineListLowerer
       marks.concat(MIR::OwnershipTransferPlan.new(
         name: "__match",
         target: :owned_sink,
-        target_alloc: @services.pipeline_result_alloc.call,
+        target_alloc: self.pipeline_result_alloc.call,
         move_guarded: true,
       ).marks)
     end
