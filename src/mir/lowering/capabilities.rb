@@ -379,9 +379,19 @@ module MIRLoweringCapabilities
     materialization.add_fallible_clause(build_fallible_clause_mir(context.var_name, context.alias_name, clause))
   end
 
-  sig { params(var_node: CapabilityVarNode).returns(String) }
-  def with_capability_source_zig(var_node)
+  sig { params(var_node: CapabilityVarNode, raw_atomic: T::Boolean).returns(String) }
+  def with_capability_source_zig(var_node, raw_atomic: false)
     lowerer = T.cast(self, MIRLowering)
+    if raw_atomic
+      prev_raw = lowerer.capability_state.atomic_emit_raw
+      lowerer.capability_state.atomic_emit_raw = true
+      begin
+        return T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
+      ensure
+        lowerer.capability_state.atomic_emit_raw = prev_raw
+      end
+    end
+
     T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
   end
 
@@ -467,9 +477,11 @@ module MIRLoweringCapabilities
 
   sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
   def borrowed_const_param_alias?(context, is_param)
+    return false unless is_param
+    return false unless context.var_sync.nil? || context.var_sync == :local
+
     sym = context.var_node.symbol
-    is_param && (context.var_sync.nil? || context.var_sync == :local) &&
-      sym && !sym.mutable
+    !!(sym && !sym.mutable)
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }
@@ -513,7 +525,7 @@ module MIRLoweringCapabilities
     any_mutable = with_capability_specs(context.node).any? { |cap| cap[:capability] == :SNAPSHOT && cap[:alias_mutable] }
     return nil if any_mutable
 
-    source_zig = with_capability_source_zig(context.var_node)
+    source_zig = with_capability_source_zig(context.var_node, raw_atomic: true)
     safe_alias = safe_with_capability_alias(context.alias_name)
     guard_var = "__#{context.var_name}_snap_#{context.node.object_id.abs}"
     MIR::SnapshotRead.new(with_match_unwrap_value(source_zig), context.rt_name, safe_alias, guard_var, nil)

@@ -564,12 +564,15 @@ module Annotator
         T.bind(self, SemanticAnnotator)
         raw_payload = match_union_schema(plan).variants[variant_name]
         if Schemas.inline_struct?(raw_payload)
+          inline_payload = T.cast(raw_payload, Schemas::InlineStructVariant)
           return Schemas::StructSchema.new(
-            fields: raw_payload.fields.transform_values { |t| AST::StructField.new(type: t) },
+            fields: inline_payload.fields.transform_values { |t| AST::StructField.new(type: t) },
           )
         end
 
-        payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
+        return nil unless raw_payload.is_a?(Type)
+
+        payload_type_sym = raw_payload.resolved
         payload_type_sym = plan.union_subst.fetch(payload_type_sym, payload_type_sym)
         T.cast(lookup_type_schema(payload_type_sym), T.nilable(MatchSchema))
       end
@@ -584,7 +587,7 @@ module Annotator
             emit_unknown_destructure_field!(node, field, struct_schema, variant_name)
             next
           end
-          field_type = struct_schema.fields[field.name].type
+          field_type = struct_schema.fields.fetch(field.name).type
           current_scope.declare(field.name, nil, field_type, false, false, nil, :stack)
           og_declare(field.name, nil, field_type)
         end

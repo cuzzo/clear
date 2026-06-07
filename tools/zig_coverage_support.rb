@@ -148,7 +148,11 @@ module ZigCoverageSupport
     paths = []
     Find.find(kcov_dir) do |path|
       if File.directory?(path)
-        Find.prune if File.basename(path) == "kcov-merged"
+        if File.basename(path) == "kcov-merged"
+          xml_path = File.join(path, "cobertura.xml")
+          paths << xml_path if File.file?(xml_path)
+          Find.prune
+        end
         next
       end
 
@@ -164,7 +168,7 @@ module ZigCoverageSupport
       return
     end
 
-    payload = removals.map do |removal|
+    payload = removals.uniq.map do |removal|
       {
         "file" => removal.file,
         "function" => removal.function,

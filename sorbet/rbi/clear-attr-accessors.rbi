@@ -1320,9 +1320,9 @@ class FunctionReturn
 end
 
 class FunctionSignature
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def alloc_fault; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def alloc_fault=(value); end
   sig { returns(T.untyped) }
   def arg_spec; end
@@ -1336,85 +1336,91 @@ class FunctionSignature
   def arity; end
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def arity=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def can_fail; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def can_fail=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(EffectSet)) }
   def effects; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(EffectSet)).returns(T.nilable(EffectSet)) }
   def effects=(value); end
   sig { returns(T.nilable(IntrinsicEmit)) }
   def emit; end
   sig { params(value: T.nilable(IntrinsicEmit)).returns(T.nilable(IntrinsicEmit)) }
   def emit=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def error_fallible; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def error_fallible=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def extern; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def extern=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(ExternEffects) }
   def extern_effects; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: ExternEffects).returns(ExternEffects) }
   def extern_effects=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def fn_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
   def fn_type_params=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
+  def heap_carry_return; end
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  def heap_carry_return=(value); end
+  sig { returns(T.nilable(T::Set[String])) }
+  def heap_carry_return_vars; end
+  sig { params(value: T.nilable(T::Set[String])).returns(T.nilable(T::Set[String])) }
+  def heap_carry_return_vars=(value); end
+  sig { returns(T::Boolean) }
   def intrinsic; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def intrinsic=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def module_alias; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
   def module_alias=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def needs_rt; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def needs_rt=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def owner_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
   def owner_type=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def owner_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
   def owner_type_params=(value); end
   sig { returns(T.untyped) }
   def params; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def reentrant; end
-  sig { returns(T.untyped) }
+  sig { returns(RequiresMap) }
   def requires; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def requires=(value); end
   sig { returns(FunctionReturn) }
   def return_def; end
   sig { params(value: FunctionReturn).returns(FunctionReturn) }
   def return_def=(value); end
   sig { returns(T::Array[LifetimeSource]) }
   def return_lifetime; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def return_strategy; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def return_strategy=(value); end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def stack_tier; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def stack_tier=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def visibility; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T.any(String, Symbol))) }
   def zig_pattern; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T.any(String, Symbol))).returns(T.nilable(T.any(String, Symbol))) }
   def zig_pattern=(value); end
 end
 
@@ -1618,6 +1624,8 @@ end
 class MIRPass
   sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   def cleanup_bindings; end
+  sig { returns(EscapeAnalysis::EscapePlacementFacts) }
+  def escape_placement_facts; end
 end
 
 class MIRPassState
@@ -1816,7 +1824,7 @@ class Schemas::StructSchema
   def as_type; end
   sig { returns(T.untyped) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
   sig { returns(T.untyped) }
   def methods; end
@@ -1829,7 +1837,7 @@ end
 class Schemas::UnionSchema
   sig { returns(T.untyped) }
   def type_params; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::UnionSchema::VariantMap) }
   def variants; end
   sig { returns(T.untyped) }
   def visibility; end
@@ -1926,7 +1934,7 @@ class StructSchema
   def as_type; end
   sig { returns(T.untyped) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
   sig { returns(T.untyped) }
   def methods; end
@@ -1943,21 +1951,21 @@ class SymbolEntry
   def async_result_shape=(value); end
   sig { returns(Integer) }
   def binding_id; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Set[Symbol]) }
   def capabilities; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Set[Symbol]).returns(T::Set[Symbol]) }
   def capabilities=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(String)) }
   def close_zig; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
   def close_zig=(value); end
   sig { returns(T::Boolean) }
   def is_param; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def is_param=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def layout; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value); end
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
@@ -1965,9 +1973,9 @@ class SymbolEntry
   def link_source; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def link_source=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def mutable; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutable=(value); end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
@@ -1977,17 +1985,17 @@ class SymbolEntry
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def rebindable; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def rebindable=(value); end
   sig { returns(T.untyped) }
   def reg; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reg=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def resource; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def resource=(value); end
   sig { returns(T.nilable(Scope)) }
   def scope; end
@@ -1997,17 +2005,17 @@ class SymbolEntry
   def scope_depth; end
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def scope_depth=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def size; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def size=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def storage; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Symbol).returns(Symbol) }
   def storage=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def sync; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def sync=(value); end
   sig { returns(T.untyped) }
   def sync_families; end
@@ -2110,7 +2118,7 @@ end
 class UnionSchema
   sig { returns(T.untyped) }
   def type_params; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::UnionSchema::VariantMap) }
   def variants; end
   sig { returns(T.untyped) }
   def visibility; end

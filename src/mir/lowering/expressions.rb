@@ -1304,7 +1304,7 @@ module MIRLoweringExpressions
     when Schemas::StructSchema
       struct_subst = struct_lit_type_subst(schema, node)
       schema.fields.each_with_object({}) do |(k, f), h|
-        raw = f.respond_to?(:type) ? f.type : f
+        raw = f.is_a?(AST::StructField) ? f.type : f
         h[k.to_s] = substitute_mir_type(raw, struct_subst)
       end
     else

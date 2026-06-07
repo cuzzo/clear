@@ -265,7 +265,7 @@ RSpec.describe "coverage gap tools" do
     File.write(hidden_xml, orphan_xml)
     File.write(merged_xml, orphan_xml)
 
-    expect(ZigCoverageSupport.coverage_xml_paths(kcov_root)).to eq([hidden_xml])
+    expect(ZigCoverageSupport.coverage_xml_paths(kcov_root)).to eq([hidden_xml, merged_xml])
     allow(ZigCoverageSanitizer).to receive(:symbol_names_for).and_return([])
 
     ZigCoverageSupport.sanitize_coverage_run!(kcov_root, File.join(@tmp, "zig-test-bin"))
@@ -283,7 +283,7 @@ RSpec.describe "coverage gap tools" do
     )
     merged = REXML::Document.new(File.read(merged_xml))
     merged_lines = REXML::XPath.match(merged, "//class[@filename='runtime/runtime-header.zig']/lines/line")
-    expect(merged_lines.map { |line| line.attributes["number"].to_i }).to eq([hit_line])
+    expect(merged_lines).to be_empty
   end
 
   it "does not remove orphan runtime-header hits without binary provenance" do
