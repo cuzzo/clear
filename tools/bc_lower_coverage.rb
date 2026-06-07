@@ -166,7 +166,7 @@ files.each_with_index do |path, index|
   begin
     imp = ModuleImporter.new(base_dir: dir, use_mir: true)
     fe  = CompilerFrontend.compile(File.read(path), importer: imp, source_dir: dir)
-    lo  = MIRLowering.new(
+    lo  = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas:   fe.struct_schemas,
       enum_schemas:     fe.enum_schemas,
       union_schemas:    fe.union_schemas,
@@ -175,7 +175,7 @@ files.each_with_index do |path, index|
       importer:         imp,
       source_dir:       dir,
       target:           :bc
-    )
+    ))
     lo.lower_program(fe.ast)
     lowered += 1
   rescue StandardError, ScriptError

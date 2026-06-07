@@ -41,7 +41,7 @@ module FsmLowering
     const :exit_kind, Symbol
   end
 
-  sig { returns(T.nilable(T::Hash[String, String])) }
+  sig { returns(T::Hash[String, String]) }
   def fsm_fn_name_rename_map
     T.bind(self, MIRLowering) rescue nil
     function_state.fn_name_rename_map
@@ -50,16 +50,13 @@ module FsmLowering
   sig { returns(T::Hash[String, CleanupEntry]) }
   def fsm_current_bindings
     T.bind(self, MIRLowering) rescue nil
-    function_state.current_bindings || {}
+    function_state.current_bindings
   end
 
   sig { returns(T::Hash[String, T::Boolean]) }
   def fsm_guarded_cleanup_names
     T.bind(self, MIRLowering) rescue nil
-    existing = function_state.guarded_cleanup_names
-    names = T.let(existing || {}, T::Hash[String, T::Boolean])
-    function_state.guarded_cleanup_names = names
-    names
+    function_state.guarded_cleanup_names
   end
 
   sig { params(name: String).returns(String) }
@@ -216,7 +213,7 @@ module FsmLowering
       body.each do |node|
         next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
         node_name = node.name.to_s
-        rendered_name = rename_map&.[](node_name) || node_name
+        rendered_name = rename_map.fetch(node_name, node_name)
         next unless node_name == fact.name || rendered_name == fact.name
 
         node.cleanup_entry[:has_moved_guard] = true
@@ -249,7 +246,7 @@ module FsmLowering
     result_type = Type.from_node!(ast_node, context: "FSM result owner")
     if result_owner.is_a?(MIR::Ident) && T.unsafe(self).ownership_tracked_transfer_type?(result_type)
       owner_name = result_owner.name.to_s
-      owner_name = rename_map[owner_name] if rename_map&.key?(owner_name)
+      owner_name = rename_map.fetch(owner_name, owner_name)
       mir_entry = bindings[result_owner.name.to_s] || bindings[owner_name] || CleanupEntry::NONE
       if mir_entry.present?
         mir_entry[:has_moved_guard] = true
@@ -265,7 +262,7 @@ module FsmLowering
     consumed = fsm_ast_result_consumed_roots(ast_node)
     consumed.each do |name|
       safe = fsm_zig_safe_name(name.to_s)
-      safe = rename_map[safe] if rename_map&.key?(safe)
+      safe = rename_map.fetch(safe, safe)
       binding_entry = bindings[name.to_s] || bindings[safe.to_s] || CleanupEntry::NONE
       next unless binding_entry.present?
       guarded = binding_entry.has_moved_guard? || guarded_cleanup_names[safe.to_s] == true
@@ -315,7 +312,7 @@ module FsmLowering
     ti = node.full_type!(context: "FSM owned transfer identifier")
     return false unless T.unsafe(self).ownership_tracked_transfer_type?(ti)
     safe = fsm_zig_safe_name(node.name.to_s)
-    safe = rename_map[safe] if rename_map&.key?(safe)
+    safe = rename_map.fetch(safe, safe)
     entry = bindings[node.name.to_s] || bindings[safe.to_s] || CleanupEntry::NONE
     (entry.present? && entry.heap?) || node.symbol&.heap_storage? == true
   end
@@ -552,7 +549,6 @@ module FsmLowering
     when :block
       prev_bg_ptr_caps = capture_state.current_bg_pointer_captures
       capture_state.current_bg_pointer_captures = pointer_captures
-      function_state.pending_stmts = T.let(function_state.pending_stmts, T.nilable(T::Array[MIR::Stmt]))
       prev_fiber_pending = function_state.pending_stmts
       function_state.pending_stmts = []
       block_code = with_fiber_capture_map(capture_map, rt_override: bg_rt) do

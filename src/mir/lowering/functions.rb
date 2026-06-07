@@ -171,18 +171,18 @@ module MIRLoweringFunctions
     extend T::Sig
 
     prop :current_function_context, T.nilable(FunctionLoweringContext), default: nil
-    prop :pending_stmts, T.nilable(T::Array[MIR::Stmt]), default: []
+    prop :pending_stmts, T::Array[MIR::Stmt], factory: -> { [] }
     prop :current_decl_alloc, T.nilable(Symbol), default: nil
     prop :current_expected_type, T.nilable(Type), default: nil
     prop :current_sink_type, T.nilable(Type), default: nil
-    prop :current_bindings, T.nilable(CleanupBindingMap), default: {}
-    prop :current_binding_types, T.nilable(BindingTypeMap), default: {}
-    prop :fn_alloc_marked_names, T.nilable(BoolNameMap), default: nil
-    prop :lowered_alloc_names, T.nilable(NameSet), default: Set.new
-    prop :lowered_guarded_cleanup_names, T.nilable(NameSet), default: Set.new
-    prop :decl_zig_name_map, T.nilable(DeclNameMap), default: nil
-    prop :guarded_cleanup_names, T.nilable(BoolNameMap), default: nil
-    prop :fn_name_rename_map, T.nilable(T::Hash[String, String]), default: nil
+    prop :current_bindings, CleanupBindingMap, factory: -> { {} }
+    prop :current_binding_types, BindingTypeMap, factory: -> { {} }
+    prop :fn_alloc_marked_names, BoolNameMap, factory: -> { {} }
+    prop :lowered_alloc_names, NameSet, factory: -> { Set.new }
+    prop :lowered_guarded_cleanup_names, NameSet, factory: -> { Set.new }
+    prop :decl_zig_name_map, DeclNameMap, factory: -> { {} }
+    prop :guarded_cleanup_names, BoolNameMap, factory: -> { {} }
+    prop :fn_name_rename_map, T::Hash[String, String], factory: -> { {} }
 
     sig { params(context: FunctionLoweringContext).void }
     def activate!(context)
@@ -207,98 +207,33 @@ module MIRLoweringFunctions
       current_decl_heap? ? :heap : :frame
     end
 
-    sig { returns(T::Array[MIR::Stmt]) }
-    def pending!
-      current = pending_stmts
-      return current if current
-
-      fresh = T.let([], T::Array[MIR::Stmt])
-      self.pending_stmts = fresh
-      fresh
-    end
-
     sig { returns(CleanupBindingMap) }
-    def bindings!
-      current = current_bindings
-      return current if current
-
-      fresh = T.let({}, CleanupBindingMap)
-      self.current_bindings = fresh
-      fresh
+    def bindings
+      current_bindings
     end
 
     sig { returns(BindingTypeMap) }
-    def binding_types!
-      current = current_binding_types
-      return current if current
-
-      fresh = T.let({}, BindingTypeMap)
-      self.current_binding_types = fresh
-      fresh
+    def binding_types
+      current_binding_types
     end
 
     sig { returns(BoolNameMap) }
-    def alloc_marked_names!
-      current = fn_alloc_marked_names
-      return current if current
-
-      fresh = T.let({}, BoolNameMap)
-      self.fn_alloc_marked_names = fresh
-      fresh
-    end
-
-    sig { returns(NameSet) }
-    def lowered_alloc_names!
-      current = lowered_alloc_names
-      return current if current
-
-      fresh = T.let(Set.new, NameSet)
-      self.lowered_alloc_names = fresh
-      fresh
-    end
-
-    sig { returns(NameSet) }
-    def lowered_guarded_cleanup_names!
-      current = lowered_guarded_cleanup_names
-      return current if current
-
-      fresh = T.let(Set.new, NameSet)
-      self.lowered_guarded_cleanup_names = fresh
-      fresh
+    def alloc_marked_names
+      fn_alloc_marked_names
     end
 
     sig { returns(DeclNameMap) }
-    def decl_zig_names!
-      current = decl_zig_name_map
-      return current if current
-
-      fresh = T.let({}, DeclNameMap)
-      self.decl_zig_name_map = fresh
-      fresh
-    end
-
-    sig { returns(BoolNameMap) }
-    def guarded_cleanup_names!
-      current = guarded_cleanup_names
-      return current if current
-
-      fresh = T.let({}, BoolNameMap)
-      self.guarded_cleanup_names = fresh
-      fresh
+    def decl_zig_names
+      decl_zig_name_map
     end
 
     sig { returns(T::Hash[String, String]) }
-    def rename_map!
-      current = fn_name_rename_map
-      return current if current
-
-      fresh = T.let({}, T::Hash[String, String])
-      self.fn_name_rename_map = fresh
-      fresh
+    def rename_map
+      fn_name_rename_map
     end
   end
 
-  sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
+  sig { params(node: AST::ExternFnDecl).returns(MIR::Node) }
   def lower_extern_fn(node)
     T.bind(self, MIRLowering) rescue nil
     mod = node.from_module
@@ -313,7 +248,7 @@ module MIRLoweringFunctions
     end
   end
 
-  sig { params(node: AST::ExternStructDecl).returns(T.untyped) }
+  sig { params(node: AST::ExternStructDecl).returns(T.any(MIR::Node, T::Array[MIR::Node])) }
   def lower_extern_struct(node)
     T.bind(self, MIRLowering) rescue nil
     if node.from_module
@@ -321,7 +256,7 @@ module MIRLoweringFunctions
       mod_parts = mod.split(".")
       mod_alias = mod.gsub(".", "_")
 
-      items = []
+      items = T.let([], T::Array[MIR::Node])
       if program_state.emitted_extern_modules.add?(mod)
         member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
         module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(mod_parts.first) ? mod_parts.first : "#{mod_parts.first}.zig"
@@ -330,7 +265,7 @@ module MIRLoweringFunctions
       # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
       zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
       items << MIR::TypeAlias.new(node.name, zig_rhs)
-      items.length == 1 ? items.first : items
+      items.length == 1 ? T.must(items.first) : items
     elsif node.field_decls.empty?
       MIR::Noop.new("empty_local_extern_struct")
     else
@@ -426,7 +361,7 @@ module MIRLoweringFunctions
       body_mir = takes_mir + pointer_param_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
     else
       pre_checks = lower_pre_clauses(node)
-      body_mir = takes_mir + pointer_param_mir + pre_checks + T.must(lower_body(node.body))
+      body_mir = takes_mir + pointer_param_mir + pre_checks + lower_body(node.body)
     end
     body_mir = append_ownership_transfers_for_mir_body(body_mir)
     if !fn_can_fail && body_has_faulting_alloc?(body_mir)
@@ -807,7 +742,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     out = T.let([], T::Array[MIR::Node])
     node.params.select(&:takes).each do |p|
-      entry = function_state.bindings![p.name.to_s] || CleanupEntry::NONE
+      entry = function_state.bindings[p.name.to_s] || CleanupEntry::NONE
       ti = p.type || Type.new(:Any)
       next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.heap?)
 
@@ -817,7 +752,7 @@ module MIRLoweringFunctions
       mark = MIR::AllocMark.new(p.name.to_s, alloc, ti, scope)
       if entry.needs_cleanup?
         build_drop_entry!(drop_entry, ti, nil)
-        function_state.guarded_cleanup_names![zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
+        function_state.guarded_cleanup_names[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
         out.concat(MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)).statements)
       else
         out.concat(MIR::MaterializationPacket.markers(mark).statements)
@@ -830,8 +765,8 @@ module MIRLoweringFunctions
   def record_lowered_entry_markers!(nodes)
     T.bind(self, MIRLowering) rescue nil
     nodes.each do |node|
-      function_state.lowered_alloc_names! << node.name.to_s if node.is_a?(MIR::AllocMark)
-      function_state.lowered_guarded_cleanup_names! << node.name.to_s if (node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)) && node.cleanup_entry.has_moved_guard?
+      function_state.lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      function_state.lowered_guarded_cleanup_names << node.name.to_s if (node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)) && node.cleanup_entry.has_moved_guard?
     end
   end
 
@@ -951,9 +886,9 @@ module MIRLoweringFunctions
       filter_messages  = clause.filter_messages
 
       clause_mir = lower_body(clause.body)
-      clause_body = T.let(T.must(clause_mir), T::Array[MIR::Node])
+      clause_body = T.let(clause_mir, T::Array[MIR::Node])
       clause_bodies << clause_body
-      clause_body_zig = T.must(clause_mir).map { |m| emit_expr(m) }.join("\n            ")
+      clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
 
       # Item side — kinds ORed with types.
       item_checks = []
@@ -986,7 +921,7 @@ module MIRLoweringFunctions
     default_code = if has_default_catch?(node)
       # Use lower_body for the same reason as above.
       default_mir = lower_body(default_catch_body(node))
-      default_body_mir = T.let(T.must(default_mir), T::Array[MIR::Node])
+      default_body_mir = T.let(default_mir, T::Array[MIR::Node])
       clause_bodies << default_body_mir
       default_body = default_body_mir.map { |m| emit_expr(m) }.join("\n            ")
       " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
@@ -1221,7 +1156,7 @@ module MIRLoweringFunctions
       end
       root = moved_arg_root(arg)
       next unless root
-      entry = function_state.bindings![root] || CleanupEntry::NONE
+      entry = function_state.bindings[root] || CleanupEntry::NONE
       next unless entry.present?
       consumed << transfer_binding_name(root)
       operands << MIR::OwnershipOperandFact.owned_binding(transfer_binding_name(root), arg_type, "call argument #{idx}", sink_alloc)
@@ -1912,10 +1847,10 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return nil if consumed_names.empty?
 
-    pending_stmts = function_state.pending!
+    pending_stmts = function_state.pending_stmts
     allocs = consumed_names.filter_map do |name|
       mark = T.cast(pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }, T.nilable(MIR::AllocMark))
-        mark&.alloc || function_state.bindings![name.to_s]&.alloc
+        mark&.alloc || function_state.bindings[name.to_s]&.alloc
     end.uniq
     allocs.length == 1 ? allocs.first : nil
   end
@@ -2082,7 +2017,7 @@ module MIRLoweringFunctions
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[String], arg_field_types: T.nilable(T::Array[T.nilable(String)]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.nilable(AST::Node)).returns(MIR::ZigTemplate) }
+  sig { params(id: MIRLoweringGeneratedId, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[String], arg_field_types: T.nilable(T::Array[T.nilable(String)]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.nilable(AST::Node)).returns(MIR::ZigTemplate) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
     T.bind(self, MIRLowering) rescue nil
     ret_t = return_type

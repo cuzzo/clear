@@ -30,7 +30,7 @@ RSpec.describe "pipeline legacy matrix" do
       $stderr = old_stderr
     end
 
-    MIRLowering.new(
+    MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
@@ -39,7 +39,7 @@ RSpec.describe "pipeline legacy matrix" do
       importer: importer,
       source_dir: Dir.pwd,
       target: :zig
-    ).lower_program(result.ast)
+    )).lower_program(result.ast)
   end
 
   def collect_inline_zig_reasons(root)

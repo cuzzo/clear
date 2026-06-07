@@ -207,7 +207,7 @@ begin
   frontend = CompilerFrontend::Result.new(ast, annotator, fn_nodes, fn_sigs, struct_schemas, enum_schemas, union_schemas, moved_guard_info)
 
   unless options[:mode] == "frontend-only"
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
@@ -215,7 +215,7 @@ begin
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,
       source_dir: source_dir,
-    )
+    ))
     program = timed_phase("lower", sampler, timings) { lowering.lower_module(frontend.ast) }
     items = (program[:items] + program[:type_items]).flatten
     fns = items.select { |item| item.is_a?(MIR::FnDef) }

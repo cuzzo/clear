@@ -525,8 +525,6 @@ class PipelineRangeLowerer
       all_fold_plan(prefix, fold_op, names)
     when AST::FindOp
       find_fold_plan(prefix, fold_op, smooth_node, names)
-    else
-      raise "unsupported range fold op #{fold_op.class}"
     end
   end
 
@@ -819,7 +817,7 @@ class PipelineRangeLowerer
     when :none
       []
     else
-      []
+      raise "unsupported observable publish expr #{spec.expr}"
     end
 
     callable_contract = if spec.transfers_item_on_success && source_elem && pipeline_element_owns_heap?(source_elem)
@@ -850,7 +848,7 @@ class PipelineRangeLowerer
         [MIR::IfStmt.new(pred_mir, [call], nil), *item_cleanup]
       end
     else
-      [call]
+      raise "unsupported observable publish gate #{spec.gate}"
     end
 
     lower_range_fold_observable(p, smooth_node, label, source_node,

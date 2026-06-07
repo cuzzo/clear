@@ -44,7 +44,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     ensure
       $stdout, $stderr = out, err
     end
-    low = MIRLowering.new(
+    low = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: fe.struct_schemas,
       enum_schemas: fe.enum_schemas,
       union_schemas: fe.union_schemas,
@@ -52,7 +52,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       moved_guard_info: fe.moved_guard_info,
       importer: importer,
       source_dir: Dir.pwd # default Zig target; :bc skips InlineZig checks
-    )
+    ))
     low.lower_program(fe.ast)
   end
 

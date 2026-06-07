@@ -281,7 +281,7 @@ def print_concurrency_report(paths)
     source_dir = File.dirname(abs)
     importer = ModuleImporter.new(base_dir: source_dir)
     fe = CompilerFrontend.compile(src, importer: importer, source_dir: source_dir)
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: fe.struct_schemas,
       enum_schemas: fe.enum_schemas,
       union_schemas: fe.union_schemas,
@@ -290,7 +290,7 @@ def print_concurrency_report(paths)
       importer: importer,
       source_dir: source_dir,
       target: :bc
-    )
+    ))
     program = lowering.lower_program(fe.ast)
     emitter = RegisterBcEmitter.new(fe, source: src, importer: importer)
     begin

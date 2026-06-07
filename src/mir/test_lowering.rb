@@ -94,7 +94,7 @@ module TestLowering
 
       (when_block.benchmarks || []).each do |b|
         name = "#{ctx.test_name}: #{when_desc}: benchmark#{tag_suffix}"
-        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + T.must(when_setup_mir) + [lower(b)]
+        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + when_setup_mir + [lower(b)]
         tests << MIR::TestDef.new(name, body)
       end
 
@@ -172,7 +172,7 @@ module TestLowering
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
-    function_state.current_bindings = prev
+    function_state.current_bindings = T.must(prev)
   end
 
   # Per-TEST-block context object — pre-lowered TEST-level data
@@ -218,7 +218,7 @@ module TestLowering
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
       (bodies || []).each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
-        tests << MIR::TestDef.new(name, [fresh_preamble] + T.must(@lowering.lower_body(body)))
+        tests << MIR::TestDef.new(name, [fresh_preamble] + @lowering.lower_body(body))
       end
     end
   end
@@ -383,8 +383,8 @@ module TestLowering
     name = node.name
     return [] unless name.is_a?(String)
     decl = node.symbol&.reg
-    renamed = (decl && function_state.decl_zig_names![decl.object_id]) ||
-              function_state.rename_map![name] ||
+    renamed = (decl && function_state.decl_zig_names[decl.object_id]) ||
+              function_state.rename_map[name] ||
               name
     [renamed]
   end

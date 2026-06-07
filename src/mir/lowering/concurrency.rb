@@ -99,11 +99,11 @@ module MIRLoweringConcurrency
     prev_bg_ptr_caps = capture_state.current_bg_pointer_captures
     prev_fiber_pending = function_state.pending_stmts
     capture_state.current_bg_pointer_captures = pointer_captures
-    function_state.pending_stmts = T.let([], T.nilable(T::Array[MIR::Stmt]))
+    function_state.pending_stmts = []
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
-    function_state.pending_stmts = T.let(prev_fiber_pending, T.nilable(T::Array[MIR::Stmt]))
+    function_state.pending_stmts = T.must(prev_fiber_pending)
     capture_state.current_bg_pointer_captures = prev_bg_ptr_caps
   end
 
@@ -163,7 +163,7 @@ module MIRLoweringConcurrency
     out = base.dup
     (analysis&.capture_symbols || {}).each do |name, sym|
       decl = sym&.reg
-      mapped = decl ? function_state.decl_zig_names![decl.object_id] : nil
+      mapped = decl ? function_state.decl_zig_names[decl.object_id] : nil
       out[name.to_s] ||= mapped if mapped
     end
     out
@@ -177,8 +177,8 @@ module MIRLoweringConcurrency
     T.unsafe(self).append_ownership_transfers_for_mir_body(body)
   ensure
     T.bind(self, MIRLowering) rescue nil
-    function_state.lowered_alloc_names = prev_alloc_names
-    function_state.lowered_guarded_cleanup_names = prev_guarded_names
+    function_state.lowered_alloc_names = T.must(prev_alloc_names)
+    function_state.lowered_guarded_cleanup_names = T.must(prev_guarded_names)
   end
 
   sig { params(node: T.untyped, receiver: String).returns(T::Boolean) }
@@ -296,7 +296,7 @@ module MIRLoweringConcurrency
       # access prefix (no per-id suffix).
       caps = FiberCtxBuilder.build(analysis,
                                    body_access_prefix: "ctx",
-                                   fresh_heap_id: (id * 1000) + i,
+                                   fresh_heap_id: (id.value * 1000) + i,
                                    source_overrides: fiber_capture_source_overrides(analysis),
                                    schema_lookup: mir_schema_lookup)
 
@@ -433,7 +433,7 @@ module MIRLoweringConcurrency
                                  body_access_prefix: "__ctx_#{id}",
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
-                                 fresh_heap_id: id,
+                                 fresh_heap_id: id.value,
                                  source_overrides: outer_capture_map,
                                  schema_lookup: mir_schema_lookup)
 
@@ -491,7 +491,7 @@ module MIRLoweringConcurrency
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
-    bg_site_id = id + 1
+    bg_site_id = id.value + 1
     bg_site_line = node.token&.line || 0
     bg_site_col = node.token&.column || 0
 
@@ -520,7 +520,7 @@ module MIRLoweringConcurrency
       transform_ctx = {
         node: node,
         blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,
-        id: id, bg_rt: bg_rt, capture_fields: capture_fields,
+        id: id.value, bg_rt: bg_rt, capture_fields: capture_fields,
         captured: captured, capture_close_zig: capture_close_zig,
         pointer_captures: pointer_captures,
         stmt_code: stmt_code, result_line: result_line,
@@ -602,7 +602,7 @@ module MIRLoweringConcurrency
       analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
       pointer_captures: T::Set[String],
       bg_rt: String,
-      id: Integer,
+      id: MIRLoweringGeneratedId,
       is_void: T::Boolean,
       inner_t: Type,
     ).returns(BgBodyMaterialization)
@@ -640,7 +640,7 @@ module MIRLoweringConcurrency
     steps
   end
 
-  sig { params(node: AST::BgBlock, id: Integer, is_void: T::Boolean, inner_t: Type).returns(BgBodyMaterialization) }
+  sig { params(node: AST::BgBlock, id: MIRLoweringGeneratedId, is_void: T::Boolean, inner_t: Type).returns(BgBodyMaterialization) }
   def lower_bg_body_steps(node, id, is_void, inner_t)
     steps = bg_body_steps(node)
     last_step = steps.pop
@@ -695,7 +695,7 @@ module MIRLoweringConcurrency
     end
   end
 
-  sig { params(step: T.nilable(BgBodyStep), body_mir: T::Array[MIR::Node], id: Integer, is_void: T::Boolean, inner_t: Type).returns(String) }
+  sig { params(step: T.nilable(BgBodyStep), body_mir: T::Array[MIR::Node], id: MIRLoweringGeneratedId, is_void: T::Boolean, inner_t: Type).returns(String) }
   def lower_bg_result_step(step, body_mir, id, is_void, inner_t)
     return "" unless step
 
@@ -719,7 +719,7 @@ module MIRLoweringConcurrency
     pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
   end
 
-  sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node], id: Integer, inner_t: Type).returns(String) }
+  sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node], id: MIRLoweringGeneratedId, inner_t: Type).returns(String) }
   def lower_bg_value_result(step, body_mir, id, inner_t)
     T.bind(self, MIRLowering) rescue nil
     result_alloc = escaping_value_alloc(inner_t)
@@ -876,7 +876,7 @@ module MIRLoweringConcurrency
                                  body_access_prefix: "ctx",
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
-                                 fresh_heap_id: id,
+                                 fresh_heap_id: id.value,
                                  source_overrides: fiber_capture_source_overrides(analysis),
                                  schema_lookup: mir_schema_lookup)
 

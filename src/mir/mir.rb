@@ -291,6 +291,54 @@ module MIR
     end
   end
 
+  class LoweredNodeId < T::Struct
+    extend T::Sig
+
+    const :value, Integer
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      return false unless other.is_a?(LoweredNodeId)
+
+      other.value == value
+    end
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
+
+    sig { returns(Integer) }
+    def hash
+      value.hash
+    end
+
+  end
+
+  class LoweredBodyId < T::Struct
+    extend T::Sig
+
+    const :node_ids, T::Array[LoweredNodeId]
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def ==(other)
+      return false unless other.is_a?(LoweredBodyId)
+
+      other.node_ids == node_ids
+    end
+
+    sig { params(other: Object).returns(T::Boolean) }
+    def eql?(other)
+      self == other
+    end
+
+    sig { returns(Integer) }
+    def hash
+      node_ids.hash
+    end
+
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -321,6 +369,8 @@ module MIR
     def explicit_ownership_contract; nil; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
     attr_accessor :ownership_consumption
+    sig { returns(T.nilable(LoweredNodeId)) }
+    attr_accessor :lowered_node_id
 
     private
 
@@ -397,12 +447,28 @@ module MIR
   ZigTemplateArgs = T.type_alias { T.any(T::Array[Emittable], T::Hash[Symbol, Emittable]) }
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
 
-  sig { params(name: T.any(String, Symbol), value: Emittable).returns(NamedMirField) }
+  StructInitFieldValue = T.type_alias { T.any(String, Symbol, Emittable) }
+
+  class StructInitField < T::Struct
+    extend T::Sig
+
+    const :name, T.any(String, Symbol)
+    const :value, Emittable
+    const :alloc, T.nilable(Symbol), default: nil
+
+    sig { params(key: Symbol).returns(T.nilable(StructInitFieldValue)) }
+    def [](key)
+      case key
+      when :name then name
+      when :value then value
+      when :alloc then alloc
+      end
+    end
+  end
+
+  sig { params(name: T.any(String, Symbol), value: Emittable).returns(StructInitField) }
   def self.named_field(name, value)
-    field = T.let({}, NamedMirField)
-    field[:name] = name
-    field[:value] = value
-    field
+    StructInitField.new(name: name, value: value)
   end
 
   sig { params(expr: Emittable, capture: T.any(String, Symbol)).returns(NamedMirField) }
@@ -411,6 +477,30 @@ module MIR
     binding[:expr] = expr
     binding[:capture] = capture
     binding
+  end
+
+  sig { params(field: Object).returns(T.nilable(T.any(String, Symbol))) }
+  def self.struct_init_field_name(field)
+    return field.name if field.is_a?(StructInitField)
+    return T.cast(field[:name], T.nilable(T.any(String, Symbol))) if field.is_a?(Hash)
+
+    nil
+  end
+
+  sig { params(field: Object).returns(T.nilable(Emittable)) }
+  def self.struct_init_field_value(field)
+    return field.value if field.is_a?(StructInitField)
+    return T.cast(field[:value], T.nilable(Emittable)) if field.is_a?(Hash)
+
+    nil
+  end
+
+  sig { params(field: Object).returns(T.nilable(Symbol)) }
+  def self.struct_init_field_alloc(field)
+    return field.alloc if field.is_a?(StructInitField)
+    return T.cast(field[:alloc], T.nilable(Symbol)) if field.is_a?(Hash)
+
+    nil
   end
 
   sig { params(root: T.nilable(NodeRoot), blk: T.proc.params(arg0: Node).void).void }
@@ -487,7 +577,7 @@ module MIR
       @placeholders = T.let(placeholders.dup.freeze, T::Hash[T.any(Symbol, String), Symbol])
     end
 
-    sig { params(value: T.untyped).returns(T.nilable(InlineAllocMetadata)) }
+    sig { params(value: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
     def self.from(value)
       return nil unless value
       return value if value.is_a?(InlineAllocMetadata)
@@ -718,10 +808,25 @@ module MIR
 
   # Tagged union type definition.
   # Zig: const Name = union(enum) { A: type, B: void };
+  class UnionTypeVariant < T::Struct
+    extend T::Sig
+
+    const :name, T.any(String, Symbol)
+    const :zig_type, String
+
+    sig { params(key: Symbol).returns(T.nilable(T.any(String, Symbol))) }
+    def [](key)
+      case key
+      when :name then name
+      when :zig_type then zig_type
+      end
+    end
+  end
+
   UnionTypeDef = Struct.new(:name, :variants, :visibility) do
     include NamedEmittable
     include Stmt
-    # variants: [{ name: String, zig_type: String }]
+    # variants: [UnionTypeVariant] (legacy hash variants are still readable)
     # unit variants have zig_type "void"
   end
 
@@ -2802,12 +2907,13 @@ module MIR
     extend T::Sig
     include Expr
     # zig_type: String or nil (nil -> anonymous .{})
-    # fields: [{ name: String, value: MIR expr }]
+    # fields: [MIR::StructInitField] (legacy hash fields are still readable)
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      values = T.let([], T::Array[T.untyped])
+      values = T.let([], T::Array[Object])
       fields&.each do |field|
-        values << field[:value] if field.respond_to?(:[])
+        value = MIR.struct_init_field_value(field)
+        values << T.cast(value, Object) if value
       end
       compact_child_exprs(values)
     end
@@ -3462,7 +3568,7 @@ module MIR
       nil
     end
 
-    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
+    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(Object), allocs: T.nilable(Object), target_var: T.nilable(String)).void }
     def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
       super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
       @audit_metadata = T.let(InlineZigAuditMetadata.new(opaque_ownership_operations: false), InlineZigAuditMetadata)
@@ -3474,14 +3580,14 @@ module MIR
       self[:ownership_contract] = contract
     end
 
-    sig { params(allocs: T.untyped).returns(T.nilable(InlineAllocMetadata)) }
+    sig { params(allocs: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
     def allocs=(allocs)
       normalized = InlineAllocMetadata.from(allocs)
       self[:allocs] = normalized
       normalized
     end
 
-    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
+    sig { params(key: T.any(Symbol, Integer), value: Object).returns(Object) }
     def []=(key, value)
       validate_ownership_contract!(value) if key == :ownership_contract || key == 2
       value = InlineAllocMetadata.from(value) if key == :allocs || key == 4

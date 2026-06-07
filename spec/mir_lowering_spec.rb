@@ -17,7 +17,7 @@ RSpec.describe MIRLowering do
   let(:emitter) { MIREmitter.new }
 
   def lowering(**opts)
-    MIRLowering.new(**opts)
+    MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 
   def emit(mir_node)
@@ -282,7 +282,8 @@ RSpec.describe MIRLowering do
       fake.define_singleton_method(:ownership_marks_for_transferred_temp) { |_mir, target_alloc:| [] }
 
       body = []
-      result = fake.send(:lower_bg_value_result, step, body, 7, Type.new(:Int64))
+      id = MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: 7)
+      result = fake.send(:lower_bg_value_result, step, body, id, Type.new(:Int64))
       expect(result).to eq("__ctx_7.inner.result = compute();")
       expect(body).to include(an_instance_of(MIR::Set))
     end
@@ -1769,6 +1770,43 @@ RSpec.describe MIRLowering do
     end
   end
 
+  describe "indirect aggregate field ownership" do
+    it "moves recursive union locals when they are boxed into indirect inline-variant fields" do
+      src = <<~CLEAR
+        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+
+        FN mk() RETURNS !Node ->
+            left = Node{ One: COPY "a" };
+            right = Node{ One: COPY "b" };
+            RETURN Node.Pair{ left: left, right: right };
+        END
+      CLEAR
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+      low = lowering(
+        struct_schemas: result.struct_schemas,
+        enum_schemas: result.enum_schemas,
+        union_schemas: result.union_schemas,
+        fn_sigs: result.fn_sigs,
+        moved_guard_info: result.moved_guard_info,
+        importer: importer,
+        source_dir: Dir.pwd
+      )
+      program = low.lower_program(result.ast)
+      mk_fn = program.items.find { |item| item.is_a?(MIR::FnDef) && item.name == "mk" }
+      hoisted_return = mk_fn.body.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s.start_with?("__hoist_") }
+      block = hoisted_return.init
+
+      expect(block).to be_a(MIR::BlockExpr)
+      expect(block.body).to include(
+        an_instance_of(MIR::TransferMark).and(have_attributes(name: "left", target: :owned_sink)),
+        an_instance_of(MIR::MoveMark).and(have_attributes(name: "left")),
+        an_instance_of(MIR::TransferMark).and(have_attributes(name: "right", target: :owned_sink)),
+        an_instance_of(MIR::MoveMark).and(have_attributes(name: "right"))
+      )
+    end
+  end
+
   # =========================================================================
   # String concat
   # =========================================================================
@@ -2116,6 +2154,20 @@ RSpec.describe MIRLowering do
       expect(zig).to include("defer if (__held")
       expect(zig).to include("const left")
       expect(zig).to include("const right")
+
+      materialization = MIRLoweringCapabilities::WithBindingMaterialization.new(
+        bindings: [],
+        fallible_clauses: [],
+      )
+      lowering.send(:materialize_sorted_lock_bindings,
+        with_node,
+        materialization,
+        caps,
+        clause,
+        "__with_label")
+
+      expect(materialization.bindings.first).to include("acquireOrErr")
+      expect(materialization.fallible_clauses.map(&:var_name)).to eq(["a", "b"])
     end
   end
 
@@ -2924,6 +2976,30 @@ RSpec.describe MIRLowering do
       # never appear to outer readers (regressed examples/graphdb).
       expect(zig).to include("x: @TypeOf(&x)")
       expect(zig).to include(".x = &x")
+    end
+
+    it "keeps nested BG pointer capture initializers pointed at rewritten outer refs" do
+      body_id = make_id("x", full_type: :Int64)
+      analysis = capture_analysis(
+        captures: { "x" => :Int64 },
+        capture_symbols: {},
+        close_patterns: {},
+        pointer_captures: Set["x"],
+        string_captures: Set.new,
+        resource_captures: Set.new
+      )
+      node = AST::BgBlock.new(tok, [body_id], nil, nil, nil, nil, nil, nil)
+      node.full_type = :"~Void"
+      node.capture_analysis = analysis
+      low = lowering
+      low.capture_state.do_capture_map = { "x" => "__ctx_outer.x" }
+
+      zig = emit(low.lower(node))
+
+      expect(zig).to include("x: @TypeOf(&__ctx_outer.x)")
+      expect(zig).to include(".x = &__ctx_outer.x")
+    ensure
+      low&.capture_state&.do_capture_map = nil
     end
 
     it "lowers pinned BgBlock with submitSpawn" do
@@ -4004,7 +4080,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
 
   def lowering(**opts)
-    MIRLowering.new(**opts)
+    MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 
   def typed_node(type)

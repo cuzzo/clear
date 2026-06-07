@@ -271,7 +271,7 @@ elsif phase == "mir_pass"
   end
 elsif phase == "lower"
   frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-  lowering = MIRLowering.new(
+  lowering = MIRLowering.new(input: MIRLoweringInput.new(
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
@@ -279,11 +279,11 @@ elsif phase == "lower"
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,
     source_dir: source_dir,
-  )
+  ))
   timings["lower"] = Benchmark.realtime { program = lowering.lower_module(frontend.ast) }
 elsif phase == "checker"
   frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-  lowering = MIRLowering.new(
+  lowering = MIRLowering.new(input: MIRLoweringInput.new(
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
@@ -291,7 +291,7 @@ elsif phase == "checker"
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,
     source_dir: source_dir,
-  )
+  ))
   program = lowering.lower_module(frontend.ast)
   items = (program[:items] + program[:type_items]).flatten
   fns = items.select { |item| item.is_a?(MIR::FnDef) }
@@ -306,7 +306,7 @@ else
   timings["frontend"] = Benchmark.realtime do
     frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
   end
-  lowering = MIRLowering.new(
+  lowering = MIRLowering.new(input: MIRLoweringInput.new(
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
@@ -314,7 +314,7 @@ else
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,
     source_dir: source_dir,
-  )
+  ))
   timings["lower"] = Benchmark.realtime { program = lowering.lower_module(frontend.ast) }
 end
 

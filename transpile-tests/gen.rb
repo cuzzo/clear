@@ -17,7 +17,7 @@ class TestGenerator
 
     result = CompilerFrontend.compile(cheat_code, importer: importer, source_dir: source_dir)
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
@@ -26,7 +26,7 @@ class TestGenerator
       importer: importer,
       source_dir: source_dir,
       debug_mode: true
-    )
+    ))
     program = lowering.lower_program(result.ast)
 
     # Post-MIR verification: catch allocator mismatches before emitting Zig.

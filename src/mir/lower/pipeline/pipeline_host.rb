@@ -33,14 +33,14 @@ class PipelineHost
   DefaultObservableFoldOp = T.type_alias { PipelineDefaultObservableFoldOp }
   BindingUnnestChain = ::PipelineBindingUnnestChain
 
-  sig { returns(T.untyped) }
+  sig { returns(MIRLoweringProgramState::FnSigMap) }
   attr_reader :fn_sigs
 
-  sig { params(lowering: T.untyped, emitter: MIREmitter).void }
+  sig { params(lowering: MIRLowering, emitter: MIREmitter).void }
   def initialize(lowering:, emitter:)
-    @lowering = lowering
-    @emitter = emitter
-    @fn_sigs = T.let(lowering.fn_sigs, T.untyped)
+    @lowering = T.let(lowering, MIRLowering)
+    @emitter = T.let(emitter, MIREmitter)
+    @fn_sigs = T.let(lowering.fn_sigs, MIRLoweringProgramState::FnSigMap)
     @pipeline_context = T.let(PipelineContextState.empty, PipelineContextState)
     @mir_mode = T.let(false, T::Boolean)
     @each_idx_counter = T.let(0, Integer)
@@ -77,7 +77,7 @@ class PipelineHost
   def build_scalar_services
     PipelineScalarServices.new(
       visit_expr: ->(_list_node, expr_node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -89,18 +89,18 @@ class PipelineHost
   sig { returns(PipelineListServices) }
   def build_list_services
     PipelineListServices.new(
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_expr: ->(_list_node, expr_node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
       visit_reduce_expr: ->(expr_node, item_placeholder, acc_placeholder) {
-        T.cast(with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(expr_node) }, MIR::Node)
+        with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(expr_node) }
       },
       visit_body: ->(body_stmts, placeholder) {
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
       },
       visit_join_lambda: ->(body, join_params) {
-        T.cast(with_context_state(current_context.with_join_params(join_params)) { visit_mir(body) }, MIR::Node)
+        with_context_state(current_context.with_join_params(join_params)) { visit_mir(body) }
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -131,12 +131,12 @@ class PipelineHost
       next_label: -> { next_pipe_label },
       set_current_label: ->(label) { @current_pipe_label = label },
       pipe_binding_zig_name: ->(clear_name) { pipe_binding_zig_name(clear_name) },
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
       },
       visit_mir_with_reduce_placeholders: ->(node, item_placeholder, acc_placeholder) {
-        T.cast(with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(node) }
       },
       transpile_type: ->(type_info) { transpile_type(type_info) },
       with_named_bindings: ->(bindings, blk) { with_named_bindings(bindings, &blk) },
@@ -162,7 +162,7 @@ class PipelineHost
   def build_each_services
     PipelineEachServices.new(
       bc_target: -> { bc_target? },
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_body_with_placeholder: ->(body_stmts, placeholder) {
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
       },
@@ -190,9 +190,9 @@ class PipelineHost
   def build_set_index_services
     PipelineSetIndexServices.new(
       bc_target: -> { bc_target? },
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -237,9 +237,9 @@ class PipelineHost
   def build_batch_window_services
     PipelineBatchWindowServices.new(
       bc_target: -> { bc_target? },
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_placeholder: ->(node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -254,9 +254,9 @@ class PipelineHost
   sig { returns(PipelineRangeLowerer::RuntimeHost) }
   def build_range_lowerer_host
     PipelineRangeLowerer::RuntimeHost.new(
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       visit_mir_with_context: ->(node, placeholder, acc) {
-        T.cast(with_pipeline_context(placeholder: placeholder, acc: acc) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder, acc: acc) { visit_mir(node) }
       },
       visit_pipeline_body_mir: ->(body_stmts, placeholder) {
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
@@ -280,36 +280,36 @@ class PipelineHost
     PipelineConcurrentServices.new(
       bc_target: -> { bc_target? },
       visit_mir: ->(node) {
-        T.cast(visit_mir(node), MIR::Node)
+        visit_mir(node)
       },
       visit_mir_with_placeholder: ->(node, placeholder) {
-        T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+        with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
       },
       visit_body_with_placeholder: ->(body_stmts, placeholder) {
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
       },
       lower_head_with_placeholder: ->(node, placeholder) {
         value, pending = @lowering.lower_head {
-          T.cast(with_pipeline_context(placeholder: placeholder) { visit_mir(node) }, MIR::Node)
+          with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
         }
         PipelineConcurrentHeadResult.new(
           value: T.cast(value, MIR::Node),
-          pending: T.cast(pending, T::Array[MIR::Emittable]),
+          pending: pending,
         )
       },
       callback_expr_mir: ->(expr, placeholder, capture_map, capture_symbols, rt_override) {
-        T.cast(with_pipeline_context(placeholder: placeholder) {
+        with_pipeline_context(placeholder: placeholder) {
           with_fiber_capture_map(capture_map, capture_symbols: capture_symbols, rt_override: rt_override) {
             visit_mir(expr)
           }
-        }, MIR::Node)
+        }
       },
       callback_body_mir: ->(body_stmts, placeholder, capture_map, capture_symbols, rt_override) {
-        T.cast(with_pipeline_context(placeholder: placeholder) {
+        with_pipeline_context(placeholder: placeholder) {
           with_fiber_capture_map(capture_map, capture_symbols: capture_symbols, rt_override: rt_override) {
             visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
           }
-        }, T::Array[MIR::Emittable])
+        }
       },
       pipeline_alloc_mark_fact: ->(value, name, fallback_alloc, type_info, ast_node, accept_owned_call, include_cleanup) {
         fact = @lowering.pipeline_alloc_mark_fact(
@@ -324,7 +324,7 @@ class PipelineHost
         fact ? PipelineConcurrentAllocationFact.new(alloc: fact.alloc, mark: fact.mark, cleanup_entry: fact.cleanup_entry) : nil
       },
       append_ownership_transfers: ->(body) {
-        T.cast(@lowering.append_ownership_transfers_for_mir_body(body), T::Array[MIR::Emittable])
+        @lowering.append_ownership_transfers_for_mir_body(body)
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -336,10 +336,10 @@ class PipelineHost
         concurrent_source_setup(lhs)
       },
       emit_builtin: ->(name, args) {
-        T.cast(@lowering.emit_builtin(name, args), MIR::Node)
+        @lowering.emit_builtin(name, args)
       },
       emit_expr: ->(node) {
-        @lowering.emit_expr(node)
+        T.must(@lowering.emit_expr(node))
       },
       lower_mir: ->(node) {
         T.cast(@lowering.lower(node), MIR::Node)
@@ -405,7 +405,7 @@ class PipelineHost
   sig { returns(PipelineMaterializer::RuntimeHost) }
   def build_materializer_host
     PipelineMaterializer::RuntimeHost.new(
-      visit_mir: ->(node) { T.cast(visit_mir(node), MIR::Node) },
+      visit_mir: ->(node) { visit_mir(node) },
       alloc_mark_fact: ->(value, name, fallback_alloc, type_info, ast_node, context, known_allocating) {
         fact = @lowering.pipeline_alloc_mark_fact(
           value,
@@ -517,7 +517,16 @@ class PipelineHost
   end
 
   # Delegate fiber capture map management to MIRLowering
-  sig { params(new_entries: T::Hash[String, String], capture_symbols: T.nilable(T::Hash[String, SymbolEntry]), rt_override: String, blk: T.untyped).returns(T.untyped) }
+  sig do
+    type_parameters(:U)
+      .params(
+        new_entries: T::Hash[String, String],
+        capture_symbols: T.nilable(T::Hash[String, SymbolEntry]),
+        rt_override: String,
+        blk: T.proc.returns(T.type_parameter(:U)),
+      )
+      .returns(T.type_parameter(:U))
+  end
   def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
     @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
@@ -531,7 +540,7 @@ class PipelineHost
 
   # Route AST node -> Zig string, handling pipeline-specific nodes
   # (Placeholder, SOA field rewrites) before general MIR lowering.
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: AST::Node).returns(T.any(String, MIR::Node)) }
   def visit(node)
     # In MIR mode, return MIR nodes instead of Zig strings.
     return visit_mir(node) if @mir_mode
@@ -556,15 +565,18 @@ class PipelineHost
 
     # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
     if context.soa_rewrite_active && AST.soa_placeholder_field?(node)
-      context.soa_needed_fields << node.field
-      return "__soa_#{node.field}[__soa_i]"
+      target = T.cast(node, AST::GetField)
+      context.soa_needed_fields << target.field
+      return "__soa_#{target.field}[__soa_i]"
     end
 
     # SOA assignment rewrite: _.field = expr -> __soa_field[__soa_i] = expr
     if context.soa_rewrite_active && AST.soa_placeholder_assignment?(node)
-      field = node.name.field
+      assignment = T.cast(node, T.any(AST::BindExpr, AST::Assignment))
+      target = T.cast(assignment.name, AST::GetField)
+      field = target.field
       context.soa_needed_fields << field
-      value = visit(node.value)
+      value = T.cast(visit(T.cast(assignment.value, AST::Node)), String)
       return "__soa_#{field}[__soa_i] = #{value};"
     end
 
@@ -586,16 +598,16 @@ class PipelineHost
 
   # MIR-mode visit: returns MIR node instead of Zig string.
   # Used by lower_* pipeline methods during MIR migration.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::Node).returns(MIR::Node) }
   def visit_mir(node)
     substituted = substitute_placeholders(node)
-    @lowering.lower(substituted)
+    T.cast(@lowering.lower(substituted), MIR::Node)
   end
 
   # Lower an array of AST body statements to MIR nodes, with pipeline
   # placeholder substitution. Used by side-effect operators (Tap, Each, Join)
   # whose loop bodies contain multiple statements.
-  sig { params(body_stmts: T::Array[T.untyped], placeholder: String).returns(T::Array[T.untyped]) }
+  sig { params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]) }
   def visit_pipeline_body_mir(body_stmts, placeholder:)
     with_pipeline_context(placeholder: placeholder) do
       substituted = body_stmts.map { |stmt| substitute_placeholders(stmt) }
@@ -607,15 +619,15 @@ class PipelineHost
 
   # Check whether any statement in an AST array references the `_` placeholder.
   # Used to decide whether to use `|__each_item|` vs `|_|` in while captures.
-  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(stmts: T::Array[AST::Node]).returns(T::Boolean) }
   def ast_stmts_use_placeholder?(stmts)
     stmts.any? { |s| ast_node_uses_placeholder?(s) }
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
   def ast_node_uses_placeholder?(node)
     return false unless node
-    return false if AST.scalar_literal_value?(node)
+    return false if AST.scalar_literal_value?(T.cast(node, Object))
     return node.name == "_" if node.is_a?(AST::Identifier)
     # Traverse known child fields that may contain sub-expressions/statements
     [:left, :right, :value, :args, :object, :target, :index, :condition,
@@ -728,14 +740,14 @@ class PipelineHost
   end
 
   # Visit pipeline expression in MIR mode with placeholder substitution.
-  sig { params(list_node: T.untyped, expr_node: T.untyped, placeholder: String).returns(T.untyped) }
+  sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node) }
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
     with_pipeline_context(placeholder: placeholder) do
       visit_mir(expr_node)
     end
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T::Boolean) }
   def ast_uses_bare_placeholder?(node)
     return false unless node
     return false if node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
@@ -761,7 +773,7 @@ class PipelineHost
     false
   end
 
-  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, fold_node: PipelineMaterializedScalarOp).returns(MIR::BlockExpr) }
   def lower_soa_scalar_fold(site, fold_node)
     list_node = site.list
     label = next_pipe_label
@@ -774,7 +786,7 @@ class PipelineHost
 
     with_soa_rewrite(each_mode: false) do
       if fold_node.respond_to?(:expression)
-        expr_mir = T.cast(with_pipeline_context(placeholder: "it") { visit_mir(fold_node.expression) }, MIR::Emittable)
+        expr_mir = with_pipeline_context(placeholder: "it") { visit_mir(fold_node.expression) }
       end
       fields = current_context.soa_needed_fields.map(&:to_s).sort
       needs_whole_item = fold_node.is_a?(AST::FindOp) ||
@@ -784,7 +796,7 @@ class PipelineHost
     build_soa_scalar_fold_block(site, fold_node, label, source_mir, T.must(expr_mir), fields, needs_whole_item)
   end
 
-  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped, label: String, source_mir: T.untyped, expr_mir: T.untyped, fields: T::Array[String], needs_whole_item: T::Boolean).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, fold_node: PipelineMaterializedScalarOp, label: String, source_mir: MIR::Node, expr_mir: MIR::Node, fields: T::Array[String], needs_whole_item: T::Boolean).returns(MIR::BlockExpr) }
   def build_soa_scalar_fold_block(site, fold_node, label, source_mir, expr_mir, fields, needs_whole_item)
     list_node = site.list
     lhs_type = list_node.full_type!
@@ -883,8 +895,6 @@ class PipelineHost
         MIR::Ident.new("find_found"),
         MIR::Cast.new(MIR::Ident.new("find_result"), "?#{elem_zig_type}", :as),
         MIR::Lit.new("null"))
-    else
-      raise "BUG: unsupported SOA scalar fold #{fold_node.class}"
     end
 
     MIR::BlockExpr.new(label, [

@@ -25,12 +25,12 @@ RSpec.describe "MIR pipeline comparison" do
     result = compile_mir_frontend(src)
     ast = result.ast
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs
-    )
+    ))
     emitter = MIREmitter.new
 
     # Lower each non-FunctionDef top-level statement and compare
@@ -132,12 +132,12 @@ RSpec.describe "MIR pipeline comparison" do
     result = compile_mir_frontend(src)
     ast = result.ast
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs
-    )
+    ))
     emitter = MIREmitter.new
 
     # Find the main function and lower its body statements
@@ -295,12 +295,12 @@ RSpec.describe "MIR pipeline comparison" do
     result = compile_mir_frontend(src)
     ast = result.ast
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs
-    )
+    ))
     emitter = MIREmitter.new
 
     results = []
@@ -409,7 +409,7 @@ RSpec.describe "MIR pipeline comparison" do
       CLEAR
 
       result = compile_mir_frontend(src)
-      lowering = MIRLowering.new(fn_sigs: result.fn_sigs)
+      lowering = MIRLowering.new(input: MIRLoweringInput.new(fn_sigs: result.fn_sigs))
       emitter = MIREmitter.new
 
       program = lowering.lower(result.ast)

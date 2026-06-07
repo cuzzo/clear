@@ -272,7 +272,7 @@ class PipelineSetIndexLowerer
   def index_result_let(map_type, alloc)
     MIR::Let.new(
       "idx_result",
-      MIR::StructInit.new(nil, [{ name: "alloc", value: MIR::AllocatorRef.new(alloc) }]),
+      MIR::StructInit.new(nil, [MIR::StructInitField.new(name: "alloc", value: MIR::AllocatorRef.new(alloc))]),
       true,
       Type.new(map_type),
       nil,

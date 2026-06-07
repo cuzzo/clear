@@ -394,7 +394,7 @@ module MIRHoistLowering
   sig { returns(T::Array[T.untyped]) }
   def flush_pending
     T.bind(self, MIRLowering) rescue nil
-    stmts = function_state.pending!
+    stmts = function_state.pending_stmts
     function_state.pending_stmts = []
     stmts
   end
@@ -405,7 +405,7 @@ module MIRHoistLowering
     prev = function_state.pending_stmts
     function_state.pending_stmts = []
     result = blk.call
-    scoped = function_state.pending!
+    scoped = function_state.pending_stmts
     function_state.pending_stmts = prev
     return result if scoped.empty?
     label = "__lazy_#{lowering_counters.next_block_expr_id}"
@@ -422,12 +422,12 @@ module MIRHoistLowering
         next unless stmt.name.to_s == name
 
         stmt.cleanup_entry[:has_moved_guard] = true
-        (function_state.guarded_cleanup_names ||= {})[name] = true
-        function_state.lowered_guarded_cleanup_names&.add(name)
+        function_state.guarded_cleanup_names[name] = true
+        function_state.lowered_guarded_cleanup_names.add(name)
       end
     end
     transfer_marks = alloc_names.intersection(result_names).flat_map do |name|
-      MIR.ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name], move_guarded: !!function_state.guarded_cleanup_names&.[](name))
+      MIR.ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name], move_guarded: pipeline_guarded_cleanup_name?(name))
     end
     block = MIR::BlockExpr.new(label, scoped + transfer_marks + [MIR::BreakStmt.new(label, result)])
     block.lazy_boundary = true
@@ -441,7 +441,7 @@ module MIRHoistLowering
     prev = function_state.pending_stmts
     function_state.pending_stmts = []
     result = blk.call
-    produced = function_state.pending!
+    produced = function_state.pending_stmts
     function_state.pending_stmts = prev
     [result, produced]
   end
@@ -477,8 +477,8 @@ module MIRHoistLowering
       type_info: ti,
       mutable: false
     )
-    function_state.pending!.concat(materialized.statements)
-    function_state.lowered_alloc_names&.add(name)
+    function_state.pending_stmts.concat(materialized.statements)
+    function_state.lowered_alloc_names.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
     MIR::Ident.new(name)
   end
@@ -575,7 +575,7 @@ module MIRHoistLowering
     T.bind(self, MIRLowering) rescue nil
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     if expr.respond_to?(:expr?) && expr.expr?
-      function_state.pending!.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
+      function_state.pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
     end
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
@@ -587,7 +587,7 @@ module MIRHoistLowering
       cleanup_entry: hoist_cleanup_entry(expr, ast_node)
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
-    function_state.pending!.concat(plan.statements)
+    function_state.pending_stmts.concat(plan.statements)
     record_hoisted_allocation!(plan)
     MIR::Ident.new(plan.name)
   end
@@ -729,12 +729,12 @@ module MIRHoistLowering
   sig { params(plan: MIR::BindingMaterialization).void }
   def record_hoisted_allocation!(plan)
     T.bind(self, MIRLowering) rescue nil
-    function_state.lowered_alloc_names&.add(plan.name)
+    function_state.lowered_alloc_names.add(plan.name)
     entry = plan.cleanup_entry
     return unless entry&.has_moved_guard?
 
-    (function_state.guarded_cleanup_names ||= {})[plan.name] = true
-    function_state.lowered_guarded_cleanup_names&.add(plan.name)
+    function_state.guarded_cleanup_names[plan.name] = true
+    function_state.lowered_guarded_cleanup_names.add(plan.name)
   end
 
   sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }

@@ -215,7 +215,7 @@ class ModuleImporter
     moved_guard_info = {}
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: struct_schemas,
       enum_schemas: enum_schemas,
       union_schemas: union_schemas,
@@ -223,7 +223,7 @@ class ModuleImporter
       moved_guard_info: moved_guard_info,
       importer: self,
       source_dir: source_dir
-    )
+    ))
 
     result = lowering.lower_module(ast)
     emitter = MIREmitter.new

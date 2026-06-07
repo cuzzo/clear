@@ -1394,10 +1394,17 @@ RSpec.describe MIRChecker do
 
       nested_state = MIRChecker::LinearOwnershipState.new
       [
+        MIR::AssertRaisesCheck.new(MIR::Lit.new("expr"), "rt", :error, "E"),
         MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])], []),
         MIR::DeferStmt.new([MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::DeferStmt.new(MIR::ExprStmt.new(MIR::Lit.new("1"), false)),
         MIR::StreamSpawn.new({}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotRead.new("cell", "rt", "view", "__guard", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotTransaction.new("cell", "rt", "alloc", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil, false),
+        MIR::SnapshotMultiTxn.new(".{a,b}", "rt", "alloc", "const a = views[0];", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil),
+        MIR::PolymorphicMutate.new("cell", "rt", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::PolymorphicFlowSignal.new(:return_value, MIR::Lit.new("1")),
+        MIR::PolymorphicMutateFlow.new("cell", "rt", "view", "Counter", "__ret", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], MIR::Lit.new("true"), [MIR::ExprStmt.new(MIR::Lit.new("0"), false)]),
         MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }]),
         fn_def("inner", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::TestDef.new("case", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),

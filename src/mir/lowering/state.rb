@@ -13,6 +13,23 @@ require_relative "../lowering/schema_registry"
 require_relative "../lowering/functions"
 require_relative "../lowering/capabilities"
 
+class MIRLoweringInput < T::Struct
+  extend T::Sig
+
+  FnSigMap = T.type_alias { T::Hash[T.any(String, Symbol), FunctionSignature] }
+  MovedGuardInfo = T.type_alias { T::Hash[String, T::Hash[String, TrueClass]] }
+
+  const :struct_schemas, T::Hash[Symbol, Schemas::StructSchema], factory: -> { {} }
+  const :enum_schemas, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants], factory: -> { {} }
+  const :union_schemas, T::Hash[Symbol, Schemas::UnionSchema], factory: -> { {} }
+  const :fn_sigs, FnSigMap, factory: -> { {} }
+  const :moved_guard_info, MovedGuardInfo, factory: -> { {} }
+  const :importer, T.nilable(ModuleImporter), default: nil
+  const :source_dir, T.nilable(String), default: nil
+  const :debug_mode, T::Boolean, default: false
+  const :target, Symbol, default: :zig
+end
+
 class MIRLoweringRuntimeState < T::Struct
   extend T::Sig
 
@@ -50,19 +67,19 @@ class MIRLoweringProgramState < T::Struct
   ShardContext = T.type_alias { T.nilable(T::Hash[Symbol, String]) }
   FnNodeMap = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
-  prop :fn_sigs, FnSigMap, default: {}
+  prop :fn_sigs, FnSigMap, factory: -> { {} }
   prop :shard_context, ShardContext, default: nil
-  prop :emitted_extern_modules, T::Set[String], default: Set.new
+  prop :emitted_extern_modules, T::Set[String], factory: -> { Set.new }
   prop :pipeline_host, T.nilable(PipelineHost), default: nil
   prop :importer, T.nilable(ModuleImporter), default: nil
   prop :source_dir, T.nilable(String), default: nil
-  prop :emitted_types, T::Set[String], default: Set.new
-  prop :emitted_require_modules, T::Set[String], default: Set.new
+  prop :emitted_types, T::Set[String], factory: -> { Set.new }
+  prop :emitted_require_modules, T::Set[String], factory: -> { Set.new }
   prop :debug_mode, T::Boolean, default: false
   prop :target, Symbol, default: :zig
   prop :used_sharded_map, T::Boolean, default: false
   prop :use_debug_allocator, T.nilable(T::Boolean), default: nil
-  prop :fn_nodes, FnNodeMap, default: {}
+  prop :fn_nodes, FnNodeMap, factory: -> { {} }
 end
 
 class MIRLoweringCaptureState < T::Struct
@@ -76,8 +93,8 @@ class MIRLoweringCaptureState < T::Struct
   prop :do_capture_map, T.nilable(CaptureMap), default: nil
   prop :current_stream_is_inf, T.nilable(T::Boolean), default: nil
   prop :current_stream_local, T.nilable(String), default: nil
-  prop :current_fsm_inherited_alloc_names, T::Set[String], default: Set.new
-  prop :current_fsm_inherited_guarded_names, T::Set[String], default: Set.new
+  prop :current_fsm_inherited_alloc_names, T::Set[String], factory: -> { Set.new }
+  prop :current_fsm_inherited_guarded_names, T::Set[String], factory: -> { Set.new }
   prop :current_fsm_owned_result_guards, T.nilable(T::Hash[String, String]), default: nil
   prop :last_fsm_result_transfer_facts, T::Array[MIR::FsmResultTransferFact], default: []
 end
@@ -95,13 +112,15 @@ end
 class MIRLoweringOwnershipState < T::Struct
   extend T::Sig
 
-  prop :finalized_body_ids, T::Set[Integer], default: Set.new
-  prop :finalized_node_ids, T::Set[Integer], default: Set.new
+  prop :next_lowered_node_id, Integer, default: 0
+  prop :finalized_body_ids, T::Set[MIR::LoweredBodyId], factory: -> { Set.new }
+  prop :finalized_node_ids, T::Set[MIR::LoweredNodeId], factory: -> { Set.new }
 end
 
 class MIRLoweringState < T::Struct
   extend T::Sig
 
+  const :input, MIRLoweringInput
   const :schemas, MIRLoweringSchemas
   const :counters, MIRLoweringCounters
   const :function_state, MIRLoweringFunctions::FunctionState

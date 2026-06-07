@@ -50,7 +50,7 @@ files.each do |path|
   begin
     importer = ModuleImporter.new(base_dir: src_dir, use_mir: true)
     result = CompilerFrontend.compile(code, importer: importer, source_dir: src_dir)
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
@@ -59,7 +59,7 @@ files.each do |path|
       importer: importer,
       source_dir: src_dir,
       debug_mode: true
-    )
+    ))
     program = lowering.lower_program(result.ast)
     MIRChecker.new.check_program!(program)
     emitter = MIREmitter.new

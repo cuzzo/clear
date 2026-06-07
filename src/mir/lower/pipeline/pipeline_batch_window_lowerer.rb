@@ -47,12 +47,12 @@ end
 class PipelineBatchWindowLowerer
   extend T::Sig
 
-  BATCH_WINDOW_TIME_NS = T.let({
-    "ms" => 1_000_000,
-    "s" => 1_000_000_000,
-    "min" => 60_000_000_000,
-    "h" => 3_600_000_000_000,
-  }.freeze, T::Hash[String, Integer])
+  BATCH_WINDOW_TIME_NS = T.let([
+    ["ms", 1_000_000],
+    ["s", 1_000_000_000],
+    ["min", 60_000_000_000],
+    ["h", 3_600_000_000_000],
+  ].to_h.freeze, T::Hash[String, Integer])
   BATCH_WINDOW_TIME_UNITS = T.let(["min", "ms", "s", "h"].freeze, T::Array[String])
 
   sig { params(services: PipelineBatchWindowServices).void }
@@ -100,8 +100,6 @@ class PipelineBatchWindowLowerer
       lower_zig_bounded_stream(plan)
     when PipelineBatchWindowSourceKind::ZigMaterialized
       lower_zig_materialized(plan)
-    else
-      T.absurd(source_kind)
     end
   end
 

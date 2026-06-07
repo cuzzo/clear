@@ -512,7 +512,7 @@ module MiniVM
         source_dir = File.expand_path(source_dir)
         importer = ModuleImporter.new(base_dir: source_dir)
         fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-        lowering = MIRLowering.new(
+        lowering = MIRLowering.new(input: MIRLoweringInput.new(
           struct_schemas: fe_result.struct_schemas,
           enum_schemas: fe_result.enum_schemas,
           union_schemas: fe_result.union_schemas,
@@ -521,7 +521,7 @@ module MiniVM
           importer: importer,
           source_dir: source_dir,
           target: :bc
-        )
+        ))
         program = lowering.lower_program(fe_result.ast)
         mir_errors = MIRChecker.new.check_program!(program, strict: true)
         raise "MIR validation errors: #{mir_errors.first}" unless mir_errors.nil? || mir_errors.empty?
@@ -580,7 +580,7 @@ module MiniVM
         source_dir = File.expand_path(source_dir)
         importer = ModuleImporter.new(base_dir: source_dir)
         fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-        lowering = MIRLowering.new(
+        lowering = MIRLowering.new(input: MIRLoweringInput.new(
           struct_schemas: fe_result.struct_schemas,
           enum_schemas: fe_result.enum_schemas,
           union_schemas: fe_result.union_schemas,
@@ -589,7 +589,7 @@ module MiniVM
           importer: importer,
           source_dir: source_dir,
           target: :bc
-        )
+        ))
         program = lowering.lower_program(fe_result.ast)
         mir_errors = MIRChecker.new.check_program!(program, strict: true)
         raise "MIR validation errors: #{mir_errors.first}" unless mir_errors.nil? || mir_errors.empty?

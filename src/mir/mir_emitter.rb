@@ -1416,7 +1416,13 @@ class MIREmitter
 
   sig { params(node: MIR::StructInit).returns(String) }
   def emit_struct_init(node)
-    fields = node.fields.map { |f| ".#{f[:name]} = #{emit(f[:value])}" }.join(", ")
+    fields = node.fields.filter_map do |field|
+      name = MIR.struct_init_field_name(field)
+      value = MIR.struct_init_field_value(field)
+      next nil unless name && value
+
+      ".#{name} = #{emit(value)}"
+    end.join(", ")
     if node.zig_type
       "#{node.zig_type}{ #{fields} }"
     else

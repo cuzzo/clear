@@ -244,7 +244,8 @@ module CleanupClassifier
     return :frame unless target_node.is_a?(AST::Identifier)
 
     target_entry = bindings[target_node.name.to_s]
-    target_entry&.heap? ? :heap : :frame
+    target_alloc = target_entry&.alloc
+    target_alloc == :heap ? :heap : :frame
   end
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────

@@ -84,7 +84,7 @@ class ZigTranspiler
       end
     end
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: T.must(result).struct_schemas,
       enum_schemas: T.must(result).enum_schemas,
       union_schemas: T.must(result).union_schemas,
@@ -93,7 +93,7 @@ class ZigTranspiler
       importer: @importer,
       source_dir: @source_dir,
       debug_mode: @default_stack_size == "Large"
-    )
+    ))
 
     needs_c_alloc = use_c_allocator
     program = lowering.lower_program(T.must(result).ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
@@ -163,7 +163,7 @@ class ZigTranspiler
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
-    lowering = MIRLowering.new(
+    lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: T.must(result).struct_schemas,
       enum_schemas: T.must(result).enum_schemas,
       union_schemas: T.must(result).union_schemas,
@@ -171,7 +171,7 @@ class ZigTranspiler
       moved_guard_info: T.must(result).moved_guard_info,
       importer: @importer,
       source_dir: @source_dir
-    )
+    ))
 
     mod_result = lowering.lower_module(T.must(result).ast)
 

@@ -36,7 +36,7 @@ class CleanupEntry < Hash
     e = new
     e[:needs_cleanup] = true
     e[:alloc] = alloc
-    e[:scope] = e.heap? ? :heap : :function
+    e[:scope] = alloc == :heap ? :heap : :function
     e[:kind] = kind
     e[:has_moved_guard] = has_moved_guard
     extra.each { |k, v| e[k] = v }
@@ -106,7 +106,7 @@ class CleanupEntry < Hash
   def with_alloc(alloc)
     updated = dup
     updated[:alloc] = alloc
-    updated[:scope] = updated.heap? ? :heap : updated.scope
+    updated[:scope] = alloc == :heap ? :heap : updated.scope
     updated
   end
 

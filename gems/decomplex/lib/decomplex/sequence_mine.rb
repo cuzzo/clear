@@ -33,6 +33,13 @@ module Decomplex
       acquire begin close commit connect deinit disconnect drain finish flush
       lock open release rollback start stop unlock wait
     ].freeze
+    ZERO_ARG_ACTION_PREFIXES = %w[
+      analyze append apply build call check classify collect compile compute
+      consume create declare emit enforce finalize find flush handle initialize
+      lower mark normalize parse perform process push record register render
+      resolve rewrite run scan set stamp sync transform validate verify visit
+      walk warn write
+    ].freeze
     IGNORED_MIDS = (DECLARATIVE_MIDS + TEST_DSL_MIDS).freeze
 
     def self.scan(files)
@@ -80,8 +87,27 @@ module Decomplex
     end
 
     def passive_reader_call?(node, mid)
-      node.type == :CALL && node.children[2].nil? &&
-        !ZERO_ARG_ACTION_MIDS.include?(mid)
+      return false if zero_arg_action_name?(mid)
+
+      case node.type
+      when :CALL
+        node.children[2].nil?
+      when :VCALL
+        true
+      when :FCALL
+        node.children[1].nil?
+      else
+        false
+      end
+    end
+
+    def zero_arg_action_name?(mid)
+      return true if ZERO_ARG_ACTION_MIDS.include?(mid)
+      return true if mid.end_with?("!")
+
+      ZERO_ARG_ACTION_PREFIXES.any? do |prefix|
+        mid == prefix || mid.start_with?("#{prefix}_")
+      end
     end
 
     class Report

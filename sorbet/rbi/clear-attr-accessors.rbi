@@ -1606,13 +1606,13 @@ class MIREmitter
   def rt_name=(value); end
 end
 
-class MIRLowering
-  sig { returns(FnSigMap) }
-  def fn_sigs; end
-  sig { returns(T.untyped) }
-  def shard_context; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def shard_context=(value); end
+class MIRLoweringSchemas
+  sig { returns(T::Hash[Symbol, EnumVariants]) }
+  def enum_schemas; end
+  sig { returns(T::Hash[Symbol, Schemas::StructSchema]) }
+  def struct_schemas; end
+  sig { returns(T::Hash[Symbol, Schemas::UnionSchema]) }
+  def union_schemas; end
 end
 
 class MIRPass
@@ -1715,7 +1715,7 @@ class OwnershipGraph
 end
 
 class PipelineHost
-  sig { returns(T.untyped) }
+  sig { returns(MIRLoweringProgramState::FnSigMap) }
   def fn_sigs; end
 end
 

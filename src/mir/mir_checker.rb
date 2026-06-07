@@ -86,9 +86,14 @@ require "set"
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
 require_relative "../semantic/pass_state"
+require_relative "placement"
 
 class MIRChecker
-    extend T::Sig
+  extend T::Sig
+
+  AggregateExpr = T.type_alias {
+    T.nilable(T.any(MIR::Emittable, String, Symbol, Integer, Float, T::Boolean))
+  }
 
   OWNERSHIP_FIELD_NAMES = T.let(
     Set[:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :owned_result_alloc, :callable_contract, :target_var],
@@ -220,6 +225,13 @@ class MIRChecker
   CleanupMarksByName = T.type_alias { T::Hash[String, T::Array[T.any(MIR::Cleanup, MIR::ErrCleanup)]] }
   NameSet = T.type_alias { T::Set[String] }
 
+  class InlineStoredAllocCheck < T::Struct
+    extend T::Sig
+
+    const :label, Symbol
+    const :alloc, T.nilable(Symbol)
+  end
+
   sig { params(fn_name: T.untyped).void }
   def initialize(fn_name: nil)
     @fn_name = fn_name
@@ -244,8 +256,8 @@ class MIRChecker
     hpt_leaks = []
     owned_return_lets = []
     owned_result_lets = []
-    inline_alloc_nodes = []
-    all_zig_nodes = []  # InlineZig nodes scanned for CheatLib contracts
+    inline_alloc_nodes = T.let([], T::Array[MIR::InlineZig])
+    all_zig_nodes = T.let([], T::Array[MIR::Node])  # InlineZig nodes scanned for CheatLib contracts
     inline_alloc_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
     all_zig_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
     structural_ownership_nodes = []
@@ -597,8 +609,6 @@ class MIRChecker
       else
         check_linear_stmt!(stmt.body, state)
       end
-    when MIR::AssertRaisesCheck
-      check_linear_expr_uses!(stmt.expr, state)
     when MIR::StreamSpawn
       check_linear_stmts!(stmt.body, LinearOwnershipState.new)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
@@ -607,8 +617,6 @@ class MIRChecker
     when MIR::PolymorphicMutate
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, "polymorphic-mutate")
-    when MIR::PolymorphicFlowSignal
-      check_linear_expr_uses!(stmt.ret, state)
     when MIR::PolymorphicMutateFlow
       check_linear_expr_uses!(stmt.guard_cond, state)
       states = T.let([], T::Array[LinearOwnershipState])
@@ -1106,7 +1114,7 @@ class MIRChecker
       "but #{stmt.name} was allocated with :#{target_alloc}")
   end
 
-  sig { params(expr: T.untyped, owner_alloc: T.nilable(Symbol), alloc_by_name: T::Hash[String, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(expr: AggregateExpr, owner_alloc: T.nilable(Symbol), alloc_by_name: T::Hash[String, Symbol]).void }
   def check_aggregate_expr!(expr, owner_alloc, alloc_by_name)
     return unless expr
     case expr
@@ -1117,8 +1125,8 @@ class MIRChecker
       expr.items&.each { |item| check_aggregate_expr!(item, list_alloc, alloc_by_name) }
     when MIR::StructInit
       expr.fields&.each do |field|
-        field_alloc = field[:alloc].is_a?(Symbol) ? field[:alloc] : owner_alloc
-        check_aggregate_expr!(field[:value], field_alloc, alloc_by_name)
+        field_alloc = MIR.struct_init_field_alloc(field) || owner_alloc
+        check_aggregate_expr!(MIR.struct_init_field_value(field), field_alloc, alloc_by_name)
       end
     when MIR::ArrayInit
       expr.items&.each { |item| check_aggregate_expr!(item, owner_alloc, alloc_by_name) }
@@ -1347,7 +1355,8 @@ class MIRChecker
         next
       end
 
-      if marks.any? { |m| MIR::Placement.frame?(m.alloc) }
+      mark_allocs = marks.map { |mark| T.unsafe(mark).alloc }
+      if mark_allocs.any? { |alloc| MIR::Placement.frame?(alloc) }
         @errors << error(:OWNED_RETURN_ALLOC_NOT_HEAP, let.name,
           "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")
       end
@@ -1720,11 +1729,15 @@ class MIRChecker
 
       # Check key/value allocators: frame-allocated stored data in a heap
       # container = use-after-free when the frame rewinds.
-      { key_alloc: alloc_metadata.key_alloc, val_alloc: alloc_metadata.value_alloc }.each do |alloc_key, stored_alloc|
+      [
+        InlineStoredAllocCheck.new(label: :key_alloc, alloc: alloc_metadata.key_alloc),
+        InlineStoredAllocCheck.new(label: :val_alloc, alloc: alloc_metadata.value_alloc),
+      ].each do |stored|
+        stored_alloc = stored.alloc
         next unless stored_alloc
         if MIR::Placement.explicit_frame?(stored_alloc) && MIR::Placement.explicit_heap?(container_alloc)
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
-            "#{alloc_key} is :frame but container '#{target}' is :heap " \
+            "#{stored.label} is :frame but container '#{target}' is :heap " \
             "(stored data will dangle after frame rewind)")
         end
       end
@@ -1974,7 +1987,7 @@ class MIRChecker
   # ownership; the ownership_contract says which concrete lowered bindings are
   # consumed at this callsite. Without that binding list, TransferMark/Cleanup
   # verification cannot prove leak/double-free safety.
-  sig { params(zig_nodes: T::Array[T.untyped], transfers: T::Set[String], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(zig_nodes: T::Array[MIR::Node], transfers: NameSet, allocs: AllocMarksByName).void }
   def verify_explicit_ownership_contracts!(zig_nodes, transfers, allocs)
     zig_nodes.each do |node|
       next unless node.is_a?(MIR::InlineZig)
@@ -2405,7 +2418,8 @@ class MIRChecker
     found = T.let(false, T::Boolean)
     each_loop_local_node(stmts) do |node|
       next unless node.is_a?(MIR::AllocMark)
-      next unless MIR::Placement.frame?(node.alloc)
+      alloc = node.alloc
+      next unless MIR::Placement.frame?(alloc)
 
       scope = T.unsafe(node).scope
       scope = scope.is_a?(Symbol) ? scope : :unknown

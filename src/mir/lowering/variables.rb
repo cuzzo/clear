@@ -158,7 +158,7 @@ module MIRLoweringVariables
     init = ensure_cleanup_binding_owns_string_init(init, facts, node.value)
 
     safe_name = var_decl_safe_name(node, facts.has_mir_drop)
-    function_state.binding_types![safe_name] = facts.ft
+    function_state.binding_types[safe_name] = facts.ft
     stamp_var_decl_init_target!(init, safe_name, facts.decl_alloc)
 
     let_node = MIR::Let.new(
@@ -237,7 +237,7 @@ module MIRLoweringVariables
     is_mutable = is_mutable == true
     node_entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
     decl_name = node.name.to_s
-    binding_entry = node_entry || function_state.bindings![decl_name] || CleanupEntry::NONE
+    binding_entry = node_entry || function_state.bindings[decl_name] || CleanupEntry::NONE
     empty_optional_init = optional_nil_initializer?(ft, node.value)
     binding_entry = CleanupEntry::NONE if empty_optional_init
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
@@ -335,7 +335,7 @@ module MIRLoweringVariables
     ti = Type.from_node!(node, context: "owned binding source")
     return nil unless ownership_tracked_transfer_type?(ti)
 
-    entry = function_state.bindings![node.name.to_s]
+    entry = function_state.bindings[node.name.to_s]
     return nil unless entry&.needs_cleanup?
 
     entry.alloc
@@ -344,9 +344,9 @@ module MIRLoweringVariables
   sig { params(node: AST::VarDecl, has_mir_drop: T::Boolean).returns(String) }
   def var_decl_safe_name(node, has_mir_drop)
     T.bind(self, MIRLowering) rescue nil
-    decl_name_map = function_state.decl_zig_names!
-    alloc_marked_names = function_state.alloc_marked_names!
-    rename_map = function_state.rename_map!
+    decl_name_map = function_state.decl_zig_names
+    alloc_marked_names = function_state.alloc_marked_names
+    rename_map = function_state.rename_map
     # `_` is not a valid Zig binding identifier; a discarded value that
     # still needs cleanup must bind to a unique temp. binding_entry
     # stays keyed by `_` so its cleanup recipe is preserved.
@@ -427,7 +427,7 @@ module MIRLoweringVariables
     init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
     node_alloc = MIR::Placement.explicit_heap?(facts.decl_alloc) ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || facts.decl_alloc)
     drop_entry = drop_entry.with_alloc(node_alloc)
-    function_state.bindings![node.name.to_s] = drop_entry
+    function_state.bindings[node.name.to_s] = drop_entry
     mark_guarded_cleanup_name!(safe_name) if drop_entry.has_moved_guard?
     MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, node_alloc, facts.ft, drop_entry),
@@ -534,7 +534,7 @@ module MIRLoweringVariables
   sig { params(name: String).void }
   def mark_guarded_cleanup_name!(name)
     T.bind(self, MIRLowering) rescue nil
-    function_state.guarded_cleanup_names![name] = true
+    function_state.guarded_cleanup_names[name] = true
   end
 
   sig { params(ft: Type, alloc: Symbol, node: AST::VarDecl).returns(CleanupEntry) }
@@ -665,12 +665,12 @@ module MIRLoweringVariables
 
     source_name = root.name.to_s
     safe = zig_safe_name(source_name)
-    rename_map = function_state.rename_map!
+    rename_map = function_state.rename_map
     safe = rename_map[safe].to_s if rename_map.key?(safe)
-    entry = function_state.bindings![source_name] || CleanupEntry::NONE
+    entry = function_state.bindings[source_name] || CleanupEntry::NONE
     return [] unless entry.present?
 
-    guarded_names = function_state.guarded_cleanup_names!
+    guarded_names = function_state.guarded_cleanup_names
     guarded = entry.has_moved_guard? || guarded_names[safe] == true
     ownership_transfer_marks(safe, :owned_sink, target_alloc: entry.alloc, move_guarded: guarded)
   end
@@ -742,7 +742,7 @@ module MIRLoweringVariables
       # the original BindExpr (`node`), not the proxy, so without this the
       # reference lowering misses the map and emits the unsuffixed name,
       # producing `var x_L8 = ...; ... x.len` which is undeclared Zig.
-      decl_name_map = function_state.decl_zig_names!
+      decl_name_map = function_state.decl_zig_names
       if decl_name_map.key?(proxy.object_id)
         decl_name_map[node.object_id] = T.must(decl_name_map[proxy.object_id])
       end
@@ -758,7 +758,7 @@ module MIRLoweringVariables
       rp = node.reassign_cleanup
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
-      binding_entry = cleanup_entry_for_ast_binding(node) || function_state.bindings![node.name.to_s] || CleanupEntry::NONE
+      binding_entry = cleanup_entry_for_ast_binding(node) || function_state.bindings[node.name.to_s] || CleanupEntry::NONE
       heap_return_var = current_function_heap_carry_return_var?(node.name.to_s)
       assign_alloc = if heap_return_var
         :heap
@@ -804,7 +804,7 @@ module MIRLoweringVariables
     safe = zig_safe_name(name)
     return safe unless renamed
 
-    function_state.rename_map!.fetch(safe, safe)
+    function_state.rename_map.fetch(safe, safe)
   end
 
   sig { params(name: String, value: T.untyped).returns(T::Boolean) }
@@ -939,8 +939,8 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     return [] unless value.is_a?(MIR::Ident)
     name = value.name.to_s
-    entry = function_state.bindings![name] || CleanupEntry::NONE
-    guarded = function_state.guarded_cleanup_names![name] == true
+    entry = function_state.bindings[name] || CleanupEntry::NONE
+    guarded = pipeline_guarded_cleanup_name?(name)
     return [] unless guarded || entry.present?
     alloc = target_alloc || (entry.present? ? entry.alloc : :heap)
     ownership_transfer_marks(name, :owned_sink, target_alloc: alloc, move_guarded: guarded)
@@ -1144,7 +1144,7 @@ module MIRLoweringVariables
     iz.target_var = extract_root_var_name(target_node)
     setAt_stmt = MIR::ExprStmt.new(iz, false)
     post_transfer_marks = consumed_names.flat_map do |name|
-      guarded = function_state.guarded_cleanup_names![name] == true
+      guarded = pipeline_guarded_cleanup_name?(name)
       ownership_transfer_marks(name, :owned_sink, target_alloc: dispatch.sink_alloc, move_guarded: guarded)
     end
 

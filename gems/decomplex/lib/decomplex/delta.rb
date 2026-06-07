@@ -24,16 +24,28 @@ module Decomplex
     # Returns a JSON-round-trippable Hash (string keys).
     def snapshot(sections, clusters)
       findings = Hash.new(0)
+      details = Hash.new { |h, k| h[k] = [] }
       sections.each do |title, _tier, fs|
         next unless fs
 
-        fs.each { |f| findings[fingerprint(title, f)] += 1 }
+        fs.each do |f|
+          fp = fingerprint(title, f)
+          findings[fp] += 1
+          details[fp] << json_safe_finding(title, f)
+        end
       end
       site = Hash.new(0)
+      site_details = Hash.new { |h, k| h[k] = [] }
       sections.each do |title, _tier, fs|
         next unless fs
 
-        fs.each { |f| site_fingerprints(title, f).each { |sfp| site[sfp] += 1 } }
+        fs.each do |f|
+          detail = json_safe_finding(title, f)
+          site_fingerprints(title, f).each do |sfp|
+            site[sfp] += 1
+            site_details[sfp] << detail
+          end
+        end
       end
       cl = {}
       clusters.each do |c|
@@ -41,7 +53,8 @@ module Decomplex
           { "n" => c[:n_detectors], "s" => c[:support],
             "fat" => !c[:fat_union].nil? && c[:fat_union] }
       end
-      { "findings" => findings, "site_findings" => site, "clusters" => cl,
+      { "findings" => findings, "site_findings" => site,
+        "details" => details, "site_details" => site_details, "clusters" => cl,
         "total" => findings.values.sum }
     end
 
@@ -66,6 +79,23 @@ module Decomplex
       RootCause.finding_units(finding)
                .map { |f, m| "#{f}##{m}" }.uniq
                .map { |u| [detector, ents, u].join(SEP) }
+    end
+
+    def json_safe_finding(detector, finding)
+      json_safe_value(finding.merge(detector: detector))
+    end
+
+    def json_safe_value(value)
+      case value
+      when Hash
+        value.to_h { |k, v| [k.to_s, json_safe_value(v)] }
+      when Array
+        value.map { |v| json_safe_value(v) }
+      when Symbol
+        value.to_s
+      else
+        value
+      end
     end
 
     # base/head: snapshot Hashes (or JSON.parse of them). Returns the

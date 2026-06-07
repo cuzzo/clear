@@ -87,10 +87,11 @@ class PipelineConcurrentInvocation < T::Struct
     ]
   end
 
-  sig { params(source_pointer: MIR::Emittable, capacity: MIR::Emittable, alloc: Symbol).returns(T::Array[MIR::Emittable]) }
-  def stream_allocating_args(source_pointer, capacity, alloc)
+  sig { params(source_pointer: MIR::Emittable, capacity: MIR::Emittable, alloc: Symbol, is_inf: MIR::Emittable).returns(T::Array[MIR::Emittable]) }
+  def stream_allocating_args(source_pointer, capacity, alloc, is_inf)
     [
       apply_ident,
+      is_inf,
       MIR::AllocatorRef.new(alloc),
       MIR::Ident.new("rt"),
       source_pointer,
@@ -678,13 +679,7 @@ class PipelineConcurrentLowerer
   sig { params(lhs: AST::Identifier, id: Integer).returns(PipelineConcurrentSourcePointer) }
   def stream_concurrent_source_setup_mir(lhs, id)
     src = @services.visit_mir.call(lhs)
-    return PipelineConcurrentSourcePointer.new(setup: [], pointer: MIR::AddressOf.new(src)) if lhs.is_a?(AST::Identifier)
-
-    local = "__stream_conc_src_#{id}"
-    PipelineConcurrentSourcePointer.new(
-      setup: [MIR::Let.new(local, src, true, nil, "_ = &#{local};")],
-      pointer: MIR::AddressOf.new(MIR::Ident.new(local)),
-    )
+    PipelineConcurrentSourcePointer.new(setup: [], pointer: MIR::AddressOf.new(src))
   end
 
   sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::Expr) }
@@ -709,8 +704,12 @@ class PipelineConcurrentLowerer
     call = @services.emit_builtin.call(:concurrentStreamSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
-      MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
-      *invoke.stream_allocating_args(source.pointer, capacity, @services.pipeline_result_alloc.call),
+      *invoke.stream_allocating_args(
+        source.pointer,
+        capacity,
+        @services.pipeline_result_alloc.call,
+        MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
+      ),
     ])
 
     label = @services.next_label.call
@@ -735,8 +734,12 @@ class PipelineConcurrentLowerer
 
     call = @services.emit_builtin.call(:concurrentStreamWhere, [
       MIR::Ident.new(item_t.zig_type),
-      MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
-      *invoke.stream_allocating_args(source.pointer, capacity, @services.pipeline_result_alloc.call),
+      *invoke.stream_allocating_args(
+        source.pointer,
+        capacity,
+        @services.pipeline_result_alloc.call,
+        MIR::Lit.new(lhs_ti.inf_stream? ? "true" : "false"),
+      ),
     ])
 
     label = @services.next_label.call
@@ -1106,9 +1109,8 @@ class PipelineConcurrentLowerer
 
   sig { params(id: Integer, ctx_name: String, fields: T::Array[MIR::FieldDef], fn: MIR::FnDef, specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(PipelineConcurrentCallback) }
   def callback_record(id, ctx_name, fields, fn, specs)
-    ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
     ctx_init = MIR::StructInit.new(ctx_name, specs.map { |s|
-      { name: s.name, value: s.init_value_mir }
+      MIR::StructInitField.new(name: s.name, value: s.init_value_mir)
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
@@ -1152,7 +1154,6 @@ class PipelineConcurrentLowerer
     when AST::AverageOp then :average
     when AST::MinOp then :min
     when AST::MaxOp then :max
-    else T.absurd(inner)
     end
   end
 

@@ -728,7 +728,7 @@ module PassWorkProfilerTool
       moved_guard_info = T.let({}, T::Hash[String, T.untyped])
       fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
-      lowering = MIRLowering.new(
+      lowering = MIRLowering.new(input: MIRLoweringInput.new(
         struct_schemas: struct_schemas,
         enum_schemas: enum_schemas,
         union_schemas: union_schemas,
@@ -736,7 +736,7 @@ module PassWorkProfilerTool
         moved_guard_info: moved_guard_info,
         importer: importer,
         source_dir: @source_dir
-      )
+      ))
       mod = T.let(nil, T.untyped)
       @profiler.measure("mir.lower", ast_root: ast) { mod = lowering.lower_module(ast) }
       items = T.let((T.must(mod)[:items] + T.must(mod)[:type_items]).flatten, T::Array[T.untyped])

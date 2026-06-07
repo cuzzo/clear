@@ -202,7 +202,7 @@ module MIRLoweringCapabilities
       build_field_path_zig(var_node)
     else
       decl = var_node.respond_to?(:symbol) ? var_node.symbol&.reg : nil
-      mapped = decl ? function_state.decl_zig_names![decl.object_id] : nil
+      mapped = decl ? function_state.decl_zig_names[decl.object_id] : nil
       capture_state.do_capture_map&.dig(var_name) || mapped || var_name
     end
   end
@@ -575,7 +575,7 @@ module MIRLoweringCapabilities
         materialization.add_binding(emit_snapshot_mutable_call(node, with_label))
         []
       else
-        lowered_body = T.cast(T.cast(self, MIRLowering).lower_body(node.body), T::Array[MIR::Emittable])
+        lowered_body = T.cast(self, MIRLowering).lower_body(node.body)
         wrap_body_with_guard(node, lowered_body, with_label)
       end
     end
@@ -1031,7 +1031,7 @@ module MIRLoweringCapabilities
         body_mir, guard_cond, guard_fail
       )])
     else
-      body_mir = wrap_body_with_guard(node, T.must(body_mir), nil)
+      body_mir = wrap_body_with_guard(node, body_mir, nil)
       MIR::ScopeBlock.new([MIR::PolymorphicMutate.new(cell_zig, runtime_binding_name, safe_alias, bare_t_zig, body_mir)])
     end
   end
@@ -1093,7 +1093,7 @@ module MIRLoweringCapabilities
       ]), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :block
-      result.concat(T.cast(lower_body(T.must(clause.body)), T::Array[MIR::Emittable]))
+      result.concat(lower_body(T.must(clause.body)))
     else
       result
     end
@@ -1231,7 +1231,7 @@ module MIRLoweringCapabilities
     when :return
       [MIR::ReturnStmt.new(lower(T.must(clause.value)))]
     when :block
-      T.must(lower_body(T.must(clause.body))) + [MIR::BreakStmt.new(T.must(with_label), nil)]
+      lower_body(T.must(clause.body)) + [MIR::BreakStmt.new(T.must(with_label), nil)]
     else
       raise "Internal: unknown lock action #{clause.action}"
     end
@@ -1240,7 +1240,7 @@ module MIRLoweringCapabilities
   sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(MutableSnapshotPlan) }
   def mutable_snapshot_plan(node, with_label)
     lowerer = T.cast(self, MIRLowering)
-    body_mir = T.cast(lowerer.lower_body(node.body), T::Array[MIR::Emittable])
+    body_mir = lowerer.lower_body(node.body)
     rt_name = lowerer.runtime_binding_name
     MutableSnapshotPlan.new(
       node: node,
@@ -1360,7 +1360,7 @@ module MIRLoweringCapabilities
       value_zig = emit_expr(lower(T.must(clause.value)))
       "return #{value_zig};"
     when :block
-      body_zig = emit_stmts_zig(T.must(lower_body(T.must(clause.body))))
+      body_zig = emit_stmts_zig(lower_body(T.must(clause.body)))
       "#{body_zig}\nbreak :#{with_label};"
     else
       raise "Internal: unknown lock action #{clause.action}"

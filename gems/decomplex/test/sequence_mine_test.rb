@@ -141,6 +141,22 @@ class SequenceMineTest < Minitest::Test
     assert_empty r.broken_protocol(min_support: 4)
   end
 
+  def test_unqualified_passive_zero_arg_readers_are_not_protocol_events
+    r = scan(<<~RB)
+      def a(node); runtime_binding_name; lowering_counters; visit(node); end
+      def b(node); runtime_binding_name; lowering_counters; visit(node); end
+      def c(node); runtime_binding_name; lowering_counters; visit(node); end
+      def d(node); runtime_binding_name; lowering_counters; visit(node); end
+      def e(node); runtime_binding_name; visit(node); end
+      def f(node); lowering_counters(); visit(node); end
+    RB
+
+    mids = r.co_called_pairs(min_support: 1).flat_map { |h| h[:pair] }.uniq
+    refute_includes mids, "runtime_binding_name"
+    refute_includes mids, "lowering_counters"
+    assert_empty r.broken_protocol(min_support: 4)
+  end
+
   def test_zero_arg_lifecycle_calls_remain_protocol_events
     r = scan(<<~RB)
       def a(lock); lock.acquire; work(lock); lock.release; end
@@ -148,6 +164,22 @@ class SequenceMineTest < Minitest::Test
       def c(lock); lock.acquire; work(lock); lock.release; end
       def d(lock); lock.acquire; work(lock); lock.release; end
       def leak(lock); lock.acquire; work(lock); end
+    RB
+
+    bp = r.broken_protocol(min_support: 4)
+    hit = bp.find { |h| h[:at].include?("leak") }
+    refute_nil hit
+    assert_equal "acquire", hit[:has]
+    assert_equal "release", hit[:missing]
+  end
+
+  def test_unqualified_zero_arg_lifecycle_calls_remain_protocol_events
+    r = scan(<<~RB)
+      def a; acquire; release; end
+      def b; acquire; release; end
+      def c; acquire; release; end
+      def d; acquire; release; end
+      def leak; acquire; end
     RB
 
     bp = r.broken_protocol(min_support: 4)

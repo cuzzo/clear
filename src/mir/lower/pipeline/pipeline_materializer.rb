@@ -272,8 +272,6 @@ class PipelineMaterializer
       build_set(lhs_type)
     when ItemKind::Default
       [MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_src_list"), true), false, nil, nil)]
-    else
-      T.absurd(kind)
     end
   end
 
