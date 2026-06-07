@@ -701,6 +701,12 @@ RSpec.describe "MIR gap-burn characterization" do
     borrowed_fn.return_lifetime = [p]
     expect(EscapeAnalysis.send(:borrowed_return?, borrowed_fn, id("source", type: :String))).to eq(true)
 
+    implicit_fn = fn([], params: [p], return_type: nil)
+    implicit_facts = EscapeAnalysis.send(:function_facts, implicit_fn)
+    EscapeAnalysis.send(:mark_heap_return!, implicit_facts, id("local", type: :String, storage: :heap))
+    expect(implicit_fn.heap_carry_return).to eq(true)
+    expect(implicit_fn.heap_carry_return_vars).to include("local")
+
     callee = fn([AST::ReturnNode.new(tok, id("made", type: :String))], return_type: :String)
     callee.heap_carry_return = true
     call = AST::FuncCall.new(tok, "callee", [])
@@ -1998,6 +2004,10 @@ RSpec.describe "MIR gap-burn characterization" do
     idx = AST::GetIndex.new(tok, id("items", type: Type.new(:"String[]")), lit(0, type: :Int64))
     idx.full_type = Type.new(:Untyped)
     expect(low.send(:copy_source_type_info, idx).resolved).to eq(:String)
+    untyped_idx = AST::GetIndex.new(tok, id("unknown_items", type: Type.new(:Any)), lit(0, type: :Int64))
+    untyped_idx.full_type = Type.new(:Any)
+    untyped_idx.define_singleton_method(:typed?) { false }
+    expect(low.send(:copy_source_type_info, untyped_idx).resolved).to eq(:Any)
 
     frame_source = SymbolEntry.new(reg: "source", type: Type.new(:String), mutable: false, storage: :frame)
     lifetime_view = id("view", type: :String, storage: :stack)

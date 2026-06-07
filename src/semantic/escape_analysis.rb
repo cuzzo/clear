@@ -407,7 +407,7 @@ module EscapeAnalysis
 
     if t.collection_value?
       elem = t.element_type
-      return false unless elem.is_a?(Type)
+      return false unless elem
       return elem.ownership_bearing?(schema_lookup)
     end
 
@@ -880,16 +880,16 @@ module EscapeAnalysis
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
   private_class_method def self.owning_return_type(fn, expr)
-    declared = Type.from_node(fn.return_type)
+    declared = fn.declared_return_type
     declared || (expr.is_a?(AST::Locatable) ? expr.full_type!(context: "owning return expression") : nil)
   end
 
   sig { params(facts: FunctionFacts, expr: AST::Node).void }
   private_class_method def self.mark_heap_return!(facts, expr)
     fn = facts.fn
-    ret = fn.return_type
-    ret = ret.value_payload_type if ret.is_a?(Type)
-    ret.mark_heap_allocated! if ret.is_a?(Type)
+    ret = fn.declared_return_type
+    ret = ret.value_payload_type if ret
+    ret.mark_heap_allocated! if ret
     fn.heap_carry_return = true if fn.respond_to?(:heap_carry_return=)
 
     names = T.let(Set.new, T::Set[String])

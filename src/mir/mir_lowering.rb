@@ -3295,7 +3295,7 @@ class MIRLowering
   def callee_can_fail?(name)
     return true if name.to_s.empty?
     sig = fn_sig_for(name)
-    sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
+    sig ? sig.can_fail != false : true
   end
 
   sig { params(nodes: T::Array[T.untyped]).returns(T::Set[String]) }

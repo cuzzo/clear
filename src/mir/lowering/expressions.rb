@@ -1098,7 +1098,7 @@ module MIRLoweringExpressions
       # `elem` field carries the element type name so bc_emitter can
       # stamp the capture slot's struct hint when this gets bound via
       # `IF pool[id] AS env`.
-      elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
+      elem_t = ti.element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
       pool_get_def = T.must(IntrinsicRegistry.sig(POOL_METHODS, "get")).dup
       pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
@@ -1822,7 +1822,7 @@ module MIRLoweringExpressions
     if source.is_a?(AST::GetIndex)
       target_ti = Type.from_node!(source.target, context: "COPY index target")
       elem = target_ti.element_type
-      return elem.is_a?(Type) ? elem : Type.new(elem) if elem
+      return elem if elem
     end
 
     sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)

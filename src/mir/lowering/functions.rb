@@ -284,7 +284,7 @@ module MIRLoweringFunctions
   sig { params(node: AST::FunctionDef).returns(T.any(MIR::FnDef, T::Array[MIR::FnDef])) }
   def lower_function_def(node)
     T.bind(self, MIRLowering) rescue nil
-    ret_type = node.return_type || :Void
+    ret_type = node.lowering_return_type
     if ret_type.is_a?(Type) && ret_type.frame? && ret_type.struct?
       ret_type = Type.new(ret_type.resolved)
     end
@@ -527,7 +527,7 @@ module MIRLoweringFunctions
   sig { params(param: AST::Param).returns(FunctionParamFact) }
   def function_param_fact(param)
     T.bind(self, MIRLowering) rescue nil
-    type_info = param.type || Type.new(:Any)
+    type_info = param.type
     base_zig = transpile_type(param.type, is_param: true)
     collection_param = !!(type_info.needs_pointer_passing? ||
                           (param.mutable && type_info.list_collection?))
@@ -552,8 +552,8 @@ module MIRLoweringFunctions
   sig { params(param: AST::Param, type_info: Type, base_zig: String).returns(String) }
   def function_param_zig_type(param, type_info, base_zig)
     T.bind(self, MIRLowering) rescue nil
-    type_sym = param.type&.resolved
-    is_user_struct = !!(type_sym && struct_schemas.key?(type_sym))
+    type_sym = param.type.resolved
+    is_user_struct = struct_schemas.key?(type_sym)
     sym = param.symbol
     atomic_sync = sym && (sym.atomic? ||
                           (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
@@ -622,7 +622,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return [] unless fn_needs_rt
 
-    ret_type_obj = node.return_type || Type.new(:Void)
+    ret_type_obj = node.lowering_return_type
     bare_ret = ret_type_obj.success_type || ret_type_obj
     returns_value_type = bare_ret.void? || bare_ret.primitive? || bare_ret.resource? ||
                          enum_schemas.key?(bare_ret.resolved) ||
@@ -743,7 +743,7 @@ module MIRLoweringFunctions
     out = T.let([], T::Array[MIR::Node])
     node.params.select(&:takes).each do |p|
       entry = function_state.bindings[p.name.to_s] || CleanupEntry::NONE
-      ti = p.type || Type.new(:Any)
+      ti = p.type
       next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.heap?)
 
       drop_entry = entry.dup
@@ -1460,8 +1460,8 @@ module MIRLoweringFunctions
     if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
       return false unless sig.heap_carry_return == true || sig.heap_return_alloc?
     end
-    node_ti = if node.is_a?(AST::FunctionDef) && node.return_type
-      Type.new(node.return_type)
+    node_ti = if node.is_a?(AST::FunctionDef)
+      node.lowering_return_type
     else
       Type.from_node!(node, context: "call owned return")
     end
@@ -1482,8 +1482,8 @@ module MIRLoweringFunctions
     return false unless node.respond_to?(:name)
     fn = program_state.fn_nodes[node.name.to_s]
     return false unless fn.is_a?(AST::FunctionDef)
-    fn_ret = Type.from_node(fn.return_type)
-    return false unless fn_ret&.error_union?
+    fn_ret = fn.lowering_return_type
+    return false unless fn_ret.error_union?
 
     !function_body_has_value_return?(fn.body)
   end
@@ -1535,15 +1535,16 @@ module MIRLoweringFunctions
       ti.resource? || ti.recursive_cleanup_shape?(mir_schema_lookup)
   end
 
-  sig { params(node: T.untyped, sig_obj: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: T.untyped, sig_obj: T.nilable(FunctionSignature)).returns(T.nilable(T::Boolean)) }
   def call_owned_return_from_args?(node, sig_obj)
     T.bind(self, MIRLowering) rescue nil
-    return nil unless sig_obj && sig_obj.respond_to?(:heap_carry_return_vars)
-    return nil unless sig_obj.heap_carry_return_vars && !sig_obj.heap_carry_return_vars.empty?
+    return nil unless sig_obj
+    heap_carry_return_vars = sig_obj.heap_carry_return_vars
+    return nil unless heap_carry_return_vars && !heap_carry_return_vars.empty?
     by_name = T.let({}, T::Hash[String, Integer])
     sig_obj.params.each_with_index { |param, idx| by_name[param.name.to_s] = idx }
     has_param_return = T.let(false, T::Boolean)
-    sig_obj.heap_carry_return_vars.each do |name|
+    heap_carry_return_vars.each do |name|
       idx = by_name[name.to_s]
       unless idx
         return true
@@ -1553,10 +1554,7 @@ module MIRLoweringFunctions
       return true if ast_expr_produces_heap?(arg)
     end
     if has_param_return
-      ret = T.let(sig_obj.respond_to?(:return_type) ? sig_obj.return_type : nil, T.untyped)
-      ret = Type.new(ret) if ret && !ret.is_a?(Type)
-      return false unless ret.is_a?(Type)
-      ret = ret.success_type
+      ret = sig_obj.return_type.success_type
       return true if ret&.string? || ret&.recursive_cleanup_shape?(mir_schema_lookup)
       return false
     end

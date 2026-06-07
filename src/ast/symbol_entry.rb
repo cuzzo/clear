@@ -50,6 +50,7 @@ class SymbolEntry
 
   @next_binding_id = T.let(0, Integer)
   EMPTY_LIFETIME = T.let([].freeze, T::Array[SymbolEntry])
+  TypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
 
   class BindingFlowFacts < T::Struct
     prop :non_escaping, T::Boolean, default: false
@@ -98,9 +99,9 @@ class SymbolEntry
   # binding's FunctionSignature, or nil (unresolved). Normalized to a
   # single Type. The runtime sig now enforces the accepted domain --
   # anything outside it is a compiler bug, surfaced here.
-  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
+  sig { params(val: TypeInput).void }
   def type=(val)
-    @type = val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val))
+    @type = val.nil? ? Type.new(:Untyped) : Type.new(val)
   end
 
   sig { returns(T::Array[SymbolEntry]) }
@@ -452,7 +453,7 @@ class SymbolEntry
     sources.uniq
   end
 
-  sig { params(reg: T.untyped, type: T.untyped, mutable: T.untyped, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
+  sig { params(reg: T.untyped, type: TypeInput, mutable: T.untyped, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)

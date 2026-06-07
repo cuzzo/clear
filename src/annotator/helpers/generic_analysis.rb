@@ -69,10 +69,9 @@ module GenericAnalysis
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
-  sig { params(node: T.untyped, type_obj: T.untyped, is_param: T::Boolean).returns(T.nilable(T::Array[Type])) }
+  sig { params(node: T.untyped, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless type_obj.is_a?(Type)
     # FN types are structurally typed; their nested param/return types are validated
     # when they are parsed. No named-type schema lookup is needed here.
     return if type_obj.fn_type?
@@ -250,6 +249,8 @@ module GenericAnalysis
         error!(node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
       end
     end
+
+    nil
   end
 
   # ----------------------------------------
@@ -270,7 +271,7 @@ module GenericAnalysis
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
-      param_type = param.type || Type.new(:Any)
+      param_type = param.type
       actual_type = T.cast(arg, AST::Locatable).full_type!(context: "generic call argument")
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
@@ -290,7 +291,7 @@ module GenericAnalysis
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
-      param_type = param.type || Type.new(:Any)
+      param_type = param.type
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
       actual_type = T.cast(arg, AST::Locatable).full_type!(context: "shared generic call argument")
       next unless actual_type.shared?
@@ -389,10 +390,10 @@ module GenericAnalysis
     end
   end
 
-  sig { params(type: Type).returns(T.untyped) }
+  sig { params(type: Type).returns(Type) }
   def generic_binding_value(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    generic_type_has_capabilities?(type) ? Type.new(type) : type.resolved
+    Type.new(type)
   end
 
   sig { params(type: Type).returns(T::Boolean) }
@@ -443,10 +444,10 @@ module GenericAnalysis
       !type.elem_sync.nil?
   end
 
-  sig { params(type: T.untyped).returns(String) }
+  sig { params(type: Type).returns(String) }
   def generic_binding_source(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    t = type.is_a?(Type) ? type : Type.new(type)
+    t = type
     parts = [t.resolved.to_s]
 
     ownership = t.ownership_surface_name

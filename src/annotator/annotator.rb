@@ -165,7 +165,7 @@ class SemanticAnnotator
     when nil
       raise "annotation stamp missing type for #{node.class}"
     end
-    node.full_type = value
+    node.full_type = T.cast(value, AST::SyntheticTypeInput)
     stamped = node.full_type!(context: "annotation stamp")
     raise "annotation stamp produced :Untyped for #{node.class}" if stamped.untyped?
     value
@@ -447,7 +447,7 @@ private
     return true if node.respond_to?(:type) && node.type.is_a?(Type) && node.type.auto?
     return true if node.respond_to?(:return_type) && node.return_type.is_a?(Type) && node.return_type.auto?
     if node.respond_to?(:params) && node.params.is_a?(Array)
-      return true if node.params.any? { |p| p.type&.auto? }
+      return true if node.params.any? { |p| p.type.auto? }
     end
     if node.respond_to?(:each_pair)
       return node.each_pair.any? { |_, v| program_has_auto?(v) }
@@ -643,13 +643,13 @@ private
     effects_begin_function(node.name)
 
     # 1. Setup metadata
-    is_implicit_return = node.return_type.nil?
+    is_implicit_return = node.implicit_return_type?
     node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
-    declared_return = node.return_type || :Any
+    declared_return = node.annotation_return_type
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
     push_function_context!(FunctionContext.new(
-      name: node.name, return_type: node.return_type || Type.new(:Any),
+      name: node.name, return_type: node.annotation_return_type,
       lifetime: lifetime_paths, type_params: fn_type_params
     ))
 
@@ -672,9 +672,9 @@ private
       params: node.params.map { |p| AST::Param.new(
         name: p.name, type: p.type, required: p.default.nil?,
         default: p.default, mutable: p.mutable, takes: p.takes,
-        sync: p.type&.any_sync? ? p.type.sync : nil
+        sync: p.type.any_sync? ? p.type.sync : nil
       )},
-      return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
+      return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant

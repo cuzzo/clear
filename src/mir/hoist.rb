@@ -261,9 +261,9 @@ module Hoist
     obj = call.object
     sym = (obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField)) ? obj.symbol : nil
     ti = sym&.type
-    return false unless ti.is_a?(Type) && ti.collection?
+    return false unless ti&.collection?
     et = ti.element_type
-    !!(et.is_a?(Type) && !et.primitive? && !et.string?)
+    !!(et && !et.primitive? && !et.string?)
   end
 
   sig { params(call: AST::MethodCall).returns(T::Boolean) }

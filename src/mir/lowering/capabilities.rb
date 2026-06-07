@@ -605,7 +605,7 @@ module MIRLoweringCapabilities
     bindings_iz = MIR::ZigTemplate.new(all_bindings, [], "with_block_bindings")
     stdlib_def = FunctionSignature.intrinsic_contract(borrows: with_block_borrow_names(node))
     clauses = materialization.fallible_clauses
-    stdlib_def.emit.fallible_clauses = clauses unless clauses.empty?
+    T.must(stdlib_def.emit).fallible_clauses = clauses unless clauses.empty?
     bindings_iz.stdlib_def = stdlib_def
     bindings_iz
   end

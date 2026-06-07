@@ -402,7 +402,7 @@ module Annotator
         rhs_info = current_scope.resolve_entry(rhs_name)
         return if rhs_info&.rc_stored? || rhs_info&.sync
 
-        type_obj = Type.new(rhs_type)
+        type_obj = rhs_type
         # A String *binding* is owned/move (CLEAR contract). implicitly_copyable?
         # returns true for a String only via the rvalue rodata exemption
         # (type.rb: string? && rodata?); escape analysis stamps the binding's
@@ -458,19 +458,22 @@ module Annotator
 
         # Path 1: stdlib functions with lifetime: "self"
         matched_def = call_node.matched_stdlib_def
-        if matched_def && matched_def.emit && !matched_def.emit.lifetime.empty?
-          lifetimes = matched_def.emit.lifetime
-          if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
-            return call_node.object
+        if matched_def
+          matched_emit = matched_def.emit
+          if matched_emit && !matched_emit.lifetime.empty?
+            lifetimes = matched_emit.lifetime
+            if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
+              return call_node.object
+            end
+            # Named param lifetime -- find by index in args list
+            args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
+            arg_types = matched_def.arg_spec
+            if arg_types.is_a?(Array)
+              idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
+              return args[idx] if idx && args[idx]
+            end
+            return nil
           end
-          # Named param lifetime -- find by index in args list
-          args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-          arg_types = matched_def.arg_spec
-          if arg_types.is_a?(Array)
-            idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
-            return args[idx] if idx && args[idx]
-          end
-          return nil
         end
 
         # Path 2: user-defined functions with return_lifetime: [...]
@@ -1105,7 +1108,8 @@ module Annotator
           matched_def = val.matched_stdlib_def
           if matched_def
             # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
-            if matched_def.emit && !matched_def.emit.lifetime.empty?
+            matched_emit = matched_def.emit
+            if matched_emit && !matched_emit.lifetime.empty?
               val.storage = :borrow if val.respond_to?(:storage=)
               node.storage = :borrow if node.respond_to?(:storage=)
               return
@@ -1234,11 +1238,11 @@ module Annotator
         error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)
       end
 
-      sig { params(type_info: T.any(Type, Symbol, String), sync: T.nilable(Symbol)).returns(Symbol) }
+      sig { params(type_info: Type::TypeInput, sync: T.nilable(Symbol)).returns(Symbol) }
       def classify_og_kind(type_info, sync: nil)
         T.bind(self, SemanticAnnotator)
 
-        t = type_info.is_a?(Type) ? type_info : Type.new(type_info)
+        t = Type.new(type_info)
         if t.multiowned? || t.shared?
           :rc
         elsif sync

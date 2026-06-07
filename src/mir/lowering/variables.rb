@@ -91,7 +91,7 @@ module MIRLoweringVariables
     return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
     return nil unless ret.generic_type_parameter?
     params = node.params.select do |p|
-      pt = p.type || Type.new(:Any)
+      pt = p.type
       pt.shared? && pt.resolved == ret.resolved
     end
     return nil unless params.size == 1

@@ -388,8 +388,7 @@ class MIRChecker
   def verify_alloc_marks_typed!(allocs)
     allocs.each do |name, marks|
       marks.each do |mark|
-        ti = mark.type_info
-        next if ti.is_a?(Type) && !ti.untyped?
+        next unless mark.type_info.untyped?
 
         @errors << error(:ALLOC_MARK_TYPE_MISSING, name,
           "MIR::AllocMark must carry a concrete Type so MIRChecker can prove cleanup/ownership safety")
@@ -1328,10 +1327,11 @@ class MIRChecker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
     sig = FunctionSignature.unwrap(node.stdlib_def)
-    ret = sig&.return_type
-    ret_type = ret.is_a?(Type) ? ret : (ret ? Type.new(ret) : nil)
-    return true if ret_type&.resource?
-    return false unless sig&.emits_allocating?
+    return false unless sig
+
+    ret_type = sig.return_type
+    return true if ret_type.resource?
+    return false unless sig.emits_allocating?
     return true if sig.heap_return_alloc?
     return false unless node.is_a?(MIR::InlineZig)
 

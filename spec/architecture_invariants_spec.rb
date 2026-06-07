@@ -643,7 +643,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       source(rel).lines.each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
         next unless line.match?(/\.full_type\s*=(?![=~])/)
-        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = value")
+        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
         "#{rel}:#{idx + 1}: #{line.strip}"
       end
     end
@@ -659,7 +659,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(annotator).to include("type_parameters(:Stamp)")
     expect(annotator).to include("value: T.type_parameter(:Stamp)")
     expect(annotator).to include("raise \"annotation stamp missing type")
-    expect(annotator).to include("node.full_type = value")
+    expect(annotator).to include("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
     expect(annotator).to include('node.full_type!(context: "annotation stamp")')
     expect(annotator).to include("stamped.untyped?")
     expect(annotator).to include('raise "annotation stamp produced :Untyped')
@@ -863,7 +863,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(checker).to include("verify_alloc_marks_typed!(allocs)")
     expect(checker).to include("def verify_alloc_marks_typed!(allocs)")
     expect(checker).to include("ALLOC_MARK_TYPE_MISSING")
-    expect(checker).to include("ti.is_a?(Type) && !ti.untyped?")
+    expect(checker).to include("mark.type_info.untyped?")
     expect(source("src/ast/diagnostic_registry.rb")).to include("ALLOC_MARK_TYPE_MISSING")
   end
 

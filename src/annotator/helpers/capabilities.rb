@@ -840,7 +840,7 @@ module CapabilityHelper
       # field access) don't re-emit Arc / Locked indirection on top of
       # the already-unwrapped guard pointer.
       inner_type = cap[:old_scope].resolve_type(var_name)
-      if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
+      if inner_type.any_sync? || inner_type.ownership != :affine
         inner_type = inner_type.bare_data_type
       end
       alias_name = cap[:alias] || var_name
@@ -870,7 +870,7 @@ module CapabilityHelper
       if cap[:alias] && !syn
         alias_name = cap[:alias]
         is_mutable = !!cap[:alias_mutable]
-        resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
+        resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || Type.new(:Any)) : cap.resolved_type)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         record_capture_local!(alias_name)
         sym = current_scope.local_entry!(alias_name)
@@ -946,7 +946,7 @@ module CapabilityHelper
         end
       end
       alias_name = cap[:alias] || var_name
-      resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
+      resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || Type.new(:Any)) : cap.resolved_type)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.local_entry!(alias_name)

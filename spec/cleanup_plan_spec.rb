@@ -259,6 +259,13 @@ RSpec.describe CleanupClassifier do
         expect(entry[:kind]).to eq(:uniform)
         expect(entry[:match_as]).to eq(true)
       end
+
+      it "skips unit and indirect payloads" do
+        indirect_ty = Type.new(:Box, layout: :indirect)
+
+        expect(CleanupClassifier.send(:match_as_entry_for, nil, :U, "None")).to be_nil
+        expect(CleanupClassifier.send(:match_as_entry_for, indirect_ty, :U, "Box")).to be_nil
+      end
     end
   end
 
@@ -455,6 +462,15 @@ RSpec.describe CleanupClassifier do
         nil,
       )
       expect(borrowed_cleanup).to be_nil
+    end
+
+    it "treats borrowed inline struct fields as non-cleanup-bearing" do
+      inline = Schemas::InlineStructVariant.new(fields: {
+        "borrowed" => Type.new(:String),
+      })
+      inline.fields["borrowed"] = AST::StructField.new(type: Type.new(:String), default: nil, borrowed: true)
+
+      expect(CleanupClassifier.send(:elem_has_cleanup_fields?, inline, schema_lookup_for)).to eq(false)
     end
   end
 

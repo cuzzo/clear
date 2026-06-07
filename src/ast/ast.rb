@@ -31,7 +31,7 @@ module AST
     end
   end
 
-  SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
+  SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, String, FunctionSignature) }
   CoerceTypeInput = T.type_alias { T.nilable(Type::TypeInput) }
   CoerceResult = T.type_alias { [CoerceTypeInput, T.nilable(String)] }
   PipelineRewriteMetadataIvars = T.let([
@@ -117,7 +117,7 @@ module AST
     def initialize(**kw)
       super
       t = self[:type]
-      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+      self[:type] = Type.new(t || :Any)
     end
 
     # Mirror of Type#atomic? (Param has :sync but no :layout, so no
@@ -126,9 +126,12 @@ module AST
     sig { returns(T::Boolean) }
     def atomic? = sync == :atomic
 
+    sig { returns(Type) }
+    def type; self[:type]; end
+
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
-      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+      self[:type] = Type.new(val || :Any)
     end
   end
 
@@ -146,18 +149,18 @@ module AST
       self[:takes]    = !!self[:takes]
       self[:comptime] = !!self[:comptime]
       t = self[:type]
-      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+      self[:type] = Type.new(t || :Any)
     end
 
     sig { returns(String) }
     def name; self[:name]; end
 
-    sig { returns(T.nilable(Type)) }
+    sig { returns(Type) }
     def type; self[:type]; end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
-      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+      self[:type] = Type.new(val || :Any)
     end
 
     sig { returns(T.nilable(AST::Locatable)) }
@@ -955,9 +958,10 @@ module AST
     sig { params(val: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
     def symbol=(val); instance_variable_set(:@symbol, val); end
 
-    # Set full_type. Accepts a Type object (stored directly) or any other
-    # value (wrapped in Type.new for backward compatibility).
-    sig { params(val: T.untyped).returns(Type) }
+    # Set full_type. Accepts a parsed or semantic type value and stores a
+    # concrete Type at the AST boundary. Existing Type objects are preserved:
+    # some tests and analysis hooks attach singleton behavior to the instance.
+    sig { params(val: SyntheticTypeInput).returns(Type) }
     def full_type=(val)
       @type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
       T.must(@type_object)
@@ -972,7 +976,6 @@ module AST
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
-      ft = Type.new(ft) unless ft.is_a?(Type)
       raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
       ft
     end
@@ -1315,13 +1318,33 @@ module AST
     def initialize(*args)
       super
       rt = self[:return_type]
-      self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
+      self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def return_type=(val)
-      self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+      self[:return_type] = val.nil? ? nil : Type.new(val)
+    end
+
+    sig { returns(T::Boolean) }
+    def implicit_return_type?
+      self[:return_type].nil?
+    end
+
+    sig { returns(T.nilable(Type)) }
+    def declared_return_type
+      self[:return_type]
+    end
+
+    sig { returns(Type) }
+    def annotation_return_type
+      self[:return_type] || Type.new(:Any)
+    end
+
+    sig { returns(Type) }
+    def lowering_return_type
+      self[:return_type] || Type.new(:Void)
     end
 
     sig { params(val: T::Array[T.untyped]).void }
@@ -1457,12 +1480,17 @@ module AST
     def initialize(**kw)
       super
       self[:borrowed] = false if self[:borrowed].nil?
+      field_type = self[:type]
+      self[:type] = Type.new(field_type || :Any)
     end
 
-    sig { returns(T.any(Type, Symbol)) }
+    sig { returns(Type) }
     def type; self[:type]; end
-    sig { params(val: T.any(Type, Symbol)).void }
-    def type=(val); self[:type] = val; end
+
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
+    def type=(val)
+      self[:type] = Type.new(val || :Any)
+    end
 
     sig { returns(T.nilable(AST::Locatable)) }
     def default; self[:default]; end
@@ -1486,12 +1514,12 @@ module AST
     def initialize(*args)
       super
       t = self[:type]
-      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+      self[:type] = Type.new(t) unless t.nil?
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
-      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+      self[:type] = val.nil? ? nil : Type.new(val)
     end
 	  end
   class AutoLockPlan < T::Struct
@@ -1539,12 +1567,12 @@ module AST
     def initialize(*args)
       super
       t = self[:type]
-      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+      self[:type] = Type.new(t) unless t.nil?
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
     def type=(val)
-      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+      self[:type] = val.nil? ? nil : Type.new(val)
     end
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
@@ -2201,11 +2229,23 @@ module AST
     def initialize(*args)
       super
       self[:params] = self[:params] || []
+      rt = self[:return_type]
+      self[:return_type] = Type.new(rt) unless rt.nil?
     end
 
     sig { params(val: T.untyped).returns(T.untyped) }
     def params=(val)
       self[:params] = val || []
+    end
+
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
+    def return_type=(val)
+      self[:return_type] = val.nil? ? nil : Type.new(val)
+    end
+
+    sig { returns(Type) }
+    def annotation_return_type
+      self[:return_type] || Type.new(:Any)
     end
   end
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"

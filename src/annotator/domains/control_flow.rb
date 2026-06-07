@@ -207,8 +207,7 @@ module Annotator
             # Destructuring bind: declare a local variable with the field's type.
             if schema && schema.fields.key?(f.name)
               field_def = schema.fields[f.name]
-              field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
-              field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
+              field_type = field_def.type
               current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
               og_declare(f.name, nil, field_type)
             end
@@ -495,8 +494,7 @@ module Annotator
                         next
                       end
                       field_def = payload_schema.fields[f.name]
-                      field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
-                      field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
+                      field_type = field_def.type
                       current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
                       og_declare(f.name, nil, field_type)
                     end

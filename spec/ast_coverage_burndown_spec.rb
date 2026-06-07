@@ -12,6 +12,7 @@ require_relative "../src/ast/parser"
 require_relative "../src/ast/std_lib"
 require_relative "../src/ast/symbol_entry"
 require_relative "../src/ast/type"
+require_relative "../src/annotator/helpers/function_signature"
 
 RSpec.describe "AST coverage burndown" do
   def token(type = :VAR_ID, value = "x", line: 1, column: 1)
@@ -232,6 +233,123 @@ RSpec.describe "AST coverage burndown" do
       expect(pattern.fields.length).to eq(1)
       expect(extern_fn.params).to eq([])
       expect(match_stmt.cases.length).to eq(1)
+    end
+
+    it "normalizes param and capture type slots to concrete Type objects" do
+      explicit = Type.new(:String)
+      typed_param = AST::Param.new(name: "name", type: explicit)
+      nil_param = AST::Param.new(name: "fallback", type: nil)
+      symbol_param = AST::Param.new(name: "count", type: :Int64)
+
+      expect(typed_param.type.resolved).to eq(:String)
+      expect(nil_param.type.resolved).to eq(:Any)
+      expect(symbol_param.type.resolved).to eq(:Int64)
+
+      typed_param.type = "Bool"
+      nil_param.type = explicit
+      symbol_param.type = nil
+
+      expect(typed_param.type.resolved).to eq(:Bool)
+      expect(nil_param.type.resolved).to eq(:String)
+      expect(symbol_param.type.resolved).to eq(:Any)
+
+      capture = AST::Capture.new(name: "cap", type: nil)
+      expect(capture.type.resolved).to eq(:Any)
+      capture.type = :Float64
+      expect(capture.type.resolved).to eq(:Float64)
+      capture.type = explicit
+      expect(capture.type.resolved).to eq(:String)
+    end
+
+    it "names function and extern return type phase defaults explicitly" do
+      tok = token
+      implicit = AST::FunctionDef.new(tok, "implicit", [], [], nil, nil, [], [], nil, :package, [], false)
+      declared = AST::FunctionDef.new(tok, "declared", [], [], :Int64, nil, [], [], nil, :package, [], false)
+
+      expect(implicit.implicit_return_type?).to be(true)
+      expect(implicit.declared_return_type).to be_nil
+      expect(implicit.annotation_return_type.resolved).to eq(:Any)
+      expect(implicit.lowering_return_type.resolved).to eq(:Void)
+      expect(declared.implicit_return_type?).to be(false)
+      expect(declared.declared_return_type.resolved).to eq(:Int64)
+      expect(declared.annotation_return_type.resolved).to eq(:Int64)
+      expect(declared.lowering_return_type.resolved).to eq(:Int64)
+
+      extern = AST::ExternFnDecl.new(tok, "native", [], "Bool", "mod", {})
+      expect(extern.return_type.resolved).to eq(:Bool)
+      expect(extern.annotation_return_type.resolved).to eq(:Bool)
+      extern.return_type = nil
+      expect(extern.annotation_return_type.resolved).to eq(:Any)
+      extern.return_type = :Float64
+      expect(extern.return_type.resolved).to eq(:Float64)
+    end
+
+    it "normalizes schema field and union payload type boundaries" do
+      explicit = Type.new(:String)
+      field = AST::StructField.new(type: :Int64)
+      nil_field = AST::StructField.new(type: nil)
+      typed_field = AST::StructField.new(type: explicit, borrowed: true)
+
+      expect(field.type.resolved).to eq(:Int64)
+      expect(nil_field.type.resolved).to eq(:Any)
+      expect(typed_field.type.resolved).to eq(:String)
+      expect(typed_field.borrowed).to be(true)
+
+      field.type = "Bool"
+      nil_field.type = explicit
+      typed_field.type = nil
+
+      expect(field.type.resolved).to eq(:Bool)
+      expect(nil_field.type.resolved).to eq(:String)
+      expect(typed_field.type.resolved).to eq(:Any)
+
+      inline = Schemas::InlineStructVariant.new(fields: { radius: :Float64, "name" => explicit })
+      expect(inline.fields[:radius].resolved).to eq(:Float64)
+      expect(inline.fields["name"].resolved).to eq(:String)
+      expect(inline.typed_fields.keys).to contain_exactly("radius", "name")
+
+      union = Schemas::UnionSchema.new(variants: {
+        Some: :Int64,
+        "Named" => "String",
+        Existing: explicit,
+        Unit: nil,
+        Inline: inline
+      })
+      expect(union.variants[:Some].resolved).to eq(:Int64)
+      expect(union.variants["Named"].resolved).to eq(:String)
+      expect(union.variants[:Existing].resolved).to eq(:String)
+      expect(union.variants[:Unit]).to be_nil
+      expect(union.variants[:Inline]).to equal(inline)
+    end
+
+    it "exposes stable semantic type ids at phase boundaries" do
+      number_id = Type.new(:Number).type_id
+      float_id = Type.new(:Float64).type_id
+      shared_string_id = Type.new(:String, ownership: :shared).type_id
+      plain_string_id = Type.new(:String).type_id
+
+      expect(number_id.key).to eq(float_id.key)
+      expect(number_id.to_s).to eq(float_id.key)
+      expect(shared_string_id.key).not_to eq(plain_string_id.key)
+
+      fn_sig = FunctionSignature.new(
+        params: [AST::Param.new(name: "x", type: :Int64)],
+        return_type: :String,
+        reentrant: true
+      )
+      fn_id = Type.new(fn_sig).type_id.key
+
+      expect(fn_id).to include("fn(")
+      expect(fn_id).to include("Int64")
+      expect(fn_id).to include("String")
+      expect(fn_id).to include("reentrant")
+
+      schemas = {
+        Box: Schemas::StructSchema.new(fields: {
+          "name" => AST::StructField.new(type: Type.new(:String, location: :heap)),
+        }),
+      }
+      expect(Type.new(:Box).recursive_cleanup_shape?(->(name) { schemas[name] })).to be(true)
     end
 
     it "collects all test hook and test bodies from TestBlock" do

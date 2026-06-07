@@ -106,21 +106,22 @@ module Schemas
   class InlineStructVariant
       extend T::Sig
 
-    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
+    FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type] }
+    FieldInputMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
 
     attr_reader :fields
     attr_accessor :deinit_entries
-    sig { params(fields: FieldMap, deinit_entries: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).void }
+    sig { params(fields: FieldInputMap, deinit_entries: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).void }
     def initialize(fields:, deinit_entries: nil)
-      @fields = T.let(fields, Schemas::InlineStructVariant::FieldMap)
+      @fields = T.let(fields.transform_values { |field_type|
+        Type.new(field_type)
+      }, Schemas::InlineStructVariant::FieldMap)
       @deinit_entries = T.let(deinit_entries, T.nilable(T::Array[Schemas::InlineStructDeinitEntry]))
     end
 
     sig { returns(T::Hash[String, Type]) }
     def typed_fields
-      @fields.transform_keys(&:to_s).transform_values do |field_type|
-        field_type.is_a?(Type) ? field_type : Type.new(field_type)
-      end
+      @fields.transform_keys(&:to_s)
     end
 
     # Value equality on the field shape (not deinit_entries, which is
@@ -141,10 +142,24 @@ module Schemas
   class UnionSchema
       extend T::Sig
 
+    VariantValue = T.type_alias { T.nilable(T.any(Type, Schemas::InlineStructVariant)) }
+    VariantMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantValue] }
+    VariantInput = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
+    VariantInputMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantInput] }
+
     attr_reader :variants, :type_params, :visibility
-    sig { params(variants: T.untyped, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
+    sig { params(variants: VariantInputMap, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
     def initialize(variants:, type_params: nil, visibility: :package)
-      @variants = variants
+      @variants = T.let(
+        variants.transform_values do |variant|
+          if variant.nil? || variant.is_a?(Schemas::InlineStructVariant)
+            variant
+          else
+            Type.new(variant)
+          end
+        end,
+        Schemas::UnionSchema::VariantMap
+      )
       @type_params = type_params
       @visibility = visibility
       freeze
@@ -177,7 +192,7 @@ module Schemas
     attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
     sig { params(fields: T.untyped, type_params: T.nilable(T::Array[Symbol]), methods: T.untyped, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
     def initialize(fields: {}, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
-      @fields = fields
+      @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = type_params
       @methods = methods
       @visibility = visibility
@@ -206,6 +221,29 @@ module Schemas
     def enum? = false
     sig { returns(T::Boolean) }
     def resource? = false
+
+    sig { params(fields: T.untyped).returns(T::Hash[String, AST::StructField]) }
+    def normalize_fields(fields)
+      fields.each_with_object({}) do |(name, field), out|
+        out[name.to_s] = normalize_field(field)
+      end
+    end
+    private :normalize_fields
+
+    sig { params(field: T.untyped).returns(AST::StructField) }
+    def normalize_field(field)
+      return field if field.is_a?(AST::StructField)
+      if field.is_a?(Hash)
+        return AST::StructField.new(
+          type: field[:type] || field["type"],
+          default: field[:default] || field["default"],
+          borrowed: field[:borrowed] || field["borrowed"]
+        )
+      end
+
+      AST::StructField.new(type: field)
+    end
+    private :normalize_field
   end
 
   # Nil-safe kind predicates. Single representation: a schema is always

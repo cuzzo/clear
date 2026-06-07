@@ -102,7 +102,7 @@ module MIRLoweringLiterals
 
       s_id = next_stream_literal_id
 
-      elem_zig = ti.stream_element_type.zig_type
+      elem_zig = T.must(ti.stream_element_type).zig_type
       n = ti.stream_capacity
       promise_zig = "CheatLib.Promise(#{elem_zig})"
       stream_zig = ti.zig_type

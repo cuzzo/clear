@@ -182,6 +182,9 @@ pipeline plan, not infer it while emitting code.
 
 ## 3. The Type Model Is Too Loose At Phase Boundaries
 
+Status: Implemented. The detailed implementation and metric record is in
+`docs/agents/type-model-phase-boundary-plan.md`.
+
 ### Problem
 
 Nil-kill reports heavy union and nilability pressure around `.type`,
@@ -211,18 +214,32 @@ toward canonical resolved type identities and explicit type kinds.
 
 ### /plan
 
-1. Introduce or strengthen a canonical resolved type representation, ideally
+Implemented in the current type-model phase-boundary refactor. The final shape:
+
+1. [x] Introduce or strengthen a canonical resolved type representation, ideally
    with stable `TypeId` values and explicit type-kind variants.
-2. Separate parser type syntax from resolved semantic types. A parsed annotation
+2. [x] Separate parser type syntax from resolved semantic types. A parsed annotation
    should not be interchangeable with a checked type.
-3. Tighten `.type`, `.return_type`, and `full_type!` contracts so callers know
+3. [x] Tighten `.type`, `.return_type`, and `full_type!` contracts so callers know
    exactly which phase representation they are receiving.
-4. Replace `Symbol | Type | nil` style flows with explicit sum types or typed
+4. [x] Replace `Symbol | Type | nil` style flows with explicit sum types or typed
    result objects. A missing type, unresolved type, inferred type, and concrete
    type should be distinguishable without sentinel values.
-5. Prioritize nil-kill's high-pressure union and nilability sites before broad
+5. [x] Prioritize nil-kill's high-pressure union and nilability sites before broad
    cosmetic typing work. The goal is to delete guards and normalizers, not add
    annotations around the existing ambiguity.
+
+The refactor normalized AST parameter/capture/field type slots, made function
+signature and context return types concrete, tightened scope and symbol-entry
+type readers, normalized schema payload fields, made post-annotation type facts
+fail closed, and added stable `TypeId` identity for memory-safety consumers.
+
+Final repo-wide metrics moved in the intended direction: Decomplex total
+`6063 -> 6046`, broken protocols `463 -> 458`, state-based branch density
+`1575 -> 1574`; nil-kill param untyped slots `885 -> 877`, return untyped slots
+`208 -> 202`, field/ivar untyped slots `858 -> 847`, collection untyped slots
+`0 -> 0`; `.type` guard collapses `33 -> 28`, `.return_type` `14 -> 7`,
+`full_type!()` `22 -> 21`, and `.element_type` `5 -> 0`.
 
 ## 4. Ownership, Capability, And Escape Facts Are Spread Across Too Many Phases
 

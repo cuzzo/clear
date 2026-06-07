@@ -592,7 +592,7 @@ class PipelineConcurrentLowerer
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_bounded_select(lhs, conc_op, inner)
-    item_t = lhs.full_type!.stream_element_type
+    item_t = T.must(lhs.full_type!.stream_element_type)
     result_t = Type.new(inner.expression.full_type!)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = bounded_stream_items_setup(lhs, invoke.id)
@@ -618,7 +618,7 @@ class PipelineConcurrentLowerer
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::WhereOp).returns(MIR::BlockExpr) }
   def lower_concurrent_bounded_where(lhs, conc_op, _inner)
-    item_t = lhs.full_type!.stream_element_type
+    item_t = T.must(lhs.full_type!.stream_element_type)
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
@@ -642,7 +642,7 @@ class PipelineConcurrentLowerer
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_concurrent_bounded_each(lhs, conc_op, _inner)
-    item_t = lhs.full_type!.stream_element_type
+    item_t = T.must(lhs.full_type!.stream_element_type)
     invoke = bounded_each_invocation(conc_op, item_t)
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
@@ -808,9 +808,9 @@ class PipelineConcurrentLowerer
   sig { params(lhs_ti: Type).returns(Type) }
   def stream_concurrent_element_type(lhs_ti)
     if lhs_ti.inf_stream?
-      Type.new(lhs_ti.inf_stream_element_type.resolved)
+      T.must(lhs_ti.inf_stream_element_type)
     elsif lhs_ti.open_stream?
-      Type.new(lhs_ti.open_stream_element_type.resolved)
+      T.must(lhs_ti.open_stream_element_type)
     else
       Type.new(T.must(lhs_ti.tense_type.element_type).resolved)
     end

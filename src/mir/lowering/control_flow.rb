@@ -448,7 +448,7 @@ module MIRLoweringControlFlow
       # because primitives are Copy types and can't be meaningfully mutated in-place.
       capture = if plan.mutable
         elem = ct.element_type
-        elem_sym = elem.is_a?(Type) ? elem.resolved : elem
+        elem_sym = elem&.resolved
         (elem_sym && struct_schemas.key?(elem_sym)) ? "*#{var}" : var
       else
         var
@@ -1231,7 +1231,7 @@ module MIRLoweringControlFlow
     unless sig.needs_rt == true || sig.needs_rt == false
       raise "callee #{name} missing finalized needs_rt metadata before MIR lowering"
     end
-    sig.needs_rt
+    T.must(sig.needs_rt)
   end
 
   # Lower a StructPattern into (conditions, binding_stmts).

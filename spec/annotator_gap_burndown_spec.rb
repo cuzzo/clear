@@ -733,6 +733,30 @@ RSpec.describe "annotator branch gap burndown" do
     expect(list.full_type!.location).to eq(:heap)
   end
 
+  it "covers field-access schema rejection branches" do
+    ann = quiet_annotator
+    ann.define_singleton_method(:visit) { |_node| nil }
+    schemas = {
+      Color: Schemas::EnumSchema.new(variants: [:Red]),
+      Choice: Schemas::UnionSchema.new(variants: { Some: Type.new(:Int64), None: nil }),
+      Box: Schemas::StructSchema.new(fields: {
+        "value" => AST::StructField.new(type: Type.new(:Int64)),
+      }),
+    }
+    ann.define_singleton_method(:lookup_type_schema) do |type_name|
+      schemas[type_name.to_sym]
+    end
+
+    ann.send(:visit_GetField, AST::GetField.new(token(:DOT, "."), typed_identifier("color", Type.new(:Color)), "Red"))
+    ann.send(:visit_GetField, AST::GetField.new(token(:DOT, "."), typed_identifier("choice", Type.new(:Choice)), "Some"))
+    ann.send(:visit_GetField, AST::GetField.new(token(:DOT, "."), typed_identifier("n", Type.new(:Int64)), "field"))
+    ann.send(:visit_GetField, AST::GetField.new(nil, typed_identifier("box", Type.new(:Box)), "missing"))
+
+    codes = direct_errors(ann).map { |err| err[1] }
+    expect(codes).to include(:ENUM_FIELD_ACCESS, :UNION_FIELD_ACCESS)
+    expect(codes.count(:ILLEGAL_FIELD_LOOKUP)).to eq(2)
+  end
+
   it "raises on observable terminal declaration mismatches" do
     ann = quiet_annotator
     left = AST::Identifier.new(token, "stream")

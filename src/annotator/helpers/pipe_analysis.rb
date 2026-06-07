@@ -1271,7 +1271,7 @@ module PipeAnalysis
   end
 
   # Recursively walk AST nodes to find GetIndex on @sharded maps.
-  sig { params(nodes: T.untyped, results: T::Array[AST::PipelineShardedAccess]).void }
+  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
   def walk_for_sharded_access(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|
@@ -1281,7 +1281,7 @@ module PipeAnalysis
   end
 
   # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T.untyped, results: T::Array[AST::PipelineShardedAccess]).void }
+  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|

@@ -570,9 +570,7 @@ module FunctionAnalysis
     return true if param.atomic?
     return true if param.symbol&.atomic?
 
-    requires = signature.requires
-    families = requires && requires[param.name.to_s]
-    families.respond_to?(:include?) && families.include?(:ATOMIC)
+    signature.requires.fetch(param.name.to_s, Set.new).include?(:ATOMIC)
   end
 
   sig { params(arg_node: AST::Identifier).returns(T::Boolean) }
@@ -716,14 +714,12 @@ module FunctionAnalysis
 
       # Check if the field exists in the schema
       sf = schema.fields[field_name] || schema.fields[field_sym] # handle string/sym keys
-      next_type = sf&.type
-
-      if next_type.nil?
+      if sf.nil?
         error!(node, :LIFETIME_NO_FIELD, type: current_type_name, field: field_name)
       end
 
       # Advance to the next type name (Type objects carry the resolved name)
-      current_type_name = next_type.is_a?(Type) ? next_type.resolved : next_type.to_sym
+      current_type_name = sf.type.resolved
     end
   end
 
@@ -736,8 +732,8 @@ module FunctionAnalysis
       if param.default
         if param.default.is_a?(AST::DefaultLit)
           # DEFAULT is only valid for struct-type params
-          param_type_sym = param.type&.resolved
-          schema = lookup_type_schema(param_type_sym) if param_type_sym
+          param_type_sym = param.type.resolved
+          schema = lookup_type_schema(param_type_sym)
           unless Schemas.struct?(schema)
             error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param.type)
           end
@@ -766,7 +762,7 @@ module FunctionAnalysis
       param_sync = nil
       if param.sync
         param_sync = param.sync
-      elsif param.type&.any_sync?
+      elsif param.type.any_sync?
         param_sync = param.type.sync
       elsif requires_map
         families = requires_map[param.name.to_s]

@@ -370,7 +370,7 @@ module EffectTracker
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
-        ti = Type.new(p.type || :Any)
+        ti = p.type
         is_pure_copy = ti.primitive? || ti.id_handle?
         !is_pure_copy
       }

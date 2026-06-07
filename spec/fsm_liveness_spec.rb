@@ -23,15 +23,13 @@ RSpec.describe FsmTransform::Liveness do
   def bind_decl(name, value_node, full_type: nil)
     be = AST::BindExpr.new(nil, name, nil, value_node)
     be.mode = :decl
-    be.instance_variable_set(:@full_type, full_type) if full_type
-    def be.full_type; @full_type; end
+    be.full_type = full_type if full_type
     be
   end
 
   def ident(name, full_type: nil)
     n = AST::Identifier.new(nil, name)
-    n.instance_variable_set(:@full_type, full_type) if full_type
-    def n.full_type; @full_type; end
+    n.full_type = full_type if full_type
     n
   end
 

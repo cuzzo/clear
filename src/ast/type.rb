@@ -339,6 +339,17 @@ class TypeFsmForEachDescriptor < T::Struct
   const :slice_suffix, String, default: ""
 end
 
+class TypeId < T::Struct
+  extend T::Sig
+
+  const :key, String
+
+  sig { returns(String) }
+  def to_s
+    key
+  end
+end
+
 class Type
     extend T::Sig
 
@@ -654,6 +665,7 @@ class Type
       @shape              = auto ? other.shape.with(auto: true) : other.shape
       @capabilities       = other.capabilities
       @placement          = other.placement
+      @auto_token         = other.auto_token
       @generic_payload_type_arg = other.generic_payload_type_arg?
     else
       parse_raw_input(raw_input, auto: auto)
@@ -1311,6 +1323,24 @@ class Type
   sig { returns(Symbol) }
   def resolved
     shape.resolved
+  end
+
+  sig { returns(TypeId) }
+  def type_id
+    TypeId.new(key: semantic_type_key)
+  end
+
+  sig { returns(String) }
+  def semantic_type_key
+    [
+      semantic_shape_key,
+      "own=#{ownership || :affine}",
+      "sync=#{sync || :none}",
+      "layout=#{layout || :direct}",
+      "loc=#{provenance || :stack}",
+      "collection=#{collection || :none}",
+      "shards=#{shard_count || 0}",
+    ].join("|")
   end
 
   # Backward API: Deprecate
@@ -1980,7 +2010,7 @@ class Type
     if schema.is_a?(Schemas::StructSchema)
       closes = T.let([], T::Array[String])
       schema.fields.each do |fname, fdef|
-        f_resolved = Type.new(fdef.type).resolved
+        f_resolved = fdef.type.resolved
         f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), T.nilable(Object))
         if f_schema.is_a?(Schemas::ResourceSchema)
           closes << f_schema.close_zig.gsub("{0}", "{0}.#{fname}")
@@ -2397,7 +2427,7 @@ class Type
     elsif inf_stream?
       inf_stream_element_type
     end
-    elem ? Type.new(elem) : nil
+    elem
   end
 
   sig { params(has_limit: T::Boolean).returns(T::Boolean) }
@@ -2444,7 +2474,7 @@ class Type
   end
 
   # The element type T in ~?T[] / ~T[?].
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def open_stream_element_type
     return nil unless open_stream?
     return T.must(optional_stream_shape_type).element_type if open_stream_alias?
@@ -2460,18 +2490,18 @@ class Type
   end
 
   # The element type T in ~T[INF].
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def inf_stream_element_type
     return nil unless inf_stream?
     tense_type.element_type
   end
 
   # The element type T in ~T[N], or ?T in ~?T[N].
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def stream_element_type
     return nil unless bounded_stream?
     if optional_stream_shape_type&.fixed?
-      Type.new(:"?#{T.must(T.must(optional_stream_shape_type).element_type).to_sym}")
+      Type.optional_of(T.must(T.must(optional_stream_shape_type).element_type))
     else
       tense_type.element_type
     end
@@ -2519,7 +2549,7 @@ class Type
       return 1 if (Schemas.enum?(schema) || Schemas.union?(schema) || Schemas.resource?(schema))
       # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)
       return 1 if schema.respond_to?(:type_params) && schema.type_params
-      return schema.fields.values.sum { |f| Type.new(f.type).slot_size(resolver) }
+      return schema.fields.values.sum { |f| f.type.slot_size(resolver) }
     end
 
     1 # Default
@@ -2565,7 +2595,7 @@ class Type
       return false unless resolver
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
       return false unless Schemas.struct?(schema)
-      return schema.fields.values.all? { |f| Type.new(f.type).copyable?(resolver) }
+      return schema.fields.values.all? { |f| f.type.copyable?(resolver) }
     end
 
     false
@@ -2633,7 +2663,7 @@ class Type
       # Structs: Copy if all fields are Copy
       if Schemas.struct?(schema)
         all_copy = schema.fields.all? do |_, v|
-          ft = v.is_a?(Type) ? v : (v.is_a?(AST::StructField) ? Type.new(v.type || :Any) : Type.new(v || :Any))
+          ft = v.type
           ft = substitute_generic_schema_field_type(ft, schema)
           ft.implicitly_copyable?(resolver)
         end
@@ -2648,7 +2678,7 @@ class Type
   sig { params(schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   def recursive_cleanup_shape?(schema_lookup = nil, seen = nil)
     seen ||= Set.new
-    key = "#{resolved}|#{collection}|#{ownership}|#{sync}|#{provenance}"
+    key = type_id.key
     return false if seen.include?(key)
     seen.add(key)
 
@@ -2667,21 +2697,21 @@ class Type
     schema = schema_lookup.call(resolved) rescue nil
     if Schemas.union?(schema)
       return (schema.variants || {}).any? do |_, vt|
+        next false unless vt
         if Schemas.inline_struct?(vt)
           vt.fields.any? do |_, ft|
-            Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+            ft.recursive_cleanup_shape?(schema_lookup, seen)
           end
         else
-          Type.from_node(vt || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+          vt.recursive_cleanup_shape?(schema_lookup, seen)
         end
       end
     end
 
     if Schemas.field_bearing?(schema)
       return schema.fields.any? do |_, field|
-        next false if field.is_a?(AST::StructField) && field.borrowed
-        ft = field.is_a?(AST::StructField) ? field.type : field
-        field_type = substitute_generic_schema_field_type(Type.from_node(ft || :Any) || Type.new(:Any), schema)
+        next false if field.borrowed
+        field_type = substitute_generic_schema_field_type(field.type, schema)
         field_type.recursive_cleanup_shape?(schema_lookup, seen)
       end
     end
@@ -2868,13 +2898,10 @@ class Type
     if Schemas.inline_struct?(vt)
       fields = vt.fields
       return fields.any? { |_, ft|
-        t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && t.heap_ptr?
+        ft.heap_ptr?
       }
     end
-    t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
-    return false unless t
-    t.heap_ptr? rescue false
+    vt.heap_ptr?
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
@@ -2982,10 +3009,8 @@ class Type
   def schema_struct_any?(schema, &blk)
     fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : {}
     fields.any? { |_, v|
-      ft = v.is_a?(AST::StructField) ? v.type : v
-      t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-      next false unless t
-      if v.is_a?(AST::StructField) && v.borrowed
+      t = v.type
+      if v.borrowed
         t = Type.new(t)
         t.mark_borrowed_reference!
       end
@@ -3001,10 +3026,8 @@ class Type
     variants = Schemas.union?(schema) ? schema.variants : {}
     variants.any? { |_, vt|
       next false unless vt
-      next false if vt.is_a?(Hash)
-      t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-      next false unless t
-      (blk.call(t)) rescue false
+      next false if Schemas.inline_struct?(vt)
+      (blk.call(vt)) rescue false
     }
   end
 
@@ -3026,8 +3049,8 @@ class Type
     return false unless self_raw.return_type.accepts?(other_raw.return_type)
 
     self_params.zip(other_params).each do |sp, op|
-      sp_t = sp.type || Type.new(:Any)
-      op_t = T.must(op).type || Type.new(:Any)
+      sp_t = sp.type
+      op_t = T.must(op).type
       return false unless sp_t.accepts?(op_t)
     end
 
@@ -3112,6 +3135,21 @@ class Type
     end
   end
 
+  sig { returns(String) }
+  def semantic_shape_key
+    return function_type_key if fn_type?
+
+    Type.surface_name(self)
+  end
+
+  sig { returns(String) }
+  def function_type_key
+    sig = T.cast(raw, FunctionSignature)
+    params_key = sig.params.map { |param| param.type.semantic_type_key }.join(",")
+
+    "fn(#{params_key})->#{sig.return_type.semantic_type_key};reentrant=#{sig.reentrant}"
+  end
+
   sig { params(str: String).returns(TypeCapabilitySuffix) }
   def self.strip_capability_suffix_from(str)
     unless str.include?("@")
@@ -3155,7 +3193,7 @@ class Type
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
     end
     if bounded_stream?
-      elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(stream_element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
     end
     if dynamic_stream?
@@ -3172,15 +3210,15 @@ class Type
       return "CheatLib.SharedPromise(#{inner_zig})"
     end
     if split_open_stream?
-      elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(open_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.SplitStream(#{elem_zig})"
     end
     if open_stream?
-      elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(open_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Stream(#{elem_zig})"
     end
     if inf_stream?
-      elem_zig = inf_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(inf_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.InfStream(#{elem_zig})"
     end
 

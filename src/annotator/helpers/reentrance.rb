@@ -161,10 +161,10 @@ module ReentranceBridge
   def validate_not_logical_return!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless [:reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)
-    rt = fn_node.return_type
-    is_err_union = rt.is_a?(Type) && rt.error_union?
-    return if is_err_union
-    rt_str = rt.is_a?(Type) ? rt.to_s : (rt.nil? ? "Void" : rt.to_s)
+    rt = fn_node.declared_return_type
+    return if rt&.error_union?
+
+    rt_str = rt ? rt.to_s : "Void"
     suggested = rt.nil? ? "!Void" : "!#{rt_str.sub(/\A!/, '')}"
     err_name = fn_node.reentrance_kind == :reentrant_not_logical ?
       "UnexpectedRecursion" : "MaxDepthExceeded"
@@ -447,8 +447,8 @@ module ReentranceBridge
         break
       end
       edits_nl.concat(eff)
-      rt = f.return_type
-      next if rt.is_a?(Type) && rt.error_union?
+      rt = f.declared_return_type
+      next if rt&.error_union?
       rt_tok = f.return_type_token
       if rt_tok.nil?
         nl_ok = false
@@ -485,8 +485,8 @@ module ReentranceBridge
         break
       end
       edits_md.concat(eff)
-      rt = f.return_type
-      next if rt.is_a?(Type) && rt.error_union?
+      rt = f.declared_return_type
+      next if rt&.error_union?
       rt_tok = f.return_type_token
       if rt_tok.nil?
         md_ok = false

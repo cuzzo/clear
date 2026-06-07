@@ -208,7 +208,7 @@ class MIRPass
   def params_need_runtime_cleanup?(params)
     params.any? do |param|
       next false unless param.takes
-      ti = param.type || Type.new(:Any)
+      ti = param.type
       next true if ti.any?
       next false if ti.primitive? || ti.id_handle?
       true

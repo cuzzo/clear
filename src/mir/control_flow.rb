@@ -716,9 +716,9 @@ class OwnershipDataflow
     @fn_node.params.each do |p|
       next unless p.takes
       name = p.name.to_s
-      ti = p.type || Type.new(:Any)
+      ti = p.type
       next unless ownership_tracked_type?(ti, heap_storage: true)
-      needs = ti ? ti.needs_explicit_cleanup?(:heap, @schema_lookup) : true
+      needs = ti.needs_explicit_cleanup?(:heap, @schema_lookup)
       state[name] = OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: needs)
     end
     state

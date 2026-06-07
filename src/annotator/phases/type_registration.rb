@@ -102,7 +102,7 @@ module Annotator
         fields.each_value do |field|
           default = field.default
           next unless default
-          stamp_type!(default, field.type.is_a?(Type) ? field.type : Type.new(field.type || :Any))
+          stamp_type!(default, field.type)
         end
       end
       private :stamp_field_defaults!
@@ -127,7 +127,7 @@ module Annotator
       sig { params(variant_data: Schemas::InlineStructVariant).returns(T::Array[Schemas::InlineStructDeinitEntry]) }
       def inline_struct_deinit_entries(variant_data)
         variant_data.fields.each_with_object(T.let([], T::Array[Schemas::InlineStructDeinitEntry])) do |(field_name, field_type), entries|
-          field_type_info = field_type.is_a?(Type) ? field_type : Type.new(field_type || :Any)
+          field_type_info = field_type
           field = field_name.to_s
 
           if field_type_info.indirect?

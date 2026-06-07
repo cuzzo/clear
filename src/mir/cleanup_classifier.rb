@@ -355,7 +355,7 @@ module CleanupClassifier
   sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[CleanupEntry])) }
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
     fn_node.params.select { |p| p.takes }.each do |p|
-      ti = p.type || Type.new(:Any)
+      ti = p.type
       name = p.name.to_s
 
       base = takes_param_base_entry(ti, schema_lookup)
@@ -452,9 +452,10 @@ module CleanupClassifier
       # AS origin for downstream guards.
       return CleanupEntry.from(common.merge(kind: :uniform))
     end
-    return nil if variant_type.is_a?(Type) && variant_type.indirect?
+    return nil unless variant_type
+    return nil if variant_type.indirect?
 
-    pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
+    pt = variant_type
     if pt.array? && !pt.string?
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
       return CleanupEntry.from(common.merge(kind: :uniform, elem_zig_type: elem_zig))
@@ -933,11 +934,10 @@ module CleanupClassifier
     return false unless value.is_a?(AST::StructLit)
     borrowed = schema.respond_to?(:borrowed_fields) ? schema.borrowed_fields : Set.new
     schema.fields.all? do |k, field|
-      ft = field.is_a?(AST::StructField) ? field.type : field
-      t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+      t = field.type
       next true unless elem_type_needs_cleanup?(t, schema_lookup)
       fval = value.fields[k.to_s] || value.fields[k]
-      (field.is_a?(AST::StructField) && field.borrowed) ||
+      field.borrowed ||
         borrowed.include?(k.to_s) ||
         (fval.respond_to?(:symbol) && fval.symbol&.borrow_provenance?) ||
         (fval && Type.from_node!(fval, context: "struct literal borrowed field").borrowed_reference?)
@@ -955,8 +955,7 @@ module CleanupClassifier
     borrowed = schema.respond_to?(:borrowed_fields) ? schema.borrowed_fields : Set.new
     has_cleanup = schema.fields.any? do |k, v|
       next false if borrowed.include?(k.to_s)
-      ft = v.is_a?(AST::StructField) ? v.type : v
-      t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+      t = v.type
       # Rodata string fields don't need cleanup
       if struct_lit
         fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
@@ -1035,9 +1034,8 @@ module CleanupClassifier
     if Schemas.inline_struct?(vt)
       return elem_has_cleanup_fields?(vt, schema_lookup)
     end
-    t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-    return false unless t
-    elem_type_needs_cleanup?(t, schema_lookup)
+    return false unless vt
+    elem_type_needs_cleanup?(vt, schema_lookup)
   end
 
   sig { params(schema: T.untyped).returns(T::Boolean) }
@@ -1051,9 +1049,8 @@ module CleanupClassifier
     borrowed = schema.respond_to?(:borrowed_fields) ? schema.borrowed_fields : Set.new
     schema.fields.any? do |name, v|
       next false if borrowed.include?(name.to_s)
-      ft = v.is_a?(AST::StructField) ? v.type : v
-      next false if v.is_a?(AST::StructField) && v.borrowed
-      t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+      next false if cleanup_field_borrowed?(v)
+      t = cleanup_field_type(v)
       t.string? ||
         t.non_string_array? ||
         t.collection? ||
@@ -1063,6 +1060,18 @@ module CleanupClassifier
         (schema_lookup && t.recursive_cleanup_shape?(schema_lookup)) ||
         (schema_lookup && t.needs_cleanup?(schema_lookup))
     end
+  end
+
+  sig { params(field: T.untyped).returns(T::Boolean) }
+  private_class_method def self.cleanup_field_borrowed?(field)
+    return false unless field.is_a?(AST::StructField)
+
+    field.borrowed == true
+  end
+
+  sig { params(field: T.untyped).returns(Type) }
+  private_class_method def self.cleanup_field_type(field)
+    field.is_a?(AST::StructField) ? field.type : Type.new(field)
   end
 
 end
