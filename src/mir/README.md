@@ -126,6 +126,7 @@ ambient state. Common examples:
 | `ListLiteralPlan`, `HashLiteralPlan` | `MIRLoweringLiterals` | Literal lowering | Decides allocation, element type, ownership storage, and capability wrappers before building MIR nodes. |
 | `NextExprPlan`, `BgLoweringNames`, `BgBodyMaterialization`, `BgCaptureMaterialization` | `MIRLoweringConcurrency` | BG/stream/observable lowering | Keeps async result shape, runtime names, captures, and body materialization explicit at the boundary. |
 | `FiberCtxBuilder::CaptureSpec` and `FiberCtxBuilder::Result` | `FiberCtxBuilder` | BG, BG stream, DO, concurrent pipeline, and FSM-related lowering | Normalizes capture fields, initializers, body access rewrites, and FreshHeapCopy/RcClone cleanup wiring. |
+| `PipelineOperationPlan`, `PipelineSourcePlan`, `PipelineTerminalPlan`, `PipelineSemanticFacts`, and `PipelineSourceShape` | `src/mir/lower/pipeline` | `PipelineHost` and its domain lowerers | Reifies source, terminal, execution mode, and target facts before a pipeline lowerer emits MIR. |
 | `WithBindingMaterialization`, `LockBindingPlan`, `FallibleLockBindingPlan`, `MutableSnapshotPlan` | `MIRLoweringCapabilities` | `WITH` lowering | Separates lock acquisition, aliases, fallible clauses, sorted acquisition, and snapshot transactions from the body. |
 | `OwnershipFinalizationContext`, `OwnershipFactTarget`, `OwnershipTransferTarget`, `OwnershipSurfaceScan` | `MIRLowering` ownership finalization | The finalization pass over lowered MIR bodies | Tracks already-emitted alloc/transfer/move/cleanup facts while inserting missing ownership markers. |
 | `ThunkTransform::Plan`, `MutualPlan`, `MutualThunkPlan` | Thunk recursive splitters | Thunk emitters/lowering | Records recognized recursion shapes so trampoline emission does not infer them from text. |
@@ -502,6 +503,26 @@ nodes, not recover intent from rendered Zig strings. Regex/text rewriting in
 FSM or thunk lowering is an architectural blocker because it hides ownership
 and capture facts from the checker.
 
+#### Pipeline Lowering
+
+Pipeline syntax is rewritten before MIR, but MIR owns the runtime shape. The
+current pipeline lowering boundary is:
+
+```text
+typed AST pipeline expression
+  -> PipelinePlanBuilder
+  -> PipelineOperationPlan(source, terminal, execution, semantic facts)
+  -> PipelineHost orchestration
+  -> domain lowerer emits structural MIR
+```
+
+`PipelineHost` should remain a coordinator over typed plans. Source and
+terminal recognition belongs in `PipelinePlanBuilder`; range, list, scalar,
+batch-window, set-index, each, and concurrent emission belongs in the matching
+domain lowerer. The narrow `PipelineLoweringBridge` is the sanctioned adapter
+back to `MIRLowering`; direct dependence on broad lowerer lifecycle state should
+not grow outside that bridge.
+
 ### 11. MIR Checker (`mir_checker.rb`)
 
 The checker validates the lowered MIR ownership surface before Zig is emitted.
@@ -594,6 +615,9 @@ The MIR directory is split by responsibility:
 * [`control_flow.rb`](control_flow.rb): CFG construction, ownership dataflow, and use-after-move checking.
 * [`mir_pass.rb`](mir_pass.rb): coordinates MIR-side AST analysis and stamping.
 * [`mir_lowering.rb`](mir_lowering.rb) and [`lowering/`](lowering/): AST-to-MIR lowering.
+* [`lower/pipeline/`](lower/pipeline): typed pipeline operation plans, pipeline
+  host orchestration, and domain lowerers for range, binding-chain, scalar,
+  list, batch-window, set-index, each, and concurrent pipeline execution.
 * [`materialization.rb`](materialization.rb): helper packets for emitting allocation marks, bindings, and cleanups together.
 * [`fiber_ctx_builder.rb`](fiber_ctx_builder.rb): shared capture-context builder for BG, DO, stream, concurrent, and FSM-adjacent lowering.
 * [`test_lowering.rb`](test_lowering.rb): TEST/WHEN/STUB/BENCHMARK lowering support.

@@ -434,17 +434,6 @@ module FsmLowering
     }.join("\n            ")
   end
 
-  sig { params(name: String, cleanup_entry: CleanupEntry).returns(String) }
-  def render_fsm_destroy_cleanup(name, cleanup_entry)
-    rendered = render_mir_list([MIR::Cleanup.new(name, cleanup_entry)])
-    if name.include?(".")
-      guard = "#{name}_moved"
-      rendered = rendered.delete_prefix("var #{guard} = false; _ = &#{guard};\n")
-    end
-    rendered = rendered.delete_prefix("defer ").strip
-    rendered.end_with?(";") ? rendered : "#{rendered};"
-  end
-
   # Resolve ONE capability's lock-acquire metadata. Returns
   # { try_method, unlock_method, lock_field_ref, alias_name,
   #   alias_data_ref, retries, lock_kind, cap } or nil if `cap`

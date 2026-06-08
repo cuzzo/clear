@@ -1,5 +1,6 @@
 require "rspec"
 require_relative "../src/mir/fsm_transform/emit"
+require_relative "../src/mir/fsm_transform/segments"
 
 RSpec.describe FsmTransform::Emit do
   it "maps profile dispatch ids and emits task-site comments" do
@@ -50,24 +51,97 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "lifts promoted ctx cleanups into destroyTask lines" do
-    lowering = Class.new {
-      def with_fiber_capture_map(_capture_map, rt_override:)
-        yield
-      end
-
-      def render_fsm_destroy_cleanup(target, _entry)
-        "cleanup(#{target})"
-      end
-    }.new
-    ctx = { fsm_destroy_lines: [] }
+    ctx = { fsm_destroy_actions: [] }
     kept = MIR::ExprStmt.new(MIR::Lit.new("keep()"), false)
-    body = [MIR::Cleanup.new("payload_L2", CleanupEntry.new), kept]
+    entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+    body = [MIR::Cleanup.new("payload_L2", entry), kept]
 
     rewritten = described_class.lift_ctx_cleanups_to_destroy!(
-      body, ["payload"], "__ctx_8", ctx, lowering)
+      body, ["payload"], "__ctx_8", ctx)
 
     expect(rewritten).to eq([kept])
-    expect(ctx[:fsm_destroy_lines].first.name).to eq("payload")
-    expect(ctx[:fsm_destroy_lines].first.zig).to eq("cleanup(__ctx_8.payload)")
+    action = ctx[:fsm_destroy_actions].first
+    expect(action).to be_a(MIR::FsmDestroyCleanup)
+    expect(action.name).to eq("payload")
+    expect(action.target_zig).to eq("__ctx_8.payload")
+    expect(action.cleanup_entry).to eq(entry)
+  end
+
+  it "orders lock releases before capture and body cleanups" do
+    cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+    ctx = { fsm_destroy_actions: [] }
+    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+      source_kind: :body,
+      name: "body",
+      target_zig: "__ctx_1.body",
+      cleanup_entry: cleanup_entry,
+    )
+    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
+      name: "__ctx_1.lock_a",
+      guard_field: "__lock_held_0",
+      lock_ref_zig: "__ctx_1.lock_a",
+      unlock_method: "unlock",
+    )
+    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+      source_kind: :capture,
+      name: "cap",
+      target_zig: "__ctx_1.cap",
+      cleanup_entry: cleanup_entry,
+    )
+    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
+      name: "__ctx_1.lock_b",
+      guard_field: "__lock_held_1",
+      lock_ref_zig: "__ctx_1.lock_b",
+      unlock_method: "unlock",
+    )
+
+    ordered = described_class.ordered_fsm_destroy_actions(ctx)
+
+    expect(ordered.map(&:name)).to eq(["__ctx_1.lock_b", "__ctx_1.lock_a", "cap", "body"])
+  end
+
+  it "registers structural lock release actions while expanding lock segments" do
+    lowering = Class.new {
+      def fsm_cap_metadata(_cap, _with_node, id, _captured)
+        {
+          try_method: "tryLockForFsm",
+          unlock_method: "unlock",
+          lock_field_ref: "__ctx_#{id}.lock",
+          alias_name: "lock",
+          alias_data_ref: "(__ctx_#{id}.lock.data)",
+          retries: 0,
+        }
+      end
+
+      def default_fsm_lock_error_arm_split(_id)
+        Struct.new(:body_zig, :exit_kind).new("", :goto_post)
+      end
+    }.new
+    with_node = Struct.new(:lock_error_clause).new(nil)
+    tail = FsmTransform::Segments::LockSuspend.new(with_node, :cap, [], 9, 10)
+    spec = {
+      index: 1,
+      prologue_stmts: [],
+      body_stmts: [],
+      tail: tail,
+      fn_name: nil,
+      rt_suppress: "",
+    }
+    ctx = {
+      id: 7,
+      bg_rt: "__rt_bg7",
+      captured: { "lock" => :stub },
+      pointer_captures: Set.new,
+      rt_name: "rt",
+    }
+
+    expanded = described_class.expand_lock_segment(spec, ctx, {}, lowering, 20)
+
+    expect(expanded[:extra_fields]).to include("__lock_held_0: bool = false,")
+    action = described_class.fsm_destroy_actions(ctx).first
+    expect(action).to be_a(MIR::FsmDestroyLockRelease)
+    expect(action.guard_field).to eq("__lock_held_0")
+    expect(action.lock_ref_zig).to eq("__ctx_7.lock")
+    expect(action.unlock_method).to eq("unlock")
   end
 end

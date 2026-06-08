@@ -514,6 +514,41 @@ RSpec.describe MIREmitter do
       expect(zig).to include("defer conn.deinit();")
     end
 
+    it "emits direct resource cleanup with the active runtime binding" do
+      e.rt_name = "__ctx_9.rt"
+      entry = CleanupEntry.build(:resource, alloc: :heap, has_moved_guard: false, resource_close_zig: "{rt}.close({0})")
+
+      zig = e.emit_direct_cleanup("__ctx_9.file", entry)
+
+      expect(zig).to eq("__ctx_9.rt.close(__ctx_9.file);")
+    end
+
+    it "emits direct guarded cleanup with an allocator override" do
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+
+      zig = e.emit_direct_cleanup("__ctx_4.owned", entry, alloc_override: "__ctx_4.alloc")
+
+      expect(zig).to eq(
+        "if (!__ctx_4.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_4.owned), __ctx_4.alloc, &__ctx_4.owned);"
+      )
+    end
+
+    it "emits direct rc cleanup with releaseFields" do
+      entry = CleanupEntry.build(
+        :rc,
+        alloc: :heap,
+        has_moved_guard: false,
+        rc_alloc: :frame,
+        base_zig: "User",
+        needs_release_fields: true,
+      )
+
+      zig = e.emit_direct_cleanup("owner", entry)
+
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(owner), rt.frameAlloc(), &owner);")
+      expect(zig).to include("CheatLib.releaseFields(User, rt.frameAlloc(), owner.ctrl.data.*);")
+    end
+
     it "emits pool cleanup" do
       entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.Pool(User, 100)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("pool", entry)

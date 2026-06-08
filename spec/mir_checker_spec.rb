@@ -1688,6 +1688,18 @@ RSpec.describe MIRChecker do
   # compile-time warning.
 
   describe "check_fsm_structure!" do
+    def fsm_cleanup_action(name, source_kind: :body, entry: nil, target: nil, guard: nil, allocator: nil)
+      cleanup_entry = entry || CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+      MIR::FsmDestroyCleanup.new(
+        source_kind: source_kind,
+        name: name,
+        target_zig: target || "__ctx_0.#{name}",
+        cleanup_entry: cleanup_entry,
+        guard_zig: guard,
+        allocator_zig: allocator,
+      )
+    end
+
     it "rejects capture cleanup placed in a step (not finalize)" do
       structure = MIR::FsmStructure.new(
         [{ name: "needle", cleanup_at: 0 }],
@@ -1719,6 +1731,242 @@ RSpec.describe MIRChecker do
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-CAPTURE-CLEANUP-PRESENT/)
     end
 
+    it "rejects finalize cleanup names without structural destroy actions" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-FINALIZE-ACTION-PRESENT/)
+    end
+
+    it "rejects finalization actions when ctx_id is missing" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        nil,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-CTX-ID/)
+    end
+
+    it "rejects destroy cleanup actions targeting the wrong ctx field" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", target: "__ctx_0.other")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-TARGET/)
+    end
+
+    it "rejects destroy cleanup actions with unknown sources" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", source_kind: :mystery)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-SOURCE/)
+    end
+
+    it "rejects destroy cleanup actions absent from finalize_cleanups" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [fsm_cleanup_action("tmp")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-FINALIZE-LIST/)
+    end
+
+    it "rejects destroy cleanup actions with no-cleanup entries" do
+      entry = CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", entry: entry)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-CLEANUP-ENTRY/)
+    end
+
+    it "rejects destroy cleanup actions with invalid allocators" do
+      entry = CleanupEntry.from(
+        kind: :uniform,
+        alloc: :arena,
+        scope: :heap,
+        needs_cleanup: true,
+        has_moved_guard: false,
+      )
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", entry: entry)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-ALLOC/)
+    end
+
+    it "rejects resource destroy actions without a target placeholder" do
+      entry = CleanupEntry.build(
+        :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_zig: "drop()",
+      )
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", entry: entry)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-TEMPLATE/)
+    end
+
+    it "rejects resource destroy actions with implicit runtime text" do
+      entry = CleanupEntry.build(
+        :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_zig: "rt.close({0})",
+      )
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", entry: entry)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-RUNTIME/)
+    end
+
+    it "rejects malformed guard and allocator expression fields" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: :finalize }],
+        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        ["tmp"],
+        0,
+        nil,
+      )
+      structure.destroy_actions = [fsm_cleanup_action("tmp", guard: "__ctx_0.bad;")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-ZIG-FIELD/)
+    end
+
+    it "rejects malformed FSM lock destroy actions" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_0.lock",
+          guard_field: "__lock_held_x",
+          lock_ref_zig: "__ctx_0.lock",
+          unlock_method: "unlock",
+        ),
+      ]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-GUARD/)
+    end
+
+    it "rejects lock destroy actions with malformed guard prefixes" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_0.lock",
+          guard_field: "held_0",
+          lock_ref_zig: "__ctx_0.lock",
+          unlock_method: "unlock",
+        ),
+      ]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-GUARD/)
+    end
+
+    it "rejects lock destroy actions outside the FSM ctx" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "lock",
+          guard_field: "__lock_held_0",
+          lock_ref_zig: "lock",
+          unlock_method: "unlock",
+        ),
+      ]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-TARGET/)
+    end
+
+    it "rejects unknown FSM lock unlock methods" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_0.lock",
+          guard_field: "__lock_held_0",
+          lock_ref_zig: "__ctx_0.lock",
+          unlock_method: "release",
+        ),
+      ]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-METHOD/)
+    end
+
     it "rejects step N reading a name whose cleanup is in step M < N" do
       structure = MIR::FsmStructure.new(
         [],
@@ -1745,6 +1993,7 @@ RSpec.describe MIRChecker do
         0,
         "rf_buf",  # aliasing detected by lowering
       )
+      structure.destroy_actions = [fsm_cleanup_action("rf_buf")]
       expect {
         MIRChecker.check_fsm_structure!(structure)
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-RESULT-NO-FINALIZED-ALIAS/)
@@ -1766,6 +2015,16 @@ RSpec.describe MIRChecker do
         0,
         nil,
       )
+      structure.destroy_actions = [
+        fsm_cleanup_action("needle", source_kind: :capture),
+        fsm_cleanup_action("rf_buf", allocator: "__ctx_0.alloc"),
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_0.lock",
+          guard_field: "__lock_held_0",
+          lock_ref_zig: "__ctx_0.lock",
+          unlock_method: "unlockShared",
+        ),
+      ]
       expect {
         MIRChecker.check_fsm_structure!(structure)
       }.not_to raise_error

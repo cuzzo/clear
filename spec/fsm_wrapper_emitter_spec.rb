@@ -249,6 +249,89 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("fn resumeFn(_: *CheatHeader.FsmTask)")
       expect(out).to include("return .{ .Done = {} };")
     end
+
+    it "renders generic destroyTask actions from structural records" do
+      cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_2.lock",
+          guard_field: "__lock_held_0",
+          lock_ref_zig: "__ctx_2.lock",
+          unlock_method: "unlock",
+        ),
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :fresh_heap,
+          name: "owned",
+          target_zig: "__ctx_2.owned",
+          cleanup_entry: cleanup_entry,
+          allocator_zig: "__ctx_2.alloc",
+        ),
+      ]
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgGenericCtx",
+        "CheatLib.Promise(i64)",
+        "",
+        [],
+        [],
+        [],
+        resume_fn(2),
+        actions,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_generic", generic_ctx, spawn_setup)
+
+      out = FsmWrapperEmitter.render(generic_body)
+
+      expect(out).to include("if (__ctx_2.__lock_held_0) __ctx_2.lock.unlock();")
+      expect(out).to include(
+        "if (!__ctx_2.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_2.owned), __ctx_2.alloc, &__ctx_2.owned);"
+      )
+    end
+
+    it "wraps guarded destroy cleanup actions, including multi-line cleanups" do
+      rc_entry = CleanupEntry.build(
+        :rc,
+        alloc: :heap,
+        has_moved_guard: false,
+        rc_alloc: :heap,
+        base_zig: "User",
+        needs_release_fields: true,
+      )
+      actions = [
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :owned_result,
+          name: "single",
+          target_zig: "__ctx_3.single",
+          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+          guard_zig: "__ctx_3.single_ready",
+        ),
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :owned_result,
+          name: "owner",
+          target_zig: "__ctx_3.owner",
+          cleanup_entry: rc_entry,
+          guard_zig: "__ctx_3.owner_ready",
+        ),
+      ]
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgGuardCtx",
+        "CheatLib.Promise(i64)",
+        "",
+        [],
+        [],
+        [],
+        resume_fn(3),
+        actions,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_guard", generic_ctx, spawn_setup)
+
+      out = FsmWrapperEmitter.render(generic_body)
+
+      expect(out).to include(
+        "if (__ctx_3.single_ready) CheatLib.cleanup(@TypeOf(__ctx_3.single), __ctx_3.rt.heapAlloc(), &__ctx_3.single);"
+      )
+      expect(out).to include("if (__ctx_3.owner_ready) {\n")
+      expect(out).to include("CheatLib.releaseFields(User, __ctx_3.rt.heapAlloc(), __ctx_3.owner.ctrl.data.*);")
+    end
   end
 
   describe "step body as MIR statements" do

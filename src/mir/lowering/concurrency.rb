@@ -117,7 +117,6 @@ module MIRLoweringConcurrency
       result[:result_line] = body.result_line
       result[:capture_frees] = capture.capture_frees
       result[:arena_init] = scheduler.arena_init
-      result[:fresh_heap_cleanups] = capture.fresh_heap_cleanups
       result[:fresh_heap_cleanup_names] = capture.fresh_heap_cleanup_names
       result[:is_void] = types.is_void
       result[:alloc_var] = names.alloc_var
@@ -581,7 +580,7 @@ module MIRLoweringConcurrency
     capture_frees = captured.filter_map { |name, _|
       close_zig = capture_close_zig[name]
       if close_zig
-        "defer #{close_zig.gsub('{0}', "__ctx_#{names.id}.#{name}")};"
+        "defer #{render_capture_close(close_zig, "__ctx_#{names.id}.#{name}")};"
       end
     }.join("\n                    ")
     capture_frees = [capture_frees, fresh_heap_cleanups].reject(&:empty?).join("\n                    ")
@@ -596,6 +595,11 @@ module MIRLoweringConcurrency
       capture_frees: capture_frees,
       promoted_decls: fresh_heap_decls,
     )
+  end
+
+  sig { params(template: String, target: String).returns(String) }
+  def render_capture_close(template, target)
+    template.gsub("{0}", target).gsub("{rt}", "rt")
   end
 
   sig { params(node: AST::BgBlock, names: BgLoweringNames, rt_name: String).returns(BgSchedulerPlan) }

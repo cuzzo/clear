@@ -21,6 +21,7 @@ require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
 require_relative "../ast/type"
 require_relative "../semantic/pass_state"
+require_relative "cleanup_entry"
 
 module MIR
   extend T::Sig
@@ -1574,8 +1575,12 @@ module MIR
   #     of this step.
   #
   #   finalize_cleanups: [String]
-  #     Names whose cleanup is placed at FSM finalize (start of the
-  #     last step, fires after post-stmts).
+  #     Names whose cleanup is placed at FSM finalize.
+  #
+  #   destroy_actions: [FsmDestroyAction]
+  #     Closed structural operations run by destroyTask before the ctx
+  #     is freed. The checker validates this list so finalization is
+  #     not an opaque rendered-Zig side channel.
   #
   #   ctx_id: Integer
   #     The numeric id used in `__ctx_<id>.<name>` references. The
@@ -1588,6 +1593,59 @@ module MIR
   #     rf_buf — which is finalized — through `content`). The
   #     checker rejects on any non-nil value: the slice would
   #     escape the FSM but its backing storage dies at finalize.
+  class FsmDestroyCleanup < T::Struct
+    extend T::Sig
+
+    SOURCE_DESTROY_ORDER = T.let({
+      capture: 1,
+      fresh_heap: 1,
+      body: 2,
+      owned_result: 2,
+    }.freeze, T::Hash[Symbol, Integer])
+
+    const :source_kind, Symbol
+    const :name, String
+    const :target_zig, String
+    const :cleanup_entry, CleanupEntry
+    const :guard_zig, T.nilable(String), default: nil
+    const :allocator_zig, T.nilable(String), default: nil
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = SOURCE_DESTROY_ORDER.fetch(source_kind, 2)
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = name
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_zig = target_zig
+  end
+
+  class FsmDestroyLockRelease < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :guard_field, String
+    const :lock_ref_zig, String
+    const :unlock_method, String
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = 0
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = -index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = nil
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_zig = nil
+  end
+
+  FsmDestroyAction = T.type_alias { T.any(FsmDestroyCleanup, FsmDestroyLockRelease) }
+
   FsmStructure = Struct.new(
     :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
     :result_aliases_finalized
@@ -1637,6 +1695,17 @@ module MIR
     sig { params(value: T::Boolean).returns(T::Boolean) }
     def owned_result_required=(value)
       @owned_result_required = value
+    end
+
+    sig { returns(T::Array[FsmDestroyAction]) }
+    def destroy_actions
+      @destroy_actions = T.let(@destroy_actions, T.nilable(T::Array[FsmDestroyAction]))
+      @destroy_actions ||= []
+    end
+
+    sig { params(value: T::Array[FsmDestroyAction]).returns(T::Array[FsmDestroyAction]) }
+    def destroy_actions=(value)
+      @destroy_actions = value
     end
   end
 
@@ -1780,13 +1849,12 @@ module MIR
     :promoted_field_decls, # [String]
     :member_fns,           # [MIR::FsmMemberFn]
     :resume_fn_zig,        # String -- protocol-specific dispatch
-    :destroy_extra_zig,    # optional String -- extra Zig run inside
-                           # destroyTask BEFORE alloc.destroy(ctx).
-                           # Used for WITH+suspend-in-CS to release
-                           # locks held across runFn boundaries on
-                           # err paths (Zig defer can't span runFn
-                           # boundaries; the per-cap __lock_held_<i>
-                           # flag tells destroyTask which to release).
+    :destroy_actions,      # [MIR::FsmDestroyAction] -- structural
+                           # finalizer ops run by destroyTask BEFORE
+                           # alloc.destroy(ctx). Used for capture
+                           # cleanup, promoted ctx cleanup, owned
+                           # suspend results, and WITH+suspend lock
+                           # release across runFn boundaries.
   )
 
   # A named member fn on the FSM ctx struct. fn_name is used as

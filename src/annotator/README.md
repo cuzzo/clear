@@ -109,7 +109,7 @@ leaked.
 | `DeferredWithValidation` | `WITH` visitors | Deferred validation phase | Delays parameter/caller-sensitive capability checks until sync propagation is complete. |
 | Lock graph records (`LockEdge`, `LockHeldCallSite`, `LockClauseSite`) | Lock helper | Whole-program deadlock checks | Builds a structural lock-order graph instead of inferring lock hazards from nested syntax later. |
 | Capability request/audit records | Capability helpers | Immediate validation and final audit | Keeps `WITH`, `REQUIRES`, predicate, snapshot, and alias decisions explicit while stamping types. |
-| Pipeline aggregation descriptors | Pipeline helper | Pipeline expression visitors | Centralizes aggregate typing and pipeline-specific validation before MIR sees a typed pipeline node. |
+| Pipeline aggregation descriptors and source/terminal typing facts | Pipeline helper | Pipeline expression visitors and MIR `PipelinePlanBuilder` | Centralizes aggregate typing and pipeline-specific validation before MIR turns a pipeline into a typed operation plan. |
 | Intrinsic registry entries | Intrinsic registry setup | Call validation and intrinsic emission helpers | Gives intrinsic calls one typed contract for argument checks, return type, and lowering metadata. |
 | Reentrance/thunk candidates | Reentrance helper | Whole-program reentrance validation and MIR thunk transform | Records recognized recursion shapes without making MIR rediscover them from source syntax. |
 
@@ -594,7 +594,8 @@ lives in the large main file:
 * [`helpers/reentrance.rb`](helpers/reentrance.rb): recursion and reentrancy
   validation.
 * [`helpers/pipe_analysis.rb`](helpers/pipe_analysis.rb): pipeline expression
-  typing and aggregate operation checks.
+  typing, source/terminal validation, concurrent operation checks, and
+  aggregate facts that MIR pipeline plans consume.
 * [`helpers/method_analysis.rb`](helpers/method_analysis.rb): collection,
   stdlib, extern, and receiver method resolution.
 * [`helpers/union.rb`](helpers/union.rb): union schema validation and variant

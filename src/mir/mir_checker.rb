@@ -1440,6 +1440,11 @@ class MIRChecker
   # naming the binding and the bad step index. Future invariants get
   # added here, NOT in the rendering code.
   class FsmStructureError < StandardError; end
+  VALID_FSM_DESTROY_SOURCES = T.let(
+    [:capture, :fresh_heap, :body, :owned_result].freeze,
+    T::Array[Symbol],
+  )
+  VALID_FSM_UNLOCK_METHODS = T.let(%w[unlock unlockShared].freeze, T::Array[String])
 
   sig { params(structure: T.nilable(MIR::FsmStructure), source: T.untyped).returns(NilClass) }
   def self.check_fsm_structure!(structure, source: nil)
@@ -1472,6 +1477,13 @@ class MIRChecker
         )
       end
     end
+
+    check_fsm_destroy_actions!(
+      structure.destroy_actions,
+      finalize_cleanups,
+      structure.ctx_id.is_a?(Integer) ? structure.ctx_id : nil,
+      source,
+    )
 
     # INV-FSM-STEP-READS-LIVE
     cleanup_step_index = {}
@@ -1558,6 +1570,178 @@ class MIRChecker
     end
 
     nil
+  end
+
+  sig do
+    params(
+      actions: T::Array[MIR::FsmDestroyAction],
+      finalize_cleanups: T::Array[String],
+      ctx_id: T.nilable(Integer),
+      source: T.nilable(Object),
+    ).void
+  end
+  def self.check_fsm_destroy_actions!(actions, finalize_cleanups, ctx_id, source)
+    return if actions.empty? && finalize_cleanups.empty?
+    unless ctx_id
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-CTX-ID",
+        "FSM finalization records exist but ctx_id is missing; destroyTask " \
+        "targets cannot be verified.",
+        source,
+      )
+    end
+
+    cleanup_names = actions.filter_map { |action|
+      action.cleanup_name
+    }
+    finalize_cleanups.each do |name|
+      next if cleanup_names.include?(name)
+
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-FINALIZE-ACTION-PRESENT",
+        "finalize cleanup '#{name}' has no structural destroy action.",
+        source,
+      )
+    end
+
+    actions.each do |action|
+      case action
+      when MIR::FsmDestroyCleanup
+        check_fsm_destroy_cleanup_action!(action, finalize_cleanups, ctx_id, source)
+      when MIR::FsmDestroyLockRelease
+        check_fsm_destroy_lock_action!(action, ctx_id, source)
+      end
+    end
+  end
+
+  sig do
+    params(
+      action: MIR::FsmDestroyCleanup,
+      finalize_cleanups: T::Array[String],
+      ctx_id: Integer,
+      source: T.nilable(Object),
+    ).void
+  end
+  def self.check_fsm_destroy_cleanup_action!(action, finalize_cleanups, ctx_id, source)
+    unless VALID_FSM_DESTROY_SOURCES.include?(action.source_kind)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-SOURCE",
+        "destroy cleanup '#{action.name}' has unknown source #{action.source_kind.inspect}.",
+        source,
+      )
+    end
+
+    expected_target = "__ctx_#{ctx_id}.#{action.name}"
+    unless action.target_zig == expected_target
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-TARGET",
+        "destroy cleanup '#{action.name}' targets #{action.target_zig.inspect}; " \
+        "expected #{expected_target.inspect}.",
+        source,
+      )
+    end
+
+    unless finalize_cleanups.include?(action.name)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-FINALIZE-LIST",
+        "destroy cleanup '#{action.name}' is not listed in finalize_cleanups.",
+        source,
+      )
+    end
+
+    entry = action.cleanup_entry
+    unless entry.needs_cleanup?
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-CLEANUP-ENTRY",
+        "destroy cleanup '#{action.name}' has a no-cleanup entry.",
+        source,
+      )
+    end
+
+    unless [:heap, :frame].include?(entry.alloc)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-ALLOC",
+        "destroy cleanup '#{action.name}' uses invalid allocator #{entry.alloc.inspect}.",
+        source,
+      )
+    end
+
+    if entry.kind == :resource
+      close_zig = entry.resource_close_zig
+      unless close_zig && close_zig.include?("{0}")
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-DESTROY-RESOURCE-TEMPLATE",
+          "resource cleanup '#{action.name}' must carry a close template with {0}.",
+          source,
+        )
+      end
+      if close_zig.include?("rt.")
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-DESTROY-RESOURCE-RUNTIME",
+          "resource cleanup '#{action.name}' must use {rt} for runtime access.",
+          source,
+        )
+      end
+    end
+
+    check_fsm_destroy_optional_zig!("guard", action.name, action.guard_zig, source)
+    check_fsm_destroy_optional_zig!("allocator", action.name, action.allocator_zig, source)
+  end
+
+  sig { params(action: MIR::FsmDestroyLockRelease, ctx_id: Integer, source: T.nilable(Object)).void }
+  def self.check_fsm_destroy_lock_action!(action, ctx_id, source)
+    unless action.guard_field.start_with?("__lock_held_")
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-LOCK-GUARD",
+        "lock destroy action '#{action.name}' uses malformed guard #{action.guard_field.inspect}.",
+        source,
+      )
+    end
+
+    suffix = action.guard_field.delete_prefix("__lock_held_")
+    unless Integer(suffix, exception: false)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-LOCK-GUARD",
+        "lock destroy action '#{action.name}' uses non-numeric guard #{action.guard_field.inspect}.",
+        source,
+      )
+    end
+
+    unless action.lock_ref_zig.include?("__ctx_#{ctx_id}.")
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-LOCK-TARGET",
+        "lock destroy action '#{action.name}' does not target ctx #{ctx_id}.",
+        source,
+      )
+    end
+
+    unless VALID_FSM_UNLOCK_METHODS.include?(action.unlock_method)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-LOCK-METHOD",
+        "lock destroy action '#{action.name}' uses unknown unlock method #{action.unlock_method.inspect}.",
+        source,
+      )
+    end
+
+    check_fsm_destroy_required_zig!("lock target", action.name, action.lock_ref_zig, source)
+  end
+
+  sig { params(kind: String, name: String, value: T.nilable(String), source: T.nilable(Object)).void }
+  def self.check_fsm_destroy_optional_zig!(kind, name, value, source)
+    return unless value
+
+    check_fsm_destroy_required_zig!(kind, name, value, source)
+  end
+
+  sig { params(kind: String, name: String, value: String, source: T.nilable(Object)).void }
+  def self.check_fsm_destroy_required_zig!(kind, name, value, source)
+    if value.strip.empty? || value.include?("\n") || value.include?(";")
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-ZIG-FIELD",
+        "destroy #{kind} for '#{name}' must be a single expression field, got #{value.inspect}.",
+        source,
+      )
+    end
   end
 
   sig { params(invariant: String, message: String, source: T.untyped).returns(String) }

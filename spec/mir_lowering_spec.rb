@@ -301,6 +301,31 @@ RSpec.describe MIRLowering do
       expect(ctx.to_transform_hash.fetch(:parallel)).to eq(false)
     end
 
+    it "renders stackful BG resource capture cleanup with explicit runtime placeholder" do
+      low = lowering
+      names = MIRLoweringConcurrency::BgLoweringNames.new(
+        id: 2,
+        ctx_type: "__BgCtx2",
+        alloc_var: "__alloc_2",
+        promise_var: "__promise_2",
+        ctx_var: "__ctx_2_ptr",
+        blk_label: "__bg2",
+        bg_rt: "__rt_bg2",
+      )
+
+      capture = low.send(
+        :bg_capture_materialization,
+        names,
+        nil,
+        { "map" => Type.new(:StringMap) },
+        { "map" => "{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())" },
+        Set.new,
+      )
+
+      expect(capture.capture_frees)
+        .to include("defer __ctx_2.map.deinit(rt.heapAlloc(), rt.heapAlloc());")
+    end
+
     it "strips leading try when assigning a BG value result" do
       fake = Object.new
       fake.extend(MIRLoweringConcurrency)

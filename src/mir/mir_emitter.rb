@@ -1103,6 +1103,39 @@ class MIREmitter
   # errdefer: false -> emits `defer cleanup(name)` with optional moved guard
   #                    based on entry.has_moved_guard?.
   # The caller (emit dispatch) decides which; this method applies the template.
+  public
+
+  sig { params(name: String, entry: CleanupEntry, alloc_override: T.nilable(String)).returns(String) }
+  def emit_direct_cleanup(name, entry, alloc_override: nil)
+    alloc = alloc_override || alloc_from_entry(entry)
+    guarded = entry.has_moved_guard?
+    via_pointer = entry.via_pointer?
+
+    case entry.kind
+    when :resource
+      close = resource_close_body(T.must(entry.resource_close_zig), name)
+      direct_cleanup_statement(name, close, guarded)
+    else
+      rc_alloc = entry.rc_alloc
+      use_alloc =
+        if entry.kind == :rc && rc_alloc && alloc_override.nil?
+          alloc_from_sym(rc_alloc)
+        else
+          alloc
+        end
+      use_name = entry.kind == :frozen ? "#{name}__buf" : name
+      use_type = via_pointer ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
+      result = direct_uniform_cleanup(use_name, use_type, use_alloc, guarded, via_pointer:)
+      if entry.rc_release_fields_cleanup?
+        guard = guarded ? "if (!#{name}_moved) " : ""
+        result += "\n#{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);"
+      end
+      result
+    end
+  end
+
+  private
+
   sig { params(node: T.untyped, errdefer: T::Boolean).returns(String) }
   def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
@@ -1118,7 +1151,7 @@ class MIREmitter
       # Schema-driven close hook: user-provided Zig snippet with `{0}` =
       # the binding name. Future: lift into a deinit method on the type
       # itself (requires wrapping raw-fd sockets as Zig structs).
-      close = entry.resource_close_zig.gsub("{0}", name)
+      close = resource_close_body(entry.resource_close_zig, name)
       guarded_defer(name, close, g, errdefer:)
 
     else
@@ -1144,7 +1177,7 @@ class MIREmitter
       # so cleanup's T matches the pointee shape.
       use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
       result = guarded_cleanup(use_name, use_type, use_alloc, g, errdefer:, via_pointer: vp)
-      if entry.kind == :rc && entry.needs_release_fields?
+      if entry.rc_release_fields_cleanup?
         guard = g ? "if (!#{name}_moved) " : ""
         kw = errdefer ? "errdefer" : "defer"
         result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
@@ -1725,5 +1758,24 @@ class MIREmitter
     else
       "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
     end
+  end
+
+  sig { params(template: String, name: String).returns(String) }
+  def resource_close_body(template, name)
+    template.gsub("{0}", name).gsub("{rt}", @rt_name)
+  end
+
+  sig { params(name: String, body: String, guarded: T::Boolean).returns(String) }
+  def direct_cleanup_statement(name, body, guarded)
+    stripped = body.strip
+    statement = stripped.end_with?(";", "}") ? stripped : "#{stripped};"
+    guarded ? "if (!#{name}_moved) #{statement}" : statement
+  end
+
+  sig { params(name: String, zig_type: String, alloc: String, guarded: T::Boolean, via_pointer: T.nilable(T::Boolean)).returns(String) }
+  def direct_uniform_cleanup(name, zig_type, alloc, guarded, via_pointer: false)
+    arg = via_pointer ? name : "&#{name}"
+    storage_type = ZigType.new(zig_type).cleanup_storage_type
+    direct_cleanup_statement(name, "CheatLib.cleanup(#{storage_type}, #{alloc}, #{arg})", guarded)
   end
 end

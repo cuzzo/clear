@@ -8,7 +8,7 @@ require_relative '../src/mir/fsm_transform/recursive_splitter'
 # `defer NAME.<method>(...)` may NEVER appear in a segment fn where
 # NAME is a cross-segment ctx field. Such a defer would fire when
 # its runSegN returns -- before the BG body has finished -- so the
-# cleanup must be lifted to destroyTask via fsm_destroy_lines.
+# cleanup must be lifted to destroyTask via fsm_destroy_actions.
 #
 # Pre-fix history: capture cleanups WERE emitted as defers in seg
 # 0's prologue (commit predating 4df184d8). Captures are
@@ -142,7 +142,7 @@ RSpec.describe FsmTransform::Emit do
         id: 3,
         bg_rt: "__rt_bg3",
         captured: { "resource" => :stub },
-        capture_close_zig: { "resource" => "rt.close({0})" },
+        capture_close_zig: { "resource" => "{rt}.close({0})" },
         pointer_captures: Set.new,
         is_void: true,
         ctx_type: "__BgCtx3",
@@ -160,7 +160,6 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: [],
-        fresh_heap_cleanups: "",
       }
 
       result = FsmTransform::Emit.build_recursive(
@@ -169,6 +168,145 @@ RSpec.describe FsmTransform::Emit do
       expect(result).to be_a(MIR::FsmLoweringResult)
       expect(result.code).to include("__ctx_3.rt.close(__ctx_3.resource);")
       expect(result.structure.captures).to include(name: "resource", cleanup_at: :finalize)
+      action = result.structure.destroy_actions.find { |entry| entry.is_a?(MIR::FsmDestroyCleanup) }
+      expect(action.source_kind).to eq(:capture)
+      expect(action.target_zig).to eq("__ctx_3.resource")
+      expect(action.cleanup_entry.kind).to eq(:resource)
+      expect(action.cleanup_entry.resource_close_zig).to eq("{rt}.close({0})")
+    end
+
+    it "routes FreshHeapCopy capture cleanup through structural destroyTask actions" do
+      lowering = Class.new {
+        def capture_inits_fsm(_capture_inits)
+          ""
+        end
+      }.new
+      segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+        segments: [
+          FsmTransform::Segments::Segment.new(
+            0, [], FsmTransform::Segments::Done.new(nil)
+          ),
+        ],
+        synthetic_fields: [],
+        alias_overrides_by_index: {},
+      )
+      ctx = {
+        id: 4,
+        bg_rt: "__rt_bg4",
+        captured: { "owned" => :stub },
+        capture_close_zig: {},
+        pointer_captures: Set.new,
+        is_void: true,
+        ctx_type: "__BgCtx4",
+        promise_zig: "CheatHeader.Promise(void)",
+        capture_fields: "owned: i32 = 0,\nowned_moved: bool = false,\n",
+        blk_label: "__bg4",
+        rt_name: "rt",
+        ctx_var: "__ctx_4_ptr",
+        promise_var: "__promise_4",
+        alloc_var: "__alloc_4",
+        capture_inits: [],
+        promoted_decls: "",
+        pin_mode: false,
+        parallel: false,
+        extra_ctx_fields: [],
+        recursive_promoted_names: [],
+        fresh_heap_cleanup_names: ["owned"],
+      }
+
+      result = FsmTransform::Emit.build_recursive(
+        ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
+
+      expect(result).to be_a(MIR::FsmLoweringResult)
+      expect(result.code).to include(
+        "if (!__ctx_4.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_4.owned), __ctx_4.alloc, &__ctx_4.owned);"
+      )
+      action = result.structure.destroy_actions.find { |entry|
+        entry.is_a?(MIR::FsmDestroyCleanup) && entry.name == "owned"
+      }
+      expect(action.source_kind).to eq(:fresh_heap)
+      expect(action.allocator_zig).to eq("__ctx_4.alloc")
+    end
+
+    it "passes destroy-action ctx fields into segment ownership lowering" do
+      lowering = Class.new {
+        attr_reader :contexts
+
+        def initialize
+          @contexts = []
+        end
+
+        def capture_inits_fsm(_capture_inits)
+          ""
+        end
+
+        def with_fsm_segment_lowering_context(pointer_captures:, inherited_alloc_names:, inherited_guard_names:, owned_result_guards:)
+          @contexts << {
+            pointer_captures: pointer_captures,
+            inherited_alloc_names: inherited_alloc_names,
+            inherited_guard_names: inherited_guard_names,
+            owned_result_guards: owned_result_guards,
+          }
+          yield
+        end
+
+        def with_fiber_capture_map(_capture_map, rt_override:)
+          yield
+        end
+
+        def lower_finalized_fsm_step_mir(_stmts, no_result:, ctx_id: nil)
+          [MIR::ExprStmt.new(MIR::Lit.new("work()"), false)]
+        end
+
+        def last_fsm_result_transfer_facts
+          []
+        end
+
+        def render_mir_list(_nodes)
+          "work();"
+        end
+      }.new
+      expr = AST::Literal.new(nil, :NUMBER, 1, nil)
+      expr.full_type = :Int64
+      segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+        segments: [
+          FsmTransform::Segments::Segment.new(
+            0, [expr], FsmTransform::Segments::Done.new(nil)
+          ),
+        ],
+        synthetic_fields: [],
+        alias_overrides_by_index: {},
+      )
+      ctx = {
+        id: 6,
+        bg_rt: "__rt_bg6",
+        captured: { "owned" => :stub },
+        capture_close_zig: {},
+        pointer_captures: Set.new,
+        is_void: true,
+        ctx_type: "__BgCtx6",
+        promise_zig: "CheatHeader.Promise(void)",
+        capture_fields: "owned: i32 = 0,\nowned_moved: bool = false,\n",
+        blk_label: "__bg6",
+        rt_name: "rt",
+        ctx_var: "__ctx_6_ptr",
+        promise_var: "__promise_6",
+        alloc_var: "__alloc_6",
+        capture_inits: [],
+        promoted_decls: "",
+        pin_mode: false,
+        parallel: false,
+        extra_ctx_fields: [],
+        recursive_promoted_names: [],
+        fresh_heap_cleanup_names: ["owned"],
+      }
+
+      result = FsmTransform::Emit.build_recursive(
+        ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
+
+      expect(result).to be_a(MIR::FsmLoweringResult)
+      inherited = lowering.contexts.first[:inherited_alloc_names]
+      expect(inherited).to include("__ctx_6.owned")
     end
 
     it "registers owned suspend result cleanup once" do
@@ -181,12 +319,14 @@ RSpec.describe FsmTransform::Emit do
       FsmTransform::Emit.send(:register_owned_suspend_result_cleanups!,
         [{ descriptor: descriptor }, { descriptor: descriptor }], ctx, 7)
 
-      lines = ctx.fetch(:fsm_destroy_lines)
-      expect(lines.length).to eq(1)
-      expect(lines.first.kind).to eq(:body)
-      expect(lines.first.name).to eq("payload")
-      expect(lines.first.zig).to include("__ctx_7.__owned_payload_init")
-      expect(lines.first.zig).to include("__ctx_7.payload")
+      actions = ctx.fetch(:fsm_destroy_actions)
+      expect(actions.length).to eq(1)
+      action = actions.first
+      expect(action).to be_a(MIR::FsmDestroyCleanup)
+      expect(action.source_kind).to eq(:owned_result)
+      expect(action.name).to eq("payload")
+      expect(action.guard_zig).to eq("__ctx_7.__owned_payload_init")
+      expect(action.target_zig).to eq("__ctx_7.payload")
     end
 
     it "collects guard fields for cleanup-bearing suspend results" do
@@ -275,7 +415,6 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: [],
-        fresh_heap_cleanups: "",
       }
 
       result = FsmTransform::Emit.build_recursive(

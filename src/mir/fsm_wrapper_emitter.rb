@@ -99,7 +99,7 @@ module FsmWrapperEmitter
     parts << ""
     parts << render_b1_resume_fn(s.run_body.ctx_id)
     parts << ""
-    parts << render_destroy_task(s.run_body.ctx_id)
+    parts << render_destroy_task(s.run_body.ctx_id, [], mir_emitter)
     parts << "    };"
     parts.join("\n")
   end
@@ -145,14 +145,14 @@ module FsmWrapperEmitter
   # embedded in it) lives long enough for the status write before
   # being freed here.
   #
-  # extra_zig is optional cleanup that runs BEFORE freeFsmCtx
-  # (e.g. WITH+suspend-in-CS releases any locks still held on the
-  # err path).
-  sig { params(ctx_id: T.untyped, extra_zig: T.nilable(String)).returns(String) }
-  def render_destroy_task(ctx_id, extra_zig = nil)
+  # destroy_actions are structural cleanup/release operations that run
+  # BEFORE freeFsmCtx (e.g. capture cleanup and WITH+suspend-in-CS locks).
+  sig { params(ctx_id: Integer, destroy_actions: T::Array[MIR::FsmDestroyAction], mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_task(ctx_id, destroy_actions, mir_emitter)
     T.bind(self, T.untyped) rescue nil
+    extra_zig = render_destroy_actions(ctx_id, destroy_actions, mir_emitter)
     extra =
-      if extra_zig && !empty?(extra_zig)
+      if !empty?(extra_zig)
         extra_zig.lines.map { |l| "    #{l.chomp}" }.join("\n") + "\n"
       else
         ""
@@ -199,7 +199,7 @@ module FsmWrapperEmitter
     parts << ""
     parts << indent_block(render_dispatch(s.resume_fn), 8)
     parts << ""
-    parts << render_destroy_task(s.resume_fn.ctx_id)
+    parts << render_destroy_task(s.resume_fn.ctx_id, [], mir_emitter)
     parts << "    };"
     parts.join("\n")
   end
@@ -294,7 +294,7 @@ module FsmWrapperEmitter
     if s.resume_fn_zig.is_a?(MIR::FsmDispatch)
       parts << indent_block(render_dispatch(s.resume_fn_zig), 8)
       parts << ""
-      parts << render_destroy_task(s.resume_fn_zig.ctx_id, s.destroy_extra_zig)
+      parts << render_destroy_task(s.resume_fn_zig.ctx_id, s.destroy_actions || [], mir_emitter)
     elsif !empty?(s.resume_fn_zig)
       parts << indent_block(s.resume_fn_zig, 8)
     end
@@ -577,6 +577,44 @@ module FsmWrapperEmitter
   def empty?(s)
     T.bind(self, T.untyped) rescue nil
     s.nil? || s.strip.empty?
+  end
+
+  sig { params(ctx_id: Integer, destroy_actions: T::Array[MIR::FsmDestroyAction], mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_actions(ctx_id, destroy_actions, mir_emitter)
+    return "" if destroy_actions.empty?
+
+    T.cast(with_rt_name(mir_emitter, "__ctx_#{ctx_id}.rt") do
+      destroy_actions.map do |action|
+        case action
+        when MIR::FsmDestroyCleanup
+          render_destroy_cleanup_action(action, mir_emitter)
+        when MIR::FsmDestroyLockRelease
+          render_destroy_lock_action(ctx_id, action)
+        end
+      end.compact.join("\n")
+    end, String)
+  end
+
+  sig { params(action: MIR::FsmDestroyCleanup, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_cleanup_action(action, mir_emitter)
+    cleanup = mir_emitter.emit_direct_cleanup(
+      action.target_zig,
+      action.cleanup_entry,
+      alloc_override: action.allocator_zig,
+    )
+    guard = action.guard_zig
+    return cleanup if guard.nil? || guard.strip.empty?
+
+    if cleanup.include?("\n")
+      "if (#{guard}) {\n#{indent_block(cleanup, 4)}\n}"
+    else
+      "if (#{guard}) #{cleanup}"
+    end
+  end
+
+  sig { params(ctx_id: Integer, action: MIR::FsmDestroyLockRelease).returns(String) }
+  def render_destroy_lock_action(ctx_id, action)
+    "if (__ctx_#{ctx_id}.#{action.guard_field}) #{action.lock_ref_zig}.#{action.unlock_method}();"
   end
 
   sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(Object)).returns(Object) }

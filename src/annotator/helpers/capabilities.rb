@@ -1268,7 +1268,7 @@ module CapabilityHelper
       set_capture_close_pattern_when(
         result.close_patterns,
         name,
-        "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())",
+        "{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())",
         string_map_cleanup
       )
     end

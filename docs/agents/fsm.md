@@ -99,13 +99,13 @@ The non-negotiable rules per `CLAUDE.md` Invariant 13:
 
 ### Cleanup pipeline (one rule, one place)
 
-For an FSM-eligible BG body, every cleanup whose target outlives a single `runSegN` fn flows through `ctx[:fsm_destroy_lines]` and runs in `destroyTask`. Three categories converge:
+For an FSM-eligible BG body, every cleanup whose target outlives a single `runSegN` fn flows through `ctx[:fsm_destroy_actions]` and runs in `destroyTask`. The action list is structural MIR finalization data, not pre-rendered Zig text. Three categories converge:
 
-| `:kind` | Pushed by | Ordering |
+| Action | Pushed by | Ordering |
 |---|---|---|
-| `:lock` | `Emit.expand_lock_segment` (one per cap) | Reverse-acquisition (LIFO). |
-| `:capture` | `Emit.build_recursive` (string-promoted heap captures + resource `close_zig` captures) | After locks. |
-| `:body` | (reserved) | After captures. |
+| `MIR::FsmDestroyLockRelease` | `Emit.expand_lock_segment` (one per cap) | Reverse-acquisition (LIFO). |
+| `MIR::FsmDestroyCleanup(source_kind: :capture/:fresh_heap)` | `Emit.build_recursive` | After locks. |
+| `MIR::FsmDestroyCleanup(source_kind: :body/:owned_result)` | cleanup lifting / suspend-result registration | After captures. |
 
 `destroyTask` runs on both success and error paths, so a captured collection / held lock / heap value never leaks even if a runSegN errors out.
 
@@ -113,7 +113,7 @@ The rule that closes the historical UAF hole:
 
 > In any segment fn, `defer NAME.<method>(...)` may NEVER appear if `NAME` is a cross-segment ctx field (captured, recursively-promoted, or in `liveness.cross_segment_vars`). Such a defer would fire when its `runSegN` returns — before the BG body completes.
 
-`Emit.check_fsm_cleanup_invariant!` enforces this with a regex sweep over each segment's lowered Zig. A violation raises with the segment index and var name and points at the fix (lift to `fsm_destroy_lines`).
+`Emit.check_fsm_cleanup_invariant!` enforces this by walking each segment's lowered MIR cleanup nodes. A violation raises with the segment index and var name and points at the fix (lift to `fsm_destroy_actions`). `MIRChecker.check_fsm_structure!` then verifies that every finalize cleanup has a structural destroy action with a ctx-field target and valid cleanup/lock shape.
 
 ## Not supported (and why)
 
@@ -169,7 +169,7 @@ Add one branch to `Type#fsm_foreach_descriptor`. The descriptor returns a hash w
 
 The splitter's `emit_for_each_fragment` dispatches on `:kind`; the splitter never inspects collection types directly. Adding a new shape (e.g. a tree iterator) is one new `emit_for_each_<kind>` in the splitter and one new branch on `fsm_foreach_descriptor` — no other code changes.
 
-Cleanup for the new collection's captured form is automatic: if its `Type#resolve_resource_close` returns a `close_zig` template, the FSM transform routes it through `ctx[:fsm_destroy_lines]` and `destroyTask` releases on task end.
+Cleanup for the new collection's captured form is automatic: if its `Type#resolve_resource_close` returns a `close_zig` template, the FSM transform routes it through `ctx[:fsm_destroy_actions]` and `destroyTask` releases on task end. Resource templates use `{0}` for the value and `{rt}` for runtime access; `MIRChecker` rejects legacy implicit `rt.` templates at the FSM finalizer boundary.
 
 ## Adding a new suspend kind
 

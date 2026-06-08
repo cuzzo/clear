@@ -1985,7 +1985,8 @@ class Type
 
   # Resolve the Zig close/deinit statement for resource types.
   # Returns [is_resource, close_zig_template] where close_zig_template uses
-  # {0} as placeholder for the variable name. Returns [false, nil] for non-resources.
+  # {0} for the variable name and {rt} for runtime access. Returns
+  # [false, nil] for non-resources.
   #
   # Group 1 / Group 2 separation: when a Group-2 shape (pool/set/...) is
   # wrapped with Group-1 ownership (Arc/Rc), the bare-shape `.deinit()`

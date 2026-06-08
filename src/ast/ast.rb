@@ -2632,7 +2632,7 @@ module MIR
   #                    :takes_string, :takes_slice
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
-  # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
+  # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit({rt}.heapAlloc())")
   # MIR::Drop carries a cleanup_entry that captures the full classifier
   # output (zig_type / alloc / has_moved_guard / kind side-channels). The
   # raw Struct fields (token, name) are the marker; everything cleanup-

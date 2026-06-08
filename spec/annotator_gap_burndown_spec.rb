@@ -2576,7 +2576,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:record_capture_info!, ctx, "map", map_entry, map_node)
 
     expect(analysis.resource_captures).to include("map")
-    expect(analysis.close_patterns["map"]).to eq("{0}.deinit(rt.heapAlloc(), rt.heapAlloc())")
+    expect(analysis.close_patterns["map"]).to eq("{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())")
 
     parallel_analysis = ann.send(:new_capture_analysis)
     parallel_analysis.has_local = true

@@ -55,14 +55,6 @@ module FsmTransform
       )
     end
 
-    class DestroyLine < T::Struct
-      extend T::Sig
-
-      const :kind, Symbol
-      const :name, T.nilable(String)
-      const :zig, String
-    end
-
     # ================================================================
     # Unified FSM emit (kind-agnostic, shape-agnostic)
     # ================================================================
@@ -237,38 +229,27 @@ module FsmTransform
       end
 
       # 4. Wrap in FsmGenericCtxStruct + spawn_setup + FsmGenericBody.
-      # Assemble destroy_extra_zig from the unified fsm_destroy_lines
-      # pipeline. Locks first (so other tasks can acquire) in reverse
-      # acquisition order, then captures, then any lifted body
-      # cleanups.
-      destroy_entries = T.cast(Array(ctx[:fsm_destroy_lines]).select { |entry|
-        entry.is_a?(DestroyLine) && fsm_destroy_zig_present?(entry.zig)
-      }, T::Array[DestroyLine])
-      lock_zigs    = destroy_entries.select { |e| e.kind == :lock    }.map(&:zig)
-      capture_zigs = destroy_entries.select { |e| e.kind == :capture }.map(&:zig)
-      body_zigs    = destroy_entries.select { |e| e.kind == :body    }.map(&:zig)
-      destroy_seq  = lock_zigs.reverse + capture_zigs + body_zigs
-      destroy_extra = destroy_seq.empty? ? nil : destroy_seq.join("\n")
+      # Assemble structural destroy actions. Locks run first (so other
+      # tasks can acquire) in reverse acquisition order, then captures,
+      # then lifted body / owned-result cleanups.
+      destroy_actions = ordered_fsm_destroy_actions(ctx)
       ctx_struct = MIR::FsmGenericCtxStruct.new(
         ctx[:ctx_type], ctx[:promise_zig], ctx[:capture_fields],
         extra_field_decls, promoted_field_decls,
-        member_fns, dispatch, destroy_extra,
+        member_fns, dispatch, destroy_actions,
       )
       spawn_setup = build_spawn_setup(ctx, lowering)
       fsm_body = MIR::FsmGenericBody.new(ctx[:blk_label], ctx_struct, spawn_setup)
       MIR::FsmLoweringResult.new(
         code: FsmWrapperEmitter.render(fsm_body),
-        structure: build_fsm_structure(ctx, segment_specs, destroy_entries, id),
+        structure: build_fsm_structure(ctx, segment_specs, destroy_actions, id),
       )
     end
 
-    sig { params(ctx: FsmContext, segment_specs: T::Array[SegmentSpec], destroy_entries: T::Array[DestroyLine], id: Integer).returns(MIR::FsmStructure) }
-    def build_fsm_structure(ctx, segment_specs, destroy_entries, id)
+    sig { params(ctx: FsmContext, segment_specs: T::Array[SegmentSpec], destroy_actions: T::Array[MIR::FsmDestroyAction], id: Integer).returns(MIR::FsmStructure) }
+    def build_fsm_structure(ctx, segment_specs, destroy_actions, id)
       T.bind(self, T.untyped) rescue nil
-      cleanup_names = destroy_entries.filter_map { |entry|
-        next nil unless entry.kind == :capture || entry.kind == :body
-        entry.name&.to_s
-      }.uniq
+      cleanup_names = fsm_destroy_cleanup_names(destroy_actions)
       captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
       capture_names = captured.keys.map(&:to_s)
       captures = capture_names.filter_map do |name|
@@ -309,13 +290,26 @@ module FsmTransform
       structure.ownership_facts = (structured_facts + result_facts).uniq do |fact|
         [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
       end
+      structure.destroy_actions = destroy_actions
       structure
     end
 
-    sig { params(zig: T.nilable(String)).returns(T::Boolean) }
-    def fsm_destroy_zig_present?(zig)
-      stripped = zig.to_s.strip
-      !stripped.empty? && stripped != ";"
+    sig { params(ctx: FsmContext).returns(T::Array[MIR::FsmDestroyAction]) }
+    def fsm_destroy_actions(ctx)
+      ctx[:fsm_destroy_actions] ||= T.let([], T::Array[MIR::FsmDestroyAction])
+      T.cast(ctx[:fsm_destroy_actions], T::Array[MIR::FsmDestroyAction])
+    end
+
+    sig { params(ctx: FsmContext).returns(T::Array[MIR::FsmDestroyAction]) }
+    def ordered_fsm_destroy_actions(ctx)
+      fsm_destroy_actions(ctx).each_with_index.sort_by do |action, index|
+        [action.destroy_order_bucket, action.destroy_order_index(index)]
+      end.map(&:first)
+    end
+
+    sig { params(actions: T::Array[MIR::FsmDestroyAction]).returns(T::Array[String]) }
+    def fsm_destroy_cleanup_names(actions)
+      actions.filter_map(&:cleanup_name).uniq
     end
 
     sig { params(sources: T::Array[FsmStructureSource], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
@@ -576,7 +570,6 @@ module FsmTransform
       recursive_promoted_names = T.cast(ctx[:recursive_promoted_names] || [], T::Array[String])
       extra_ctx_fields = T.cast(ctx[:extra_ctx_fields] || [], T::Array[String])
       fresh_heap_cleanup_names = T.cast(ctx[:fresh_heap_cleanup_names] || [], T::Array[String])
-      fresh_heap_cleanups = T.cast(ctx[:fresh_heap_cleanups] || "", String)
       is_void = T.cast(ctx[:is_void], T::Boolean)
       lowering_api = T.unsafe(lowering)
 
@@ -652,53 +645,35 @@ module FsmTransform
       # so a defer placed in any one runFn fires when THAT fn
       # returns -- before the BG body as a whole has finished.
       #
-      # Three categories converge here:
-      #   :lock     -- per-cap unlock (push at expand_lock_segment
-      #                time). Ordered LIFO of acquisition.
-      #   :capture  -- resource close_zig captures.
-      #   :body     -- (reserved) MIR::Cleanup nodes for body-local
-      #                vars promoted to ctx (cross-segment). Lifted
-      #                from segment Zig if the invariant scan finds
-      #                them; today there are none in the corpus.
-      #
-      # FsmGenericCtxStruct.destroy_extra_zig assembles them in
-      # order: locks (reverse-acquisition) -> captures -> body.
-      ctx[:fsm_destroy_lines] = T.let([], T::Array[DestroyLine])
+      # Three categories converge here as structural destroy actions:
+      # locks, capture cleanups, and lifted body/owned-result cleanups.
+      ctx[:fsm_destroy_actions] = T.let([], T::Array[MIR::FsmDestroyAction])
       captured.each do |name, _|
-        zig =
-          if capture_close_zig[name]
-            tpl = T.must(capture_close_zig[name])
-            close_target = "__ctx_#{id}.#{name}"
-            tpl = tpl.split("{0}").join(close_target)
-            tpl = tpl.split("rt.").join("__ctx_#{id}.rt.")
-            "#{tpl};"
-          end
-        T.cast(ctx[:fsm_destroy_lines], T::Array[DestroyLine]) << DestroyLine.new(
-          kind: :capture,
+        close_zig = capture_close_zig[name]
+        next unless close_zig
+
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+          source_kind: :capture,
           name: name.to_s,
-          zig: zig,
-        ) if zig
+          target_zig: "__ctx_#{id}.#{name}",
+          cleanup_entry: CleanupEntry.build(
+            :resource,
+            alloc: :heap,
+            has_moved_guard: false,
+            resource_close_zig: close_zig,
+          ),
+        )
       end
-      # FreshHeapCopy cleanups (master's `defer CheatLib.cleanup(...)`
-      # forms inside the run fn) lift to destroyTask. The body_cleanup_zig
-      # produced by FiberCtxBuilder is `defer CheatLib.cleanup(@TypeOf
-      # (__ctx_<id>.<name>), __ctx_<id>.alloc, &__ctx_<id>.<name>);` —
-      # we strip the leading `defer ` and trailing `;` and re-emit as a
-      # destroyTask line so it fires once when the FSM ctx tears down,
-      # not on each segment return.
-      fresh_heap_names = fresh_heap_cleanup_names
-      fresh_heap_cleanups.each_line.with_index do |line, cleanup_index|
-        line = line.strip
-        next if line.empty?
-        # Drop the `defer ` prefix; destroy_extra_zig wraps the line at
-        # the destroyTask exit anyway, so the unconditional cleanup fires
-        # exactly once.
-        zig = line.delete_prefix("defer ")
-        zig = zig.split("rt.").join("__ctx_#{id}.rt.")
-        T.cast(ctx[:fsm_destroy_lines], T::Array[DestroyLine]) << DestroyLine.new(
-          kind: :capture,
-          name: fresh_heap_names[cleanup_index]&.to_s,
-          zig: zig,
+      # FreshHeapCopy captures are fiber-owned ctx fields. Register the
+      # cleanup from the capture names and a CleanupEntry instead of
+      # stripping `defer` from a previously rendered Zig line.
+      fresh_heap_cleanup_names.each do |name|
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+          source_kind: :fresh_heap,
+          name: name,
+          target_zig: "__ctx_#{id}.#{name}",
+          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
+          allocator_zig: "__ctx_#{id}.alloc",
         )
       end
 
@@ -732,11 +707,10 @@ module FsmTransform
           raw_stmts
         else
           want_result = !is_void && result_seg_indices.include?(seg.index)
-          inherited_capture_names = T.let(Array(ctx[:fsm_destroy_lines]).filter_map do |entry|
-            next nil unless entry.is_a?(DestroyLine) && (entry.kind == :capture || entry.kind == :body)
-            name = entry.name
-            name ? "__ctx_#{id}.#{name}" : nil
-          end.to_set, T::Set[String])
+          inherited_capture_names = T.let(
+            fsm_destroy_actions(ctx).filter_map(&:ctx_cleanup_target_zig).to_set,
+            T::Set[String],
+          )
           captured.keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }
           # Per-segment alias overrides (e.g. WITH's `inner` ->
           # __ctx_<id>.c.ctrl.data.*.data) merged into the rendering
@@ -767,7 +741,7 @@ module FsmTransform
           if all_promoted.any?
             promoted_names = all_promoted.uniq
             lowered_mir = promote_fsm_mir_to_ctx_fields(lowered_mir, promoted_names, id)
-            lowered_mir = lift_ctx_cleanups_to_destroy!(lowered_mir, promoted_names, "__ctx_#{id}", ctx, lowering)
+            lowered_mir = lift_ctx_cleanups_to_destroy!(lowered_mir, promoted_names, "__ctx_#{id}", ctx)
           end
           seg_mir_codes[i] = lowered_mir
           lowered = lowering_api.with_fiber_capture_map({}, rt_override: bg_rt) do
@@ -784,7 +758,7 @@ module FsmTransform
       # that segment's runFn returns -- before the BG body as a
       # whole has finished -- causing a use-after-free on the
       # remaining segments. The cleanup must be lifted to
-      # destroyTask via ctx[:fsm_destroy_lines]. This sweep is the
+      # destroyTask via ctx[:fsm_destroy_actions]. This sweep is the
       # checker that closes the historical hole where Pass 3 (which
       # validates cleanups assuming a single-fn body) couldn't see
       # Pass 4's segment splitting.
@@ -817,7 +791,7 @@ module FsmTransform
             # Capture cleanups deliberately do NOT live in the
             # prologue: a Zig defer here fires when seg 0's runFn
             # returns -- before the BG body has finished running.
-            # See ctx[:fsm_destroy_lines] / destroyTask above.
+            # See ctx[:fsm_destroy_actions] / destroyTask above.
             parts.empty? ? nil : parts
           end
 
@@ -973,20 +947,17 @@ module FsmTransform
       nil
     end
 
-    sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], ctx_ref: String, ctx: FsmContext, lowering: Object).returns(T::Array[MIR::Node]) }
-    def lift_ctx_cleanups_to_destroy!(body, promoted_names, ctx_ref, ctx, lowering)
-      lowering_api = T.unsafe(lowering)
+    sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], ctx_ref: String, ctx: FsmContext).returns(T::Array[MIR::Node]) }
+    def lift_ctx_cleanups_to_destroy!(body, promoted_names, ctx_ref, ctx)
       body.filter_map do |node|
         if node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
           promoted_name = promoted_fsm_field_name(node.name.to_s, promoted_names)
           if promoted_name
-            zig = lowering_api.with_fiber_capture_map({}, rt_override: "#{ctx_ref}.rt") do
-              lowering_api.render_fsm_destroy_cleanup("#{ctx_ref}.#{promoted_name}", node.cleanup_entry)
-            end
-            T.cast(ctx[:fsm_destroy_lines], T::Array[DestroyLine]) << DestroyLine.new(
-              kind: :body,
+            fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+              source_kind: :body,
               name: promoted_name,
-              zig: zig,
+              target_zig: "#{ctx_ref}.#{promoted_name}",
+              cleanup_entry: node.cleanup_entry,
             )
             next nil
           end
@@ -1021,11 +992,12 @@ module FsmTransform
         name = desc.result_var.to_s
         next unless seen.add?(name)
         guard = SuspendResolvers.fsm_owned_guard_name(name)
-        ctx[:fsm_destroy_lines] ||= T.let([], T::Array[DestroyLine])
-        T.cast(ctx[:fsm_destroy_lines], T::Array[DestroyLine]) << DestroyLine.new(
-          kind: :body,
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+          source_kind: :owned_result,
           name: name,
-          zig: "if (__ctx_#{id}.#{guard}) CheatLib.cleanup(@TypeOf(__ctx_#{id}.#{name}), __ctx_#{id}.rt.heapAlloc(), &__ctx_#{id}.#{name});",
+          target_zig: "__ctx_#{id}.#{name}",
+          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+          guard_zig: "__ctx_#{id}.#{guard}",
         )
       end
     end
@@ -1034,7 +1006,7 @@ module FsmTransform
     # Zig and asserts that no `defer NAME.<method>(...)` line
     # references a cross-segment ctx field. Such a defer would fire
     # when its runSegN returns -- before the BG body completes --
-    # so it must be lifted to destroyTask via fsm_destroy_lines.
+    # so it must be lifted to destroyTask via fsm_destroy_actions.
     #
     # Whitelist: defers whose receiver is itself qualified with the
     # ctx (`__ctx_<id>.X`) are user-written destroy-side stmts,
@@ -1062,7 +1034,7 @@ module FsmTransform
                 "cleanup for '#{name}', a cross-segment ctx " \
                 "field. The defer would fire when this runSegN returns, " \
                 "before the BG body completes. Lift the cleanup to " \
-                "destroyTask via ctx[:fsm_destroy_lines]."
+                "destroyTask via ctx[:fsm_destroy_actions]."
         end
       end
     end
@@ -1205,15 +1177,14 @@ module FsmTransform
       ]
       extra_fields << "retry_count: u32 = 0," if meta[:retries] > 0
 
-      # Per-cap destroyTask cleanup: if this cap's flag is still
-      # set when the task dies, release the lock. Pushed onto the
-      # unified fsm_destroy_lines pipeline as a :lock entry; the
-      # final destroy_extra_zig orders locks LIFO of acquisition.
-      ctx[:fsm_destroy_lines] ||= T.let([], T::Array[DestroyLine])
-      T.cast(ctx[:fsm_destroy_lines], T::Array[DestroyLine]) << DestroyLine.new(
-        kind: :lock,
+      # Per-cap destroyTask cleanup: if this cap's flag is still set
+      # when the task dies, release the lock. The finalizer orders lock
+      # releases LIFO of acquisition.
+      fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
         name: meta[:lock_field_ref].to_s,
-        zig:  "if (__ctx_#{id}.__lock_held_#{cap_idx}) #{meta[:lock_field_ref]}.#{meta[:unlock_method]}();",
+        guard_field: "__lock_held_#{cap_idx}",
+        lock_ref_zig: meta[:lock_field_ref].to_s,
+        unlock_method: meta[:unlock_method].to_s,
       )
 
       {

@@ -19,6 +19,9 @@ require "sorbet-runtime"
 #   needs_cleanup alloc scope kind has_moved_guard match_as
 #   resource_close_zig rc_alloc base_zig needs_release_fields
 #   elem_needs_cleanup sync inner via_pointer source_kind
+# `resource_close_zig` uses `{0}` for the target value and `{rt}` for
+# runtime access, so FSM finalizers can bind cleanup to `__ctx_N.rt`
+# structurally instead of scanning emitted Zig text.
 class CleanupEntry < Hash
   extend T::Sig
   extend T::Generic
@@ -101,6 +104,9 @@ class CleanupEntry < Hash
 
   sig { returns(T::Boolean) }
   def needs_release_fields? = self[:needs_release_fields] == true
+
+  sig { returns(T::Boolean) }
+  def rc_release_fields_cleanup? = kind == :rc && needs_release_fields?
 
   sig { params(alloc: Symbol).returns(CleanupEntry) }
   def with_alloc(alloc)
