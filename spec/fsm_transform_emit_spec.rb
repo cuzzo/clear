@@ -32,10 +32,13 @@ RSpec.describe FsmTransform::Emit do
       index: attrs.fetch(:index),
       prologue_stmts: attrs.fetch(:prologue_stmts, []),
       body_stmts: attrs.fetch(:body_stmts, []),
+      structure_stmts: attrs.fetch(:structure_stmts, []),
       tail: attrs.fetch(:tail),
       descriptor: attrs[:descriptor],
+      fsm_result_transfer_facts: attrs.fetch(:fsm_result_transfer_facts, []),
       fn_name: attrs[:fn_name],
       rt_suppress: attrs.fetch(:rt_suppress, ""),
+      facts: attrs.fetch(:facts, FsmTransform::Emit::FsmSegmentFacts.empty),
     )
   end
 
@@ -86,15 +89,94 @@ RSpec.describe FsmTransform::Emit do
     expect(described_class.tail_resume_target(FsmTransform::Segments::Done.new(nil))).to be_nil
   end
 
-  it "filters non-renderable structure sources and normalizes ctx ownership fact names" do
-    ident = MIR::Ident.new("value")
+  it "derives segment facts from MIR roots and ignores rendered body text" do
+    payload_ref = MIR::FieldGet.new(MIR::Ident.new("__ctx_12"), "payload")
+    moved_ref = MIR::FieldGet.new(MIR::Ident.new("__ctx_12"), "payload_moved")
+    result_ref = MIR::FieldGet.new(
+      MIR::FieldGet.new(MIR::Ident.new("__ctx_12"), "inner"),
+      "result",
+    )
+    descriptor = MIR::SuspendDescriptor.new(
+      [MIR::ExprStmt.new(payload_ref, false)],
+      [MIR::Set.new(moved_ref, MIR::Lit.new("true"), false)],
+      MIR::FsmTailYield.new(1, "WaitForIo"),
+      [],
+      nil,
+      nil,
+      false,
+    )
+    spec = fsm_spec(
+      index: 0,
+      body_stmts: ["__ctx_12.fake_moved = true;"],
+      structure_stmts: [
+        MIR::TransferMark.new("__ctx_12.payload", :return, :heap),
+        MIR::MoveMark.new("__ctx_12.payload"),
+        MIR::Set.new(result_ref, payload_ref, false),
+      ],
+      tail: FsmTransform::Segments::Done.new(nil),
+      descriptor: descriptor,
+      fsm_result_transfer_facts: [
+        MIR::FsmResultTransferFact.new(
+          name: "__ctx_12.payload",
+          target_alloc: :heap,
+          move_guarded: true,
+        ),
+      ],
+    )
 
-    expect(described_class.fsm_structure_source_array(["raw;", ident, Object.new]))
-      .to eq(["raw;", ident])
+    facts = described_class.build_fsm_segment_facts(spec, 12, ["payload"])
+
+    expect(facts.ctx_reads).to include("payload", "payload_moved", "inner")
+    expect(facts.required_move_guards).to eq(["payload"])
+    expect(facts.move_guard_writes).to include("payload", "__ctx_12.payload")
+    expect(facts.move_guard_writes).not_to include("fake")
+    expect(facts.result_names).to eq(["payload"])
+    expect(facts.ownership_facts.map(&:name)).to eq(["payload"])
     expect(described_class.fsm_fact_guard_name("__ctx_12")).to eq("")
     expect(described_class.fsm_fact_guard_name("__ctx_12.payload")).to eq("payload")
     expect(described_class.promoted_fsm_field_name("payload_L3_moved", ["payload"]))
       .to eq("payload_moved")
+  end
+
+  it "builds FSM structure from materialized segment facts" do
+    cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+    action = MIR::FsmDestroyCleanup.new(
+      source_kind: :capture,
+      name: "payload",
+      target_zig: "__ctx_33.payload",
+      cleanup_entry: cleanup_entry,
+    )
+    fact = MIR::FsmOwnershipFact.new(
+      name: "payload",
+      target: :result,
+      target_alloc: :heap,
+      move_guarded: true,
+    )
+    spec = fsm_spec(
+      index: 0,
+      body_stmts: ["__ctx_33.ignored = true;"],
+      tail: FsmTransform::Segments::Done.new(nil),
+      facts: FsmTransform::Emit::FsmSegmentFacts.new(
+        ctx_reads: ["payload"],
+        required_move_guards: ["payload"],
+        move_guard_writes: ["payload"],
+        result_names: ["payload"],
+        ownership_facts: [fact],
+      ),
+    )
+
+    structure = described_class.build_fsm_structure(
+      fsm_ctx(id: 33, captured: { "payload" => :stub }),
+      [spec],
+      [action],
+      33,
+    )
+
+    expect(structure.steps).to eq([{ index: 0, reads: ["payload"], cleanups: [] }])
+    expect(structure.captures).to eq([{ name: "payload", cleanup_at: :finalize }])
+    expect(structure.required_move_guards).to eq(["payload"])
+    expect(structure.move_guard_writes).to eq(["payload"])
+    expect(structure.ownership_facts).to eq([fact])
   end
 
   it "accepts zig_text conditions and rejects unresolved condition ASTs" do

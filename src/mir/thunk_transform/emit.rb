@@ -121,10 +121,10 @@ module ThunkTransform
       base_cases = plan.base_cases.map { |bc|
         cond  = render_expr(bc.cond_ast, lowering, context)
         value = render_expr(bc.value_ast, lowering, context)
-        {
+        MIR::ThunkBaseCase.new(
           cond_zig: cond,
           value_zig: value,
-        }
+        )
       }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
@@ -343,7 +343,7 @@ module ThunkTransform
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
-    sig { params(cf: AST::FunctionDef, _mtp: ThunkTransform::RecursiveSplitter::MutualThunkPlan, ret_zig: String, lowering: Object).returns(T::Hash[Symbol, Object]) }
+    sig { params(cf: AST::FunctionDef, _mtp: ThunkTransform::RecursiveSplitter::MutualThunkPlan, ret_zig: String, lowering: Object).returns(MIR::MutualThunkArm) }
     def build_mutual_arm(cf, _mtp, ret_zig, lowering)
       own_plan = mutual_thunk_plan!(cf).own_plan
       context = mutual_frame_context(cf)
@@ -351,10 +351,10 @@ module ThunkTransform
       base_cases = own_plan.base_cases.map { |bc|
         cond = render_expr(bc.cond_ast, lowering, context)
         value = render_expr(bc.value_ast, lowering, context)
-        {
+        MIR::ThunkBaseCase.new(
           cond_zig: cond,
           value_zig: value,
-        }
+        )
       }
 
       target_fn = own_plan.target_fn
@@ -369,12 +369,12 @@ module ThunkTransform
       }
       _ = ret_zig
 
-      {
+      MIR::MutualThunkArm.new(
         variant_name: cf.name,
         base_cases: base_cases,
         target_variant: target_fn,
         target_arg_inits: arg_inits,
-      }
+      )
     end
 
     sig { params(cf: AST::FunctionDef, name: String).returns(AST::FunctionDef) }

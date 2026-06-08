@@ -1435,6 +1435,44 @@ module MIR
   # synchronous frame machine, but the MIR now exposes the frame layout,
   # base cases, recursive step, combine op, and yield policy instead of
   # hiding the entire function body in opaque Zig text.
+  class ThunkBaseCase < T::Struct
+    extend T::Sig
+
+    const :cond_zig, String
+    const :value_zig, String
+
+    sig { params(key: Symbol).returns(String) }
+    def fetch(key)
+      case key
+      when :cond_zig then cond_zig
+      when :value_zig then value_zig
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class MutualThunkArm < T::Struct
+    extend T::Sig
+
+    const :variant_name, String
+    const :base_cases, T::Array[ThunkBaseCase]
+    const :target_variant, String
+    const :target_arg_inits, T::Array[String]
+
+    sig { params(key: Symbol).returns(T.any(String, T::Array[ThunkBaseCase], T::Array[String])) }
+    def fetch(key)
+      case key
+      when :variant_name then variant_name
+      when :base_cases then base_cases
+      when :target_variant then target_variant
+      when :target_arg_inits then target_arg_inits
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
   ThunkTrampoline = Struct.new(
     :fn_name,
     :ret_zig,

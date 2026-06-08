@@ -987,21 +987,21 @@ class MIREmitter
     ZIG
   end
 
-  sig { params(arm: T.untyped).returns(String) }
+  sig { params(arm: MIR::MutualThunkArm).returns(String) }
   def emit_mutual_thunk_arm(arm)
-    base_branches = arm.fetch(:base_cases).map { |bc|
+    base_branches = arm.base_cases.map { |bc|
       <<~ZIG.chomp
-        if (#{bc.fetch(:cond_zig)}) {
-                              return #{bc.fetch(:value_zig)};
+        if (#{bc.cond_zig}) {
+                              return #{bc.value_zig};
                           }
       ZIG
     }.join("\n                      ")
-    target_arg_inits = arm.fetch(:target_arg_inits).join(", ")
+    target_arg_inits = arm.target_arg_inits.join(", ")
 
     <<~ZIG.chomp
-      .#{arm.fetch(:variant_name)} => |f| {
+      .#{arm.variant_name} => |f| {
                       #{base_branches}
-                      current = .{ .#{arm.fetch(:target_variant)} = .{ #{target_arg_inits} } };
+                      current = .{ .#{arm.target_variant} = .{ #{target_arg_inits} } };
                       continue;
                   },
     ZIG

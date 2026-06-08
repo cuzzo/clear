@@ -25,8 +25,6 @@ module FsmTransform
     extend T::Sig
     module_function
 
-    FsmStructureSource = T.type_alias { T.any(MIR::Node, String) }
-    FsmStructureSourceInput = T.type_alias { T.nilable(T.any(FsmStructureSource, T::Array[FsmStructureSource])) }
     PromotableFsmValue = T.type_alias { T.any(MIR::Node, Object) }
     FsmBodyStmt = T.type_alias { T.any(MIR::Node, String) }
     FsmTail = T.type_alias do
@@ -52,6 +50,21 @@ module FsmTransform
         Segments::LockSuspend,
         FsmTail,
       )
+    end
+
+    class FsmSegmentFacts < T::Struct
+      extend T::Sig
+
+      const :ctx_reads, T::Array[String], default: []
+      const :required_move_guards, T::Array[String], default: []
+      const :move_guard_writes, T::Array[String], default: []
+      const :result_names, T::Array[String], default: []
+      const :ownership_facts, T::Array[MIR::FsmOwnershipFact], default: []
+
+      sig { returns(FsmSegmentFacts) }
+      def self.empty
+        FsmSegmentFacts.new
+      end
     end
 
     class FsmEmitContext < T::Struct
@@ -159,6 +172,8 @@ module FsmTransform
     end
 
     class FsmSegmentSpec < T::Struct
+      extend T::Sig
+
       const :index, Integer
       const :prologue_stmts, T::Array[FsmBodyStmt], default: []
       const :body_stmts, T::Array[FsmBodyStmt], default: []
@@ -172,6 +187,27 @@ module FsmTransform
       const :pre_body_skip, T.nilable(MIR::FsmTailCondSkip), default: nil
       const :pre_body_zig, T.nilable(String), default: nil
       const :extra_prologue_zig, T.nilable(String), default: nil
+      const :facts, FsmSegmentFacts, default: FsmSegmentFacts.empty
+
+      sig { params(facts: FsmSegmentFacts).returns(FsmSegmentSpec) }
+      def with_facts(facts)
+        FsmSegmentSpec.new(
+          index: index,
+          prologue_stmts: prologue_stmts,
+          body_stmts: body_stmts,
+          structure_stmts: structure_stmts,
+          tail: tail,
+          descriptor: descriptor,
+          fsm_result_transfer_facts: fsm_result_transfer_facts,
+          fn_name: fn_name,
+          rt_suppress: rt_suppress,
+          err_cleanups: err_cleanups,
+          pre_body_skip: pre_body_skip,
+          pre_body_zig: pre_body_zig,
+          extra_prologue_zig: extra_prologue_zig,
+          facts: facts,
+        )
+      end
     end
 
     class ExpandedLockSegment < T::Struct
@@ -258,6 +294,10 @@ module FsmTransform
 
       id = ctx.id
       bg_rt = ctx.bg_rt
+      destroy_actions = ordered_fsm_destroy_actions(ctx)
+      segment_specs = materialize_fsm_segment_facts(
+        segment_specs, id, fsm_destroy_cleanup_names(destroy_actions)
+      )
 
       # 1. Compose member fn body_stmts: segment body + setup at end
       #    + bind from the suspend whose next_index points HERE at
@@ -349,7 +389,6 @@ module FsmTransform
       # Assemble structural destroy actions. Locks run first (so other
       # tasks can acquire) in reverse acquisition order, then captures,
       # then lifted body / owned-result cleanups.
-      destroy_actions = ordered_fsm_destroy_actions(ctx)
       ctx_struct = MIR::FsmGenericCtxStruct.new(
         ctx.ctx_type, ctx.promise_zig, ctx.capture_fields,
         extra_field_decls, promoted_field_decls,
@@ -372,39 +411,19 @@ module FsmTransform
         next nil unless cleanup_names.include?(name)
         { name: name, cleanup_at: :finalize }
       end
-      structure_sources = fsm_structure_sources(segment_specs)
       steps = segment_specs.map do |spec|
-        step_sources = fsm_structure_sources_for_spec(spec)
         {
           index: spec.index,
-          reads: collect_ctx_field_reads(step_sources, id),
+          reads: spec.facts.ctx_reads,
           cleanups: [],
         }
       end
       structure = MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
-      structure.required_move_guards =
-        collect_required_move_guards(structure_sources, id, cleanup_names)
-      structure.move_guard_writes = collect_move_guard_writes(structure_sources, id)
-      result_names = collect_result_names(structure_sources, id)
-      result_facts = result_names.uniq.map do |name|
-        MIR::FsmOwnershipFact.new(name: name, target: :result, target_alloc: :heap, move_guarded: true)
-      end
-      structured_facts = segment_specs.flat_map do |spec|
-        spec.fsm_result_transfer_facts.filter_map do |fact|
-          guard_name = fsm_fact_guard_name(fact.name)
-          next nil if guard_name.empty?
-
-          MIR::FsmOwnershipFact.new(
-            name: guard_name,
-            target: :result,
-            target_alloc: fact.target_alloc,
-            move_guarded: fact.move_guarded,
-          )
-        end
-      end
-      structure.ownership_facts = (structured_facts + result_facts).uniq do |fact|
-        [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
-      end
+      structure.required_move_guards = segment_specs.flat_map { |spec| spec.facts.required_move_guards }.uniq
+      structure.move_guard_writes = segment_specs.flat_map { |spec| spec.facts.move_guard_writes }.uniq
+      structure.ownership_facts = unique_fsm_ownership_facts(
+        segment_specs.flat_map { |spec| spec.facts.ownership_facts }
+      )
       structure.destroy_actions = destroy_actions
       structure
     end
@@ -438,9 +457,71 @@ module FsmTransform
       end
     end
 
-    sig { params(sources: T::Array[FsmStructureSource], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
-    def collect_required_move_guards(sources, id, cleanup_names)
-      collect_fsm_nodes(sources).filter_map do |node|
+    sig { params(segment_specs: T::Array[FsmSegmentSpec], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[FsmSegmentSpec]) }
+    def materialize_fsm_segment_facts(segment_specs, id, cleanup_names)
+      segment_specs.map do |spec|
+        spec.with_facts(build_fsm_segment_facts(spec, id, cleanup_names))
+      end
+    end
+
+    sig { params(spec: FsmSegmentSpec, id: Integer, cleanup_names: T::Array[String]).returns(FsmSegmentFacts) }
+    def build_fsm_segment_facts(spec, id, cleanup_names)
+      nodes = collect_fsm_nodes(fsm_segment_fact_roots(spec))
+      result_names = collect_result_names(nodes, id)
+      result_facts = result_names.map do |name|
+        MIR::FsmOwnershipFact.new(name: name, target: :result, target_alloc: :heap, move_guarded: true)
+      end
+      structured_facts = spec.fsm_result_transfer_facts.filter_map do |fact|
+        guard_name = fsm_fact_guard_name(fact.name)
+        next nil if guard_name.empty?
+
+        MIR::FsmOwnershipFact.new(
+          name: guard_name,
+          target: :result,
+          target_alloc: fact.target_alloc,
+          move_guarded: fact.move_guarded,
+        )
+      end
+
+      FsmSegmentFacts.new(
+        ctx_reads: collect_ctx_field_reads(nodes, id),
+        required_move_guards: collect_required_move_guards(nodes, id, cleanup_names),
+        move_guard_writes: collect_move_guard_writes(nodes, id),
+        result_names: result_names,
+        ownership_facts: unique_fsm_ownership_facts(structured_facts + result_facts),
+      )
+    end
+
+    sig { params(spec: FsmSegmentSpec).returns(T::Array[MIR::Node]) }
+    def fsm_segment_fact_roots(spec)
+      roots = T.let([], T::Array[MIR::Node])
+      roots.concat(fsm_body_mir_nodes(spec.prologue_stmts))
+      roots.concat(spec.structure_stmts.empty? ? fsm_body_mir_nodes(spec.body_stmts) : spec.structure_stmts)
+      descriptor = spec.descriptor
+      if descriptor
+        roots.concat(descriptor.setup_stmts)
+        roots.concat(descriptor.bind_stmts)
+      end
+      roots
+    end
+
+    sig { params(stmts: T::Array[FsmBodyStmt]).returns(T::Array[MIR::Node]) }
+    def fsm_body_mir_nodes(stmts)
+      stmts.filter_map do |stmt|
+        stmt if stmt.is_a?(MIR::Emittable)
+      end
+    end
+
+    sig { params(facts: T::Array[MIR::FsmOwnershipFact]).returns(T::Array[MIR::FsmOwnershipFact]) }
+    def unique_fsm_ownership_facts(facts)
+      facts.uniq do |fact|
+        [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
+      end
+    end
+
+    sig { params(nodes: T::Array[MIR::Node], id: Integer, cleanup_names: T::Array[String]).returns(T::Array[String]) }
+    def collect_required_move_guards(nodes, id, cleanup_names)
+      nodes.filter_map do |node|
         next nil unless node.is_a?(MIR::TransferMark)
         next nil unless node.target == :owned_sink || node.target == :return
         name = normalized_ctx_field_name(node.name.to_s, id)
@@ -448,38 +529,9 @@ module FsmTransform
       end.uniq
     end
 
-    sig { params(segment_specs: T::Array[FsmSegmentSpec]).returns(T::Array[FsmStructureSource]) }
-    def fsm_structure_sources(segment_specs)
-      segment_specs.flat_map { |spec| fsm_structure_sources_for_spec(spec) }
-    end
-
-    sig { params(spec: FsmSegmentSpec).returns(T::Array[FsmStructureSource]) }
-    def fsm_structure_sources_for_spec(spec)
-      out = T.let([], T::Array[FsmStructureSource])
-      out.concat(fsm_structure_source_array(spec.prologue_stmts))
-      structure_stmts = spec.structure_stmts
-      body_sources = structure_stmts.empty? ? spec.body_stmts : structure_stmts
-      out.concat(fsm_structure_source_array(body_sources))
-      descriptor = spec.descriptor
-      if descriptor
-        out.concat(fsm_structure_source_array(descriptor.setup_stmts))
-        out.concat(fsm_structure_source_array(descriptor.bind_stmts))
-      end
-      out
-    end
-
-    sig { params(value: FsmStructureSourceInput).returns(T::Array[FsmStructureSource]) }
-    def fsm_structure_source_array(value)
-      Kernel.Array(value).filter_map do |item|
-        next item if item.is_a?(String)
-        next item if item.is_a?(MIR::Emittable)
-        nil
-      end
-    end
-
-    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
-    def collect_move_guard_writes(sources, id)
-      collect_fsm_nodes(sources).filter_map do |node|
+    sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
+    def collect_move_guard_writes(nodes, id)
+      nodes.filter_map do |node|
         if node.is_a?(MIR::MoveMark)
           name = node.name.to_s
           normalized = normalized_ctx_field_name(name, id)
@@ -499,9 +551,9 @@ module FsmTransform
       name.delete_prefix("__ctx_#{id}.")
     end
 
-    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
-    def collect_result_names(sources, id)
-      collect_fsm_nodes(sources).filter_map do |node|
+    sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
+    def collect_result_names(nodes, id)
+      nodes.filter_map do |node|
         next nil unless node.is_a?(MIR::Set)
         next nil unless ctx_inner_result_target?(node.target, id)
         result_source_name(node.value, id)
@@ -538,16 +590,15 @@ module FsmTransform
       value.each_char.all? { |char| char >= "0" && char <= "9" }
     end
 
-    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
-    def collect_ctx_field_reads(sources, id)
-      collect_fsm_nodes(sources).filter_map do |node|
+    sig { params(nodes: T::Array[MIR::Node], id: Integer).returns(T::Array[String]) }
+    def collect_ctx_field_reads(nodes, id)
+      nodes.filter_map do |node|
         ctx_field_name(node, id)
       end.uniq
     end
 
-    sig { params(sources: T::Array[FsmStructureSource]).returns(T::Array[MIR::Node]) }
-    def collect_fsm_nodes(sources)
-      roots = T.let(sources.filter_map { |source| source if source.is_a?(MIR::Emittable) }, T::Array[MIR::Node])
+    sig { params(roots: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+    def collect_fsm_nodes(roots)
       out = T.let([], T::Array[MIR::Node])
       MIR.each_node(roots) { |node| out << node }
       out
@@ -1257,11 +1308,13 @@ module FsmTransform
         index:          spec.index,
         prologue_stmts: spec.prologue_stmts,
         body_stmts:     spec.body_stmts,
+        structure_stmts: spec.structure_stmts,
         tail:           MIR::FsmTailLockTry.new(
                            meta[:try_method], meta[:lock_field_ref],
                            try_success_idx, woken_idx, retry_idx,
                          ),
         descriptor:     nil,
+        fsm_result_transfer_facts: spec.fsm_result_transfer_facts,
         fn_name:        has_step_work ? spec.fn_name : nil,
         rt_suppress:    spec.rt_suppress,
       )

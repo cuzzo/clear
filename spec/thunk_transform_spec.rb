@@ -207,7 +207,11 @@ RSpec.describe "ThunkTransform emit coverage" do
 
     expect(node).to be_a(MIR::ThunkTrampoline)
     expect(node.fn_name).to eq("factorial")
+    expect(node.base_cases.first).to be_a(MIR::ThunkBaseCase)
     expect(node.base_cases.first.fetch(:value_zig)).to eq("1")
+    expect {
+      node.base_cases.first.fetch(:missing)
+    }.to raise_error(KeyError, /missing/)
     expect(node.combine_lhs_zig).to eq("current.n")
     expect(node.op_zig).to eq("*")
     zig = MIREmitter.new.emit(node)
@@ -323,7 +327,12 @@ RSpec.describe "ThunkTransform emit coverage" do
     node = ThunkTransform::Emit.build_mutual_trampoline(even, FakeThunkLowering.new)
     expect(node).to be_a(MIR::MutualThunkTrampoline)
     expect(node.variants.map { |v| v.fetch(:name) }).to eq(%w[even odd])
+    expect(node.arms).to all(be_a(MIR::MutualThunkArm))
+    expect(node.arms.first.fetch(:variant_name)).to eq("even")
     expect(node.arms.map { |a| a.fetch(:target_variant) }).to eq(%w[odd even])
+    expect {
+      node.arms.first.fetch(:missing)
+    }.to raise_error(KeyError, /missing/)
 
     zig = MIREmitter.new.emit(node)
 
