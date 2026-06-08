@@ -90,7 +90,10 @@ RSpec.describe "annotator completion phases" do
     with_node = AST::WithBlock.new(tok("WITH"), [], [], [])
     var_node = AST::Identifier.new(tok("cell"), "cell")
     var_node.full_type = Type.new(:Int64)
-    annotator.record_deferred_with_validation!(with_node, var_node, :EXCLUSIVE)
+    annotator.record_deferred_with_validation!(
+      with_node,
+      capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: var_node))
+    )
 
     expect {
       annotator.mark_annotation_complete!(program)
@@ -104,7 +107,10 @@ RSpec.describe "annotator completion phases" do
     var_node.full_type = Type.new(:Int64)
     var_node.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :stack)
     var_node.symbol.is_param = true
-    annotator.record_deferred_with_validation!(with_node, var_node, :ATOMIC)
+    annotator.record_deferred_with_validation!(
+      with_node,
+      capability_transition(AST::Capability.new(capability: :ATOMIC, var_node: var_node))
+    )
 
     expect {
       annotator.run_deferred_validations!

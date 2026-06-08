@@ -55,8 +55,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # can resolve the alias identifier. Provide deterministic
       # stubs for the spec.
       def fsm_cap_metadata(cap, _with_node, ctx_id, _captured)
-        var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : "x"
-        alias_name = cap[:alias] || var_name
+        var_name = cap.var_node.respond_to?(:name) ? cap.var_node.name : "x"
+        alias_name = cap.alias_name
         ref = "__ctx_#{ctx_id}.#{var_name}"
         {
           cap:            cap,
@@ -385,6 +385,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     it "produces a LockSuspend segment for a single-cap EXCLUSIVE WITH" do
       cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       with_node = AST::WithBlock.new(nil, [cap], [])
+      attach_capability_plan!(with_node)
       segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
       segs = segments_for(segment_list)
@@ -401,6 +402,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       cap1 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("a"))
       cap2 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("b"))
       with_node = AST::WithBlock.new(nil, [cap1, cap2], [])
+      attach_capability_plan!(with_node)
+      cap_facts = CapabilityPlan.require_for(with_node).locks
       segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
       segs = segments_for(segment_list)
@@ -410,19 +413,20 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       expect(lock_segs.length).to eq(2)
       # First cap chains to the second; second's post_acquire goes
       # to the CS body entry (not another cap).
-      expect(lock_segs[0].tail.cap).to eq(cap1)
+      expect(lock_segs[0].tail.cap).to eq(cap_facts[0])
       expect(lock_segs[0].tail.post_acquire_idx).to eq(lock_segs[1].index)
       expect(lock_segs[0].tail.prior_caps).to eq([])
-      expect(lock_segs[1].tail.cap).to eq(cap2)
+      expect(lock_segs[1].tail.cap).to eq(cap_facts[1])
       expect(lock_segs[1].tail.post_acquire_idx).to be_a(Integer)
       expect(lock_segs[1].tail.post_acquire_idx).not_to eq(lock_segs[0].index)
-      expect(lock_segs[1].tail.prior_caps).to eq([cap1])
+      expect(lock_segs[1].tail.prior_caps).to eq([cap_facts[0]])
     end
 
     it "rejects multi-cap WITH where any cap is non-lock-suspending" do
       cap1 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("a"))
       cap2 = AST::Capability.new(capability: :infer, var_node: ident("b"))
       with_node = AST::WithBlock.new(nil, [cap1, cap2], [])
+      attach_capability_plan!(with_node)
       expect(FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)).to be_nil
     end
@@ -431,6 +435,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       next_expr = AST::NextExpr.new(nil, ident("p"))
       with_node = AST::WithBlock.new(nil, [cap], [next_expr])
+      attach_capability_plan!(with_node)
       segment_list = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
       segs = segments_for(segment_list)

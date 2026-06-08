@@ -2,25 +2,24 @@
 require "sorbet-runtime"
 
 require_relative "../../ast/ast"
+require_relative "../../semantic/capability_plan"
 
 module Annotator
   module Phases
     class DeferredWithValidation < T::Struct
       const :node, AST::WithBlock
-      const :var_node, AST::Locatable
-      const :capability, Symbol
+      const :fact, CapabilityPlan::CapabilityTransition
     end
 
     module DeferredValidation
       extend T::Sig
 
-      sig { params(node: AST::WithBlock, var_node: AST::Locatable, capability: Symbol).void }
-      def record_deferred_with_validation!(node, var_node, capability)
+      sig { params(node: AST::WithBlock, fact: CapabilityPlan::CapabilityTransition).void }
+      def record_deferred_with_validation!(node, fact)
         T.bind(self, SemanticAnnotator)
         deferred_with_validations << DeferredWithValidation.new(
           node: node,
-          var_node: var_node,
-          capability: capability
+          fact: fact
         )
       end
 
@@ -39,22 +38,22 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         deferred_with_validations.each do |d|
-          var_node = d.var_node
+          fact = d.fact
+          var_node = fact.var_node
           syn = var_node.symbol&.sync
-          case d.capability
+          case fact.capability
           when :EXCLUSIVE
             next if syn
             storage = var_node.symbol&.storage
             error!(d.node, :WITH_EXCLUSIVE_NEEDS_LOCK_GOT, got: storage || 'unknown')
           when :write_locked_read
             next if syn == :write_locked
-            error!(d.node, :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: cap_var_label(var_node))
+            error!(d.node, :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: fact.target_label)
           when :ATOMIC
             next if syn == :atomic
-            name = cap_var_label(var_node)
             storage = var_node.symbol&.storage
             actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
-            error!(d.node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: name, actual: actual)
+            error!(d.node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: fact.target_label, actual: actual)
           end
         end
         deferred_with_validations.clear

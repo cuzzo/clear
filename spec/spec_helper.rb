@@ -100,6 +100,66 @@ if defined?(ParallelRSpec) && File.basename($PROGRAM_NAME) == "prspec"
 end
 
 module MirPipelineSpecHelper
+  def capability_transition(cap)
+    require_relative "../src/semantic/capability_plan"
+
+    source = if cap.is_a?(AST::Capability)
+      cap
+    else
+      AST::Capability.new(**cap)
+    end
+    request = CapabilityPlan::CapabilityRequest.from_ast(source)
+    var_node = request.var_node
+    var_name = CapabilityPlan.var_name_for(var_node)
+    resolved_type = source.resolved_type
+    if resolved_type.untyped? && var_node.respond_to?(:full_type)
+      begin
+        resolved_type = var_node.full_type!(context: "spec capability transition")
+      rescue RuntimeError
+        resolved_type = Type.new(:Untyped)
+      end
+    end
+    source_entry = if var_node.respond_to?(:symbol)
+      var_node.symbol
+    end
+    old_scope = T.cast(source[:old_scope], T.nilable(Scope))
+    source_type = source_entry ? Type.new(source_entry.type) : Type.new(resolved_type)
+    target_label = if var_node.is_a?(AST::GetField)
+      var_node.field.to_s
+    elsif var_node.respond_to?(:name)
+      var_node.name
+    else
+      var_name
+    end
+    target = CapabilityPlan::CapabilityTargetFact.new(
+      var_node: var_node,
+      var_name: var_name,
+      target_label: target_label,
+      field_target: var_node.is_a?(AST::GetField),
+      index_target: var_node.is_a?(AST::GetIndex),
+      resolved_type: Type.new(resolved_type),
+      old_scope: old_scope,
+      source_entry: source_entry,
+      source_type: source_type,
+      sync: source_entry&.sync || Type.new(resolved_type).sync,
+      storage: source_entry&.storage || Type.new(resolved_type).ownership_storage,
+      layout: source_entry&.layout || Type.new(resolved_type).layout,
+      live_symbol_refreshed: false,
+    )
+    CapabilityPlan.transition_from(request, target, nil)
+  end
+
+  def attach_capability_plan!(with_node)
+    require_relative "../src/semantic/capability_plan"
+
+    plan = CapabilityPlan::WithCapabilityPlan.new
+    with_node.capabilities.each do |cap|
+      plan.add(capability_transition(cap))
+    end
+    with_node.capability_plan = plan
+    with_node
+  end
+
   def compile_mir_frontend(src, source_dir: Dir.pwd)
     require_relative "../src/backends/compiler_frontend"
     require_relative "../src/backends/importer"

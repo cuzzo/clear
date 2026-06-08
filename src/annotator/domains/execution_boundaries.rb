@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require_relative "../../semantic/capability_plan"
+
 module Annotator
   module Domains
     module ExecutionBoundaries
@@ -11,49 +13,14 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         @with_block_depth = (@with_block_depth || 0) + 1
-
-        # Reject WITH MATCH shapes that would silently miscompile.
-        #
-        # `WITH c AS MUTABLE va MATCH ... WHEN VERSIONED -> { va.field = X }`
-        # writes through the read-snapshot Guard — the write goes into a
-        # frozen pointer that's about to be replaced and never commits. The
-        # LOCKED arm works (Guard.get() returns *T into the live cell), so
-        # the bug only fires for the VERSIONED arm at runtime. Reject up
-        # front and direct the user to `WITH SNAPSHOT cell AS MUTABLE va
-        # { ... } ON MvccConflict ...` for transactional mutation.
-        #
-        # SNAPSHOT MATCH bypasses this rejection because each arm dispatches to
-        # `Versioned.update`
-        # (VERSIONED) or `AtomicPtr.update` (ATOMIC), which DO commit
-        # transactionally. The legacy guard only applied to generic
-        # WITH MATCH (no SNAPSHOT prefix), where the VERSIONED arm
-        # would write through a read-snapshot Guard.
-        #
-        # Multi-cell WITH MATCH (`WITH c1 AS a1, c2 AS a2 MATCH`) is
-        # parser-allowed but lower_with_match_block emits prelude for
-        # `node.capabilities.first` only — secondary aliases are undefined
-        # in arm bodies. Reject until codegen is extended.
-        if node.arms && node.snapshot_mode.nil?
-          has_versioned_arm = node.arms.any? { |arm| arm[:family] == :VERSIONED }
-          mut_cap = node.capabilities.find { |c| c[:alias_mutable] }
-          if has_versioned_arm && mut_cap
-            error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE,
-              name: (mut_cap[:var_node].respond_to?(:name) ? mut_cap[:var_node].name : 'cell'))
-          end
-          if node.capabilities.length > 1
-            names = node.capabilities.map { |c|
-              c[:var_node].respond_to?(:name) ? c[:var_node].name : "<expr>"
-            }.join(", ")
-            error!(node, :WITH_MATCH_MULTI_CELL, names: names)
-          end
-        end
-
         capability_expansion = CapabilityHelper::WithCapabilityExpansion.new
         node.capabilities.each do |cap|
           acquire_capability!(node, cap, capability_expansion)
         end
-        expanded_capabilities = capability_expansion.all
-        lock_capabilities = capability_expansion.locks
+        node.capability_plan = capability_expansion
+        expanded_capabilities = CapabilityPlan.require_for(node).all
+        lock_capabilities = CapabilityPlan.require_for(node).locks
+        validate_with_match_source_shape!(node, capability_expansion)
 
         check_nested_lock_reacquire!(node, lock_capabilities)
 
@@ -185,6 +152,29 @@ module Annotator
         stamp_type!(node, :Void)
       end
 
+      # Reject WITH MATCH shapes that would silently miscompile.
+      #
+      # `WITH c AS MUTABLE va MATCH ... WHEN VERSIONED -> { va.field = X }`
+      # writes through a read snapshot instead of committing the mutation. The
+      # plan is already built here, so the check consumes typed capability facts
+      # instead of maintaining a second raw AST request path.
+      sig { params(node: AST::WithBlock, capability_plan: CapabilityPlan::WithCapabilityPlan).void }
+      def validate_with_match_source_shape!(node, capability_plan)
+        T.bind(self, SemanticAnnotator)
+
+        return unless node.arms && node.snapshot_mode.nil?
+
+        mutable_cap = capability_plan.all.find(&:alias_mutable)
+        if mutable_cap && node.arms.any? { |arm| arm[:family] == :VERSIONED }
+          error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE, name: mutable_cap.var_name)
+        end
+
+        return unless capability_plan.all.length > 1
+
+        names = capability_plan.all.map(&:var_name).join(", ")
+        error!(node, :WITH_MATCH_MULTI_CELL, names: names)
+      end
+
       sig { params(node: AST::WithBlock).void }
       def mark_with_runtime_requirements!(node)
         T.bind(self, SemanticAnnotator)
@@ -223,11 +213,13 @@ module Annotator
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
         T.bind(self, SemanticAnnotator)
 
-        return unless node.polymorphic && node.capabilities.length == 1
+        capability_plan = CapabilityPlan.require_for(node)
+        return unless node.polymorphic && capability_plan.all.length == 1
 
-        bound_var = node.capabilities.first[:var_node]
-        bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
-        bound_sym = bound_var.symbol
+        bound_fact = capability_plan.first_transition
+        bound_var = bound_fact.var_node
+        bound_name = bound_fact.var_name
+        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
         return unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
 
         fn_node = function_node_for(fn_ctx.name)
@@ -322,11 +314,13 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         return true if node.universal_poly
-        return false unless node.polymorphic && (node.capabilities || []).length == 1
+        capability_plan = CapabilityPlan.require_for(node)
+        return false unless node.polymorphic && capability_plan.all.length == 1
 
-        bound_var = node.capabilities.first[:var_node]
-        bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
-        bound_sym = bound_var.symbol
+        bound_fact = capability_plan.first_transition
+        bound_var = bound_fact.var_node
+        bound_name = bound_fact.var_name
+        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
         is_param = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
         fn_node = function_node_for(current_fn_ctx&.name)
         has_req = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
@@ -359,10 +353,9 @@ module Annotator
 
         # AtomicPtr and Versioned cells have different conflict surfaces, so
         # choose the handler contract from the participating cell family.
-        snap_caps = node.capabilities || []
-        has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
-          next false unless c[:capability] == :SNAPSHOT
-          sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
+        capability_plan = CapabilityPlan.require_for(node)
+        has_atomic_ptr = is_snapshot_txn && capability_plan.snapshot_transitions.any? { |cap|
+          sym = cap.source_entry
           sym && sym.atomic? && sym.indirect?
         }
 
@@ -393,7 +386,7 @@ module Annotator
         # cannot fail. Accept silently for now (parser already restricts the
         # syntax shape); a future polish pass could note the dead clause.
 
-        has_guard = (node.capabilities || []).any? { |c| c[:guard_expr] }
+        has_guard = !capability_plan.guarded.empty?
         has_fallible = has_guard || is_snapshot_txn || !lock_capabilities.empty?
         unless has_fallible
           error!(node, :ON_RETRY_NEEDS_FALLIBLE_CAP, hint: "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
@@ -474,7 +467,8 @@ module Annotator
       def validate_no_multi_object_atomic!(node)
         T.bind(self, SemanticAnnotator)
 
-        caps = (node.capabilities || []).select { |c| sync_constrained_cap?(c) }
+        capability_plan = CapabilityPlan.require_for(node)
+        caps = capability_plan.sync_constrained
         return if caps.size < 2
 
         arm_admits_atomic = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
@@ -482,34 +476,12 @@ module Annotator
         return unless offender || arm_admits_atomic
 
         var_name = if offender
-          offender[:var_node].respond_to?(:name) ? offender[:var_node].name : "<expr>"
+          offender.var_name
         else
           "this WITH"
         end
 
         error!(node, :WITH_MULTI_OBJECT_ATOMIC, name: var_name)
-      end
-
-      # A capability is sync-constrained only when it synchronizes against a
-      # runtime cell. Pure borrows and observable reads do not count.
-
-      sig { params(cap: AST::Capability).returns(T::Boolean) }
-      def sync_constrained_cap?(cap)
-        T.bind(self, SemanticAnnotator)
-
-        case cap[:capability]
-        when :BORROWED, :RESTRICT, :VIEW, :MATERIALIZED_VIEW, :multiowned, :shared
-          false
-        when :EXCLUSIVE, :write_locked_read, :SNAPSHOT, :ATOMIC
-          true
-        when :infer
-          # Inferred from the var_node's actual sync (if any).
-          sym = cap[:var_node].symbol
-          return false unless sym
-          !sym.sync.nil? || (sym.sync_families && !sym.sync_families.empty?)
-        else
-          false
-        end
       end
 
       # Does this capability's binding potentially run as `:atomic` at runtime?
@@ -519,11 +491,11 @@ module Annotator
       #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
       #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
 
-      sig { params(cap: AST::Capability).returns(T::Boolean) }
+      sig { params(cap: CapabilityPlan::CapabilityTransition).returns(T::Boolean) }
       def cap_admits_atomic?(cap)
         T.bind(self, SemanticAnnotator)
 
-        sym = cap[:var_node].symbol
+        sym = cap.source_entry
         return false unless sym
         return true if sym.atomic?
         fams = sym.sync_families
@@ -594,10 +566,11 @@ module Annotator
 
         possible = Set.new
         possible.merge(SNAPSHOT_POSSIBLE_TYPES) if is_snapshot_txn
-        if (node.capabilities || []).any? { |c| c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read }
+        capability_plan = CapabilityPlan.require_for(node)
+        if capability_plan.locks.any?
           possible.merge(LOCK_POSSIBLE_TYPES)
         end
-        possible << :GuardFail if (node.capabilities || []).any? { |c| c[:guard_expr] }
+        possible << :GuardFail unless capability_plan.guarded.empty?
         possible = possible.to_a
         matched  = []
 

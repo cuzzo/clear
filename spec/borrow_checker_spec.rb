@@ -32,6 +32,7 @@ RSpec.describe BorrowChecker do
       guard_expr: nil,
     )
     with = AST::WithBlock.new(token, [cap], body, nil)
+    attach_capability_plan!(with)
     fn = AST::FunctionDef.new(token, "main", [], [], Type.new(:Void), nil, [with], [], nil, :private, [], false)
     BorrowChecker.check(fn, schema_lookup: ->(_name) { nil })
   end

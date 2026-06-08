@@ -81,45 +81,70 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def with_capability_fact(cap, var_name: nil, type: Type.new(:Counter), sync: :locked, storage: :stack)
-    var_node = cap[:var_node]
-    fact_var_name = var_name || (var_node.respond_to?(:name) ? var_node.name : "cap")
-    old_scope = cap[:old_scope]
-    source_entry = old_scope&.resolve_entry(fact_var_name)
-    capability = cap[:capability]
-    lock_capability = CapabilityHelper::LOCK_CAPABILITIES.include?(capability)
-    restrict_capability = capability == :RESTRICT
-    borrowed_capability = capability == :BORROWED
-    snapshot_capability = capability == :SNAPSHOT
-    field_target = var_node.is_a?(AST::GetField)
-    deferred_lock_param = source_entry&.is_param == true && sync.nil? && lock_capability
-    CapabilityHelper::WithCapabilityFact.new(
-      source: cap,
-      capability: capability,
-      var_node: var_node,
-      var_name: fact_var_name,
-      alias_name: (cap[:alias] || (var_node.respond_to?(:name) ? var_node.name : "cap")).to_s,
-      alias_explicit: !cap[:alias].nil?,
-      alias_mutable: cap[:alias_mutable] == true,
-      resolved_type: type,
-      old_scope: old_scope,
-      source_entry: source_entry,
-      field_target: field_target,
-      sync: sync,
-      storage: storage,
-      layout: nil,
-      source_type: source_entry ? Type.new(source_entry.type) : Type.new(type),
-      lock_identity_value: Type.new(type).base_type,
-      lock_capability: lock_capability,
-      restrict_capability: restrict_capability,
-      borrowed_capability: borrowed_capability,
-      snapshot_capability: snapshot_capability,
-      view_capability: CapabilityHelper::VIEW_CAPABILITIES.include?(capability),
-      deferred_lock_param: deferred_lock_param,
-      sync_alias_unwrapped: (field_target && !sync.nil?) ||
-        (!field_target && (!sync.nil? || deferred_lock_param)),
-      plain_restrict_alias: restrict_capability && !cap[:alias].nil? && sync.nil?,
-      borrowed_qualifier: nil,
+    cap[:resolved_type] = type
+    if cap[:var_node].respond_to?(:symbol) && cap[:var_node].symbol.nil?
+      cap[:var_node].symbol = SymbolEntry.new(reg: nil, type: type, mutable: true, storage: storage, sync: sync)
+    end
+    capability_transition(cap)
+  end
+
+  def transition_for_sync(name, sync: nil, sync_families: nil)
+    ident = AST::Identifier.new(token(:IDENTIFIER, name), name)
+    ident.full_type = Type.new(:Counter)
+    ident.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: sync)
+    ident.symbol.sync_families = sync_families
+    capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: ident))
+  end
+
+  it "covers capability-plan request helpers and atomic admission facts" do
+    inferred_cap = AST::Capability.new(
+      capability: :infer,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "cell"), "cell"),
     )
+    inferred_request = CapabilityPlan::CapabilityRequest.from_ast(inferred_cap)
+
+    expect(inferred_request.inferred?).to be(true)
+    expect(inferred_request.effective_alias_name).to eq("cell")
+
+    view_cap = AST::Capability.new(
+      capability: :VIEW,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "row"), "row"),
+      alias: "view_alias",
+    )
+    view_request = CapabilityPlan::CapabilityRequest.from_ast(view_cap)
+    view_transition = capability_transition(view_cap)
+
+    expect(view_request.effective_alias_name).to eq("view_alias")
+    expect(view_transition.view?).to be(true)
+    expect(transition_for_sync("plain").view?).to be(false)
+
+    missing_symbol = capability_transition(AST::Capability.new(
+      capability: :EXCLUSIVE,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "missing"), "missing"),
+    ))
+
+    expect(missing_symbol.admits_atomic?).to be(false)
+    expect(transition_for_sync("direct_atomic", sync: :atomic).admits_atomic?).to be(true)
+    expect(transition_for_sync("bad_family_shape", sync_families: :ATOMIC).admits_atomic?).to be(false)
+    expect(transition_for_sync("atomic_family", sync_families: Set[:ATOMIC]).admits_atomic?).to be(true)
+    expect(transition_for_sync("snapshotted_family", sync_families: Set[:SNAPSHOTTED]).admits_atomic?).to be(true)
+    expect(transition_for_sync("locked_family", sync_families: Set[:LOCKED]).admits_atomic?).to be(false)
+
+    literal_target = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    literal_field = AST::GetField.new(token(:DOT, "."), literal_target, "fallback")
+    expect(CapabilityPlan.var_name_for(literal_field)).to eq("fallback")
+
+    with_without_plan = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
+    expect {
+      CapabilityPlan.require_for(with_without_plan)
+    }.to raise_error(/without a CapabilityPlan/)
+
+    param = AST::Param.new(name: "cell", type: Type.new(:Counter), mutable: true)
+    param.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap)
+    fn = function_def("refresh_without_plan", params: [param])
+    fn.body = [with_without_plan]
+
+    expect { CapabilityPlan.refresh_function_plans!(fn) }.not_to raise_error
   end
 
   it "annotates default fixed-array literals with their target type" do
@@ -275,8 +300,8 @@ RSpec.describe "annotator branch gap burndown" do
       sync: :atomic,
     )
 
-    expect(ann.send(:sync_constrained_cap?, infer_without_symbol)).to be(false)
-    expect(ann.send(:sync_constrained_cap?, infer_with_sync)).to be(true)
+    expect(capability_transition(infer_without_symbol).sync_constrained?).to be(false)
+    expect(capability_transition(infer_with_sync).sync_constrained?).to be(true)
     expect(ann.send(:field_name_for_msg, AST::GetField.new(token, AST::Identifier.new(token, "x"), nil))).to eq("<field>")
     expect(ann.send(:match_variant_name, AST::MethodCall.new(token, AST::Identifier.new(token, "Result"), "Ok", []))).to eq("Ok")
 
@@ -1397,28 +1422,33 @@ RSpec.describe "annotator branch gap burndown" do
       ident
     end
 
-    cap_ann.send(:validate_capability, with_node, :write_locked_read, mk_var.call("read_param", Type.new(:Counter), is_param: true))
-    cap_ann.send(:validate_capability, with_node, :write_locked_read, mk_var.call("plain_read", Type.new(:Counter)))
+    validate = lambda do |capability, var_node|
+      cap = AST::Capability.new(capability: capability, var_node: var_node)
+      cap_ann.send(:validate_capability_transition!, with_node, capability_transition(cap))
+    end
+
+    validate.call(:write_locked_read, mk_var.call("read_param", Type.new(:Counter), is_param: true))
+    validate.call(:write_locked_read, mk_var.call("plain_read", Type.new(:Counter)))
     view_target = AST::Identifier.new(token, "source")
     view_target.full_type = Type.new(:Row)
     view_field = AST::GetField.new(token, view_target, "count")
     view_field.full_type = Type.new(:Int64)
-    cap_ann.send(:validate_capability, with_node, :VIEW, view_field)
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("atomic_cell", Type.new(:Counter, ownership: :shared, sync: :atomic, layout: :indirect), sync: :atomic, layout: :indirect))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("indirect_locked", Type.new(:Counter, sync: :locked, layout: :indirect), sync: :locked, layout: :indirect))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("locked", Type.new(:Counter, sync: :locked), sync: :locked))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("shared", Type.new(:Counter, ownership: :shared), storage: :shared))
+    validate.call(:VIEW, view_field)
+    validate.call(:SNAPSHOT, mk_var.call("atomic_cell", Type.new(:Counter, ownership: :shared, sync: :atomic, layout: :indirect), sync: :atomic, layout: :indirect))
+    validate.call(:SNAPSHOT, mk_var.call("indirect_locked", Type.new(:Counter, sync: :locked, layout: :indirect), sync: :locked, layout: :indirect))
+    validate.call(:SNAPSHOT, mk_var.call("locked", Type.new(:Counter, sync: :locked), sync: :locked))
+    validate.call(:SNAPSHOT, mk_var.call("shared", Type.new(:Counter, ownership: :shared), storage: :shared))
     plain = AST::Identifier.new(token, "plain")
     plain.full_type = Type.new(:Counter)
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, plain)
-    cap_ann.send(:validate_capability, with_node, :multiowned, mk_var.call("not_multi", Type.new(:Counter), storage: :stack))
-    cap_ann.send(:validate_capability, with_node, :shared, mk_var.call("not_shared", Type.new(:Counter), storage: :stack))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("param_atomic", Type.new(:Counter), is_param: true))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("locked_atomic", Type.new(:Counter, sync: :locked), sync: :locked))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("wrong_atomic", Type.new(:Counter), storage: :shared))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, plain)
-    cap_ann.send(:validate_capability, with_node, :RESTRICT, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))
-    cap_ann.send(:validate_capability, with_node, :UNKNOWN, mk_var.call("unknown", Type.new(:Counter)))
+    validate.call(:SNAPSHOT, plain)
+    validate.call(:multiowned, mk_var.call("not_multi", Type.new(:Counter), storage: :stack))
+    validate.call(:shared, mk_var.call("not_shared", Type.new(:Counter), storage: :stack))
+    validate.call(:ATOMIC, mk_var.call("param_atomic", Type.new(:Counter), is_param: true))
+    validate.call(:ATOMIC, mk_var.call("locked_atomic", Type.new(:Counter, sync: :locked), sync: :locked))
+    validate.call(:ATOMIC, mk_var.call("wrong_atomic", Type.new(:Counter), storage: :shared))
+    validate.call(:ATOMIC, plain)
+    validate.call(:RESTRICT, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))
+    validate.call(:UNKNOWN, mk_var.call("unknown", Type.new(:Counter)))
 
     guard_expr = AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)
     guard_expr.full_type = Type.new(:Bool)
@@ -1431,6 +1461,7 @@ RSpec.describe "annotator branch gap burndown" do
       )
     ], [])
     guarded.snapshot_mode = :transaction
+    attach_capability_plan!(guarded)
     cap_ann.define_singleton_method(:visit) { |_node| nil }
     cap_ann.send(:validate_and_visit_with_guards!, guarded)
 
@@ -2373,6 +2404,7 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock"))
     ], [])
+    attach_capability_plan!(node)
     clause = AST::ErrorClause.new(
       token: token(:ON, "ON"),
       retries: 1,
@@ -2503,6 +2535,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:synthesize_clause_from_policy) { |_name| nil }
     node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     node.snapshot_mode = :transaction
+    attach_capability_plan!(node)
 
     ann.send(:validate_lock_error_clause!, node, [])
 
@@ -2515,13 +2548,15 @@ RSpec.describe "annotator branch gap burndown" do
     second = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "b"))
     node = AST::WithBlock.new(token(:WITH, "WITH"), [first, second], [])
     node.arms = [{ family: :ATOMIC, body: [], lock_error_clauses: [] }]
+    attach_capability_plan!(node)
 
     ann.send(:validate_no_multi_object_atomic!, node)
 
     error = direct_errors(ann).find { |err| err[1] == :WITH_MULTI_OBJECT_ATOMIC }
     expect(error).not_to be_nil
     expect(error[3][:name]).to eq("this WITH")
-    expect(ann.send(:sync_constrained_cap?, AST::Capability.new(capability: :unknown, var_node: AST::Identifier.new(token, "x")))).to be(false)
+    unknown_cap = AST::Capability.new(capability: :unknown, var_node: AST::Identifier.new(token, "x"))
+    expect(capability_transition(unknown_cap).sync_constrained?).to be(false)
   end
 
   it "strips BG error-union result types and rejects arena parallel blocks" do
@@ -2656,6 +2691,7 @@ RSpec.describe "annotator branch gap burndown" do
     self_loop_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "looped"))
     ], [])
+    attach_capability_plan!(self_loop_node)
     self_loop_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
       retries: nil,
@@ -2685,6 +2721,7 @@ RSpec.describe "annotator branch gap burndown" do
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock")),
       AST::Capability.new(capability: :RESTRICT, var_node: AST::Identifier.new(token, "guarded"), guard_expr: AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)),
     ], [])
+    attach_capability_plan!(lock_node)
     lock_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
       retries: nil,
@@ -2709,6 +2746,7 @@ RSpec.describe "annotator branch gap burndown" do
     atomic_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: atomic_var)
     ], [])
+    attach_capability_plan!(atomic_node)
     atomic_node.snapshot_mode = :transaction
     atomic_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
@@ -2727,6 +2765,7 @@ RSpec.describe "annotator branch gap burndown" do
     versioned_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: AST::Identifier.new(token, "versioned"))
     ], [])
+    attach_capability_plan!(versioned_node)
     versioned_node.snapshot_mode = :transaction
     versioned_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
@@ -2944,14 +2983,13 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers capability variable label shapes directly" do
     ann = quiet_annotator
-    root = AST::Identifier.new(token, "root")
-    field = AST::GetField.new(token, root, "field")
-    index = AST::GetIndex.new(token, root, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack))
-    ann.define_singleton_method(:cap_var_name) { |node| "index:#{node.target.name}" }
+	    root = AST::Identifier.new(token, "root")
+	    field = AST::GetField.new(token, root, "field")
+	    index = AST::GetIndex.new(token, root, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack))
 
-    expect(ann.send(:cap_var_label, root)).to eq("root")
-    expect(ann.send(:cap_var_label, field)).to eq("field")
-    expect(ann.send(:cap_var_label, index)).to eq("index:root")
+	    expect(ann.send(:cap_var_label, root)).to eq("root")
+	    expect(ann.send(:cap_var_label, field)).to eq("field")
+	    expect(ann.send(:cap_var_label, index)).to eq("root")
     expect(ann.send(:cap_var_label, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))).to eq("__unknown")
   end
 
@@ -3150,6 +3188,7 @@ RSpec.describe "annotator branch gap burndown" do
     cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token(:IDENTIFIER, "c"), "c"))
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [])
     with_node.arms = []
+    attach_capability_plan!(with_node)
     fn = function_def("needs_requires", params: [param])
     fn.body = [with_node]
 
@@ -3172,6 +3211,7 @@ RSpec.describe "annotator branch gap burndown" do
     warnings = []
     poly_node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [])
     poly_node.polymorphic = true
+    attach_capability_plan!(poly_node)
     WithMatchCheck.warn_polymorphic_unhandled_errors!(
       poly_node,
       Set["c"],
@@ -3393,8 +3433,12 @@ RSpec.describe "annotator branch gap burndown" do
     read_lock = AST::Identifier.new(token(:IDENTIFIER, "reader"), "reader")
     read_lock.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :atomic)
 
-    ann.send(:record_deferred_with_validation!, with_node, unknown, :EXCLUSIVE)
-    ann.send(:record_deferred_with_validation!, with_node, read_lock, :write_locked_read)
+    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+      AST::Capability.new(capability: :EXCLUSIVE, var_node: unknown)
+    ))
+    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+      AST::Capability.new(capability: :write_locked_read, var_node: read_lock)
+    ))
     ann.send(:flush_deferred_with_validations!)
 
     codes = direct_errors(ann).map { |e| e[1] }
@@ -3627,6 +3671,7 @@ RSpec.describe "annotator branch gap burndown" do
       []
     )
     with_node.polymorphic = true
+    attach_capability_plan!(with_node)
     fn = function_def("owner")
     ann.semantic_function_nodes.replace({ "owner" => fn })
     ctx = FunctionContext.new(name: "owner", return_type: Type.new(:Void))

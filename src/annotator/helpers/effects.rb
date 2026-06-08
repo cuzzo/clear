@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require 'set'
+require_relative "../../semantic/capability_plan"
 
 # EffectTracker — Silent effect tracking for CLEAR functions.
 #
@@ -879,9 +880,7 @@ module EffectTracker
   sig { params(node: AST::WithBlock).returns(T::Boolean) }
   def with_block_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.capabilities.any? do |c|
-      c.capability == :EXCLUSIVE || c.capability == :write_locked_read
-    end
+    CapabilityPlan.require_for(node).locks.any?
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

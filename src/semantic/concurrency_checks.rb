@@ -23,6 +23,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
+require_relative "capability_plan"
 
 module ConcurrencyChecks
   extend T::Sig
@@ -91,8 +92,6 @@ module ConcurrencyChecks
   # variants (BORROWED, RESTRICT) don't hold a lock; nesting them is
   # safe. Same-binding nesting is permitted (still useful for re-entry
   # checks; reentrant detection covers the dangerous case).
-  LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
-
   sig { params(fn: AST::FunctionDef, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
   def check_naked_nested_with!(fn, error_handler, lock_ranks = {})
     walk_with_blocks(fn.body) do |outer, outer_scope|
@@ -132,10 +131,9 @@ module ConcurrencyChecks
   sig { params(with_block: T.untyped, lock_ranks: LockRanks).returns(T::Boolean) }
   def any_lock_rank?(with_block, lock_ranks)
     return false if lock_ranks.empty?
-    (with_block.capabilities || []).any? do |cap|
-      ti = cap[:resolved_type]
-      next false unless ti && ti.respond_to?(:base_type)
-      lock_ranks.key?(ti.base_type)
+    CapabilityPlan.require_for(with_block).locks.any? do |cap|
+      identity = cap.lock_identity
+      identity && lock_ranks.key?(identity)
     end
   end
 
@@ -144,10 +142,8 @@ module ConcurrencyChecks
   sig { params(with_block: T.untyped).returns(T::Set[String]) }
   def lock_holding_names(with_block)
     out = Set.new
-    (with_block.capabilities || []).each do |cap|
-      next unless LOCK_HOLDING_CAPABILITIES.include?(cap[:capability])
-      n = cap_var_name(cap[:var_node])
-      out << n if n
+    CapabilityPlan.require_for(with_block).locks.each do |cap|
+      out << cap.var_name
     end
     out
   end
@@ -240,15 +236,11 @@ module ConcurrencyChecks
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p.name.to_s }.to_set
     out = Set.new
-    (with_block.capabilities || []).each do |cap|
-      n = cap_var_name(cap[:var_node])
-      out << n if n && param_names.include?(n)
+    CapabilityPlan.require_for(with_block).locks.each do |cap|
+      n = cap.var_name
+      out << n if param_names.include?(n)
     end
     out
   end
 
-  sig { params(var_node: T.untyped).returns(T.untyped) }
-  def cap_var_name(var_node)
-    var_node.is_a?(AST::Identifier) ? var_node.name : nil
-  end
 end

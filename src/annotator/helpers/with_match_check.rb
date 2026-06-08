@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../semantic/capability_plan"
 # Validation of REQUIRES + WITH MATCH at the function level and call-site
 # family check.
 #
@@ -167,8 +168,8 @@ module WithMatchCheck
   sig { params(with_node: AST::WithBlock, param_names: T::Set[String]).returns(T::Set[String]) }
   def self.collect_bound_param_names(with_node, param_names)
     out = Set.new
-    (with_node.capabilities || []).each do |cap|
-      vn = cap[:var_node]
+    CapabilityPlan.require_for(with_node).all.each do |cap|
+      vn = cap.var_node
       next unless vn.is_a?(AST::Identifier)
       out << vn.name if param_names.include?(vn.name)
     end

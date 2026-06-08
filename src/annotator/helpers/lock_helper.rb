@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require "set"
+require_relative "../../semantic/capability_plan"
 
 # All lock-safety analysis lives here. Two layers in one module so they
 # share state (@held_lock_types, @held_locks, the lock-edge accumulator)
@@ -415,11 +416,10 @@ module LockHelper
     # check mirrors the dispatch in
     # SemanticAnnotator#validate_lock_error_clause!.
     if node.snapshot_mode == :transaction
-      has_atomic_ptr = (node.capabilities || []).any? { |c|
-        next false unless c[:capability] == :SNAPSHOT
-        sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
+      has_atomic_ptr = CapabilityPlan.require_for(node).snapshot_transitions.any? do |cap|
+        sym = cap.source_entry
         sym && sym.atomic? && sym.respond_to?(:layout) && sym.indirect?
-      }
+      end
       possible = Set.new([has_atomic_ptr ? :AtomicConflict : :MvccConflict])
     else
       possible = Set.new
@@ -429,7 +429,7 @@ module LockHelper
         possible << :Deadlock  if types_with_self.include?(t)
       end
     end
-    possible << :GuardFail if (node.capabilities || []).any? { |c| c[:guard_expr] }
+    possible << :GuardFail unless CapabilityPlan.require_for(node).guarded.empty?
 
     clause.selectors.each do |sel|
       expansion = case sel.form

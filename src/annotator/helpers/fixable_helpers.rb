@@ -855,7 +855,7 @@ module FixableHelper
     T.bind(self, SemanticAnnotator) rescue nil
     edits = []
     missing_caps.each do |c|
-      vn = c[:var_node]
+      vn = c.respond_to?(:var_node) ? c.var_node : c[:var_node]
       next unless vn.is_a?(AST::Identifier) && vn.respond_to?(:token) && vn.token
       tok = vn.token
       name = vn.name.to_s

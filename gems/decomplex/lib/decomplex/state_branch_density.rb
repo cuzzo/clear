@@ -15,9 +15,31 @@ module Decomplex
 
     def self.scan(files)
       decisions = []
-      files.each do |file|
+      parsed_files = files.map do |file|
         root, lines = Ast.parse(file)
+        [file, root, lines]
+      end
+      global_immutable_readers = Hash.new { |h, k| h[k] = Set.new }
+      global_immutable_reader_types = Hash.new { |h, k| h[k] = {} }
+      global_type_aliases = {}
+      parsed_files.each do |file, _root, lines|
         scanner = new(file, lines)
+        scanner.send(:immutable_struct_readers, lines).each do |name, readers|
+          global_immutable_readers[name].merge(readers)
+        end
+        scanner.send(:immutable_struct_reader_types, lines).each do |name, readers|
+          global_immutable_reader_types[name].merge!(readers)
+        end
+        global_type_aliases.merge!(scanner.send(:type_aliases, lines))
+      end
+      parsed_files.each do |file, root, lines|
+        scanner = new(
+          file,
+          lines,
+          immutable_readers: global_immutable_readers,
+          immutable_reader_types: global_immutable_reader_types,
+          type_aliases: global_type_aliases,
+        )
         scanner.walk(root, [])
         decisions.concat(scanner.decisions)
       end
@@ -26,12 +48,14 @@ module Decomplex
 
     attr_reader :decisions
 
-    def initialize(file, lines)
+    def initialize(file, lines, immutable_readers: nil, immutable_reader_types: nil, type_aliases: nil)
       @file = file
       @lines = lines
       @decisions = []
       @totals = Hash.new(0)
-      @immutable_readers = immutable_struct_readers(lines)
+      @immutable_readers = immutable_readers || immutable_struct_readers(lines)
+      @immutable_reader_types = immutable_reader_types || immutable_struct_reader_types(lines)
+      @type_aliases = type_aliases || type_aliases(lines)
       @method_param_types = method_param_types(lines)
     end
 
@@ -107,16 +131,52 @@ module Decomplex
     end
 
     def immutable_struct_const_read?(recv, mid, defn)
-      return false unless Ast.node?(recv) && recv.type == :LVAR
+      owner_type = immutable_receiver_type(recv, defn)
+      return false unless owner_type
+
+      immutable_reader?(owner_type, mid)
+    end
+
+    def immutable_receiver_type(recv, defn)
+      return false unless Ast.node?(recv)
+
+      if %i[CALL QCALL OPCALL].include?(recv.type)
+        recv_recv, recv_mid, recv_args = recv.children
+        return immutable_reader_result_type(recv_recv, recv_mid, recv_args, defn)
+      end
+      return false unless recv.type == :LVAR
 
       param_types = @method_param_types[defn]
       return false unless param_types
 
-      type_name = param_types[recv.children[0].to_s]
+      param_types[recv.children[0].to_s]
+    end
+
+    def immutable_reader?(type_name, mid)
       return false unless type_name
 
-      readers = @immutable_readers[type_name] || @immutable_readers[type_name.split("::").last]
+      resolved_type_name = resolve_type_alias(type_name)
+      readers = if @immutable_readers.key?(resolved_type_name)
+                  @immutable_readers[resolved_type_name]
+                else
+                  @immutable_readers[resolved_type_name.split("::").last]
+                end
       readers&.include?(mid) || false
+    end
+
+    def immutable_reader_result_type(recv, mid, args, defn)
+      return nil unless args.nil? || empty_arg_list?(args)
+
+      owner_type = immutable_receiver_type(recv, defn)
+      return nil unless owner_type
+
+      resolved_type_name = resolve_type_alias(owner_type)
+      reader_types = if @immutable_reader_types.key?(resolved_type_name)
+                       @immutable_reader_types[resolved_type_name]
+                     else
+                       @immutable_reader_types[resolved_type_name.split("::").last]
+                     end
+      reader_types[mid]
     end
 
     def empty_arg_list?(args)
@@ -138,6 +198,49 @@ module Decomplex
         class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
       end
       readers
+    end
+
+    def immutable_struct_reader_types(lines)
+      reader_types = Hash.new { |h, k| h[k] = {} }
+      class_stack = []
+      lines.each do |line|
+        if (match = line.match(/\A\s*class\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*<\s*T::Struct\b/))
+          class_stack << match[1]
+          next
+        end
+        if class_stack.any? && (match = line.match(/\A\s*const\s+:([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b/))
+          reader_types[class_stack.last][match[1].to_sym] = match[2]
+          next
+        end
+        class_stack.pop if class_stack.any? && line.match?(/\A\s*end\s*(?:#.*)?\z/)
+      end
+      reader_types
+    end
+
+    def type_aliases(lines)
+      aliases = {}
+      lines.each do |line|
+        if (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*T\.type_alias\s*\{\s*([A-Z]\w*(?:::[A-Z]\w*)*)\s*\}/))
+          aliases[match[1]] = match[2]
+        elsif (match = line.match(/\A\s*([A-Z]\w*)\s*=\s*([A-Z]\w*(?:::[A-Z]\w*)*)\b/))
+          aliases[match[1]] = match[2]
+        end
+      end
+      aliases
+    end
+
+    def resolve_type_alias(type_name)
+      seen = Set.new
+      current = type_name
+      loop do
+        break current if seen.include?(current)
+
+        seen.add(current)
+        target = @type_aliases[current] || @type_aliases[current.split("::").last]
+        break current unless target
+
+        current = target
+      end
     end
 
     def method_param_types(lines)

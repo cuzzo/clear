@@ -21,6 +21,17 @@ class StateBranchDensityTest < Minitest::Test
     Decomplex::StateBranchDensity.scan([f.path]).findings
   end
 
+  def scan_many(*sources)
+    files = sources.map do |src|
+      f = Tempfile.new(["state_branch", ".rb"])
+      f.write(src)
+      f.close
+      @files << f
+      f.path
+    end
+    Decomplex::StateBranchDensity.scan(files).findings
+  end
+
   def test_flags_branches_over_ivars_globals_and_object_attributes
     rows = scan(<<~RB)
       $enabled = true
@@ -127,6 +138,143 @@ class StateBranchDensityTest < Minitest::Test
         save if fact.active
       end
     RB
+
+    assert_empty rows
+  end
+
+  def test_ignores_typed_struct_const_fact_readers_through_local_alias
+    rows = scan(<<~RB)
+      module CapabilityPlan
+        class CapabilityTransition < T::Struct
+          const :capability, Symbol
+          const :alias_explicit, T::Boolean
+        end
+      end
+
+      WithCapabilityFact = CapabilityPlan::CapabilityTransition
+
+      sig { params(fact: WithCapabilityFact).void }
+      def validate(fact)
+        warn if fact.capability == :EXCLUSIVE
+        save if fact.alias_explicit
+      end
+    RB
+
+    assert_empty rows
+  end
+
+  def test_alias_resolution_preserves_props_as_state
+    rows = scan(<<~RB)
+      class MutableFact < T::Struct
+        prop :remaining, Integer
+      end
+
+      FactAlias = MutableFact
+
+      sig { params(fact: FactAlias).void }
+      def validate(fact)
+        warn if fact.remaining
+      end
+    RB
+
+    row = rows.find { |h| h[:method] == "validate" }
+    refute_nil row
+    assert_includes row[:state_refs], "fact.remaining"
+  end
+
+  def test_ignores_immutable_fact_readers_defined_in_another_scanned_file
+    rows = scan_many(
+      <<~RB,
+        module CapabilityPlan
+          class CapabilityTransition < T::Struct
+            const :capability, Symbol
+            const :alias_explicit, T::Boolean
+          end
+        end
+      RB
+      <<~RB
+        WithCapabilityFact = CapabilityPlan::CapabilityTransition
+
+        sig { params(fact: WithCapabilityFact).void }
+        def validate(fact)
+          warn if fact.capability == :EXCLUSIVE
+          save if fact.alias_explicit
+        end
+      RB
+    )
+
+    assert_empty rows
+  end
+
+  def test_ignores_nested_immutable_fact_readers_through_const_fields
+    rows = scan_many(
+      <<~RB,
+        module CapabilityPlan
+          class CapabilityTransition < T::Struct
+            const :capability, Symbol
+          end
+        end
+      RB
+      <<~RB
+        CapabilitySpec = CapabilityPlan::CapabilityTransition
+
+        class WithCapabilityBindingContext < T::Struct
+          const :cap, CapabilitySpec
+        end
+
+        sig { params(context: WithCapabilityBindingContext).void }
+        def materialize(context)
+          save if context.cap.capability == :EXCLUSIVE
+        end
+      RB
+    )
+
+    assert_empty rows
+  end
+
+  def test_nested_prop_reader_through_const_field_is_still_state
+    rows = scan(<<~RB)
+      class MutableFact < T::Struct
+        prop :remaining, Integer
+      end
+
+      class Context < T::Struct
+        const :fact, MutableFact
+      end
+
+      sig { params(context: Context).void }
+      def materialize(context)
+        warn if context.fact.remaining
+      end
+    RB
+
+    row = rows.find { |h| h[:method] == "materialize" }
+    refute_nil row
+    assert_includes row[:state_refs], "context.fact.remaining"
+  end
+
+  def test_ignores_nested_immutable_fact_readers_through_sorbet_type_alias
+    rows = scan_many(
+      <<~RB,
+        module CapabilityPlan
+          class CapabilityTransition < T::Struct
+            const :capability, Symbol
+          end
+        end
+      RB
+      <<~RB
+        CapabilitySpec = T.type_alias { CapabilityPlan::CapabilityTransition }
+
+        class Context < T::Struct
+          const :cap, CapabilitySpec
+        end
+
+        sig { params(context: Context).void }
+        def materialize(context)
+          save if context.cap.capability == :EXCLUSIVE
+        end
+      RB
+    )
 
     assert_empty rows
   end

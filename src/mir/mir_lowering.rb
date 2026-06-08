@@ -3489,9 +3489,9 @@ class MIRLowering
   #
   # `capture_symbols` (optional Hash<name => SymbolEntry>) carries the LIVE
   # SymbolEntry for each captured name so body-lowering passes that need
-  # current sync/storage (e.g. WITH EXCLUSIVE's Arc-vs-bare dispatch in
-  # with_cap_sync_storage) read post-`propagate_caller_sync!` state, not
-  # the AST-snapshot state that var_node.symbol may carry. Without this,
+  # current sync/storage (especially WITH EXCLUSIVE's Arc-vs-bare dispatch)
+  # read post-`propagate_caller_sync!` state, not the AST-snapshot state
+  # that var_node.symbol may carry. Without this,
   # a `WITH EXCLUSIVE c` inside a CONCURRENT/BG/DO callback that captures
   # c (received via REQUIRES LOCKED) emits the polymorphic `c.*` deref
   # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig

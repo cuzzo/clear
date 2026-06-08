@@ -286,13 +286,78 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps WITH capability expansion behind typed fact records" do
     capabilities = source("src/annotator/helpers/capabilities.rb")
     execution = source("src/annotator/domains/execution_boundaries.rb")
+    plan = source("src/semantic/capability_plan.rb")
+    mir_caps = source("src/mir/lowering/capabilities.rb")
+    deferred = source("src/annotator/phases/deferred_validation.rb")
 
-    expect(capabilities).to include("class WithCapabilityFact < T::Struct")
-    expect(capabilities).to include("class WithCapabilityExpansion < T::Struct")
-    expect(capabilities).to include("source_entry: source_entry")
-    expect(capabilities).to include("borrowed_qualifier:")
+    expect(plan).to include("class CapabilityRequest < T::Struct")
+    expect(plan).to include("class CapabilityTargetFact < T::Struct")
+    expect(plan).to include("class CapabilityTransition < T::Struct")
+    expect(plan).to include("class WithCapabilityPlan < T::Struct")
+    expect(capabilities).to include("WithCapabilityFact = CapabilityPlan::CapabilityTransition")
     expect(execution).to include("capability_expansion = CapabilityHelper::WithCapabilityExpansion.new")
-    expect(execution).to include("lock_capabilities = capability_expansion.locks")
+    expect(execution).to include("node.capability_plan = capability_expansion")
+    expect(deferred).to include("const :fact, CapabilityPlan::CapabilityTransition")
+    expect(deferred).not_to include("const :var_node")
+    expect(deferred).not_to include("const :capability")
+    expect(mir_caps).to include("CapabilityPlan.require_for(node).all")
+  end
+
+  it "does not reach into removed annotator function-node ivars" do
+    production_paths = [
+      File.join(ARCH_ROOT, "clear"),
+      *Dir[File.join(ARCH_ROOT, "src", "**", "*.rb")],
+    ]
+
+    offenders = production_paths.uniq.sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("instance_variable_get(:@fn_nodes)") ||
+                    line.include?("instance_variable_get('@fn_nodes')") ||
+                    line.include?('instance_variable_get("@fn_nodes")')
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Production code must use SemanticAnnotator#semantic_function_nodes instead of stale @fn_nodes reach-ins:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps MIR capability lowering on typed plans, not raw source capability hashes" do
+    sanctioned = [
+      "src/mir/lower/pipeline/pipeline_context.rb",
+    ]
+    raw_field_reads = [
+      "[:capability]",
+      "[:var_node]",
+      "[:alias]",
+      "[:alias_mutable]",
+      "[:guard_expr]",
+      "[:resolved_type]",
+      "[:old_scope]",
+    ]
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if sanctioned.include?(rel)
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\b(?:node|stmt|with_node|with_stmt)\.capabilities\b/) ||
+                    line.match?(/\bAST::Capability\b/) ||
+                    line.include?("T::Array[AST::Capability]") ||
+                    raw_field_reads.any? { |field| line.include?(field) }
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR must consume CapabilityPlan::WithCapabilityPlan facts instead of raw source capability hashes:\n" \
+      "#{offenders.join("\n")}"
   end
 
   it "does not let production capability consumers rediscover raw lock facts" do

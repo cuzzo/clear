@@ -40,6 +40,7 @@
 require "sorbet-runtime"
 
 require_relative "../../ast/ast"
+require_relative "../../semantic/capability_plan"
 require_relative "segments"
 
 module FsmTransform
@@ -326,10 +327,7 @@ module FsmTransform
     sig { params(with_node: T.untyped).returns(T::Boolean) }
     def with_lock_suspend?(with_node)
       T.bind(self, T.untyped) rescue nil
-      caps = with_node.capabilities || []
-      caps.any? { |c|
-        c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
-      }
+      CapabilityPlan.require_for(with_node).locks.any?
     end
 
     # Shape rejection. We accept:
@@ -372,12 +370,9 @@ module FsmTransform
     sig { params(with_node: T.untyped).returns(T::Boolean) }
     def with_unsupported?(with_node)
       T.bind(self, T.untyped) rescue nil
-      caps = with_node.capabilities || []
       if with_lock_suspend?(with_node)
-        unsuspending = caps.any? { |c|
-          c[:capability] != :EXCLUSIVE && c[:capability] != :write_locked_read
-        }
-        return true if unsuspending
+        with_plan = CapabilityPlan.require_for(with_node)
+        return true unless with_plan.all.length == with_plan.locks.length
       end
       contains_unsupported?(with_node.body)
     end
@@ -723,7 +718,7 @@ module FsmTransform
     sig { params(with_stmt: AST::WithBlock, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
     def emit_with_fragment(with_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
-      caps = with_stmt.capabilities || []
+      caps = CapabilityPlan.require_for(with_stmt).locks
       raise UnsupportedShape, "WITH with no capabilities" if caps.empty?
 
       ctx_id_raw = ctx[:id]

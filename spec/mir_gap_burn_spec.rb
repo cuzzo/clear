@@ -1679,19 +1679,22 @@ RSpec.describe "MIR gap-burn characterization" do
     end
 
     root = id("root", type: Type.new(:Counter), storage: :heap)
-    field = AST::GetField.new(tok, root, "lock")
-    field.full_type = Type.new(:Counter, ownership: :shared, sync: :locked)
-    expect(low.send(:with_cap_var_name, field)).to eq("lock")
-    sync, storage = low.send(:with_cap_sync_storage, field)
-    expect(sync).to eq(:locked)
-    expect(storage).to eq(:shared)
+	    field = AST::GetField.new(tok, root, "lock")
+	    field.full_type = Type.new(:Counter, ownership: :shared, sync: :locked)
+	    field_cap = capability_transition(capability: :EXCLUSIVE, var_node: field, resolved_type: field.full_type)
+	    expect(field_cap.target_label).to eq("lock")
+	    expect(field_cap.sync).to eq(:locked)
+	    expect(field_cap.storage).to eq(:shared)
     expect(low.send(:with_cap_zig_target, field, "lock")).to eq("root.lock")
 
     with_node = AST::WithBlock.new(tok, [], [], nil)
+    attach_capability_plan!(with_node)
+    local_var = id("local_value", type: Type.new(:Counter), storage: :heap)
+    local_cap = capability_transition(capability: :RESTRICT, var_node: local_var, alias: "alias_value", alias_mutable: false, resolved_type: Type.new(:Counter))
     local_context = MIRLoweringCapabilities::WithCapabilityBindingContext.new(
       node: with_node,
-      cap: { alias_mutable: false },
-      var_node: id("local_value", type: Type.new(:Counter), storage: :heap),
+      cap: local_cap,
+      var_node: local_var,
       var_name: "local_value",
       alias_name: "alias_value",
       resolved_type: Type.new(:Counter),
@@ -1705,10 +1708,12 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(low.send(:restrict_capability_binding, local_context)).to eq("const alias_value = local_value;")
 
+    view_var = id("view_source", type: Type.new(:Box), storage: :heap)
+    view_cap = capability_transition(capability: :VIEW, var_node: view_var, alias: "view_alias", resolved_type: Type.new(:Box))
     view_context = MIRLoweringCapabilities::WithCapabilityBindingContext.new(
       node: with_node,
-      cap: {},
-      var_node: id("view_source", type: Type.new(:Box), storage: :heap),
+      cap: view_cap,
+      var_node: view_var,
       var_name: "view_source",
       alias_name: "view_alias",
       resolved_type: Type.new(:Box),
@@ -1730,6 +1735,23 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:with_match_probe_for_family, :ATOMIC, "cell", with_node)).to include("cmpxchgStrong")
     expect { low.send(:with_match_probe_for_family, :ACTOR, "cell", with_node) }.to raise_error(/no probe/)
 
+    match_cell = id("cell", type: Type.new(:Counter, sync: :locked), storage: :heap)
+    match_node = AST::WithBlock.new(tok, [
+      AST::Capability.new(capability: :EXCLUSIVE, var_node: match_cell, alias: "guarded")
+    ], [], nil)
+    match_node.arms = [
+      { family: :LOCKED, body: [AST::PassStmt.new(tok)] },
+      { family: :VERSIONED, body: [AST::PassStmt.new(tok)] },
+    ]
+    attach_capability_plan!(match_node)
+    low.define_singleton_method(:lower_body) { |_body| [MIR::Noop.new] }
+
+    match_dispatch = low.send(:lower_with_match_block, match_node).body.first
+    expect(match_dispatch).to be_a(MIR::WithMatchDispatch)
+    expect(match_dispatch.cell_zig).to eq("cell")
+    expect(match_dispatch.arms.map { |arm| arm[:family] }).to eq([:LOCKED, :VERSIONED])
+    expect(match_dispatch.arms.first[:prelude_zig]).to include("const guarded")
+
     expect(low.send(:ast_contains_return?, { nested: [AST::ReturnNode.new(tok, nil)] })).to eq(true)
     expect(low.send(:ast_contains_return?, fn([AST::ReturnNode.new(tok, nil)]))).to eq(false)
 
@@ -1737,6 +1759,7 @@ RSpec.describe "MIR gap-burn characterization" do
     guard_clause.matched_types = [:GuardFail]
     guard_node = AST::WithBlock.new(tok, [], [], nil)
     guard_node.lock_error_clause = guard_clause
+    attach_capability_plan!(guard_node)
     expect(low.send(:guard_fail_flow_body, guard_node)).to eq([])
 
     pre_fn = fn([])
@@ -3265,6 +3288,7 @@ RSpec.describe "MIR gap-burn characterization" do
     call_arg = id("c", type: Type.new(:Counter))
     call = AST::FuncCall.new(tok, "touch", [call_arg])
     with_block = AST::WithBlock.new(tok, [{ capability: :EXCLUSIVE, var_node: call_arg }], [call], nil)
+    attach_capability_plan!(with_block)
     fn_node = fn([with_block], params: [held_param])
 
     callee_param = param("x", type: Type.new(:Counter))

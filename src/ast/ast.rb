@@ -1851,7 +1851,7 @@ module AST
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
-  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
+  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops, :capability_plan) do
     extend T::Sig
     include Locatable
     include HasBodies

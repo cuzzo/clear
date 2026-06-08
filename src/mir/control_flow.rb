@@ -22,6 +22,7 @@ require "sorbet-runtime"
 
 require_relative "../ast/ast"
 require_relative "../annotator/helpers/function_signature"
+require_relative "../semantic/capability_plan"
 require_relative "cleanup_entry"
 require_relative "placement"
 require_relative "../semantic/local_binding_facts"
@@ -1757,16 +1758,16 @@ class BorrowChecker
   def handle_with_block(stmt)
     added = []
 
-    (stmt.capabilities || []).each do |cap|
-      source = cap_source_name(cap[:var_node])
+    CapabilityPlan.require_for(stmt).all.each do |cap|
+      var_node = cap.var_node
+      source = var_node.is_a?(AST::Identifier) ? cap_source_name(var_node) : nil
       next unless source
 
       # Only RESTRICT and BORROWED create compile-time borrows.
-      capability = cap[:capability]
-      next unless capability == :RESTRICT || capability == :BORROWED
+      next unless cap.restrict? || cap.borrowed?
 
-      kind = (capability == :RESTRICT) ? :mutable : :immutable
-      token = cap[:var_node].token || stmt.token
+      kind = cap.restrict? ? :mutable : :immutable
+      token = var_node.token || stmt.token
 
       # ALIAS_VIOLATION: conflicting borrows
       existing = @active_borrows[source]

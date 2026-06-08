@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative '../ast/type'
+require_relative '../semantic/capability_plan'
 require_relative 'fsm_ops'
 require_relative 'fsm_wrapper_emitter'
 
@@ -32,7 +33,7 @@ module FsmLowering
     extend T::Sig
   include Kernel
 
-  FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, AST::Capability) }
+  FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, CapabilityPlan::CapabilityTransition) }
   FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
   FsmMirRenderable = T.type_alias { T.any(MIR::Node, String) }
 
@@ -440,19 +441,19 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: AST::Capability, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Object]).returns(T.nilable(FsmCapMetadata)) }
+  sig { params(cap: CapabilityPlan::CapabilityTransition, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Object]).returns(T.nilable(FsmCapMetadata)) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
-    return nil unless cap[:capability] == :EXCLUSIVE ||
-                      cap[:capability] == :write_locked_read
+    return nil unless cap.capability == :EXCLUSIVE ||
+                      cap.capability == :write_locked_read
 
-    var_node = cap[:var_node]
+    var_node = cap.var_node
     return nil unless var_node.is_a?(AST::Identifier)
     lock_var_name = var_node.name
-    alias_name = cap[:alias] || lock_var_name
+    alias_name = cap.alias_name
     return nil unless captured.key?(lock_var_name)
 
-    resolved = cap[:resolved_type]
+    resolved = cap.resolved_type
     any_rc       = resolved&.any_rc?
     write_locked = resolved&.write_locked?
     # A polymorphic LOCKED param (REQUIRES c: LOCKED on a `c: T`
@@ -465,7 +466,7 @@ module FsmLowering
     is_param = var_node.symbol&.is_param
     polymorphic_locked = is_param && !any_rc &&
                          (!!resolved&.locked? || !!resolved&.write_locked?)
-    lock_kind = if cap[:capability] == :write_locked_read
+    lock_kind = if cap.capability == :write_locked_read
                   :rwlock_read
                 elsif write_locked
                   :rwlock_write

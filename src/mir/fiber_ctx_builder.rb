@@ -23,8 +23,8 @@ require_relative "../semantic/capture_strategy"
 # DO use Zig templates) or as MIR nodes (CONCURRENT pipeline_host
 # uses MIR::StructDef / MIR::StructInit). The capture_map and
 # capture_symbols outputs feed `with_fiber_capture_map` so body
-# lowerings (especially WITH EXCLUSIVE's Arc-vs-bare dispatch in
-# with_cap_sync_storage) read the live SymbolEntry.
+# lowerings (especially WITH EXCLUSIVE's Arc-vs-bare dispatch) read the
+# live SymbolEntry.
 #
 # What this REPLACES (4 → 1):
 #

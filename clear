@@ -562,7 +562,7 @@ when 'build'
       importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
       annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
       annotator.annotate!(ast)
-      fn_nodes = annotator.instance_variable_get(:@fn_nodes)
+      fn_nodes = annotator.semantic_function_nodes
 
       base_name = File.basename(source, '.cht')
       prefix = "._clear_tmp_#{base_name}"

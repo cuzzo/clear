@@ -4,6 +4,7 @@ require "sorbet-runtime"
 require_relative "../../ast/ast"
 require_relative "../../ast/scope"
 require_relative "../../semantic/bg_capture_classifier"
+require_relative "../../semantic/capability_plan"
 require_relative "../../semantic/concurrency_checks"
 require_relative "../../semantic/effect_inference"
 require_relative "../../semantic/escape_analysis"
@@ -25,6 +26,7 @@ module Annotator
         root_scope = whole_program_root_scope
 
         EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+        fn_nodes.each_value { |fn| CapabilityPlan.refresh_function_plans!(fn) }
 
         # Single authority for BG capture-strategy facts. This runs after caller
         # sync propagation so SymbolEntry stamps are final, and before downstream

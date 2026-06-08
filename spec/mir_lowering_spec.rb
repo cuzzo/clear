@@ -2218,8 +2218,9 @@ RSpec.describe MIRLowering do
       clause.matched_types = [:LockTimeout]
       clause.bubble_types = [:Deadlock]
       with_node = AST::WithBlock.new(tok, caps, [], nil)
+      typed_caps = caps.map { |cap| capability_transition(cap) }
 
-      zig = lowering.send(:emit_sorted_lock_acquires_fallible, caps, clause, "__with_label", with_node)
+      zig = lowering.send(:emit_sorted_lock_acquires_fallible, typed_caps, clause, "__with_label", with_node)
 
       expect(zig).to include("acquireOrErr")
       expect(zig).to include("readOrErr")
@@ -2239,7 +2240,7 @@ RSpec.describe MIRLowering do
       lowering.send(:materialize_sorted_lock_bindings,
         with_node,
         materialization,
-        caps,
+        typed_caps,
         clause,
         "__with_label")
 
@@ -2718,6 +2719,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
@@ -2733,6 +2735,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2748,6 +2751,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2765,6 +2769,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2780,6 +2785,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2794,6 +2800,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2808,6 +2815,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2822,6 +2830,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2833,6 +2842,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
