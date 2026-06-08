@@ -274,11 +274,10 @@ module FsmTransform
 
     sig { params(decl: T.untyped).returns(MIR::ContextFieldDecl) }
     def state_field_decl(decl)
-      init = decl.respond_to?(:init_zig) ? decl.init_zig.to_s : "undefined"
       ctx_field_decl(
         decl.name.to_s,
         decl.zig_type.to_s,
-        init == "undefined" ? MIR::Undef.new(nil) : MIR::Lit.new(init),
+        T.cast(decl.default_value, MIR::Emittable),
       )
     end
 

@@ -50,6 +50,11 @@ RSpec.describe "MIR gap-burn characterization" do
         ["allocator_zig", text.include?("allocator_zig")],
         ["lock_ref_zig", text.include?("lock_ref_zig")],
         ["rt_suppress_zig", text.include?("rt_suppress_zig")],
+        ["with_capability_source_zig", text.include?("with_capability_source_zig")],
+        ["with_match_probe_for_family", text.include?("with_match_probe_for_family")],
+        ["with_match_arm_prelude", text.include?("with_match_arm_prelude")],
+        ["with_match_unwrap_value", text.include?("with_match_unwrap_value")],
+        ["emit_expr lower rendering", text.match?(/emit_expr\(\s*lower\(/)],
         ["raw string emitter passthrough", text.match?(/when String\s+then\s+node/)],
         ["raw DeferStmt body", text.match?(/MIR::DeferStmt\.new\(\s*["']/)],
         ["raw ErrDeferStmt body", text.match?(/MIR::ErrDeferStmt\.new\(\s*["']/)],
@@ -83,7 +88,8 @@ RSpec.describe "MIR gap-burn characterization" do
     )
 
     expect(promoted.specs.first.field_type_zig).to eq("[]const u8")
-    expect(promoted.specs.first.init_value_zig).to eq("__promoted_name")
+    expect(promoted.specs.first.init_value_mir).to eq(MIR::Ident.new("__promoted_name"))
+    expect(promoted.specs.first.cleanup_plan.none?).to eq(true)
 
     fresh_analysis = double(
       captures: { "owned" => Type.new(:String) },
@@ -105,8 +111,147 @@ RSpec.describe "MIR gap-burn characterization" do
     )
 
     expect(fresh.has_fresh_heap_copy?).to eq(true)
-    expect(fresh.specs.first.dupe_decl_zig).to include("__fc_7_owned")
-    expect(fresh.specs.first.body_cleanup_zig).to include("owned_moved")
+    expect(fresh.specs.first.setup_mir.map(&:class)).to include(MIR::Let, MIR::ErrDeferStmt)
+    expect(fresh.specs.first.cleanup_plan.captured_value?).to eq(true)
+    expect(fresh.specs.first.cleanup_mir_for("ctx")).to be_a(MIR::DeferStmt)
+  end
+
+  it "builds rc, move, pointer-local, and default fiber capture specs structurally" do
+    expect(FiberCtxBuilder::CaptureRcKind::Rc.retain_func).to eq("rcRetain")
+    expect(FiberCtxBuilder::CaptureRcKind::Arc.release_func).to eq("arcRelease")
+
+    shared_type = Type.new(:Widget)
+    shared_type.apply_reference_ownership!(:shared)
+    shared_sym = SymbolEntry.new(reg: "shared", type: shared_type, mutable: false, storage: :shared)
+    rc_analysis = double(
+      captures: { "shared" => shared_type },
+      strategies: {
+        "shared" => CaptureStrategy::RcClone.new(zig_type: "Widget", ctx_init_name: "shared"),
+      },
+      pointer_captures: Set.new,
+      capture_symbols: { "shared" => shared_sym },
+    )
+    rc = FiberCtxBuilder.build(rc_analysis, body_access_prefix: "ctx", fresh_heap_id: 3)
+    expect(rc.specs.first.setup_mir.first.init.callee).to eq("CheatLib.arcRetain")
+    expect(rc.specs.first.cleanup_mir_for("ctx").body.func).to eq("arcRelease")
+
+    moved_analysis = double(
+      captures: { "owned" => Type.new(:String), "count" => Type.new(:Int64) },
+      strategies: {
+        "owned" => CaptureStrategy::MoveInto.new(zig_type: "[]const u8", ctx_init_name: "owned", source_name: "owned"),
+        "count" => CaptureStrategy::MoveInto.new(zig_type: "i64", ctx_init_name: "count", source_name: "count"),
+      },
+      pointer_captures: Set.new,
+      capture_symbols: {},
+    )
+    moved = FiberCtxBuilder.build(moved_analysis, body_access_prefix: "ctx")
+    owned_spec = moved.specs.find { |spec| spec.name == "owned" }
+    count_spec = moved.specs.find { |spec| spec.name == "count" }
+    expect(owned_spec.cleanup_plan.kind).to eq(FiberCtxBuilder::CaptureCleanupKind::UniformValue)
+    expect(owned_spec.cleanup_mir_for("ctx")).to be_a(MIR::DeferStmt)
+    expect(count_spec.cleanup_plan.none?).to eq(true)
+    expect(count_spec.cleanup_mir_for("ctx")).to be_nil
+
+    local_pointer_analysis = double(
+      captures: { "pool" => Type.new(:Pool) },
+      strategies: {},
+      pointer_captures: Set["pool"],
+      capture_symbols: { "pool" => SymbolEntry.new(reg: "pool", type: Type.new(:Pool), mutable: true, storage: :heap) },
+    )
+    pointer = FiberCtxBuilder.build(local_pointer_analysis, body_access_prefix: "ctx")
+    expect(pointer.specs.first.field_type_zig).to eq("@TypeOf(&pool)")
+    expect(pointer.specs.first.init_value_mir).to eq(MIR::AddressOf.new(MIR::Ident.new("pool")))
+
+    default_analysis = double(
+      captures: { "plain" => Type.new(:Int64) },
+      strategies: {},
+      pointer_captures: Set.new,
+      capture_symbols: {},
+    )
+    plain = FiberCtxBuilder.build(default_analysis, body_access_prefix: "ctx")
+    expect(plain.specs.first.field_type_zig).to eq("@TypeOf(plain)")
+  end
+
+  it "builds capture ownership mirrors and typed FSM transform hashes" do
+    helper = Class.new { include MIRLoweringConcurrency }.new
+    cap_spec = FiberCtxBuilder::CaptureSpec.new(
+      name: "owned",
+      field_type_zig: "@TypeOf(owned)",
+      init_value_mir: MIR::Ident.new("owned"),
+      setup_mir: [],
+      cleanup_plan: FiberCtxBuilder::CaptureCleanupPlan.new(
+        kind: FiberCtxBuilder::CaptureCleanupKind::UniformValue,
+        mirror_type: Type.new(:String),
+      ),
+    )
+    caps = FiberCtxBuilder::Result.new(specs: [cap_spec], capture_map: {}, capture_symbols: {})
+    analysis = CapabilityHelper::CaptureAnalysis.new(captures: { "owned" => Type.new(:String) })
+
+    mirrors = helper.capture_ownership_mirror_nodes(caps, analysis, "ctx")
+    expect(mirrors).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Cleanup))
+    expect(helper.capture_ownership_mirror_nodes(
+      caps,
+      analysis,
+      "ctx",
+      { "owned" => Schemas::ResourceClosePlan.method("close") },
+    )).to eq([])
+    expect(helper.capture_moved_guard_fields([cap_spec]).first.default_value.value).to eq("false")
+
+    node = AST::BgBlock.new(tok, [], nil, nil, false, false, true, false)
+    names = MIRLoweringConcurrency::BgLoweringNames.new(
+      id: 9,
+      ctx_type: "__BgCtx9",
+      alloc_var: "__alloc",
+      promise_var: "__promise",
+      ctx_var: "__ctx",
+      blk_label: "__bg9",
+      bg_rt: "__rt_bg9",
+    )
+    types = MIRLoweringConcurrency::BgTypePlan.new(
+      async_shape: AsyncResultShape.promise(Type.new(:Void)),
+      inner_type: Type.new(:Void),
+      inner_zig: "void",
+      promise_zig: "CheatHeader.Promise(void)",
+      is_void: true,
+    )
+    capture = MIRLoweringConcurrency::BgCaptureMaterialization.new(
+      caps: caps,
+      capture_fields: [MIR::ContextFieldDecl.new(name: "owned", type_zig: "[]const u8")],
+      capture_inits: [MIR::StructInitField.new(name: :owned, value: MIR::Ident.new("owned"))],
+      fresh_heap_cleanup_names: ["owned"],
+      capture_frees: [],
+      promoted_decls: [],
+    )
+    body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+    task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
+    scheduler = MIRLoweringConcurrency::BgSchedulerPlan.new(
+      pin_mode: false,
+      site_id: 11,
+      site_line: 12,
+      site_col: 13,
+      dispatch: :local,
+      profiled_task_cfg: task_config,
+      spawn_call: MIR::FiberSpawnCall.new(target: :local, ctx_type: "__BgCtx9", ctx_var: "__ctx", task_config: task_config),
+      profile_site: MIR::ProfileTaskSite.new(site_id: 11, line: 12, column: 13, dispatch: :local, form: :bg),
+      arena_init: nil,
+    )
+    ctx = MIRLoweringConcurrency::BgFsmTransformContext.new(
+      node: node,
+      names: names,
+      types: types,
+      capture: capture,
+      body: body,
+      scheduler: scheduler,
+      captured: { "owned" => Type.new(:String) },
+      capture_close_plans: {},
+      pointer_captures: Set.new,
+      rt_name: "rt",
+    )
+
+    hash = ctx.to_transform_hash
+    expect(hash[:capture_fields]).to eq(capture.capture_fields)
+    expect(hash[:fresh_heap_cleanup_names]).to eq(["owned"])
+    expect(hash[:arena_init_flag]).to eq(true)
   end
 
   it "captures pointer parameters by value in fiber contexts" do
@@ -1858,11 +2003,12 @@ RSpec.describe "MIR gap-burn characterization" do
 
     snapshot_node = AST::WithBlock.new(tok, [], [], nil)
     snapshot_node.snapshot_mode = :read
-    expect(low.send(:with_match_probe_for_family, :VERSIONED, "cell", snapshot_node)).to include("compareAndPublish")
-    expect(low.send(:with_match_probe_for_family, :VERSIONED, "cell", with_node)).to eq("@hasDecl(CheatLib.WithMatchInner(@TypeOf(cell)), \"Inner\")")
-    expect(low.send(:with_match_probe_for_family, :ATOMIC, "cell", snapshot_node)).to include("compareAndPublish")
-    expect(low.send(:with_match_probe_for_family, :ATOMIC, "cell", with_node)).to include("cmpxchgStrong")
-    expect { low.send(:with_match_probe_for_family, :ACTOR, "cell", with_node) }.to raise_error(/no probe/)
+    emitter = MIREmitter.new
+    expect(emitter.send(:emit_with_match_probe, :VERSIONED, "cell", true)).to include("compareAndPublish")
+    expect(emitter.send(:emit_with_match_probe, :VERSIONED, "cell", false)).to eq("@hasDecl(CheatLib.WithMatchInner(@TypeOf(cell)), \"Inner\")")
+    expect(emitter.send(:emit_with_match_probe, :ATOMIC, "cell", true)).to include("compareAndPublish")
+    expect(emitter.send(:emit_with_match_probe, :ATOMIC, "cell", false)).to include("cmpxchgStrong")
+    expect { emitter.send(:emit_with_match_probe, :ACTOR, "cell", false) }.to raise_error(/no probe/)
 
     match_cell = id("cell", type: Type.new(:Counter, sync: :locked), storage: :heap)
     match_node = AST::WithBlock.new(tok, [
@@ -2935,8 +3081,26 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.capture_state.current_bg_pointer_captures).to eq(old_pointer_captures)
     expect(low.function_state.pending_stmts).to eq(old_pending)
 
-    versioned_prelude = low.send(:with_match_arm_prelude, :VERSIONED, "cell", "alias", with_node)
+    versioned_prelude = MIREmitter.new.send(
+      :emit_with_match_prelude,
+      MIR::WithMatchArm.new(family: :VERSIONED, guard_var: "__guard", body: []),
+      "cell",
+      "alias",
+      "rt",
+      false,
+    )
     expect(versioned_prelude).to include(".read(").and include("const alias")
+
+    guard_exit_clause = AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: tok,
+      message: lit("guard timeout"))
+    guard_exit_clause.matched_types = [:GuardFail]
+    with_node.lock_error_clause = guard_exit_clause
+    guard_exit_body = low.send(:guard_fail_flow_body, with_node)
+    expect(guard_exit_body).to include(
+      an_instance_of(MIR::ExprStmt),
+      an_instance_of(MIR::PolymorphicFlowSignal),
+    )
+    expect(guard_exit_body.first.expr.args[2]).to eq(low.lower(guard_exit_clause.message))
 
     exit_clause = AST::ErrorClause.new(selectors: [], action: :exit, retries: nil, token: tok,
       message: lit("timeout"))

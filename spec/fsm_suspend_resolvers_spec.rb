@@ -40,7 +40,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
       promoted_decls: [],
       capture_inits: [],
       captured: {},
-      capture_close_zig: {},
+      capture_close_plans: {},
       pointer_captures: Set.new,
       extra_ctx_fields: [],
       recursive_promoted_names: [],
@@ -67,7 +67,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
-      capture_close_zig: raw.fetch(:capture_close_zig),
+      capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
@@ -106,7 +106,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
           ),
         ],
         fsm_state_decls: [
-          FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
+          FsmOps::StateFieldDecl.new(name: "rf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
         ],
       })
     }
@@ -160,7 +160,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
       finish_value_def = IntrinsicRegistry.fs({
         suspends: true,
         fsm_setup: [],
-        fsm_finish_value: FsmOps::ZigLit.new("__finished"),
+        fsm_finish_value: FsmOps::LocalRef.new("__finished"),
       })
       tail = FsmTransform::Segments::IoSuspend.new(call_node, finish_value_def, nil)
 
@@ -168,15 +168,14 @@ RSpec.describe FsmTransform::SuspendResolvers do
         FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
 
       expect(d.bind_stmts).to contain_exactly(an_instance_of(MIR::ExprStmt))
-      expect(d.bind_stmts.first.expr).to be_a(MIR::Lit)
-      expect(d.bind_stmts.first.expr.value).to eq("__finished")
+      expect(d.bind_stmts.first.expr).to eq(MIR::Ident.new("__finished"))
     end
 
     it "binds IO result values into the FSM context" do
       finish_value_def = IntrinsicRegistry.fs({
         suspends: true,
         fsm_setup: [],
-        fsm_finish_value: FsmOps::ZigLit.new("__finished"),
+        fsm_finish_value: FsmOps::LocalRef.new("__finished"),
       })
       value_call = Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
         [], nil, finish_value_def, :String

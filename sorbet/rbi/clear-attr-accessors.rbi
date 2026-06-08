@@ -1797,17 +1797,17 @@ end
 class ResourceSchema
   sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(String) }
-  def close_zig; end
+  sig { returns(Schemas::ResourceClosePlan) }
+  def close_plan; end
   sig { returns(T.nilable(String)) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::MethodsMap) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
   sig { returns(Symbol) }
   def visibility; end
@@ -1832,17 +1832,17 @@ end
 class Schemas::ResourceSchema
   sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(String) }
-  def close_zig; end
+  sig { returns(Schemas::ResourceClosePlan) }
+  def close_plan; end
   sig { returns(T.nilable(String)) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::MethodsMap) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
   sig { returns(Symbol) }
   def visibility; end
@@ -1984,10 +1984,10 @@ class SymbolEntry
   def capabilities; end
   sig { params(value: T::Set[Symbol]).returns(T::Set[Symbol]) }
   def capabilities=(value); end
-  sig { returns(T.nilable(String)) }
-  def close_zig; end
-  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
-  def close_zig=(value); end
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def close_plan; end
+  sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def close_plan=(value); end
   sig { returns(T::Boolean) }
   def is_param; end
   sig { params(value: T::Boolean).returns(T::Boolean) }

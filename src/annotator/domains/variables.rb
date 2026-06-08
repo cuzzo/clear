@@ -175,7 +175,7 @@ module Annotator
         # the symbol -- that over-promotes (e.g. a union typed heap-capable
         # but never actually escaping).
         is_resource, resource_close = resolve_resource_close(node)
-        node.resource_close_zig = resource_close
+        node.resource_close_plan = resource_close
         node_type = node.full_type!(context: "var declaration")
         node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)
 
@@ -201,7 +201,7 @@ module Annotator
           sync: node_sync,
           layout: node_layout,
           resource: is_resource,
-          close_zig: resource_close
+          close_plan: resource_close
         )
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)

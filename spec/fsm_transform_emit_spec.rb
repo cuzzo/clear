@@ -38,7 +38,7 @@ RSpec.describe FsmTransform::Emit do
       promoted_decls: [],
       capture_inits: [],
       captured: {},
-      capture_close_zig: {},
+      capture_close_plans: {},
       pointer_captures: Set.new,
       is_void: true,
       pin_mode: false,
@@ -65,7 +65,7 @@ RSpec.describe FsmTransform::Emit do
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
-      capture_close_zig: raw.fetch(:capture_close_zig),
+      capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
@@ -387,7 +387,7 @@ RSpec.describe FsmTransform::Emit do
       rt_name: "rt",
       parallel: true,
       pin_mode: false,
-      capture_inits: ".payload = payload,",
+      capture_inits: [MIR::StructInitField.new(name: :payload, value: MIR::Ident.new("payload"))],
     )
 
     setup = described_class.build_spawn_setup(ctx, lowering)
@@ -578,20 +578,20 @@ RSpec.describe FsmTransform::Emit do
       blk_label: "__bg4",
       ctx_type: "__BgCtx4",
       promise_zig: "CheatHeader.Promise(void)",
-      capture_fields: "",
+      capture_fields: [],
       alloc_var: "__alloc_4",
       promise_var: "__promise_4",
       ctx_var: "__ctx_4_ptr",
       rt_name: "rt",
-      promoted_decls: "",
-      capture_inits: "",
+      promoted_decls: [],
+      capture_inits: [],
       captured: {},
-      capture_close_zig: {},
+      capture_close_plans: {},
       pointer_captures: Set.new,
       is_void: true,
       pin_mode: false,
       parallel: false,
-      extra_ctx_fields: ["existing: i64 = 0,"],
+      extra_ctx_fields: [ctx_decl("existing", "i64", MIR::Lit.new("0"))],
     }
     structure = MIR::FsmStructure.new([], [], [], [], 4, nil)
     body = MIR::FsmGenericBody.new(
@@ -630,5 +630,31 @@ RSpec.describe FsmTransform::Emit do
       expect(rec_segs).to eq(segment_list)
       expect(used_lowering).to eq(lowering)
     end
+  end
+
+  it "rejects legacy string FSM context data at the transform boundary" do
+    field = ctx_decl("payload", "i64", MIR::Lit.new("0"))
+    init = MIR::StructInitField.new(name: :payload, value: MIR::Ident.new("payload"))
+    stmt = MIR::ExprStmt.new(MIR::Lit.new("0"), false)
+
+    expect(FsmTransform.coerce_context_fields(nil)).to eq([])
+    expect(FsmTransform.coerce_context_fields([[field]])).to eq([field])
+    expect(FsmTransform.coerce_context_inits(nil)).to eq([])
+    expect(FsmTransform.coerce_context_inits([[init]])).to eq([init])
+    expect(FsmTransform.coerce_promoted_decls(nil)).to eq([])
+    expect(FsmTransform.coerce_promoted_decls([[stmt]])).to eq([stmt])
+
+    expect { FsmTransform.coerce_context_fields("payload: i64 = 0,") }
+      .to raise_error(TypeError, /ContextFieldDecl/)
+    expect { FsmTransform.coerce_context_field("payload: i64 = 0,") }
+      .to raise_error(TypeError, /ContextFieldDecl/)
+    expect { FsmTransform.coerce_context_inits(".payload = payload,") }
+      .to raise_error(TypeError, /StructInitField/)
+    expect { FsmTransform.coerce_context_inits(["bad"]) }
+      .to raise_error(TypeError, /StructInitField/)
+    expect { FsmTransform.coerce_promoted_decls("const x = 0;") }
+      .to raise_error(TypeError, /Emittable/)
+    expect { FsmTransform.coerce_promoted_decls(["bad"]) }
+      .to raise_error(TypeError, /Emittable/)
   end
 end

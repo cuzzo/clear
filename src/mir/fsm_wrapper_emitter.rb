@@ -29,6 +29,7 @@
 
 require_relative "mir"
 require_relative "mir_emitter"
+require_relative "fsm_ops"
 
 module FsmWrapperEmitter
   extend T::Sig
@@ -187,7 +188,8 @@ module FsmWrapperEmitter
     capture_fields = render_context_field_decls(s.capture_fields, mir_emitter)
     parts << indent_block(capture_fields, 8) unless empty?(capture_fields)
     parts << "        step: u8 = 0,"
-    s.state_decls.each { |d| parts << "        #{d.render}" }
+    state_fields = render_fsm_state_field_decls(s.state_decls || [], mir_emitter)
+    parts << indent_block(state_fields, 8) unless empty?(state_fields)
     s.promoted_field_decls.each { |line| parts << "        #{line}" }
     parts << ""
     parts << render_step(s.step0, mir_emitter)
@@ -611,6 +613,14 @@ module FsmWrapperEmitter
     fields.map do |field|
       default = field.default_value ? " = #{mir_emitter.emit(T.must(field.default_value))}" : ""
       "#{field.name}: #{field.type_zig}#{default},"
+    end.join("\n")
+  end
+
+  sig { params(fields: T::Array[FsmOps::StateFieldDecl], mir_emitter: MIREmitter).returns(String) }
+  def render_fsm_state_field_decls(fields, mir_emitter)
+    fields.map do |field|
+      default = mir_emitter.emit(field.default_value)
+      "#{field.name}: #{field.zig_type} = #{default},"
     end.join("\n")
   end
 

@@ -1983,9 +1983,8 @@ class Type
     @is_resource || RESOURCE_TYPES.include?(resolved)
   end
 
-  # Resolve the Zig close/deinit statement for resource types.
-  # Returns [is_resource, close_zig_template] where close_zig_template uses
-  # {0} for the variable name and {rt} for runtime access. Returns
+  # Resolve the close/deinit plan for resource types.
+  # Returns [is_resource, close_plan]. Returns
   # [false, nil] for non-resources.
   #
   # Group 1 / Group 2 separation: when a Group-2 shape (pool/set/...) is
@@ -1993,31 +1992,31 @@ class Type
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
-  ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(String)] }
+  ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(Schemas::ResourceClosePlan)] }
 
   sig { params(schema_lookup: T.nilable(T.proc.params(name: Symbol).returns(T.nilable(Object)))).returns(ResourceCloseResult) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
-    return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
+    return [true, Schemas::ResourceClosePlan.method("deinit")] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
     schema = T.let((schema_lookup.call(resolved) rescue nil), T.nilable(Object))
 
     if schema.is_a?(Schemas::ResourceSchema)
-      return [true, schema.close_zig]
+      return [true, schema.close_plan]
     end
 
     # Struct with resource fields: compose close statements from fields.
     if schema.is_a?(Schemas::StructSchema)
-      closes = T.let([], T::Array[String])
+      actions = T.let([], T::Array[Schemas::ResourceCloseAction])
       schema.fields.each do |fname, fdef|
         f_resolved = fdef.type.resolved
         f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), T.nilable(Object))
         if f_schema.is_a?(Schemas::ResourceSchema)
-          closes << f_schema.close_zig.gsub("{0}", "{0}.#{fname}")
+          actions.concat(f_schema.close_plan.for_field(fname).actions)
         end
       end
-      return [true, closes.join("; ")] if closes.any?
+      return [true, Schemas::ResourceClosePlan.composite(actions)] if actions.any?
     end
 
     [false, nil]

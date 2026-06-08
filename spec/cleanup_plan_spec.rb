@@ -82,7 +82,7 @@ RSpec.describe CleanupClassifier do
         value: AST::Literal.new(tok, :STRING, "borrowed", :rodata),
         storage: :borrow,
       )
-      node.resource_close_zig = "{0}.close()"
+      node.resource_close_plan = Schemas::ResourceClosePlan.method("close")
 
       facts = CleanupClassifier.send(:binding_cleanup_facts, node)
 
@@ -91,7 +91,7 @@ RSpec.describe CleanupClassifier do
       expect(facts.heap_storage).to be(false)
       expect(facts.empty_initializer).to be(false)
       expect(facts.mutable_binding_mutated).to be(false)
-      expect(facts.resource_close_zig).to eq("{0}.close()")
+      expect(facts.resource_close_plan&.actions&.map(&:name)).to eq(["close"])
     end
 
     it "keeps mutated mutable optional nil bindings cleanup-eligible" do
@@ -358,14 +358,90 @@ RSpec.describe CleanupClassifier do
       moved_string = CleanupClassifier.send(:transferred_payload_entry, Type.new(:String), schema_lookup_for)
       expect(moved_string[:kind]).to eq(:heap_string)
 
-      resource_schema = Schemas::ResourceSchema.new(close_zig: "{0}.close()")
+      resource_schema = Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close"))
       resource = CleanupClassifier.send(
         :takes_param_base_entry,
         Type.new(:Fileish),
         schema_lookup_for(Fileish: resource_schema),
       )
       expect(resource[:kind]).to eq(:resource)
-      expect(resource[:resource_close_zig]).to eq("{0}.close()")
+      expect(resource.resource_close_plan&.actions&.map(&:name)).to eq(["close"])
+    end
+
+    it "keeps resource close plans structural through field composition" do
+      function_plan = Schemas::ResourceClosePlan.function("closeHandle", runtime_heap_alloc_args: 2)
+      nested = function_plan.for_field("handle")
+
+      expect(function_plan.empty?).to eq(false)
+      expect(Schemas::ResourceClosePlan.composite([]).empty?).to eq(true)
+      expect(nested.actions.first.call_kind).to eq(Schemas::ResourceCloseCallKind::Function)
+      expect(nested.actions.first.field_path).to eq(["handle"])
+      expect(nested.actions.first.runtime_heap_alloc_args).to eq(2)
+
+      resource_schema = Schemas::ResourceSchema.new(
+        close_plan: function_plan,
+        fields: {
+          raw: :Int64,
+          existing: AST::StructField.new(type: Type.new(:Bool)),
+          meta: { type: :String, default: AST::Literal.new(tok, :STRING, "x", :rodata), borrowed: true },
+        },
+        type_params: [:T],
+        extern_module: "native",
+        as_type: "Native(T)",
+        static_methods: {
+          "open" => { args: [:String], return: :Handle, zig: "open({0})", can_fail: true },
+        },
+      )
+
+      expect(resource_schema.fields.fetch("raw").type.resolved).to eq(:Int64)
+      expect(resource_schema.fields.fetch("existing").type.resolved).to eq(:Bool)
+      expect(resource_schema.fields.fetch("meta").borrowed).to eq(true)
+      expect(resource_schema.type_params).to eq([:T])
+      expect(resource_schema.static_methods.fetch("open").fetch(:can_fail)).to eq(true)
+
+      direct = Type.new(:Handle).resolve_resource_close(schema_lookup_for(Handle: resource_schema))
+      expect(direct.first).to eq(true)
+      expect(direct.last&.actions&.first&.name).to eq("closeHandle")
+
+      box_schema = Schemas::StructSchema.new(fields: {
+        "handle" => AST::StructField.new(type: Type.new(:Handle)),
+      })
+      composed = Type.new(:Box).resolve_resource_close(schema_lookup_for(Box: box_schema, Handle: resource_schema))
+      expect(composed.first).to eq(true)
+      action = composed.last&.actions&.first
+      expect(action&.name).to eq("closeHandle")
+      expect(action&.field_path).to eq(["handle"])
+
+      resource_decl = var_decl(
+        name: "handle",
+        type: Type.new(:Handle),
+        value: nil,
+        storage: :heap,
+      )
+      resource_entry = CleanupClassifier.send(
+        :classify_binding,
+        Type.new(:Handle),
+        resource_decl,
+        schema_lookup_for(Handle: resource_schema),
+      )
+      expect(resource_entry.kind).to eq(:resource)
+      expect(resource_entry.resource_close_plan&.actions&.first&.name).to eq("closeHandle")
+
+      planned_decl = var_decl(
+        name: "late",
+        type: Type.new(:LateBound),
+        value: nil,
+        storage: :heap,
+      )
+      planned_decl.resource_close_plan = Schemas::ResourceClosePlan.method("closeLate")
+      planned_entry = CleanupClassifier.send(
+        :classify_binding,
+        Type.new(:LateBound),
+        planned_decl,
+        schema_lookup_for,
+      )
+      expect(planned_entry.kind).to eq(:resource)
+      expect(planned_entry.resource_close_plan&.actions&.first&.name).to eq("closeLate")
     end
 
     it "recognizes MATCH TAKES method-style variants as owned AS bindings" do

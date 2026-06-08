@@ -7,7 +7,7 @@ require_relative 'fsm_wrapper_emitter'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
 # so the helpers share the lowering's explicit function/capture state and
-# core helpers (lower, emit_expr,
+# core helpers (lower,
 # with_fiber_capture_map, hoist_alloc, ...).
 #
 # Top-level FSM emission lives in src/mir/fsm_transform.rb +
@@ -15,10 +15,8 @@ require_relative 'fsm_wrapper_emitter'
 # liveness}.rb -- this file holds only what those need from the
 # rest of the lowering pipeline:
 #
-#   lower_step_stmts / emit_step_stmts -- AST stmt list -> MIR -> Zig
-#                                          text (consults
-#                                          capture_state.do_capture_map)
-#   render_mir_list                    -- shared MIREmitter wrapper
+#   lower_step_stmts                   -- AST stmt list -> MIR
+#                                          (consults capture_state.do_capture_map)
 #   fsm_cap_metadata                   -- per-cap lock-acquire metadata
 #                                          (try_method, alias_data_ref,
 #                                          retries) used by
@@ -67,7 +65,6 @@ module FsmLowering
   # stmt may set `__ctx_N.inner.result = ...;` (for non-void result
   # types). Mirrors the inner loop of lower_bg_block but exposed as a
   # helper so Phase B2 can call it twice (once for pre-stmts, once for
-  # post-stmts).
   # Lower a list of step statements to one logical MIR body. Value-producing
   # FSM segments keep the final result assignment in the same body as the
   # statements that created the value, so ownership finalization sees the
@@ -77,9 +74,7 @@ module FsmLowering
   # final expression's MIR plus any pending hoists, wrapped in a
   # typed MIR::Set assignment to ctx.inner.result. The strip-try
   # rewrite is applied to the lowered MIR via the existing
-  # `strip_try` helper.\n  #\n  # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
-  # below renders the same MIR to Zig text via MIREmitter. The
-  # recursive emit path uses emit_step_stmts.
+  # `strip_try` helper.
   sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Emittable]) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
@@ -393,32 +388,6 @@ module FsmLowering
     capture_state.current_fsm_owned_result_guards = prev_result_guards
     capture_state.current_fsm_inherited_guarded_names = T.must(prev_guard_names)
     capture_state.current_fsm_inherited_alloc_names = T.must(prev_alloc_names)
-  end
-
-  # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
-  # finalizes ownership once, then renders through MIREmitter.
-  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(String) }
-  def emit_step_stmts(stmts, no_result:, ctx_id: nil)
-    render_mir_list(lower_finalized_fsm_step_mir(stmts, no_result: no_result, ctx_id: ctx_id))
-  end
-  sig { params(mir_list: T::Array[MIR::Node]).returns(String) }
-  def render_mir_list(mir_list)
-    T.bind(self, MIRLowering) rescue nil
-    return "" if false || mir_list.empty?
-    emitter = runtime_state.emitter!
-    emitter.rt_name = runtime_binding_name
-    # `lower_var_decl` may return an Array of MIR nodes (e.g.
-    # [AllocMark, Let, Cleanup]) for cleanup-needing bindings. After
-    # the FreshHeapCopy capture wiring on master's BG path, this also
-    # arrives inside FSM-lowered fiber bodies (test 258 / 273 etc.).
-    # Flatten one level so each emit sees a single MIR node.
-    mir_list.flatten(1).filter_map { |n|
-      out = emitter.emit(n)
-      next nil if out.nil? || out.strip.empty?
-      stripped = out.strip
-      out = out + ";" if stripped.start_with?("try ") && !stripped.end_with?(";", "}")
-      out
-    }.join("\n            ")
   end
 
   # Resolve ONE capability's lock-acquire metadata. Returns

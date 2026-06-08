@@ -83,7 +83,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       promoted_decls: [],
       capture_inits: [],
       captured: {},
-      capture_close_zig: {},
+      capture_close_plans: {},
       pointer_captures: Set.new,
       extra_ctx_fields: [],
       recursive_promoted_names: [],

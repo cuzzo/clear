@@ -122,6 +122,7 @@ class MIREmitter
     when MIR::CapWrap          then emit_cap_wrap(node)
     when MIR::SharePromote     then emit_share_promote(node)
     when MIR::RcRetain         then emit_rc_retain(node)
+    when MIR::RcRelease        then emit_rc_release(node)
     when MIR::RcDowngrade      then emit_rc_downgrade(node)
     when MIR::WeakUpgrade      then emit_weak_upgrade(node)
     when MIR::FreezeExpr       then emit_freeze(node)
@@ -2006,7 +2007,7 @@ class MIREmitter
 
     case entry.kind
     when :resource
-      close = resource_close_body(T.must(entry.resource_close_zig), name)
+      close = render_resource_close_plan(T.must(entry.resource_close_plan), name)
       direct_cleanup_statement(name, close, guarded)
     else
       rc_alloc = entry.rc_alloc
@@ -2041,10 +2042,7 @@ class MIREmitter
 
     case entry.kind
     when :resource
-      # Schema-driven close hook: user-provided Zig snippet with `{0}` =
-      # the binding name. Future: lift into a deinit method on the type
-      # itself (requires wrapping raw-fd sockets as Zig structs).
-      close = resource_close_body(entry.resource_close_zig, name)
+      close = render_resource_close_plan(entry.resource_close_plan, name)
       guarded_defer(name, close, g, errdefer:)
 
     else
@@ -2177,6 +2175,11 @@ class MIREmitter
   sig { params(node: MIR::RcRetain).returns(String) }
   def emit_rc_retain(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
+  end
+
+  sig { params(node: MIR::RcRelease).returns(String) }
+  def emit_rc_release(node)
+    "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.alloc)}, #{emit(node.source)})"
   end
 
   sig { params(node: MIR::RcDowngrade).returns(String) }
@@ -2674,9 +2677,22 @@ class MIREmitter
     end
   end
 
-  sig { params(template: String, name: String).returns(String) }
-  def resource_close_body(template, name)
-    template.gsub("{0}", name).gsub("{rt}", @rt_name)
+  sig { params(plan: Schemas::ResourceClosePlan, root_name: String).returns(String) }
+  def render_resource_close_plan(plan, root_name)
+    plan.actions.map { |action| render_resource_close_action(action, root_name) }.join("; ")
+  end
+
+  sig { params(action: Schemas::ResourceCloseAction, root_name: String).returns(String) }
+  def render_resource_close_action(action, root_name)
+    target = ([root_name] + action.field_path).join(".")
+    runtime_args = Array.new(action.runtime_heap_alloc_args) { "#{@rt_name}.heapAlloc()" }
+    case action.call_kind
+    when Schemas::ResourceCloseCallKind::Method
+      "#{target}.#{action.name}(#{runtime_args.join(", ")})"
+    when Schemas::ResourceCloseCallKind::Function
+      args = [target] + runtime_args
+      "#{action.name}(#{args.join(", ")})"
+    end
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean).returns(String) }

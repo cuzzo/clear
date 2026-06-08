@@ -224,7 +224,7 @@ module MIRLoweringVariables
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
     is_mutable ||= ft.collection?
     is_mutable ||= ft.any_sync?
-    is_mutable ||= ft.resource? || node.resource_close_zig
+    is_mutable ||= ft.resource? || node.resource_close_plan
     is_mutable = false if ft.local?
     # Plain T bindings borrowed by reference need Zig `var`; otherwise
     # &binding produces *const T and the callee cannot write back.
@@ -249,7 +249,7 @@ module MIRLoweringVariables
     is_heap = placement.heap?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
-                          is_heap || ft.resource? || node.resource_close_zig
+                          is_heap || ft.resource? || node.resource_close_plan
     forced_var = is_mutable && has_mutable_cleanup
     forced_var = forced_var == true
     # Borrowed-by-reference bindings force Zig `var` even when local mutation
@@ -712,7 +712,7 @@ module MIRLoweringVariables
       AST.stamp_synthetic_type!(proxy, node.full_type!(context: "bind expression proxy"), context: "synthetic AST type")
       proxy.storage = node.storage
       proxy.slot_size = node.slot_size
-      proxy.resource_close_zig = node.resource_close_zig
+      proxy.resource_close_plan = node.resource_close_plan
       proxy.var_used = node.var_used
       proxy.container_borrow = node.container_borrow if node.respond_to?(:container_borrow) && proxy.respond_to?(:container_borrow=)
       proxy.symbol = node.symbol if node.respond_to?(:symbol) && proxy.respond_to?(:symbol=)

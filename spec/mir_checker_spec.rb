@@ -1864,12 +1864,11 @@ RSpec.describe MIRChecker do
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-ALLOC/)
     end
 
-    it "rejects resource destroy actions without a target placeholder" do
+    it "rejects resource destroy actions without a close plan" do
       entry = CleanupEntry.build(
         :resource,
         alloc: :heap,
         has_moved_guard: false,
-        resource_close_zig: "drop()",
       )
       structure = MIR::FsmStructure.new(
         [],
@@ -1883,15 +1882,15 @@ RSpec.describe MIRChecker do
 
       expect {
         MIRChecker.check_fsm_structure!(structure)
-      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-TEMPLATE/)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-PLAN/)
     end
 
-    it "rejects resource destroy actions with implicit runtime text" do
+    it "rejects resource destroy actions with an empty close plan" do
       entry = CleanupEntry.build(
         :resource,
         alloc: :heap,
         has_moved_guard: false,
-        resource_close_zig: "rt.close({0})",
+        resource_close_plan: Schemas::ResourceClosePlan.composite([]),
       )
       structure = MIR::FsmStructure.new(
         [],
@@ -1905,7 +1904,7 @@ RSpec.describe MIRChecker do
 
       expect {
         MIRChecker.check_fsm_structure!(structure)
-      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-RUNTIME/)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-RESOURCE-PLAN/)
     end
 
     it "rejects malformed guard and allocator expression fields" do

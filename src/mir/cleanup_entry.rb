@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
+require_relative "../ast/schemas"
 
 # CleanupEntry -- one binding's cleanup recipe, produced by
 # CleanupClassifier and consumed by MIRLowering / MIREmitter.
@@ -17,11 +18,11 @@ require "sorbet-runtime"
 # Field universe (all optional except kind/alloc/scope/needs_cleanup/
 # has_moved_guard, which `build` always sets):
 #   needs_cleanup alloc scope kind has_moved_guard match_as
-#   resource_close_zig rc_alloc base_zig needs_release_fields
+#   resource_close_plan rc_alloc base_zig needs_release_fields
 #   elem_needs_cleanup sync inner via_pointer source_kind
-# `resource_close_zig` uses `{0}` for the target value and `{rt}` for
-# runtime access, so FSM finalizers can bind cleanup to `__ctx_N.rt`
-# structurally instead of scanning emitted Zig text.
+# `resource_close_plan` is a structural list of close actions, so FSM
+# finalizers can bind cleanup to `__ctx_N.rt` structurally instead of
+# scanning emitted Zig text.
 class CleanupEntry < Hash
   extend T::Sig
   extend T::Generic
@@ -129,8 +130,8 @@ class CleanupEntry < Hash
   sig { returns(T.nilable(String)) }
   def base_zig = self[:base_zig]
 
-  sig { returns(T.nilable(String)) }
-  def resource_close_zig = self[:resource_close_zig]
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def resource_close_plan = self[:resource_close_plan]
 
   # The non-nil sentinel for "this binding needs no cleanup".
   # Replaces the old `nil` returned by an absent cleanup_bindings lookup.

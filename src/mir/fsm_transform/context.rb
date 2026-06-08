@@ -22,7 +22,7 @@ module FsmTransform
       const :promoted_decls, T::Array[MIR::Emittable]
       const :capture_inits, T::Array[MIR::StructInitField]
       const :captured, T::Hash[String, Object]
-      const :capture_close_zig, T::Hash[String, String]
+      const :capture_close_plans, T::Hash[String, Schemas::ResourceClosePlan]
       const :pointer_captures, T::Set[String]
       const :extra_ctx_fields, T::Array[MIR::ContextFieldDecl]
       const :recursive_promoted_names, T::Array[String]
@@ -52,7 +52,7 @@ module FsmTransform
           promoted_decls: promoted_decls,
           capture_inits: capture_inits,
           captured: captured,
-          capture_close_zig: capture_close_zig,
+          capture_close_plans: capture_close_plans,
           pointer_captures: pointer_captures,
           extra_ctx_fields: fields,
           recursive_promoted_names: recursive_promoted_names,

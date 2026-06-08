@@ -1754,18 +1754,11 @@ class MIRChecker
     end
 
     if entry.kind == :resource
-      close_zig = entry.resource_close_zig
-      unless close_zig && close_zig.include?("{0}")
+      close_plan = entry.resource_close_plan
+      unless close_plan && !close_plan.empty?
         raise FsmStructureError, format_fsm_error(
-          "INV-FSM-DESTROY-RESOURCE-TEMPLATE",
-          "resource cleanup '#{action.name}' must carry a close template with {0}.",
-          source,
-        )
-      end
-      if close_zig.include?("rt.")
-        raise FsmStructureError, format_fsm_error(
-          "INV-FSM-DESTROY-RESOURCE-RUNTIME",
-          "resource cleanup '#{action.name}' must use {rt} for runtime access.",
+          "INV-FSM-DESTROY-RESOURCE-PLAN",
+          "resource cleanup '#{action.name}' must carry at least one close action.",
           source,
         )
       end

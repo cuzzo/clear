@@ -923,10 +923,10 @@ module AST
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
     def slot_size=(val); instance_variable_set(:@slot_size, val); end
 
-    sig { returns(T.nilable(String)) }
-    def resource_close_zig; T.cast(instance_variable_get(:@resource_close_zig), T.nilable(String)); end
-    sig { params(val: T.nilable(String)).returns(T.nilable(String)) }
-    def resource_close_zig=(val); instance_variable_set(:@resource_close_zig, val); end
+    sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+    def resource_close_plan; T.cast(instance_variable_get(:@resource_close_plan), T.nilable(Schemas::ResourceClosePlan)); end
+    sig { params(val: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
+    def resource_close_plan=(val); instance_variable_set(:@resource_close_plan, val); end
 
     sig { returns(T.nilable(T::Boolean)) }
     def can_fail; T.cast(instance_variable_get(:@can_fail), T.nilable(T::Boolean)); end
@@ -2632,7 +2632,7 @@ module MIR
   #                    :takes_string, :takes_slice
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
-  # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit({rt}.heapAlloc())")
+  # resource_close_plan: structural close/deinit plan for :resource kind.
   # MIR::Drop carries a cleanup_entry that captures the full classifier
   # output (zig_type / alloc / has_moved_guard / kind side-channels). The
   # raw Struct fields (token, name) are the marker; everything cleanup-

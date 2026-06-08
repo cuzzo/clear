@@ -603,7 +603,12 @@ RSpec.describe MIREmitter do
     end
 
     it "emits resource cleanup" do
-      entry = CleanupEntry.from({ kind: :resource, alloc: :heap, has_moved_guard: false, resource_close_zig: "{0}.deinit()" })
+      entry = CleanupEntry.from({
+        kind: :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_plan: Schemas::ResourceClosePlan.method("deinit"),
+      })
       node = MIR::Cleanup.new("conn", entry)
       zig = e.emit(node)
       expect(zig).to include("defer conn.deinit();")
@@ -611,11 +616,35 @@ RSpec.describe MIREmitter do
 
     it "emits direct resource cleanup with the active runtime binding" do
       e.rt_name = "__ctx_9.rt"
-      entry = CleanupEntry.build(:resource, alloc: :heap, has_moved_guard: false, resource_close_zig: "{rt}.close({0})")
+      entry = CleanupEntry.build(
+        :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_plan: Schemas::ResourceClosePlan.method("deinit", runtime_heap_alloc_args: 1),
+      )
 
       zig = e.emit_direct_cleanup("__ctx_9.file", entry)
 
-      expect(zig).to eq("__ctx_9.rt.close(__ctx_9.file);")
+      expect(zig).to eq("__ctx_9.file.deinit(__ctx_9.rt.heapAlloc());")
+    end
+
+    it "emits structural rc release and function resource cleanup at the final edge" do
+      release = MIR::RcRelease.new(
+        MIR::FieldGet.new(MIR::Ident.new("ctx"), "shared"),
+        "Payload",
+        "arcRelease",
+        MIR::Ident.new("std.heap.page_allocator"),
+      )
+      expect(e.emit(release)).to eq("CheatLib.arcRelease(Payload, std.heap.page_allocator, ctx.shared)")
+
+      e.rt_name = "rt"
+      entry = CleanupEntry.build(
+        :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_plan: Schemas::ResourceClosePlan.function("closeHandle", runtime_heap_alloc_args: 1),
+      )
+      expect(e.emit_direct_cleanup("handle", entry)).to eq("closeHandle(handle, rt.heapAlloc());")
     end
 
     it "emits direct guarded cleanup with an allocator override" do

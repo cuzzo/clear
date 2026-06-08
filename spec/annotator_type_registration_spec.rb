@@ -59,7 +59,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
 
     resource_schema = scope.types.fetch(:Handle).fetch(:schema)
     expect(resource_schema).to be_a(Schemas::ResourceSchema)
-    expect(resource_schema.close_zig).to eq("{0}.close()")
+    expect(resource_schema.close_plan.actions.map(&:name)).to eq(["close"])
     expect(resource.full_type!.resolved).to eq(:Void)
   end
 

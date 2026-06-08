@@ -16,12 +16,12 @@ require_relative "../semantic/capture_strategy"
 #   init:       `.name = name`
 #   body access: `<prefix>.name`
 #
-# FreshHeapCopy captures may override the field/init shape; see below.
+# FreshHeapCopy captures may override the field/init shape with MIR setup
+# nodes and a typed cleanup plan; see below.
 #
 # This builder produces a normalized list of CaptureSpec entries that
-# each callsite can render either as a Zig string (BG / BG STREAM /
-# DO use Zig templates) or as MIR nodes (CONCURRENT pipeline_host
-# uses MIR::StructDef / MIR::StructInit). The capture_map and
+# each callsite can lower into structural context fields, initializers,
+# setup nodes, and cleanup nodes. The capture_map and
 # capture_symbols outputs feed `with_fiber_capture_map` so body
 # lowerings (especially WITH EXCLUSIVE's Arc-vs-bare dispatch) read the
 # live SymbolEntry.
@@ -43,15 +43,15 @@ require_relative "../semantic/capture_strategy"
 # When a capture's strategy is `CaptureStrategy::FreshHeapCopy` (user
 # wrote `COPY x` inside the body), the builder produces:
 #
-#   * a `dupe_var` (a unique pre-spawn local) and a `dupe_decl_zig`
-#     fragment that the callsite emits BEFORE the ctx init:
-#       `const __fc_<id>_<name> = try CheatLib.dupeValue(@TypeOf(<name>), <name>, <alloc>);
-#        errdefer CheatLib.cleanup(@TypeOf(__fc_<id>_<name>), <alloc>, &__fc_<id>_<name>);`
-#   * `init_value_zig` switches to reference the dupe_var instead of
-#     the raw capture name
-#   * `body_cleanup_zig` carries a `defer CheatLib.cleanup(...)` that
-#     the callsite injects INTO the run function so the duped value
-#     is released on every exit (success or error).
+#   * a `dupe_var` (a unique pre-spawn local) and MIR setup nodes that
+#     the callsite emits BEFORE the ctx init:
+#       const __fc_<id>_<name> = try CheatLib.dupeCaptured(...)
+#       errdefer CheatLib.cleanup(...)
+#   * the initializer switches to the dupe_var instead of the raw
+#     capture name
+#   * a typed cleanup plan asks callsites to inject a structural
+#     `defer` MIR node INTO the run function so the duped value is
+#     released on every exit (success or error).
 #
 # This works today for plain structs / strings (which `dupeValue`
 # handles via its comptime walk over fields). Collections with
@@ -61,23 +61,91 @@ require_relative "../semantic/capture_strategy"
 module FiberCtxBuilder
     extend T::Sig
 
-  # name           : String              -- captured outer-scope name
-  # field_type_zig : String              -- Zig type expression for the ctx field
-  # init_value_zig : String              -- Zig expression for the field init
-  # init_value_mir : MIR::Ident-or-other -- MIR node form of the same init
-  # dupe_decl_zig  : String?             -- pre-spawn dupe decl (FreshHeapCopy only)
-  # body_cleanup_zig : String?           -- in-body cleanup defer (FreshHeapCopy only)
-  CaptureSpec = Struct.new(:name, :field_type_zig, :init_value_zig, :init_value_mir,
-                           :dupe_decl_zig, :body_cleanup_zig, :setup_mir,
-                           :release_func, :payload_zig) do
+  class CaptureCleanupKind < T::Enum
+    enums do
+      None = new("none")
+      CapturedValue = new("captured_value")
+      UniformValue = new("uniform_value")
+      RcRelease = new("rc_release")
+    end
+  end
+
+  class CaptureRcKind < T::Enum
     extend T::Sig
+
+    enums do
+      Rc = new("rc")
+      Arc = new("arc")
+    end
+
+    sig { returns(String) }
+    def retain_func
+      self == Arc ? "arcRetain" : "rcRetain"
+    end
+
+    sig { returns(String) }
+    def release_func
+      self == Arc ? "arcRelease" : "rcRelease"
+    end
+  end
+
+  class CaptureCleanupPlan < T::Struct
+    extend T::Sig
+
+    const :kind, CaptureCleanupKind
+    const :mirror_type, T.nilable(Type), default: nil
+    const :rc_kind, T.nilable(CaptureRcKind), default: nil
+    const :rc_payload_type_zig, T.nilable(String), default: nil
+
+    sig { returns(CaptureCleanupPlan) }
+    def self.none
+      new(kind: CaptureCleanupKind::None)
+    end
+
+    sig { returns(T::Boolean) }
+    def none?
+      kind == CaptureCleanupKind::None
+    end
+
+    sig { returns(T::Boolean) }
+    def guarded?
+      !none?
+    end
+
+    sig { returns(T::Boolean) }
+    def captured_value?
+      kind == CaptureCleanupKind::CapturedValue
+    end
+
+    sig { returns(T::Boolean) }
+    def rc_release?
+      kind == CaptureCleanupKind::RcRelease
+    end
+
+    sig { returns(T::Boolean) }
+    def emits_cleanup?
+      kind != CaptureCleanupKind::None
+    end
+  end
+
+  class CaptureSpec < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :field_type_zig, String
+    const :init_value_mir, MIR::Emittable
+    const :setup_mir, T::Array[MIR::Emittable]
+    const :cleanup_plan, CaptureCleanupPlan
 
     sig { params(receiver: String).returns(T.nilable(MIR::DeferStmt)) }
     def cleanup_mir_for(receiver)
+      return nil unless cleanup_plan.emits_cleanup?
+
       receiver_expr = MIR::Ident.new(receiver)
       captured_field = MIR::FieldGet.new(receiver_expr, name)
       moved_guard = MIR::FieldGet.new(receiver_expr, "#{name}_moved")
-      if body_cleanup_zig && field_type_zig.start_with?("CheatLib.CapturedValue(") && !(release_func && payload_zig)
+      if cleanup_plan.kind == CaptureCleanupKind::CapturedValue ||
+          cleanup_plan.kind == CaptureCleanupKind::UniformValue
         cleanup_call = MIR::Call.new(
           "CheatLib.cleanup",
           [
@@ -96,32 +164,50 @@ module FiberCtxBuilder
         ))
       end
 
-      return nil unless release_func && payload_zig
+      return nil unless cleanup_plan.rc_release?
 
-      MIR::DeferStmt.new(MIR::Call.new(
-        "CheatLib.#{release_func}",
-        [
-          MIR::Ident.new(T.cast(payload_zig, String)),
-          MIR::Ident.new("std.heap.page_allocator"),
-          MIR::Ident.new("#{receiver}.#{name}"),
-        ],
-        false,
-        false,
-        MIR::CallableContract.no_ownership(3),
+      rc_kind = T.must(cleanup_plan.rc_kind)
+      payload_type_zig = T.must(cleanup_plan.rc_payload_type_zig)
+
+      MIR::DeferStmt.new(MIR::RcRelease.new(
+        captured_field,
+        payload_type_zig,
+        rc_kind.release_func,
+        MIR::Ident.new("std.heap.page_allocator"),
       ))
+    end
+
+    sig { returns(T::Boolean) }
+    def requires_setup?
+      !setup_mir.empty?
+    end
+
+    sig { returns(T::Boolean) }
+    def needs_moved_guard?
+      cleanup_plan.guarded?
+    end
+
+    sig { returns(T.nilable(Type)) }
+    def cleanup_mirror_type
+      cleanup_plan.mirror_type
     end
   end
 
   # specs                : Array<CaptureSpec>
   # capture_map          : Hash<name => "<prefix>.name"> for body identifier rewrites
   # capture_symbols      : Hash<name => SymbolEntry> live entries for storage/sync queries
-  # has_fresh_heap_copy? : true if any spec carries dupe_decl_zig (callsite must emit
-  #                        the pre-spawn decls and inject the body cleanups)
-  Result = Struct.new(:specs, :capture_map, :capture_symbols) do
+  # has_fresh_heap_copy? : true if any spec has setup nodes and a cleanup
+  #                        plan that moves ownership into the fiber body.
+  class Result < T::Struct
     extend T::Sig
+
+    const :specs, T::Array[CaptureSpec]
+    const :capture_map, T::Hash[String, String]
+    const :capture_symbols, T::Hash[String, SymbolEntry]
+
     sig { returns(T::Boolean) }
     def has_fresh_heap_copy?
-      specs.any? { |s| s.dupe_decl_zig }
+      specs.any? { |s| s.cleanup_plan.captured_value? && s.requires_setup? }
     end
   end
 
@@ -151,18 +237,18 @@ module FiberCtxBuilder
     specs = captured.map do |name, _type_obj|
       strat = strategies[name]
       if promoted_names[name]
-        CaptureSpec.new(name, "[]const u8", promoted_names[name],
-                        MIR::Ident.new(promoted_names[name]), nil, nil, nil, nil, nil)
+        CaptureSpec.new(
+          name: name,
+          field_type_zig: "[]const u8",
+          init_value_mir: MIR::Ident.new(promoted_names[name]),
+          setup_mir: [],
+          cleanup_plan: CaptureCleanupPlan.none,
+        )
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
         source_mir = MIR::Ident.new(source_ref)
         needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup)
-        # ctx field type and dupe return type must be the same
-        # expression (CapturedValue) so they cannot diverge for a
-        # `*const T` borrowed-param source.
-        dupe_decl = "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});"
-        dupe_decl += "\n        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});" if needs_cleanup
         setup_mir = T.let([
           MIR::Let.new(
             dupe_var,
@@ -191,43 +277,61 @@ module FiberCtxBuilder
             MIR::CallableContract.no_ownership(3),
           ))
         end
-        body_cleanup = if needs_cleanup
-          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
-          "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
-        end
-        CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
-                        MIR::Ident.new(dupe_var), dupe_decl, body_cleanup, setup_mir, nil, nil)
+        cleanup_plan = needs_cleanup ? CaptureCleanupPlan.new(
+          kind: CaptureCleanupKind::CapturedValue,
+          mirror_type: Type.new(:CapturedValue, location: :heap),
+        ) : CaptureCleanupPlan.none
+        CaptureSpec.new(
+          name: name,
+          field_type_zig: "CheatLib.CapturedValue(@TypeOf(#{source_ref}))",
+          init_value_mir: MIR::Ident.new(dupe_var),
+          setup_mir: setup_mir,
+          cleanup_plan: cleanup_plan,
+        )
       elsif strat.is_a?(CaptureStrategy::RcClone)
         retain_var = "__fc_#{fresh_heap_id}_#{name}_retain"
         source_ref = source_overrides[name] || name
         ti = _type_obj.is_a?(Type) ? _type_obj : Type.new(_type_obj)
         sym = analysis&.capture_symbols&.dig(name)
         shared_capture = ti.shared? || sym&.storage == :shared
-        func = shared_capture ? "arcRetain" : "rcRetain"
-        release = shared_capture ? "arcRelease" : "rcRelease"
-        payload_zig = rc_payload_zig_type(ti)
-        retain_decl = "const #{retain_var} = CheatLib.#{func}(#{payload_zig}, #{source_ref});"
-        body_cleanup =
-          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.#{release}(#{payload_zig}, std.heap.page_allocator, " \
-          "#{body_access_prefix}.#{name});"
+        rc_kind = shared_capture ? CaptureRcKind::Arc : CaptureRcKind::Rc
+        payload_type_zig = rc_payload_zig_type(ti)
         retain_setup_mir = T.let([MIR::Let.new(retain_var, MIR::Call.new(
-          "CheatLib.#{func}",
-          [MIR::Ident.new(payload_zig), MIR::Ident.new(source_ref)],
+          "CheatLib.#{rc_kind.retain_func}",
+          [MIR::Ident.new(payload_type_zig), MIR::Ident.new(source_ref)],
           false,
           false,
           MIR::CallableContract.no_ownership(2),
         ), false, nil, nil)], T::Array[MIR::Emittable])
-        CaptureSpec.new(name, "@TypeOf(#{source_ref})", retain_var,
-                        MIR::Ident.new(retain_var), retain_decl, body_cleanup,
-                        retain_setup_mir, release, payload_zig)
+        CaptureSpec.new(
+          name: name,
+          field_type_zig: "@TypeOf(#{source_ref})",
+          init_value_mir: MIR::Ident.new(retain_var),
+          setup_mir: retain_setup_mir,
+          cleanup_plan: CaptureCleanupPlan.new(
+            kind: CaptureCleanupKind::RcRelease,
+            mirror_type: Type.new(ti).tap { |t| t.apply_reference_ownership!(shared_capture ? :shared : :multiowned) },
+            rc_kind: rc_kind,
+            rc_payload_type_zig: payload_type_zig,
+          ),
+        )
       elsif strat.is_a?(CaptureStrategy::MoveInto)
         source_ref = source_overrides[name] || name
-        cleanup = if needs_move_capture_cleanup?(_type_obj, schema_lookup)
-                    "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
-                    "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
-                  end
-        CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
-                        MIR::Ident.new(source_ref), nil, cleanup, nil, nil, nil)
+        cleanup_plan = if needs_move_capture_cleanup?(_type_obj, schema_lookup)
+                         CaptureCleanupPlan.new(
+                           kind: CaptureCleanupKind::UniformValue,
+                           mirror_type: Type.new(_type_obj.is_a?(Type) ? _type_obj : Type.new(_type_obj)),
+                         )
+                       else
+                         CaptureCleanupPlan.none
+                       end
+        CaptureSpec.new(
+          name: name,
+          field_type_zig: "@TypeOf(#{source_ref})",
+          init_value_mir: MIR::Ident.new(source_ref),
+          setup_mir: [],
+          cleanup_plan: cleanup_plan,
+        )
       elsif pointer_captures.include?(name)
         source_ref = source_overrides[name] || name
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
@@ -249,20 +353,35 @@ module FiberCtxBuilder
         # through (parameters are Zig-const, so `&pool` is `*const T`).
         sym = analysis&.capture_symbols&.dig(name)
         if sym&.is_param
-          CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
-                          MIR::Ident.new(source_ref), nil, nil, nil, nil, nil)
+          CaptureSpec.new(
+            name: name,
+            field_type_zig: "@TypeOf(#{source_ref})",
+            init_value_mir: MIR::Ident.new(source_ref),
+            setup_mir: [],
+            cleanup_plan: CaptureCleanupPlan.none,
+          )
         else
-          CaptureSpec.new(name, "@TypeOf(&#{source_ref})", "&#{source_ref}",
-                          MIR::AddressOf.new(MIR::Ident.new(source_ref)), nil, nil, nil, nil, nil)
+          CaptureSpec.new(
+            name: name,
+            field_type_zig: "@TypeOf(&#{source_ref})",
+            init_value_mir: MIR::AddressOf.new(MIR::Ident.new(source_ref)),
+            setup_mir: [],
+            cleanup_plan: CaptureCleanupPlan.none,
+          )
         end
       else
         source_ref = source_overrides[name] || name
-        CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
-                        MIR::Ident.new(source_ref), nil, nil, nil, nil, nil)
+        CaptureSpec.new(
+          name: name,
+          field_type_zig: "@TypeOf(#{source_ref})",
+          init_value_mir: MIR::Ident.new(source_ref),
+          setup_mir: [],
+          cleanup_plan: CaptureCleanupPlan.none,
+        )
       end
     end
     map = captured.keys.to_h { |n| [n, "#{body_access_prefix}.#{n}"] }
-    Result.new(specs, map, analysis&.capture_symbols || {})
+    Result.new(specs: specs, capture_map: map, capture_symbols: analysis&.capture_symbols || {})
   end
 
   sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }

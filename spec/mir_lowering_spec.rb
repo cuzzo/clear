@@ -76,7 +76,7 @@ RSpec.describe MIRLowering do
     node
   end
 
-  def capture_analysis(captures: {}, capture_symbols: {}, close_patterns: {},
+  def capture_analysis(captures: {}, capture_symbols: {}, close_plans: {},
                        pointer_captures: Set.new, string_captures: Set.new,
                        resource_captures: Set.new, strategies: {})
     typed_captures = captures.to_h { |name, type| [name.to_s, type.is_a?(Type) ? type : Type.new(type)] }
@@ -85,7 +85,7 @@ RSpec.describe MIRLowering do
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
       captures: typed_captures, capture_symbols: capture_symbols,
-      close_patterns: close_patterns,
+      close_plans: close_plans,
       pointer_captures: pointer_captures, string_captures: string_captures,
       resource_captures: resource_captures,
       site_moved: Set.new, site_copied: Set.new,
@@ -289,7 +289,7 @@ RSpec.describe MIRLowering do
         body: body,
         scheduler: scheduler,
         captured: {},
-        capture_close_zig: {},
+        capture_close_plans: {},
         pointer_captures: Set.new,
         rt_name: "rt",
       )
@@ -323,7 +323,7 @@ RSpec.describe MIRLowering do
         names,
         nil,
         { "map" => Type.new(:StringMap) },
-        { "map" => "{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())" },
+        { "map" => Schemas::ResourceClosePlan.method("deinit", runtime_heap_alloc_args: 2) },
         Set.new,
       )
 
@@ -2960,7 +2960,7 @@ RSpec.describe MIRLowering do
       nested_analysis = capture_analysis(
         captures: { "inner" => :Int64 },
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set.new
@@ -2972,7 +2972,7 @@ RSpec.describe MIRLowering do
       branch_analysis = capture_analysis(
         captures: {},
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set.new
@@ -3076,7 +3076,7 @@ RSpec.describe MIRLowering do
       analysis = capture_analysis(
         captures: captures_hash,
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new(["x"]),
         string_captures: Set.new,
         resource_captures: Set.new
@@ -3101,7 +3101,7 @@ RSpec.describe MIRLowering do
       analysis = capture_analysis(
         captures: { "x" => :Int64 },
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set["x"],
         string_captures: Set.new,
         resource_captures: Set.new

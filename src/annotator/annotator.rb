@@ -486,10 +486,10 @@ private
     # Built-in File resource type
     # bc/bc_op marks the static methods as VM-dispatchable so the lowering
     # produces a structural MIR::InlineBc that both backends consume. The
-    # close_zig template carries to the resource's MIR::Cleanup unchanged
+    # close_plan carries to the resource's MIR::Cleanup unchanged
     # (Zig defers it; BC ignores -- the VM has no fd-style close).
     current_scope.declare_type(:File, Schemas::ResourceSchema.new(
-      close_zig: "{0}.close()",
+      close_plan: Schemas::ResourceClosePlan.method("close"),
       static_methods: {
         "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})",
                        bc: true, bc_op: :file_open, can_fail: true },
@@ -501,7 +501,7 @@ private
     # Built-in TCPServer resource type — a non-blocking server socket (i32 fd).
     # TCPServer::listen(port) returns the server fd; auto-closes via RAII.
     current_scope.declare_type(:TCPServer, Schemas::ResourceSchema.new(
-      close_zig: "CheatLib.socketClose({0})",
+      close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
       static_methods: {
         "listen" => { args: [:Int64], return: :TCPServer, zig: "try CheatLib.socketListen(@intCast({0}))", can_fail: true }
       }
@@ -511,7 +511,7 @@ private
     # Produced by accept(server) or TCPClient::connect(host, port).
     # Auto-closes via RAII.
     current_scope.declare_type(:TCPClient, Schemas::ResourceSchema.new(
-      close_zig: "CheatLib.socketClose({0})",
+      close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
       static_methods: {
         "connect" => { args: [:String, :Int64], return: :TCPClient,
                        zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true }

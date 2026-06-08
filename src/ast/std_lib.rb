@@ -309,9 +309,9 @@ STD_LIB = T.let({
     # lowering must teach MIR/promotion-plan that the FSM-lowered BG
     # result owns heap data so the consumer auto-cleans.
     fsm_state_decls: [
-      FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
-      FsmOps::StateFieldDecl.new("rf_buf", "[]u8", "&[_]u8{}"),
-      FsmOps::StateFieldDecl.new("rf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+      FsmOps::StateFieldDecl.new(name: "rf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+      FsmOps::StateFieldDecl.new(name: "rf_buf", zig_type: "[]u8", default_value: MIR::AddressOf.new(MIR::ArrayInit.new("u8", "_", []))),
+      FsmOps::StateFieldDecl.new(name: "rf_waiter", zig_type: "CheatHeader.FsmIoWaiter", default_value: MIR::Undef.new(nil)),
     ],
     fsm_setup: [
       # ctx.rf_fd = try fsmOpenForRead(path)
@@ -373,8 +373,8 @@ STD_LIB = T.let({
     # returns less than full length is truncated. Force stackful via
     # @xl when partial-write robustness is required.
     fsm_state_decls: [
-      FsmOps::StateFieldDecl.new("wf_fd", "i32", "-1"),
-      FsmOps::StateFieldDecl.new("wf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+      FsmOps::StateFieldDecl.new(name: "wf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+      FsmOps::StateFieldDecl.new(name: "wf_waiter", zig_type: "CheatHeader.FsmIoWaiter", default_value: MIR::Undef.new(nil)),
     ],
     fsm_setup: [
       FO.assign_field("wf_fd",

@@ -66,8 +66,6 @@ module MIRLoweringConcurrency
     const :caps, FiberCtxBuilder::Result
     const :capture_fields, T::Array[MIR::ContextFieldDecl]
     const :capture_inits, T::Array[MIR::StructInitField]
-    const :fresh_heap_decls, String
-    const :fresh_heap_cleanups, String
     const :fresh_heap_cleanup_names, T::Array[String]
     const :capture_frees, T::Array[MIR::CaptureCleanupAction]
     const :promoted_decls, T::Array[MIR::Emittable]
@@ -95,7 +93,7 @@ module MIRLoweringConcurrency
     const :body, BgBodyMaterialization
     const :scheduler, BgSchedulerPlan
     const :captured, T::Hash[String, Type]
-    const :capture_close_zig, T::Hash[String, String]
+    const :capture_close_plans, T::Hash[String, Schemas::ResourceClosePlan]
     const :pointer_captures, T::Set[String]
     const :rt_name, String
 
@@ -110,7 +108,7 @@ module MIRLoweringConcurrency
       result[:bg_rt] = names.bg_rt
       result[:capture_fields] = capture.capture_fields
       result[:captured] = captured
-      result[:capture_close_zig] = capture_close_zig
+      result[:capture_close_plans] = capture_close_plans
       result[:pointer_captures] = pointer_captures
       result[:stmt_code] = body.stmt_code
       result[:result_line] = body.result_line
@@ -198,18 +196,17 @@ module MIRLoweringConcurrency
     capture_state.current_stream_is_inf = prev_stream_is_inf
   end
 
-  sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_patterns: T::Hash[String, String]).returns(T::Array[MIR::Stmt]) }
-  def capture_ownership_mirror_nodes(caps, analysis, receiver, close_patterns = {})
+  sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
+  def capture_ownership_mirror_nodes(caps, analysis, receiver, close_plans = {})
     captured = T.let(analysis ? analysis.captures : {}, T::Hash[String, Type])
     caps.specs.filter_map do |spec|
-      next nil unless spec.body_cleanup_zig
-      next nil if close_patterns.key?(spec.name)
-      next nil unless spec.field_type_zig.start_with?("CheatLib.CapturedValue(") || spec.release_func
+      next nil unless spec.needs_moved_guard?
+      next nil if close_plans.key?(spec.name)
 
       raw_type = captured[spec.name]
       type_info = raw_type.is_a?(Type) ? Type.new(raw_type) : Type.new(raw_type || :Any)
       next nil if type_info.resource?
-      type_info = Type.new(:CapturedValue, location: :heap) if spec.field_type_zig.start_with?("CheatLib.CapturedValue(")
+      type_info = spec.cleanup_mirror_type || type_info
       name = "#{receiver}.#{spec.name}"
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
       mark = MIR::AllocMark.new(name, :heap, type_info, :heap)
@@ -220,7 +217,7 @@ module MIRLoweringConcurrency
   sig { params(specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(T::Array[MIR::ContextFieldDecl]) }
   def capture_moved_guard_fields(specs)
     specs.filter_map do |spec|
-      next nil unless spec.body_cleanup_zig
+      next nil unless spec.needs_moved_guard?
 
       MIR::ContextFieldDecl.new(
         name: "#{spec.name}_moved",
@@ -243,8 +240,7 @@ module MIRLoweringConcurrency
   sig { params(specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(T::Array[MIR::Emittable]) }
   def capture_setup_stmts(specs)
     specs.flat_map do |spec|
-      setup = spec.setup_mir
-      setup.is_a?(Array) ? setup : [setup].compact
+      spec.setup_mir
     end
   end
 
@@ -465,17 +461,17 @@ module MIRLoweringConcurrency
     types = bg_type_plan(node)
     analysis = node.capture_analysis
     captured = T.let(analysis ? analysis.captures : {}, T::Hash[String, Type])
-    capture_close_zig = T.let(analysis ? analysis.close_patterns : {}, T::Hash[String, String])
+    capture_close_plans = T.let(analysis ? analysis.close_plans : {}, T::Hash[String, Schemas::ResourceClosePlan])
     pointer_captures = T.let(analysis ? analysis.pointer_captures : Set.new, T::Set[String])
     rt_name = runtime_binding_name
 
     enforce_bg_capture_strategies!(node, captured)
     capture = bg_capture_materialization(
-      names, analysis, captured, capture_close_zig, pointer_captures
+      names, analysis, captured, capture_close_plans, pointer_captures
     )
     body = bg_body_materialization(
       node, capture.caps, analysis, pointer_captures,
-      names.bg_rt, id, types.is_void, types.inner_type, capture_close_zig
+      names.bg_rt, id, types.is_void, types.inner_type, capture_close_plans
     )
     scheduler = bg_scheduler_plan(node, names, rt_name)
 
@@ -488,7 +484,7 @@ module MIRLoweringConcurrency
         body: body,
         scheduler: scheduler,
         captured: captured,
-        capture_close_zig: capture_close_zig,
+        capture_close_plans: capture_close_plans,
         pointer_captures: pointer_captures,
         rt_name: rt_name,
       )
@@ -534,11 +530,11 @@ module MIRLoweringConcurrency
       names: BgLoweringNames,
       analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
       captured: T::Hash[String, Type],
-      capture_close_zig: T::Hash[String, String],
+      capture_close_plans: T::Hash[String, Schemas::ResourceClosePlan],
       pointer_captures: T::Set[String],
     ).returns(BgCaptureMaterialization)
   end
-  def bg_capture_materialization(names, analysis, captured, capture_close_zig, pointer_captures)
+  def bg_capture_materialization(names, analysis, captured, capture_close_plans, pointer_captures)
     T.bind(self, MIRLowering) rescue nil
     promoted_names = T.let({}, T::Hash[String, String])
     outer_capture_map = fiber_capture_source_overrides(analysis, capture_state.do_capture_map || {})
@@ -559,7 +555,7 @@ module MIRLoweringConcurrency
     # FreshHeapCopy dupes already point to a local generated above the
     # spawn, so they don't need rewriting.
     capture_fields = caps.specs.map { |s|
-      ftype = if s.dupe_decl_zig || promoted_names[s.name] || outer_capture_map[s.name].nil?
+      ftype = if s.requires_setup? || promoted_names[s.name] || outer_capture_map[s.name].nil?
                 s.field_type_zig
               else
                 # @TypeOf(<outer_ref>) so the field type resolves under the
@@ -575,7 +571,7 @@ module MIRLoweringConcurrency
       context_init_field(:alloc, MIR::Ident.new(names.alloc_var)),
     ] + caps.specs.map { |s|
       outer_ref = outer_capture_map[s.name]
-      init_val = if s.dupe_decl_zig || promoted_names[s.name] || outer_ref.nil?
+      init_val = if s.requires_setup? || promoted_names[s.name] || outer_ref.nil?
                    s.init_value_mir
                  elsif pointer_captures.include?(s.name)
                    s.init_value_mir
@@ -585,19 +581,17 @@ module MIRLoweringConcurrency
       context_init_field(s.name, init_val)
     }
     setup_stmts = capture_setup_stmts(caps.specs)
-    fresh_heap_decls = render_mir_list(setup_stmts).gsub("\n", "\n        ")
-    fresh_heap_cleanups = ""
-    fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? spec.name : nil }
+    fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.needs_moved_guard? ? spec.name : nil }
     capture_frees = captured.filter_map { |name, _|
-      close_zig = capture_close_zig[name]
-      if close_zig
+      close_plan = capture_close_plans[name]
+      if close_plan
         MIR::CaptureCleanupAction.new(
           target: MIR::FieldGet.new(MIR::Ident.new("__ctx_#{names.id}"), name.to_s),
           cleanup_entry: CleanupEntry.build(
             :resource,
             alloc: :heap,
             has_moved_guard: false,
-            resource_close_zig: close_zig,
+            resource_close_plan: close_plan,
           ),
         )
       end
@@ -607,8 +601,6 @@ module MIRLoweringConcurrency
       caps: caps,
       capture_fields: capture_fields,
       capture_inits: capture_inits,
-      fresh_heap_decls: fresh_heap_decls,
-      fresh_heap_cleanups: fresh_heap_cleanups,
       fresh_heap_cleanup_names: fresh_heap_cleanup_names,
       capture_frees: capture_frees,
       promoted_decls: setup_stmts,
@@ -777,10 +769,10 @@ module MIRLoweringConcurrency
       id: MIRLoweringGeneratedId,
       is_void: T::Boolean,
       inner_t: Type,
-      capture_close_zig: T::Hash[String, String],
+      capture_close_plans: T::Hash[String, Schemas::ResourceClosePlan],
     ).returns(BgBodyMaterialization)
   end
-  def bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t, capture_close_zig)
+  def bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t, capture_close_plans)
     T.bind(self, MIRLowering) rescue nil
     run_body = T.let([], T::Array[MIR::Node])
     stmt_code, result_line = with_bg_fiber_body_context(pointer_captures) do
@@ -789,7 +781,7 @@ module MIRLoweringConcurrency
                              rt_override: bg_rt) do
         lowered = lower_bg_body_steps(node, id, is_void, inner_t)
         run_body = finalized_boundary_body_for_emit(
-          capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}", capture_close_zig) +
+          capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}", capture_close_plans) +
             capture_cleanup_stmts(caps.specs, "__ctx_#{id}") +
             lowered.run_body
         )
@@ -1030,7 +1022,7 @@ module MIRLoweringConcurrency
     stream_run_body = T.let(nil, T.untyped)
     stream_emit_body = T.let([], T::Array[MIR::Node])
     stream_capture_cleanups = capture_cleanup_stmts(caps.specs, "ctx")
-    inherited_capture_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? "ctx.#{spec.name}" : nil }.to_set
+    inherited_capture_names = caps.specs.filter_map { |spec| spec.needs_moved_guard? ? "ctx.#{spec.name}" : nil }.to_set
     prev_stream_inherited_allocs = capture_state.current_fsm_inherited_alloc_names
     with_stream_body_context(local_stream, is_inf) do
       begin

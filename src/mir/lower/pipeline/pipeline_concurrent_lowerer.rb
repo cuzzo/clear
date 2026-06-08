@@ -526,9 +526,9 @@ class PipelineConcurrentLowerer < T::Struct
     id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
-    specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
-    capture_map = T.cast(caps.capture_map, T::Hash[String, String])
-    capture_symbols = T.cast(caps.capture_symbols, T::Hash[String, SymbolEntry])
+    specs = caps.specs
+    capture_map = caps.capture_map
+    capture_symbols = caps.capture_symbols
 
     fields = specs.map { |s| capture_field_def(s, capture_symbols) }
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)
@@ -1035,9 +1035,9 @@ class PipelineConcurrentLowerer < T::Struct
     id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
-    specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
-    capture_map = T.cast(caps.capture_map, T::Hash[String, String])
-    capture_symbols = T.cast(caps.capture_symbols, T::Hash[String, SymbolEntry])
+    specs = caps.specs
+    capture_map = caps.capture_map
+    capture_symbols = caps.capture_symbols
 
     fields = specs.map { |s| capture_field_def(s, capture_symbols) }
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)

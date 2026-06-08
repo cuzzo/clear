@@ -106,8 +106,8 @@ class Scope
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
+  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).returns(SymbolEntry) }
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_plan: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
       reg: reg,
@@ -120,7 +120,7 @@ class Scope
       size: size || 0,
       capabilities: capabilities,
       resource: resource,
-      close_zig: close_zig,
+      close_plan: close_plan,
     )
     entry.scope = self
     # Stamp declaring depth so escape checks can compare source and destination

@@ -2609,7 +2609,9 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:record_capture_info!, ctx, "map", map_entry, map_node)
 
     expect(analysis.resource_captures).to include("map")
-    expect(analysis.close_patterns["map"]).to eq("{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())")
+    map_close = T.must(analysis.close_plans["map"])
+    expect(map_close.actions.map(&:name)).to eq(["deinit"])
+    expect(map_close.actions.first.runtime_heap_alloc_args).to eq(2)
 
     parallel_analysis = ann.send(:new_capture_analysis)
     parallel_analysis.has_local = true
@@ -2637,7 +2639,7 @@ RSpec.describe "annotator branch gap burndown" do
       capture_symbols: {
         "inner" => SymbolEntry.new(reg: "inner", type: Type.new(:Int64), mutable: false, storage: :stack)
       },
-      close_patterns: { "inner" => "{0}.deinit()" },
+      close_plans: { "inner" => Schemas::ResourceClosePlan.method("deinit") },
       pointer_captures: Set["inner"],
       string_captures: Set["outer"],
       resource_captures: Set["inner"],
@@ -2657,7 +2659,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(site_info.copied_names).to include("outer")
     expect(site_info.moved_names).to include("inner")
     expect(parent.strategies.select { |_name, strategy| strategy.is_a?(CaptureStrategy::Refuse) }.keys).to eq(["blocked"])
-    expect(parent.close_patterns["inner"]).to eq("{0}.deinit()")
+    expect(parent.close_plans["inner"]&.actions&.map(&:name)).to eq(["deinit"])
     expect(parent.pointer_captures).to include("inner")
     expect(parent.string_captures).to include("outer")
     expect(parent.resource_captures).to include("inner")
@@ -2668,15 +2670,16 @@ RSpec.describe "annotator branch gap burndown" do
   it "applies capture fact helpers only when their local predicate is active" do
     ann = quiet_annotator
     names = Set.new
-    patterns = {}
+    plans = {}
+    close_plan = Schemas::ResourceClosePlan.method("drop")
 
     ann.send(:add_capture_name_when, names, "inactive", false)
-    ann.send(:set_capture_close_pattern_when, patterns, "inactive", "drop()", false)
+    ann.send(:set_capture_close_plan_when, plans, "inactive", close_plan, false)
     ann.send(:add_capture_name_when, names, "active", true)
-    ann.send(:set_capture_close_pattern_when, patterns, "active", "drop()", true)
+    ann.send(:set_capture_close_plan_when, plans, "active", close_plan, true)
 
     expect(names).to eq(Set["active"])
-    expect(patterns).to eq("active" => "drop()")
+    expect(plans).to eq("active" => close_plan)
   end
 
   it "covers lock handler reachability branch matrix directly" do
@@ -3447,7 +3450,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:visit_FuncCall, native)
     expect(native.full_type!.resolved).to eq(:Any)
 
-    ann.current_scope.declare_type(:Handle, Schemas::ResourceSchema.new(close_zig: "close"))
+    ann.current_scope.declare_type(:Handle, Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close")))
     missing_static = AST::StaticCall.new(
       token(:COLON2, "::"),
       AST::Identifier.new(nil, "Handle"),

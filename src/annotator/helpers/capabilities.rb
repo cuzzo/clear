@@ -1017,7 +1017,7 @@ module CapabilityHelper
     prop :has_non_escaping_capture, T::Boolean, default: false
     prop :captures, T::Hash[String, Type], factory: -> { {} }
     prop :capture_symbols, T::Hash[String, SymbolEntry], factory: -> { {} }
-    prop :close_patterns, T::Hash[String, String], factory: -> { {} }
+    prop :close_plans, T::Hash[String, Schemas::ResourceClosePlan], factory: -> { {} }
     prop :pointer_captures, T::Set[String], factory: -> { Set.new }
     prop :string_captures, T::Set[String], factory: -> { Set.new }
     prop :resource_captures, T::Set[String], factory: -> { Set.new }
@@ -1034,7 +1034,7 @@ module CapabilityHelper
     def merge_nested!(nested)
       captures.merge!(nested.captures) { |_name, old, _new| old }
       capture_symbols.merge!(nested.capture_symbols) { |_name, old, _new| old }
-      close_patterns.merge!(nested.close_patterns) { |_name, old, _new| old }
+      close_plans.merge!(nested.close_plans) { |_name, old, _new| old }
       pointer_captures.merge(nested.pointer_captures)
       string_captures.merge(nested.string_captures)
       resource_captures.merge(nested.resource_captures)
@@ -1137,21 +1137,21 @@ module CapabilityHelper
       result.captures[name] = cap_type
       result.capture_symbols[name] = info
       t = cap_type
-      close_pattern = info.close_zig
+      close_plan = info.close_plan
       add_capture_name_when(result.pointer_captures, name, t.needs_pointer_passing?)
       add_capture_name_when(result.string_captures, name, t.string?)
-      add_capture_name_when(result.resource_captures, name, t.resource? || !close_pattern.nil?)
-      string_map_cleanup = t.captured_plain_string_map_needs_deinit? && close_pattern.nil?
+      add_capture_name_when(result.resource_captures, name, t.resource? || !close_plan.nil?)
+      string_map_cleanup = t.captured_plain_string_map_needs_deinit? && close_plan.nil?
       add_capture_name_when(result.resource_captures, name, string_map_cleanup)
-      set_capture_close_pattern_when(
-        result.close_patterns,
+      set_capture_close_plan_when(
+        result.close_plans,
         name,
-        "{0}.deinit({rt}.heapAlloc(), {rt}.heapAlloc())",
+        Schemas::ResourceClosePlan.method("deinit", runtime_heap_alloc_args: 2),
         string_map_cleanup
       )
     end
-    close_pattern = info.close_zig
-    set_capture_close_pattern_when(result.close_patterns, name, close_pattern || "", !close_pattern.nil?)
+    close_plan = info.close_plan
+    set_capture_close_plan_when(result.close_plans, name, close_plan, !close_plan.nil?)
     result.has_local ||= info.local?
     result.has_rc ||= info.storage == :multiowned
     ti = info.type
@@ -1171,11 +1171,11 @@ module CapabilityHelper
     names << name
   end
 
-  sig { params(patterns: T::Hash[String, String], name: String, pattern: String, active: T::Boolean).void }
-  def set_capture_close_pattern_when(patterns, name, pattern, active)
+  sig { params(plans: T::Hash[String, Schemas::ResourceClosePlan], name: String, plan: T.nilable(Schemas::ResourceClosePlan), active: T::Boolean).void }
+  def set_capture_close_plan_when(plans, name, plan, active)
     return unless active
 
-    patterns[name] ||= pattern
+    plans[name] ||= T.must(plan)
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }

@@ -1097,8 +1097,8 @@ class CapabilityHelper::CaptureAnalysis
   def captures; end
   sig { returns(T.untyped) }
   def capture_symbols; end
-  sig { returns(T.untyped) }
-  def close_patterns; end
+  sig { returns(T::Hash[String, Schemas::ResourceClosePlan]) }
+  def close_plans; end
   sig { returns(T.untyped) }
   def pointer_captures; end
   sig { returns(T.untyped) }
@@ -1185,26 +1185,24 @@ class CompilerFrontend::Result
 end
 
 class FiberCtxBuilder::CaptureSpec
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
   sig { returns(String) }
   def field_type_zig; end
-  sig { returns(T.untyped) }
-  def init_value_zig; end
-  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  sig { returns(MIR::Emittable) }
   def init_value_mir; end
-  sig { returns(T.untyped) }
-  def dupe_decl_zig; end
-  sig { returns(T.untyped) }
-  def body_cleanup_zig; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def setup_mir; end
+  sig { returns(FiberCtxBuilder::CaptureCleanupPlan) }
+  def cleanup_plan; end
 end
 
 class FiberCtxBuilder::Result
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[FiberCtxBuilder::CaptureSpec]) }
   def specs; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, String]) }
   def capture_map; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, SymbolEntry]) }
   def capture_symbols; end
 end
 
@@ -1332,8 +1330,8 @@ class FsmOps::StateFieldDecl
   def name; end
   sig { returns(String) }
   def zig_type; end
-  sig { returns(String) }
-  def init_zig; end
+  sig { returns(MIR::Emittable) }
+  def default_value; end
 end
 
 class FsmOps::StmtCall
@@ -1350,11 +1348,6 @@ class FsmOps::SubField
   def base; end
   sig { returns(String) }
   def name; end
-end
-
-class FsmOps::ZigLit
-  sig { returns(String) }
-  def zig; end
 end
 
 class FsmTransform::Liveness::Result
@@ -1755,8 +1748,8 @@ class MIR::Drop
   def has_moved_guard; end
   sig { returns(T.untyped) }
   def type_info; end
-  sig { returns(T.untyped) }
-  def resource_close_zig; end
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def resource_close_plan; end
   sig { returns(T.untyped) }
   def source_node; end
 end
@@ -2455,17 +2448,6 @@ class MIR::RangeLit
   def elem_type; end
 end
 
-class MIR::RawZig
-  sig { returns(T.untyped) }
-  def code; end
-  sig { returns(String) }
-  def reason; end
-  sig { returns(T.untyped) }
-  def ownership_contract; end
-  sig { returns(T.untyped) }
-  def stdlib_def; end
-end
-
 class MIR::RcDowngrade
   sig { returns(T.untyped) }
   def source; end
@@ -2482,6 +2464,17 @@ class MIR::RcRetain
   def zig_base; end
   sig { returns(String) }
   def func; end
+end
+
+class MIR::RcRelease
+  sig { returns(T.untyped) }
+  def source; end
+  sig { returns(String) }
+  def zig_base; end
+  sig { returns(String) }
+  def func; end
+  sig { returns(T.untyped) }
+  def alloc; end
 end
 
 class MIR::ReassignCleanup

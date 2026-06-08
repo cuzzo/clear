@@ -24,7 +24,7 @@ require_relative "../semantic/local_binding_facts"
 # Data sources (all from annotator, no re-inference):
 #   - type_info (cleanup_alloc, collection?, map?, etc.)
 #   - node.container_borrow (set by register_container_borrow!)
-#   - node.resource_close_zig (set by annotator)
+#   - node.resource_close_plan (set by annotator)
 #   - fn_node.params (TAKES params, via walk_takes_params)
 #   - MatchStatement cases with bindings + was_moved
 #   - union/struct schemas (for non-Copy checks)
@@ -41,7 +41,7 @@ module CleanupClassifier
     const :rodata_provenance, T::Boolean
     const :empty_initializer, T::Boolean
     const :mutable_binding_mutated, T::Boolean
-    const :resource_close_zig, T.nilable(String)
+    const :resource_close_plan, T.nilable(Schemas::ResourceClosePlan)
     const :sync, T.nilable(Symbol)
   end
 
@@ -389,9 +389,9 @@ module CleanupClassifier
   private_class_method def self.takes_param_base_entry(ti, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
 
-    # Schema-driven kinds: resource (close_zig) and union (heap variants).
+    # Schema-driven kinds: resource (close_plan) and union (heap variants).
     if Schemas.resource?(schema)
-      return entry(:resource, resource_close_zig: schema.close_zig)
+      return entry(:resource, resource_close_plan: schema.close_plan)
     end
     if Schemas.union?(schema)
       has_heap = union_variants_need_cleanup?(schema, schema_lookup)
@@ -591,7 +591,7 @@ module CleanupClassifier
     schema = schema_lookup.call(ti.resolved) rescue nil
 
     if Schemas.resource?(schema)
-      entry = entry(:resource, resource_close_zig: schema.close_zig)
+      entry = entry(:resource, resource_close_plan: schema.close_plan)
     end
 
     entry ||= entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
@@ -600,8 +600,8 @@ module CleanupClassifier
       entry[:fixed_alloc] = true
     end
     entry ||= entry(:uniform, has_moved_guard: true) if stream_handle_type?(ti)
-    if !entry && facts.resource_close_zig
-      entry = entry(:resource, resource_close_zig: facts.resource_close_zig)
+    if !entry && facts.resource_close_plan
+      entry = entry(:resource, resource_close_plan: facts.resource_close_plan)
     end
     entry ||= classify_mutable_owning_slot(ti, node, schema_lookup)
     entry ||= classify_optional(ti, schema_lookup, node: node)
@@ -636,7 +636,7 @@ module CleanupClassifier
       rodata_provenance: node.rodata_provenance?,
       empty_initializer: optional_empty_initializer?(binding_value(node)),
       mutable_binding_mutated: node.is_a?(AST::VarDecl) && node.mutable == true && node.var_mutated == true,
-      resource_close_zig: node.resource_close_zig,
+      resource_close_plan: node.resource_close_plan,
       sync: symbol&.sync,
     )
   end

@@ -161,14 +161,14 @@ RSpec.describe FsmWrapperEmitter do
       expect(FsmWrapperEmitter.render(body)).to include("step: u8 = 0,")
     end
 
-    it "renders state decls via FsmOps::StateFieldDecl#render" do
+    it "renders state decls from structural default MIR" do
       decls = [
-        FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
-        FsmOps::StateFieldDecl.new("rf_buf", "[]u8", "&[_]u8{}"),
+        FsmOps::StateFieldDecl.new(name: "rf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+        FsmOps::StateFieldDecl.new(name: "rf_buf", zig_type: "[]u8", default_value: MIR::AddressOf.new(MIR::ArrayInit.new("u8", "_", []))),
       ]
       out = FsmWrapperEmitter.render(body(state_decls: decls))
       expect(out).to include("rf_fd: i32 = -1,")
-      expect(out).to include("rf_buf: []u8 = &[_]u8{},")
+      expect(out).to match(/rf_buf: \[\]u8 = &\[_\]u8\{\s*\},/)
     end
 
     it "emits captures field block" do

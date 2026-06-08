@@ -33,6 +33,10 @@ RSpec.describe FsmTransform::Emit do
     MIREmitter.new.emit(expr)
   end
 
+  def ctx_decl(name, type_zig, default_value = nil)
+    MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
+  end
+
   let(:liveness_double) {
     Class.new {
       def initialize(names) ; @names = names ; end
@@ -59,7 +63,7 @@ RSpec.describe FsmTransform::Emit do
       id: 1,
       bg_rt: "__rt_bg1",
       captured: {},
-      capture_close_zig: {},
+      capture_close_plans: {},
       pointer_captures: Set.new,
       is_void: true,
       ctx_type: "__BgCtx1",
@@ -96,7 +100,7 @@ RSpec.describe FsmTransform::Emit do
       promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
       capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
-      capture_close_zig: raw.fetch(:capture_close_zig),
+      capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
       extra_ctx_fields: raw.fetch(:extra_ctx_fields),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
@@ -219,19 +223,19 @@ RSpec.describe FsmTransform::Emit do
         id: 3,
         bg_rt: "__rt_bg3",
         captured: { "resource" => :stub },
-        capture_close_zig: { "resource" => "{rt}.close({0})" },
+        capture_close_plans: { "resource" => Schemas::ResourceClosePlan.function("CheatLib.closeResource") },
         pointer_captures: Set.new,
         is_void: true,
         ctx_type: "__BgCtx3",
         promise_zig: "CheatHeader.Promise(void)",
-        capture_fields: "resource: i32 = 0,\n",
+        capture_fields: [ctx_decl("resource", "i32", MIR::Lit.new("0"))],
         blk_label: "__bg3",
         rt_name: "rt",
         ctx_var: "__ctx_3_ptr",
         promise_var: "__promise_3",
         alloc_var: "__alloc_3",
         capture_inits: [],
-        promoted_decls: "",
+        promoted_decls: [],
         pin_mode: false,
         parallel: false,
         extra_ctx_fields: [],
@@ -243,14 +247,14 @@ RSpec.describe FsmTransform::Emit do
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
 
       expect(result).to be_a(MIR::FsmLoweringResult)
-      expect(FsmWrapperEmitter.render(result.body)).to include("__ctx_3.rt.close(__ctx_3.resource);")
+      expect(FsmWrapperEmitter.render(result.body)).to include("CheatLib.closeResource(__ctx_3.resource);")
       capture = T.must(result.structure.captures.find { |fact| fact.name == "resource" })
       expect(capture.cleanup_at).to eq(:finalize)
       action = result.structure.destroy_actions.find { |entry| entry.is_a?(MIR::FsmDestroyCleanup) }
       expect(action.source_kind).to eq(:capture)
       expect(render_expr(action.target)).to eq("__ctx_3.resource")
       expect(action.cleanup_entry.kind).to eq(:resource)
-      expect(action.cleanup_entry.resource_close_zig).to eq("{rt}.close({0})")
+      expect(action.cleanup_entry.resource_close_plan&.actions&.map(&:name)).to eq(["CheatLib.closeResource"])
     end
 
     it "routes FreshHeapCopy capture cleanup through structural destroyTask actions" do
@@ -272,19 +276,22 @@ RSpec.describe FsmTransform::Emit do
         id: 4,
         bg_rt: "__rt_bg4",
         captured: { "owned" => :stub },
-        capture_close_zig: {},
+        capture_close_plans: {},
         pointer_captures: Set.new,
         is_void: true,
         ctx_type: "__BgCtx4",
         promise_zig: "CheatHeader.Promise(void)",
-        capture_fields: "owned: i32 = 0,\nowned_moved: bool = false,\n",
+        capture_fields: [
+          ctx_decl("owned", "i32", MIR::Lit.new("0")),
+          ctx_decl("owned_moved", "bool", MIR::Lit.new("false")),
+        ],
         blk_label: "__bg4",
         rt_name: "rt",
         ctx_var: "__ctx_4_ptr",
         promise_var: "__promise_4",
         alloc_var: "__alloc_4",
         capture_inits: [],
-        promoted_decls: "",
+        promoted_decls: [],
         pin_mode: false,
         parallel: false,
         extra_ctx_fields: [],
@@ -340,9 +347,6 @@ RSpec.describe FsmTransform::Emit do
           []
         end
 
-        def render_mir_list(_nodes)
-          "work();"
-        end
       }.new
       expr = AST::Literal.new(nil, :NUMBER, 1, nil)
       expr.full_type = :Int64
@@ -359,19 +363,22 @@ RSpec.describe FsmTransform::Emit do
         id: 6,
         bg_rt: "__rt_bg6",
         captured: { "owned" => :stub },
-        capture_close_zig: {},
+        capture_close_plans: {},
         pointer_captures: Set.new,
         is_void: true,
         ctx_type: "__BgCtx6",
         promise_zig: "CheatHeader.Promise(void)",
-        capture_fields: "owned: i32 = 0,\nowned_moved: bool = false,\n",
+        capture_fields: [
+          ctx_decl("owned", "i32", MIR::Lit.new("0")),
+          ctx_decl("owned_moved", "bool", MIR::Lit.new("false")),
+        ],
         blk_label: "__bg6",
         rt_name: "rt",
         ctx_var: "__ctx_6_ptr",
         promise_var: "__promise_6",
         alloc_var: "__alloc_6",
         capture_inits: [],
-        promoted_decls: "",
+        promoted_decls: [],
         pin_mode: false,
         parallel: false,
         extra_ctx_fields: [],
@@ -459,9 +466,6 @@ RSpec.describe FsmTransform::Emit do
           []
         end
 
-        def render_mir_list(_nodes)
-          "loweredResult();"
-        end
       }.new
       result_expr = AST::Literal.new(nil, :NUMBER, 1, nil)
       result_expr.full_type = :Int64
@@ -478,19 +482,19 @@ RSpec.describe FsmTransform::Emit do
         id: 5,
         bg_rt: "__rt_bg5",
         captured: {},
-        capture_close_zig: {},
+        capture_close_plans: {},
         pointer_captures: Set.new,
         is_void: false,
         ctx_type: "__BgCtx5",
         promise_zig: "CheatHeader.Promise(i64)",
-        capture_fields: "",
+        capture_fields: [],
         blk_label: "__bg5",
         rt_name: "rt",
         ctx_var: "__ctx_5_ptr",
         promise_var: "__promise_5",
         alloc_var: "__alloc_5",
         capture_inits: [],
-        promoted_decls: "",
+        promoted_decls: [],
         pin_mode: false,
         parallel: false,
         extra_ctx_fields: [],

@@ -269,22 +269,6 @@ module MIRLoweringCapabilities
     materialization.add_fallible_clause(build_fallible_clause_mir(context.var_name, context.alias_name, clause))
   end
 
-  sig { params(var_node: CapabilityVarNode, raw_atomic: T::Boolean).returns(String) }
-  def with_capability_source_zig(var_node, raw_atomic: false)
-    lowerer = T.cast(self, MIRLowering)
-    if raw_atomic
-      prev_raw = lowerer.capability_state.atomic_emit_raw
-      lowerer.capability_state.atomic_emit_raw = true
-      begin
-        return T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
-      ensure
-        lowerer.capability_state.atomic_emit_raw = prev_raw
-      end
-    end
-
-    T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
-  end
-
   sig { params(var_node: CapabilityVarNode, raw_atomic: T::Boolean).returns(MIR::Emittable) }
   def with_capability_source_mir(var_node, raw_atomic: false)
     lowerer = T.cast(self, MIRLowering)
@@ -681,139 +665,6 @@ module MIRLoweringCapabilities
   end
 
 
-  # WITH MATCH lowers to a comptime if-else chain that probes the bound
-  # variable's wrapper type. Zig elides not-taken branches, so one function
-  # body works for every family declared in REQUIRES.
-  #
-  # Family probes:
-  #   :VERSIONED  -> @hasDecl(<inner_type>, "Inner")
-  #                  Versioned(T) re-exports `pub const Inner = T`;
-  #                  Locked(T) and bare T do not.
-  #   :LOCKED   -> @hasField(<inner_type>, "mutex")
-  #                  Locked(T) has a `mutex` field; bare T doesn't.
-  #   :LOCAL      -> else branch (no probe; runtime fallback).
-  #
-  # Each probe is wrapped in a comptime Arc unwrap so bare and Arc-wrapped
-  # callers share the same generated body.
-
-  # Per-family probe for WITH MATCH dispatch. Routes through the
-  # comptime helper `CheatLib.WithMatchInner` (runtime-header.zig)
-  # which peels off an outer pointer and an outer Arc-wrapper to
-  # reach the cell type. The same probe then matches whether the
-  # caller's binding is `@versioned`, `@shared:versioned`, `@locked`,
-  # or `@shared:locked` -- the parameter shape (pointer-to-T vs
-  # value-Arc(T)) is invisible to the probe.
-  #
-  # Recognized families today: LOCKED, VERSIONED. ACTOR and LOCK_FREE
-  # are parser-reserved but have no probe yet (raise on use). See
-  # WithMatchCheck.LOCKED_SYNCS / VERSIONED_SYNCS for the inverse
-  # mapping that classifies a binding's family at the call site.
-  sig { params(family: Symbol, zig_var: String, node: T.nilable(AST::WithBlock)).returns(String) }
-  def with_match_probe_for_family(family, zig_var, node = nil)
-    T.bind(self, MIRLowering) rescue nil
-    inner_t = "CheatLib.WithMatchInner(@TypeOf(#{zig_var}))"
-    snapshot = node.respond_to?(:snapshot_mode) && T.must(node).snapshot_mode
-    case family
-    # Versioned and AtomicPtr both expose `pub const Inner = T`, so a
-    # bare `@hasDecl(..., "Inner")` probe would match AtomicPtr too.
-    # That's harmless in non-SNAPSHOT WITH MATCH (Versioned/AtomicPtr
-    # never appear in those polymorphic call sites today) but
-    # silently miscompiles in SNAPSHOT MATCH where AtomicPtr cells
-    # are first-class. Tighten with `!@hasDecl(..., "compareAndPublish")`
-    # which is unique to AtomicPtr -- routes AtomicPtr cells to the
-    # ATOMIC arm in SNAPSHOT MATCH.
-    when :VERSIONED
-      if snapshot
-        "(@hasDecl(#{inner_t}, \"Inner\") and !@hasDecl(#{inner_t}, \"compareAndPublish\"))"
-      else
-        "@hasDecl(#{inner_t}, \"Inner\")"
-      end
-    when :LOCKED then "@hasField(#{inner_t}, \"mutex\")"
-    # Primitive atomics expose `cmpxchgStrong`; AtomicPtr exposes
-    # `compareAndPublish`. Pick the probe from the surrounding mode.
-    when :ATOMIC
-      if snapshot
-        "@hasDecl(#{inner_t}, \"compareAndPublish\")"
-      else
-        "@hasDecl(#{inner_t}, \"cmpxchgStrong\")"
-      end
-    else
-      raise "WITH MATCH: no probe for family #{family.inspect} (only " \
-            ":VERSIONED, :LOCKED, :ATOMIC are wired today)"
-    end
-  end
-
-  # Resolve to a `*Inner` value regardless of param shape. Invalid
-  # expressions in not-taken comptime branches are elided by Zig.
-  sig { params(zig_var: String).returns(String) }
-  def with_match_unwrap_value(zig_var)
-    T.bind(self, MIRLowering) rescue nil
-    is_ptr  = "@typeInfo(@TypeOf(#{zig_var})) == .pointer"
-    inner_t = "@typeInfo(@TypeOf(#{zig_var})).pointer.child"
-    "(if (comptime #{is_ptr}) " \
-      "(if (comptime @typeInfo(#{inner_t}) == .@\"struct\") " \
-        "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{zig_var}.ctrl.data else #{zig_var}) " \
-       "else " \
-        "(if (comptime @typeInfo(#{inner_t}) == .pointer) " \
-          "(if (comptime @typeInfo(@typeInfo(#{inner_t}).pointer.child) == .@\"struct\") " \
-            "(if (comptime @hasField(@typeInfo(#{inner_t}).pointer.child, \"ctrl\")) #{zig_var}.*.ctrl.data else #{zig_var}.*) " \
-           "else #{zig_var}.*) " \
-         "else #{zig_var})) " \
-    "else " \
-      "(if (comptime @typeInfo(@TypeOf(#{zig_var})) == .@\"struct\") " \
-        "(if (comptime @hasField(@TypeOf(#{zig_var}), \"ctrl\")) #{zig_var}.ctrl.data else &#{zig_var}) " \
-       "else &#{zig_var}))"
-  end
-
-  # Per-arm prelude that binds the user's alias (`va` in
-  # `WITH c AS va MATCH`) to a `*Inner` for this arm's family.
-  # Both VERSIONED and LOCKED arms produce `const <alias>: *T = ...`
-  # so the body's `<alias>.field` access lowers identically across
-  # families. The Guard's `defer release()` handles teardown.
-  sig { params(family: Symbol, zig_var: String, alias_name: String, node: AST::WithBlock).returns(T.nilable(String)) }
-  def with_match_arm_prelude(family, zig_var, alias_name, node)
-    T.bind(self, MIRLowering) rescue nil
-    safe_alias = zig_safe_name(alias_name)
-    rt_name = runtime_binding_name
-    unwrap = with_match_unwrap_value(zig_var)
-    guard_var = "__#{alias_name}_match_#{node.object_id.abs}"
-    case family
-    when :VERSIONED
-      <<~ZIG.rstrip
-        var #{guard_var} = #{unwrap}.*.read(#{rt_name});
-        defer #{guard_var}.release();
-        const #{safe_alias} = #{guard_var}.get();
-        _ = &#{safe_alias};
-      ZIG
-    when :LOCKED
-      <<~ZIG.rstrip
-        var #{guard_var} = #{unwrap}.*.acquire();
-        defer #{guard_var}.release();
-        const #{safe_alias} = #{guard_var}.get();
-        _ = &#{safe_alias};
-      ZIG
-    # Atomic primitives have no Guard/acquire/release; the alias binds
-    # directly to the cell pointer so arm bodies can call atomic methods.
-    #
-    # In SNAPSHOT MATCH, AtomicPtr binds through a Guard like VERSIONED.
-    # Mutable publish-via-CAS requires a larger lowering change.
-    when :ATOMIC
-      if node.respond_to?(:snapshot_mode) && node.snapshot_mode
-        <<~ZIG.rstrip
-          var #{guard_var} = #{unwrap}.*.read(#{rt_name});
-          defer #{guard_var}.release();
-          const #{safe_alias} = #{guard_var}.get();
-          _ = &#{safe_alias};
-        ZIG
-      else
-        <<~ZIG.rstrip
-          const #{safe_alias} = #{unwrap};
-          _ = &#{safe_alias};
-        ZIG
-      end
-    end
-  end
-
   sig { params(node: AST::WithBlock).returns(MIR::ScopeBlock) }
   def lower_with_match_block(node)
     T.bind(self, MIRLowering) rescue nil
@@ -942,11 +793,11 @@ module MIRLoweringCapabilities
       ]), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :exit
-      msg_zig = emit_expr(lower(T.must(clause.message)))
+      msg_mir = lower(T.must(clause.message))
       result << MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
         MIR::Ident.new(".Transient"),
         no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.GuardFail")]),
-        MIR::Lit.new(msg_zig),
+        msg_mir,
         MIR::Lit.new(line),
       ]), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
@@ -1074,12 +925,12 @@ module MIRLoweringCapabilities
         MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
       ]
     when :exit
-      msg_zig = emit_expr(lower(T.must(clause.message)))
+      msg_mir = lower(T.must(clause.message))
       [
         MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
           MIR::Ident.new(".#{kind}"),
           no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.#{err_name}")]),
-          MIR::Lit.new(msg_zig),
+          msg_mir,
           MIR::Lit.new(line),
         ]), false),
         MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),

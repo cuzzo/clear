@@ -102,11 +102,6 @@ module FsmOps
   # &<expr>
   AddrOf = Struct.new(:expr)
 
-  # Raw Zig literal for things that don't need structure (numbers,
-  # `undefined`, `&[_]u8{}`, etc.). Kept as a small escape hatch for
-  # init expressions; the checker treats it as opaque.
-  ZigLit = Struct.new(:zig)
-
   # @intCast(<zig_type>, <expr>) — Zig's type-coercion builtin.
   IntCast = Struct.new(:zig_type, :expr)
 
@@ -160,7 +155,7 @@ module FsmOps
   BinOp = Struct.new(:op, :left, :right)
 
   Expr = T.type_alias do
-    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, ZigLit, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp)
+    T.any(ArgRef, StateField, SubField, LocalRef, AddrOf, IntCast, CallExpr, AllocExpr, SliceUntilIntCast, BinOp)
   end
   Stmt = T.type_alias do
     T.any(AssignField, LetConst, ErrDeferCall, ErrDeferFreeField, DeferFreeField, StmtCall, IoSubmit,
@@ -214,8 +209,6 @@ module FsmOps
     def local(name);                         LocalRef.new(name); end
     sig { params(expr: FsmOps::StateField).returns(FsmOps::AddrOf) }
     def addr(expr);                          AddrOf.new(expr); end
-    sig { params(zig: String).returns(FsmOps::ZigLit) }
-    def lit(zig);                            ZigLit.new(zig); end
     sig { params(zig_type: String, expr: FsmOps::Expr).returns(FsmOps::IntCast) }
     def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
     sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::CallExpr) }
@@ -236,141 +229,18 @@ module FsmOps
   #
   #   name      String — e.g. "rf_fd"
   #   zig_type  String — e.g. "i32" or "CheatHeader.FsmIoWaiter"
-  #   init_zig  String — Zig initializer, e.g. "-1" or "undefined"
+  #   default_value MIR::Emittable — structural initializer.
   # =====================================================================
-  StateFieldDecl = Struct.new(:name, :zig_type, :init_zig) do
-    extend T::Sig
-    sig { returns(String) }
-    def render
-      "#{name}: #{zig_type} = #{init_zig},"
-    end
-  end
-
-  # =====================================================================
-  # Emitter
-  # =====================================================================
-  #
-  # Renders an op tree to Zig text. Single dispatch on op class —
-  # no decisions, no allocator choices, no template substitution
-  # surprises. Every Zig fragment in an FSM body comes from one of
-  # these methods, including the trailing semicolons and newlines.
-  #
-  # Context required:
-  #
-  #   ctx_id     Integer — the FSM ctx id (renders __ctx_<id>.X)
-  #   bg_rt      String  — the BG runtime variable name (e.g. __rt_bg0)
-  #   arg_codes  [String] — pre-rendered arg expressions (template {N})
-  #
-  # The emitter is stateless; create one per FSM body or reuse safely.
-  class Emitter
-      extend T::Sig
-
-    sig { params(ctx_id: Integer, bg_rt: String, arg_codes: T::Array[String]).void }
-    def initialize(ctx_id:, bg_rt:, arg_codes:)
-      @ctx_id = ctx_id
-      @bg_rt = bg_rt
-      @arg_codes = arg_codes
-    end
-
-    # Render a list of statement ops into newline-joined Zig text
-    # with each statement properly terminated. Empty list -> "".
-    sig { params(ops: T::Array[Stmt]).returns(String) }
-    def emit_stmts(ops)
-      return "" if false || ops.empty?
-      ops.map { |op| emit_stmt(op) }.join("\n")
-    end
-
-    sig { params(op: T.untyped).returns(T.nilable(String)) }
-    def emit_stmt(op)
-      case op
-      when AssignField
-        "#{ctx}.#{op.field} = #{emit_expr(op.value)};"
-      when LetConst
-        "const #{op.name}: #{op.zig_type} = #{emit_expr(op.value)};"
-      when ErrDeferCall
-        "errdefer #{resolve_fn(T.cast(op.fn, FsmOps::FunctionPath))}(#{emit_args(op.args)});"
-      when ErrDeferFreeField
-        "errdefer #{ctx}.alloc.free(#{ctx}.#{op.field});"
-      when DeferFreeField
-        "defer #{ctx}.alloc.free(#{ctx}.#{op.field});"
-      when StmtCall
-        prefix = op.is_try ? "try " : ""
-        "#{prefix}#{resolve_fn(T.cast(op.fn, FsmOps::FunctionPath))}(#{emit_args(op.args)});"
-      when IoSubmit
-        verb_fn = IO_SUBMIT_VERBS[op.verb] or
-          raise ArgumentError, "FsmOps::IoSubmit unknown verb #{op.verb.inspect}"
-        all_args = [AddrOf.new(op.waiter)] + (op.extra_args || [])
-        "try #{ctx}.rt.getSched().#{verb_fn}(#{emit_args(all_args)});"
-      when IfFieldSubLtZeroReturnCall
-        cond = "#{ctx}.#{op.field}.#{op.sub} < 0"
-        "if (#{cond}) {\n    return #{resolve_fn(T.cast(op.return_fn, FsmOps::FunctionPath))}(#{emit_args(op.return_args)});\n}"
-      else
-        raise ArgumentError, "FsmOps::Emitter unknown statement op #{op.class}"
-      end
-    end
-
-    sig { params(fn_path: FsmOps::FunctionPath).returns(String) }
-    def resolve_fn(fn_path)
-      fn_path.render(ctx)
-    end
-
-    sig { params(expr: T.untyped).returns(T.nilable(String)) }
-    def emit_expr(expr)
-      case expr
-      when ArgRef
-        idx = expr.idx
-        unless @arg_codes && idx < @arg_codes.length
-          raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_codes&.length || 0} args)"
-        end
-        @arg_codes[idx]
-      when StateField
-        "#{ctx}.#{expr.name}"
-      when SubField
-        "#{emit_expr(expr.base)}.#{expr.name}"
-      when LocalRef
-        expr.name
-      when AddrOf
-        "&#{emit_expr(expr.expr)}"
-      when ZigLit
-        expr.zig
-      when IntCast
-        "@as(#{expr.zig_type}, @intCast(#{emit_expr(expr.expr)}))"
-      when CallExpr
-        prefix = expr.is_try ? "try " : ""
-        "#{prefix}#{resolve_fn(T.cast(expr.fn, FsmOps::FunctionPath))}(#{emit_args(expr.args)})"
-      when AllocExpr
-        "try #{ctx}.alloc.alloc(#{expr.elem_type}, #{emit_expr(expr.count)})"
-      when SliceUntilIntCast
-        "#{emit_expr(expr.base)}[0..@as(usize, @intCast(#{emit_expr(expr.end_expr)}))]"
-      when BinOp
-        "(#{emit_expr(expr.left)} #{expr.op} #{emit_expr(expr.right)})"
-      when String
-        # Allow plain strings as opaque expression literals for
-        # backward compat / convenience. Treated like ZigLit.
-        expr
-      else
-        raise ArgumentError, "FsmOps::Emitter unknown expression op #{expr.class}"
-      end
-    end
-
-    private
-
-    sig { params(args: T::Array[T.untyped]).returns(String) }
-    def emit_args(args)
-      (args || []).map { |a| emit_expr(a) }.join(", ")
-    end
-
-    sig { returns(String) }
-    def ctx
-      "__ctx_#{@ctx_id}"
-    end
+  class StateFieldDecl < T::Struct
+    const :name, String
+    const :zig_type, String
+    const :default_value, MIR::Emittable
   end
 
   # =====================================================================
   # Lowerer — convert FsmOps op trees to MIR statements/expressions.
   # =====================================================================
   #
-  # Sibling of Emitter. Emitter produces Zig text (legacy path);
   # Lowerer produces typed MIR nodes that the wrapper renders via
   # MIREmitter. The structural goal: every FSM body fragment is a
   # real MIR statement, not an opaque blob carrying Zig text.
@@ -398,7 +268,6 @@ module FsmOps
   #   SubField           -> MIR::FieldGet(lower(base), name)
   #   LocalRef           -> MIR::Ident(name)
   #   AddrOf             -> MIR::UnaryOp("&", lower(expr))
-  #   ZigLit             -> MIR::Lit(zig)
   #   IntCast            -> MIR::Call("@as", [Ident(zig_type), Call("@intCast", [expr])])
   #   CallExpr           -> MIR::Call(resolve_fn(fn), args.map(&lower), is_try)
   #   AllocExpr          -> MIR::MethodCall(ctx.alloc, "alloc", [Ident(elem_type), count], try=true)
@@ -490,8 +359,6 @@ module FsmOps
         MIR::Ident.new(expr.name)
       when AddrOf
         MIR::UnaryOp.new("&", lower_expr(expr.expr))
-      when ZigLit
-        MIR::Lit.new(expr.zig)
       when IntCast
         # Zig: @as(<type>, @intCast(<expr>))
         MIR::Call.new(
@@ -522,11 +389,6 @@ module FsmOps
         )
       when BinOp
         MIR::BinOp.new(expr.op, lower_expr(expr.left), lower_expr(expr.right))
-      when String
-        # Already-rendered Zig; keep as a literal so the MIR
-        # emitter passes it through. Should be rare -- prefer
-        # structured ops.
-        MIR::Lit.new(expr)
       else
         raise ArgumentError, "FsmOps::Lowerer unknown expression op #{expr.class}"
       end

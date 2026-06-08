@@ -104,7 +104,7 @@ RSpec.describe SymbolEntry do
       expect(minimal.valid).to eq(true)
       expect(minimal.invalid_reason).to be_nil
       expect(minimal.resource).to be_nil
-      expect(minimal.close_zig).to be_nil
+      expect(minimal.close_plan).to be_nil
       expect(minimal.scope).to be_nil
     end
   end

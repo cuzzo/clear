@@ -33,6 +33,7 @@ require "sorbet-runtime"
 # this is acyclic and also makes FunctionSignature available for
 # `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
 require_relative "type"
+require_relative "schemas"
 require_relative "async_result_shape"
 
 # Scope and SymbolEntry are a mutual back-reference: scope.rb requires
@@ -67,7 +68,7 @@ class SymbolEntry
   end
 
   attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
-                :size, :capabilities, :resource, :close_zig,
+                :size, :capabilities, :resource, :close_plan,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # declaring scope depth (0 = root)
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
@@ -445,10 +446,10 @@ class SymbolEntry
     sources.uniq
   end
 
-  sig { params(reg: T.untyped, type: TypeInput, mutable: T::Boolean, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
+  sig { params(reg: T.untyped, type: TypeInput, mutable: T::Boolean, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).void }
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
-                 valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
+                 valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
     @reg = reg
     @type = T.let(Type.new(:Untyped), Type)
@@ -462,7 +463,7 @@ class SymbolEntry
     @capabilities = T.let(capabilities, T::Set[Symbol])
     @valid = T.let(valid, T::Boolean)
     @resource = T.let(resource, T.nilable(T::Boolean))
-    @close_zig = T.let(close_zig, T.nilable(String))
+    @close_plan = T.let(close_plan, T.nilable(Schemas::ResourceClosePlan))
     @lifetime = T.let([], T::Array[SymbolEntry])
     @flow = T.let(BindingFlowFacts.new(valid: valid, invalid_reason: invalid_reason), BindingFlowFacts)
     @sync_families = T.let(nil, T.untyped)

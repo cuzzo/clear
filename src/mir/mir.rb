@@ -2771,7 +2771,7 @@ module MIR
   # The emitter applies templates mechanically from the entry.
   #
   # cleanup_entry keys: :kind, :zig_type, :elem_zig_type, :alloc,
-  #   :has_moved_guard, :resource_close_zig, :is_fixed,
+  #   :has_moved_guard, :resource_close_plan, :is_fixed,
   #   :rc_variant, :rc_alloc, :rc_release_func, :base_zig,
   #   :needs_release_fields
   #
@@ -2920,6 +2920,15 @@ module MIR
     def ownership_effect
       OwnershipEffect.owned(alloc: :heap, cleanup_kind: :rc)
     end
+  end
+
+  # Rc/Arc release (reference count decrement).
+  # Zig: CheatLib.arcRelease(T, alloc, name)  or  CheatLib.rcRelease(T, alloc, name)
+  RcRelease = Struct.new(:source, :zig_base, :func, :alloc) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source, alloc])
   end
 
   # Rc/Arc downgrade to weak ref.
@@ -4571,7 +4580,7 @@ module MIR
     ReturnMark, DiscardOwned, RegistryCall, IndexedStore, ExternTrampoline, ObservableConsumerSpawn,
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
-    DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
+    DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease,
     RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
     NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,

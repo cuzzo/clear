@@ -49,7 +49,7 @@ module FsmTransform
   # nil-returning path shrinks until it disappears.
   #
   # ctx is a hash with keys:
-  #   :node, :captured, :capture_close_zig, :pointer_captures,
+  #   :node, :captured, :capture_close_plans, :pointer_captures,
   #   :alloc_var, :promise_var, :ctx_var,
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
@@ -71,9 +71,9 @@ module FsmTransform
     # control-flow that hides reads from Liveness:
     #   * WithBlock -- CS body lowers at LockSuspend expansion
     #     time, after Liveness has already run.
-    #   * IF / WHILE / FOR with a suspend in scope -- cond_ast is
-    #     rendered to a Zig string at split time so identifier
-    #     reads in the cond are invisible to Liveness's MIR walk.
+    #   * IF / WHILE / FOR with a suspend in scope -- nested
+    #     control-flow is split before all condition reads are visible
+    #     to Liveness's straight-line segment walk.
     # Pure linear bodies (NEXT chains, single IO + post-stmts) go
     # through Liveness cleanly; conservative promotion would
     # over-promote unused locals.
@@ -140,7 +140,7 @@ module FsmTransform
       promoted_decls: coerce_promoted_decls(raw_ctx[:promoted_decls]),
       capture_inits: coerce_context_inits(raw_ctx[:capture_inits]),
       captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, Object]),
-      capture_close_zig: T.cast(raw_ctx[:capture_close_zig] || {}, T::Hash[String, String]),
+      capture_close_plans: T.cast(raw_ctx[:capture_close_plans] || {}, T::Hash[String, Schemas::ResourceClosePlan]),
       pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
       extra_ctx_fields: ext_ctx,
       recursive_promoted_names: promoted_names,
@@ -158,61 +158,64 @@ module FsmTransform
 
   sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::ContextFieldDecl]) }
   def self.coerce_context_fields(raw)
+    return [] if raw.nil?
+
     if raw.is_a?(Array)
-      return raw.flat_map do |field|
-        field.is_a?(MIR::ContextFieldDecl) ? [field] : coerce_context_fields(field)
-      end
+      return raw.flat_map { |field| coerce_context_field(field) }
     end
 
-    raw.to_s.lines.filter_map do |line|
-      stripped = line.strip.delete_suffix(",")
-      next nil if stripped.empty?
-
-      name, type_and_default = stripped.split(":", 2)
-      next nil unless name && type_and_default
-
-      type_zig, default_zig = type_and_default.split("=", 2).map(&:to_s)
-      MIR::ContextFieldDecl.new(
-        name: name.strip,
-        type_zig: T.must(type_zig).strip,
-        default_value: context_field_default_expr(default_zig),
-      )
-    end
+    raise TypeError, "FSM context fields must be MIR::ContextFieldDecl values, got #{raw.class}"
   end
 
-  sig { params(raw: T.nilable(String)).returns(T.nilable(MIR::Emittable)) }
-  def self.context_field_default_expr(raw)
-    text = raw.to_s.strip
-    return nil if text.empty?
-    return MIR::Undef.new(nil) if text == "undefined"
+  sig { params(raw: Object).returns(T::Array[MIR::ContextFieldDecl]) }
+  def self.coerce_context_field(raw)
+    if raw.is_a?(MIR::ContextFieldDecl)
+      return [raw]
+    end
 
-    MIR::Lit.new(text)
+    if raw.is_a?(Array)
+      return raw.flat_map { |field| coerce_context_field(field) }
+    end
+
+    raise TypeError, "FSM context field must be MIR::ContextFieldDecl, got #{raw.class}"
   end
 
   sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::StructInitField]) }
   def self.coerce_context_inits(raw)
+    return [] if raw.nil?
+
     if raw.is_a?(Array)
-      return raw.filter_map { |field| field if field.is_a?(MIR::StructInitField) }
+      return raw.flat_map do |field|
+        if field.is_a?(MIR::StructInitField)
+          [field]
+        elsif field.is_a?(Array)
+          coerce_context_inits(field)
+        else
+          raise TypeError, "FSM context init must be MIR::StructInitField, got #{field.class}"
+        end
+      end
     end
 
-    raw.to_s.split(",").filter_map do |part|
-      stripped = part.strip
-      next nil if stripped.empty?
-
-      name, value = stripped.delete_prefix(".").split("=", 2).map(&:strip)
-      next nil unless name && value
-
-      MIR::StructInitField.new(name: name, value: MIR::Ident.new(value))
-    end
+    raise TypeError, "FSM context inits must be MIR::StructInitField values, got #{raw.class}"
   end
 
   sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::Emittable]) }
   def self.coerce_promoted_decls(raw)
+    return [] if raw.nil?
+
     if raw.is_a?(Array)
-      return raw.filter_map { |node| node if node.is_a?(MIR::Emittable) }
+      return raw.flat_map do |node|
+        if node.is_a?(MIR::Emittable)
+          [node]
+        elsif node.is_a?(Array)
+          coerce_promoted_decls(node)
+        else
+          raise TypeError, "FSM promoted decl must be MIR::Emittable, got #{node.class}"
+        end
+      end
     end
 
-    []
+    raise TypeError, "FSM promoted decls must be MIR::Emittable values, got #{raw.class}"
   end
 
   # Recursively walk the BG body collecting every VarDecl /

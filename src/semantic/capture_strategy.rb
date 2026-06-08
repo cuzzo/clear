@@ -10,7 +10,7 @@
 # treatment: the ctx-struct field Zig type, the ctx-init RHS, and which
 # MIRChecker marker nodes must be emitted. With this classifier, the
 # existing capture paths in mir_lowering.lower_bg_block (pointer_captures,
-# resource_captures, promoted_names, capture_close_zig, ad-hoc per-type
+# resource_captures, promoted_names, capture_close_plans, ad-hoc per-type
 # forks) collapse to: classify -> dispatch.
 #
 # Why a classifier and not piecewise decisions:
@@ -198,7 +198,7 @@ module CaptureStrategy
 
     # 2. Resource captures (File, TCPClient, etc.) already have their
     #    ownership transfer tracked by escape_analysis; the BG body's
-    #    close_patterns machinery emits the right defer for the fiber.
+    #    close_plans machinery emits the right defer for the fiber.
     #    Treat as MoveInto so the outer scope's cleanup is suppressed.
     if is_resource
       return MoveInto.new(zig_type: zig_t, ctx_init_name: name, source_name: name)

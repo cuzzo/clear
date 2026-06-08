@@ -676,12 +676,12 @@ module FsmTransform
     # `ctx` carries the standard BG lowering context (id, bg_rt,
     # blk_label, ctx_type, promise_zig, capture_fields, alloc_var,
     # promise_var, ctx_var, rt_name, pin_mode, promoted_decls,
-    # capture_inits, captured, capture_close_zig, pointer_captures,
+    # capture_inits, captured, capture_close_plans, pointer_captures,
     # arena_init_flag, is_void).
     #
     # `lowering` is the MIRLowering instance; we use it for
-    # capture-map context (with_fiber_capture_map), AST -> MIR
-    # lowering (lower / emit_step_stmts), and capture-frees rendering.
+    # capture-map context (with_fiber_capture_map) and AST -> MIR
+    # lowering. Rendering stays at the final wrapper emitter edge.
     #
     # `liveness` is the Liveness analysis result; promoted_field_decls
     # are derived from cross_segment_vars.
@@ -693,7 +693,7 @@ module FsmTransform
       id = ctx.id
       bg_rt = ctx.bg_rt
       captured = ctx.captured
-      capture_close_zig = ctx.capture_close_zig
+      capture_close_plans = ctx.capture_close_plans
       pointer_captures = ctx.pointer_captures
       arena_init_flag = ctx.arena_init_flag
       recursive_promoted_names = ctx.recursive_promoted_names
@@ -766,8 +766,8 @@ module FsmTransform
       # locks, capture cleanups, and lifted body/owned-result cleanups.
       ctx.destroy_actions = []
       captured.each do |name, _|
-        close_zig = capture_close_zig[name]
-        next unless close_zig
+        close_plan = capture_close_plans[name]
+        next unless close_plan
 
         fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
           source_kind: :capture,
@@ -777,7 +777,7 @@ module FsmTransform
             :resource,
             alloc: :heap,
             has_moved_guard: false,
-            resource_close_zig: close_zig,
+            resource_close_plan: close_plan,
           ),
         )
       end

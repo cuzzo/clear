@@ -1,96 +1,92 @@
 require 'bundler/setup'
 require_relative '../src/mir/fsm_ops'
+require_relative '../src/mir/mir_emitter'
 
-# Tests the FsmOps op tree + emitter that replaces the previous
-# Zig-text :fsm_setup / :fsm_finish_block / :fsm_finish_value
-# templates. These specs exercise:
-#
-#   - Each op kind renders to the expected Zig fragment.
-#   - Template arg substitution ({0}, {1}, ...) goes through ArgRef,
-#     not string interpolation.
-#   - Context-rooted function paths render to __ctx_<id> without
-#     placeholder substitution.
-#   - Structure-derivation helpers (referenced_state_fields,
-#     alloc_state_fields, free_state_fields) walk op trees correctly
-#     and let the FsmStructure derivation in fsm_lowering.rb avoid
-#     textual scans of rendered Zig.
-
+# Tests the FsmOps op tree that replaces the previous Zig-text
+# :fsm_setup / :fsm_finish_block / :fsm_finish_value templates.
+# Production uses exactly one path: FsmOps::Lowerer builds MIR nodes,
+# then the normal MIREmitter renders those nodes at the final edge.
 RSpec.describe FsmOps do
-  let(:emitter) do
-    FsmOps::Emitter.new(
+  FO = FsmOps::DSL
+
+  let(:lowerer) do
+    FsmOps::Lowerer.new(
       ctx_id: 0,
       bg_rt: "__rt_bg0",
-      arg_codes: ["path_arg", "content_arg"],
+      arg_mirs: [MIR::Ident.new("path_arg"), MIR::Ident.new("content_arg")],
     )
   end
 
-  FO = FsmOps::DSL
+  let(:emitter) { MIREmitter.new }
 
-  describe "expression emission" do
-    it "renders ArgRef from arg_codes" do
-      expect(emitter.emit_expr(FO.arg(0))).to eq("path_arg")
-      expect(emitter.emit_expr(FO.arg(1))).to eq("content_arg")
+  def render_expr(expr)
+    emitter.emit(lowerer.lower_expr(expr))
+  end
+
+  def render_stmt(stmt)
+    emitter.emit(lowerer.lower_stmt(stmt))
+  end
+
+  describe "expression lowering" do
+    it "lowers ArgRef from arg MIR nodes" do
+      expect(lowerer.lower_expr(FO.arg(0))).to eq(MIR::Ident.new("path_arg"))
+      expect(lowerer.lower_expr(FO.arg(1))).to eq(MIR::Ident.new("content_arg"))
     end
 
     it "raises on out-of-range arg index" do
-      expect { emitter.emit_expr(FO.arg(2)) }
+      expect { lowerer.lower_expr(FO.arg(2)) }
         .to raise_error(ArgumentError, /arg index 2 out of range/)
     end
 
-    it "renders StateField as __ctx_<id>.<name>" do
-      expect(emitter.emit_expr(FO.state("rf_buf"))).to eq("__ctx_0.rf_buf")
-    end
-
-    it "renders SubField as base.name" do
-      expect(emitter.emit_expr(FO.subf(FO.state("rf_waiter"), "result")))
+    it "lowers StateField and SubField structurally" do
+      expect(render_expr(FO.state("rf_buf"))).to eq("__ctx_0.rf_buf")
+      expect(render_expr(FO.subf(FO.state("rf_waiter"), "result")))
         .to eq("__ctx_0.rf_waiter.result")
     end
 
-    it "renders AddrOf as &expr" do
-      expect(emitter.emit_expr(FO.addr(FO.state("task")))).to eq("&__ctx_0.task")
+    it "lowers AddrOf structurally" do
+      expect(render_expr(FO.addr(FO.state("task")))).to eq("&__ctx_0.task")
     end
 
-    it "renders IntCast as @as(type, @intCast(expr))" do
-      expect(emitter.emit_expr(FO.intcast("usize", FO.arg(0))))
+    it "lowers IntCast through normal MIR calls" do
+      expect(render_expr(FO.intcast("usize", FO.arg(0))))
         .to eq("@as(usize, @intCast(path_arg))")
     end
 
-    it "renders BinOp with parens" do
+    it "lowers BinOp with typed children" do
       expr = FO.binop("+", FO.call(FO.fn("clock"), []), FO.intcast("i64", FO.arg(0)))
-      expect(emitter.emit_expr(expr)).to eq("(clock() + @as(i64, @intCast(path_arg)))")
+      expect(render_expr(expr)).to eq("(clock() + @as(i64, @intCast(path_arg)))")
     end
 
-    it "renders SliceUntilIntCast" do
+    it "lowers SliceUntilIntCast into MIR::SliceExpr" do
       expr = FO.slice_intcast(FO.state("rf_buf"),
                               FO.subf(FO.state("rf_waiter"), "result"))
-      expect(emitter.emit_expr(expr))
+      mir = lowerer.lower_expr(expr)
+
+      expect(mir).to be_a(MIR::SliceExpr)
+      expect(emitter.emit(mir))
         .to eq("__ctx_0.rf_buf[0..@as(usize, @intCast(__ctx_0.rf_waiter.result))]")
     end
 
-    it "renders try CallExpr" do
+    it "lowers try CallExpr" do
       expr = FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)
-      expect(emitter.emit_expr(expr))
-        .to eq("try CheatHeader.fsmOpenForRead(path_arg)")
+      expect(render_expr(expr)).to eq("try CheatHeader.fsmOpenForRead(path_arg)")
     end
 
-    it "renders AllocExpr against ctx.alloc" do
+    it "lowers AllocExpr against ctx.alloc" do
       expr = FO.alloc_expr("u8", FO.local("__rf_size"))
-      expect(emitter.emit_expr(expr)).to eq("try __ctx_0.alloc.alloc(u8, __rf_size)")
+      expect(render_expr(expr)).to eq("try __ctx_0.alloc.alloc(u8, __rf_size)")
     end
 
-    it "renders context-rooted CallExpr function paths" do
+    it "lowers context-rooted CallExpr function paths" do
       expr = FO.call(FO.ctx_fn(["rt", "getSched()", "fsmSleepTask"]),
-                     [FO.addr(FO.state("task")), FO.lit("42")])
-      expect(emitter.emit_expr(expr))
-        .to eq("__ctx_0.rt.getSched().fsmSleepTask(&__ctx_0.task, 42)")
-    end
-
-    it "renders plain string expression literals" do
-      expect(emitter.emit_expr("already_rendered")).to eq("already_rendered")
+                     [FO.addr(FO.state("task")), FO.arg(0)])
+      expect(render_expr(expr))
+        .to eq("__ctx_0.rt.getSched().fsmSleepTask(&__ctx_0.task, path_arg)")
     end
 
     it "rejects unknown expression ops" do
-      expect { emitter.emit_expr(Object.new) }
+      expect { lowerer.lower_expr(Object.new) }
         .to raise_error(ArgumentError, /unknown expression op/)
     end
 
@@ -101,116 +97,83 @@ RSpec.describe FsmOps do
     end
   end
 
-  describe "statement emission" do
-    it "renders AssignField with try call" do
+  describe "statement lowering" do
+    it "lowers AssignField with try call" do
       stmt = FO.assign_field("rf_fd",
         FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true))
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("__ctx_0.rf_fd = try CheatHeader.fsmOpenForRead(path_arg);")
     end
 
-    it "renders LetConst with intcast(try call)" do
+    it "lowers LetConst with intcast(try call)" do
       stmt = FO.let_const("__rf_size", "usize",
         FO.intcast("usize",
           FO.call(FO.fn("CheatHeader.fsmFileSize"), [FO.state("rf_fd")], is_try: true)))
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("const __rf_size: usize = @as(usize, @intCast(try CheatHeader.fsmFileSize(__ctx_0.rf_fd)));")
     end
 
-    it "renders ErrDeferCall" do
+    it "lowers ErrDeferCall" do
       stmt = FO.err_defer_call(FO.fn("CheatHeader.fsmCloseFd"), [FO.state("rf_fd")])
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("errdefer CheatHeader.fsmCloseFd(__ctx_0.rf_fd);")
     end
 
-    it "renders ErrDeferFreeField" do
+    it "lowers ErrDeferFreeField" do
       stmt = FO.err_defer_free_field("rf_buf")
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("errdefer __ctx_0.alloc.free(__ctx_0.rf_buf);")
     end
 
-    it "renders DeferFreeField" do
+    it "lowers DeferFreeField" do
       stmt = FO.defer_free_field("rf_buf")
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("defer __ctx_0.alloc.free(__ctx_0.rf_buf);")
     end
 
-    it "renders IoSubmit with verb -> runtime fn lookup" do
+    it "lowers IoSubmit with verb lookup" do
       stmt = FO.io_submit(:read, "rf_waiter",
                           [FO.state("rf_fd"), FO.state("rf_buf")])
-      expect(emitter.emit_stmt(stmt))
+      expect(render_stmt(stmt))
         .to eq("try __ctx_0.rt.getSched().submitReadForFsm(&__ctx_0.rf_waiter, __ctx_0.rf_fd, __ctx_0.rf_buf);")
     end
 
     it "raises on IoSubmit unknown verb" do
       stmt = FO.io_submit(:bogus, "w", [])
-      expect { emitter.emit_stmt(stmt) }
+      expect { lowerer.lower_stmt(stmt) }
         .to raise_error(ArgumentError, /unknown verb/)
     end
 
-    it "renders IfFieldSubLtZeroReturnCall" do
+    it "lowers IfFieldSubLtZeroReturnCall" do
       stmt = FO.if_neg_return_call("rf_waiter", "result",
         FO.fn("CheatHeader.fsmIoError"),
         [FO.subf(FO.state("rf_waiter"), "result")])
-      expect(emitter.emit_stmt(stmt)).to include("if (__ctx_0.rf_waiter.result < 0)")
-      expect(emitter.emit_stmt(stmt))
-        .to include("return CheatHeader.fsmIoError(__ctx_0.rf_waiter.result);")
+      out = render_stmt(stmt)
+      expect(out).to include("if ((__ctx_0.rf_waiter.result < 0))")
+      expect(out).to include("return CheatHeader.fsmIoError(__ctx_0.rf_waiter.result);")
     end
 
-    it "renders try statement calls and rejects unknown statement ops" do
+    it "lowers try statement calls and rejects unknown statement ops" do
       stmt = FsmOps::StmtCall.new(FO.fn("CheatHeader.tick"), [FO.arg(0)], true)
-      expect(emitter.emit_stmt(stmt)).to eq("try CheatHeader.tick(path_arg);")
+      expect(render_stmt(stmt)).to eq("try CheatHeader.tick(path_arg);")
 
-      expect { emitter.emit_stmt(Object.new) }
+      expect { lowerer.lower_stmt(Object.new) }
         .to raise_error(ArgumentError, /unknown statement op/)
     end
   end
 
-  describe "MIR lowering" do
-    it "lowers LetConst into a typed MIR let" do
-      lowerer = FsmOps::Lowerer.new(
-        ctx_id: 7,
-        bg_rt: "__rt_bg7",
-        arg_mirs: [MIR::Lit.new("42")],
-      )
-      stmt = FO.let_const("__rf_size", "usize", FO.intcast("usize", FO.arg(0)))
-
-      mir = lowerer.lower_stmt(stmt)
-
-      expect(mir).to be_a(MIR::Let)
-      expect(mir.name).to eq("__rf_size")
-      expect(mir.mutable).to eq(false)
-      expect(mir.annotation).to eq(Type.new("usize"))
-      expect(mir.init).to be_a(MIR::Call)
-      expect(mir.init.callee).to eq("@as")
-      expect(mir.init.args.first).to eq(MIR::Ident.new("usize"))
-      expect(mir.init.args.last).to eq(MIR::Call.new("@intCast", [MIR::Lit.new("42")], false))
-    end
-
-    it "lowers string literals, Zig literals, and bounded slices" do
-      lowerer = FsmOps::Lowerer.new(
-        ctx_id: 7,
-        bg_rt: "__rt_bg7",
-        arg_mirs: [MIR::Ident.new("buf"), MIR::Ident.new("len")],
+  describe "state field declarations" do
+    it "stores structural default MIR, not initializer Zig text" do
+      decl = FsmOps::StateFieldDecl.new(
+        name: "rf_waiter",
+        zig_type: "CheatHeader.FsmIoWaiter",
+        default_value: MIR::Undef.new(nil),
       )
 
-      expect(lowerer.lower_expr("opaque")).to eq(MIR::Lit.new("opaque"))
-      expect(lowerer.lower_expr(FO.lit("undefined"))).to eq(MIR::Lit.new("undefined"))
-
-      slice = lowerer.lower_expr(FsmOps::SliceUntilIntCast.new(FO.arg(0), FO.arg(1)))
-      expect(slice).to be_a(MIR::SliceExpr)
-      expect(slice.target).to eq(MIR::Ident.new("buf"))
-    end
-
-    it "rejects lowerer arg overflows and unknown ops" do
-      lowerer = FsmOps::Lowerer.new(ctx_id: 7, bg_rt: "__rt_bg7", arg_mirs: [])
-
-      expect { lowerer.lower_expr(FO.arg(0)) }
-        .to raise_error(ArgumentError, /arg index 0 out of range/)
-      expect { lowerer.lower_expr(Object.new) }
-        .to raise_error(ArgumentError, /unknown expression op/)
-      expect { lowerer.lower_stmt(Object.new) }
-        .to raise_error(ArgumentError, /unknown statement op/)
+      expect(decl.name).to eq("rf_waiter")
+      expect(decl.zig_type).to eq("CheatHeader.FsmIoWaiter")
+      expect(decl.default_value).to eq(MIR::Undef.new(nil))
+      expect(decl).not_to respond_to(:init_zig)
     end
   end
 
@@ -233,11 +196,6 @@ RSpec.describe FsmOps do
 
     it "lists referenced state fields without textual scanning" do
       refs = FsmOps.referenced_state_fields(setup_ops).sort
-      # The fixture's setup_ops references rf_fd, rf_buf, rf_waiter
-      # (the last via the IoSubmit waiter slot which is now a
-      # StateField op so the walker sees it). It does NOT include
-      # the rf_waiter init step (which would bring &task into the
-      # tree), so "task" is correctly absent.
       expect(refs).to eq(%w[rf_buf rf_fd rf_waiter])
     end
 
@@ -250,12 +208,8 @@ RSpec.describe FsmOps do
     end
   end
 
-  describe "rendering a complete readFile setup matches the Zig form expected by the runtime" do
-    # Smoke-level snapshot: the rendered code must compile under
-    # the FSM ctx struct. We assert the structural pieces are
-    # present rather than the exact whitespace, so non-semantic
-    # edits to the emitter don't churn this test.
-    it "produces all expected statements in order" do
+  describe "complete readFile setup lowering" do
+    it "produces all expected statements through the normal MIR emitter" do
       ops = [
         FO.assign_field("rf_fd",
           FO.call(FO.fn("CheatHeader.fsmOpenForRead"), [FO.arg(0)], is_try: true)),
@@ -272,7 +226,7 @@ RSpec.describe FsmOps do
         FO.io_submit(:read, "rf_waiter",
           [FO.state("rf_fd"), FO.state("rf_buf")]),
       ]
-      out = emitter.emit_stmts(ops)
+      out = lowerer.lower_stmts(ops).map { |stmt| emitter.emit(stmt) }.join("\n")
       expect(out).to include("__ctx_0.rf_fd = try CheatHeader.fsmOpenForRead(path_arg);")
       expect(out).to include("errdefer CheatHeader.fsmCloseFd(__ctx_0.rf_fd);")
       expect(out).to include("const __rf_size: usize = @as(usize, @intCast(try CheatHeader.fsmFileSize(__ctx_0.rf_fd)));")
