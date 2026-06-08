@@ -105,11 +105,9 @@ See the [Polymorphic Syncronization Guide](docs/polymorphic-synchronization.md) 
 
 ### The Finite State Machine Advantage
 
-Because CLEAR's concurrency and memory lifetimes are declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (2KB+, often 8KB+ for web requests) and maintaining a garbage collector, which means 1 million idle connections consume gigabytes of RAM, which means extra cache misses, write barriers, and Garbage Collection Jitter.
+Instead of heavy, stack-allocated fibers like Go, CLEAR's compiler lowers most concurrent tasks into memory efficient Finite State Machines (FSMs). This delivers Rust/Tokio-level memory efficiency with SQL-like  ergonomics.
 
-In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite State Machines (FSMs) rather than stack-allocated fibers. Some functions that use FFI or are re-entrant may prefer to use stacks explicitly, though *CAN* be lowered to FSMs.
-
-This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of a SQL query.
+See the [Concurrency Model](dos/concurrency.md) for more details.
 
 ### Profile Guided Optimization
 
@@ -125,9 +123,10 @@ CLEAR lowers to Zig, which has native access to the entire C library.
 
 In addition, Zig supports compiling *to* any target *from* any machine. I.e. you can compile for a Mac architecture from your Linux workstation.
 
-It also has exceptionally fast *debug* build times, but does not produce production binaries as fast as Go.
+It also has exceptionally fast *debug* build times.
 
-In general, CLEAR thinks that the people building Zig are some of the smartest people in the world, and it has the picked the most practical build system trade-offs. Some Go engineers will likely disagree.
+> [!NOTE]
+> CLEAR will self-host by v0.2.  CLEAR's v0.1 compiler currently adds on substantial time to Zig's compilation.
 
 ## BUILDING & TESTING
 

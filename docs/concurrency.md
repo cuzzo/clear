@@ -2,10 +2,12 @@
 
 CLEAR uses cooperative fibers for concurrency.
 
-Fibers are lightweight threads managed by the CLEAR runtime — each has its own stack (4-256KB) and runs until it yields. No OS threads are created per fiber; the scheduler multiplexes fibers onto a thread pool.
+Fibers are lightweight threads managed by the CLEAR runtime.
 
-> [!NOTE]
-> CLEAR will support limited Finite State Machines in v0.2, and by v0.4 - full support for Finite State Machines is planned.
+By default, Fibers are transformed to Finite State Machines.  By default, OS threads are not created per fiber.  The scheduler multiplexes fibers onto a thread pool.
+
+You can override them to run on stacks if you like. Stacks can be sized between (4-256KB) and runs until it yields.  Stack fibers can also be set to run as true OS threads when you want them to.
+
 
 ## BG — Background Fibers
 
@@ -17,12 +19,11 @@ p = BG { expensive_computation(data); };
 result = NEXT p;  # block until the fiber finishes
 ```
 
-The last expression in the body becomes the promise's value. `NEXT` consumes the promise and returns the value.
-
-> [!NOTE]
-> By v0.4 Finite State Machines will be the default, and you will opt-in to stack-based fibers for re-entrant tasks or tasks that use FFI.
+The last expression in the body becomes the promise's value (like an implicit return). `NEXT` consumes the promise and returns the value.
 
 ### Modifiers
+
+You can override tasks with modifiers to run on stacks, to be true OS threads, or to have a particular allocation strategy.
 
 Modifiers go inside the braces, before a `->`:
 
@@ -40,19 +41,17 @@ BG { @large:pinned -> heavy_work(); }
 | `@pinned` | Pin to local scheduler (no work stealing) |
 | `@parallel` | Distribute to least-loaded scheduler |
 | `@arena` | Thread-local arena allocation; only works with @pinned tasks |
+| `@fsm` | Force to run as an Finite State Machine (the default) |
 
-Combine with `:` — `@large:@arena` gives a large stack with arena allocation.
-
-By v0.2 `@stateMachine` and `@stack` will be options.  The compiler will warn you when you should use a state machine, and block you from using it when it's not an option.  
+Combine with `:` — `@large:arena` gives a large stack with arena allocation.
 
 ### @service — OS Thread Spawning
 
 `@service` spawns a **dedicated OS thread** instead of a green fiber. Use it for heavy-compute tasks that won't cooperatively yield - the OS handles preemption.
 
 ```ruby clear illustrative
-p = BG { @service ->
-    trainModel(dataset);  # runs on its own OS thread
-};
+# runs on its own OS thread due to @service
+p = BG { @service -> trainModel(dataset); };
 # fiber continues concurrently
 result = NEXT p;  # blocks fiber until OS thread finishes
 ```
@@ -110,8 +109,7 @@ result = BG {
 
 **Error handling:** use `OR` before the `AS` binding. If a step returns `!T`, handle it inline:
 
-```clear
-# ILLUSTRATIVE
+```ruby clear illustrative
 result = BG {
     fetch(url) OR RAISE           # propagate error to caller
       AS response THEN parse(response) OR default_value
@@ -126,8 +124,7 @@ result = BG {
 
 Execute multiple branches concurrently, wait for all to complete:
 
-```clear
-# ILLUSTRATIVE
+```ruby clear illustrative
 DO {
     update_database(record),
     send_notification(user),
@@ -142,9 +139,8 @@ Branches are separated by commas. Each runs in its own fiber. The DO block waits
 
 Each branch can have its own modifiers:
 
-```clear
-# ILLUSTRATIVE
-DO {
+```ruby clear illustrative
+BG {
     @large -> heavy_computation(),
     @pinned -> cache_local_work()
 }
@@ -163,7 +159,7 @@ result: Float64 = NEXT p;
 |---|---|---|
 | `~T` | `T` | Consumes the promise (one-shot) |
 | `~T @shared` | `T` | Returns cached result (safe for multiple NEXT) |
-| `~T[?]` | `?T` | Returns next value or nil (open stream) |
+| `~?T[]` | `?T` | Returns next value or nil (open stream) |
 | `~T[INF]` | `T` | Returns next value, never nil (infinite stream) |
 
 ## BG STREAM — Generators
@@ -172,7 +168,7 @@ Spawn a fiber that yields values over time:
 
 ```ruby clear illustrative
 # Open stream (finite)
-s: ~Float64[?] = BG STREAM {
+s: ~?Float64[] = BG STREAM {
     YIELD 1.0;
     YIELD 4.0;
     YIELD 9.0;
@@ -198,10 +194,9 @@ v2 = NEXT counter;  # 1.0 (blocks until generator yields)
 
 Apply pipeline operators in parallel with a persistent worker pool:
 
-```clear
-# ILLUSTRATIVE
-results = items |> CONCURRENT(workers: 8) SELECT transform(_);
-filtered = items |> CONCURRENT(workers: 4) WHERE predicate(_);
+```ruby clear illustrative
+results = items |> CONCURRENT(workers: 8) SELECT transform;
+filtered = items |> CONCURRENT(workers: 4) WHERE predicate;
 items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```
 
@@ -226,20 +221,20 @@ items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```ruby clear illustrative
 # Skip failed items
 results = items
-  |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR PRUNE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn OR PRUNE;
 
 # Propagate first error
 results = items
-  |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR RAISE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn OR RAISE;
 ```
 
 ### How It Works
 
-CONCURRENT spawns N persistent worker fibers that pull items from a shared atomic index. Zero per-item allocation — workers reuse their stack and context across all items. This is fundamentally different from spawning one fiber per item (which is what BG does).
+`CONCURRENT` spawns N persistent worker fibers that pull items from a shared atomic index. Zero per-item allocation.  Workers reuse their stack and context across all items.  This is fundamentally different from spawning one fiber per item (which is what BG does).
 
 ```ruby clear
 results = items
-  |> SELECT BG { risky_fn(_) OR RAISE };
+  |> SELECT BG { risky_fn OR RAISE };
 # this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
 ```
 
@@ -253,17 +248,17 @@ Multi-core (workers distributed):
   → 8 fibers spread across all schedulers
 ```
 
-### Performance
+### Backpressure / Performance
 
 | Pattern | Per-item cost | Use when |
 |---|---|---|
-| `CONCURRENT(workers: N)` | ~0 (atomic fetchAdd only) | Bulk processing, batch transforms |
+| `CONCURRENT(workers: N, capacity: M)` | ~0 (atomic fetchAdd only) | Bulk processing, batch transforms |
 | Individual `BG { }` | ~60μs (GPA alloc) | Dynamic spawning, I/O-bound tasks |
 
 
- * CONCURRENT is 30x faster than individual BG spawns for batch workloads. 
+ * CONCURRENT is ~30x faster than individual BG spawns for batch workloads. 
  * For I/O-bound tasks (network requests, file reads), the 60μs BG spawn cost is negligible compared to I/O latency.
- * The big benefit is that `workers: N` handles backpressure to avoid spawning more tasks than you can handle.
+ * **The big benefit**: `capacity: M` handles **backpressure** to avoid spawning more tasks than you can handle.
 
 ## Multi-Threading
 
