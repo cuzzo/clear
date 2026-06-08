@@ -43,6 +43,43 @@ RSpec.describe FsmTransform::Emit do
     MIR::ErrCleanup.new(name, CleanupEntry.new)
   end
 
+  def fsm_ctx(overrides = {})
+    raw = {
+      id: 1,
+      bg_rt: "__rt_bg1",
+      captured: {},
+      capture_close_zig: {},
+      pointer_captures: Set.new,
+      is_void: true,
+      ctx_type: "__BgCtx1",
+      promise_zig: "CheatHeader.Promise(void)",
+      capture_fields: "",
+      blk_label: "__bg1",
+      rt_name: "rt",
+      ctx_var: "__ctx_1_ptr",
+      promise_var: "__promise_1",
+      alloc_var: "__alloc_1",
+      capture_inits: "",
+      promoted_decls: "",
+      pin_mode: false,
+      parallel: false,
+      extra_ctx_fields: [],
+      recursive_promoted_names: [],
+      fresh_heap_cleanup_names: [],
+    }.merge(overrides)
+    raw[:capture_inits] = raw[:capture_inits].join("\n") if raw[:capture_inits].is_a?(Array)
+    FsmTransform::Emit::FsmEmitContext.from_hash(raw)
+  end
+
+  def fsm_spec(attrs)
+    FsmTransform::Emit::FsmSegmentSpec.new(
+      index: attrs.fetch(:index),
+      body_stmts: attrs.fetch(:body_stmts, []),
+      tail: attrs.fetch(:tail),
+      descriptor: attrs[:descriptor],
+    )
+  end
+
   describe "#check_fsm_cleanup_invariant!" do
     it "passes when no defers appear" do
       seg_codes = [[], []]
@@ -138,7 +175,7 @@ RSpec.describe FsmTransform::Emit do
         synthetic_fields: [],
         alias_overrides_by_index: {},
       )
-      ctx = {
+      ctx = fsm_ctx(
         id: 3,
         bg_rt: "__rt_bg3",
         captured: { "resource" => :stub },
@@ -160,7 +197,7 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: [],
-      }
+      )
 
       result = FsmTransform::Emit.build_recursive(
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
@@ -190,7 +227,7 @@ RSpec.describe FsmTransform::Emit do
         synthetic_fields: [],
         alias_overrides_by_index: {},
       )
-      ctx = {
+      ctx = fsm_ctx(
         id: 4,
         bg_rt: "__rt_bg4",
         captured: { "owned" => :stub },
@@ -212,7 +249,7 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: ["owned"],
-      }
+      )
 
       result = FsmTransform::Emit.build_recursive(
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
@@ -277,7 +314,7 @@ RSpec.describe FsmTransform::Emit do
         synthetic_fields: [],
         alias_overrides_by_index: {},
       )
-      ctx = {
+      ctx = fsm_ctx(
         id: 6,
         bg_rt: "__rt_bg6",
         captured: { "owned" => :stub },
@@ -299,7 +336,7 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: ["owned"],
-      }
+      )
 
       result = FsmTransform::Emit.build_recursive(
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
@@ -314,12 +351,15 @@ RSpec.describe FsmTransform::Emit do
         [], [], MIR::FsmTailYield.new(1, "next"), [],
         "payload", "[]const u8", true,
       )
-      ctx = {}
+      ctx = fsm_ctx(id: 7)
 
       FsmTransform::Emit.send(:register_owned_suspend_result_cleanups!,
-        [{ descriptor: descriptor }, { descriptor: descriptor }], ctx, 7)
+        [
+          fsm_spec(index: 0, tail: FsmTransform::Segments::NextSuspend.new(Object.new, nil), descriptor: descriptor),
+          fsm_spec(index: 1, tail: FsmTransform::Segments::NextSuspend.new(Object.new, nil), descriptor: descriptor),
+        ], ctx, 7)
 
-      actions = ctx.fetch(:fsm_destroy_actions)
+      actions = FsmTransform::Emit.fsm_destroy_actions(ctx)
       expect(actions.length).to eq(1)
       action = actions.first
       expect(action).to be_a(MIR::FsmDestroyCleanup)
@@ -393,7 +433,7 @@ RSpec.describe FsmTransform::Emit do
         synthetic_fields: [],
         alias_overrides_by_index: {},
       )
-      ctx = {
+      ctx = fsm_ctx(
         id: 5,
         bg_rt: "__rt_bg5",
         captured: {},
@@ -415,7 +455,7 @@ RSpec.describe FsmTransform::Emit do
         extra_ctx_fields: [],
         recursive_promoted_names: [],
         fresh_heap_cleanup_names: [],
-      }
+      )
 
       result = FsmTransform::Emit.build_recursive(
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)

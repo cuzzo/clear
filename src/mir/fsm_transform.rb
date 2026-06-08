@@ -119,11 +119,14 @@ module FsmTransform
     liveness = Liveness.analyze(segments, ctx)
     ext_ctx = (ctx[:extra_ctx_fields] || []) +
               field_locals.map { |p| "#{p[:name]}: #{p[:zig_type]} = undefined," }
-    Emit.build_recursive(
-      ctx.merge(extra_ctx_fields: ext_ctx,
-                recursive_promoted_names: promoted_names),
-      rec_segs, liveness, lowering,
+    emit_ctx = Emit::FsmEmitContext.from_hash(
+      T.cast(
+        ctx.merge(extra_ctx_fields: ext_ctx,
+                  recursive_promoted_names: promoted_names),
+        T::Hash[Symbol, T.nilable(Object)],
+      ),
     )
+    Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering)
   end
 
   # Recursively walk the BG body collecting every VarDecl /

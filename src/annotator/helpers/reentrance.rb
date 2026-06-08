@@ -378,7 +378,7 @@ module ReentranceBridge
     ret_types = concrete_cycle_fns.map(&:return_type).map { |t| t&.to_s }.uniq
     return false unless ret_types.size == 1
 
-    plans = {}
+    plans = T.let({}, T::Hash[String, ThunkTransform::RecursiveSplitter::MutualPlan])
     concrete_cycle_fns.each do |f|
       partners = cycle_names - [f.name]
       mp = ThunkTransform::RecursiveSplitter.split_mutual(f.body, f.name, partners, self)
@@ -388,8 +388,8 @@ module ReentranceBridge
 
     concrete_cycle_fns.each do |f|
       f.mutual_thunk_plan = ThunkTransform::RecursiveSplitter::MutualThunkPlan.new(
-        cycle_fns: cycle_fns,
-        own_plan:  plans[f.name],
+        cycle_fns: concrete_cycle_fns,
+        own_plan:  T.must(plans[f.name]),
       )
     end
     true

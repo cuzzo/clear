@@ -23,6 +23,33 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     result.code
   end
 
+  def fsm_spec(attrs)
+    FsmTransform::Emit::FsmSegmentSpec.new(
+      index: attrs.fetch(:index),
+      prologue_stmts: attrs.fetch(:prologue_stmts, []),
+      body_stmts: attrs.fetch(:body_stmts, []),
+      structure_stmts: attrs.fetch(:structure_stmts, []),
+      tail: attrs.fetch(:tail),
+      descriptor: attrs[:descriptor],
+      fsm_result_transfer_facts: attrs.fetch(:fsm_result_transfer_facts, []),
+      fn_name: attrs[:fn_name],
+      rt_suppress: attrs.fetch(:rt_suppress, ""),
+      err_cleanups: attrs.fetch(:err_cleanups, []),
+      pre_body_skip: attrs[:pre_body_skip],
+      pre_body_zig: attrs[:pre_body_zig],
+      extra_prologue_zig: attrs[:extra_prologue_zig],
+    )
+  end
+
+  def fsm_specs(attrs)
+    attrs.map { |spec| fsm_spec(spec) }
+  end
+
+  def build_unified(ctx, specs, promoted_field_decls, lowering)
+    FsmTransform::Emit.build_fsm_unified(
+      ctx, fsm_specs(specs), promoted_field_decls, lowering)
+  end
+
   let(:lowering_double) {
     Class.new {
       def capture_inits_fsm(_); ""; end
@@ -30,7 +57,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
   }
 
   let(:base_ctx) {
-    {
+    FsmTransform::Emit::FsmEmitContext.from_hash(
       id: 0,
       bg_rt: "__rt_bg0",
       blk_label: "__bg0",
@@ -44,7 +71,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       pin_mode: false,
       promoted_decls: "",
       capture_inits: "",
-    }
+    )
   }
 
   it "rejects unexpanded lock tails in dispatch assembly" do
@@ -56,7 +83,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     expect {
-      FsmTransform::Emit.build_dispatch_tail(spec, 0, [spec], 0)
+      typed_spec = fsm_spec(spec)
+      FsmTransform::Emit.build_dispatch_tail(typed_spec, 0, [typed_spec], 0)
     }.to raise_error(ArgumentError, /Unsupported segment tail/)
   end
 
@@ -87,8 +115,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       },
     ]
 
-    out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-      base_ctx, segment_specs, [], lowering_double))
+    out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
 
     run_after = out[/fn runLegacy2.*?fn resumeFn/m]
     expect(run_after).to include("bindLegacy()")
@@ -139,36 +166,31 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     it "produces rendered Zig text" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("__bg0: {")
     end
 
     it "concatenates the descriptor's setup_stmts onto seg 0's body" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       runstep0 = out[/fn runStep0.*?fn runStep1/m]
       expect(runstep0).to include("preStmt()")
       expect(runstep0).to include("registerWaiter()")
     end
 
     it "concatenates the descriptor's bind_stmts onto seg 1's body" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       runstep1 = out[/fn runStep1.*?fn resumeFn/m]
       expect(runstep1).to include("__waiter.result")
       expect(runstep1).to include("postStmt()")
     end
 
     it "places suspend ctx_field_decls in the ctx struct" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("rf_fd: i32 = -1,")
     end
 
     it "emits dispatch with FsmTailYield and FsmTailDone" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       # Arm 0 yields WaitForLock with step=1.
       expect(out).to match(/0 => \{[\s\S]*?step = 1;[\s\S]*?return \.\{ \.WaitForLock = \{\} \}/)
       # Arm 1 emits Done.
@@ -210,8 +232,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     it "emits N+1 dispatch arms with RegisterYield tails on the suspends" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("if (register_sp_1())")
       expect(out).to include("if (register_sp_2())")
       expect(out).to include("0 => {")
@@ -220,8 +241,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "places each suspend's ctx_field_decls in the ctx struct" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("sp_1: P = undefined,")
       expect(out).to include("sp_2: P = undefined,")
     end
@@ -280,8 +300,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "emits CondJump for the cond head and LoopBack for the back-edge" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       # arm 1 is the cond branch
       expect(out).to match(/1 => \{[\s\S]*?if \(hasNext\)/)
       # arm 3 jumps back to step 1
@@ -289,8 +308,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "concatenates bind_stmts onto runLoopPost (after suspend)" do
-      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double))
+      out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
       runlooppost = out[/fn runLoopPost.*?fn runPost/m]
       expect(runlooppost).to include("bindNext()")
       expect(runlooppost).to include("runLoopPost()")
