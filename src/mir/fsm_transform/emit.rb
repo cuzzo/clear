@@ -313,6 +313,7 @@ module FsmTransform
         bind_for_index[target] = d.bind_stmts
       end
 
+      body_fn_names_by_index = T.let({}, T::Hash[Integer, String])
       member_fns = segment_specs.filter_map do |spec|
         body = []
         body.concat(spec.prologue_stmts)
@@ -323,6 +324,7 @@ module FsmTransform
           body.concat(incoming_bind)
         end
         next nil if fn_name.nil?
+        body_fn_names_by_index[spec.index] = fn_name
         body.concat(spec.body_stmts)
         if (d = spec.descriptor)
           body.concat(d.setup_stmts || [])
@@ -349,7 +351,7 @@ module FsmTransform
           spec.index,
           spec.pre_body_skip,
           spec.pre_body_zig,
-          spec.fn_name,
+          body_fn_names_by_index[spec.index],
           spec.err_cleanups,
           tail,
         )

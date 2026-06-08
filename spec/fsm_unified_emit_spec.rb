@@ -122,6 +122,40 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     expect(run_after).to include("afterLegacy()")
   end
 
+  it "runs incoming descriptor binds before structural lock-try tails" do
+    descriptor = MIR::SuspendDescriptor.new(
+      [MIR::ExprStmt.new(MIR::Lit.new("setupNext()"), false)],
+      [MIR::ExprStmt.new(MIR::Lit.new("finishNext()"), false)],
+      MIR::FsmTailRegisterYield.new(nil, "registerNext()", "WaitForLock"),
+      ["sp_1: P = undefined,"],
+      nil,
+      nil,
+      false,
+    )
+    segment_specs = [
+      {
+        index: 0,
+        body_stmts: [],
+        tail: FsmTransform::Segments::NextSuspend.new(Object.new, nil, 2),
+        descriptor: descriptor,
+        fn_name: "runSeg0",
+      },
+      {
+        index: 2,
+        body_stmts: [],
+        tail: MIR::FsmTailLockTry.new("tryLockForFsm", "__ctx_0.lock", 3, 4, 5),
+        descriptor: nil,
+        fn_name: nil,
+      },
+    ]
+
+    out = fsm_code(build_unified(base_ctx, segment_specs, [], lowering_double))
+
+    expect(out).to include("fn runSeg2")
+    expect(out).to include("finishNext()")
+    expect(out).to match(/2 => \{[\s\S]*@This\(\)\.runSeg2\(__ctx_0\)[\s\S]*const __lock_r = __ctx_0\.lock\.tryLockForFsm/)
+  end
+
   describe "two-segment IO shape (B2-IO)" do
     # Build the descriptor by hand to exercise the assembly without
     # depending on the IO resolver. Setup = a single ExprStmt; bind
