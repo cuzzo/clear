@@ -15,7 +15,7 @@
 #
 # After this refactor every byte of FSM-emitted Zig comes from
 # walking these op nodes via FsmOpEmitter. No template substitution,
-# no string interpolation, no InlineZig escape hatch on the FSM path.
+# no string interpolation, no raw Zig escape hatch on the FSM path.
 # The checker receives an FsmStructure derived directly from the op
 # tree (not from a textual scan of rendered Zig) so its invariants
 # hold structurally rather than syntactically.

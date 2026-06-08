@@ -29,7 +29,6 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :inline_alloc_mismatch_value, error_code: :INLINE_ALLOC_MISMATCH },
   { case_name: :inline_alloc_without_allocmark, error_code: :INLINE_ALLOC_WITHOUT_ALLOCMARK },
   { case_name: :inline_alloc_without_target, error_code: :INLINE_ALLOC_WITHOUT_TARGET },
-  { case_name: :inline_no_contract, error_code: :INLINE_NO_CONTRACT },
   { case_name: :copy_cleanup_primitive, error_code: :COPY_CLEANUP },
   { case_name: :indirect_double_box, error_code: :INDIRECT_DOUBLE_BOX },
   { case_name: :transfer_without_alloc, error_code: :TRANSFER_WITHOUT_ALLOC },
@@ -211,7 +210,7 @@ def mir_checker_negative_case(case_name)
     RUBY
   when :inline_alloc_mismatch_primary
     <<~RUBY
-      iz = inline_zig("try target.append(alloc, value)", :heap, "items")
+      iz = registry_call(:heap, "items")
       [
         alloc_mark("items", :frame),
         MIR::ExprStmt.new(iz, false),
@@ -219,8 +218,8 @@ def mir_checker_negative_case(case_name)
     RUBY
   when :inline_alloc_mismatch_value
     <<~RUBY
-      iz = inline_zig("try target.put(key_alloc, val_alloc, key, value)", nil, "map")
-      iz.allocs = { key_alloc: :heap, val_alloc: :frame }
+      iz = registry_call(nil, "map")
+      iz.allocs = MIR.inline_alloc_metadata(key_alloc: :heap, val_alloc: :frame)
       [
         alloc_mark("map", :heap),
         MIR::ExprStmt.new(iz, false),
@@ -228,22 +227,16 @@ def mir_checker_negative_case(case_name)
     RUBY
   when :inline_alloc_without_allocmark
     <<~RUBY
-      iz = inline_zig("try target.append(alloc, value)", :heap, "external_list")
+      iz = registry_call(:heap, "external_list")
       [
         MIR::ExprStmt.new(iz, false),
       ]
     RUBY
   when :inline_alloc_without_target
     <<~RUBY
-      iz = inline_zig("try target.append(alloc, value)", :heap, nil)
+      iz = registry_call(:heap, nil)
       [
         MIR::ExprStmt.new(iz, false),
-      ]
-    RUBY
-  when :inline_no_contract
-    <<~RUBY
-      [
-        MIR::ExprStmt.new(MIR::InlineZig.new("CheatLib.intAdd(a, b)", "math"), false),
       ]
     RUBY
   when :copy_cleanup_primitive
@@ -408,12 +401,17 @@ def mir_checker_negative_source(case_name, error_code)
       CleanupEntry.from({ kind: :uniform, alloc: alloc, has_moved_guard: moved_guard })
     end
 
-    def inline_zig(code, alloc, target)
-      iz = MIR::InlineZig.new(code, "inline_contract")
-      iz.allocs = alloc ? { alloc: alloc } : {}
-      iz.target_var = target
-      iz.stdlib_def = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      iz
+    def registry_call(alloc, target)
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+      MIR::RegistryCall.new(
+        entry: sig,
+        args: [],
+        reason: "inline_contract",
+        ownership_contract: MIR::OwnershipContract.empty,
+        allocs: alloc ? MIR.inline_alloc_metadata(alloc: alloc) : MIR.inline_alloc_metadata,
+        target_var: target,
+      )
     end
 
     body = begin

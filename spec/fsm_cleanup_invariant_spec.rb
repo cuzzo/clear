@@ -1,6 +1,7 @@
 require 'bundler/setup'
 require 'set'
 require_relative '../src/mir/fsm_transform/emit'
+require_relative '../src/mir/fsm_transform'
 require_relative '../src/mir/fsm_transform/liveness'
 require_relative '../src/mir/fsm_transform/recursive_splitter'
 
@@ -24,10 +25,12 @@ require_relative '../src/mir/fsm_transform/recursive_splitter'
 RSpec.describe FsmTransform::Emit do
   def fsm_body_items(stmts)
     stmts.map do |stmt|
-      stmt.is_a?(String) ?
-        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
-        FsmTransform::Emit.fsm_body_mir_item(stmt)
+      FsmTransform::Emit.fsm_body_mir_item(stmt)
     end
+  end
+
+  def render_expr(expr)
+    MIREmitter.new.emit(expr)
   end
 
   let(:liveness_double) {
@@ -61,14 +64,14 @@ RSpec.describe FsmTransform::Emit do
       is_void: true,
       ctx_type: "__BgCtx1",
       promise_zig: "CheatHeader.Promise(void)",
-      capture_fields: "",
+      capture_fields: [],
       blk_label: "__bg1",
       rt_name: "rt",
       ctx_var: "__ctx_1_ptr",
       promise_var: "__promise_1",
       alloc_var: "__alloc_1",
-      capture_inits: "",
-      promoted_decls: "",
+      capture_inits: [],
+      promoted_decls: [],
       pin_mode: false,
       parallel: false,
       extra_ctx_fields: [],
@@ -79,20 +82,19 @@ RSpec.describe FsmTransform::Emit do
       profile_line: nil,
       profile_column: nil,
     }.merge(overrides)
-    raw[:capture_inits] = raw[:capture_inits].join("\n") if raw[:capture_inits].is_a?(Array)
     FsmTransform::Emit::FsmEmitContext.new(
       id: raw.fetch(:id),
       bg_rt: raw.fetch(:bg_rt),
       blk_label: raw.fetch(:blk_label),
       ctx_type: raw.fetch(:ctx_type),
       promise_zig: raw.fetch(:promise_zig),
-      capture_fields: raw.fetch(:capture_fields),
+      capture_fields: FsmTransform.coerce_context_fields(raw.fetch(:capture_fields)),
       alloc_var: raw.fetch(:alloc_var),
       promise_var: raw.fetch(:promise_var),
       ctx_var: raw.fetch(:ctx_var),
       rt_name: raw.fetch(:rt_name),
-      promoted_decls: raw.fetch(:promoted_decls),
-      capture_inits: raw.fetch(:capture_inits),
+      promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
+      capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
       capture_close_zig: raw.fetch(:capture_close_zig),
       pointer_captures: raw.fetch(:pointer_captures),
@@ -241,12 +243,12 @@ RSpec.describe FsmTransform::Emit do
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
 
       expect(result).to be_a(MIR::FsmLoweringResult)
-      expect(result.code).to include("__ctx_3.rt.close(__ctx_3.resource);")
+      expect(FsmWrapperEmitter.render(result.body)).to include("__ctx_3.rt.close(__ctx_3.resource);")
       capture = T.must(result.structure.captures.find { |fact| fact.name == "resource" })
       expect(capture.cleanup_at).to eq(:finalize)
       action = result.structure.destroy_actions.find { |entry| entry.is_a?(MIR::FsmDestroyCleanup) }
       expect(action.source_kind).to eq(:capture)
-      expect(action.target_zig).to eq("__ctx_3.resource")
+      expect(render_expr(action.target)).to eq("__ctx_3.resource")
       expect(action.cleanup_entry.kind).to eq(:resource)
       expect(action.cleanup_entry.resource_close_zig).to eq("{rt}.close({0})")
     end
@@ -294,14 +296,14 @@ RSpec.describe FsmTransform::Emit do
         ctx, segment_list, FsmTransform::Liveness::Result.new({}), lowering)
 
       expect(result).to be_a(MIR::FsmLoweringResult)
-      expect(result.code).to include(
+      expect(FsmWrapperEmitter.render(result.body)).to include(
         "if (!__ctx_4.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_4.owned), __ctx_4.alloc, &__ctx_4.owned);"
       )
       action = result.structure.destroy_actions.find { |entry|
         entry.is_a?(MIR::FsmDestroyCleanup) && entry.name == "owned"
       }
       expect(action.source_kind).to eq(:fresh_heap)
-      expect(action.allocator_zig).to eq("__ctx_4.alloc")
+      expect(render_expr(action.allocator)).to eq("__ctx_4.alloc")
     end
 
     it "passes destroy-action ctx fields into segment ownership lowering" do
@@ -404,8 +406,8 @@ RSpec.describe FsmTransform::Emit do
       expect(action).to be_a(MIR::FsmDestroyCleanup)
       expect(action.source_kind).to eq(:owned_result)
       expect(action.name).to eq("payload")
-      expect(action.guard_zig).to eq("__ctx_7.__owned_payload_init")
-      expect(action.target_zig).to eq("__ctx_7.payload")
+      expect(render_expr(action.guard)).to eq("__ctx_7.__owned_payload_init")
+      expect(render_expr(action.target)).to eq("__ctx_7.payload")
     end
 
     it "collects guard fields for cleanup-bearing suspend results" do

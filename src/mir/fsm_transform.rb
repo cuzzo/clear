@@ -117,8 +117,14 @@ module FsmTransform
     return nil if expected != actual
 
     liveness = Liveness.analyze(segments, ctx)
-    ext_ctx = (ctx[:extra_ctx_fields] || []) +
-              field_locals.map { |p| "#{p[:name]}: #{p[:zig_type]} = undefined," }
+    ext_ctx = coerce_context_fields(ctx[:extra_ctx_fields]) +
+              field_locals.map do |p|
+                MIR::ContextFieldDecl.new(
+                  name: p[:name].to_s,
+                  type_zig: p[:zig_type].to_s,
+                  default_value: MIR::Undef.new(nil),
+                )
+              end
     raw_ctx = T.cast(ctx, T::Hash[Symbol, T.nilable(Object)])
     emit_ctx = Emit::FsmEmitContext.new(
       id: T.cast(raw_ctx.fetch(:id), Integer),
@@ -126,17 +132,17 @@ module FsmTransform
       blk_label: T.cast(raw_ctx.fetch(:blk_label), String),
       ctx_type: T.cast(raw_ctx.fetch(:ctx_type), String),
       promise_zig: T.cast(raw_ctx.fetch(:promise_zig), String),
-      capture_fields: T.cast(raw_ctx.fetch(:capture_fields), String),
+      capture_fields: coerce_context_fields(raw_ctx.fetch(:capture_fields)),
       alloc_var: T.cast(raw_ctx.fetch(:alloc_var), String),
       promise_var: T.cast(raw_ctx.fetch(:promise_var), String),
       ctx_var: T.cast(raw_ctx.fetch(:ctx_var), String),
       rt_name: T.cast(raw_ctx.fetch(:rt_name), String),
-      promoted_decls: T.cast(raw_ctx[:promoted_decls] || "", String),
-      capture_inits: T.cast(raw_ctx[:capture_inits] || "", String),
+      promoted_decls: coerce_promoted_decls(raw_ctx[:promoted_decls]),
+      capture_inits: coerce_context_inits(raw_ctx[:capture_inits]),
       captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, Object]),
       capture_close_zig: T.cast(raw_ctx[:capture_close_zig] || {}, T::Hash[String, String]),
       pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
-      extra_ctx_fields: T.cast(ext_ctx, T::Array[String]),
+      extra_ctx_fields: ext_ctx,
       recursive_promoted_names: promoted_names,
       fresh_heap_cleanup_names: T.cast(raw_ctx[:fresh_heap_cleanup_names] || [], T::Array[String]),
       arena_init_flag: raw_ctx[:arena_init_flag] == true,
@@ -148,6 +154,65 @@ module FsmTransform
       profile_column: T.cast(raw_ctx[:profile_column], T.nilable(Integer)),
     )
     Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering)
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::ContextFieldDecl]) }
+  def self.coerce_context_fields(raw)
+    if raw.is_a?(Array)
+      return raw.flat_map do |field|
+        field.is_a?(MIR::ContextFieldDecl) ? [field] : coerce_context_fields(field)
+      end
+    end
+
+    raw.to_s.lines.filter_map do |line|
+      stripped = line.strip.delete_suffix(",")
+      next nil if stripped.empty?
+
+      name, type_and_default = stripped.split(":", 2)
+      next nil unless name && type_and_default
+
+      type_zig, default_zig = type_and_default.split("=", 2).map(&:to_s)
+      MIR::ContextFieldDecl.new(
+        name: name.strip,
+        type_zig: T.must(type_zig).strip,
+        default_value: context_field_default_expr(default_zig),
+      )
+    end
+  end
+
+  sig { params(raw: T.nilable(String)).returns(T.nilable(MIR::Emittable)) }
+  def self.context_field_default_expr(raw)
+    text = raw.to_s.strip
+    return nil if text.empty?
+    return MIR::Undef.new(nil) if text == "undefined"
+
+    MIR::Lit.new(text)
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::StructInitField]) }
+  def self.coerce_context_inits(raw)
+    if raw.is_a?(Array)
+      return raw.filter_map { |field| field if field.is_a?(MIR::StructInitField) }
+    end
+
+    raw.to_s.split(",").filter_map do |part|
+      stripped = part.strip
+      next nil if stripped.empty?
+
+      name, value = stripped.delete_prefix(".").split("=", 2).map(&:strip)
+      next nil unless name && value
+
+      MIR::StructInitField.new(name: name, value: MIR::Ident.new(value))
+    end
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::Emittable]) }
+  def self.coerce_promoted_decls(raw)
+    if raw.is_a?(Array)
+      return raw.filter_map { |node| node if node.is_a?(MIR::Emittable) }
+    end
+
+    []
   end
 
   # Recursively walk the BG body collecting every VarDecl /

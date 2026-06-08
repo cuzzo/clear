@@ -74,6 +74,28 @@ module FiberCtxBuilder
 
     sig { params(receiver: String).returns(T.nilable(MIR::DeferStmt)) }
     def cleanup_mir_for(receiver)
+      receiver_expr = MIR::Ident.new(receiver)
+      captured_field = MIR::FieldGet.new(receiver_expr, name)
+      moved_guard = MIR::FieldGet.new(receiver_expr, "#{name}_moved")
+      if body_cleanup_zig && field_type_zig.start_with?("CheatLib.CapturedValue(") && !(release_func && payload_zig)
+        cleanup_call = MIR::Call.new(
+          "CheatLib.cleanup",
+          [
+            MIR::TypeOf.new(captured_field),
+            MIR::FieldGet.new(receiver_expr, "alloc"),
+            MIR::AddressOf.new(captured_field),
+          ],
+          false,
+          false,
+          MIR::CallableContract.no_ownership(3),
+        )
+        return MIR::DeferStmt.new(MIR::IfStmt.new(
+          MIR::UnaryOp.new("!", moved_guard),
+          [MIR::ExprStmt.new(cleanup_call, false)],
+          nil,
+        ))
+      end
+
       return nil unless release_func && payload_zig
 
       MIR::DeferStmt.new(MIR::Call.new(
@@ -134,18 +156,47 @@ module FiberCtxBuilder
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
+        source_mir = MIR::Ident.new(source_ref)
         needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup)
         # ctx field type and dupe return type must be the same
         # expression (CapturedValue) so they cannot diverge for a
         # `*const T` borrowed-param source.
         dupe_decl = "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});"
         dupe_decl += "\n        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});" if needs_cleanup
+        setup_mir = T.let([
+          MIR::Let.new(
+            dupe_var,
+            MIR::Call.new(
+              "CheatLib.dupeCaptured",
+              [MIR::TypeOf.new(source_mir), source_mir, MIR::Ident.new(fresh_heap_alloc)],
+              true,
+              false,
+              MIR::CallableContract.no_ownership(3),
+            ),
+            false,
+            nil,
+            nil,
+          ),
+        ], T::Array[MIR::Emittable])
+        if needs_cleanup
+          setup_mir << MIR::ErrDeferStmt.new(MIR::Call.new(
+            "CheatLib.cleanup",
+            [
+              MIR::TypeOf.new(MIR::Ident.new(dupe_var)),
+              MIR::Ident.new(fresh_heap_alloc),
+              MIR::AddressOf.new(MIR::Ident.new(dupe_var)),
+            ],
+            false,
+            false,
+            MIR::CallableContract.no_ownership(3),
+          ))
+        end
         body_cleanup = if needs_cleanup
           "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
         end
         CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
-                        MIR::Ident.new(dupe_var), dupe_decl, body_cleanup, nil, nil, nil)
+                        MIR::Ident.new(dupe_var), dupe_decl, body_cleanup, setup_mir, nil, nil)
       elsif strat.is_a?(CaptureStrategy::RcClone)
         retain_var = "__fc_#{fresh_heap_id}_#{name}_retain"
         source_ref = source_overrides[name] || name
@@ -159,16 +210,16 @@ module FiberCtxBuilder
         body_cleanup =
           "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.#{release}(#{payload_zig}, std.heap.page_allocator, " \
           "#{body_access_prefix}.#{name});"
-        setup_mir = MIR::Let.new(retain_var, MIR::Call.new(
+        retain_setup_mir = T.let([MIR::Let.new(retain_var, MIR::Call.new(
           "CheatLib.#{func}",
           [MIR::Ident.new(payload_zig), MIR::Ident.new(source_ref)],
           false,
           false,
           MIR::CallableContract.no_ownership(2),
-        ), false, nil, nil)
+        ), false, nil, nil)], T::Array[MIR::Emittable])
         CaptureSpec.new(name, "@TypeOf(#{source_ref})", retain_var,
                         MIR::Ident.new(retain_var), retain_decl, body_cleanup,
-                        setup_mir, release, payload_zig)
+                        retain_setup_mir, release, payload_zig)
       elsif strat.is_a?(CaptureStrategy::MoveInto)
         source_ref = source_overrides[name] || name
         cleanup = if needs_move_capture_cleanup?(_type_obj, schema_lookup)

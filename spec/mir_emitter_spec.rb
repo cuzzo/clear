@@ -18,8 +18,20 @@ RSpec.describe MIREmitter do
     expect(e.emit(MIR::Ident.new("foo"))).to eq("foo")
   end
 
+  it "emits an anonymous tuple literal from structural children" do
+    node = MIR::TupleLiteral.new([MIR::Ident.new("x"), MIR::Lit.new("42")])
+
+    expect(e.emit(node)).to eq(".{x, 42}")
+  end
+
   it "emits a function reference" do
     expect(e.emit(MIR::FnRef.new("handler"))).to eq("&handler")
+  end
+
+  it "emits TypeOf from a structural child expression" do
+    node = MIR::TypeOf.new(MIR::FieldGet.new(MIR::Ident.new("target"), "field"))
+
+    expect(e.emit(node)).to eq("@TypeOf(target.field)")
   end
 
   # =========================================================================
@@ -173,8 +185,16 @@ RSpec.describe MIREmitter do
   it "emits switch statement" do
     node = MIR::SwitchStmt.new(
       MIR::Ident.new("dir"),
-      [{ pattern: ".North", body: [MIR::ReturnStmt.new(MIR::Lit.new("0"))] },
-       { pattern: ".South", body: [MIR::ReturnStmt.new(MIR::Lit.new("1"))] }],
+      [
+        MIR::SwitchArm.new(
+          patterns: [MIR::EnumSwitchPattern.new(variant: "North")],
+          body: [MIR::ReturnStmt.new(MIR::Lit.new("0"))],
+        ),
+        MIR::SwitchArm.new(
+          patterns: [MIR::EnumSwitchPattern.new(variant: "South")],
+          body: [MIR::ReturnStmt.new(MIR::Lit.new("1"))],
+        ),
+      ],
       [MIR::ReturnStmt.new(MIR::Lit.new("-1"))]
     )
     zig = e.emit(node)
@@ -182,6 +202,72 @@ RSpec.describe MIREmitter do
     expect(zig).to include(".North =>")
     expect(zig).to include(".South =>")
     expect(zig).to include("else =>")
+  end
+
+  it "emits structural function catch wrappers" do
+    clause = MIR::CatchClause.new(
+      meta: MIR::CatchClauseMeta.new(
+        kinds: ["Input"],
+        types: ["ParseErr"],
+        filter_types: [],
+        filter_messages: [MIR::Lit.new("\"bad\"")],
+      ),
+      body: [MIR::ReturnStmt.new(MIR::Lit.new("1"))],
+    )
+    node = MIR::CatchWrapper.new(
+      MIR::Call.new("__f_body", [MIR::Ident.new("rt")], false, false, MIR::CallableContract.no_ownership(1)),
+      [],
+      [clause],
+      [],
+      MIR::CatchDefaultAction::Propagate,
+      Type.new(:String),
+      "rt",
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("return __f_body(rt) catch")
+    expect(zig).to include("rt.__error.matchesKind(.Input)")
+    expect(zig).to include("ErrorName.ParseErr")
+    expect(zig).to include('rt.__error.matchesMessage("bad")')
+    expect(zig).to include("const __snap_ptr = rt.__error.snapshotAs([]const u8);")
+    expect(zig).to include("return error.CheatError;")
+  end
+
+  it "emits default-only structural function catch wrappers" do
+    node = MIR::CatchWrapper.new(
+      MIR::Call.new("__f_body", [], false, false, MIR::CallableContract.no_ownership(0)),
+      [],
+      [],
+      [MIR::ReturnStmt.new(MIR::Lit.new("0"))],
+      MIR::CatchDefaultAction::Body,
+      nil,
+      "rt",
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("return __f_body() catch")
+    expect(zig).to include("const __error = rt.__error;")
+    expect(zig).to include("return 0;")
+    expect(zig).not_to include("else")
+  end
+
+  it "emits snapshot reads from structural capability unwraps" do
+    node = MIR::SnapshotRead.new(
+      MIR::CapabilityUnwrap.new(MIR::Ident.new("cell")),
+      "rt",
+      "view",
+      "__guard",
+      [MIR::Suppress.new("view")],
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("@typeInfo(@TypeOf(cell))")
+    expect(zig).to include("var __guard = ")
+    expect(zig).to include(".*.read(rt);")
+    expect(zig).to include("const view = __guard.get();")
   end
 
   it "emits if-chain" do
@@ -752,13 +838,20 @@ RSpec.describe MIREmitter do
   # =========================================================================
 
   it "emits defer with simple statement" do
-    node = MIR::DeferStmt.new("allocator.free(buf)")
+    node = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("allocator"), "free", [MIR::Ident.new("buf")], false))
     expect(e.emit(node)).to eq("defer allocator.free(buf);")
   end
 
   it "emits errdefer" do
-    node = MIR::ErrDeferStmt.new("allocator.free(buf)")
+    node = MIR::ErrDeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("allocator"), "free", [MIR::Ident.new("buf")], false))
     expect(e.emit(node)).to eq("errdefer allocator.free(buf);")
+  end
+
+  it "rejects raw string defer bodies" do
+    expect { MIR::DeferStmt.new("allocator.free(buf)") }
+      .to raise_error(TypeError, /MIR::DeferStmt body must be structural MIR/)
+    expect { MIR::ErrDeferStmt.new("allocator.free(buf)") }
+      .to raise_error(TypeError, /MIR::ErrDeferStmt body must be structural MIR/)
   end
 
   # =========================================================================
@@ -784,11 +877,12 @@ RSpec.describe MIREmitter do
   end
 
   # =========================================================================
-  # String passthrough
+  # Raw string rejection
   # =========================================================================
 
-  it "passes through raw strings" do
-    expect(e.emit("already_zig_code")).to eq("already_zig_code")
+  it "rejects raw strings" do
+    expect { e.emit("already_zig_code") }
+      .to raise_error(/MIREmitter cannot emit raw Zig strings/)
   end
 
   it "emits empty string for nil" do
@@ -881,8 +975,8 @@ RSpec.describe MIREmitter do
         MIR::Ident.new("shard_key"),
         :string_map,
         sig,
-        "[]const u8",
-        "i64",
+        Type.new(:String),
+        Type.new(:Int64),
         { alloc: :frame },
         :shard_direct_zig,
       )
@@ -909,13 +1003,22 @@ RSpec.describe MIREmitter do
     end
 
     it "emits snapshot multi transactions through the conflict wrapper" do
+      action = MIR::FailureAction.new(
+        kind: MIR::FailureActionKind::Return,
+        error_type: :UpdateRetriesExhausted,
+        error_kind: :Transient,
+        default_message: "conflict",
+        line: "0",
+        rt_name: "rt",
+        return_value: MIR::Ident.new("error.Conflict"),
+      )
       node = MIR::SnapshotMultiTxn.new(
-        ".{ left, right }",
+        [MIR::Ident.new("left"), MIR::Ident.new("right")],
         "rt",
-        "rt.heapAlloc()",
-        "const left_view = views[0];",
+        :heap,
+        ["left_view"],
         [MIR::Set.new(MIR::Ident.new("left_view.value"), MIR::Lit.new("1"))],
-        "return error.Conflict;",
+        action,
         nil,
         nil,
       )
@@ -925,28 +1028,35 @@ RSpec.describe MIREmitter do
       expect(zig).to include("const left_view = views[0];")
       expect(zig).to include("left_view.value = 1;")
       expect(zig).to include("error.UpdateRetriesExhausted")
+      expect(zig).to include("return error.Conflict;")
     end
 
     it "emits WITH MATCH dispatch arms with preludes" do
-      node = MIR::WithMatchDispatch.new("cell", [
-        {
-          family: :Locked,
-          probe: "@hasDecl(T, \"lock\")",
-          prelude_zig: "const x = cell.lock();",
-          body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("x")], false), false)],
-        },
-        {
-          family: :Plain,
-          probe: "true",
-          prelude_zig: "",
-          body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("cell")], false), false)],
-        },
-      ])
+      node = MIR::WithMatchDispatch.new(
+        MIR::Ident.new("cell"),
+        "x",
+        false,
+        "rt",
+        [
+          MIR::WithMatchArm.new(
+            family: :LOCKED,
+            guard_var: "__guard",
+            body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("x")], false), false)],
+          ),
+          MIR::WithMatchArm.new(
+            family: :ATOMIC,
+            guard_var: "__unused",
+            body: [MIR::ExprStmt.new(MIR::Call.new("use", [MIR::Ident.new("cell")], false), false)],
+          ),
+        ],
+      )
 
       zig = e.emit(node)
-      expect(zig).to include("if (comptime @hasDecl(T, \"lock\"))")
-      expect(zig).to include("const x = cell.lock();")
-      expect(zig).to include("else if (comptime true)")
+      expect(zig).to include("if (comptime @hasField(CheatLib.WithMatchInner(@TypeOf(cell)), \"mutex\"))")
+      expect(zig).to include("var __guard = ")
+      expect(zig).to include(".*.acquire();")
+      expect(zig).to include("else if (comptime @hasDecl(CheatLib.WithMatchInner(@TypeOf(cell)), \"cmpxchgStrong\"))")
+      expect(zig).to include("const x = ")
       expect(zig).to include("_ = &cell;")
     end
 
@@ -982,10 +1092,20 @@ RSpec.describe MIREmitter do
     end
 
     it "wraps snapshot conflicts with retry loops" do
-      zig = e.send(:wrap_conflict_handler, "cell.update()", "return error.Stop;", 3, "AtomicConflict")
+      action = MIR::FailureAction.new(
+        kind: MIR::FailureActionKind::Return,
+        error_type: :AtomicConflict,
+        error_kind: :Transient,
+        default_message: "atomic CAS retries exhausted",
+        line: "0",
+        rt_name: "rt",
+        return_value: MIR::Ident.new("error.Stop"),
+      )
+      zig = e.send(:wrap_conflict_handler, "cell.update()", action, 3, "AtomicConflict")
       expect(zig).to include("__snap_retry: while (true)")
       expect(zig).to include("error.AtomicConflict")
       expect(zig).to include("if (__retry + 1 < 3) continue;")
+      expect(zig).to include("return error.Stop;")
     end
 
     it "emits index inserts with frame and custom allocator expressions" do

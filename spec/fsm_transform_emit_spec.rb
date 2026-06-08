@@ -2,14 +2,25 @@ require "rspec"
 require_relative "../src/mir/fsm_transform"
 require_relative "../src/mir/fsm_transform/emit"
 require_relative "../src/mir/fsm_transform/segments"
+require_relative "../src/mir/fsm_wrapper_emitter"
 
 RSpec.describe FsmTransform::Emit do
   def fsm_body_items(stmts)
     stmts.map do |stmt|
-      stmt.is_a?(String) ?
-        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
-        FsmTransform::Emit.fsm_body_mir_item(stmt)
+      FsmTransform::Emit.fsm_body_mir_item(stmt)
     end
+  end
+
+  def ctx_field(ctx, field)
+    MIR::FieldGet.new(MIR::Ident.new(ctx), field)
+  end
+
+  def ctx_decl(name, type_zig, default_value = nil)
+    MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
+  end
+
+  def render_expr(expr)
+    MIREmitter.new.emit(expr)
   end
 
   def fsm_ctx(overrides = {})
@@ -19,13 +30,13 @@ RSpec.describe FsmTransform::Emit do
       blk_label: "__bg1",
       ctx_type: "__BgCtx1",
       promise_zig: "CheatHeader.Promise(void)",
-      capture_fields: "",
+      capture_fields: [],
       alloc_var: "__alloc_1",
       promise_var: "__promise_1",
       ctx_var: "__ctx_1_ptr",
       rt_name: "rt",
-      promoted_decls: "",
-      capture_inits: "",
+      promoted_decls: [],
+      capture_inits: [],
       captured: {},
       capture_close_zig: {},
       pointer_captures: Set.new,
@@ -46,17 +57,17 @@ RSpec.describe FsmTransform::Emit do
       blk_label: raw.fetch(:blk_label),
       ctx_type: raw.fetch(:ctx_type),
       promise_zig: raw.fetch(:promise_zig),
-      capture_fields: raw.fetch(:capture_fields),
+      capture_fields: FsmTransform.coerce_context_fields(raw.fetch(:capture_fields)),
       alloc_var: raw.fetch(:alloc_var),
       promise_var: raw.fetch(:promise_var),
       ctx_var: raw.fetch(:ctx_var),
       rt_name: raw.fetch(:rt_name),
-      promoted_decls: raw.fetch(:promoted_decls),
-      capture_inits: raw.fetch(:capture_inits),
+      promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
+      capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
       capture_close_zig: raw.fetch(:capture_close_zig),
       pointer_captures: raw.fetch(:pointer_captures),
-      extra_ctx_fields: raw.fetch(:extra_ctx_fields),
+      extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
       fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
       arena_init_flag: raw.fetch(:arena_init_flag),
@@ -79,7 +90,7 @@ RSpec.describe FsmTransform::Emit do
       descriptor: attrs[:descriptor],
       fsm_result_transfer_facts: attrs.fetch(:fsm_result_transfer_facts, []),
       fn_name: attrs[:fn_name],
-      rt_suppress: attrs.fetch(:rt_suppress, ""),
+      suppress_runtime_ref: attrs.fetch(:suppress_runtime_ref, false),
       facts: attrs.fetch(:facts, FsmTransform::Emit::FsmSegmentFacts.empty),
     )
   end
@@ -102,8 +113,10 @@ RSpec.describe FsmTransform::Emit do
     expect(ctx.bg_rt).to eq("__rt_bg12")
     expect(ctx.captured).to eq("payload" => :stub)
 
-    updated = ctx.with_extra_ctx_fields(["payload: i64 = 0,"])
-    expect(updated.extra_ctx_fields).to eq(["payload: i64 = 0,"])
+    updated = ctx.with_extra_ctx_fields([ctx_decl("payload", "i64", MIR::Lit.new("0"))])
+    expect(updated.extra_ctx_fields.first.name).to eq("payload")
+    expect(updated.extra_ctx_fields.first.type_zig).to eq("i64")
+    expect(updated.extra_ctx_fields.first.default_value.value).to eq("0")
     expect(updated.id).to eq(12)
   end
 
@@ -123,14 +136,14 @@ RSpec.describe FsmTransform::Emit do
     )
 
     expect(result).to be_a(MIR::FsmLoweringResult)
-    expect(result.code).not_to include("fn runSeg0")
+    expect(FsmWrapperEmitter.render(result.body)).not_to include("fn runSeg0")
   end
 
   it "returns no resume target for terminal segment tails" do
     expect(described_class.tail_resume_target(FsmTransform::Segments::Done.new(nil))).to be_nil
   end
 
-  it "derives segment facts from MIR roots and ignores rendered body text" do
+  it "derives segment facts from MIR roots and prefers materialized structure roots" do
     payload_ref = MIR::FieldGet.new(MIR::Ident.new("__ctx_12"), "payload")
     moved_ref = MIR::FieldGet.new(MIR::Ident.new("__ctx_12"), "payload_moved")
     result_ref = MIR::FieldGet.new(
@@ -148,7 +161,7 @@ RSpec.describe FsmTransform::Emit do
     )
     spec = fsm_spec(
       index: 0,
-      body_stmts: ["__ctx_12.fake_moved = true;"],
+      body_stmts: [MIR::MoveMark.new("__ctx_12.fake")],
       structure_stmts: [
         MIR::TransferMark.new("__ctx_12.payload", :return, :heap),
         MIR::MoveMark.new("__ctx_12.payload"),
@@ -179,17 +192,14 @@ RSpec.describe FsmTransform::Emit do
       .to eq("payload_moved")
   end
 
-  it "keeps rendered FSM body text opaque to safety fact collection" do
-    rendered_guard = FsmTransform::Emit.fsm_body_opaque_zig_item("__ctx_12.payload_moved = true;")
+  it "keeps structural FSM body items visible to safety fact collection" do
     structural_guard = FsmTransform::Emit.fsm_body_mir_item(
       MIR::MoveMark.new("__ctx_12.payload")
     )
 
-    expect(rendered_guard.fact_node).to be_nil
-    expect(rendered_guard.emit_value).to eq("__ctx_12.payload_moved = true;")
     expect(structural_guard.fact_node).to be_a(MIR::MoveMark)
     expect(structural_guard.emit_value).to be_a(MIR::MoveMark)
-    expect(FsmTransform::Emit.fsm_body_mir_nodes([rendered_guard, structural_guard]))
+    expect(FsmTransform::Emit.fsm_body_mir_nodes([structural_guard]))
       .to eq([structural_guard.fact_node])
   end
 
@@ -198,7 +208,7 @@ RSpec.describe FsmTransform::Emit do
     action = MIR::FsmDestroyCleanup.new(
       source_kind: :capture,
       name: "payload",
-      target_zig: "__ctx_33.payload",
+      target: ctx_field("__ctx_33", "payload"),
       cleanup_entry: cleanup_entry,
     )
     fact = MIR::FsmOwnershipFact.new(
@@ -209,7 +219,7 @@ RSpec.describe FsmTransform::Emit do
     )
     spec = fsm_spec(
       index: 0,
-      body_stmts: ["__ctx_33.ignored = true;"],
+      body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("ignored()"), false)],
       tail: FsmTransform::Segments::Done.new(nil),
       facts: FsmTransform::Emit::FsmSegmentFacts.new(
         ctx_reads: ["payload"],
@@ -241,19 +251,19 @@ RSpec.describe FsmTransform::Emit do
     expect(structure.ownership_facts).to eq([fact])
   end
 
-  it "accepts zig_text conditions and rejects unresolved condition ASTs" do
-    cond = Struct.new(:zig_text).new("has_work")
+  it "accepts structural MIR conditions and rejects unresolved condition ASTs" do
+    cond = MIR::Ident.new("has_work")
     tail = FsmTransform::Segments::CondBranch.new(cond, 2, 3)
     spec = fsm_spec(index: 1, tail: tail, descriptor: nil)
     lowered = described_class.build_dispatch_tail(spec, 0, [], 7)
 
     expect(lowered).to be_a(MIR::FsmTailCondJump)
-    expect(lowered.cond_zig).to eq("has_work")
+    expect(lowered.condition).to eq(cond)
 
     bad_tail = FsmTransform::Segments::CondBranch.new(Object.new, 2, 3)
     expect {
       described_class.build_dispatch_tail(fsm_spec(index: 1, tail: bad_tail, descriptor: nil), 0, [], 7)
-    }.to raise_error(ArgumentError, /CondBranch tail's cond_ast/)
+    }.to raise_error(ArgumentError, /CondBranch tail condition must be structural MIR/)
   end
 
   it "rejects unsupported suspend descriptor tails" do
@@ -328,7 +338,7 @@ RSpec.describe FsmTransform::Emit do
     action = described_class.fsm_destroy_actions(ctx).first
     expect(action).to be_a(MIR::FsmDestroyCleanup)
     expect(action.name).to eq("payload")
-    expect(action.target_zig).to eq("__ctx_8.payload")
+    expect(render_expr(action.target)).to eq("__ctx_8.payload")
     expect(action.cleanup_entry).to eq(entry)
   end
 
@@ -338,25 +348,25 @@ RSpec.describe FsmTransform::Emit do
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
       source_kind: :body,
       name: "body",
-      target_zig: "__ctx_1.body",
+      target: ctx_field("__ctx_1", "body"),
       cleanup_entry: cleanup_entry,
     )
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_a",
       guard_field: "__lock_held_0",
-      lock_ref_zig: "__ctx_1.lock_a",
+      lock_ref: ctx_field("__ctx_1", "lock_a"),
       unlock_method: "unlock",
     )
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
       source_kind: :capture,
       name: "cap",
-      target_zig: "__ctx_1.cap",
+      target: ctx_field("__ctx_1", "cap"),
       cleanup_entry: cleanup_entry,
     )
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_b",
       guard_field: "__lock_held_1",
-      lock_ref_zig: "__ctx_1.lock_b",
+      lock_ref: ctx_field("__ctx_1", "lock_b"),
       unlock_method: "unlock",
     )
 
@@ -382,9 +392,11 @@ RSpec.describe FsmTransform::Emit do
 
     setup = described_class.build_spawn_setup(ctx, lowering)
 
-    expect(setup.spawn_call_zig).to eq("try CheatHeader.spawnFsmBest(__ctx_8_ptr.task);")
-    expect(setup.alloc_expr_zig).to eq("rt.heapAlloc()")
-    expect(setup.ctx_init_zig).to include(".payload = payload,")
+    expect(FsmWrapperEmitter.render_fsm_spawn_call(setup.spawn_call))
+      .to eq("try CheatHeader.spawnFsmBest(__ctx_8_ptr.task);")
+    expect(MIREmitter.new.emit(setup.alloc_expr)).to eq("rt.heapAlloc()")
+    expect(FsmWrapperEmitter.render_struct_init_fields(setup.ctx_init_fields, MIREmitter.new))
+      .to include(".payload = payload,")
   end
 
   it "registers structural lock release actions while expanding lock segments" do
@@ -412,7 +424,7 @@ RSpec.describe FsmTransform::Emit do
       body_stmts: [],
       tail: tail,
       fn_name: nil,
-      rt_suppress: "",
+      suppress_runtime_ref: false,
     )
     ctx = fsm_ctx(
       id: 7,
@@ -424,11 +436,13 @@ RSpec.describe FsmTransform::Emit do
 
     expanded = described_class.expand_lock_segment(spec, ctx, {}, lowering, 20)
 
-    expect(expanded.extra_fields).to include("__lock_held_0: bool = false,")
+    held_field = expanded.extra_fields.find { |field| field.name == "__lock_held_0" }
+    expect(held_field&.type_zig).to eq("bool")
+    expect(held_field&.default_value&.value).to eq("false")
     action = described_class.fsm_destroy_actions(ctx).first
     expect(action).to be_a(MIR::FsmDestroyLockRelease)
     expect(action.guard_field).to eq("__lock_held_0")
-    expect(action.lock_ref_zig).to eq("__ctx_7.lock")
+    expect(render_expr(action.lock_ref)).to eq("__ctx_7.lock")
     expect(action.unlock_method).to eq("unlock")
   end
 
@@ -475,12 +489,15 @@ RSpec.describe FsmTransform::Emit do
     )
 
     fail_spec = expanded.appended_specs[2]
+    fail_pre_body = FsmWrapperEmitter.render_stmt_array(fail_spec.pre_body_stmts, "__rt_bg7")
     expect(expanded.lock_try_spec.fn_name).to eq("runLock")
-    expect(fail_spec.pre_body_zig).to include("__ctx_7.__lock_held_0 = false;")
-    expect(fail_spec.pre_body_zig).to include("__ctx_7.lock_prior.unlockprior();")
-    expect(fail_spec.pre_body_zig).to include("handleLockError();")
+    expect(fail_pre_body).to include("__ctx_7.__lock_held_0 = false;")
+    expect(fail_pre_body).to include("__ctx_7.lock_prior.unlockprior();")
+    expect(fail_pre_body).to include("handleLockError();")
     expect(fail_spec.tail).to be_a(FsmTransform::Segments::Done)
-    expect(expanded.extra_fields).to include("retry_count: u32 = 0,")
+    retry_field = expanded.extra_fields.find { |field| field.name == "retry_count" }
+    expect(retry_field&.type_zig).to eq("u32")
+    expect(retry_field&.default_value&.value).to eq("0")
     expect(lowering.error_calls.first).to eq([
       error_clause,
       7,
@@ -536,7 +553,7 @@ RSpec.describe FsmTransform::Emit do
     )
 
     expect(result).to be_a(MIR::FsmLoweringResult)
-    expect(result.code).to include("__lock_held_0: bool = false,")
+    expect(FsmWrapperEmitter.render(result.body)).to include("__lock_held_0: bool = false,")
     expect(result.structure.destroy_actions.first).to be_a(MIR::FsmDestroyLockRelease)
     expect(result.structure.destroy_actions.first.guard_field).to eq("__lock_held_0")
   end
@@ -577,7 +594,26 @@ RSpec.describe FsmTransform::Emit do
       extra_ctx_fields: ["existing: i64 = 0,"],
     }
     structure = MIR::FsmStructure.new([], [], [], [], 4, nil)
-    result = MIR::FsmLoweringResult.new(code: "code", structure: structure)
+    body = MIR::FsmGenericBody.new(
+      "__bg4",
+      MIR::FsmGenericCtxStruct.new("__BgCtx4", "CheatHeader.Promise(void)", [], [], [], [], MIR::FsmDispatch.new(4, [], false), []),
+      MIR::FsmSpawnSetup.new(
+        "__alloc_4",
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+        "__promise_4",
+        "CheatHeader.Promise(void)",
+        [],
+        "__ctx_4_ptr",
+        "__BgCtx4",
+        [],
+        MIR::FsmSpawnCall.new(target: :best, ctx_var: "__ctx_4_ptr"),
+        "rt",
+        0,
+        0,
+        nil,
+      ),
+    )
+    result = MIR::FsmLoweringResult.new(body: body, structure: structure)
 
     allow(FsmTransform::RecursiveSplitter).to receive(:split).and_return(segment_list)
     allow(FsmTransform::Liveness).to receive(:analyze)
@@ -587,7 +623,9 @@ RSpec.describe FsmTransform::Emit do
     expect(FsmTransform.transform(bg_block, ctx, lowering)).to eq(result)
     expect(FsmTransform::Emit).to have_received(:build_recursive) do |emit_ctx, rec_segs, _liveness, used_lowering|
       expect(emit_ctx).to be_a(FsmTransform::Emit::FsmEmitContext)
-      expect(emit_ctx.extra_ctx_fields).to eq(["existing: i64 = 0,"])
+      expect(emit_ctx.extra_ctx_fields.first.name).to eq("existing")
+      expect(emit_ctx.extra_ctx_fields.first.type_zig).to eq("i64")
+      expect(emit_ctx.extra_ctx_fields.first.default_value.value).to eq("0")
       expect(emit_ctx.recursive_promoted_names).to eq([])
       expect(rec_segs).to eq(segment_list)
       expect(used_lowering).to eq(lowering)

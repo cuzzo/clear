@@ -138,7 +138,7 @@ preserved_count = rbi_preserved.values.sum(&:size)
 warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches, #{preserved_count} preserved from existing RBI"
 
 normalize_type = lambda do |_class_path, type_str|
-  type_str.gsub(/\bZigTemplateArgs\b/, "MIR::ZigTemplateArgs")
+  type_str
 end
 
 puts <<~HDR

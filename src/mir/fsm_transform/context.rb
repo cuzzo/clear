@@ -14,17 +14,17 @@ module FsmTransform
       const :blk_label, String
       const :ctx_type, String
       const :promise_zig, String
-      const :capture_fields, String
+      const :capture_fields, T::Array[MIR::ContextFieldDecl]
       const :alloc_var, String
       const :promise_var, String
       const :ctx_var, String
       const :rt_name, String
-      const :promoted_decls, String
-      const :capture_inits, String
+      const :promoted_decls, T::Array[MIR::Emittable]
+      const :capture_inits, T::Array[MIR::StructInitField]
       const :captured, T::Hash[String, Object]
       const :capture_close_zig, T::Hash[String, String]
       const :pointer_captures, T::Set[String]
-      const :extra_ctx_fields, T::Array[String]
+      const :extra_ctx_fields, T::Array[MIR::ContextFieldDecl]
       const :recursive_promoted_names, T::Array[String]
       const :fresh_heap_cleanup_names, T::Array[String]
       const :arena_init_flag, T::Boolean
@@ -36,7 +36,7 @@ module FsmTransform
       const :profile_column, T.nilable(Integer)
       prop :destroy_actions, T::Array[MIR::FsmDestroyAction], default: []
 
-      sig { params(fields: T::Array[String]).returns(FsmEmitContext) }
+      sig { params(fields: T::Array[MIR::ContextFieldDecl]).returns(FsmEmitContext) }
       def with_extra_ctx_fields(fields)
         FsmEmitContext.new(
           id: id,

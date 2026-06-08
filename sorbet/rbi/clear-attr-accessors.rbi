@@ -880,7 +880,7 @@ end
 class Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
@@ -1031,14 +1031,14 @@ end
 class FsmTransform::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
@@ -1479,6 +1479,23 @@ class InlineStructVariant
   def fields; end
 end
 
+class LinearOwnershipSnapshot
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def err_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def maybe_released; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def released; end
+end
+
 class LinearOwnershipState
   sig { returns(T::Hash[String, Symbol]) }
   def alloc_kinds; end
@@ -1566,14 +1583,26 @@ class MIR::Program
   def items; end
 end
 
-class MIR::ZigTemplate
-  sig { returns(MIR::ZigTemplateArgs) }
-  def args; end
-end
-
 class MIRChecker
   sig { returns(T::Array[T.untyped]) }
   def errors; end
+end
+
+class MIRChecker::LinearOwnershipSnapshot
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def err_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def maybe_released; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def released; end
 end
 
 class MIRChecker::LinearOwnershipState
@@ -1761,7 +1790,7 @@ end
 class RecursiveSplitter::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
@@ -2216,11 +2245,6 @@ class WithBlock
   def view_kind=(value); end
 end
 
-class ZigTemplate
-  sig { returns(MIR::ZigTemplateArgs) }
-  def args; end
-end
-
 class ZigTranspiler
   sig { returns(T.untyped) }
   def enum_schemas; end
@@ -2236,4 +2260,3 @@ class ZigType
   sig { returns(String) }
   def source; end
 end
-

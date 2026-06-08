@@ -1702,7 +1702,8 @@ class MIRLowering
     effect = MIR::OwnershipEffect.of(source_expr)
     return true if effect.produces_owned
 
-    source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating? == true
+    sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+    sig&.emits_allocating? == true
   end
 
   sig { params(expr: MIR::Node).returns(T::Boolean) }
@@ -1788,7 +1789,8 @@ class MIRLowering
 
     effect = MIR::OwnershipEffect.of(source_expr)
     unless effect.produces_owned
-      return unless source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating?
+      sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+      return unless sig&.emits_allocating?
 
       facts << MIR::OwnedCreate.new(target_name, mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))
       return
@@ -2609,7 +2611,7 @@ class MIRLowering
   end
 
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
-  # to a concrete :heap/:frame symbol. Used by InlineZig allocs field.
+  # to a concrete :heap/:frame symbol for structural allocator metadata.
   sig { params(alloc_sym: Symbol, target_node: T.untyped, node: T.untyped).returns(Symbol) }
   def resolve_alloc_sym(alloc_sym, target_node = nil, node = nil)
     case alloc_sym
@@ -2652,12 +2654,6 @@ class MIRLowering
 
     decl = root.symbol&.reg
     (decl && function_state.decl_zig_names[decl.object_id]) || root.name.to_s
-  end
-
-  # Resolve allocator symbol to Zig string for InlineZig patterns.
-  sig { params(kind: Symbol).returns(String) }
-  def alloc_zig_str(kind)
-    MIR::Placement.zig_allocator(kind, runtime_binding_name)
   end
 
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
@@ -2952,7 +2948,7 @@ class MIRLowering
   # These helpers paper over the difference for the lowering loop.
 
   # User-visible name of the bound entity — used for naming guard vars.
-  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def lower_static_call(node)
     # Structural MIR::InlineBc when the matched stdlib_def opts in via
     # bc:true. Both backends consume the same node: Zig emits via
@@ -2964,19 +2960,24 @@ class MIRLowering
       return MIR::InlineBc.new(stdlib_def.emit&.bc_op, mir_args, stdlib_def)
     end
 
-    pattern = T.cast(node.zig_pattern, String).dup
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
     # checker can verify their cleanup. Non-allocating args (and frame allocs)
-    # stay as MIR children of the template expression.
+    # stay as MIR children of the registry call expression.
     mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-    MIR::ZigTemplate.new(pattern, mir_args, "static_call", MIR::OwnershipContract.empty, node.matched_stdlib_def)
+    stdlib_def = FunctionSignature.unwrap(node.matched_stdlib_def)
+    raise "lower_static_call: missing stdlib signature for #{node.class.name}" unless stdlib_def
+    MIR::RegistryCall.new(
+      entry: stdlib_def,
+      args: mir_args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "static_call",
+    )
   end
 
   sig { params(node: AST::OrExit).returns(MIR::ScopeBlock) }
   def lower_or_exit(node)
     facts = or_exit_facts(node, node.token.line)
 
-    # Register VM: structured sibling of the InlineZig sequence below.
+    # Register VM: structural sibling of the Zig backend sequence below.
     # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
     # reassignment as one InlineBc with structured fields. The Zig
     # backend path (target != :bc) is byte-for-byte unchanged.
@@ -3191,47 +3192,6 @@ class MIRLowering
     end
   end
 
-  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
-  def task_config_zig(stack_size, computed_tier)
-    variant = task_config_variant(stack_size, computed_tier)
-    ".{ .stack_size = .#{variant} }"
-  end
-
-  sig { params(rt_name: String, ctx_type: String, ctx_var: String, task_cfg: String, pin_mode: T.nilable(T.any(Symbol, T::Boolean))).returns(String) }
-  def fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
-    spawn_args = "@intFromPtr(&Runtime.entryWrapper),\n" \
-      "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
-      "    #{ctx_var},\n" \
-      "    #{task_cfg}"
-    case pin_mode
-    when :local, true
-      "try #{rt_name}.getSched().submitSpawn(\n    #{spawn_args}\n);"
-    when :shared
-      "try CheatHeader.spawnPinned(\n    #{spawn_args}\n);"
-    when :parallel
-      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
-    else
-      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
-    end
-  end
-
-  sig { params(task_cfg: String, site_id: Integer, dispatch: BackgroundDispatch).returns(String) }
-  def task_config_with_profile(task_cfg, site_id, dispatch)
-    fields = ".profile_site_id = #{site_id}, .profile_dispatch = #{profile_dispatch_id(dispatch)}"
-    stripped = task_cfg.strip
-    return ".{ #{fields} }" if stripped == ".{}"
-    append_zig_struct_literal_fields(stripped, fields)
-  end
-
-  sig { params(literal: String, fields: String).returns(String) }
-  def append_zig_struct_literal_fields(literal, fields)
-    trimmed = literal.rstrip
-    return literal unless trimmed.end_with?("}")
-
-    prefix = T.must(trimmed[0...-1])
-    "#{prefix}, #{fields} }"
-  end
-
   sig { params(dispatch: BackgroundDispatch).returns(Integer) }
   def profile_dispatch_id(dispatch)
     case dispatch
@@ -3276,8 +3236,7 @@ class MIRLowering
     formats = node.args.map { |arg| zig_format_for_type(arg.full_type!) }.join(" ")
     args_mir = node.args.map { |a| hoist_alloc(lower(a), a) }
     format_lit = MIR::Lit.new("\"#{formats}\\n\"")
-    tuple_inner = args_mir.map { |a| emit_expr(a) }.join(", ")
-    tuple = MIR::Ident.new(".{#{tuple_inner}}")
+    tuple = MIR::TupleLiteral.new(args_mir)
     MIR::Call.new("std.debug.print", [format_lit, tuple], false, false, MIR::CallableContract.no_ownership(2))
   end
 
@@ -3318,15 +3277,18 @@ class MIRLowering
 
   # Emit a builtin operation from BUILTIN_OPS registry with structured MIR
   # children and stdlib_def attached so the MIR checker can verify ownership.
-  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def emit_builtin(name, args)
     entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     if bc_target? && entry.emit&.bc
       return MIR::InlineBc.new(name, args, entry)
     end
-    pattern = entry.emit&.zig.to_s.dup
-    MIR::ZigTemplate.new(pattern, args, "builtin_#{name}", MIR::OwnershipContract.empty, entry)
+    MIR::RegistryCall.new(
+      entry: entry,
+      args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "builtin_#{name}",
+    )
   end
 
   sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
@@ -3423,7 +3385,7 @@ class MIRLowering
 
   public
 
-  public :task_config_variant, :task_config_zig, :emit_expr, :emit_builtin,
+  public :task_config_variant, :emit_expr, :emit_builtin,
     :lower_head, :append_ownership_transfers_for_mir_body
 
   sig do
@@ -3555,7 +3517,7 @@ class MIRLowering
     when :rc_retain
       MIR::RcRetain.new(value, T.must(plan.zig_type), T.must(plan.rc_func))
     when :dupe_union
-      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::Ident.new(alloc_zig_str(plan.target_alloc))])
+      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::AllocatorRef.new(plan.target_alloc)])
     else
       value
     end

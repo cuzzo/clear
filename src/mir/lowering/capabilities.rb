@@ -32,7 +32,7 @@ module MIRLoweringCapabilities
 
   CapabilitySpec = T.type_alias { CapabilityPlan::CapabilityTransition }
   CapabilityVarNode = T.type_alias { T.any(AST::Identifier, AST::GetField, AST::GetIndex) }
-  WithBindingNode = T.type_alias { T.any(String, MIR::Node) }
+  WithBindingNode = T.type_alias { T.any(String, MIR::Emittable, T::Array[MIR::Emittable]) }
 
   class FallibleClauseFact < T::Struct
     const :var_name, String
@@ -78,36 +78,10 @@ module MIRLoweringCapabilities
     end
   end
 
-  class FallibleLockBindingPlan < T::Struct
-    const :acquire_call, String
-    const :guard_var, String
-    const :alias_name, String
-    const :clause, AST::ErrorClause
-    const :with_label, T.nilable(String)
-    const :with_node, AST::WithBlock
-    const :rt_name, String
-    const :action_zig, String
-    const :retries, T.nilable(Integer)
-    const :matched_types, T::Array[Symbol]
-    const :bubble_types, T::Array[Symbol]
-    const :acquire_block, String
-    const :source_line, String
-  end
-
-  class SortedAcquireEntry < T::Struct
-    const :index, Integer
-    const :alias_name, String
-    const :guard_var, String
-    const :held_var, String
-    const :lock_expr, String
-    const :addr_expr, String
-    const :method_name, String
-  end
-
   class LockBindingPlan < T::Struct
     const :guard_var, String
     const :alias_name, String
-    const :lock_expr, String
+    const :lock_expr, MIR::Emittable
     const :lock_sync, T.nilable(Symbol)
     const :clause, T.nilable(AST::ErrorClause)
     const :with_label, T.nilable(String)
@@ -117,8 +91,8 @@ module MIRLoweringCapabilities
   class MutableSnapshotCap < T::Struct
     const :var_node, CapabilityVarNode
     const :alias_name, String
-    const :source_zig, String
-    const :bare_type_zig, String
+    const :source, MIR::Emittable
+    const :bare_type, Type
     const :conflict_error, Symbol
   end
 
@@ -126,7 +100,7 @@ module MIRLoweringCapabilities
     const :node, AST::WithBlock
     const :with_label, T.nilable(String)
     const :rt_name, String
-    const :alloc_zig, String
+    const :alloc, Symbol
     const :body_mir, T::Array[MIR::Emittable]
     const :retries, T.nilable(Integer)
     const :capabilities, T::Array[MutableSnapshotCap]
@@ -168,33 +142,6 @@ module MIRLoweringCapabilities
     T.bind(self, MIRLowering) rescue nil
     return false unless var_node.is_a?(AST::Identifier)
     var_node.symbol&.is_param == true
-  end
-
-  # Comptime-dispatched lock target: at compile time, Zig picks
-  # `x.ctrl.data.*` if the underlying type is `Arc(...)` (has a `ctrl`
-  # field), else the bare value. The same fn body then works for both
-  # `Locked(T)` and `Arc(Locked(T))` callers without runtime overhead.
-  # Mutable parameters arrive as `*T`, so probe and deref through `*`.
-  sig { params(zig_var: String).returns(String) }
-  def comptime_arc_unwrap_expr(zig_var)
-    T.bind(self, MIRLowering) rescue nil
-    "#{with_match_unwrap_value(zig_var)}.*"
-  end
-
-  sig { params(lock_expr: String, var_sync: T.nilable(Symbol), fallible: T::Boolean).returns(String) }
-  def lock_acquire_call_expr(lock_expr, var_sync, fallible)
-    T.bind(self, MIRLowering) rescue nil
-    if var_sync == :write_locked
-      return "#{lock_expr}.#{fallible ? "writeOrErr" : "write"}()"
-    end
-    if var_sync == :locked
-      return "#{lock_expr}.#{fallible ? "acquireOrErr" : "acquire"}()"
-    end
-
-    write_method = fallible ? "writeOrErr" : "write"
-    acquire_method = fallible ? "acquireOrErr" : "acquire"
-    "(if (comptime @hasDecl(@TypeOf(#{lock_expr}), \"#{write_method}\")) " \
-      "#{lock_expr}.#{write_method}() else #{lock_expr}.#{acquire_method}())"
   end
 
   # Recursively build the Zig string for a (possibly nested) field path.
@@ -244,14 +191,14 @@ module MIRLoweringCapabilities
   end
   def materialize_sorted_lock_bindings(node, materialization, fallible_caps, clause, with_label)
     if clause
-      materialization.add_binding(emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, node))
+      materialization.add_binding(sorted_lock_acquire(fallible_caps, clause, with_label, node))
       fallible_caps.each do |cap|
         var_name = cap.target_label
         alias_name = cap.alias_name
         materialization.add_fallible_clause(build_fallible_clause_mir(var_name, alias_name, clause))
       end
     else
-      materialization.add_binding(emit_sorted_lock_acquires(fallible_caps, node))
+      materialization.add_binding(sorted_lock_acquire(fallible_caps, nil, with_label, node))
     end
   end
 
@@ -338,6 +285,22 @@ module MIRLoweringCapabilities
     T.cast(lowerer.emit_expr(lowerer.lower(var_node)), String)
   end
 
+  sig { params(var_node: CapabilityVarNode, raw_atomic: T::Boolean).returns(MIR::Emittable) }
+  def with_capability_source_mir(var_node, raw_atomic: false)
+    lowerer = T.cast(self, MIRLowering)
+    if raw_atomic
+      prev_raw = lowerer.capability_state.atomic_emit_raw
+      lowerer.capability_state.atomic_emit_raw = true
+      begin
+        return T.cast(lowerer.lower(var_node), MIR::Emittable)
+      ensure
+        lowerer.capability_state.atomic_emit_raw = prev_raw
+      end
+    end
+
+    T.cast(lowerer.lower(var_node), MIR::Emittable)
+  end
+
   sig { params(alias_name: String).returns(String) }
   def safe_with_capability_alias(alias_name)
     cleaned = (alias_name.end_with?("!") || alias_name.end_with?("?")) ? T.must(alias_name[0..-2]) : alias_name
@@ -345,13 +308,14 @@ module MIRLoweringCapabilities
     ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(String) }
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def shared_capability_binding(context)
     inner = "__#{context.var_name}_unwrap"
-    "const #{inner} = #{context.zig_var}.ctrl.data.*;\n_ = &#{inner};"
+    source = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new(context.zig_var), "ctrl"), "data"))
+    [MIR::Let.new(inner, source, false, nil, nil), MIR::Suppress.new(inner)]
   end
 
-  sig { params(context: WithCapabilityBindingContext, lock_expr: String, lock_sync: T.nilable(Symbol)).returns(LockBindingPlan) }
+  sig { params(context: WithCapabilityBindingContext, lock_expr: MIR::Emittable, lock_sync: T.nilable(Symbol)).returns(LockBindingPlan) }
   def lock_binding_plan(context, lock_expr, lock_sync)
     LockBindingPlan.new(
       guard_var: "__#{context.var_name}_guard_#{context.node.object_id.abs}",
@@ -364,21 +328,42 @@ module MIRLoweringCapabilities
     )
   end
 
-  sig { params(plan: LockBindingPlan, acquire_call: String).returns(String) }
+  sig { params(plan: LockBindingPlan, acquire_call: MIR::Emittable).returns(T::Array[MIR::Emittable]) }
   def render_lock_binding(plan, acquire_call)
     clause = plan.clause
-    return emit_fallible_lock_binding(acquire_call, plan.guard_var, plan.alias_name, clause, plan.with_label, plan.with_node) if clause
+    if clause
+      return [
+        MIR::FallibleLockBinding.new(
+          plan.guard_var,
+          plan.alias_name,
+          acquire_call,
+          lock_failure_action(clause, plan.with_label, plan.with_node),
+          clause.retries,
+          clause.matched_types,
+          clause.bubble_types,
+          plan.with_node.token&.line.to_s,
+          "__acq_#{plan.with_node.object_id.abs}_#{plan.guard_var}",
+          T.cast(self, MIRLowering).runtime_binding_name,
+        ),
+      ]
+    end
 
-    "var #{plan.guard_var} = #{acquire_call};\ndefer #{plan.guard_var}.release();\nconst #{plan.alias_name} = #{plan.guard_var}.get();\n_ = &#{plan.alias_name};"
+    [
+      MIR::Let.new(plan.guard_var, acquire_call, true, nil, nil),
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(plan.guard_var), "release", [], false, MIR::CallableContract.no_ownership(0))),
+      MIR::Let.new(plan.alias_name, MIR::MethodCall.new(MIR::Ident.new(plan.guard_var), "get", [], false, MIR::CallableContract.no_ownership(0)), false, nil, nil),
+      MIR::Suppress.new(plan.alias_name),
+    ]
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(String) }
+  sig { params(context: WithCapabilityBindingContext).returns(MIR::Emittable) }
   def exclusive_lock_expr(context)
     is_arc = SymbolEntry.rc_storage?(context.var_storage) || context.resolved_type&.any_rc?
     is_param = with_cap_is_param?(context.var_node)
-    return comptime_arc_unwrap_expr(context.zig_var) if is_param && !is_arc
+    source = with_capability_source_mir(context.var_node)
+    return MIR::CapabilityLockTarget.new(source, false, true) if is_param && !is_arc
 
-    is_arc ? "#{context.zig_var}.ctrl.data.*" : context.zig_var
+    MIR::CapabilityLockTarget.new(source, is_arc, false)
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(Symbol)) }
@@ -387,35 +372,31 @@ module MIRLoweringCapabilities
     context.node.polymorphic && is_param ? nil : context.var_sync
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }
+  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
   def exclusive_capability_binding(context)
     return nil if context.needs_sort
 
     plan = lock_binding_plan(context, exclusive_lock_expr(context), exclusive_lock_sync(context))
-    render_lock_binding(plan, lock_acquire_call_expr(plan.lock_expr, plan.lock_sync, !plan.clause.nil?))
+    render_lock_binding(plan, MIR::LockAcquire.new(plan.lock_expr, plan.lock_sync, !plan.clause.nil?))
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }
+  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
   def read_locked_capability_binding(context)
     return nil if context.needs_sort
 
     is_arc = SymbolEntry.rc_storage?(context.var_storage) || context.resolved_type&.any_rc?
-    lock_expr = is_arc ? "#{context.zig_var}.ctrl.data.*" : context.zig_var
+    lock_expr = MIR::CapabilityLockTarget.new(with_capability_source_mir(context.var_node), is_arc, false)
     plan = lock_binding_plan(context, lock_expr, nil)
-    render_lock_binding(plan, plan.clause ? "#{lock_expr}.readOrErr()" : "#{lock_expr}.read()")
+    render_lock_binding(plan, MIR::MethodCall.new(lock_expr, plan.clause ? "readOrErr" : "read", [], false, MIR::CallableContract.no_ownership(0)))
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(String) }
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def borrowed_capability_binding(context)
-    source_zig = with_capability_source_zig(context.var_node)
+    source_mir = with_capability_source_mir(context.var_node)
     is_param = with_cap_is_param?(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    if borrowed_const_param_alias?(context, is_param)
-      aliased_value = with_match_unwrap_value(source_zig)
-      "const #{safe_alias} = #{aliased_value};\n_ = &#{safe_alias};"
-    else
-      "const #{safe_alias} = #{source_zig};\n_ = &#{safe_alias};"
-    end
+    aliased_value = borrowed_const_param_alias?(context, is_param) ? MIR::Deref.new(source_mir) : source_mir
+    [MIR::Let.new(safe_alias, aliased_value, false, nil, nil), MIR::Suppress.new(safe_alias)]
   end
 
   sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
@@ -427,26 +408,27 @@ module MIRLoweringCapabilities
     !!(sym && !sym.mutable)
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(String)) }
+  sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
   def restrict_capability_binding(context)
     return nil unless context.var_sync.nil? || context.var_sync == :local
 
-    source_zig = with_capability_source_zig(context.var_node)
+    source_mir = with_capability_source_mir(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    if with_cap_is_param?(context.var_node)
-      "const #{safe_alias} = #{with_match_unwrap_value(source_zig)};"
-    elsif context.var_sync == :local
-      "const #{safe_alias} = #{source_zig};"
+    value = if with_cap_is_param?(context.var_node)
+      MIR::Deref.new(source_mir)
     elsif context.cap.alias_mutable
-      "const #{safe_alias} = &#{source_zig};"
+      MIR::AddressOf.new(source_mir)
     else
-      "const #{safe_alias} = #{source_zig};\n_ = &#{safe_alias};"
+      source_mir
     end
+    stmts = T.let([MIR::Let.new(safe_alias, value, false, nil, nil)], T::Array[MIR::Emittable])
+    stmts << MIR::Suppress.new(safe_alias) unless context.var_sync == :local || context.cap.alias_mutable
+    stmts
   end
 
-  sig { params(context: WithCapabilityBindingContext).returns(String) }
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
   def view_capability_binding(context)
-    source_zig = with_capability_source_zig(context.var_node)
+    source_mir = with_capability_source_mir(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
     rt = context.resolved_type || Type.new(:Any)
     inner_t = rt.future? ? rt.tense_type : rt
@@ -455,32 +437,50 @@ module MIRLoweringCapabilities
                      (inner_t.optional? && wrapped_inner &&
                       (wrapped_inner.primitive? || wrapped_inner.string?))
     wants_release = !is_value_shape && (inner_t.collection_value? || !inner_t.primitive?)
-    coop_yield = "if (CheatHeader.scheduler.scheduler_running) { CheatHeader.scheduler.active_scheduler.drainChannels(); CheatHeader.scheduler.active_scheduler.coopYield(); }"
+    view_expr = MIR::MethodCall.new(source_mir, "view", [], false, MIR::CallableContract.no_ownership(0))
+    stmts = T.let([MIR::Let.new(safe_alias, view_expr, wants_release, nil, nil)], T::Array[MIR::Emittable])
     if wants_release
-      "var #{safe_alias} = #{source_zig}.view();\ndefer #{safe_alias}.release();\n#{coop_yield}\n_ = &#{safe_alias};"
-    else
-      "const #{safe_alias} = #{source_zig}.view();\n#{coop_yield}\n_ = &#{safe_alias};"
+      stmts << MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(safe_alias), "release", [], false, MIR::CallableContract.no_ownership(0)))
     end
+    stmts.concat(coop_yield_mir)
+    stmts << MIR::Suppress.new(safe_alias)
+    stmts
+  end
+
+  sig { returns(T::Array[MIR::Emittable]) }
+  def coop_yield_mir
+    scheduler = MIR::FieldGet.new(MIR::Ident.new("CheatHeader"), "scheduler")
+    active_scheduler = MIR::FieldGet.new(scheduler, "active_scheduler")
+    [
+      MIR::IfStmt.new(
+        MIR::FieldGet.new(scheduler, "scheduler_running"),
+        [
+          MIR::ExprStmt.new(MIR::MethodCall.new(active_scheduler, "drainChannels", [], false, MIR::CallableContract.no_ownership(0)), false),
+          MIR::ExprStmt.new(MIR::MethodCall.new(active_scheduler, "coopYield", [], false, MIR::CallableContract.no_ownership(0)), false),
+        ],
+        nil,
+      ),
+    ]
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(MIR::SnapshotRead)) }
   def snapshot_capability_binding(context)
     return nil if CapabilityPlan.require_for(context.node).mutable_snapshot?
 
-    source_zig = with_capability_source_zig(context.var_node, raw_atomic: true)
+    source_mir = with_capability_source_mir(context.var_node, raw_atomic: true)
     safe_alias = safe_with_capability_alias(context.alias_name)
     guard_var = "__#{context.var_name}_snap_#{context.node.object_id.abs}"
-    MIR::SnapshotRead.new(with_match_unwrap_value(source_zig), context.rt_name, safe_alias, guard_var, nil)
+    MIR::SnapshotRead.new(MIR::CapabilityUnwrap.new(source_mir), context.rt_name, safe_alias, guard_var, nil)
   end
 
   sig { params(context: WithCapabilityBindingContext).returns(T::Array[WithBindingNode]) }
   def materialized_view_capability_bindings(context)
-    source_zig = with_capability_source_zig(context.var_node)
+    source_mir = with_capability_source_mir(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
     rt = context.resolved_type || Type.new(:Any)
     is_collection = rt.observable_array_future? || rt.array?
     materialize = MIR::MethodCall.new(
-      MIR::Ident.new(source_zig),
+      source_mir,
       "materialize",
       [MIR::AllocatorRef.new(:heap)],
       true,
@@ -541,24 +541,24 @@ module MIRLoweringCapabilities
     end
   end
 
-  sig { params(materialization: WithBindingMaterialization, node: AST::WithBlock).returns(T.nilable(MIR::ZigTemplate)) }
+  sig { params(materialization: WithBindingMaterialization, node: AST::WithBlock).returns(T.nilable(MIR::Emittable)) }
   def with_block_inline_bindings(materialization, node)
     string_bindings = materialization.bindings.filter_map { |binding| binding if binding.is_a?(String) }.reject(&:empty?)
-    all_bindings = string_bindings.join("\n")
-    return nil if all_bindings.empty?
+    return nil if string_bindings.empty?
 
-    bindings_iz = MIR::ZigTemplate.new(all_bindings, [], "with_block_bindings")
-    stdlib_def = FunctionSignature.intrinsic_contract(borrows: with_block_borrow_names(node))
-    clauses = materialization.fallible_clauses
-    T.must(stdlib_def.emit).fallible_clauses = clauses unless clauses.empty?
-    bindings_iz.stdlib_def = stdlib_def
-    bindings_iz
+    Kernel.raise "WITH binding materialization still produced pre-emission Zig text; structural MIR binding nodes are required"
   end
 
   sig { params(materialization: WithBindingMaterialization).returns(T::Array[MIR::Emittable]) }
   def structured_with_bindings(materialization)
-    materialization.bindings.filter_map do |binding|
-      binding if binding.is_a?(MIR::Emittable)
+    materialization.bindings.flat_map do |binding|
+      if binding.is_a?(Array)
+        binding
+      elsif binding.is_a?(MIR::Emittable)
+        [binding]
+      else
+        []
+      end
     end
   end
 
@@ -819,104 +819,20 @@ module MIRLoweringCapabilities
     T.bind(self, MIRLowering) rescue nil
     cap = CapabilityPlan.require_for(node).first_transition
     var_node = T.cast(cap.var_node, CapabilityVarNode)
-    var_name = cap.target_label
-    zig_var  = with_cap_zig_target(var_node, var_name)
+    cell = with_capability_source_mir(var_node, raw_atomic: true)
     alias_name = cap.alias_name
+    safe_alias = safe_with_capability_alias(alias_name)
+    snapshot_mode = node.respond_to?(:snapshot_mode) && node.snapshot_mode
 
     arms_meta = node.arms.map { |arm|
-      {
-        family:      arm[:family],
-        probe:       with_match_probe_for_family(arm[:family], zig_var, node),
-        prelude_zig: with_match_arm_prelude(arm[:family], zig_var, alias_name, node),
-        body:        lower_body(arm[:body]),
-      }
+      family = T.cast(arm[:family], Symbol)
+      MIR::WithMatchArm.new(
+        family: family,
+        guard_var: "__#{alias_name}_match_#{node.object_id.abs}",
+        body: lower_body(arm[:body]),
+      )
     }
-    MIR::ScopeBlock.new([MIR::WithMatchDispatch.new(zig_var, arms_meta)])
-  end
-
-  # Emit the acquire-or-catch binding for a fallible lock under a
-  # WithBlock#lock_error_clause. The switch dispatches per error type
-  # using the error registry:
-  #   - Types in clause.matched_types  -> run the user action.
-  #   - Types in clause.bubble_types   -> setError(kind, name) + return
-  #                                         error.CheatError.
-  # Deadlock is always in bubble_types unless the user explicitly selected
-  # it (e.g. `ON :Deadlock -> { ... }`), in which case its action runs.
-  sig { params(acquire_call: String, guard_var: String, alias_name: String, clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(FallibleLockBindingPlan) }
-  def fallible_lock_binding_plan(acquire_call, guard_var, alias_name, clause, with_label, with_node)
-    T.bind(self, MIRLowering) rescue nil
-    rt_name = runtime_binding_name
-    FallibleLockBindingPlan.new(
-      acquire_call: acquire_call,
-      guard_var: guard_var,
-      alias_name: alias_name,
-      clause: clause,
-      with_label: with_label,
-      with_node: with_node,
-      rt_name: rt_name,
-      action_zig: emit_lock_action_zig(clause, with_label, with_node),
-      retries: clause.retries,
-      matched_types: clause.matched_types,
-      bubble_types: clause.bubble_types,
-      acquire_block: "__acq_#{with_node.object_id.abs}_#{guard_var}",
-      source_line: with_node.token&.line.to_s,
-    )
-  end
-
-  sig { params(plan: FallibleLockBindingPlan).returns(String) }
-  def fallible_lock_error_handler(plan)
-    matched_arms = plan.matched_types.map do |type_name|
-      matched_errs = "error.#{AST.zig_name_of_type(type_name)}"
-      body = plan.retries ? "if (__retry + 1 < #{plan.retries}) continue;\n#{plan.action_zig}" : plan.action_zig
-      "#{matched_errs} => { #{body} }"
-    end
-    bubble_arms = plan.bubble_types.map do |type_name|
-      zig = AST.zig_name_of_type(type_name)
-      kind = AST.kind_of_type(type_name)
-      %Q(error.#{zig} => { #{plan.rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{plan.source_line}); return error.CheatError; })
-    end
-    arms = matched_arms + bubble_arms
-    "switch (__err) {\n#{arms.join(",\n")}\n}"
-  end
-
-  sig { params(plan: FallibleLockBindingPlan).returns(String) }
-  def fallible_lock_acquire_expr(plan)
-    handler = fallible_lock_error_handler(plan)
-    if plan.retries
-      <<~ZIG.rstrip
-        #{plan.acquire_block}: {
-          var __retry: usize = 0;
-          while (true) : (__retry += 1) {
-            if (#{plan.acquire_call}) |__g| {
-              break :#{plan.acquire_block} __g;
-            } else |__err| {
-              #{handler}
-            }
-          }
-        }
-      ZIG
-    else
-      <<~ZIG.rstrip
-        #{plan.acquire_block}: {
-          if (#{plan.acquire_call}) |__g| {
-            break :#{plan.acquire_block} __g;
-          } else |__err| {
-            #{handler}
-          }
-        }
-      ZIG
-    end
-  end
-
-  sig { params(acquire_call: String, guard_var: String, alias_name: String, clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
-  def emit_fallible_lock_binding(acquire_call, guard_var, alias_name, clause, with_label, with_node)
-    plan = fallible_lock_binding_plan(acquire_call, guard_var, alias_name, clause, with_label, with_node)
-    <<~ZIG.rstrip
-      var #{plan.guard_var} = #{fallible_lock_acquire_expr(plan)};
-      defer #{plan.guard_var}.release();
-      const #{plan.alias_name} = #{plan.guard_var}.get();
-      _ = &#{plan.alias_name};
-    ZIG
+    MIR::ScopeBlock.new([MIR::WithMatchDispatch.new(cell, safe_alias, snapshot_mode, runtime_binding_name, arms_meta)])
   end
 
   # Emit a single-cell or multi-cell snapshot transaction whose closure
@@ -942,7 +858,7 @@ module MIRLoweringCapabilities
   #     else => return __err,
   #   };
   # Return structured MIR so the checker can see the transaction body and
-  # runtime heap allocation instead of treating them as opaque InlineZig.
+  # runtime heap allocation instead of treating them as opaque generated code.
   sig { params(node: AST::WithBlock).returns(MIR::ScopeBlock) }
   def lower_polymorphic_universal(node)
     T.bind(self, MIRLowering) rescue nil
@@ -951,34 +867,30 @@ module MIRLoweringCapabilities
     var_name   = cap.target_label
     alias_name = cap.alias_name
     safe_alias = zig_safe_name(alias_name)
-    # Emit the cell raw, with no auto-`.load()` injection. The atomic-
+    # Lower the cell raw, with no auto-`.load()` injection. The atomic-
     # cell read path that visit_Identifier installs (line 4056 in
     # annotator/helpers/cell access) wraps `@atomic` reads in `.load()`,
     # which returns a value -- but `polymorphicMutate` needs the cell
     # OBJECT to dispatch by `@hasDecl`. Set capability_state.atomic_emit_raw so the
-    # surrounding emit_expr returns the bare ident.
-    prev_raw = capability_state.atomic_emit_raw
-    capability_state.atomic_emit_raw = true
-    cell_zig = emit_expr(lower(var_node))
-    capability_state.atomic_emit_raw = prev_raw
-    cell_zig = "&#{cell_zig}"
+    # surrounding lowering returns the bare cell expression.
+    cell_mir = MIR::AddressOf.new(with_capability_source_mir(var_node, raw_atomic: true))
     # The body's `x` alias is a `*T` -- grab the bare T (post-Arc,
     # post-sync-wrapper) for the closure signature.
     resolved_source = cap.resolved_type
     rt_obj = Type.from_node!(resolved_source, context: "WITH polymorphic capability resolved type")
-    bare_t_zig = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type.zig_type : rt_obj.zig_type
+    bare_type = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type : rt_obj
     body_mir = lower_body(node.body)
     guard_cond = combined_guard_cond(node)
     if polymorphic_flow_required?(node)
       guard_fail = guard_cond ? guard_fail_flow_body(node) : []
       return MIR::ScopeBlock.new([MIR::PolymorphicMutateFlow.new(
-        cell_zig, runtime_binding_name, safe_alias, bare_t_zig,
-        current_function_return_payload_zig || "void",
+        cell_mir, runtime_binding_name, safe_alias, bare_type,
+        Type.new(current_function_return_payload_zig || :Void),
         body_mir, guard_cond, guard_fail
       )])
     else
       body_mir = wrap_body_with_guard(node, body_mir, nil)
-      MIR::ScopeBlock.new([MIR::PolymorphicMutate.new(cell_zig, runtime_binding_name, safe_alias, bare_t_zig, body_mir)])
+      MIR::ScopeBlock.new([MIR::PolymorphicMutate.new(cell_mir, runtime_binding_name, safe_alias, bare_type, body_mir)])
     end
   end
 
@@ -1192,7 +1104,7 @@ module MIRLoweringCapabilities
       node: node,
       with_label: with_label,
       rt_name: rt_name,
-      alloc_zig: "#{rt_name}.heapAlloc()",
+      alloc: :heap,
       body_mir: body_mir,
       retries: node.lock_error_clause&.retries,
       capabilities: with_capability_specs(node).map { |cap| mutable_snapshot_cap(lowerer, cap) },
@@ -1207,21 +1119,21 @@ module MIRLoweringCapabilities
     MutableSnapshotCap.new(
       var_node: var_node,
       alias_name: cap.alias_name,
-      source_zig: T.must(lowerer.emit_expr(lowerer.lower(var_node))),
-      bare_type_zig: resolved_type.bare_data_type.zig_type,
+      source: lowerer.with_capability_source_mir(var_node, raw_atomic: true),
+      bare_type: resolved_type.bare_data_type,
       conflict_error: sym && sym.atomic? && sym.indirect? ? :AtomicConflict : :MvccConflict,
     )
   end
 
   sig { params(plan: MutableSnapshotPlan, cap: MutableSnapshotCap).returns(MIR::SnapshotTransaction) }
   def single_mutable_snapshot_txn(plan, cap)
-    conflict_action = emit_conflict_action_zig(plan.node.lock_error_clause, plan.with_label, plan.node, cap.conflict_error)
+    conflict_action = conflict_failure_action(plan.node.lock_error_clause, plan.with_label, plan.node, cap.conflict_error)
     MIR::SnapshotTransaction.new(
-      with_match_unwrap_value(cap.source_zig),
+      MIR::CapabilityUnwrap.new(cap.source),
       plan.rt_name,
-      plan.alloc_zig,
+      plan.alloc,
       safe_with_capability_alias(cap.alias_name),
-      cap.bare_type_zig,
+      cap.bare_type,
       plan.body_mir,
       conflict_action,
       plan.retries,
@@ -1230,28 +1142,14 @@ module MIRLoweringCapabilities
     )
   end
 
-  sig { params(plan: MutableSnapshotPlan).returns(String) }
-  def mutable_snapshot_cells_tuple(plan)
-    cells = plan.capabilities.map(&:source_zig)
-    ".{ #{cells.join(", ")} }"
-  end
-
-  sig { params(plan: MutableSnapshotPlan).returns(String) }
-  def mutable_snapshot_alias_decls(plan)
-    plan.capabilities.each_with_index.map do |cap, index|
-      safe_alias = safe_with_capability_alias(cap.alias_name)
-      "const #{safe_alias} = views[#{index}]; _ = &#{safe_alias};"
-    end.join("\n            ")
-  end
-
   sig { params(plan: MutableSnapshotPlan).returns(MIR::SnapshotMultiTxn) }
   def multi_mutable_snapshot_txn(plan)
-    conflict_action = emit_conflict_action_zig(plan.node.lock_error_clause, plan.with_label, plan.node, :MvccConflict)
+    conflict_action = conflict_failure_action(plan.node.lock_error_clause, plan.with_label, plan.node, :MvccConflict)
     MIR::SnapshotMultiTxn.new(
-      mutable_snapshot_cells_tuple(plan),
+      plan.capabilities.map(&:source),
       plan.rt_name,
-      plan.alloc_zig,
-      mutable_snapshot_alias_decls(plan),
+      plan.alloc,
+      plan.capabilities.map { |cap| safe_with_capability_alias(cap.alias_name) },
       plan.body_mir,
       conflict_action,
       plan.retries,
@@ -1266,49 +1164,81 @@ module MIRLoweringCapabilities
     single_cap ? single_mutable_snapshot_txn(plan, single_cap) : multi_mutable_snapshot_txn(plan)
   end
 
-  # Emit the user's snapshot-conflict action using the conflict error chosen
+  # Build the user's snapshot-conflict action using the conflict error chosen
   # for the cell family. Retry loops are handled around the transaction call,
-  # not inside this action.
-  sig { params(clause: T.nilable(AST::ErrorClause), with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(String) }
-  def emit_conflict_action_zig(clause, with_label, with_node, conflict_error = :MvccConflict)
+  # not inside this action. The emitter owns conversion to Zig.
+  sig { params(clause: T.nilable(AST::ErrorClause), with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(MIR::FailureAction) }
+  def conflict_failure_action(clause, with_label, with_node, conflict_error = :MvccConflict)
     T.bind(self, MIRLowering) rescue nil
-    line = with_node.token&.line.to_s
-    err_name = conflict_error.to_s
-    msg = err_name == "AtomicConflict" ? "atomic CAS retries exhausted" : "MVCC commit conflict"
-    return %Q(#{runtime_binding_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), "#{msg}", #{line});\nreturn error.CheatError;) unless clause
-    emit_error_action_zig(clause, with_label, with_node, conflict_error, msg)
+    msg = conflict_error == :AtomicConflict ? "atomic CAS retries exhausted" : "MVCC commit conflict"
+    return default_failure_action(with_label, with_node, conflict_error, msg) unless clause
+
+    failure_action_from_clause(clause, with_label, with_node, conflict_error, msg)
   end
 
-  # Zig statements for the matched-selector action. Must terminate: return
-  # / @panic, or break :__with_<id> (for PASS / `-> { }`).
-  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
-  def emit_lock_action_zig(clause, with_label, with_node)
-    T.bind(self, MIRLowering) rescue nil
-    emit_error_action_zig(clause, with_label, with_node, :LockTimeout, "lock acquire timed out")
+  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(MIR::FailureAction) }
+  def lock_failure_action(clause, with_label, with_node)
+    failure_action_from_clause(clause, with_label, with_node, :LockTimeout, "lock acquire timed out")
   end
 
-  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(String) }
-  def emit_error_action_zig(clause, with_label, with_node, error_type, default_msg)
+  sig { params(with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(MIR::FailureAction) }
+  def default_failure_action(with_label, with_node, error_type, default_msg)
     T.bind(self, MIRLowering) rescue nil
-    line = with_node.token&.line.to_s
-    err_name = error_type.to_s
-    kind = AST.kind_of_type(error_type) || :Transient
+    MIR::FailureAction.new(
+      kind: MIR::FailureActionKind::Raise,
+      error_type: error_type,
+      error_kind: AST.kind_of_type(error_type) || :Transient,
+      default_message: default_msg,
+      line: with_node.token&.line.to_s,
+      rt_name: runtime_binding_name,
+      with_label: with_label,
+    )
+  end
+
+  sig { params(clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(MIR::FailureAction) }
+  def failure_action_from_clause(clause, with_label, with_node, error_type, default_msg)
+    T.bind(self, MIRLowering) rescue nil
+    kind = failure_action_kind(clause.action)
+    message_mir = T.let(nil, T.nilable(MIR::Emittable))
+    return_mir = T.let(nil, T.nilable(MIR::Emittable))
+    body_mir = T.let([], T::Array[MIR::Emittable])
     case clause.action
-    when :raise
-      %Q(#{runtime_binding_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{err_name}), "#{default_msg}", #{line});\nreturn error.CheatError;)
     when :exit
-      msg_zig = emit_expr(lower(T.must(clause.message)))
-      %Q(#{runtime_binding_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{err_name}), #{msg_zig}, #{line});\nreturn error.CheatError;)
-    when :pass
-      "break :#{with_label};"
+      message_mir = T.cast(lower(T.must(clause.message)), MIR::Emittable)
     when :return
-      value_zig = emit_expr(lower(T.must(clause.value)))
-      "return #{value_zig};"
+      return_mir = T.cast(lower(T.must(clause.value)), MIR::Emittable)
     when :block
-      body_zig = emit_stmts_zig(lower_body(T.must(clause.body)))
-      "#{body_zig}\nbreak :#{with_label};"
+      body_mir = lower_body(T.must(clause.body))
+    end
+    MIR::FailureAction.new(
+      kind: kind,
+      error_type: error_type,
+      error_kind: AST.kind_of_type(error_type) || :Transient,
+      default_message: default_msg,
+      line: with_node.token&.line.to_s,
+      rt_name: runtime_binding_name,
+      with_label: with_label,
+      message: message_mir,
+      return_value: return_mir,
+      body: body_mir,
+    )
+  end
+
+  sig { params(action: Symbol).returns(MIR::FailureActionKind) }
+  def failure_action_kind(action)
+    case action
+    when :raise
+      MIR::FailureActionKind::Raise
+    when :exit
+      MIR::FailureActionKind::Exit
+    when :pass
+      MIR::FailureActionKind::Pass
+    when :return
+      MIR::FailureActionKind::Return
+    when :block
+      MIR::FailureActionKind::Block
     else
-      raise "Internal: unknown lock action #{clause.action}"
+      Kernel.raise "Internal: unknown lock action #{action}"
     end
   end
 
@@ -1321,7 +1251,7 @@ module MIRLoweringCapabilities
   # in its own labeled block today, so collisions are impossible in
   # practice, but the suffix makes the property defensible against
   # future lowering changes.
-  sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[SortedAcquireEntry]) }
+  sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[MIR::SortedLockAcquireEntry]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     T.bind(self, MIRLowering) rescue nil
     suffix = with_node ? "_#{with_node.object_id.abs}" : ""
@@ -1330,11 +1260,11 @@ module MIRLoweringCapabilities
       var_name   = cap.target_label
       alias_name = cap.alias_name
       resolved   = cap.resolved_type
-      zig_var    = with_cap_zig_target(var_node, var_name)
+      source_mir = with_capability_source_mir(var_node)
       var_storage = cap.storage
       is_arc = SymbolEntry.rc_storage?(var_storage) || resolved&.any_rc?
-      lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
-      addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
+      lock_expr = MIR::CapabilityLockTarget.new(source_mir, is_arc, false)
+      addr_expr = MIR::CapabilityLockAddress.new(source_mir, is_arc)
       var_sync   = cap.sync
       panic_method, err_method = case cap.capability
                                  when :EXCLUSIVE
@@ -1342,201 +1272,33 @@ module MIRLoweringCapabilities
                                  when :write_locked_read
                                    %w[read readOrErr]
                                  end
-      SortedAcquireEntry.new(
+      MIR::SortedLockAcquireEntry.new(
         index: i,
         alias_name: alias_name.to_s,
         guard_var: "__sort_guard#{suffix}_#{i}",
         held_var: "__held#{suffix}_#{i}",
         lock_expr: lock_expr,
-        addr_expr: addr_expr,
+        address_expr: addr_expr,
         method_name: (fallible ? err_method : panic_method).to_s,
       )
     end
   end
 
-  # Emit Zig for acquiring N>=2 fallible lock captures in runtime
-  # pointer-address order. Produces:
-  #   - one __guardN per capture (undefined, typed via @TypeOf)
-  #   - a __ptrs array of usize addresses
-  #   - a __order index array, bubble-sorted by __ptrs
-  #   - a for-loop over __order with a switch to call the right acquire()
-  #   - defer __guardN.release() for each guard
-  #   - const alias = __guardN.get() aliases
-  # Uses panic-variant acquire methods (acquire / read / write); no
-  # ON-clause handling. The fallible-variant emitter sits beside this.
-  sig { params(fallible_caps: T::Array[CapabilitySpec], with_node: T.nilable(AST::WithBlock)).returns(String) }
-  def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
+  sig { params(fallible_caps: T::Array[CapabilitySpec], clause: T.nilable(AST::ErrorClause), with_label: T.nilable(String), with_node: AST::WithBlock).returns(MIR::SortedLockAcquire) }
+  def sorted_lock_acquire(fallible_caps, clause, with_label, with_node)
     T.bind(self, MIRLowering) rescue nil
-    n = fallible_caps.length
-    entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
-
-    guard_decls = entries.map { |e|
-      "var #{e.guard_var}: @TypeOf(#{e.lock_expr}.#{e.method_name}()) = undefined;"
-    }.join("\n")
-
-    ptr_init = entries.map { |e| "@intFromPtr(#{e.addr_expr})" }.join(", ")
-    order_init = (0...n).to_a.join(", ")
-
-    switch_arms = entries.map { |e|
-      "#{e.index} => #{e.guard_var} = #{e.lock_expr}.#{e.method_name}(),"
-    }.join("\n                ")
-
-    defer_releases = entries.map { |e| "defer #{e.guard_var}.release();" }.join("\n")
-    alias_decls    = entries.map { |e|
-      "const #{e.alias_name} = #{e.guard_var}.get();\n_ = &#{e.alias_name};"
-    }.join("\n")
-
-    <<~ZIG.rstrip
-      #{guard_decls}
-      {
-          const __ptrs = [_]usize{ #{ptr_init} };
-          var __order = [_]u8{ #{order_init} };
-          var __i: usize = 0;
-          while (__i < #{n}) : (__i += 1) {
-              var __j: usize = 0;
-              while (__j + 1 < #{n}) : (__j += 1) {
-                  if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
-                      const __tmp = __order[__j];
-                      __order[__j] = __order[__j + 1];
-                      __order[__j + 1] = __tmp;
-                  }
-              }
-          }
-          for (__order) |__idx| {
-              switch (__idx) {
-                #{switch_arms}
-                else => unreachable,
-              }
-          }
-      }
-      #{defer_releases}
-      #{alias_decls}
-    ZIG
-  end
-
-  # Fallible variant of emit_sorted_lock_acquires. Uses the OrErr
-  # acquire methods, tracks held guards in a per-cap bool, and on any
-  # acquisition error releases held guards in reverse-acquisition order
-  # before either retrying (`RETRY(N) THEN ...`) or running the user's
-  # ON action. Defers at WITH-scope use the same held-bitmap so they're
-  # safe no-ops on the failure path. The on-success path leaves all
-  # __heldN flags true; the WITH body runs with all locks held; defers
-  # release on scope exit as usual.
-  sig { params(fallible_caps: T::Array[CapabilitySpec], clause: AST::ErrorClause, with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
-  def emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, with_node)
-    T.bind(self, MIRLowering) rescue nil
-    n = fallible_caps.length
-    entries = build_sorted_acquire_entries(fallible_caps, fallible: true, with_node: with_node)
-
-    action_zig = emit_lock_action_zig(clause, with_label, with_node)
-    matched    = clause.matched_types
-    bubble     = clause.bubble_types
-    retries    = clause.retries
-    line       = with_node.token&.line.to_s
-    acq_loop   = "__acq_sort_#{with_node.object_id.abs}"
-
-    guard_decls = entries.map { |e|
-      "var #{e.guard_var}: @TypeOf(try #{e.lock_expr}.#{e.method_name}()) = undefined;"
-    }.join("\n")
-    held_decls = entries.map { |e| "var #{e.held_var}: bool = false;" }.join("\n")
-
-    ptr_init   = entries.map { |e| "@intFromPtr(#{e.addr_expr})" }.join(", ")
-    order_init = (0...n).to_a.join(", ")
-
-    acquire_arms = entries.map { |e|
-      <<~ZIG.rstrip
-        #{e.index} => {
-                                        if (#{e.lock_expr}.#{e.method_name}()) |__g| {
-                                            #{e.guard_var} = __g;
-                                            #{e.held_var} = true;
-                                        } else |__err_inner| {
-                                            __err_caught = __err_inner;
-                                            __success = false;
-                                        }
-                                    },
-      ZIG
-    }.join("\n                                ")
-
-    release_arms = entries.map { |e|
-      "#{e.index} => if (#{e.held_var}) { #{e.guard_var}.release(); #{e.held_var} = false; },"
-    }.join("\n                            ")
-
-    handler_arms = []
-    unless matched.empty?
-      matched_errs = matched.map { |t| "error.#{AST.zig_name_of_type(t)}" }.join(", ")
-      handler_arms << "#{matched_errs} => { #{action_zig} }"
-    end
-    bubble.each do |t|
-      zig = AST.zig_name_of_type(t)
-      kind = AST.kind_of_type(t)
-      handler_arms << %Q(error.#{zig} => { #{runtime_binding_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{line}); return error.CheatError; })
-    end
-    # Catch-all: __err_caught is `?anyerror`, so Zig requires an else
-    # arm. Set a generic System error before propagating so callers
-    # don't see CheatError with stale rt.__error content from a prior
-    # operation. This path covers Zig errors that aren't in the
-    # OrErr method's documented set (defensive).
-    handler_arms << %Q(else => |__err_other| { #{runtime_binding_name}.setError(.System, 0, @errorName(__err_other), #{line}); return error.CheatError; })
-    handler_switch = "switch (__err_caught.?) {\n                    #{handler_arms.join(",\n                    ")},\n                }"
-
-    retry_branch = if retries
-      "if (__retry + 1 < #{retries}) continue;"
-    else
-      "// no retries configured"
-    end
-
-    defer_releases = entries.map { |e| "defer if (#{e.held_var}) #{e.guard_var}.release();" }.join("\n")
-    alias_decls    = entries.map { |e|
-      "const #{e.alias_name} = #{e.guard_var}.get();\n_ = &#{e.alias_name};"
-    }.join("\n")
-
-    <<~ZIG.rstrip
-      #{guard_decls}
-      #{held_decls}
-      #{acq_loop}: {
-          var __retry: usize = 0;
-          while (true) : (__retry += 1) {
-              const __ptrs = [_]usize{ #{ptr_init} };
-              var __order = [_]u8{ #{order_init} };
-              var __i: usize = 0;
-              while (__i < #{n}) : (__i += 1) {
-                  var __j: usize = 0;
-                  while (__j + 1 < #{n}) : (__j += 1) {
-                      if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
-                          const __tmp = __order[__j];
-                          __order[__j] = __order[__j + 1];
-                          __order[__j + 1] = __tmp;
-                      }
-                  }
-              }
-              var __success = true;
-              var __err_caught: ?anyerror = null;
-              var __k: usize = 0;
-              while (__k < #{n}) : (__k += 1) {
-                  const __idx = __order[__k];
-                  switch (__idx) {
-                      #{acquire_arms}
-                      else => unreachable,
-                  }
-                  if (!__success) break;
-              }
-              if (__success) break :#{acq_loop};
-              var __r: usize = __k;
-              while (__r > 0) {
-                  __r -= 1;
-                  switch (__order[__r]) {
-                      #{release_arms}
-                      else => unreachable,
-                  }
-              }
-              #{retry_branch}
-              #{handler_switch}
-              unreachable;
-          }
-      }
-      #{defer_releases}
-      #{alias_decls}
-    ZIG
+    fallible = !clause.nil?
+    MIR::SortedLockAcquire.new(
+      build_sorted_acquire_entries(fallible_caps, fallible: fallible, with_node: with_node),
+      clause ? lock_failure_action(clause, with_label, with_node) : nil,
+      clause&.matched_types || [],
+      clause&.bubble_types || [],
+      clause&.retries,
+      with_node.token&.line.to_s,
+      "__acq_sort_#{with_node.object_id.abs}",
+      runtime_binding_name,
+      fallible,
+    )
   end
 
 

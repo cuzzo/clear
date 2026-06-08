@@ -816,7 +816,7 @@ module MIRLoweringExpressions
     if node.right.is_a?(AST::OrRaise)
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
-      return left if left.is_a?(MIR::InlineZig) && left.reason == "extern_trampoline"
+      return left if left.is_a?(MIR::ExternTrampoline)
       return MIR::TryExpr.new(strip_try(left)) if facts.left_is_error
       return left
     end
@@ -1223,23 +1223,22 @@ module MIRLoweringExpressions
                         :sharded_zig
                       else :zig
                       end
-      template = op[template_kind]
       resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-        next unless template.include?("{#{alloc_key}}")
+        next unless op[alloc_key]
         sym = op[alloc_key] || :heap
         resolved_allocs[alloc_key] = resolve_alloc_sym(sym, plan.target_ast, plan.target_ast)
       end
       alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)
-      key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
-      val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
+      key_type = (kind == :numeric_map) ? map_ft.key_type : nil
+      value_type = (kind == :numeric_map) ? map_ft.value_type : nil
       if shard_direct
         return MIR::ShardedMapGet.new(target, index,
           MIR::Ident.new(shard[:idx]),
           MIR::Ident.new(shard[:key]),
-          kind, op, key_zig, val_zig, alloc_metadata, template_kind)
+          kind, op, key_type, value_type, alloc_metadata, template_kind)
       end
-      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, alloc_metadata, template_kind)
+      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_type, value_type, alloc_metadata, template_kind)
     elsif ti.pool?
       # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
       # BC dispatches via compile_inline_bc :get on tag == :pool_method
@@ -1283,7 +1282,7 @@ module MIRLoweringExpressions
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1575,7 +1574,7 @@ module MIRLoweringExpressions
           # before destroying the pointer, otherwise those allocations leak.
           cleanup_call = emit_builtin(:cleanup, [
             MIR::Ident.new(zig_t),
-            MIR::Ident.new(alloc_zig_str(:heap)),
+            MIR::AllocatorRef.new(:heap),
             MIR::Ident.new(temp),
           ])
           hoisted << MIR::ErrDeferStmt.new(MIR::ScopeBlock.new([
@@ -1760,7 +1759,7 @@ module MIRLoweringExpressions
     # CheatLib.assert for non-equality conditions and for `!=`.
     #
     # Skip for the :bc (register VM) target: the bytecode VM cannot
-    # execute raw Zig, so an InlineZig assert helper would leave the
+    # execute raw Zig, so a raw Zig assert helper would leave the
     # test register-pending forever. The CheatLib.assert fallback path
     # below evaluates the condition as a normal MIR expression and
     # routes through the runtime's bool-assert opcode.
@@ -1814,8 +1813,8 @@ module MIRLoweringExpressions
 
     left  = cond.left
     right = cond.right
-    left_zig  = emit_expr(hoist_alloc(lower(left), left))
-    right_zig = emit_expr(hoist_alloc(lower(right), right))
+    left_mir = hoist_alloc(lower(left), left)
+    right_mir = hoist_alloc(lower(right), right)
 
     helper, extra_args = pick_equality_helper(left, right)
     return nil unless helper
@@ -1823,12 +1822,9 @@ module MIRLoweringExpressions
     # Argument order matches the Zig stdlib convention: expected
     # first, actual second. CLEAR doesn't distinguish, so we use
     # left=expected, right=actual.
-    args = []
-    args.concat(extra_args)
-    args << left_zig
-    args << right_zig
-
-    args_mir = args.map { |arg| MIR::Lit.new(arg) }
+    args_mir = T.let(extra_args.map { |arg| MIR::Ident.new(arg) }, T::Array[MIR::Emittable])
+    args_mir << T.cast(left_mir, MIR::Emittable)
+    args_mir << T.cast(right_mir, MIR::Emittable)
     params = args_mir.each_index.map do |idx|
       AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
     end

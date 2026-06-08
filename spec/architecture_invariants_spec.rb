@@ -234,7 +234,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps ownership-significant MIR node classes in an explicit registry" do
     expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
     expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
-    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, RegistryCall")
     expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
   end
 
@@ -1109,7 +1109,7 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
       allowed: [],
     ),
     ForbiddenPattern.new(
-      name: "InlineZig allocator hash protocol",
+      name: "structural allocator metadata hash protocol",
       glob: "src/**/*.rb",
       pattern: /(?<!resolved_)allocs\.is_a\?\(Hash\)|\.allocs\.values|\.allocs\.key\?\(|\.allocs\[:|\.allocs\.transform_values|resolved_allocs\.is_a\?\(Hash\)|resolved_allocs\[:/,
       allowed: [],

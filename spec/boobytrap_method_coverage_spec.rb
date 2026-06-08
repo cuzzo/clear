@@ -128,12 +128,25 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
 
   it "covers MIR checker and pass helpers for frame allocs and return escapes" do
     checker = MIRChecker.new
-    inline_mutator = MIR::InlineZig.new("x", "mutator", MIR::OwnershipContract.empty, { mutates_receiver: true }, nil)
-    expect(checker.send(:expr_has_frame_alloc?, inline_mutator)).to be(false)
+    mutator_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+    mutator_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+    registry_mutator = MIR::RegistryCall.new(
+      entry: mutator_sig,
+      args: [],
+      reason: "mutator",
+      ownership_contract: MIR::OwnershipContract.empty,
+    )
+    expect(checker.send(:expr_has_frame_alloc?, registry_mutator)).to be(false)
     expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(true)
-    inline_frame = MIR::InlineZig.new("frameAlloc()", "frame_alloc_probe")
-    inline_frame.allocs = { alloc: :frame }
-    expect(checker.send(:expr_has_frame_alloc?, inline_frame)).to be(true)
+    frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    registry_frame = MIR::RegistryCall.new(
+      entry: frame_sig,
+      args: [],
+      reason: "frame_alloc_probe",
+      ownership_contract: MIR::OwnershipContract.empty,
+      allocs: MIR.inline_alloc_metadata(alloc: :frame),
+    )
+    expect(checker.send(:expr_has_frame_alloc?, registry_frame)).to be(true)
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)
 
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_) { nil })
@@ -149,11 +162,9 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), bindings)).to eq(["__hoist_tmp"])
   end
 
-  it "covers emitter raw-bytecode and discard-owned paths" do
+  it "keeps raw bytecode carriers deleted and covers discard-owned paths" do
     emitter = MIREmitter.new
-    raw = MIR::RawBc.new(nil, [MIR::Ident.new("x"), MIR::Lit.new("1")], { zig: "doIt({0}, {1})" })
-    expect(emitter.emit(raw)).to eq("doIt(x, 1)")
-    expect { emitter.emit(MIR::RawBc.new(nil, [], nil)) }.to raise_error(/no stdlib_def/)
+    expect(MIR.const_defined?(:RawBc, false)).to be(false)
 
     cleanup = CleanupEntry.build(:heap_string, alloc: :heap, has_moved_guard: true)
     success_only = MIR::TryCatch.new(MIR::Call.new("maybe", [], false, false), MIR::Undef.new, nil)

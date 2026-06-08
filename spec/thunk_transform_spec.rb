@@ -47,7 +47,7 @@ RSpec.describe "ThunkTransform module wiring" do
   # plus the type checker keep the body non-fallible (a `RETURN <lhs>
   # <op> self_call(args)` shape rejects fallible operands), but a
   # future Phase 4 extension could relax that. The guard fails loudly
-  # if ret_zig is fallible so the leak can't ship silently.
+  # if the return type is fallible so the leak can't ship silently.
   describe "non-fallible body invariant (assert_non_fallible_ret!)" do
     let(:tok) { Lexer::Token.new(:IDENT, "deep", 1, 1) }
     let(:fake_fn) {
@@ -56,25 +56,25 @@ RSpec.describe "ThunkTransform module wiring" do
 
     it "passes for plain integer return types" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "i64")
+        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Int64))
       }.not_to raise_error
     end
 
     it "passes for void return type" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "void")
+        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Void))
       }.not_to raise_error
     end
 
-    it "raises a directed error message when ret_zig is fallible" do
+    it "raises a directed error message when the return type is fallible" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "!i64")
+        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/THUNK trampoline.*'deep'.*fallible/)
     end
 
     it "names the helpers a future maintainer must extend" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "!i64")
+        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/build_trampoline.*build_mutual_trampoline.*errdefer/m)
     end
   end
@@ -214,7 +214,10 @@ RSpec.describe "ThunkTransform emit coverage" do
       node.base_cases.first.fetch(:missing)
     }.to raise_error(KeyError, /missing/)
     expect(FakeThunkLowering.new.emit_expr(node.combine_lhs)).to eq("current.n")
-    expect(node.op_zig).to eq("*")
+    expect(node.return_type.zig_type).to eq("i64")
+    expect(node.param_fields.first.type_info.zig_type).to eq("i64")
+    expect(node.combine_op).to eq(:MUL)
+    expect(node.yield_policy).to eq(:check)
     zig = MIREmitter.new.emit(node)
     expect(zig).to include("const Frame = struct")
     expect(zig).to include("rt.checkYield();")
@@ -236,7 +239,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       FakeThunkLowering.new
     )
 
-    expect(node.yield_line).to eq("// (TIGHT: scheduler yield-check skipped)")
+    expect(node.yield_policy).to eq(:tight_skip)
     zig = MIREmitter.new.emit(node)
     expect(zig).to include("// (TIGHT: scheduler yield-check skipped)")
     expect(zig).not_to include("rt.checkYield();")
@@ -362,7 +365,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/cycle member 'odd' not found/)
 
     target = fn("odd", params: [param("n")])
@@ -371,7 +374,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/target arg\/param count mismatch/)
   end
 

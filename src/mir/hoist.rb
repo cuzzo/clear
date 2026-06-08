@@ -526,9 +526,9 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mutating_receiver_allocator_op?(node)
-    return false unless node.is_a?(MIR::InlineZig)
+    return false unless node.respond_to?(:mutating_receiver_allocator_op?)
 
-    node.mutating_receiver_allocator_op? == true
+    T.unsafe(node).mutating_receiver_allocator_op? == true
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
@@ -623,7 +623,7 @@ module MIRHoistLowering
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
     when MIR::Call, MIR::MethodCall, MIR::TailCall
       raise "#{context}: allocating #{mir.class} has no callable return type"
-    when MIR::InlineZig, MIR::InlineBc
+    when MIR::InlineBc
       raise "#{context}: allocating #{mir.class} has no typed stdlib return"
     when MIR::BgBlock
       raise "#{context}: allocating MIR::BgBlock has no result type"
@@ -656,7 +656,9 @@ module MIRHoistLowering
       T.unsafe(mir).result_type
     elsif mir.respond_to?(:callable_contract)
       T.unsafe(mir).callable_contract&.signature&.return_type
-    elsif mir.is_a?(MIR::InlineZig) || mir.is_a?(MIR::InlineBc)
+    elsif mir.is_a?(MIR::RegistryCall)
+      FunctionSignature.unwrap(mir.stdlib_def)&.return_type
+    elsif mir.is_a?(MIR::InlineBc)
       FunctionSignature.unwrap(mir.stdlib_def)&.return_type
     end
     raw_type ? Type.new(raw_type) : nil
@@ -1075,18 +1077,18 @@ module MIRHoistLowering
     return if name.empty?
 
     case expr
-    when MIR::InlineZig
-      return unless expr.has_alloc_metadata?
+    when MIR::RegistryCall
+      return unless expr.has_alloc_metadata? || MIR::OwnershipEffect.of(expr).produces_owned
       return if expr.mutating_receiver_allocator_op?
 
       expr.target_var = name
-      expr.allocs = expr.allocs.with_all(alloc) if alloc && expr.allocs
+      expr.allocs = expr.allocs&.with_all(alloc) if alloc
     else
       if alloc && MIR::OwnershipEffect.of(expr).produces_owned && expr.respond_to?(:alloc=)
         expr.alloc = alloc
       end
       expr.ownership_source_exprs.each do |child|
-        has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
+        has_alloc_metadata = child.respond_to?(:has_alloc_metadata?) && T.unsafe(child).has_alloc_metadata?
         stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)
       end
     end
@@ -1164,7 +1166,8 @@ module MIRHoistLowering
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr, MIR::InlineZig, MIR::InlineBc, MIR::BgBlock
+    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
+         MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||
         typed_cleanup_entry_for_mir_result(mir, alloc: alloc) ||
         cleanup_entry_for_ownership_effect(mir, alloc: alloc)

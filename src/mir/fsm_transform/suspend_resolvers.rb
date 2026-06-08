@@ -49,7 +49,7 @@ module FsmTransform
     #                bound result) MIR::Set against the resumed local
     #                from fsm_finish_value
     #   tail:        FsmTailYield(next, "WaitForLock")
-    #   ctx_field_decls: rendered fsm_state_decls
+    #   ctx_field_decls: typed FSM ctx field declarations
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
     sig { params(io_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
@@ -84,14 +84,14 @@ module FsmTransform
       result_var = io_tail.result_var
       result_zig_type = nil
       result_needs_cleanup = false
-      ctx_field_decls = state_decls.map(&:render)
+      ctx_field_decls = state_decls.map { |decl| state_field_decl(decl) }
       if finish_value_mir && result_var && result_var != "_"
         ft = Type.from_node!(io_tail.call_node, context: "FSM IO tail result")
         result_zig_type = ft ? Type.new(ft).zig_type : nil
         raise ArgumentError, "FSM IO result #{result_var} missing Zig type" unless result_zig_type
 
         ctx_ident = MIR::Ident.new("__ctx_#{id}")
-        ctx_field_decls << "#{result_var}: #{result_zig_type} = undefined,"
+        ctx_field_decls << ctx_field_decl(result_var, result_zig_type, MIR::Undef.new(nil))
         bind_stmts << MIR::Set.new(
           MIR::FieldGet.new(ctx_ident, result_var),
           finish_value_mir,
@@ -177,9 +177,19 @@ module FsmTransform
 
       # `task` is a `*FsmTask` (slab-allocated by allocFsmTask; ctx
       # holds the pointer), so pass directly — no `&` wrapper.
-      register_zig =
-        "__ctx_#{id}.#{sp_field}.inner.wg.registerFsmWaiter(__ctx_#{id}.task)"
-      tail = MIR::FsmTailRegisterYield.new(nil, register_zig, "WaitForLock")
+      register_expr = MIR::MethodCall.new(
+        MIR::FieldGet.new(
+          MIR::FieldGet.new(
+            MIR::FieldGet.new(ctx_ident, sp_field),
+            "inner",
+          ),
+          "wg",
+        ),
+        "registerFsmWaiter",
+        [MIR::FieldGet.new(ctx_ident, "task")],
+        false,
+      )
+      tail = MIR::FsmTailRegisterYield.new(nil, register_expr, "WaitForLock")
 
       result_var = next_tail.result_var
       promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
@@ -227,10 +237,12 @@ module FsmTransform
           [MIR::ExprStmt.new(finish_expr, true)]
         end
 
-      ctx_field_decls = ["#{sp_field}: #{sp_zig} = undefined,"]
-      ctx_field_decls << "#{captured_promise_guard_name}: bool = false," if captured_promise_guard_name
+      ctx_field_decls = [ctx_field_decl(sp_field, sp_zig, MIR::Undef.new(nil))]
+      if captured_promise_guard_name
+        ctx_field_decls << ctx_field_decl(captured_promise_guard_name, "bool", MIR::Lit.new("false"))
+      end
       if result_var && inner_zig
-        ctx_field_decls << "#{result_var}: #{inner_zig} = undefined,"
+        ctx_field_decls << ctx_field_decl(result_var, inner_zig, MIR::Undef.new(nil))
         ctx_field_decls << fsm_owned_guard_decl(result_var) if result_needs_cleanup
       end
 
@@ -250,9 +262,24 @@ module FsmTransform
       "__owned_#{name}_init"
     end
 
-    sig { params(name: String).returns(String) }
+    sig { params(name: String).returns(MIR::ContextFieldDecl) }
     def fsm_owned_guard_decl(name)
-      "#{fsm_owned_guard_name(name)}: bool = false,"
+      ctx_field_decl(fsm_owned_guard_name(name), "bool", MIR::Lit.new("false"))
+    end
+
+    sig { params(name: String, type_zig: String, default_value: T.nilable(MIR::Emittable)).returns(MIR::ContextFieldDecl) }
+    def ctx_field_decl(name, type_zig, default_value)
+      MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
+    end
+
+    sig { params(decl: T.untyped).returns(MIR::ContextFieldDecl) }
+    def state_field_decl(decl)
+      init = decl.respond_to?(:init_zig) ? decl.init_zig.to_s : "undefined"
+      ctx_field_decl(
+        decl.name.to_s,
+        decl.zig_type.to_s,
+        init == "undefined" ? MIR::Undef.new(nil) : MIR::Lit.new(init),
+      )
     end
 
     sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }

@@ -69,7 +69,6 @@ class PipelineConcurrentCoverageHost
         mark(concurrent_builtin_mark(name, args))
         MIR::Call.new(name.to_s, [], false, false, MIR::CallableContract.no_ownership(0))
       },
-      emit_expr: ->(node) { MIREmitter.new.emit(node) },
       lower_mir: ->(node) { concurrent_visit_mir(node) },
       next_label: -> { "__label" },
       typed_block_expr: ->(label, body, result_type) {
@@ -626,9 +625,17 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     it "builds pipeline blocks with source cleanup, item setup, and result body" do
-      inline = MIR::InlineZig.new("make()", "test", MIR::OwnershipContract.empty, nil,
-        MIR.inline_alloc_metadata(alloc: :heap), "pipe_src_list")
-      harness = materializer_coverage_harness(source_mir: inline)
+      source_sig = FunctionSignature.new(params: [], return_type: Type.new(:"Int64[]", collection: :list), intrinsic: true)
+      source_sig.emit = IntrinsicEmit.new(allocates: true)
+      source_call = MIR::RegistryCall.new(
+        entry: source_sig,
+        args: [],
+        reason: "test",
+        ownership_contract: MIR::OwnershipContract.empty,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap),
+        target_var: "pipe_src_list",
+      )
+      harness = materializer_coverage_harness(source_mir: source_call)
       mat = described_class.new(host: harness.host)
       list = id("items", type: Type.new(:"Int64[]", collection: :list))
 
@@ -1408,12 +1415,8 @@ RSpec.describe "pipeline backend coverage" do
           insert
         end
 
-        def emit_expr(node)
-          node.respond_to?(:value) ? node.value.to_s : node.name.to_s
-        end
-
         def emit_builtin(name, args)
-          MIR::InlineZig.new("#{name}(#{args.map { |arg| emit_expr(arg) }.join(", ")})", "test_builtin")
+          MIR::Call.new(name.to_s, args, false, false, MIR::CallableContract.no_ownership(args.length))
         end
 
         def append_ownership_transfers_for_mir_body(body)
@@ -1422,10 +1425,6 @@ RSpec.describe "pipeline backend coverage" do
 
         def with_fiber_capture_map(_entries, capture_symbols: nil, rt_override: "__rt")
           yield
-        end
-
-        def task_config_zig(_stack_size, _computed_tier = nil)
-          ".{}"
         end
 
         def task_config_variant(_stack_size, _computed_tier = nil)
@@ -1449,7 +1448,6 @@ RSpec.describe "pipeline backend coverage" do
       expect(bridge.pipeline_result_alloc).to eq(:heap)
       expect(bridge.mir_schema_lookup.call(:Missing)).to be_nil
       expect(bridge.next_pipeline_observable_id).to eq(0)
-      expect(bridge.default_task_config_zig).to eq(".{}")
       expect(bridge.task_config_variant(:large)).to eq("Large")
       expect(bridge.guarded_cleanup_name?("__missing")).to be false
 
@@ -1457,8 +1455,10 @@ RSpec.describe "pipeline backend coverage" do
       expect(lowered).to eq(MIR::Ident.new("x"))
       expect(bridge.lower_body([id("x")])).to eq([MIR::Ident.new("x")])
       expect(bridge.emit_mir(MIR::Ident.new("x"))).to eq("x")
-      expect(bridge.emit_expr(MIR::Ident.new("x"))).to eq("x")
-      expect(bridge.emit_builtin(:testBuiltin, [MIR::Lit.new("1")])).to be_a(MIR::InlineZig)
+      builtin = bridge.emit_builtin(:testBuiltin, [MIR::Lit.new("1")])
+      expect(builtin).to be_a(MIR::Call)
+      expect(builtin.callee).to eq("testBuiltin")
+      expect(builtin.args).to eq([MIR::Lit.new("1")])
       expect(bridge.lower_head { MIR::Ident.new("head") }.value).to eq(MIR::Ident.new("head"))
       expect(bridge.append_ownership_transfers_for_mir_body([MIR::Suppress.new("x")])).to eq([MIR::Suppress.new("x")])
 
@@ -1485,8 +1485,6 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(bridge.with_runtime_binding_name("__rt2") { lowering.runtime_binding_name }).to eq("__rt2")
       expect(bridge.with_fiber_capture_map({}, capture_symbols: nil, rt_override: "__rt3") { :ok }).to eq(:ok)
-      bridge.emitter_rt_name = "__rt4"
-      expect(bridge.emitter_rt_name).to eq("__rt4")
     end
 
     it "normalizes observable type names and rewrites body identifiers on token boundaries" do
@@ -2102,7 +2100,7 @@ RSpec.describe "pipeline backend coverage" do
       block = pipeline_host.send(:lower_range_fold, stream, [], count, smooth)
 
       expect(block.body).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::ExprStmt), a_kind_of(MIR::BreakStmt))
-      expect(block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }).not_to be_nil
+      expect(block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }).not_to be_nil
     end
 
     it "rejects observable range folds without a terminal registry entry" do
@@ -2165,7 +2163,7 @@ RSpec.describe "pipeline backend coverage" do
       lowerer = pipeline_host.instance_variable_get(:@concurrent_lowerer)
       batch_mir = lowerer.send(:bounded_concurrent_batch_mir, conc)
       workers_mir = lowerer.send(:bounded_concurrent_worker_count_for_call_mir, conc)
-      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, "n_workers")
+      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, MIR::Ident.new("n_workers"))
       task_cfg_mir = lowerer.send(:bounded_concurrent_task_cfg_mir, conc)
 
       expect(batch_mir).to be_a(MIR::Cast)
@@ -2176,6 +2174,18 @@ RSpec.describe "pipeline backend coverage" do
       expect(MIREmitter.new.emit(capacity_mir)).to eq("@intCast(cap)")
       expect(task_cfg_mir).to be_a(MIR::StructInit)
       expect(MIREmitter.new.emit(task_cfg_mir)).to eq(".{ .stack_size = .Large }")
+    end
+
+    it "keeps default stream capacity worker count structural until emission" do
+      conc = AST::ConcurrentOp.new(tok, nil, {})
+      lowerer = pipeline_host.instance_variable_get(:@concurrent_lowerer)
+      worker_count = MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
+
+      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, worker_count)
+
+      expect(capacity_mir).to be_a(MIR::DefaultStreamCapacity)
+      expect(capacity_mir.worker_count).to eq(worker_count)
+      expect(MIREmitter.new.emit(capacity_mir)).to include("CheatLib.threadCount() * 4")
     end
 
     it "delegates PipelineHost concurrent lowering to the concurrent lowerer" do
@@ -2211,9 +2221,9 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(result).to be_a(MIR::BlockExpr)
       expect(result.body).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::Let), a_kind_of(MIR::BreakStmt))
-      spawn = result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }
+      spawn = result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
       expect(spawn).not_to be_nil
-      zig = spawn.expr.code
+      zig = T.must(MIREmitter.new.emit(T.must(spawn).expr))
       expect(zig).to include("ctx.acc.inner.view()")
       expect(zig).to include("ctx.acc.inner.tryCommit(__obs_reduce_curr_0, __obs_reduce_next_0)")
       expect(zig).to include("ctx.acc.inner.markSeen()")
@@ -2277,9 +2287,9 @@ RSpec.describe "pipeline backend coverage" do
       expect(find_result).to be_a(MIR::BlockExpr)
       expect(bounded_distinct_result).to be_a(MIR::BlockExpr)
       [scaffold, default_result, distinct_result, avg_result, any_result, find_result, bounded_distinct_result].each do |block|
-        spawn = block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }
+        spawn = block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
         expect(spawn).not_to be_nil
-        expect(spawn.expr.code).to include(".gen = ")
+        expect(T.must(MIREmitter.new.emit(T.must(spawn).expr))).to include(".gen = ")
       end
 
       stub_const("PipelineRangeLowerer::PUBLISH_SPEC", {

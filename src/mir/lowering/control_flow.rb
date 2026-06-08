@@ -202,7 +202,7 @@ module MIRLoweringControlFlow
       when MIR::ScopeBlock, MIR::BlockExpr
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
         stamp_loop_frame_alloc_scopes!(s.default_body, scope)
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
@@ -210,7 +210,7 @@ module MIRLoweringControlFlow
       when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::WithMatchDispatch
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
     end
     nil
@@ -298,7 +298,6 @@ module MIRLoweringControlFlow
       source_name = "__for_src_#{lowering_counters.next_tmp_id}"
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
-      coll.target_var = source_name if coll.is_a?(MIR::InlineZig)
       collection_setup.concat(MIR::BindingMaterialization.new(
         name: source_name,
         expr: T.cast(coll, MIR::Node),
@@ -712,7 +711,7 @@ module MIRLoweringControlFlow
     default = union_match_default_body(node, facts, arms)
     default = hoist_unhoisted_return_allocs(default, node.default_case) if default
     MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
-      { pattern: ".#{arm.variant}", payload: arm.payload_name, body: arm.body }
+      MIR::UnionMatchArm.new(variant: arm.variant, payload: arm.payload_name, body: arm.body)
     }, default)
   end
 
@@ -747,14 +746,21 @@ module MIRLoweringControlFlow
   def union_match_case_variants(c)
     T.bind(self, MIRLowering) rescue nil
     [c.value, *(c.extra_values || [])].filter_map do |value|
-      case value
-      when AST::GetField
-        value.field.to_s
-      when AST::MethodCall
-        value.name.to_s
-      else
-	        emit_expr(lower(value)).to_s.delete_prefix(".")
-      end
+      union_match_variant_name(value)
+    end
+  end
+
+  sig { params(value: AST::Node).returns(String) }
+  def union_match_variant_name(value)
+    case value
+    when AST::GetField
+      value.field.to_s
+    when AST::MethodCall
+      value.name.to_s
+    when AST::Identifier
+      value.name.to_s
+    else
+      Kernel.raise "union MATCH variant must be a named variant, got #{value.class}"
     end
   end
 
@@ -783,22 +789,11 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     arms = node.cases.map { |c|
       body = lower_match_branch(c.body, facts.expr_label)
-      # Multi-pattern arm: emit `.A, .B, .C` (Zig switch supports
-      # comma-separated prongs natively; the body is shared).
-      head_pat = if facts.is_enum_match
-        ".#{c.value.field}"
-      else
-        emit_expr(lower(c.value))
+      patterns = T.let([switch_match_pattern(c.value, facts.is_enum_match)], T::Array[MIR::SwitchPattern])
+      (c.extra_values || []).each do |ev|
+        patterns << switch_match_pattern(ev, facts.is_enum_match)
       end
-      extras_pats = (c.extra_values || []).map { |ev|
-        if facts.is_enum_match
-          ".#{ev.field}"
-        else
-          emit_expr(lower(ev))
-        end
-      }
-      pattern = ([head_pat] + extras_pats).join(", ")
-      { pattern: pattern, body: body }
+      MIR::SwitchArm.new(patterns: patterns, body: body)
     }
     default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : nil
     # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
@@ -816,6 +811,14 @@ module MIRLoweringControlFlow
       default = [] if !default && !exhaustive
     end
     MIR::SwitchStmt.new(facts.subject, arms, default)
+  end
+
+  sig { params(value: AST::Node, is_enum_match: T::Boolean).returns(MIR::SwitchPattern) }
+  def switch_match_pattern(value, is_enum_match)
+    T.bind(self, MIRLowering) rescue nil
+    return MIR::EnumSwitchPattern.new(variant: T.cast(value, AST::GetField).field.to_s) if is_enum_match
+
+    lower(value)
   end
 
   sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }

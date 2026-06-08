@@ -318,7 +318,7 @@ module TestLowering
   # Build the MIR replacement for a stubbed call site, or nil if `fn_name`
   # is not currently stubbed. Shared between FuncCall (`receiver` is nil)
   # and UFCS MethodCall (`receiver` is the object). Pure MIR composition
-  # -- no InlineZig escape hatch -- so the checker can see what's going
+  # -- no raw Zig escape hatch -- so the checker can see what's going
   # on. Locals that would otherwise become "unused" after stub
   # replacement get an explicit MIR::Suppress (`_ = &name;`).
   sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }

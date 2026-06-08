@@ -36,6 +36,29 @@ RSpec.describe MIRChecker do
     MIR::Call.new(name, [MIR::Ident.new("rt")], false, true)
   end
 
+  def registry_sig(return_type: Type.new(:Void), allocates: false, return_alloc: nil, mutates_receiver: false, params: [], fixed_return: true)
+    sig = FunctionSignature.new(params: params, return_type: return_type, intrinsic: true)
+    sig.emit = IntrinsicEmit.new(
+      zig: "#{return_type.resolved}({0})",
+      allocates: allocates,
+      return_alloc: return_alloc,
+      mutates_receiver: mutates_receiver,
+    )
+    sig.fixed_return = fixed_return if sig.respond_to?(:fixed_return=)
+    sig
+  end
+
+  def registry_call(reason, sig, allocs: nil, target_var: nil, ownership_contract: MIR::OwnershipContract.empty)
+    MIR::RegistryCall.new(
+      entry: sig,
+      args: [],
+      reason: reason,
+      ownership_contract: ownership_contract,
+      allocs: allocs,
+      target_var: target_var,
+    )
+  end
+
   def boundary_fact(kind: :bg, dispatch: :local, captures: [])
     MIR::ExecutionBoundaryFact.new(kind: kind, dispatch: dispatch, captures: captures)
   end
@@ -51,6 +74,27 @@ RSpec.describe MIRChecker do
       requires_pinned: !parallel_safe,
       forbidden_reason: forbidden_reason,
     )
+  end
+
+  def structural_bg_plan
+    MIR::FsmB1Body.new(
+      "__bg_checker",
+      MIR::FsmB1CtxStruct.new(
+        "__BgCheckerCtx",
+        "CheatLib.Promise(void)",
+        [],
+        MIR::FsmStep.new(0, 0, "__rt_checker", false, []),
+      ),
+      nil,
+    )
+  end
+
+  def bg_block(run_body = [])
+    MIR::BgBlock.new(structural_bg_plan, {}, run_body, nil)
+  end
+
+  def structural_do_block(branch_bodies)
+    MIR::DoBlock.new(MIR::DoBlockPlan.new(wg_var: "__wg_checker", branches: []), branch_bodies)
   end
 
   describe "OWNERSHIP_CLEANUP_FOR_BORROW" do
@@ -85,6 +129,26 @@ RSpec.describe MIRChecker do
       ]
 
       errors = checker.check_fn!(fn_def("owned_copy_cleanup", body))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
+
+    it "allows cleanup when a registry call returns an owned resource" do
+      signature = FunctionSignature.new(params: [], return_type: Type.new(:TCPClient))
+      signature.emit = IntrinsicEmit.new(zig: "accept()", allocates: true)
+      registry_call = MIR::RegistryCall.new(
+        entry: signature,
+        args: [],
+        reason: "accept resource",
+        allocs: MIR::InlineAllocMetadata.new(result_alloc: :heap),
+      )
+
+      body = [
+        alloc_mark("client", :heap, Type.new(:TCPClient)),
+        MIR::Let.new("client", registry_call, false, nil, nil),
+        MIR::Cleanup.new("client", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: true })),
+      ]
+
+      errors = checker.check_fn!(fn_def("registry_resource_cleanup", body))
       expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
     end
   end
@@ -206,8 +270,8 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
     end
 
-    it "detects discarded InlineZig stdlib call with allocates:true" do
-      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone", MIR::OwnershipContract.empty, { allocates: true, return: :String, return_alloc: :heap })
+    it "detects discarded registry stdlib call with allocates:true" do
+      iz = registry_call("clone", FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap))
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -215,18 +279,17 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
     end
 
-    it "detects fixed-return InlineZig leaks even when ownership effect metadata is suppressed" do
+    it "detects fixed-return registry leaks even when ownership effect metadata is suppressed" do
       sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
-      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone_fixed", MIR::OwnershipContract.empty, sig)
-      iz.result_ownership_bearing = false
+      iz = registry_call("clone_fixed", sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
 
       errors = checker.check_fn!(fn_def("stdlib_fixed_leak", [MIR::ExprStmt.new(iz, false)]))
 
       expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("clone_fixed") }).to be true
     end
 
-    it "rejects InlineZig stdlib call with allocates:true returning Void without explicit ownership facts" do
-      iz = MIR::InlineZig.new("CheatLib.sort({0})", "sort", MIR::OwnershipContract.empty, { allocates: true, return: :Void })
+    it "rejects registry stdlib call with allocates:true returning Void without explicit ownership facts" do
+      iz = registry_call("sort", FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true))
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -263,7 +326,7 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects invalid allocator metadata" do
-      iz = MIR::InlineZig.new("alloc({alloc})", "alloc", MIR::OwnershipContract.empty, nil, { alloc: :arena })
+      iz = registry_call("alloc", FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)), allocs: MIR::InlineAllocMetadata.new(alloc: :arena))
       body = [
         MIR::AllocMark.new("x", :arena, Type.new(:String), :heap),
         MIR::AllocMark.new("y", :heap, Type.new(:String), :nowhere),
@@ -414,9 +477,8 @@ RSpec.describe MIRChecker do
 
   describe "INLINE_ALLOC_MISMATCH" do
     it "detects heap append on frame list" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :heap }
-      iz.target_var = "parts"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "parts")
       body = [
         alloc_mark("parts", :frame),
         MIR::ExprStmt.new(iz, false),
@@ -425,24 +487,21 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("parts") }).to be true
     end
 
-    it "rejects frame append on frame list without a callable/effect contract" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "parts"
+    it "accepts frame append on frame list when allocator metadata matches" do
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "parts")
       body = [
         MIR::FrameSave.new("rt"),
         alloc_mark("parts", :frame),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("ok_inline", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("intrinsic") }).to be true
       expect(errors.none? { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be true
     end
 
     it "catches frame val_alloc stored in heap container" do
-      iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
-      iz.allocs = { key_alloc: :heap, val_alloc: :frame }
-      iz.target_var = "map"
+      iz = registry_call("index_set", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(key_alloc: :heap, val_alloc: :frame), target_var: "map")
       body = [
         MIR::FrameSave.new("rt"),
         alloc_mark("map", :heap),
@@ -452,10 +511,9 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("val_alloc") }).to be true
     end
 
-    it "rejects heap key_alloc/val_alloc in heap container without a callable/effect contract" do
-      iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
-      iz.allocs = { key_alloc: :heap, val_alloc: :heap }
-      iz.target_var = "map"
+    it "accepts heap key_alloc/val_alloc in heap container" do
+      iz = registry_call("index_set", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(key_alloc: :heap, val_alloc: :heap), target_var: "map")
       cleanup = MIR::Cleanup.new("map", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false,
                                            zig_type: "CheatLib.StringMap(i64)" }))
       body = [
@@ -464,14 +522,12 @@ RSpec.describe MIRChecker do
         cleanup,
       ]
       errors = checker.check_fn!(fn_def("heap_map_ok", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("index_set") }).to be true
       expect(errors.none? { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be true
     end
 
     it "rejects operations on non-local containers without an AllocMark" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :heap }
-      iz.target_var = "external_list"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "external_list")
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -479,10 +535,9 @@ RSpec.describe MIRChecker do
       expect(errors.join("\n")).to include("INLINE_ALLOC_WITHOUT_ALLOCMARK")
     end
 
-    it "detects mismatch for InlineZig found directly (not wrapped in ExprStmt)" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :heap }
-      iz.target_var = "items"
+    it "detects mismatch for registry call found directly (not wrapped in ExprStmt)" do
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       body = [
         MIR::FrameSave.new("rt"),
         alloc_mark("items", :frame),
@@ -492,10 +547,9 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("items") }).to be true
     end
 
-    it "detects mismatch for allocator-bearing InlineZig wrapped in DiscardOwned" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :heap }
-      iz.target_var = "parts"
+    it "detects mismatch for allocator-bearing registry call wrapped in DiscardOwned" do
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "parts")
       cleanup = CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })
       body = [
         MIR::FrameSave.new("rt"),
@@ -514,7 +568,7 @@ RSpec.describe MIRChecker do
   #
   # Pin for the test 380 UAF class. A `MUTABLE T[]@list` parameter is
   # pointer-passed; its Zig type is `*ArrayList(T)`. Buffer growth via
-  # `.append` (an InlineZig op with `alloc: :receiver_storage`) must
+  # `.append` (a structural op with `alloc: :receiver_storage`) must
   # resolve to `:heap`, not `:frame`. If lowering's `resolve_alloc_sym`
   # ever regresses, the checker catches it here independently.
 
@@ -526,32 +580,28 @@ RSpec.describe MIRChecker do
     end
 
     it "detects :frame allocator on a pointer-passed @list param" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "items"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "items")
       body = [MIR::ExprStmt.new(iz, false)]
       errors = checker.check_fn!(fn_with_ptr_param(body))
       expect(errors.any? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") && e.include?("items") }).to be true
     end
 
-    it "rejects pointer-passed param mutation without a callable/effect contract even when allocator is :heap" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :heap }
-      iz.target_var = "items"
+    it "accepts pointer-passed param mutation when allocator is :heap" do
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       body = [
         alloc_mark("items", :heap, Type.new(:"String[]", collection: :list)),
         MIR::TransferMark.new("items", :external_param),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_with_ptr_param(body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("intrinsic") }).to be true
       expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
     end
 
     it "ignores :frame allocator on a NON-pointer-passed local binding" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "local_list"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "local_list")
       body = [
         MIR::FrameSave.new("rt"),
         alloc_mark("local_list", :frame),
@@ -564,9 +614,8 @@ RSpec.describe MIRChecker do
     end
 
     it "fires for every :frame allocator key, not just :alloc" do
-      iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {k}, {v})", "index_set")
-      iz.allocs = { key_alloc: :frame, val_alloc: :frame }
-      iz.target_var = "map"
+      iz = registry_call("index_set", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(key_alloc: :frame, val_alloc: :frame), target_var: "map")
       param = MIR::Param.new("map", "anytype", true)
       fn = MIR::FnDef.new("update", [param], "void", [MIR::ExprStmt.new(iz, false)], :pub, true, nil)
       errors = checker.check_fn!(fn)
@@ -577,9 +626,8 @@ RSpec.describe MIRChecker do
     end
 
     it "no-ops on functions with empty params (no false positives)" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "anything"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "anything")
       body = [
         MIR::FrameSave.new("rt"),
         alloc_mark("anything", :frame),
@@ -591,9 +639,8 @@ RSpec.describe MIRChecker do
 
     it "leaves slice (non-pointer-passed) params alone" do
       param = MIR::Param.new("slice", "[]const TraceItem", false)
-      iz = MIR::InlineZig.new("for ({0}) |x| {{ ... }}", "iter")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "slice"
+      iz = registry_call("iter", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "slice")
       fn = MIR::FnDef.new("read_only", [param], "void", [MIR::ExprStmt.new(iz, false)], :pub, false, nil)
       errors = checker.check_fn!(fn)
       expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
@@ -673,10 +720,9 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "detects loop with frame InlineZig alloc but no restoreLoopMark defer" do
-      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "tmp"
+    it "detects loop with frame registry alloc but no restoreLoopMark defer" do
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "tmp")
       loop_body = [alloc_mark("tmp", :frame, scope: :iteration), MIR::ExprStmt.new(iz, false)]
       body = [
         MIR::FrameSave.new("rt"),
@@ -687,9 +733,8 @@ RSpec.describe MIRChecker do
     end
 
     it "detects ForStmt with frame Let init but no restoreLoopMark defer" do
-      iz = MIR::InlineZig.new("try CheatLib.init({alloc})", "intrinsic")
-      iz.allocs = { alloc: :frame }
-      iz.target_var = "tmp"
+      iz = registry_call("intrinsic", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "tmp")
       loop_body = [alloc_mark("tmp", :frame, scope: :iteration), MIR::Let.new("tmp", iz, false, nil, nil)]
       body = [
         MIR::FrameSave.new("rt"),
@@ -766,60 +811,10 @@ RSpec.describe MIRChecker do
     end
   end
 
-  # ===========================================================================
-  # INLINE_NO_CONTRACT -- InlineZig with CheatLib calls must have stdlib_def
-  # ===========================================================================
-
-  describe "INLINE_NO_CONTRACT" do
-    it "detects InlineZig calling CheatLib without stdlib_def" do
-      iz = MIR::InlineZig.new("try CheatLib.makeList(u8, alloc, items)", "bad_call")
-      body = [MIR::ExprStmt.new(iz, false)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
-      expect(errors.any? { |e| e.include?("bad_call") }).to be true
-    end
-
-    it "passes when stdlib_def is set" do
-      iz = MIR::InlineZig.new("try CheatLib.makeList(u8, alloc, items)", "ok_call")
-      iz.stdlib_def = { allocates: true }
-      body = [MIR::ExprStmt.new(iz, false)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.select { |e| e.include?("INLINE_NO_CONTRACT") }).to be_empty
-    end
-
-    it "rejects opaque allocator ownership even when stdlib_def is set" do
-      iz = MIR::InlineZig.new("const p = try rt.heapAlloc().create(Node); rt.heapAlloc().destroy(p);", "opaque_alloc")
-      iz.stdlib_def = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      iz.mark_opaque_ownership_operations!
-      body = [MIR::ExprStmt.new(iz, false)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.any? { |e| e.include?("OPAQUE_ZIG_OWNERSHIP") && e.include?("opaque_alloc") }).to be true
-    end
-
-    it "rejects formerly exempt CheatLib calls without a callable/effect contract" do
-      iz = MIR::InlineZig.new("CheatLib.intAdd(a, b)", "math")
-      body = [MIR::ExprStmt.new(iz, false)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("math") }).to be true
-    end
-
-    it "detects unaudited CheatLib call in Let init" do
-      iz = MIR::InlineZig.new("try CheatLib.promote(T, rt, &val)", "promote")
-      body = [MIR::Let.new("x", iz, false, nil, nil)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
-    end
-
-    it "detects unaudited InlineZig nested inside another expression" do
-      iz = MIR::InlineZig.new("opaqueValue()", "nested_opaque")
-      body = [MIR::ExprStmt.new(MIR::Call.new("use", [iz], false), false)]
-      errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("nested_opaque") }).to be true
-    end
-
-    it "does not require contracts for simple assignment-shaped inline Zig" do
-      iz = MIR::InlineZig.new("value.* = next", "assignment")
-      expect(checker.send(:inline_zig_requires_contract?, iz)).to be false
+  describe "raw Zig carriers" do
+    it "does not expose an opaque Zig MIR node" do
+      expect(MIR.const_defined?(:InlineZig, false)).to be(false)
+      expect(MIR.const_defined?(:RawBc, false)).to be(false)
     end
   end
 
@@ -1163,7 +1158,8 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects a TAKES stdlib call with no concrete consumed binding contract" do
-      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
+      iz = registry_call("items", takes_signature,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       body = [
         alloc_mark("items", :heap),
         MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
@@ -1173,16 +1169,17 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("IMPLICIT_OWNERSHIP_TRANSFER") && e.include?("items") }).to be true
     end
 
-    it "rejects malformed ownership contracts at the MIR node boundary" do
-      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
+    it "freezes ownership contracts at the MIR node boundary" do
+      iz = registry_call("items", takes_signature,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
 
-      expect { iz[:ownership_contract] = { consumes: ["m"] } }.to raise_error(TypeError, /MIR::OwnershipContract/)
       expect { iz.ownership_contract.consumes << "late" }.to raise_error(FrozenError)
     end
 
     it "rejects a consumed binding that has no TransferMark" do
       contract = MIR::OwnershipContract.consumes(["m"])
-      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", contract, takes_signature, { alloc: :heap }, "items")
+      iz = registry_call("items", takes_signature, ownership_contract: contract,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       body = [
         alloc_mark("items", :heap),
         MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
@@ -1192,37 +1189,14 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("OWNERSHIP_CONTRACT_WITHOUT_TRANSFER") && e.include?("m") }).to be true
     end
 
-    it "rejects a transfer contract whose emitted Zig deep-copies the consumed source" do
+    it "preserves registry ownership metadata when stripping try" do
       contract = MIR::OwnershipContract.consumes(["m"])
-      iz = MIR::InlineZig.new(
-        "try items.append({alloc}, try CheatLib.dupeValue(CheatLib.StringMap(i64), m, rt.heapAlloc()))",
-        "intrinsic",
-        contract,
-        takes_signature,
-        { alloc: :heap },
-        "items"
-      )
-      iz.mark_copied_consumed_binding!("m")
-      body = [
-        alloc_mark("m", :heap),
-        MIR::TransferMark.new("m", :owned_sink, :heap),
-        alloc_mark("items", :heap),
-        MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
-        iz,
-      ]
-      errors = checker.check_fn!(fn_def("take_copy_mismatch", body))
-      expect(errors.any? { |e| e.include?("OWNERSHIP_TRANSFER_COPIED") && e.include?("m") }).to be true
-    end
-
-    it "preserves InlineZig ownership metadata when stripping try" do
-      iz = MIR::InlineZig.new("try use(m)", "intrinsic")
-      iz.mark_opaque_ownership_operations!
-      iz.mark_copied_consumed_binding!("m")
-
+      iz = registry_call("intrinsic", takes_signature, ownership_contract: contract,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       stripped = iz.without_try
-      expect(stripped.code).to eq("use(m)")
-      expect(stripped.opaque_ownership_operations).to be true
-      expect(stripped.copied_consumed_bindings).to eq(["m"])
+      expect(stripped.ownership_contract).to eq(contract)
+      expect(stripped.allocs).to eq(iz.allocs)
+      expect(stripped.target_var).to eq("items")
     end
 
   end
@@ -1276,7 +1250,7 @@ RSpec.describe MIRChecker do
 
   describe "execution boundary facts" do
     it "rejects BgBlock without a typed boundary fact" do
-      bg = MIR::BgBlock.new("{}", {}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
+      bg = bg_block([MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
 
       errors = checker.check_fn!(fn_def("missing_bg_fact", [bg]))
 
@@ -1284,7 +1258,7 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects DoBlock when fact count does not match branch bodies" do
-      do_block = MIR::DoBlock.new("{}", [[MIR::ExprStmt.new(MIR::Lit.new("1"), false)]])
+      do_block = structural_do_block([[MIR::ExprStmt.new(MIR::Lit.new("1"), false)]])
       do_block.boundary_facts = []
 
       errors = checker.check_fn!(fn_def("bad_do_fact_count", [do_block]))
@@ -1293,7 +1267,7 @@ RSpec.describe MIRChecker do
     end
 
     it "rejects parallel boundary captures not proven parallel safe" do
-      bg = MIR::BgBlock.new("{}", {}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
+      bg = bg_block([MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
       bg.boundary_fact = boundary_fact(
         dispatch: :parallel,
         captures: [boundary_capture("x", parallel_safe: false, forbidden_reason: :affine_locked)],
@@ -1399,13 +1373,19 @@ RSpec.describe MIRChecker do
         MIR::DeferStmt.new([MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::DeferStmt.new(MIR::ExprStmt.new(MIR::Lit.new("1"), false)),
         MIR::StreamSpawn.new({}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
-        MIR::SnapshotRead.new("cell", "rt", "view", "__guard", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
-        MIR::SnapshotTransaction.new("cell", "rt", "alloc", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil, false),
-        MIR::SnapshotMultiTxn.new(".{a,b}", "rt", "alloc", "const a = views[0];", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil),
-        MIR::PolymorphicMutate.new("cell", "rt", "view", "Counter", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotRead.new(MIR::CapabilityUnwrap.new(MIR::Ident.new("cell")), "rt", "view", "__guard", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+        MIR::SnapshotTransaction.new(MIR::CapabilityUnwrap.new(MIR::Ident.new("cell")), "rt", :heap, "view", Type.new(:Counter), [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil, false),
+        MIR::SnapshotMultiTxn.new([MIR::Ident.new("a"), MIR::Ident.new("b")], "rt", "alloc", ["a"], [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], nil, nil, nil),
+        MIR::PolymorphicMutate.new(MIR::Ident.new("cell"), "rt", "view", Type.new(:Counter), [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::PolymorphicFlowSignal.new(:return_value, MIR::Lit.new("1")),
-        MIR::PolymorphicMutateFlow.new("cell", "rt", "view", "Counter", "__ret", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], MIR::Lit.new("true"), [MIR::ExprStmt.new(MIR::Lit.new("0"), false)]),
-        MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }]),
+        MIR::PolymorphicMutateFlow.new(MIR::Ident.new("cell"), "rt", "view", Type.new(:Counter), Type.new(:Int64), [MIR::ExprStmt.new(MIR::Lit.new("1"), false)], MIR::Lit.new("true"), [MIR::ExprStmt.new(MIR::Lit.new("0"), false)]),
+        MIR::WithMatchDispatch.new(
+          MIR::Ident.new("cell"),
+          "alias",
+          false,
+          "rt",
+          [MIR::WithMatchArm.new(family: :LOCKED, guard_var: "__guard", body: [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])],
+        ),
         fn_def("inner", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::TestDef.new("case", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
         MIR::StructDef.new("S", [], [fn_def("method", [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])], :private),
@@ -1506,7 +1486,13 @@ RSpec.describe MIRChecker do
       checker.send(:verify_move_mark_scope!, [MIR::MoveMark.new("x")])
       checker.send(:verify_move_mark_scope!, [
         MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("cond"), body: [MIR::MoveMark.new("branch")])], [MIR::MoveMark.new("default")]),
-        MIR::WithMatchDispatch.new("cell", [{ family: :Locked, body: [MIR::MoveMark.new("arm")] }]),
+        MIR::WithMatchDispatch.new(
+          MIR::Ident.new("cell"),
+          "alias",
+          false,
+          "rt",
+          [MIR::WithMatchArm.new(family: :LOCKED, guard_var: "__guard", body: [MIR::MoveMark.new("arm")])],
+        ),
       ])
 
       aggregate = [
@@ -1539,7 +1525,7 @@ RSpec.describe MIRChecker do
 
     it "covers owned return, FSM guard, and boundary-fact branches" do
       sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:String), allocates: true, return_alloc: :heap)
-      inline = MIR::InlineZig.new("try make()", "owned", MIR::OwnershipContract.empty, sig)
+      inline = registry_call("owned", sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
       expect(checker.send(:owned_return_init?, inline)).to be true
 
       structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
@@ -1561,10 +1547,10 @@ RSpec.describe MIRChecker do
         MIRChecker.check_fsm_structure!(structure)
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-OWNED-RESULT-GUARD-WRITTEN/)
 
-      bg = MIR::BgBlock.new("{}", {}, [], nil)
+      bg = bg_block
       bg.boundary_fact = boundary_fact
       stream = MIR::StreamSpawn.new({}, [])
-      do_block = MIR::DoBlock.new("{}", [[]])
+      do_block = structural_do_block([[]])
       checker.send(:verify_execution_boundary_facts!, [bg, stream, do_block])
       checker.send(:verify_execution_boundary_fact!, boundary_fact(kind: :bad_kind, dispatch: :bad_dispatch), "bad")
 
@@ -1604,20 +1590,25 @@ RSpec.describe MIRChecker do
         Set.new,
         require_operands: true)
 
-      malformed_zig = Class.new(MIR::InlineZig) do
-        def initialize
-          super("raw()", "malformed")
-        end
-        def ownership_contract = Object.new
-      end.new
-      checker.send(:verify_explicit_ownership_contracts!, [MIR::Lit.new("not_zig"), malformed_zig], Set.new, {})
+      malformed_registry = Struct.new(:ownership_contract, :stdlib_def, :reason) do
+        include MIR::Expr
+        def child_exprs = []
+      end.new(Object.new, FunctionSignature.new(
+        params: [AST::Param.new(name: "value", type: Type.new(:Int64), takes: true)],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+      ), "malformed")
+      checker.send(:verify_explicit_ownership_contracts!, [MIR::Lit.new("not_zig"), malformed_registry], Set.new, {})
 
       method = MIR::MethodCall.new(MIR::Ident.new("items"), "pop", [], false, MIR::CallableContract.no_ownership(0), :heap)
       reassign = MIR::ReassignWithCleanup.new("dst", MIR::Ident.new("owned"), "[]const u8", :heap)
       reassign.ownership_consumption = consumption_fact([owned_operand("owned")])
       checker.send(:verify_ownership_surfaces_finalized!, [method, reassign], [])
 
-      iz = MIR::InlineZig.new("try put({val_alloc}, value)", "sink", MIR::OwnershipContract.consumes(["owned"]), nil, { val_alloc: :heap }, "map")
+      iz = registry_call("map", FunctionSignature.borrowing_intrinsic,
+        ownership_contract: MIR::OwnershipContract.consumes(["owned"]),
+        allocs: MIR.inline_alloc_metadata(val_alloc: :heap),
+        target_var: "map")
       checker.send(:check_consumed_allocators_match_sink!, iz, ["owned"], "owned" => [alloc_mark("owned", :frame)])
 
       takes_signature = FunctionSignature.new(
@@ -1625,14 +1616,9 @@ RSpec.describe MIRChecker do
         return_type: Type.new(:Void),
         intrinsic: true,
       )
-      covered_takes = MIR::InlineZig.new(
-        "try consume(value)",
-        "covered_takes",
-        MIR::OwnershipContract.new(covers_consuming_params: true),
-        takes_signature,
-      )
-      expect(checker.send(:stdlib_consumption_covered_without_owned_values?, covered_takes)).to be true
-      expect(checker.send(:inline_ownership_side_channel?, covered_takes)).to be false
+      covered_takes = registry_call("covered_takes", takes_signature,
+        ownership_contract: MIR::OwnershipContract.new(covers_consuming_params: true))
+      expect(checker.send(:stdlib_takes_ownership?, covered_takes)).to be true
 
       walker_seen = []
       checker.send(:walk_mir, [MIR::ExprStmt.new(MIR::Ident.new("walk"), false)]) { |node| walker_seen << node.class.name }
@@ -1654,8 +1640,10 @@ RSpec.describe MIRChecker do
     it "covers frame-allocation and unhoisted-allocation helper branches" do
       mutating_sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true)
       mutating_sig.emit = IntrinsicEmit.new(allocates: true, mutates_receiver: true, alloc: :frame)
-      mutating_inline = MIR::InlineZig.new("try items.append({alloc}, x)", "mutating", MIR::OwnershipContract.empty, mutating_sig, { alloc: :frame }, "items")
-      frame_inline = MIR::InlineZig.new("try make({alloc})", "frame", MIR::OwnershipContract.empty, nil, { alloc: :frame }, "tmp")
+      mutating_inline = registry_call("mutating", mutating_sig,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "items")
+      frame_inline = registry_call("frame", FunctionSignature.borrowing_intrinsic,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "tmp")
 
       expect(checker.send(:expr_has_frame_alloc?, nil)).to be false
       expect(checker.send(:expr_has_frame_alloc?, mutating_inline)).to be false
@@ -1698,15 +1686,22 @@ RSpec.describe MIRChecker do
   # compile-time warning.
 
   describe "check_fsm_structure!" do
+    def mir_ref(text)
+      return nil if text.nil?
+
+      head, tail = text.split(".", 2)
+      tail ? MIR::FieldGet.new(MIR::Ident.new(head), tail) : MIR::Ident.new(text)
+    end
+
     def fsm_cleanup_action(name, source_kind: :body, entry: nil, target: nil, guard: nil, allocator: nil)
       cleanup_entry = entry || CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
       MIR::FsmDestroyCleanup.new(
         source_kind: source_kind,
         name: name,
-        target_zig: target || "__ctx_0.#{name}",
+        target: mir_ref(target || "__ctx_0.#{name}"),
         cleanup_entry: cleanup_entry,
-        guard_zig: guard,
-        allocator_zig: allocator,
+        guard: mir_ref(guard),
+        allocator: mir_ref(allocator),
       )
     end
 
@@ -1935,7 +1930,7 @@ RSpec.describe MIRChecker do
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
           guard_field: "__lock_held_x",
-          lock_ref_zig: "__ctx_0.lock",
+          lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "unlock",
         ),
       ]
@@ -1951,7 +1946,7 @@ RSpec.describe MIRChecker do
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
           guard_field: "held_0",
-          lock_ref_zig: "__ctx_0.lock",
+          lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "unlock",
         ),
       ]
@@ -1967,7 +1962,7 @@ RSpec.describe MIRChecker do
         MIR::FsmDestroyLockRelease.new(
           name: "lock",
           guard_field: "__lock_held_0",
-          lock_ref_zig: "lock",
+          lock_ref: mir_ref("lock"),
           unlock_method: "unlock",
         ),
       ]
@@ -1983,7 +1978,7 @@ RSpec.describe MIRChecker do
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
           guard_field: "__lock_held_0",
-          lock_ref_zig: "__ctx_0.lock",
+          lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "release",
         ),
       ]
@@ -2043,7 +2038,7 @@ RSpec.describe MIRChecker do
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
           guard_field: "__lock_held_0",
-          lock_ref_zig: "__ctx_0.lock",
+          lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "unlockShared",
         ),
       ]

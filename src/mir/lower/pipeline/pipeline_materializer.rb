@@ -365,9 +365,13 @@ class PipelineMaterializer
 
   sig { params(source_mir: MIR::Node).returns(T.nilable(Symbol)) }
   def inline_source_alloc(source_mir)
-    return nil unless source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
+    effect = MIR::OwnershipEffect.of(source_mir)
+    return effect.alloc if effect.produces_owned && effect.alloc
 
-    source_mir.allocs.any_heap? ? :heap : :frame
+    metadata = source_mir.respond_to?(:allocs) ? T.unsafe(source_mir).allocs : nil
+    return nil unless metadata.is_a?(MIR::InlineAllocMetadata) && !metadata.empty?
+
+    metadata.any_heap? ? :heap : :frame
   end
 
   sig { returns(T::Boolean) }

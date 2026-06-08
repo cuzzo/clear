@@ -191,7 +191,6 @@ class PipelineConcurrentLowerer < T::Struct
   const :pipeline_result_alloc, T.proc.returns(Symbol)
   const :source_setup, T.proc.params(lhs: AST::Node).returns(T::Array[MIR::Emittable])
   const :emit_builtin, T.proc.params(name: Symbol, args: T::Array[MIR::Emittable]).returns(MIR::Node)
-  const :emit_expr, T.proc.params(node: MIR::Emittable).returns(String)
   const :lower_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :next_label, T.proc.returns(String)
   const :typed_block_expr, T.proc.params(label: String, body: T::Array[MIR::Emittable], result_type: Type).returns(MIR::BlockExpr)
@@ -809,10 +808,10 @@ class PipelineConcurrentLowerer < T::Struct
     PipelineConcurrentSourcePointer.new(setup: [], pointer: MIR::AddressOf.new(src))
   end
 
-  sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::Expr) }
-  def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+  sig { params(conc_op: AST::ConcurrentOp, worker_count: MIR::Emittable).returns(MIR::Expr) }
+  def stream_concurrent_capacity_mir(conc_op, worker_count)
     cap_node = concurrent_option(conc_op, "capacity")
-    return MIR::DefaultStreamCapacity.new(MIR::Ident.new(n_workers_zig)) unless cap_node
+    return MIR::DefaultStreamCapacity.new(worker_count) unless cap_node
 
     MIR::Cast.new(self.lower_mir.call(cap_node), nil, :intCast)
   end
@@ -825,8 +824,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamSelect, [
       MIR::Ident.new(item_t.zig_type),
@@ -856,8 +854,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamWhere, [
       MIR::Ident.new(item_t.zig_type),
@@ -886,8 +883,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_each_invocation(conc_op, item_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamEach, [
       MIR::Ident.new(item_t.zig_type),
@@ -1238,7 +1234,10 @@ class PipelineConcurrentLowerer < T::Struct
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
-    pre_ctx_stmts = specs.filter_map(&:setup_mir)
+    pre_ctx_stmts = specs.flat_map { |spec|
+      setup = spec.setup_mir
+      setup.is_a?(Array) ? setup : [setup].compact
+    }
     post_ctx_stmts = specs.filter_map { |s| s.cleanup_mir_for(ctx_var) }
     PipelineConcurrentCallback.new(
       id: id,

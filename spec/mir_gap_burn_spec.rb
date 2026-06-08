@@ -17,6 +17,51 @@ require_relative "../src/mir/fiber_ctx_builder"
 RSpec.describe "MIR gap-burn characterization" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }
 
+  def registry_call(reason, sig, allocs: nil, target_var: nil, ownership_contract: MIR::OwnershipContract.empty)
+    MIR::RegistryCall.new(
+      entry: sig,
+      args: [],
+      reason: reason,
+      ownership_contract: ownership_contract,
+      allocs: allocs,
+      target_var: target_var,
+    )
+  end
+
+  it "keeps production MIR lowering free of raw Zig template constructors" do
+    production_files = Dir.glob(File.expand_path("../src/**/*.rb", __dir__)).reject { |path|
+      path.include?("/mir_emitter.rb") || path.include?("/fsm_wrapper_emitter.rb")
+    }
+    offenders = production_files.flat_map do |path|
+      text = File.read(path)
+      [
+        ["InlineZig.new", text.include?("InlineZig.new")],
+        ["MIR::InlineZig", text.include?("MIR::InlineZig")],
+        ["MIR::RawBc", text.include?("MIR::RawBc")],
+        ["ZigTemplate", text.include?("ZigTemplate")],
+        ["SyntheticZig", text.include?("SyntheticZig")],
+        ["lower_to_zig", text.include?("lower_to_zig")],
+        ["fsm_body_opaque", text.include?("fsm_body_opaque")],
+        ["resume_fn_zig", text.include?("resume_fn_zig")],
+        ["register_zig", text.include?("register_zig")],
+        ["cond_zig", text.include?("cond_zig")],
+        ["target_zig", text.include?("target_zig")],
+        ["guard_zig", text.include?("guard_zig")],
+        ["allocator_zig", text.include?("allocator_zig")],
+        ["lock_ref_zig", text.include?("lock_ref_zig")],
+        ["rt_suppress_zig", text.include?("rt_suppress_zig")],
+        ["raw string emitter passthrough", text.match?(/when String\s+then\s+node/)],
+        ["raw DeferStmt body", text.match?(/MIR::DeferStmt\.new\(\s*["']/)],
+        ["raw ErrDeferStmt body", text.match?(/MIR::ErrDeferStmt\.new\(\s*["']/)],
+        ["raw BgBlock code", text.match?(/MIR::BgBlock\.new\(\s*["']/)],
+        ["raw DoBlock code", text.match?(/MIR::DoBlock\.new\(\s*["']/)],
+        ["rendered FsmLoweringResult code", text.include?("FsmLoweringResult.new(code:")],
+      ].filter_map { |label, present| "#{path}: #{label}" if present }
+    end
+
+    expect(offenders).to eq([])
+  end
+
   it "does not clean up borrowed capture values" do
     borrowed = Type.new(:String)
     borrowed.mark_borrowed_reference!
@@ -349,6 +394,33 @@ RSpec.describe "MIR gap-burn characterization" do
     MIRLowering.new
   end
 
+  def structural_bg_plan
+    MIR::FsmB1Body.new(
+      "__bg_fixture",
+      MIR::FsmB1CtxStruct.new(
+        "__BgFixtureCtx",
+        "CheatLib.Promise(void)",
+        [],
+        MIR::FsmStep.new(0, 0, "__rt_fixture", false, []),
+      ),
+      MIR::FsmSpawnSetup.new(
+        "__bg_fixture_alloc",
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+        "__bg_fixture_promise",
+        "CheatLib.Promise(void)",
+        [],
+        "__bg_fixture_ctx",
+        "__BgFixtureCtx",
+        [],
+        MIR::FsmSpawnCall.new(target: :best, ctx_var: "__bg_fixture_ctx"),
+        "rt",
+        0,
+        0,
+        nil,
+      ),
+    )
+  end
+
   it "covers MIR node and ownership helper edges" do
     nested = MIR::BlockExpr.new("__surface_stop", [MIR::ExprStmt.new(MIR::Ident.new("inside"), false)])
     surface = MIR.surface_nodes([
@@ -358,7 +430,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(surface).to include(nested)
     expect(surface.grep(MIR::Ident).map(&:name)).to eq(["surface"])
 
-    expect { MIR::InlineAllocMetadata.from(Object.new) }.to raise_error(TypeError, /InlineZig allocs/)
+    expect { MIR::InlineAllocMetadata.from(Object.new) }.to raise_error(TypeError, /allocator metadata/)
     expect { MIR::InlineAllocMetadata.from(alloc: "heap") }.to raise_error(TypeError, /allocator metadata/)
     allocs = MIR::InlineAllocMetadata.new(alloc: :frame, key_alloc: :heap)
     expect(allocs.any_frame?).to be(true)
@@ -404,13 +476,10 @@ RSpec.describe "MIR gap-burn characterization" do
     if_slots.last.replace([])
     expect(if_chain.default_body).to eq([])
 
-    raw = MIR::InlineZig.new("try consume(owned)", "coverage")
     contract = MIR::OwnershipContract.consumes(["owned"])
-    raw.ownership_contract = contract
+    raw = registry_call("coverage", FunctionSignature.borrowing_intrinsic, ownership_contract: contract)
     expect(raw.explicit_ownership_contract).to eq(contract)
-    raw[:ownership_contract] = MIR::OwnershipContract.empty
-    expect(raw.ownership_contract.empty?).to be(true)
-    expect { raw[:ownership_contract] = Object.new }.to raise_error(TypeError, /ownership_contract/)
+    expect(raw.ownership_contract.consumes).to eq(["owned"])
 
     stream = MIR::StreamSpawn.new({}, [])
     expect(stream.boundary_fact).to be_nil
@@ -419,21 +488,39 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(stream.boundary_fact).to eq(boundary)
 
     structure = MIR::FsmStructure.new([], [], [], [], nil, nil)
-    lowered = MIR::FsmLoweringResult.new(code: "pub fn run() void {}", structure: structure)
-    expect(lowered.to_s).to eq("pub fn run() void {}")
+    body = MIR::FsmB1Body.new(
+      "__bg",
+      MIR::FsmB1CtxStruct.new("__Ctx", "CheatLib.Promise(void)", [], MIR::FsmStep.new(0, 0, "__rt", false, [])),
+      MIR::FsmSpawnSetup.new(
+        "__alloc",
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+        "__promise",
+        "CheatLib.Promise(void)",
+        [],
+        "__ctx",
+        "__Ctx",
+        [],
+        MIR::FsmSpawnCall.new(target: :best, ctx_var: "__ctx"),
+        "rt",
+        0,
+        0,
+        nil,
+      ),
+    )
+    lowered = MIR::FsmLoweringResult.new(body: body, structure: structure)
+    expect(lowered.body).to eq(body)
 
-    dispatch_arm = {
-      family: :Locked,
-      probe: "@hasDecl(Cell, \"Locked\")",
-      prelude_zig: nil,
+    dispatch_arm = MIR::WithMatchArm.new(
+      family: :LOCKED,
+      guard_var: "__guard",
       body: [MIR::ExprStmt.new(MIR::Ident.new("locked"), false)],
-    }
-    dispatch = MIR::WithMatchDispatch.new("cell", [dispatch_arm])
+    )
+    dispatch = MIR::WithMatchDispatch.new(MIR::Ident.new("cell"), "alias", false, "rt", [dispatch_arm])
     dispatch_slots = dispatch.body_slots
     expect(dispatch_slots.map(&:name)).to eq([:arms_0])
     replacement_dispatch = [MIR::ExprStmt.new(MIR::Ident.new("unlocked"), false)]
     dispatch_slots.first.replace(replacement_dispatch)
-    expect(dispatch.arms.first[:body]).to eq(replacement_dispatch)
+    expect(dispatch.arms.first.body).to eq(replacement_dispatch)
 
     callable_contract = MIR::CallableContract.no_ownership(1)
     method_call = MIR::MethodCall.new(
@@ -462,8 +549,7 @@ RSpec.describe "MIR gap-burn characterization" do
       return_type: Type.new(:"!?String"),
       return_alloc: :heap,
     )
-    inline = MIR::InlineZig.new("try make()", "coverage", MIR::OwnershipContract.empty, heap_return_sig)
-    inline.result_type = Type.new(:"!?String")
+    inline = registry_call("coverage", heap_return_sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
     inline_effect = inline.ownership_effect
     expect(inline_effect.produces_owned).to be(true)
     expect(inline_effect.alloc).to eq(:heap)
@@ -607,7 +693,7 @@ RSpec.describe "MIR gap-burn characterization" do
     call.result_type = Type.new(:Int64)
     expect(low.mir_explicit_result_type(call).resolved).to eq(:Int64)
 
-    inline = MIR::InlineZig.new("make()", "test", MIR::OwnershipContract.empty, string_sig)
+    inline = registry_call("test", string_sig)
     expect(low.mir_explicit_result_type(inline).resolved).to eq(:String)
   end
 
@@ -976,8 +1062,10 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:lower_body) { |_body| [MIR::Suppress.new("default_body")] }
     plan = low.send(:build_catch_clauses, fun, false)
 
-    expect(plan.clause_bodies).to eq([[MIR::Suppress.new("default_body")]])
-    expect(plan.code).to include("defer rt.freeSnapshot();")
+    expect(plan.clauses).to eq([])
+    expect(plan.default_body).to eq([MIR::Suppress.new("default_body")])
+    expect(plan.default_action).to eq(MIR::CatchDefaultAction::Body)
+    expect(plan.snapshot_type).to be_nil
   end
 
   it "covers lowering coercion and implicit allocation facts as typed facts" do
@@ -1191,7 +1279,8 @@ RSpec.describe "MIR gap-burn characterization" do
       singleton = Class.new(MIRLowering) do
         define_method(:owned_sink_plan) { |_value, _ast_node, _sink_alloc, _sink_type = nil| plan }
         def emit_builtin(name, args)
-          MIR::InlineZig.new("#{name}(#{args.length})", "test")
+          sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+          MIR::RegistryCall.new(entry: sig, args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) }, reason: name.to_s)
         end
       end.new
       result = singleton.send(:materialize_owned_sink_value, value, ast, :heap, Type.new(:String))
@@ -1202,7 +1291,7 @@ RSpec.describe "MIR gap-burn characterization" do
       when :rc_retain
         expect(result).to be_a(MIR::RcRetain)
       when :dupe_union
-        expect(result).to be_a(MIR::InlineZig)
+        expect(result).to be_a(MIR::RegistryCall)
       else
         expect(result).to be(value)
       end
@@ -1261,11 +1350,9 @@ RSpec.describe "MIR gap-burn characterization" do
     bad_plan = MIRLowering::DestinationPlacementPlan.new(action: :bad, type_info: nil, dest_alloc: nil)
     expect { bad_plan.place(low, MIR::Ident.new("x"), id("x")) }.to raise_error(/unknown destination placement action/)
 
-    stdlib_alloc = double(emits_allocating?: true, heap_return_alloc?: true,
-      fixed_return?: false, mutates_receiver?: true)
-    mutating_alloc = MIR::InlineZig.new("append()", "test", MIR::OwnershipContract.empty,
-      stdlib_alloc, { alloc: :heap })
-    mutating_alloc.result_ownership_bearing = true
+    stdlib_alloc = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    stdlib_alloc.emit = IntrinsicEmit.new(allocates: true, return_alloc: :heap, mutates_receiver: true)
+    mutating_alloc = registry_call("test", stdlib_alloc, allocs: MIR.inline_alloc_metadata(alloc: :heap))
     expect(low.send(:implicit_allocating_result_fact,
       MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), ownership_finalization_context)).to be_nil
 
@@ -1588,10 +1675,10 @@ RSpec.describe "MIR gap-burn characterization" do
 
     expect(low.send(:mir_alloc_mark_type_info, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap)).resolved).to eq(:"i64[]")
 
-    typed_bg = MIR::BgBlock.new("code", {}, [], nil)
+    typed_bg = MIR::BgBlock.new(structural_bg_plan, {}, [], nil)
     typed_bg.result_type = Type.new(:String)
     expect(low.send(:mir_alloc_mark_type_info, typed_bg).resolved).to eq(:String)
-    expect { low.send(:mir_alloc_mark_type_info, MIR::BgBlock.new("code", {}, [], nil)) }.to raise_error(/BgBlock has no result type/)
+    expect { low.send(:mir_alloc_mark_type_info, MIR::BgBlock.new(structural_bg_plan, {}, [], nil)) }.to raise_error(/BgBlock has no result type/)
 
     typed_try = MIR::TryCatch.new(MIR::Ident.new("fallible"), MIR::Lit.new("fallback"), nil)
     typed_try.result_type = Type.new(:String)
@@ -1687,7 +1774,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:normalized_alloc_wrapper_alias?, MIR::TryExpr.new(MIR::Ident.new("aliased")))).to eq(false)
 
     inline_sig = FunctionSignature.new(params: [], return_type: Type.new(:"String[]", collection: :list))
-    inline = MIR::InlineZig.new("makeList()", "test", MIR::OwnershipContract.empty, inline_sig)
+    inline = registry_call("test", inline_sig)
     expect(low.send(:typed_cleanup_entry_for_mir_result, inline).kind).to eq(:uniform)
 
     rc = MIR::RcRetain.new(MIR::Ident.new("rc"), "Counter", "rcRetain")
@@ -1742,7 +1829,10 @@ RSpec.describe "MIR gap-burn characterization" do
       needs_sort: false,
       rt_name: "rt",
     )
-    expect(low.send(:restrict_capability_binding, local_context)).to eq("const alias_value = local_value;")
+    restrict_binding = low.send(:restrict_capability_binding, local_context)
+    expect(restrict_binding).to eq([
+      MIR::Let.new("alias_value", MIR::Ident.new("local_value"), false, nil, nil),
+    ])
 
     view_var = id("view_source", type: Type.new(:Box), storage: :heap)
     view_cap = capability_transition(capability: :VIEW, var_node: view_var, alias: "view_alias", resolved_type: Type.new(:Box))
@@ -1761,7 +1851,10 @@ RSpec.describe "MIR gap-burn characterization" do
       needs_sort: false,
       rt_name: "rt",
     )
-    expect(low.send(:view_capability_binding, view_context)).to include("defer view_alias.release();")
+    view_binding = low.send(:view_capability_binding, view_context)
+    expect(view_binding).to include(an_instance_of(MIR::DeferStmt))
+    expect(view_binding.grep(MIR::DeferStmt).first.body.method).to eq("release")
+    expect(view_binding).to include(an_instance_of(MIR::IfStmt))
 
     snapshot_node = AST::WithBlock.new(tok, [], [], nil)
     snapshot_node.snapshot_mode = :read
@@ -1784,9 +1877,10 @@ RSpec.describe "MIR gap-burn characterization" do
 
     match_dispatch = low.send(:lower_with_match_block, match_node).body.first
     expect(match_dispatch).to be_a(MIR::WithMatchDispatch)
-    expect(match_dispatch.cell_zig).to eq("cell")
-    expect(match_dispatch.arms.map { |arm| arm[:family] }).to eq([:LOCKED, :VERSIONED])
-    expect(match_dispatch.arms.first[:prelude_zig]).to include("const guarded")
+    expect(match_dispatch.cell).to eq(MIR::Ident.new("cell"))
+    expect(match_dispatch.alias_name).to eq("guarded")
+    expect(match_dispatch.arms.map(&:family)).to eq([:LOCKED, :VERSIONED])
+    expect(match_dispatch.arms.first.guard_var).to start_with("__guarded_match_")
 
     expect(low.send(:ast_contains_return?, { nested: [AST::ReturnNode.new(tok, nil)] })).to eq(true)
     expect(low.send(:ast_contains_return?, fn([AST::ReturnNode.new(tok, nil)]))).to eq(false)
@@ -1808,7 +1902,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(pre_body.last.value.name).to eq("error.CheatError")
 
     unknown_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
-    expect { low.send(:emit_lock_action_zig, unknown_clause, "__with", with_node) }.to raise_error(/unknown lock action/)
+    expect { low.send(:lock_failure_action, unknown_clause, "__with", with_node) }.to raise_error(/unknown lock action/)
   end
 
   it "covers concurrency lowering defensive and diagnostic branches" do
@@ -1877,7 +1971,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     facts = []
     low.send(:append_ownership_facts_for_owned_result!,
-      facts, "promise", MIR::BgBlock.new("bg", {}, [], nil), Type.new(:String))
+      facts, "promise", MIR::BgBlock.new(structural_bg_plan, {}, [], nil), Type.new(:String))
     expect(facts.first).to be_a(MIR::OwnedReturn)
     expect(facts.first.name).to eq("promise")
 
@@ -1927,13 +2021,13 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:ownership_contract_for_node, MIR::Call.new("plain", [], false, false))).to be_nil
 
     expect(low.send(:ownership_consumer_requires_fact?, MIR::Ident.new("plain"))).to eq(false)
-    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec"))).to eq(false)
-    no_params_sig = Struct.new(:return_type).new(Type.new(:Void))
-    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, no_params_sig))).to eq(false)
+    expect(low.send(:ownership_consumer_requires_fact?, registry_call("spec", FunctionSignature.borrowing_intrinsic))).to eq(false)
+    no_params_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+    expect(low.send(:ownership_consumer_requires_fact?, registry_call("spec", no_params_sig))).to eq(false)
     taking_sig = FunctionSignature.new(params: [param("taken", takes: true)], return_type: Type.new(:Void))
-    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, taking_sig))).to eq(true)
+    expect(low.send(:ownership_consumer_requires_fact?, registry_call("spec", taking_sig))).to eq(true)
     non_taking_sig = FunctionSignature.new(params: [param("kept")], return_type: Type.new(:Void))
-    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, non_taking_sig))).to eq(false)
+    expect(low.send(:ownership_consumer_requires_fact?, registry_call("spec", non_taking_sig))).to eq(false)
 
     try_catch = MIR::TryCatch.new(MIR::Ident.new("fallible"), MIR::Ident.new("fallback"), nil)
     expect(low.send(:place_owned_try_catch_for_destination, try_catch, Type.new(:String), :heap)).to be_a(MIR::TryCatch)
@@ -2296,7 +2390,7 @@ RSpec.describe "MIR gap-burn characterization" do
     switch_union_match.full_type = :Void
     switch_result = union_low.lower(switch_union_match)
     expect(switch_result).to be_a(MIR::UnionMatchStmt)
-    expect(switch_result.arms.flat_map { |arm| arm[:body].grep(MIR::Let).map(&:name) }).to include("value")
+    expect(switch_result.arms.flat_map { |arm| arm.body.grep(MIR::Let).map(&:name) }).to include("value")
 
     generic_case = AST::MatchCase.new(kind: :eq, value: id("A", type: :Any),
       extra_values: [id("B", type: :Any)], body: [lit(6, type: :Int64)])
@@ -2312,7 +2406,13 @@ RSpec.describe "MIR gap-burn characterization" do
     default_mark = MIR::AllocMark.new("default_owned", :frame, Type.new(:String), nil)
     match_mark = MIR::AllocMark.new("match_owned", :frame, Type.new(:String), nil)
     if_chain = MIR::IfChain.new([MIR::IfChainBranch.new(cond: MIR::Lit.new("true"), body: [branch_mark])], [default_mark])
-    with_match = MIR::WithMatchDispatch.new("cell", [{ family: :LOCKED, probe: "true", prelude_zig: "", body: [match_mark] }])
+    with_match = MIR::WithMatchDispatch.new(
+      MIR::Ident.new("cell"),
+      "alias",
+      false,
+      "rt",
+      [MIR::WithMatchArm.new(family: :LOCKED, guard_var: "__guard", body: [match_mark])],
+    )
     low.send(:stamp_loop_frame_alloc_scopes!, [if_chain, with_match], :iteration)
     expect([branch_mark.scope, default_mark.scope, match_mark.scope]).to all(eq(:iteration))
 
@@ -2424,7 +2524,8 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers expression literal, operator, field, and OR edge branches" do
     low = MIRLowering.new(input: MIRLoweringInput.new(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :String, Done: nil }) }))
     low.define_singleton_method(:emit_builtin) do |name, args|
-      MIR::InlineZig.new("#{name}(#{args.length})", "test")
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+      MIR::RegistryCall.new(entry: sig, args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) }, reason: name.to_s)
     end
 
     nul = AST::Literal.new(tok, :STRING, "a\0b", nil)
@@ -2577,8 +2678,11 @@ RSpec.describe "MIR gap-burn characterization" do
     ])
     type_mod = ModuleImporter::CompiledModule.new(type_ast, nil, nil, nil, nil, nil, nil, nil, nil, [])
     expect(low.send(:visible_imported_type_names, type_mod, same_dir: true)).to include("PublicType", "PackageType", "Choice", "Choice_Pair")
-    expect(low.send(:fiber_spawn_call_zig, "rt", "Ctx", "ctx", ".{}", :shared)).to include("spawnPinned")
-    expect(low.send(:fiber_spawn_call_zig, "rt", "Ctx", "ctx", ".{}", :unknown)).to include("spawnBest")
+    task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
+    shared_spawn = low.send(:fiber_spawn_call_plan, "rt", "Ctx", "ctx", task_config, :shared)
+    default_spawn = low.send(:fiber_spawn_call_plan, "rt", "Ctx", "ctx", task_config, :unknown)
+    expect(MIREmitter.new.emit_fiber_spawn_call(shared_spawn)).to include("spawnPinned")
+    expect(MIREmitter.new.emit_fiber_spawn_call(default_spawn)).to include("spawnBest")
 
     nested_fn = fn([id("inner")])
     names = low.send(:collect_identifier_names, [id("outer"), nested_fn])
@@ -2624,7 +2728,8 @@ RSpec.describe "MIR gap-burn characterization" do
       }),
     }))
     low.define_singleton_method(:emit_builtin) do |name, args|
-      MIR::InlineZig.new("#{name}(#{args.length})", "test")
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+      MIR::RegistryCall.new(entry: sig, args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) }, reason: name.to_s)
     end
     low.define_singleton_method(:hoist_alloc) do |expr, *_args, **_kwargs|
       expr
@@ -2667,7 +2772,8 @@ RSpec.describe "MIR gap-burn characterization" do
       shard_get = low.send(:index_access_value, plan)
       expect(shard_get).to be_a(MIR::ShardedMapGet)
       expect(shard_get.shard_idx.name).to eq("__idx")
-      expect(shard_get.resolved_allocs[:shard_alloc]).to eq(:heap)
+      expect(shard_get.template_kind).to eq(:shard_direct_zig)
+      expect(shard_get.resolved_allocs.shard_alloc).to be_nil
     ensure
       INDEX_OPS[:string_map][:get][:shard_direct_zig] = old_shard_template
     end
@@ -2683,7 +2789,7 @@ RSpec.describe "MIR gap-burn characterization" do
       target_name: nil,
       needs_mut_ref: false,
     )
-    expect(low.send(:index_collection_value, MIR::Ident.new("set"), MIR::Ident.new("item"), set_plan)).to be_a(MIR::InlineZig)
+    expect(low.send(:index_collection_value, MIR::Ident.new("set"), MIR::Ident.new("item"), set_plan)).to be_a(MIR::RegistryCall)
 
     blank_schema = Schemas::StructSchema.new(fields: {}, type_params: nil)
     expect(low.send(:struct_lit_field_types, AST::StructLit.new(tok, "Missing", {}, nil, []))).to eq({})
@@ -2697,7 +2803,10 @@ RSpec.describe "MIR gap-burn characterization" do
     }, union_schemas: {
       Choice: Schemas::UnionSchema.new(variants: { Payload: :String }),
     }))
-    low.define_singleton_method(:emit_builtin) { |name, args| MIR::InlineZig.new("#{name}(#{args.length})", "test") }
+    low.define_singleton_method(:emit_builtin) do |name, args|
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+      MIR::RegistryCall.new(entry: sig, args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) }, reason: name.to_s)
+    end
     low.define_singleton_method(:lower) do |node|
       node.respond_to?(:name) ? MIR::Ident.new(node.name.to_s) : MIR::Ident.new("value")
     end
@@ -2883,34 +2992,29 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(materialized).to be_a(MIR::Ident)
     expect(low.function_state.pending_stmts).to include(an_instance_of(MIR::AllocMark))
 
-    heap_template = low.send(:build_extern_trampoline_common,
-      id: MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::Extern, value: 91),
-      prefix: "__ext_",
-      args_tuple_name: "__args",
-      frame_name: "__frame",
-      arg_codes: [],
-      arg_field_types: nil,
-      arg_tuple: ".{}",
+    heap_trampoline = MIR::ExternTrampoline.new(
+      id: 91,
+      callee_name: "native",
+      module_alias: nil,
+      comptime_args: [],
+      runtime_args: [],
       alloc_kind: :heap,
       return_type: Type.new(:Void),
-      call_zig: "native(f.alloc)",
-      receiver_field: nil,
-      ast_node: nil)
-    frame_template = low.send(:build_extern_trampoline_common,
-      id: MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::Extern, value: 92),
-      prefix: "__ext_",
-      args_tuple_name: "__args",
-      frame_name: "__frame",
-      arg_codes: [],
-      arg_field_types: nil,
-      arg_tuple: ".{}",
+      stdlib_def: FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)),
+    )
+    frame_trampoline = MIR::ExternTrampoline.new(
+      id: 92,
+      callee_name: "native",
+      module_alias: nil,
+      comptime_args: [],
+      runtime_args: [],
       alloc_kind: :frame,
       return_type: Type.new(:Void),
-      call_zig: "native(f.alloc)",
-      receiver_field: nil,
-      ast_node: nil)
-    expect(heap_template.code).to include(".alloc = rt.heapAlloc()")
-    expect(frame_template.code).to include(".alloc = rt.frameAlloc()")
+      stdlib_def: FunctionSignature.intrinsic_contract(return_type: Type.new(:Void)),
+    )
+    emitter = MIREmitter.new
+    expect(emitter.emit(heap_trampoline)).to include(".alloc = rt.heapAlloc()")
+    expect(emitter.emit(frame_trampoline)).to include(".alloc = rt.frameAlloc()")
   end
 
   it "covers function lowering helper edge branches" do
@@ -3032,7 +3136,8 @@ RSpec.describe "MIR gap-burn characterization" do
     trampoline = AST::FuncCall.new(tok, "native", [value_arg])
     trampoline.full_type = Type.new(:Int64)
     trampoline_out = extern_low.send(:build_extern_trampoline_call, trampoline)
-    expect(trampoline_out.code).to include("a0: i64")
+    expect(trampoline_out).to be_a(MIR::ExternTrampoline)
+    expect(MIREmitter.new.emit(trampoline_out)).to include("a0: i64")
 
     module_sig = FunctionSignature.new(params: [param("port", type: :Int64)], return_type: Type.new(:Void), module_alias: "http")
     extern_low.program_state.fn_sigs = { "startTestServer" => module_sig }
@@ -3040,7 +3145,8 @@ RSpec.describe "MIR gap-burn characterization" do
     module_call.full_type = Type.new(:Void)
     module_call.module_alias = "http"
     module_out = extern_low.send(:build_extern_trampoline_call, module_call)
-    expect(module_out.code).to include("a0: i64")
+    expect(module_out).to be_a(MIR::ExternTrampoline)
+    expect(MIREmitter.new.emit(module_out)).to include("a0: i64")
 
     lambda_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
     lambda_node = AST::LambdaLit.new(tok, [], ["raw_capture"], lit(1, type: :Int64), nil, nil)
@@ -3153,14 +3259,16 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:compose_capability_wrap, inner, "Counter", Type.new(:Counter, ownership: :shared), :heap).strategy).to eq(:own_only)
     expect(low.send(:compose_capability_wrap, inner, "Counter", Type.new(:Counter), :heap)).to be(inner)
 
-    inline = MIR::InlineZig.new("make()", "edge", MIR::OwnershipContract.empty, nil, { alloc: :frame })
+    frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    frame_sig.emit = IntrinsicEmit.new(allocates: true)
+    inline = registry_call("edge", frame_sig, allocs: MIR.inline_alloc_metadata(alloc: :frame))
     low.send(:stamp_var_decl_init_target!, inline, "owned", :heap)
     expect(inline.target_var).to eq("owned")
     expect(inline.allocs.primary).to eq(:heap)
 
     allocating_sig = FunctionSignature.new(params: [], return_type: Type.new(:String))
     allocating_sig.emit = IntrinsicEmit.new(allocates: true)
-    transfer_init = MIR::InlineZig.new("makeOwned()", "edge", MIR::OwnershipContract.empty, allocating_sig, { alloc: :heap })
+    transfer_init = registry_call("edge", allocating_sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
     transfer_entry = CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
     transfer_let = MIR::Let.new("owned", transfer_init, false, Type.new(:String), nil)
     packet = low.send(

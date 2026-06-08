@@ -4,6 +4,7 @@ require_relative '../src/ast/lexer'
 require_relative '../src/ast/parser'
 require_relative '../src/ast/type'
 require_relative '../src/mir/mir'
+require_relative '../src/mir/fsm_lowering'
 require_relative '../src/mir/fsm_transform/segments'
 require_relative '../src/mir/fsm_transform/recursive_splitter'
 
@@ -13,20 +14,6 @@ require_relative '../src/mir/fsm_transform/recursive_splitter'
 # IO / NEXT suspends.
 
 RSpec.describe FsmTransform::RecursiveSplitter do
-  describe "synthetic FSM ctx fragments" do
-    it "renders ctx fields late and passes through plain strings" do
-      step_ref = FsmTransform::Segments::CtxFieldRef.new(name: "step")
-      fragment = FsmTransform::Segments::SyntheticZig.new(parts: [
-        step_ref, " = ", step_ref, " + 1;",
-      ])
-
-      expect(FsmTransform::Segments.render_synthetic_zig(fragment, "__ctx_4"))
-        .to eq("__ctx_4.step = __ctx_4.step + 1;")
-      expect(FsmTransform::Segments.render_synthetic_zig("return;", "__ctx_4"))
-        .to eq("return;")
-    end
-  end
-
   # Minimal lowering double: returns the input unchanged for AST
   # nodes (the splitter uses .lower and .emit_expr to render
   # cond / start / end exprs; for shape tests we just need a
@@ -176,17 +163,6 @@ RSpec.describe FsmTransform::RecursiveSplitter do
         [for_each("v", unknown_coll, [next_expr])], lowering)).to be_nil
     end
 
-    it "returns nil when expression lowering fails" do
-      bad_lowering = Class.new {
-        def lower(_node)
-          raise "bad lower"
-        end
-      }.new
-
-      expect(FsmTransform::RecursiveSplitter.lower_to_zig(ident("x"), bad_lowering))
-        .to be_nil
-    end
-
     it "remaps loop-back tails and passes through unknown tails" do
       remapped = FsmTransform::RecursiveSplitter.remap_tail(
         FsmTransform::Segments::LoopBack.new(4),
@@ -201,183 +177,85 @@ RSpec.describe FsmTransform::RecursiveSplitter do
   end
 
   describe "WhileLoop with NEXT" do
-    it "produces cond + body + done" do
+    it "falls back instead of carrying rendered condition text" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       cond = binop(ident("i"), :LESSTHAN, lit(3))
       body = [next_expr]
-      segment_list = FsmTransform::RecursiveSplitter.split([while_stmt(cond, body)], lowering)
-      segs = segments_for(segment_list)
-      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_seg).not_to be_nil
-      expect(cond_seg.tail.cond_ast).to include("i").and include("<")
-      sus_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
-      expect(sus_seg).not_to be_nil
-      # The suspend's next_index points back to the cond seg (loop back).
-      expect(sus_seg.tail.next_index).to eq(cond_seg.index)
+      expect(FsmTransform::RecursiveSplitter.split([while_stmt(cond, body)], lowering))
+        .to be_nil
     end
   end
 
   describe "ForRange with NEXT" do
-    it "synthesizes init / cond / incr around the body" do
+    it "falls back instead of synthesizing Zig loop fragments" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       stmt = for_range("i", lit(0), lit(3), [next_expr])
-      segment_list = FsmTransform::RecursiveSplitter.split([stmt], lowering)
-      segs = segments_for(segment_list)
-      init_seg = segs.find { |s|
-        s.stmts.any? { |st|
-          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("__ctx_9.__for_")
-        }
-      }
-      expect(init_seg).not_to be_nil
-      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_seg).not_to be_nil
-      rendered_cond = FsmTransform::Segments.render_synthetic_zig(cond_seg.tail.cond_ast, "__ctx_9")
-      expect(rendered_cond).to match(/__ctx_9\.__for_\d+ < 3/)
-      incr_seg = segs.find { |s|
-        s.stmts.any? { |st|
-          rendered = FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9")
-          rendered.include?("__ctx_9.__for_") && rendered.include?("+ 1")
-        }
-      }
-      expect(incr_seg).not_to be_nil
-      # Synthetic fields registered for the unified emit.
-      expect(segment_list.synthetic_fields).to include(/__for_\d+: i64/)
-      expect(segment_list.synthetic_fields).to include(/i: i64/)
+      expect(FsmTransform::RecursiveSplitter.split([stmt], lowering))
+        .to be_nil
     end
   end
 
   describe "ForEach iterator with NEXT" do
-    it "synthesizes iterator state and a condition segment" do
+    it "falls back for iterator collections until foreach state is structural MIR" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       coll = AST::Identifier.new(nil, "items")
       coll.full_type = Type.new(:"Int64[]", collection: :set)
 
-      segment_list = FsmTransform::RecursiveSplitter.split(
-        [for_each("v", coll, [next_expr])], lowering)
-      segs = segments_for(segment_list)
-
-      expect(segment_list.synthetic_fields).to include(/v: i64/)
-      expect(segment_list.synthetic_fields).to include(/__feiter_\d+:/)
-      expect(segment_list.synthetic_fields).to include(/__fehas_\d+: bool/)
-      init_seg = segs.find { |s|
-        s.stmts.any? { |st|
-          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("items.keyIterator()")
-        }
-      }
-      expect(init_seg).not_to be_nil
-      cond_seg = segs.find { |s|
-        s.tail.is_a?(FsmTransform::Segments::CondBranch) &&
-          s.stmts.any? { |st|
-            FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?(".next()")
-          }
-      }
-      expect(cond_seg).not_to be_nil
-      sus_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
-      expect(sus_seg.tail.next_index).to eq(cond_seg.index)
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)).to be_nil
     end
 
-    it "synthesizes indexed-slice state for list collections" do
+    it "falls back for indexed-slice collections" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       coll = AST::Identifier.new(nil, "items")
       coll.full_type = Type.new(:"Int64[]", collection: :list)
 
-      segment_list = FsmTransform::RecursiveSplitter.split(
-        [for_each("v", coll, [next_expr])], lowering)
-      segs = segments_for(segment_list)
-
-      expect(segment_list.synthetic_fields).to include(/v: i64/)
-      expect(segment_list.synthetic_fields).to include(/__feidx_\d+: usize/)
-      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_seg).not_to be_nil
-      rendered_cond = FsmTransform::Segments.render_synthetic_zig(cond_seg.tail.cond_ast, "__ctx_9")
-      expect(rendered_cond).to match(/__ctx_9\.__feidx_\d+ < items\.items\.len/)
-      assign_seg = segs.find { |s|
-        s.stmts.any? { |st|
-          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?("items.items[__ctx_9.__feidx_")
-        }
-      }
-      expect(assign_seg).not_to be_nil
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)).to be_nil
     end
 
-    it "synthesizes pool slot state and skips dead slots" do
+    it "falls back for pool collections" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       coll = AST::Identifier.new(nil, "items")
       coll.full_type = Type.new(:"Int64[]", collection: :pool)
 
-      segment_list = FsmTransform::RecursiveSplitter.split(
-        [for_each("v", coll, [next_expr])], lowering)
-      segs = segments_for(segment_list)
-
-      expect(segment_list.synthetic_fields).to include(/v: i64/)
-      expect(segment_list.synthetic_fields).to include(/__feidx_\d+: usize/)
-      skip_seg = segs.find { |s|
-        s.tail.is_a?(FsmTransform::Segments::CondBranch) &&
-          FsmTransform::Segments.render_synthetic_zig(s.tail.cond_ast, "__ctx_9").include?("!items.slots[__ctx_9.__feidx_")
-      }
-      expect(skip_seg).not_to be_nil
-      assign_seg = segs.find { |s|
-        s.stmts.any? { |st|
-          FsmTransform::Segments.render_synthetic_zig(st, "__ctx_9").include?(".value")
-        }
-      }
-      expect(assign_seg).not_to be_nil
+      expect(FsmTransform::RecursiveSplitter.split(
+        [for_each("v", coll, [next_expr])], lowering)).to be_nil
     end
   end
 
   describe "IF with suspend in then-branch" do
-    it "produces CondBranch with separate then/else paths" do
+    it "falls back instead of carrying rendered condition text" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       cond = ident("flag")
       stmts = [if_stmt(cond, [next_expr], nil)]
-      segment_list = FsmTransform::RecursiveSplitter.split(stmts, lowering)
-      segs = segments_for(segment_list)
-      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_seg).not_to be_nil
-      # then_index points at a NextSuspend segment
-      then_seg = segs[cond_seg.tail.then_index]
-      expect(then_seg.tail).to be_a(FsmTransform::Segments::NextSuspend)
-      # else_index falls through to Done (no else branch given)
-      done_idx = segs.find_index { |s| s.tail.is_a?(FsmTransform::Segments::Done) }
-      expect(cond_seg.tail.else_index).to eq(done_idx)
+      expect(FsmTransform::RecursiveSplitter.split(stmts, lowering)).to be_nil
     end
 
-    it "recursively splits a suspending else branch" do
+    it "falls back for suspending else branches" do
       promise = ident("p")
       then_next = AST::NextExpr.new(nil, promise)
       else_next = AST::NextExpr.new(nil, promise)
       stmts = [if_stmt(ident("flag"), [then_next], [else_next])]
-      segment_list = FsmTransform::RecursiveSplitter.split(stmts, lowering)
-      segs = segments_for(segment_list)
-
-      cond_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_seg).not_to be_nil
-      expect(segs[cond_seg.tail.then_index].tail).to be_a(FsmTransform::Segments::NextSuspend)
-      expect(segs[cond_seg.tail.else_index].tail).to be_a(FsmTransform::Segments::NextSuspend)
+      expect(FsmTransform::RecursiveSplitter.split(stmts, lowering)).to be_nil
     end
   end
 
   describe "nested: IF inside WhileLoop body" do
-    it "produces a graph with nested CondBranch inside the loop" do
+    it "falls back instead of composing rendered nested conditions" do
       promise = ident("p")
       next_expr = AST::NextExpr.new(nil, promise)
       inner_if = if_stmt(ident("flag"), [next_expr], nil)
       while_body = [inner_if]
       cond = binop(ident("i"), :LESSTHAN, lit(3))
-      segment_list = FsmTransform::RecursiveSplitter.split(
-        [while_stmt(cond, while_body)], lowering)
-      segs = segments_for(segment_list)
-      # There should be at least 2 CondBranch tails: the outer
-      # while-cond and the inner if-cond.
-      cond_segs = segs.select { |s| s.tail.is_a?(FsmTransform::Segments::CondBranch) }
-      expect(cond_segs.length).to be >= 2
-      sus_seg = segs.find { |s| s.tail.is_a?(FsmTransform::Segments::NextSuspend) }
-      expect(sus_seg).not_to be_nil
+      expect(FsmTransform::RecursiveSplitter.split(
+        [while_stmt(cond, while_body)], lowering)).to be_nil
     end
   end
 

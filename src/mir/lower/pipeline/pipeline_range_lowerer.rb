@@ -167,11 +167,8 @@ class PipelineRangeLowerer
     sig { abstract.returns(Integer) }
     def range_next_observable_id; end
 
-    sig { abstract.params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String) }
-    def range_emit_observable_body(body_mir, fiber_rt); end
-
     sig { abstract.returns(String) }
-    def range_task_config_zig; end
+    def range_task_config_variant; end
   end
 
   class RuntimeHost
@@ -191,14 +188,13 @@ class PipelineRangeLowerer
         schema_lookup: T.proc.returns(MIRLoweringSchemas::SchemaLookup),
         runtime_name: T.proc.returns(String),
         next_observable_id: T.proc.returns(Integer),
-        emit_observable_body: T.proc.params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String),
-        task_config_zig: T.proc.returns(String),
+        task_config_variant: T.proc.returns(String),
       ).void
     end
     def initialize(visit_mir:, visit_mir_with_context:, visit_pipeline_body_mir:,
                    ast_stmts_use_placeholder:, bc_target:, next_label:,
                    transpile_type:, schema_lookup:, runtime_name:, next_observable_id:,
-                   emit_observable_body:, task_config_zig:)
+                   task_config_variant:)
       @visit_mir = T.let(visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node))
       @visit_mir_with_context = T.let(visit_mir_with_context,
         T.proc.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node))
@@ -212,9 +208,7 @@ class PipelineRangeLowerer
       @schema_lookup = T.let(schema_lookup, T.proc.returns(MIRLoweringSchemas::SchemaLookup))
       @runtime_name = T.let(runtime_name, T.proc.returns(String))
       @next_observable_id = T.let(next_observable_id, T.proc.returns(Integer))
-      @emit_observable_body = T.let(emit_observable_body,
-        T.proc.params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String))
-      @task_config_zig = T.let(task_config_zig, T.proc.returns(String))
+      @task_config_variant = T.let(task_config_variant, T.proc.returns(String))
     end
 
     sig { override.params(node: AST::Node).returns(MIR::Node) }
@@ -267,14 +261,9 @@ class PipelineRangeLowerer
       @next_observable_id.call
     end
 
-    sig { override.params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String) }
-    def range_emit_observable_body(body_mir, fiber_rt)
-      @emit_observable_body.call(body_mir, fiber_rt)
-    end
-
     sig { override.returns(String) }
-    def range_task_config_zig
-      @task_config_zig.call
+    def range_task_config_variant
+      @task_config_variant.call
     end
   end
 
@@ -707,8 +696,7 @@ class PipelineRangeLowerer
   def lower_range_fold_observable(p, smooth_node, label, source_node,
                                   acc_alloc_expr:, publish_stmts:, observable_id: nil)
     source_name = p.source_name
-    obs_zig = without_const_prefix(@host.range_transpile_type(smooth_node.full_type!))
-    source_zig = "@TypeOf(#{source_name})"
+    obs_type = Type.from_node!(smooth_node, context: "observable accumulator")
     rt_name = @host.range_runtime_name
 
     wg_init = MIR::HeapCreate.new(
@@ -744,8 +732,8 @@ class PipelineRangeLowerer
     ], false, set_completion_contract)
     acc_init_stmts = [
       *p.setup_stmts,
-      MIR::AllocMark.new("__obs_acc", :heap, Type.new(obs_zig), :heap),
-      MIR::Let.new("__obs_acc", acc_alloc_expr, false, Type.new(obs_zig), nil),
+      MIR::AllocMark.new("__obs_acc", :heap, obs_type, :heap),
+      MIR::Let.new("__obs_acc", acc_alloc_expr, false, obs_type, nil),
       MIR::AllocMark.new("__obs_wg", :heap, Type.new(:"CheatHeader.WaitGroup", layout: :indirect), :heap),
       MIR::Let.new("__obs_wg", wg_init, false, Type.new("*CheatHeader.WaitGroup"), nil),
       MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("__obs_wg"), "add", [MIR::Lit.new("1")], false,
@@ -755,45 +743,23 @@ class PipelineRangeLowerer
 
     body_mir = [p.loop_stmt(nil, publish_stmts)]
     fid = observable_id || @host.range_next_observable_id
-    ctx_type = "__ObsConsumerCtx#{fid}"
-    fiber_rt = "__rt_obs_#{fid}"
-
-    body_zig = replace_zig_identifier(
-      replace_zig_identifier(@host.range_emit_observable_body(body_mir, fiber_rt), "__obs_acc", "ctx.acc"),
-      source_name,
-      "ctx.gen",
+    spawn = MIR::ObservableConsumerSpawn.new(
+      id: fid,
+      acc_name: "__obs_acc",
+      source_name: source_name,
+      acc_type: obs_type,
+      runtime_name: rt_name,
+      task_config_variant: @host.range_task_config_variant,
+      stdlib_def: PIPELINE_ALLOC_REF_DEF,
+      ownership_contract: MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding(source_name, Type.new(:Any), "observable consumer spawn", :heap),
+      ]),
+      body: body_mir,
     )
-
-    spawn_zig = <<~ZIG.chomp
-      const #{ctx_type} = struct {
-              acc: #{obs_zig},
-              gen: #{source_zig},
-              fn run(__raw_rt_obs_#{fid}: *anyopaque, __raw_args_obs_#{fid}: ?*anyopaque) anyerror!void {
-                  const #{fiber_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_obs_#{fid})));
-                  #{body_zig.include?(fiber_rt) ? "" : "_ = &#{fiber_rt};"}
-                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_obs_#{fid}.?)));
-                  defer ctx.acc.finish();
-                  #{body_zig}
-              }
-          };
-          try CheatHeader.spawnObservableConsumerCtx(
-              #{ctx_type},
-              #{rt_name},
-              .{ .acc = __obs_acc, .gen = #{source_name} },
-              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-              #{@host.range_task_config_zig}
-          )
-    ZIG
-
-    spawn_inline = MIR::ZigTemplate.new(spawn_zig, [], "obs_consumer_spawn")
-    spawn_inline.stdlib_def = PIPELINE_ALLOC_REF_DEF
-    spawn_inline.ownership_contract = MIR::OwnershipContract.consume_operands([
-      MIR::OwnershipOperandFact.owned_binding(source_name, Type.new(:Any), "observable consumer spawn", :heap),
-    ])
 
     MIR::BlockExpr.new(label, [
       *acc_init_stmts,
-      MIR::ExprStmt.new(spawn_inline, nil),
+      MIR::ExprStmt.new(spawn, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("__obs_acc"))
     ])
   end

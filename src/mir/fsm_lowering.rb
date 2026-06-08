@@ -15,7 +15,6 @@ require_relative 'fsm_wrapper_emitter'
 # liveness}.rb -- this file holds only what those need from the
 # rest of the lowering pipeline:
 #
-#   capture_inits_fsm                  -- ctx struct init helper
 #   lower_step_stmts / emit_step_stmts -- AST stmt list -> MIR -> Zig
 #                                          text (consults
 #                                          capture_state.do_capture_map)
@@ -63,17 +62,6 @@ module FsmLowering
     T.cast(T.unsafe(self).__send__(:zig_safe_name, name), String)
   end
 
-  # The stackful capture_inits string starts with `.inner = ..., .alloc = ...`
-  # followed by user captures. For FSM we pre-set those fields with their
-  # explicit values in the struct-literal, so extract just the capture
-  # portion (everything after the alloc init).
-  sig { params(capture_inits: String).returns(String) }
-  def capture_inits_fsm(capture_inits)
-    T.bind(self, MIRLowering) rescue nil
-    # Drop leading ".inner = X.inner, .alloc = Y, " portion.
-    parts = capture_inits.split(", ").drop(2)
-    parts.empty? ? "" : parts.join(", ") + ","
-  end
   # Lower a list of statements and produce Zig text. If no_result is
   # true, all stmts are emitted as intermediates. Otherwise the last
   # stmt may set `__ctx_N.inner.result = ...;` (for non-void result

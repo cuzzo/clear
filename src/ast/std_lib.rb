@@ -1433,8 +1433,8 @@ COLLECTION_METHOD_CONFIGS = T.let({
 # ============================================================================
 # Builtin Operations Registry -- CheatLib runtime functions used by operators,
 # indexing, assertions, and deep copy. NOT user-callable -- emitted by the
-# lowering for operators/expressions. Each entry gets attached as stdlib_def
-# on the MIR::InlineZig node so the MIR checker can verify ownership.
+# lowering for operators/expressions. Each entry gets attached to structural
+# registry MIR nodes so the MIR checker can verify ownership.
 # ============================================================================
 # Pattern placeholders: {0}, {1}, {2} = positional args
 # All entries implicitly borrow their args unless noted otherwise.

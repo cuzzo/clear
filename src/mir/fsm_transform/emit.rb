@@ -30,7 +30,7 @@ module FsmTransform
     module_function
 
     PromotableFsmValue = T.type_alias { T.any(MIR::Node, Object) }
-    FsmBodyEmission = T.type_alias { T.any(MIR::Node, String) }
+    FsmBodyEmission = T.type_alias { MIR::Node }
     FsmTail = T.type_alias do
       T.any(
         MIR::FsmTailDone,
@@ -61,23 +61,12 @@ module FsmTransform
 
       const :emission, FsmBodyEmission
       const :fact_node_value, T.nilable(MIR::Node)
-      const :blank_value, T::Boolean
 
       sig { params(node: MIR::Node).returns(FsmBodyItem) }
       def self.mir(node)
         FsmBodyItem.new(
           emission: node,
           fact_node_value: node,
-          blank_value: false,
-        )
-      end
-
-      sig { params(zig: String).returns(FsmBodyItem) }
-      def self.opaque_zig(zig)
-        FsmBodyItem.new(
-          emission: zig,
-          fact_node_value: nil,
-          blank_value: zig.strip.empty?,
         )
       end
 
@@ -93,7 +82,7 @@ module FsmTransform
 
       sig { returns(T::Boolean) }
       def blank?
-        blank_value
+        false
       end
     end
 
@@ -123,11 +112,11 @@ module FsmTransform
       const :descriptor, T.nilable(MIR::SuspendDescriptor), default: nil
       const :fsm_result_transfer_facts, T::Array[MIR::FsmResultTransferFact], default: []
       const :fn_name, T.nilable(String), default: nil
-      const :rt_suppress, String, default: ""
+      const :suppress_runtime_ref, T::Boolean, default: false
       const :err_cleanups, T::Array[MIR::Node], default: []
       const :pre_body_skip, T.nilable(MIR::FsmTailCondSkip), default: nil
-      const :pre_body_zig, T.nilable(String), default: nil
-      const :extra_prologue_zig, T.nilable(String), default: nil
+      const :pre_body_stmts, T::Array[MIR::Node], default: []
+      const :extra_prologue_stmts, T::Array[MIR::Node], default: []
       const :facts, FsmSegmentFacts, default: FsmSegmentFacts.empty
 
       sig { params(facts: FsmSegmentFacts).returns(FsmSegmentSpec) }
@@ -141,11 +130,11 @@ module FsmTransform
           descriptor: descriptor,
           fsm_result_transfer_facts: fsm_result_transfer_facts,
           fn_name: fn_name,
-          rt_suppress: rt_suppress,
+          suppress_runtime_ref: suppress_runtime_ref,
           err_cleanups: err_cleanups,
           pre_body_skip: pre_body_skip,
-          pre_body_zig: pre_body_zig,
-          extra_prologue_zig: extra_prologue_zig,
+          pre_body_stmts: pre_body_stmts,
+          extra_prologue_stmts: extra_prologue_stmts,
           facts: facts,
         )
       end
@@ -154,7 +143,7 @@ module FsmTransform
     class ExpandedLockSegment < T::Struct
       const :lock_try_spec, FsmSegmentSpec
       const :appended_specs, T::Array[FsmSegmentSpec]
-      const :extra_fields, T::Array[String]
+      const :extra_fields, T::Array[MIR::ContextFieldDecl]
     end
 
     # ================================================================
@@ -178,16 +167,16 @@ module FsmTransform
     #                          {
     #                            index:           Integer,
     #                            prologue_stmts:  [MIR::Stmt] | nil,
-    #                            body_stmts:      [MIR::Stmt | String],
+    #                            body_stmts:      [MIR::Stmt],
     #                            tail:            Segments::*,
     #                            descriptor:      MIR::SuspendDescriptor | nil,
     #                            fn_name:         String,    # "runStep0",
     #                                                          "runSeg0",
     #                                                          "runPre", ...
-    #                            rt_suppress:     String | nil,
+    #                            suppress_runtime_ref: Boolean,
     #                            err_cleanups:    [MIR::Stmt] | nil,
     #                            pre_body_skip:   MIR::FsmTailCondSkip | nil,
-    #                            pre_body_zig:    String | nil,
+    #                            pre_body_stmts:  [MIR::Node],
     #                          }
     #
     # `prologue_stmts` runs FIRST in the runStepK fn, BEFORE the
@@ -196,7 +185,7 @@ module FsmTransform
     # whose runStep is the FSM's last entry) -- these must
     # register defers before any potentially-erroring bind block.
     #
-    # `rt_suppress` is the `_ = &<bg_rt>;` line emitted at the
+    # `suppress_runtime_ref` asks the wrapper to emit `_ = &<bg_rt>;`
     # top of runStepK when the rendered body doesn't reference
     # bg_rt (avoiding the unused-binding diagnostic). The caller
     # computes this from the rendered body text -- the unified
@@ -206,7 +195,7 @@ module FsmTransform
     # the dispatch arm's catch handler before the standard
     # store-err / wg.done / destroy / Done sequence. Used by
     # B2-IO step-0 for capture frees on setup error.
-    #   promoted_field_decls -- [String] from Liveness or legacy walk.
+    #   promoted_field_decls -- [MIR::ContextFieldDecl] from Liveness.
     #
     # Outputs: rendered Zig text (the FsmGenericBody emission).
     #
@@ -229,7 +218,7 @@ module FsmTransform
     #     descriptor's ctx_field_decls; member_fns = one per segment;
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
-    sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], promoted_field_decls: T::Array[String], lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
+    sig { params(ctx: FsmEmitContext, segment_specs: T::Array[FsmSegmentSpec], promoted_field_decls: T::Array[MIR::ContextFieldDecl], lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
     def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       return nil if segment_specs.empty?
 
@@ -273,11 +262,9 @@ module FsmTransform
         body.compact!
         body.reject!(&:blank?)
 
-        rt_suppress = spec.rt_suppress
-
         MIR::FsmMemberFn.new(
-          fn_name, id, bg_rt, rt_suppress, fsm_body_emit_values(body),
-          spec.extra_prologue_zig,
+          fn_name, id, bg_rt, spec.suppress_runtime_ref, fsm_body_emit_values(body),
+          spec.extra_prologue_stmts,
         )
       end
 
@@ -291,7 +278,7 @@ module FsmTransform
         MIR::FsmStateArm.new(
           spec.index,
           spec.pre_body_skip,
-          spec.pre_body_zig,
+          spec.pre_body_stmts,
           body_fn_names_by_index[spec.index],
           spec.err_cleanups,
           tail,
@@ -303,29 +290,31 @@ module FsmTransform
       #    suspend-protocol fields + caller-supplied extras (used by
       #    WITH for lock_waiter + retry_count, since those don't
       #    correspond to a generic suspend descriptor today).
-      extra_field_decls = ["step: u8 = 0,"]
+      extra_field_decls = [ctx_field_decl("step", "u8", MIR::Lit.new("0"))]
       segment_specs.each do |spec|
         d = spec.descriptor
         next unless d
         extra_field_decls.concat(d.ctx_field_decls || [])
       end
       extra_field_decls.concat(ctx.extra_ctx_fields)
-      extra_field_decls.uniq!
-      capture_field_names = ctx.capture_fields.lines.each_with_object({}) do |decl, names|
-        name = decl.to_s.split(":").first&.strip
-        names[name] = true if name && !name.empty?
+      seen_extra_names = T.let({}, T::Hash[String, T::Boolean])
+      extra_field_decls = extra_field_decls.reject do |decl|
+        name = decl.name
+        duplicate = seen_extra_names[name] == true
+        seen_extra_names[name] = true
+        duplicate
+      end
+      capture_field_names = ctx.capture_fields.each_with_object({}) do |field, names|
+        names[field.name] = true
       end
       extra_field_decls = extra_field_decls.reject do |decl|
-        name = decl.to_s.split(":").first&.strip
-        name && capture_field_names[name]
+        capture_field_names[decl.name]
       end
       extra_field_names = extra_field_decls.each_with_object(capture_field_names.dup) do |decl, names|
-        name = decl.to_s.split(":").first&.strip
-        names[name] = true if name && !name.empty?
+        names[decl.name] = true unless decl.name.empty?
       end
       promoted_field_decls = promoted_field_decls.reject do |decl|
-        name = decl.to_s.split(":").first&.strip
-        name && extra_field_names[name]
+        extra_field_names[decl.name]
       end
 
       # 4. Wrap in FsmGenericCtxStruct + spawn_setup + FsmGenericBody.
@@ -340,7 +329,7 @@ module FsmTransform
       spawn_setup = build_spawn_setup(ctx, lowering)
       fsm_body = MIR::FsmGenericBody.new(ctx.blk_label, ctx_struct, spawn_setup)
       MIR::FsmLoweringResult.new(
-        code: FsmWrapperEmitter.render(fsm_body),
+        body: fsm_body,
         structure: build_fsm_structure(ctx, segment_specs, destroy_actions, id),
       )
     end
@@ -458,19 +447,9 @@ module FsmTransform
       FsmBodyItem.mir(node)
     end
 
-    sig { params(zig: String).returns(FsmBodyItem) }
-    def fsm_body_opaque_zig_item(zig)
-      FsmBodyItem.opaque_zig(zig)
-    end
-
     sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[FsmBodyItem]) }
     def fsm_body_mir_items(nodes)
       nodes.map { |node| fsm_body_mir_item(node) }
-    end
-
-    sig { params(lines: T::Array[String]).returns(T::Array[FsmBodyItem]) }
-    def fsm_body_opaque_zig_items(lines)
-      lines.map { |line| fsm_body_opaque_zig_item(line) }
     end
 
     sig { params(items: T::Array[FsmBodyItem]).returns(T::Array[FsmBodyEmission]) }
@@ -483,15 +462,8 @@ module FsmTransform
       fsm_body_emit_values(items).join("\n")
     end
 
-    sig { params(stmts: T::Array[MIR::Node], bg_rt: String).returns(String) }
-    def render_fsm_pre_body_zig(stmts, bg_rt)
-      emitter = MIREmitter.new
-      emitter.rt_name = bg_rt
-      emitter.emit_stmt_list(stmts)
-    end
-
-    sig { params(ctx_id: Integer, lock_index: Integer, lock_ref_zig: String, unlock_method: String).returns(T::Array[MIR::Node]) }
-    def prior_lock_release_stmts(ctx_id, lock_index, lock_ref_zig, unlock_method)
+    sig { params(ctx_id: Integer, lock_index: Integer, lock_ref: String, unlock_method: String).returns(T::Array[MIR::Node]) }
+    def prior_lock_release_stmts(ctx_id, lock_index, lock_ref, unlock_method)
       [
         MIR::Set.new(
           MIR::Ident.new("__ctx_#{ctx_id}.__lock_held_#{lock_index}"),
@@ -499,7 +471,7 @@ module FsmTransform
           false,
         ),
         MIR::ExprStmt.new(
-          MIR::MethodCall.new(MIR::Ident.new(lock_ref_zig), unlock_method, [], false),
+          MIR::MethodCall.new(MIR::Ident.new(lock_ref), unlock_method, [], false),
           false,
         ),
       ]
@@ -657,26 +629,12 @@ module FsmTransform
       when Segments::Goto, Segments::LoopBack
         MIR::FsmTailJump.new(tail.target_index)
       when Segments::CondBranch
-        # cond_ast may be a raw AST node (caller resolves to Zig
-        # string at lower-time) or a pre-rendered string. We accept
-        # either via duck-typing: prefer .cond_zig, else .zig_text,
-        # else assume already a String.
-        cond_zig =
-          if tail.cond_ast.respond_to?(:cond_zig) && tail.cond_ast.cond_zig
-            tail.cond_ast.cond_zig
-          elsif tail.cond_ast.respond_to?(:zig_text)
-            tail.cond_ast.zig_text
-          elsif tail.cond_ast.respond_to?(:render)
-            tail.cond_ast.render("__ctx_#{id}")
-          elsif tail.cond_ast.is_a?(String)
-            tail.cond_ast
-          else
-            Kernel.raise ArgumentError,
-              "CondBranch tail's cond_ast (#{tail.cond_ast.class}) " \
-              "needs a #cond_zig accessor, #zig_text accessor, or " \
-              "must be a String. Caller-side lower-then-pass-zig-text."
-          end
-        MIR::FsmTailCondJump.new(cond_zig, tail.then_index, tail.else_index)
+        condition = tail.cond_ast
+        unless condition.is_a?(MIR::Emittable)
+          Kernel.raise ArgumentError,
+            "CondBranch tail condition must be structural MIR, got #{condition.class}"
+        end
+        MIR::FsmTailCondJump.new(condition, tail.then_index, tail.else_index)
       when Segments::IoSuspend, Segments::NextSuspend
         # Descriptor produced an FsmTailYield(nil, ...) or
         # FsmTailRegisterYield(nil, ..., ...) -- fill in the next
@@ -694,7 +652,7 @@ module FsmTransform
           MIR::FsmTailYield.new(target_step, desc_tail.yield_reason)
         when MIR::FsmTailRegisterYield
           MIR::FsmTailRegisterYield.new(
-            target_step, desc_tail.register_zig, desc_tail.yield_reason,
+            target_step, desc_tail.register_expr, desc_tail.yield_reason,
           )
         else
           Kernel.raise ArgumentError,
@@ -744,22 +702,8 @@ module FsmTransform
       is_void = ctx.is_void
       lowering_api = T.unsafe(lowering)
 
-      ctx_token = "__ctx_#{id}"
       segment_list = segments
-      segments = segment_list.segments.map do |seg|
-        new_stmts = seg.stmts.map do |s|
-          render_segment_stmt(s, ctx_token)
-        end
-        new_tail = seg.tail
-        if new_tail.is_a?(Segments::CondBranch) &&
-            (new_tail.cond_ast.is_a?(String) || new_tail.cond_ast.is_a?(Segments::SyntheticZig))
-          new_tail = Segments::CondBranch.new(
-            render_segment_stmt(new_tail.cond_ast, ctx_token),
-            new_tail.then_index, new_tail.else_index,
-          )
-        end
-        Segments::Segment.new(seg.index, new_stmts, new_tail)
-      end
+      segments = segment_list.segments
 
       # Promoted field decls from Liveness. Cross-segment vars become
       # ctx fields. NEXT/IO result vars are added separately by their
@@ -782,9 +726,9 @@ module FsmTransform
           }
           .map do |name, info|
             t = info[:type] ? Type.new(info[:type]) : nil
-            "#{name}: #{t ? t.zig_type : 'anyopaque'} = undefined,"
+            ctx_field_decl(name.to_s, t ? t.zig_type : "anyopaque", MIR::Undef.new(nil))
           end
-      promoted_guard_decls = fsm_promoted_names.map { |name| "#{name}_moved: bool = false," }
+      promoted_guard_decls = fsm_promoted_names.map { |name| ctx_field_decl("#{name}_moved", "bool", MIR::Lit.new("false")) }
       promoted_field_decls = promoted_value_decls + promoted_guard_decls
 
       # capture_map: outer captures + promoted locals (liveness +
@@ -808,7 +752,9 @@ module FsmTransform
         capture_map[rv] ||= "__ctx_#{id}.#{rv}" if rv && rv != "_"
       end
 
-      arena_init_zig = arena_init_flag ? "#{bg_rt}.arena_mode = true;" : ""
+      arena_init_stmt = if arena_init_flag
+        MIR::Set.new(MIR::FieldGet.new(MIR::Ident.new(bg_rt), "arena_mode"), MIR::Lit.new("true"), false)
+      end
       # FSM destroy pipeline: ONE source of truth for cleanups that
       # must fire when the FSM task ends, regardless of whether the
       # body completes successfully or errors out. Zig `defer` is
@@ -826,7 +772,7 @@ module FsmTransform
         fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
           source_kind: :capture,
           name: name.to_s,
-          target_zig: "__ctx_#{id}.#{name}",
+          target: fsm_ctx_field(id, name.to_s),
           cleanup_entry: CleanupEntry.build(
             :resource,
             alloc: :heap,
@@ -842,16 +788,15 @@ module FsmTransform
         fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
           source_kind: :fresh_heap,
           name: name,
-          target_zig: "__ctx_#{id}.#{name}",
+          target: fsm_ctx_field(id, name),
           cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
-          allocator_zig: "__ctx_#{id}.alloc",
+          allocator: fsm_ctx_field(id, "alloc"),
         )
       end
 
-      # Per-segment lowering. Stmts may be a mix of AST nodes (user
-      # code) and Strings (synthesized init/cond/incr from the
-      # splitter). AST nodes go through lower_step_stmts; Strings
-      # pass through.
+      # Per-segment lowering. Stmts may be user AST nodes or MIR
+      # nodes synthesized by the splitter. MIR nodes pass through
+      # structurally; user AST nodes go through lower_step_stmts.
       #
       # The Done-tailed segment's stmts are lowered with
       # no_result: false so its trailing expression becomes the BG's
@@ -872,15 +817,22 @@ module FsmTransform
       seg_result_facts = T.let({}, T::Hash[Integer, T::Array[MIR::FsmResultTransferFact]])
       seg_mir_codes = T.let([], T::Array[T::Array[MIR::Node]])
       seg_codes = segments.each_with_index.map do |seg, i|
-        ast_stmts, raw_stmts = seg.stmts.partition { |s| !s.is_a?(String) }
-        raw_stmt_lines = raw_stmts.filter_map { |stmt| stmt if stmt.is_a?(String) }
+        mir_stmts = T.let([], T::Array[MIR::Node])
+        ast_stmts = T.let([], T::Array[AST::Node])
+        seg.stmts.each do |stmt|
+          if stmt.is_a?(MIR::Emittable)
+            mir_stmts << stmt
+          else
+            ast_stmts << T.cast(stmt, AST::Node)
+          end
+        end
         if ast_stmts.empty?
-          seg_mir_codes[i] = []
-          fsm_body_opaque_zig_items(raw_stmt_lines)
+          seg_mir_codes[i] = mir_stmts
+          fsm_body_mir_items(mir_stmts)
         else
           want_result = !is_void && result_seg_indices.include?(seg.index)
           inherited_capture_names = T.let(
-            fsm_destroy_actions(ctx).filter_map(&:ctx_cleanup_target_zig).to_set,
+            fsm_destroy_actions(ctx).filter_map(&:ctx_cleanup_target_name).to_set,
             T::Set[String],
           )
           captured.keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }
@@ -912,6 +864,7 @@ module FsmTransform
           )
           seg_result_facts[seg.index] = facts
           return nil if lowered_mir.nil?
+          lowered_mir = mir_stmts + lowered_mir
           all_promoted = fsm_promoted_names + captured.keys.map(&:to_s)
           if all_promoted.any?
             promoted_names = all_promoted.uniq
@@ -919,12 +872,7 @@ module FsmTransform
             lowered_mir = lift_ctx_cleanups_to_destroy!(lowered_mir, promoted_names, "__ctx_#{id}", ctx)
           end
           seg_mir_codes[i] = lowered_mir
-          lowered = lowering_api.with_fiber_capture_map({}, rt_override: bg_rt) do
-            lowering_api.render_mir_list(lowered_mir)
-          end
-          fsm_body_opaque_zig_items(
-            [lowered, *raw_stmt_lines].reject { |s| s.strip.empty? }
-          )
+          fsm_body_mir_items(lowered_mir)
         end
       end
 
@@ -949,7 +897,13 @@ module FsmTransform
       # Done segment so the promise resolves to a void value (the
       # legacy emitters do this via explicit_void_assign on the
       # final runPostStmts).
-      void_assign_zig = is_void ? "__ctx_#{id}.inner.result = {};" : nil
+      void_assign_stmt = if is_void
+        MIR::Set.new(
+          MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result"),
+          MIR::VoidLiteral.new,
+          false,
+        )
+      end
       # Stable sp_<N> index allocation: walk segments in dispatch
       # order (0 → tail.next_index → ...) and assign sp_1, sp_2, ...
       # to each NEXT/IO suspend. Decouples sp_N labels from arbitrary
@@ -963,8 +917,8 @@ module FsmTransform
 
         prologue =
           if i == 0
-            parts = []
-            parts << arena_init_zig unless arena_init_zig.empty?
+            parts = T.let([], T::Array[FsmBodyItem])
+            parts << fsm_body_mir_item(arena_init_stmt) if arena_init_stmt
             # Capture cleanups deliberately do NOT live in the
             # prologue: a Zig defer here fires when seg 0's runFn
             # returns -- before the BG body has finished running.
@@ -973,15 +927,15 @@ module FsmTransform
           end
 
         body_stmts = Array(seg_codes[i])
-        if void_assign_zig && seg.tail.is_a?(Segments::Done)
-          body_stmts = body_stmts + [fsm_body_opaque_zig_item(void_assign_zig)]
+        if void_assign_stmt && seg.tail.is_a?(Segments::Done)
+          body_stmts = body_stmts + [fsm_body_mir_item(void_assign_stmt)]
         end
 
-        prologue_stmts = fsm_body_opaque_zig_items(prologue || [])
+        prologue_stmts = prologue || []
         rt_used = (fsm_body_joined_text(body_stmts) +
                    fsm_body_joined_text(prologue_stmts) +
                    (descriptor && descriptor.setup_stmts || []).join("\n")).include?(bg_rt)
-        rt_suppress = rt_used ? "" : "_ = &#{bg_rt};"
+        suppress_runtime_ref = !rt_used
 
         FsmSegmentSpec.new(
           index:           seg.index,
@@ -992,7 +946,7 @@ module FsmTransform
           descriptor:      descriptor,
           fsm_result_transfer_facts: seg_result_facts[seg.index] || [],
           fn_name:         "runSeg#{seg.index}",
-          rt_suppress:     rt_suppress,
+          suppress_runtime_ref: suppress_runtime_ref,
         )
       end
 
@@ -1004,7 +958,7 @@ module FsmTransform
       # the only suspend kind that needs multiple dispatch arms; the
       # expansion concentrates that complexity here so the splitter
       # stays purely structural.
-      lock_extra_fields = []
+      lock_extra_fields = T.let([], T::Array[MIR::ContextFieldDecl])
       next_extra_idx = segment_specs.length
       expanded_specs = []
       segment_specs.each do |spec|
@@ -1029,7 +983,7 @@ module FsmTransform
       # iteration vars can both name the same field; first wins.
       seen_names = {}
       deduped = all_fields.reject do |decl|
-        name = decl.to_s.split(":").first&.strip
+        name = decl.name.to_s
         next false if name.nil? || name.empty?
         if seen_names[name]
           true
@@ -1040,16 +994,6 @@ module FsmTransform
       end
       ctx_with_extras = ctx.with_extra_ctx_fields(deduped)
       build_fsm_unified(ctx_with_extras, segment_specs, promoted_field_decls, lowering)
-    end
-
-    sig { params(stmt: T.any(String, Segments::SyntheticZig), ctx_token: String).returns(String) }
-    def render_segment_stmt(stmt, ctx_token)
-      case stmt
-      when Segments::SyntheticZig
-        stmt.render(ctx_token)
-      else
-        stmt
-      end
     end
 
     sig { params(body: T::Array[MIR::Node], promoted_names: T::Array[String], id: Integer).returns(T::Array[MIR::Node]) }
@@ -1129,7 +1073,7 @@ module FsmTransform
             fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
               source_kind: :body,
               name: promoted_name,
-              target_zig: "#{ctx_ref}.#{promoted_name}",
+              target: MIR::FieldGet.new(MIR::Ident.new(ctx_ref), promoted_name),
               cleanup_entry: node.cleanup_entry,
             )
             next nil
@@ -1167,9 +1111,9 @@ module FsmTransform
         fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
           source_kind: :owned_result,
           name: name,
-          target_zig: "__ctx_#{id}.#{name}",
+          target: fsm_ctx_field(id, name),
           cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
-          guard_zig: "__ctx_#{id}.#{guard}",
+          guard: fsm_ctx_field(id, guard),
         )
       end
     end
@@ -1295,7 +1239,6 @@ module FsmTransform
         )
       end.reverse.flatten
       fail_body_stmts = prior_release_stmts + err.body_stmts
-      fail_pre_body = render_fsm_pre_body_zig(fail_body_stmts, bg_rt)
 
       fail_tail = err.exit_kind == :done ?
                     Segments::Done.new(nil) :
@@ -1314,42 +1257,47 @@ module FsmTransform
         descriptor:     nil,
         fsm_result_transfer_facts: spec.fsm_result_transfer_facts,
         fn_name:        has_step_work ? spec.fn_name : nil,
-        rt_suppress:    spec.rt_suppress,
+        suppress_runtime_ref: spec.suppress_runtime_ref,
       )
       woken_spec = FsmSegmentSpec.new(
         index:        woken_idx, body_stmts: [],
         tail:         MIR::FsmTailWokenCheck.new(try_success_idx, retry_idx),
         descriptor:   nil, fn_name: nil,
-        rt_suppress:  "_ = &#{bg_rt};",
+        suppress_runtime_ref: true,
       )
       retry_spec = FsmSegmentSpec.new(
         index:        retry_idx, body_stmts: [],
         tail:         MIR::FsmTailRetryOrError.new(meta[:retries], spec.index, fail_idx),
         descriptor:   nil, fn_name: nil,
-        rt_suppress:  "_ = &#{bg_rt};",
+        suppress_runtime_ref: true,
       )
       fail_spec = FsmSegmentSpec.new(
         index:        fail_idx,
         body_stmts:   [],
-        pre_body_zig: fail_pre_body,
+        pre_body_stmts: fail_body_stmts,
         tail:         fail_tail,
         descriptor:   nil, fn_name: nil,
-        rt_suppress:  "_ = &#{bg_rt};",
+        suppress_runtime_ref: true,
+      )
+      held_set_stmt = MIR::Set.new(
+        MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "__lock_held_#{cap_idx}"),
+        MIR::Lit.new("true"),
+        false,
       )
       held_set_spec = FsmSegmentSpec.new(
         index:        held_set_idx,
         body_stmts:   [],
-        pre_body_zig: "__ctx_#{id}.__lock_held_#{cap_idx} = true;",
+        pre_body_stmts: [held_set_stmt],
         tail:         Segments::Goto.new(tail.post_acquire_idx),
         descriptor:   nil, fn_name: nil,
-        rt_suppress:  "_ = &#{bg_rt};",
+        suppress_runtime_ref: true,
       )
 
       extra_fields = [
-        "lock_waiter: CheatHeader.WaiterNode = undefined,",
-        "__lock_held_#{cap_idx}: bool = false,",
+        ctx_field_decl("lock_waiter", "CheatHeader.WaiterNode", MIR::Undef.new(nil)),
+        ctx_field_decl("__lock_held_#{cap_idx}", "bool", MIR::Lit.new("false")),
       ]
-      extra_fields << "retry_count: u32 = 0," if meta[:retries] > 0
+      extra_fields << ctx_field_decl("retry_count", "u32", MIR::Lit.new("0")) if meta[:retries] > 0
 
       # Per-cap destroyTask cleanup: if this cap's flag is still set
       # when the task dies, release the lock. The finalizer orders lock
@@ -1357,7 +1305,7 @@ module FsmTransform
       fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
         name: meta[:lock_field_ref].to_s,
         guard_field: "__lock_held_#{cap_idx}",
-        lock_ref_zig: meta[:lock_field_ref].to_s,
+        lock_ref: MIR::Ident.new(meta[:lock_field_ref].to_s),
         unlock_method: meta[:unlock_method].to_s,
       )
 
@@ -1438,45 +1386,75 @@ module FsmTransform
     # body shapes.
     sig { params(ctx: FsmEmitContext, lowering: Object).returns(MIR::FsmSpawnSetup) }
     def build_spawn_setup(ctx, lowering)
-      lowering_api = T.unsafe(lowering)
       is_local_pin = (ctx.pin_mode == true || ctx.pin_mode == :local)
       is_default_local = (ctx.pin_mode.nil? || ctx.pin_mode == false) && !ctx.parallel
       is_local_dispatch = is_local_pin || is_default_local
       dispatch = is_local_dispatch ? :local : :parallel
-      spawn_call_zig =
-        if is_local_dispatch
-          "try #{ctx.rt_name}.getSched().submitFsmSpawn(#{ctx.ctx_var}.task);"
-        else
-          "try CheatHeader.spawnFsmBest(#{ctx.ctx_var}.task);"
-        end
-      alloc_expr_zig = is_local_dispatch ?
-        "#{ctx.rt_name}.getSched().allocator" : "#{ctx.rt_name}.heapAlloc()"
+      spawn_call = MIR::FsmSpawnCall.new(
+        target: is_local_dispatch ? :runtime_submit : :best,
+        runtime_name: is_local_dispatch ? ctx.rt_name : nil,
+        ctx_var: ctx.ctx_var,
+      )
+      alloc_expr = if is_local_dispatch
+                     sched = MIR::MethodCall.new(
+                       MIR::Ident.new(ctx.rt_name),
+                       "getSched",
+                       [],
+                       false,
+                       MIR::CallableContract.no_ownership(0),
+                     )
+                     MIR::FieldGet.new(sched, "allocator")
+                   else
+                     MIR::MethodCall.new(
+                       MIR::Ident.new(ctx.rt_name),
+                       "heapAlloc",
+                       [],
+                       false,
+                       MIR::CallableContract.no_ownership(0),
+                     )
+                   end
 
       # `.task = undefined` and `.rt = undefined` here are rebound by
       # render_spawn_setup AFTER allocFsmTask + allocFsmTaskRuntime.
       # The FsmTask is allocated from the scheduler's fsm_task_slab
       # (so detectCycleFsm can pin it during chain walks); ctx.task
       # is a *FsmTask pointer to the slab slot.
-      ctx_init_zig = [
-        ".task = undefined,",
-        ".rt = undefined,",
-        ".inner = #{ctx.promise_var}.inner,",
-        ".alloc = #{ctx.alloc_var},",
-        lowering_api.capture_inits_fsm(ctx.capture_inits),
-      ].reject { |l| l.nil? || l.strip.empty? }.join("\n")
+      capture_inits = ctx.capture_inits.reject do |field|
+        field.name.to_s == "inner" || field.name.to_s == "alloc"
+      end
+      ctx_init_fields = [
+        MIR::StructInitField.new(name: :task, value: MIR::Undef.new(nil)),
+        MIR::StructInitField.new(name: :rt, value: MIR::Undef.new(nil)),
+        MIR::StructInitField.new(name: :inner, value: MIR::FieldGet.new(MIR::Ident.new(ctx.promise_var), "inner")),
+        MIR::StructInitField.new(name: :alloc, value: MIR::Ident.new(ctx.alloc_var)),
+      ] + capture_inits
+      profile_site = if ctx.profile_site_id
+                       MIR::ProfileTaskSite.new(
+                         site_id: T.must(ctx.profile_site_id),
+                         line: ctx.profile_line || 0,
+                         column: ctx.profile_column || 0,
+                         dispatch: dispatch,
+                         form: :fsm,
+                       )
+                     end
 
       MIR::FsmSpawnSetup.new(
-        ctx.alloc_var, alloc_expr_zig,
+        ctx.alloc_var, alloc_expr,
         ctx.promise_var, ctx.promise_zig,
         ctx.promoted_decls,
         ctx.ctx_var, ctx.ctx_type,
-        ctx_init_zig,
-        spawn_call_zig,
+        ctx_init_fields,
+        spawn_call,
         ctx.rt_name,
         ctx.profile_site_id,
         profile_dispatch_id(dispatch),
-        bg_profile_site_comment(ctx, dispatch, :fsm),
+        profile_site,
       )
+    end
+
+    sig { params(name: String, type_zig: String, default_value: T.nilable(MIR::Emittable)).returns(MIR::ContextFieldDecl) }
+    def ctx_field_decl(name, type_zig, default_value)
+      MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
     end
 
     sig { params(dispatch: T.untyped).returns(Integer) }

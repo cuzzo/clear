@@ -2,6 +2,7 @@ require 'bundler/setup'
 require 'set'
 require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
+require_relative '../src/mir/fsm_transform'
 require_relative '../src/mir/fsm_wrapper_emitter'
 require_relative '../src/mir/fsm_transform/segments'
 require_relative '../src/mir/fsm_transform/suspend_resolvers'
@@ -20,15 +21,17 @@ require_relative '../src/mir/fsm_transform/emit'
 RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
   def fsm_body_items(stmts)
     stmts.map do |stmt|
-      stmt.is_a?(String) ?
-        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
-        FsmTransform::Emit.fsm_body_mir_item(stmt)
+      FsmTransform::Emit.fsm_body_mir_item(stmt)
     end
   end
 
   def fsm_code(result)
     expect(result).to be_a(MIR::FsmLoweringResult)
-    result.code
+    FsmWrapperEmitter.render(result.body)
+  end
+
+  def ctx_decl(name, type_zig, default_value = MIR::Undef.new(nil))
+    MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
   end
 
   def fsm_spec(attrs)
@@ -41,11 +44,11 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       descriptor: attrs[:descriptor],
       fsm_result_transfer_facts: attrs.fetch(:fsm_result_transfer_facts, []),
       fn_name: attrs[:fn_name],
-      rt_suppress: attrs.fetch(:rt_suppress, ""),
+      suppress_runtime_ref: attrs.fetch(:suppress_runtime_ref, false),
       err_cleanups: attrs.fetch(:err_cleanups, []),
       pre_body_skip: attrs[:pre_body_skip],
-      pre_body_zig: attrs[:pre_body_zig],
-      extra_prologue_zig: attrs[:extra_prologue_zig],
+      pre_body_stmts: attrs[:pre_body_stmts] || [],
+      extra_prologue_stmts: attrs[:extra_prologue_stmts] || [],
     )
   end
 
@@ -71,14 +74,14 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       blk_label: "__bg0",
       ctx_type: "__BgCtx0",
       promise_zig: "CheatLib.Promise(i64)",
-      capture_fields: "",
+      capture_fields: [],
       alloc_var: "__bg0_alloc",
       promise_var: "__bg0_promise",
       ctx_var: "__bg0_ctx",
       rt_name: "rt",
       pin_mode: false,
-      promoted_decls: "",
-      capture_inits: "",
+      promoted_decls: [],
+      capture_inits: [],
       captured: {},
       capture_close_zig: {},
       pointer_captures: Set.new,
@@ -146,8 +149,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     descriptor = MIR::SuspendDescriptor.new(
       [MIR::ExprStmt.new(MIR::Lit.new("setupNext()"), false)],
       [MIR::ExprStmt.new(MIR::Lit.new("finishNext()"), false)],
-      MIR::FsmTailRegisterYield.new(nil, "registerNext()", "WaitForLock"),
-      ["sp_1: P = undefined,"],
+      MIR::FsmTailRegisterYield.new(nil, MIR::Call.new("registerNext", [], false), "WaitForLock"),
+      [ctx_decl("sp_1", "P")],
       nil,
       nil,
       false,
@@ -189,7 +192,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
         # tail
         MIR::FsmTailYield.new(nil, "WaitForLock"),
         # ctx_field_decls
-        ["rf_fd: i32 = -1,"],
+        [ctx_decl("rf_fd", "i32", MIR::Lit.new("-1"))],
         # result_var
         nil,
         # result_zig_type
@@ -259,8 +262,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
         MIR::SuspendDescriptor.new(
           [MIR::ExprStmt.new(MIR::Lit.new("setup_#{sp_field}()"), false)],
           [MIR::ExprStmt.new(MIR::Lit.new("bind_#{sp_field}()"), false)],
-          MIR::FsmTailRegisterYield.new(nil, "register_#{sp_field}()", "WaitForLock"),
-          ["#{sp_field}: P = undefined,"],
+          MIR::FsmTailRegisterYield.new(nil, MIR::Call.new("register_#{sp_field}", [], false), "WaitForLock"),
+          [ctx_decl(sp_field, "P")],
           nil,
           nil,
           false,
@@ -306,8 +309,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       MIR::SuspendDescriptor.new(
         [MIR::ExprStmt.new(MIR::Lit.new("setupNext()"), false)],
         [MIR::ExprStmt.new(MIR::Lit.new("bindNext()"), false)],
-        MIR::FsmTailRegisterYield.new(nil, "registerWaiter()", "WaitForLock"),
-        ["sp: P = undefined,"],
+        MIR::FsmTailRegisterYield.new(nil, MIR::Call.new("registerWaiter", [], false), "WaitForLock"),
+        [ctx_decl("sp", "P")],
         nil,
         nil,
         false,
@@ -350,7 +353,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     def double_with_zig(zig)
-      Struct.new(:cond_zig).new(zig)
+      MIR::Ident.new(zig)
     end
 
     it "emits CondJump for the cond head and LoopBack for the back-edge" do

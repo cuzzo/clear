@@ -6,6 +6,7 @@ require_relative '../src/ast/type'
 require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
 require_relative '../src/mir/fsm_transform/segments'
+require_relative '../src/mir/fsm_transform'
 require_relative '../src/mir/fsm_transform/suspend_resolvers'
 require_relative '../src/annotator/helpers/intrinsic_registry'
 
@@ -31,13 +32,13 @@ RSpec.describe FsmTransform::SuspendResolvers do
       blk_label: "__bg0",
       ctx_type: "__BgCtx0",
       promise_zig: "CheatLib.Promise(i64)",
-      capture_fields: "",
+      capture_fields: [],
       alloc_var: "__bg0_alloc",
       promise_var: "__bg0_promise",
       ctx_var: "__bg0_ctx",
       rt_name: "rt",
-      promoted_decls: "",
-      capture_inits: "",
+      promoted_decls: [],
+      capture_inits: [],
       captured: {},
       capture_close_zig: {},
       pointer_captures: Set.new,
@@ -58,17 +59,17 @@ RSpec.describe FsmTransform::SuspendResolvers do
       blk_label: raw.fetch(:blk_label),
       ctx_type: raw.fetch(:ctx_type),
       promise_zig: raw.fetch(:promise_zig),
-      capture_fields: raw.fetch(:capture_fields),
+      capture_fields: FsmTransform.coerce_context_fields(raw.fetch(:capture_fields)),
       alloc_var: raw.fetch(:alloc_var),
       promise_var: raw.fetch(:promise_var),
       ctx_var: raw.fetch(:ctx_var),
       rt_name: raw.fetch(:rt_name),
-      promoted_decls: raw.fetch(:promoted_decls),
-      capture_inits: raw.fetch(:capture_inits),
+      promoted_decls: FsmTransform.coerce_promoted_decls(raw.fetch(:promoted_decls)),
+      capture_inits: FsmTransform.coerce_context_inits(raw.fetch(:capture_inits)),
       captured: raw.fetch(:captured),
       capture_close_zig: raw.fetch(:capture_close_zig),
       pointer_captures: raw.fetch(:pointer_captures),
-      extra_ctx_fields: raw.fetch(:extra_ctx_fields),
+      extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
       fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
       arena_init_flag: raw.fetch(:arena_init_flag),
@@ -79,6 +80,10 @@ RSpec.describe FsmTransform::SuspendResolvers do
       profile_line: raw.fetch(:profile_line),
       profile_column: raw.fetch(:profile_column),
     )
+  end
+
+  def field_named(fields, name)
+    fields.find { |field| field.name == name }
   end
 
   let(:ctx) { fsm_ctx }
@@ -131,7 +136,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
     it "renders fsm_state_decls into ctx_field_decls" do
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], io_tail), ctx, lowering)
-      expect(d.ctx_field_decls).to include(/rf_fd: i32 = -1/)
+      field = field_named(d.ctx_field_decls, "rf_fd")
+      expect(field&.type_zig).to eq("i32")
+      expect(field&.default_value&.value).to eq("-1")
     end
 
     it "uses FsmTailYield(WaitForLock) -- IO always yields after setup" do
@@ -179,7 +186,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
 
-      expect(d.ctx_field_decls).to include("content: []const u8 = undefined,")
+      field = field_named(d.ctx_field_decls, "content")
+      expect(field&.type_zig).to eq("[]const u8")
+      expect(field&.default_value).to be_a(MIR::Undef)
       expect(d.bind_stmts).to include(an_instance_of(MIR::Set))
       set = d.bind_stmts.grep(MIR::Set).first
       expect(set.target).to be_a(MIR::FieldGet)
@@ -208,7 +217,8 @@ RSpec.describe FsmTransform::SuspendResolvers do
         FsmTransform::Segments::Segment.new(0, [], next_tail_with_var),
         ctx, lowering, susp_idx: 1)
       expect(d.tail).to be_a(MIR::FsmTailRegisterYield)
-      expect(d.tail.register_zig).to include("registerFsmWaiter")
+      expect(d.tail.register_expr).to be_a(MIR::MethodCall)
+      expect(MIREmitter.new.emit(d.tail.register_expr)).to include("registerFsmWaiter")
       expect(d.tail.yield_reason).to eq("WaitForLock")
     end
 
@@ -226,7 +236,10 @@ RSpec.describe FsmTransform::SuspendResolvers do
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], next_tail_with_var),
         ctx, lowering, susp_idx: 1)
-      expect(d.ctx_field_decls.first).to match(/sp_1:.*= undefined/)
+      field = d.ctx_field_decls.first
+      expect(field.name).to eq("sp_1")
+      expect(field.type_zig).to include("CheatLib.Promise")
+      expect(field.default_value).to be_a(MIR::Undef)
     end
 
     it "reports the bound result_var" do
@@ -290,7 +303,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
         ctx, lowering, susp_idx: 3)
 
       expect(d.result_needs_cleanup).to eq(true)
-      expect(d.ctx_field_decls).to include("__owned_payload_init: bool = false,")
+      guard = field_named(d.ctx_field_decls, "__owned_payload_init")
+      expect(guard&.type_zig).to eq("bool")
+      expect(guard&.default_value&.value).to eq("false")
       expect(d.bind_stmts).to include(
         an_object_having_attributes(
           target: an_object_having_attributes(field: "__owned_payload_init"),
