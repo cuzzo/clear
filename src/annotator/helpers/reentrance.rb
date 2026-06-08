@@ -221,17 +221,15 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_not_logical_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
       # `function_call_graph[name]` strips self-calls (annotator.rb:599), so
-      # direct self-recursion shows up in `@fn_direct_effects[name]`
+      # direct self-recursion shows up in the direct-effect map
       # as the REENTRANT marker recorded at visit_FunctionDef. Mutual
       # cycles still go through `reachable_from_self?`.
-      direct = @fn_direct_effects[name]&.include?(EffectTracker::REENTRANT) || false
+      direct = effect_direct_effects_for(name).include?(EffectTracker::REENTRANT)
       mutual = !direct && reachable_from_self?(name)
       next unless direct || mutual
 
@@ -256,13 +254,11 @@ module ReentranceBridge
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
       # Direct-only is fine; counter handles it.
-      direct = @fn_direct_effects[name]&.include?(EffectTracker::REENTRANT) || false
+      direct = effect_direct_effects_for(name).include?(EffectTracker::REENTRANT)
       mutual = !direct && reachable_from_self?(name)
       next unless mutual
 
@@ -307,8 +303,7 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_thunk_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
@@ -350,8 +345,7 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def try_stamp_mutual_thunk_plan!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
     # Phase 4f.1 scope: every cycle member must be defined locally
@@ -410,8 +404,7 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
   def emit_mutual_thunk_unsupported!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
     cycle_thunk_fns = cycle_names.filter_map { |n| fn_nodes[n] }

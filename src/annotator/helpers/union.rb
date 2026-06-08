@@ -41,8 +41,7 @@ module UnionAnalysis
             req.token, req.name, fn_params, [], req.return_type,
             nil, T.must(req.body), nil, nil, req_vis, nil, nil
           )
-          synthetic_fns = T.cast(T.unsafe(self).instance_variable_get(:@synthetic_fns), T::Array[AST::FunctionDef])
-          synthetic_fns << fn_node
+          queue_synthetic_function!(fn_node)
           next
         else
           error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)

@@ -228,7 +228,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     end
     fn = AST::FunctionDef.new(tok, "deep", [], [], :Void, nil, [], [], nil, :private, [], false)
     fn.stack_tier = :unbounded
-    a.instance_variable_set(:@fn_nodes, { "deep" => fn })
+    a.semantic_function_nodes.replace({ "deep" => fn })
     expect(a.send(:find_unbounded_callee, Set["start"])).to eq("deep")
 
     source = OpenStruct.new(scope_depth: 3)
@@ -255,7 +255,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.send(:visit_BlockExpr, block)
     expect(block.storage).to eq(:rodata)
 
-    a.current_scope.declare("counter", OpenStruct.new(token: tok), Type.new(:Int64), true, false, nil, :stack)
+    a.current_scope.declare("counter", id("counter", type: Type.new(:Int64)), Type.new(:Int64), true, false, nil, :stack)
     assign = AST::Assignment.new(tok, id("counter", type: Type.new(:Int64)), lit("2", type: Type.new(:Int64)))
     a.send(:visit_assignment_variable, assign.name, assign)
     expect(assign.full_type!(context: "assignment test").resolved).to eq(:Int64)

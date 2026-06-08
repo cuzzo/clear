@@ -545,9 +545,7 @@ module CapabilityHelper
       return "mutates its receiver" if md.emit&.mutates_receiver
       return nil
     end
-
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn = fn_nodes[callee]
     return nil unless fn
     return "can fail" if fn.can_fail
@@ -1399,8 +1397,7 @@ module CapabilityAudit
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
     fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn_node = fn_name ? fn_nodes[fn_name] : nil
     return if fn_node&.visibility == :pub
 

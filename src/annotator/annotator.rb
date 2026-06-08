@@ -20,6 +20,7 @@ require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
 require_relative "phases/whole_program_semantics"
+require_relative "function_registry"
 require_relative "domains/control_flow"
 require_relative "domains/variables"
 require_relative "domains/member_access"
@@ -99,7 +100,27 @@ class SemanticAnnotator
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
   def semantic_function_nodes
-    @fn_nodes
+    function_node_map
+  end
+
+  sig { returns(Annotator::FunctionRegistry) }
+  def semantic_function_registry
+    @function_registry
+  end
+
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
+  def function_node_map
+    semantic_function_registry.nodes
+  end
+
+  sig { params(name: T.nilable(String)).returns(T.nilable(AST::FunctionDef)) }
+  def function_node_for(name)
+    semantic_function_registry.fetch(name)
+  end
+
+  sig { params(node: AST::FunctionDef).returns(AST::FunctionDef) }
+  def register_function_node!(node)
+    semantic_function_registry.register!(node)
   end
 
   sig { returns(Scope) }
@@ -313,20 +334,14 @@ class SemanticAnnotator
     @match_pattern_context = T.let(false, T.nilable(T::Boolean)) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @held_locks = T.let({}, T.nilable(HeldLockMap))
     @held_lock_types = T.let([], T.nilable(T::Array[HeldLockTypeEntry]))
-    # Reentrancy and fallibility analysis facts recorded by the body-summary
-    # phase. This is the single source for call graph, propagating callees,
-    # fn-pointer calls, and direct failure seeds.
-    @body_summaries = T.let({}, T::Hash[String, Annotator::Phases::FunctionBodySummary])
-    @fn_nodes    = T.let({}, T::Hash[String, AST::FunctionDef])  # name => FunctionDef node (for error reporting in the post-pass)
+    @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
     @capability_audit = T.let({}, CapabilityAudit::BindingAuditStore)
-    @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
-    @call_site_context = T.let(nil, T.untyped)
-    @call_site_arg_families = T.let(nil, T.untyped)
+    @effect_state = T.let(nil, T.nilable(EffectTracker::EffectState))
     @in_auto_locked_assign = T.let(nil, T.nilable(String))
     @with_block_depth = T.let(0, Integer)
 
@@ -342,7 +357,6 @@ class SemanticAnnotator
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
     @og = T.let(OwnershipGraph.new, OwnershipGraph)
     @og_scope_depth = T.let(0, Integer)
-    @synthetic_fns = T.let([], T::Array[AST::FunctionDef])
     @branch_terminated = T.let(false, T::Boolean)
     @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
     @inside_snapshot_txn = T.let(0, T.nilable(Integer))
@@ -381,15 +395,16 @@ private
   # concrete types and uses operator evidence to rank ambiguous fixes.
   sig { params(program_node: AST::Program).void }
   def run_auto_inference!(program_node)
-    collector = AutoConstraintCollector.new(@fn_nodes)
+    fn_nodes = function_node_map
+    collector = AutoConstraintCollector.new(fn_nodes)
     slots = collector.collect!(program_node)
     return if slots.empty?
 
     # Empty `[]` / `{}` initializers need forward-flow evidence from later
     # appends and index writes before unification can pick an element type.
-    ShapeEvidenceCollector.new(slots, @fn_nodes).collect!
+    ShapeEvidenceCollector.new(slots, fn_nodes).collect!
 
-    op_evidence = OperatorEvidenceCollector.new(slots, @fn_nodes).collect!
+    op_evidence = OperatorEvidenceCollector.new(slots, fn_nodes).collect!
 
     unifier = AutoUnifier.new(slots)
     result = unifier.resolve!
@@ -561,7 +576,17 @@ private
 
   sig { returns(T::Array[AST::FunctionDef]) }
   def synthetic_function_definitions
-    @synthetic_fns
+    semantic_function_registry.synthetic_definitions
+  end
+
+  sig { void }
+  def clear_synthetic_function_definitions!
+    semantic_function_registry.clear_synthetic_definitions!
+  end
+
+  sig { params(node: AST::FunctionDef).returns(AST::FunctionDef) }
+  def queue_synthetic_function!(node)
+    semantic_function_registry.add_synthetic_definition!(node)
   end
 
   sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
@@ -646,10 +671,12 @@ private
     declared_return = node.annotation_return_type
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
-    push_function_context!(FunctionContext.new(
+    fn_ctx = FunctionContext.new(
       name: node.name, return_type: node.annotation_return_type,
       lifetime: lifetime_paths, type_params: fn_type_params
-    ))
+    )
+    push_function_context!(fn_ctx)
+    begin
 
     # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p.mutable }
@@ -681,7 +708,7 @@ private
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
     # Register function node before body analysis so recursive references can resolve it.
-    @fn_nodes[node.name] = node
+    register_function_node!(node)
 
     # 4. Routine Analysis
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
@@ -689,7 +716,7 @@ private
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
     called_names, has_fnptr, unabsorbed_calls = scan_for_calls(node.body)
     directly_recursive = called_names.include?(node.name)
-    current_fn_ctx&.mark_runtime_used! if has_fnptr && current_fn_ctx
+    fn_ctx.mark_runtime_used! if has_fnptr
 
     if directly_recursive
       record_effect(EffectTracker::REENTRANT)
@@ -756,7 +783,7 @@ private
 
     signature.return_strategy = get_return_strategy(signature.return_type)
     stamp_type!(node, signature)
-    ctx = current_fn_ctx!
+    ctx = fn_ctx
     node.uses_frame = (ctx.frame_count > 0)
     node.uses_heap  = (ctx.heap_count > 0)
     node.uses_alloc = (ctx.alloc_count > 0)
@@ -787,9 +814,7 @@ private
       has_fnptr_call: has_fnptr,
       raises_directly: raises_directly
     ))
-    if current_fn_ctx && runtime_error_clause?(node)
-      current_fn_ctx&.mark_runtime_used!
-    end
+    fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
     if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
@@ -820,9 +845,10 @@ private
       end
 
     end
-
-
-    pop_function_context!
+    nil
+    ensure
+      pop_function_context!
+    end
   end
 
   # Visit a statement body.
@@ -1068,7 +1094,7 @@ private
       name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
-      fn = @fn_nodes[name]
+      fn = function_node_for(name)
       return name if fn && fn.reentrance_kind == :reentrant
       (function_call_graph[name] || []).each { |c| queue << c }
     end
@@ -1087,7 +1113,7 @@ private
       name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
-      fn = @fn_nodes[name]
+      fn = function_node_for(name)
       return name if fn && fn.reentrance_kind == :reentrant_max_depth && mutually_recursive_in_call_graph?(name)
       (function_call_graph[name] || []).each { |c| queue << c }
     end
@@ -1144,7 +1170,7 @@ private
       name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
-      return name if @fn_nodes[name]&.stack_tier == :unbounded
+      return name if function_node_for(name)&.stack_tier == :unbounded
       (function_call_graph[name] || []).each { |c| queue << c }
     end
     nil

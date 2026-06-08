@@ -185,8 +185,7 @@ module PipeAnalysis
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
     fn_name = current_fn_ctx&.name
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn = fn_name ? fn_nodes[fn_name] : nil
     fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
   end

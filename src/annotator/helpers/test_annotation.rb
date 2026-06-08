@@ -179,8 +179,7 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
-      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-      fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
       fn = fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)

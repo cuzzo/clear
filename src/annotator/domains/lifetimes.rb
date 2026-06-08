@@ -714,7 +714,7 @@ module Annotator
         # always invalid — covered by the existing non_escaping check.
         return if sources == [sym]
 
-        fn_node = @fn_nodes[current_fn_ctx&.name]
+        fn_node = function_node_for(current_fn_ctx&.name)
         rl = fn_node&.return_lifetime
         return if rl == :wildcard
         declared = rl || []
@@ -778,7 +778,7 @@ module Annotator
         end
         # Param symbols may have been refreshed via Scope.live_param_syms;
         # fall back to a function-level scan.
-        @fn_nodes.each_value do |fn|
+        function_node_map.each_value do |fn|
           next unless fn.respond_to?(:params)
           fn.params.each do |p|
             return p.name.to_s if p.symbol.equal?(sym)

@@ -105,10 +105,11 @@ module Annotator
               # Record family-specific prelude effects before each arm body so
               # the per-arm delta includes synthetic acquire/snapshot work.
               fn_ctx_name = current_fn_ctx&.name
-              snapshot = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+              direct_effects = effect_direct_effects
+              snapshot = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
               per_arm_effects = []
               node.arms.each do |arm|
-                before = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+                before = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
                 # Family-specific prelude effects that the lowering will emit
                 # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
                 # + SUSPENDS); VERSIONED takes a snapshot via EBR pin
@@ -121,12 +122,12 @@ module Annotator
                   finalize_scope(node)
                 end
                 if fn_ctx_name
-                  after = @fn_direct_effects[fn_ctx_name]
-                  arm_delta = after - before
+                  after = effect_direct_effects_for(fn_ctx_name)
+                  arm_delta = after - T.must(before)
                   per_arm_effects << arm_delta
                   # Roll back the fn's direct effects so the next arm sees a
                   # clean baseline. We re-stamp the consensus and ?-form below.
-                  @fn_direct_effects[fn_ctx_name] = snapshot.dup
+                  direct_effects[fn_ctx_name] = T.must(snapshot).dup
                 end
               end
               if fn_ctx_name && !per_arm_effects.empty?
@@ -137,14 +138,13 @@ module Annotator
                 # for the contention/blocking axis.
                 all_union = per_arm_effects.reduce(Set.new, :|)
                 maybe_set = all_union - concrete
-                concrete.each { |eff| @fn_direct_effects[fn_ctx_name].add(eff) }
                 maybe_projection = {
                   EffectTracker::CONTENTION => EffectTracker::CONTENTION_MAYBE,
                   EffectTracker::BLOCKING => EffectTracker::BLOCKING_MAYBE,
                 }
-                maybe_set.each do |eff|
-                  @fn_direct_effects[fn_ctx_name].add(maybe_projection.fetch(eff, eff))
-                end
+                target_effects = effect_direct_effects_for(fn_ctx_name)
+                concrete.each { |eff| target_effects.add(eff) }
+                maybe_set.each { |eff| target_effects.add(maybe_projection.fetch(eff, eff)) }
               end
             end
             finalize_scope(node)
@@ -230,7 +230,7 @@ module Annotator
         bound_sym = bound_var.symbol
         return unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
 
-        fn_node = @fn_nodes[fn_ctx.name]
+        fn_node = function_node_for(fn_ctx.name)
         return unless fn_node && !with_requires_binding?(fn_node, bound_name)
 
         fn_ctx.uses_rt = true
@@ -328,7 +328,7 @@ module Annotator
         bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
         bound_sym = bound_var.symbol
         is_param = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
-        fn_node = @fn_nodes[current_fn_ctx&.name]
+        fn_node = function_node_for(current_fn_ctx&.name)
         has_req = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
                   fn_node.requires.key?(bound_name)
         is_param && !has_req

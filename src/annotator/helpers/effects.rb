@@ -23,6 +23,20 @@ module EffectTracker
 
   requires_ancestor { SemanticAnnotator }
 
+  EffectSetMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
+  CallContext = T.type_alias { T::Hash[Symbol, T::Boolean] }
+  CallSiteContextMap = T.type_alias { T::Hash[String, T::Hash[String, CallContext]] }
+  ArgFamilySets = T.type_alias { T::Array[T::Set[Symbol]] }
+  CallSiteArgFamilyMap = T.type_alias { T::Hash[String, T::Hash[String, T::Array[ArgFamilySets]]] }
+
+  class EffectState < T::Struct
+    prop :direct_effects, EffectSetMap, factory: -> { {} }
+    prop :call_site_context, CallSiteContextMap, factory: -> { Hash.new { |h, k| h[k] = {} } }
+    prop :call_site_arg_families, CallSiteArgFamilyMap, factory: -> {
+      Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }
+    }
+  end
+
   # Core effect constants.
   HEAP         = :HEAP
   BLOCKING     = :BLOCKING
@@ -88,26 +102,62 @@ module EffectTracker
 
   # --- Phase 1: Direct collection ---
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(EffectState) }
   def effects_init!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_direct_effects = T.let({}, T.untyped)   # fn_name => Set of direct effect symbols
-    # Per-caller map of callee => worst-case call-site context
-    # {loop: bool, cond: bool}. Populated by record_call_site during body
-    # scanning. Used by compute_effects! to promote SUSPENDS → SUSPENDS_LOOP
-    # or SUSPENDS_CONDITIONAL when the call site sits in that context.
-    @call_site_context = T.let(Hash.new { |h, k| h[k] = {} }, T.untyped)
-    # Per-(caller, callee) arg-family sets, one entry per call site. Used to
-    # resolve callee ?-form effects based on what families the caller passes.
-    @call_site_arg_families = T.let(Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }, T.untyped)
+    @effect_state = T.let(EffectState.new, T.nilable(EffectState))
+    effect_state
+  end
+
+  sig { returns(EffectState) }
+  def effect_state
+    T.bind(self, SemanticAnnotator) rescue nil
+    T.must(@effect_state)
+  end
+
+  sig { returns(EffectSetMap) }
+  def effect_direct_effects
+    T.bind(self, SemanticAnnotator) rescue nil
+    effect_state.direct_effects
+  end
+
+  sig { returns(CallSiteContextMap) }
+  def effect_call_site_context
+    T.bind(self, SemanticAnnotator) rescue nil
+    effect_state.call_site_context
+  end
+
+  sig { returns(CallSiteArgFamilyMap) }
+  def effect_call_site_arg_families
+    T.bind(self, SemanticAnnotator) rescue nil
+    effect_state.call_site_arg_families
+  end
+
+  sig { params(fn_name: String).returns(T::Set[Symbol]) }
+  def effect_direct_effects_for(fn_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    effect_direct_effects[fn_name] ||= Set.new
+  end
+
+  sig { params(caller_name: String, callee_name: String).returns(CallContext) }
+  def effect_call_site_context_for(caller_name, callee_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    caller_context = effect_call_site_context[caller_name] ||= {}
+    caller_context[callee_name] ||= { loop: false, cond: false }
+  end
+
+  sig { params(caller_name: String, callee_name: String).returns(T::Array[ArgFamilySets]) }
+  def effect_call_site_arg_families_for(caller_name, callee_name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    caller_families = effect_call_site_arg_families[caller_name] ||= {}
+    caller_families[callee_name] ||= []
   end
 
   # Called at the start of visit_FunctionDef to prepare a fresh effect set.
   sig { params(fn_name: String).returns(T::Set[Symbol]) }
   def effects_begin_function(fn_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @fn_direct_effects[fn_name] = Set.new
+    effect_direct_effects[fn_name] = T.let(Set.new, T::Set[Symbol])
   end
 
   # Record a direct effect for the function currently being analyzed.
@@ -116,12 +166,11 @@ module EffectTracker
   sig { params(effect: Symbol).returns(NilClass) }
   def record_effect(effect)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.nilable(Integer))
     fn_ctx = current_fn_ctx
     return unless fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
-    @fn_direct_effects[fn_ctx.name]&.add(effect)
+    effect_direct_effects_for(fn_ctx.name).add(effect)
     # MVCC L5-followup (D1): a SNAPSHOT-transaction body must be pure
     # for atomicity -- yielding the fiber breaks EBR pin guarantees,
     # and IO can't be rolled back if the transaction aborts. Track
@@ -167,18 +216,16 @@ module EffectTracker
   sig { params(callee_name: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_site_context = T.let(@call_site_context, T.untyped)
     fn_ctx = current_fn_ctx
     return unless fn_ctx&.name
     caller_name = fn_ctx.name
     in_loop = current_loop_depth > 0
     in_cond = current_conditional_depth > 0
     return unless in_loop || in_cond
-    existing = @call_site_context[caller_name][callee_name] || { loop: false, cond: false }
-    @call_site_context[caller_name][callee_name] = {
-      loop: existing[:loop] || in_loop,
-      cond: existing[:cond] || in_cond,
-    }
+    existing = effect_call_site_context_for(caller_name, callee_name)
+    existing[:loop] = existing[:loop] || in_loop
+    existing[:cond] = existing[:cond] || in_cond
+    existing
   end
 
   # Record the per-arg family Sets at this call site.
@@ -189,10 +236,9 @@ module EffectTracker
   sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).returns(T.nilable(T::Array[T::Array[T::Set[Symbol]]])) }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
     fn_ctx = current_fn_ctx
     return unless fn_ctx&.name
-    @call_site_arg_families[fn_ctx.name][callee_name] << arg_family_sets
+    effect_call_site_arg_families_for(fn_ctx.name, callee_name) << arg_family_sets
   end
 
   # --- Phase 2: Transitive propagation ---
@@ -206,13 +252,11 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_effects!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @call_site_context = T.let(@call_site_context, T.untyped)
+    fn_nodes = function_node_map
+    direct_effects = effect_direct_effects
     # Seed from direct effects.
     resolved = {}
-    @fn_direct_effects.each { |name, effs| resolved[name] = effs.dup }
+    direct_effects.each { |name, effs| resolved[name] = effs.dup }
 
     # Recursive functions that emit `rt.checkYield()` yield to the scheduler.
     # Seed YIELD so hold-lock-across-yield sees calls inside WITH lock bodies.
@@ -236,7 +280,7 @@ module EffectTracker
           callee_effs = resolved[callee]
           next unless callee_effs
           before = current.size
-          site_ctx = @call_site_context[fn_name][callee]
+          site_ctx = effect_call_site_context_for(fn_name, callee)
           resolved_callee = resolve_maybe_effects(
             callee_effs, fn_name, callee
           )
@@ -272,12 +316,11 @@ module EffectTracker
   sig { params(callee_set: T::Set[Symbol], caller_name: String, callee_name: String).returns(T::Set[Symbol]) }
   def resolve_maybe_effects(callee_set, caller_name, callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
     has_block_maybe = callee_set.include?(BLOCKING_MAYBE)
     has_cont_maybe  = callee_set.include?(CONTENTION_MAYBE)
     return callee_set unless has_block_maybe || has_cont_maybe
 
-    call_sites = @call_site_arg_families[caller_name][callee_name]
+    call_sites = effect_call_site_arg_families_for(caller_name, callee_name)
     return callee_set if call_sites.empty?
 
     any_concrete_lockable = T.let(false, T::Boolean)
@@ -361,8 +404,7 @@ module EffectTracker
   sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     needs_rt = {}
     fn_nodes.each do |name, fn_node|
       fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
@@ -426,8 +468,7 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_can_fail!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
     # @nonReentrant / BG-spawn / declared `!T` / transitive ERROR
     # callee). This is the axis that forces `RETURNS !T` (step 4). It
@@ -592,8 +633,7 @@ module EffectTracker
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     # Enforcement is gated because migrating every fallible `RETURNS T` to
     # `RETURNS !T` is a tree-wide source change. Keep the scaffolding in place
     # so the flag can flip once call sites have been migrated.
@@ -683,8 +723,7 @@ module EffectTracker
   sig { params(name: String).returns(String) }
   def fallibility_hint_for(name)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     return "raises directly via RAISE" if function_raises_directly?(name)
     callees = function_call_graph[name] || []
     fallible_callee = callees.find { |c| fn_nodes[c]&.can_fail }
@@ -698,8 +737,7 @@ module EffectTracker
   sig { params(program_node: AST::Program).returns(T::Array[T.untyped]) }
   def mark_fn_value_references!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
@@ -760,8 +798,7 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_fsm_eligibility!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn_nodes.each do |_name, fn_node|
       effs = fn_node.effects || Set.new
 
@@ -794,8 +831,7 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def enumerate_fsm_suspend_points!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn_nodes.each do |_name, fn_node|
       next unless fn_node.fsm_eligible
       points = []
@@ -851,8 +887,7 @@ module EffectTracker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def func_call_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     return true if node.matched_stdlib_def&.emit&.suspends
     return false if node.respond_to?(:fn_var_call) && node.fn_var_call
     callee = fn_nodes[node.name]
@@ -907,8 +942,7 @@ module EffectTracker
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(T::Array[T.nilable(Symbol)]) }
   def bg_spawn_form_for(callee_names, has_fnptr)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     return [:stackful, :fn_pointer] if has_fnptr
     visited = Set.new
     queue = callee_names.to_a.dup
@@ -973,8 +1007,7 @@ module EffectTracker
   sig { returns(NilClass) }
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
     #   :reentrant            unbounded -> :service (OS thread)
@@ -1103,8 +1136,7 @@ module EffectTracker
   sig { params(fn_names: T::Set[String]).returns(Symbol) }
   def max_tier_for_calls(fn_names)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     visited = Set.new
     max = T.let(:micro, Symbol)
     queue = fn_names.to_a.dup
@@ -1132,8 +1164,7 @@ module EffectTracker
   sig { params(stmts: T::Array[T.untyped], loop_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     stmts.each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
   end
 
@@ -1249,9 +1280,8 @@ module EffectTracker
   sig { returns(T.nilable(T::Hash[String, T::Set[String]])) }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    fn_nodes = function_node_map
+    direct_effects = effect_direct_effects
     function_call_graph.each_key do |fn_name|
       node = fn_nodes[fn_name]
       next if node.nil?
@@ -1266,7 +1296,7 @@ module EffectTracker
         visited.add(callee)
 
         if callee == fn_name
-          @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
+          direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
           arrow = node.arrow_token
           if arrow
             fix = Fix.new(

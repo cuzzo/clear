@@ -172,8 +172,7 @@ module FunctionAnalysis
 
     scope = lookup_scope_for(func_name)
     unless scope
-      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-      fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
       emit_typo_suggestion!(
         node.token, func_name, fn_nodes.keys,
         "Undefined function '#{func_name}'",

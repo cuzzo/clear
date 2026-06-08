@@ -20,54 +20,44 @@ module Annotator
       sig { params(summary: FunctionBodySummary).void }
       def record_function_body_summary!(summary)
         T.bind(self, SemanticAnnotator)
-        body_summary_store[summary.name] = summary
+        semantic_function_registry.record_body_summary!(summary)
       end
 
       sig { returns(T::Hash[String, FunctionBodySummary]) }
       def function_body_summaries
         T.bind(self, SemanticAnnotator)
-        body_summary_store
+        semantic_function_registry.body_summaries
       end
 
       sig { params(name: String).returns(T.nilable(FunctionBodySummary)) }
       def function_body_summary_for(name)
         T.bind(self, SemanticAnnotator)
-        body_summary_store[name]
+        semantic_function_registry.body_summary_for(name)
       end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
         T.bind(self, SemanticAnnotator)
-        body_summary_store.transform_values(&:callees)
+        semantic_function_registry.call_graph
       end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_propagating_callees
         T.bind(self, SemanticAnnotator)
-        body_summary_store.transform_values(&:propagating_callees)
+        semantic_function_registry.propagating_callees
       end
 
       sig { params(name: String).returns(T::Boolean) }
       def function_has_fnptr_call?(name)
         T.bind(self, SemanticAnnotator)
-        body_summary_store[name]&.has_fnptr_call == true
+        semantic_function_registry.fnptr_call?(name)
       end
 
       sig { params(name: String).returns(T::Boolean) }
       def function_raises_directly?(name)
         T.bind(self, SemanticAnnotator)
-        body_summary_store[name]&.raises_directly == true
+        semantic_function_registry.raises_directly?(name)
       end
-
-      SummaryStore = T.type_alias { T::Hash[String, FunctionBodySummary] }
-
-      sig { returns(SummaryStore) }
-      def body_summary_store
-        T.bind(self, SemanticAnnotator)
-        @body_summaries = T.let(@body_summaries, T.nilable(SummaryStore))
-        T.must(@body_summaries)
-      end
-      private :body_summary_store
 
       sig { params(declarations: DeclarationIndex, program: AST::Program).void }
       def analyze_program_bodies!(declarations, program)
