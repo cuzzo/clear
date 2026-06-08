@@ -899,16 +899,16 @@ class MIREmitter
   sig { params(node: MIR::ThunkTrampoline).returns(String) }
   def emit_thunk_trampoline(node)
     param_field_decls = node.param_field_decls.join("\n            ")
-    param_init = node.param_init_fields.join(", ")
+    param_init = emit_thunk_frame_inits(node.param_init_fields)
     base_case_branches = node.base_cases.map { |bc|
       <<~ZIG.chomp
-        if (#{bc.fetch(:cond_zig)}) {
-                            const result: #{node.ret_zig} = #{bc.fetch(:value_zig)};
+        if (#{emit(bc.cond)}) {
+                            const result: #{node.ret_zig} = #{emit(bc.value)};
         #{emit_thunk_return_or_pop}
                         }
       ZIG
     }.join("\n                    ")
-    recurse_arg_inits = node.recurse_arg_inits.join(", ")
+    recurse_arg_inits = emit_thunk_frame_inits(node.recurse_arg_inits)
 
     <<~ZIG
       const Frame = struct {
@@ -938,7 +938,7 @@ class MIREmitter
                       continue;
                   },
                   1 => {
-                      const result: #{node.ret_zig} = #{node.combine_lhs_zig} #{node.op_zig} current.child_result;
+                      const result: #{node.ret_zig} = #{emit(node.combine_lhs)} #{node.op_zig} current.child_result;
       #{emit_thunk_return_or_pop}
                   },
                   else => unreachable,
@@ -963,14 +963,14 @@ class MIREmitter
   sig { params(node: MIR::MutualThunkTrampoline).returns(String) }
   def emit_mutual_thunk_trampoline(node)
     variant_decls = node.variants.map { |variant|
-      fields = variant.fetch(:param_field_decls).join("\n          ")
+      fields = variant.param_field_decls.join("\n          ")
       <<~ZIG.chomp
-        #{variant.fetch(:name)}: struct {
+        #{variant.name}: struct {
                   #{fields}
               },
       ZIG
     }.join("\n      ")
-    initial_fields = node.initial_fields.join(", ")
+    initial_fields = emit_thunk_frame_inits(node.initial_fields)
     switch_arms = node.arms.map { |arm| emit_mutual_thunk_arm(arm) }.join("\n              ")
 
     <<~ZIG
@@ -991,12 +991,12 @@ class MIREmitter
   def emit_mutual_thunk_arm(arm)
     base_branches = arm.base_cases.map { |bc|
       <<~ZIG.chomp
-        if (#{bc.cond_zig}) {
-                              return #{bc.value_zig};
+        if (#{emit(bc.cond)}) {
+                              return #{emit(bc.value)};
                           }
       ZIG
     }.join("\n                      ")
-    target_arg_inits = arm.target_arg_inits.join(", ")
+    target_arg_inits = emit_thunk_frame_inits(arm.target_arg_inits)
 
     <<~ZIG.chomp
       .#{arm.variant_name} => |f| {
@@ -1005,6 +1005,11 @@ class MIREmitter
                       continue;
                   },
     ZIG
+  end
+
+  sig { params(inits: T::Array[MIR::ThunkFrameInit]).returns(String) }
+  def emit_thunk_frame_inits(inits)
+    inits.map { |init| ".#{init.field_name} = #{emit(init.value)}" }.join(", ")
   end
 
   sig { params(node: T.untyped, source: String).returns(String) }
@@ -1104,6 +1109,11 @@ class MIREmitter
   #                    based on entry.has_moved_guard?.
   # The caller (emit dispatch) decides which; this method applies the template.
   public
+
+  sig { params(stmts: T::Array[MIR::Node]).returns(String) }
+  def emit_stmt_list(stmts)
+    emit_body(stmts)
+  end
 
   sig { params(name: String, entry: CleanupEntry, alloc_override: T.nilable(String)).returns(String) }
   def emit_direct_cleanup(name, entry, alloc_override: nil)

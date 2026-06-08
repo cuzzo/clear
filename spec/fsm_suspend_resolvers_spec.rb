@@ -24,7 +24,64 @@ RSpec.describe FsmTransform::SuspendResolvers do
     }.new
   }
 
-  let(:ctx) { { id: 0, bg_rt: "__rt_bg0" } }
+  def fsm_ctx(overrides = {})
+    raw = {
+      id: 0,
+      bg_rt: "__rt_bg0",
+      blk_label: "__bg0",
+      ctx_type: "__BgCtx0",
+      promise_zig: "CheatLib.Promise(i64)",
+      capture_fields: "",
+      alloc_var: "__bg0_alloc",
+      promise_var: "__bg0_promise",
+      ctx_var: "__bg0_ctx",
+      rt_name: "rt",
+      promoted_decls: "",
+      capture_inits: "",
+      captured: {},
+      capture_close_zig: {},
+      pointer_captures: Set.new,
+      extra_ctx_fields: [],
+      recursive_promoted_names: [],
+      fresh_heap_cleanup_names: [],
+      arena_init_flag: false,
+      is_void: false,
+      pin_mode: false,
+      parallel: false,
+      profile_site_id: nil,
+      profile_line: nil,
+      profile_column: nil,
+    }.merge(overrides)
+    FsmTransform::Emit::FsmEmitContext.new(
+      id: raw.fetch(:id),
+      bg_rt: raw.fetch(:bg_rt),
+      blk_label: raw.fetch(:blk_label),
+      ctx_type: raw.fetch(:ctx_type),
+      promise_zig: raw.fetch(:promise_zig),
+      capture_fields: raw.fetch(:capture_fields),
+      alloc_var: raw.fetch(:alloc_var),
+      promise_var: raw.fetch(:promise_var),
+      ctx_var: raw.fetch(:ctx_var),
+      rt_name: raw.fetch(:rt_name),
+      promoted_decls: raw.fetch(:promoted_decls),
+      capture_inits: raw.fetch(:capture_inits),
+      captured: raw.fetch(:captured),
+      capture_close_zig: raw.fetch(:capture_close_zig),
+      pointer_captures: raw.fetch(:pointer_captures),
+      extra_ctx_fields: raw.fetch(:extra_ctx_fields),
+      recursive_promoted_names: raw.fetch(:recursive_promoted_names),
+      fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
+      arena_init_flag: raw.fetch(:arena_init_flag),
+      is_void: raw.fetch(:is_void),
+      pin_mode: raw.fetch(:pin_mode),
+      parallel: raw.fetch(:parallel),
+      profile_site_id: raw.fetch(:profile_site_id),
+      profile_line: raw.fetch(:profile_line),
+      profile_column: raw.fetch(:profile_column),
+    )
+  end
+
+  let(:ctx) { fsm_ctx }
 
   describe "resolve_io" do
     # Build a fake stdlib_def with a sleep-like fsm_setup template.

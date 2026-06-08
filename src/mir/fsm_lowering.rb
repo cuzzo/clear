@@ -24,10 +24,10 @@ require_relative 'fsm_wrapper_emitter'
 #                                          (try_method, alias_data_ref,
 #                                          retries) used by
 #                                          Emit.expand_lock_segment
-#   emit_fsm_lock_error_arm_split      -- ON-clause error-arm body
-#                                          renderer for the
+#   emit_fsm_lock_error_arm_split      -- ON-clause error-arm MIR
+#                                          planner for the
 #                                          FsmTailRetryOrError fail step
-#   default_fsm_lock_error_arm_split   -- default error-arm body when
+#   default_fsm_lock_error_arm_split   -- default error-arm MIR when
 #                                          no ON clause is present
 module FsmLowering
     extend T::Sig
@@ -35,10 +35,8 @@ module FsmLowering
 
   FsmCapMetadataValue = T.type_alias { T.any(String, Integer, Symbol, CapabilityPlan::CapabilityTransition) }
   FsmCapMetadata = T.type_alias { T::Hash[Symbol, FsmCapMetadataValue] }
-  FsmMirRenderable = T.type_alias { T.any(MIR::Node, String) }
-
   class FsmLockErrorArmSplit < T::Struct
-    const :body_zig, String
+    const :body_stmts, T::Array[MIR::Node]
     const :exit_kind, Symbol
   end
 
@@ -415,7 +413,7 @@ module FsmLowering
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     render_mir_list(lower_finalized_fsm_step_mir(stmts, no_result: no_result, ctx_id: ctx_id))
   end
-  sig { params(mir_list: T::Array[FsmMirRenderable]).returns(String) }
+  sig { params(mir_list: T::Array[MIR::Node]).returns(String) }
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
     return "" if false || mir_list.empty?
@@ -503,9 +501,9 @@ module FsmLowering
       retries:        retries,
     }
   end
-  # Render the lock_error_clause action as a body + exit kind for
+  # Plan the lock_error_clause action as MIR statements + exit kind for
   # the FsmTailRetryOrError fail step. Returns:
-  #   { body_zig: String, exit_kind: :done | :goto_post }
+  #   { body_stmts: [MIR::Node], exit_kind: :done | :goto_post }
   #
   #   :done       -> fail-step segment uses Segments::Done as its
   #                  tail (sets inner.result + wg.done + destroy +
@@ -514,53 +512,103 @@ module FsmLowering
   #   :goto_post  -> fail-step segment Gotos to the post-WITH
   #                  segment. Body is empty for :pass, the user
   #                  block for :block.
-  sig { params(clause: AST::ErrorClause, ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: T::Set[String], bg_rt: String, rt_name: String).returns(T.nilable(FsmLockErrorArmSplit)) }
+  sig { params(clause: AST::ErrorClause, ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: T::Set[String], bg_rt: String).returns(T.nilable(FsmLockErrorArmSplit)) }
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
-                                    capture_map:, pointer_captures:, bg_rt:,
-                                    rt_name:)
+                                    capture_map:, pointer_captures:, bg_rt:)
     T.bind(self, MIRLowering) rescue nil
     line = with_node.token&.line.to_s
     case clause.action
     when :raise
-      body = <<~ZIG.chomp
-        __ctx_#{ctx_id}.rt.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), "lock acquire failed", #{line});
-        __ctx_#{ctx_id}.inner.result = error.CheatError;
-      ZIG
-      FsmLockErrorArmSplit.new(body_zig: body, exit_kind: :done)
+      FsmLockErrorArmSplit.new(
+        body_stmts: lock_error_done_stmts(
+          ctx_id,
+          MIR::Lit.new('"lock acquire failed"'),
+          line,
+          "error.CheatError",
+        ),
+        exit_kind: :done,
+      )
     when :exit
-      msg_zig = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-        emit_expr(lower(T.must(clause.message)))
+      message_mir = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
+        lower(T.must(clause.message))
       end
-      return nil if msg_zig.nil?
-      body = <<~ZIG.chomp
-        __ctx_#{ctx_id}.rt.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), #{msg_zig}, #{line});
-        __ctx_#{ctx_id}.inner.result = error.CheatError;
-      ZIG
-      FsmLockErrorArmSplit.new(body_zig: body, exit_kind: :done)
+      return nil unless message_mir.is_a?(MIR::Emittable)
+      FsmLockErrorArmSplit.new(
+        body_stmts: lock_error_done_stmts(
+          ctx_id,
+          message_mir,
+          line,
+          "error.CheatError",
+        ),
+        exit_kind: :done,
+      )
     when :pass
-      FsmLockErrorArmSplit.new(body_zig: "", exit_kind: :goto_post)
+      FsmLockErrorArmSplit.new(body_stmts: [], exit_kind: :goto_post)
     when :block
       prev_bg_ptr_caps = capture_state.current_bg_pointer_captures
-      capture_state.current_bg_pointer_captures = pointer_captures
       prev_fiber_pending = function_state.pending_stmts
-      function_state.pending_stmts = []
-      block_code = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-        emit_step_stmts(clause.body || [], no_result: true)
+      block_mir = begin
+        capture_state.current_bg_pointer_captures = pointer_captures
+        function_state.pending_stmts = []
+        with_fiber_capture_map(capture_map, rt_override: bg_rt) do
+          lower_finalized_fsm_step_mir(clause.body || [], no_result: true)
+        end
+      ensure
+        function_state.pending_stmts = prev_fiber_pending
+        capture_state.current_bg_pointer_captures = prev_bg_ptr_caps
       end
-      function_state.pending_stmts = prev_fiber_pending
-      capture_state.current_bg_pointer_captures = prev_bg_ptr_caps
-      return nil if block_code.nil?
-      FsmLockErrorArmSplit.new(body_zig: block_code, exit_kind: :goto_post)
+      FsmLockErrorArmSplit.new(body_stmts: block_mir, exit_kind: :goto_post)
     else
       nil
     end
   end
 
-  # Default error arm body when no clause is present: surface as a
+  sig { params(ctx_id: Integer, message: MIR::Node, line: String, result_zig: String).returns(T::Array[MIR::Node]) }
+  def lock_error_done_stmts(ctx_id, message, line, result_zig)
+    [
+      lock_error_set_error_stmt(ctx_id, message, line),
+      lock_error_result_set(ctx_id, result_zig),
+    ]
+  end
+
+  sig { params(ctx_id: Integer, message: MIR::Node, line: String).returns(MIR::ExprStmt) }
+  def lock_error_set_error_stmt(ctx_id, message, line)
+    MIR::ExprStmt.new(
+      MIR::MethodCall.new(
+        MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "rt"),
+        "setError",
+        [
+          MIR::Lit.new(".Transient"),
+          MIR::Lit.new("@intFromEnum(ErrorName.LockTimeout)"),
+          message,
+          MIR::Lit.new(line),
+        ],
+        false,
+      ),
+      false,
+    )
+  end
+
+  sig { params(ctx_id: Integer, result_zig: String).returns(MIR::Set) }
+  def lock_error_result_set(ctx_id, result_zig)
+    MIR::Set.new(
+      MIR::FieldGet.new(
+        MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "inner"),
+        "result",
+      ),
+      MIR::Lit.new(result_zig),
+      false,
+    )
+  end
+
+  # Default error arm MIR when no clause is present: surface as a
   # generic LockError (body sets inner.result; exit_kind = :done).
   sig { params(id: Integer).returns(FsmLockErrorArmSplit) }
   def default_fsm_lock_error_arm_split(id)
     T.bind(self, MIRLowering) rescue nil
-    FsmLockErrorArmSplit.new(body_zig: "__ctx_#{id}.inner.result = error.LockError;", exit_kind: :done)
+    FsmLockErrorArmSplit.new(
+      body_stmts: [lock_error_result_set(id, "error.LockError")],
+      exit_kind: :done,
+    )
   end
 end

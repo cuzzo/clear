@@ -1455,6 +1455,16 @@ RSpec.describe MIRChecker do
       right.owned.add("branch_owned")
       checker.send(:linear_merge_branch_states!, [left, right], MIRChecker::LinearOwnershipState.new, "if")
 
+      typed_state = MIRChecker::LinearOwnershipState.new
+      typed_state.owned.add("owned")
+      typed_state.released.add("released")
+      typed_state.alloc_kinds["owned"] = :heap
+      snapshot = typed_state.snapshot
+      expect(snapshot.owned).to include(MIRChecker::PlaceId.from_path("owned"))
+      expect(snapshot.alloc_kinds[MIRChecker::PlaceId.from_path("owned")]).to eq(:heap)
+      expect(typed_state.summary).to include("owned=owned")
+      expect(typed_state.same_state?(typed_state.copy)).to be(true)
+
       guarded_left = MIRChecker::LinearOwnershipState.new
       guarded_right = MIRChecker::LinearOwnershipState.new
       [guarded_left, guarded_right].each { |state| state.guarded_finalizers.add("x") }
@@ -1700,13 +1710,29 @@ RSpec.describe MIRChecker do
       )
     end
 
+    def fsm_capture_fact(name, cleanup_at: :finalize)
+      MIR::FsmCaptureFact.new(name: name, cleanup_at: cleanup_at)
+    end
+
+    def fsm_state_field_fact(name, finalize_at: :finalize, error_handled_in_setup: false)
+      MIR::FsmStateFieldFact.new(
+        name: name,
+        finalize_at: finalize_at,
+        error_handled_in_setup: error_handled_in_setup,
+      )
+    end
+
+    def fsm_step_fact(index, reads: [], cleanups: [])
+      MIR::FsmStepFact.new(index: index, reads: reads, cleanups: cleanups)
+    end
+
     it "rejects capture cleanup placed in a step (not finalize)" do
       structure = MIR::FsmStructure.new(
-        [{ name: "needle", cleanup_at: 0 }],
+        [fsm_capture_fact("needle", cleanup_at: 0)],
         [],
         [
-          { index: 0, reads: ["needle"], cleanups: ["needle"] },
-          { index: 1, reads: ["needle"], cleanups: [] },
+          fsm_step_fact(0, reads: ["needle"], cleanups: ["needle"]),
+          fsm_step_fact(1, reads: ["needle"]),
         ],
         [],
         0,
@@ -1719,9 +1745,9 @@ RSpec.describe MIRChecker do
 
     it "rejects capture with no cleanup at all" do
       structure = MIR::FsmStructure.new(
-        [{ name: "needle", cleanup_at: :finalize }],
+        [fsm_capture_fact("needle")],
         [],
-        [{ index: 0, reads: [], cleanups: [] }],
+        [fsm_step_fact(0)],
         [],
         0,
         nil,
@@ -1734,8 +1760,8 @@ RSpec.describe MIRChecker do
     it "rejects finalize cleanup names without structural destroy actions" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1749,8 +1775,8 @@ RSpec.describe MIRChecker do
     it "rejects finalization actions when ctx_id is missing" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         nil,
         nil,
@@ -1765,8 +1791,8 @@ RSpec.describe MIRChecker do
     it "rejects destroy cleanup actions targeting the wrong ctx field" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1781,8 +1807,8 @@ RSpec.describe MIRChecker do
     it "rejects destroy cleanup actions with unknown sources" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1807,8 +1833,8 @@ RSpec.describe MIRChecker do
       entry = CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1830,8 +1856,8 @@ RSpec.describe MIRChecker do
       )
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1852,8 +1878,8 @@ RSpec.describe MIRChecker do
       )
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1874,8 +1900,8 @@ RSpec.describe MIRChecker do
       )
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1890,8 +1916,8 @@ RSpec.describe MIRChecker do
     it "rejects malformed guard and allocator expression fields" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: :finalize }],
-        [{ index: 0, reads: ["tmp"], cleanups: ["tmp"] }],
+        [fsm_state_field_fact("tmp")],
+        [fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"])],
         ["tmp"],
         0,
         nil,
@@ -1970,10 +1996,10 @@ RSpec.describe MIRChecker do
     it "rejects step N reading a name whose cleanup is in step M < N" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "tmp", finalize_at: nil }],
+        [fsm_state_field_fact("tmp", finalize_at: nil)],
         [
-          { index: 0, reads: ["tmp"], cleanups: ["tmp"] },
-          { index: 1, reads: ["tmp"], cleanups: [] },
+          fsm_step_fact(0, reads: ["tmp"], cleanups: ["tmp"]),
+          fsm_step_fact(1, reads: ["tmp"]),
         ],
         [],
         0,
@@ -1987,8 +2013,8 @@ RSpec.describe MIRChecker do
     it "rejects result aliasing a finalized state field" do
       structure = MIR::FsmStructure.new(
         [],
-        [{ name: "rf_buf", finalize_at: :finalize }],
-        [{ index: 1, reads: ["rf_buf"], cleanups: ["rf_buf"] }],
+        [fsm_state_field_fact("rf_buf")],
+        [fsm_step_fact(1, reads: ["rf_buf"], cleanups: ["rf_buf"])],
         ["rf_buf"],
         0,
         "rf_buf",  # aliasing detected by lowering
@@ -2001,15 +2027,11 @@ RSpec.describe MIRChecker do
 
     it "passes a well-formed FSM structure" do
       structure = MIR::FsmStructure.new(
-        [{ name: "needle", cleanup_at: :finalize }],
-        [{ name: "rf_buf", finalize_at: :finalize }],
+        [fsm_capture_fact("needle")],
+        [fsm_state_field_fact("rf_buf")],
         [
-          { index: 0, reads: ["needle"], cleanups: [] },
-          {
-            index: 1,
-            reads: ["needle", "rf_buf"],
-            cleanups: ["needle", "rf_buf"],
-          },
+          fsm_step_fact(0, reads: ["needle"]),
+          fsm_step_fact(1, reads: ["needle", "rf_buf"], cleanups: ["needle", "rf_buf"]),
         ],
         ["needle", "rf_buf"],
         0,

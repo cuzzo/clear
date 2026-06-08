@@ -12,6 +12,7 @@
 # that's the splitter's responsibility.
 
 require_relative "../mir"
+require_relative "context"
 
 module FsmTransform
   module SuspendResolvers
@@ -21,11 +22,10 @@ module FsmTransform
     # Public entry. `seg` is a Segments::Segment whose tail is one of
     # the *Suspend variants. Returns MIR::SuspendDescriptor.
     #
-    # `ctx` is a hash with at least: :id (numeric ctx id), :bg_rt
-    # (e.g. "__rt_bg0").
+    # `ctx` carries the typed FSM emit context, including id and bg runtime.
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
-    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(seg: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: T.nilable(Integer)).returns(MIR::SuspendDescriptor) }
     def resolve(seg, ctx, lowering, susp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       case seg.tail
@@ -52,14 +52,14 @@ module FsmTransform
     #   ctx_field_decls: rendered fsm_state_decls
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
-    sig { params(io_tail: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(io_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
     def resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
       raise ArgumentError, "IoSuspend missing stdlib_def" unless stdlib_def
 
-      id = ctx[:id]
-      bg_rt = ctx[:bg_rt]
+      id = ctx.id
+      bg_rt = ctx.bg_rt
 
       em             = stdlib_def.emit
       setup_ops      = em&.fsm_setup || []
@@ -152,10 +152,10 @@ module FsmTransform
     # The dispatch arm already registered/yielded or observed count==0,
     # so finishFsmNext consumes the settled result and destroys Inner
     # without blocking the scheduler thread.
-    sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(next_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: Integer).returns(MIR::SuspendDescriptor) }
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
-      id = ctx[:id]
+      id = ctx.id
       sp_field = "sp_#{susp_idx}"
       promise_expr_mir = lowering.lower(next_tail.promise_ast)
       ctx_ident = MIR::Ident.new("__ctx_#{id}")
@@ -164,7 +164,7 @@ module FsmTransform
         MIR::Set.new(MIR::FieldGet.new(ctx_ident, sp_field), promise_expr_mir, false),
       ]
       captured_promise_guard_name = T.let(nil, T.nilable(String))
-      captured_names = (ctx[:captured] || {}).keys.map(&:to_s)
+      captured_names = ctx.captured.keys.map(&:to_s)
       promise_root = AST.root_identifier(next_tail.promise_ast) rescue nil
       if promise_root && captured_names.include?(promise_root.name.to_s)
         captured_promise_guard_name = "#{promise_root.name}_moved"

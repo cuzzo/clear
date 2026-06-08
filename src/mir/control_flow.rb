@@ -26,6 +26,7 @@ require_relative "../semantic/capability_plan"
 require_relative "cleanup_entry"
 require_relative "placement"
 require_relative "../semantic/local_binding_facts"
+require_relative "../semantic/ownership_identity"
 
 module MIRControlFlowExpr
   extend T::Sig
@@ -311,6 +312,7 @@ end
 class OwnershipDataflow
     extend T::Sig
   include MIRControlFlowExpr
+  PlaceId = OwnershipIdentity::PlaceId
 
   UNINIT      = :uninit
   OWNED       = :owned
@@ -358,6 +360,38 @@ class OwnershipDataflow
     sig { returns(Integer) }
     def hash
       state.hash
+    end
+  end
+
+  class OwnershipSnapshot
+    extend T::Sig
+
+    sig { params(entries: T::Hash[PlaceId, OwnerEntry]).void }
+    def initialize(entries:)
+      @entries = T.let(entries.freeze, T::Hash[PlaceId, OwnerEntry])
+    end
+
+    sig { params(state: T::Hash[String, OwnerEntry]).returns(OwnershipSnapshot) }
+    def self.from_state(state)
+      entries = T.let({}, T::Hash[PlaceId, OwnerEntry])
+      state.each { |name, entry| entries[PlaceId.from_path(name)] = entry }
+      new(entries: entries)
+    end
+
+    sig { params(name: String).returns(T.nilable(OwnerEntry)) }
+    def entry_for(name)
+      @entries[PlaceId.from_path(name)]
+    end
+
+    sig { params(block: T.proc.params(place: PlaceId, entry: OwnerEntry).void).void }
+    def each_entry(&block)
+      @entries.each { |place, entry| block.call(place, entry) }
+      nil
+    end
+
+    sig { returns(T::Set[String]) }
+    def names
+      @entries.keys.map(&:path).to_set
     end
   end
 
@@ -471,13 +505,19 @@ class OwnershipDataflow
     @block_in[@cfg.exit_block.id] || {}
   end
 
+  sig { returns(OwnershipSnapshot) }
+  def exit_snapshot
+    OwnershipSnapshot.from_state(exit_states)
+  end
+
   # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
   # Backward-compatible: reads .state from OwnerEntry.
   sig { returns(T::Hash[String, CleanupDecision]) }
   def cleanup_summary
     summary = T.let({}, T::Hash[String, CleanupDecision])
-    exit_states.each do |name, entry|
-      st = entry.is_a?(OwnerEntry) ? entry.state : entry
+    exit_snapshot.each_entry do |place, entry|
+      name = place.path
+      st = entry.state
       case st
       when OWNED
         summary[name] = CleanupDecision.new(needs_cleanup: true, has_moved_guard: false)

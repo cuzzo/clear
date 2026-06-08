@@ -130,6 +130,25 @@ RSpec.describe OwnershipDataflow do
       expect(summary["a"].has_moved_guard).to be false
     end
 
+    it "exposes a typed PlaceId snapshot for exit ownership state" do
+      src = <<~SRC
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          RETURN;
+        END
+      SRC
+      df = analyze(src, "main")
+      snapshot = df.exit_snapshot
+      yielded = []
+
+      snapshot.each_entry { |place, entry| yielded << [place, entry.state] }
+
+      expect(snapshot.names).to eq(Set["a"])
+      expect(snapshot.entry_for("a").state).to eq(:owned)
+      expect(yielded).to include([OwnershipDataflow::PlaceId.from_path("a"), :owned])
+    end
+
     it "reports has_moved_guard for maybe_moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }

@@ -12,6 +12,7 @@ require_relative "../ast/ast"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator/helpers/function_signature"
 require_relative "local_binding_facts"
+require_relative "ownership_identity"
 
 module EscapeAnalysis
     extend T::Sig
@@ -23,10 +24,21 @@ module EscapeAnalysis
   AssignmentTarget = T.type_alias { T.any(String, Symbol, AST::Node) }
 
   class EscapePlacementFact < T::Struct
+    extend T::Sig
+
     const :fn_name, String
-    const :symbol_name, String
-    const :binding_id, Integer
+    const :binding, OwnershipIdentity::BindingId
     const :reason, Symbol
+
+    sig { returns(String) }
+    def symbol_name
+      binding.name
+    end
+
+    sig { returns(Integer) }
+    def binding_id
+      binding.binding_id
+    end
   end
 
   class FunctionFacts < T::Struct
@@ -74,8 +86,7 @@ module EscapeAnalysis
 
         placements << EscapePlacementFact.new(
           fn_name: facts.fn.name.to_s,
-          symbol_name: name,
-          binding_id: sym.binding_id,
+          binding: OwnershipIdentity::BindingId.from_symbol(name, sym),
           reason: reason
         )
       end

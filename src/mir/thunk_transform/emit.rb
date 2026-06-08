@@ -113,50 +113,48 @@ module ThunkTransform
       }
 
       param_init_fields = params.map { |p|
-        ".#{p[:name]} = #{p[:name]}"
+        frame_init(p[:name].to_s, MIR::Ident.new(p[:name].to_s))
       }
 
       context = current_frame_context(fn_node)
 
       base_cases = plan.base_cases.map { |bc|
-        cond  = render_expr(bc.cond_ast, lowering, context)
-        value = render_expr(bc.value_ast, lowering, context)
         MIR::ThunkBaseCase.new(
-          cond_zig: cond,
-          value_zig: value,
+          cond: lower_frame_expr(bc.cond_ast, lowering, context),
+          value: lower_frame_expr(bc.value_ast, lowering, context),
         )
       }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
         param = params[i]
         Kernel.raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
-        rendered = render_expr(arg, lowering, context)
-        ".#{param[:name]} = #{rendered}"
+        frame_init(param[:name].to_s, lower_frame_expr(arg, lowering, context))
       }
 
-      combine_lhs_zig = render_expr(plan.combine_lhs, lowering, context)
+      combine_lhs = lower_frame_expr(plan.combine_lhs, lowering, context)
       op_zig = OP_TO_ZIG.fetch(plan.combine_op) {
         Kernel.raise "thunk: unsupported op #{plan.combine_op}"
       }
       yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
 
       MIR::ThunkTrampoline.new(
-        fn_node.name,
-        ret_zig,
-        param_field_decls,
-        param_init_fields,
-        base_cases,
-        recurse_arg_inits,
-        combine_lhs_zig,
-        op_zig,
-        yield_line
+        fn_name: fn_node.name,
+        ret_zig: ret_zig,
+        param_field_decls: param_field_decls,
+        param_init_fields: param_init_fields,
+        base_cases: base_cases,
+        recurse_arg_inits: recurse_arg_inits,
+        combine_lhs: combine_lhs,
+        op_zig: op_zig,
+        yield_line: yield_line,
       )
     end
 
     # Lower an AST expression through the surrounding MIRLowering, rewrite
-    # frame-bound param references structurally, then emit Zig from MIR.
-    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(String) }
-    def render_expr(ast_expr, lowering, context)
+    # frame-bound param references structurally, and leave rendering to
+    # MIREmitter.
+    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(MIR::Node) }
+    def lower_frame_expr(ast_expr, lowering, context)
       lowering_api = T.unsafe(lowering)
       mir =
         if lowering_api.respond_to?(:with_fiber_capture_map)
@@ -166,7 +164,12 @@ module ThunkTransform
         else
           lowering_api.lower(ast_expr)
         end
-      lowering_api.send(:emit_expr, bind_frame_refs(mir, context)).to_s
+      bind_frame_refs(T.cast(mir, MIR::Node), context)
+    end
+
+    sig { params(field_name: String, value: MIR::Node).returns(MIR::ThunkFrameInit) }
+    def frame_init(field_name, value)
+      MIR::ThunkFrameInit.new(field_name: field_name, value: value)
     end
 
     sig { params(fn_node: AST::FunctionDef).returns(FrameBindingContext) }
@@ -311,16 +314,16 @@ module ThunkTransform
       cycle_fns = mtp.cycle_fns
 
       variants = cycle_fns.map { |cf|
-        {
+        MIR::ThunkVariant.new(
           name: cf.name,
           param_field_decls: function_params(cf).map { |p|
             "#{p[:name]}: #{param_zig_type(p, lowering)},"
           },
-        }
+        )
       }
 
       initial_fields = function_params(fn_node).map { |p|
-        ".#{p[:name]} = #{p[:name]}"
+        frame_init(p[:name].to_s, MIR::Ident.new(p[:name].to_s))
       }
 
       arms = cycle_fns.map { |cf|
@@ -330,13 +333,13 @@ module ThunkTransform
       yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
 
       MIR::MutualThunkTrampoline.new(
-        fn_node.name,
-        ret_zig,
-        variants,
-        fn_node.name,
-        initial_fields,
-        arms,
-        yield_line
+        fn_name: fn_node.name,
+        ret_zig: ret_zig,
+        variants: variants,
+        initial_variant: fn_node.name,
+        initial_fields: initial_fields,
+        arms: arms,
+        yield_line: yield_line,
       )
     end
 
@@ -349,11 +352,9 @@ module ThunkTransform
       context = mutual_frame_context(cf)
 
       base_cases = own_plan.base_cases.map { |bc|
-        cond = render_expr(bc.cond_ast, lowering, context)
-        value = render_expr(bc.value_ast, lowering, context)
         MIR::ThunkBaseCase.new(
-          cond_zig: cond,
-          value_zig: value,
+          cond: lower_frame_expr(bc.cond_ast, lowering, context),
+          value: lower_frame_expr(bc.value_ast, lowering, context),
         )
       }
 
@@ -363,9 +364,8 @@ module ThunkTransform
       Kernel.raise "thunk: target arg/param count mismatch for '#{cf.name}' -> '#{target_fn}'" \
         if target_args.length != target_params.length
       arg_inits = target_args.each_with_index.map { |arg, i|
-        rendered = render_expr(arg, lowering, context)
         target_param = target_params.fetch(i)
-        ".#{target_param[:name]} = #{rendered}"
+        frame_init(target_param[:name].to_s, lower_frame_expr(arg, lowering, context))
       }
       _ = ret_zig
 

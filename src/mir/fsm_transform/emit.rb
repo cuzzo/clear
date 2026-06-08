@@ -18,6 +18,10 @@ require "sorbet-runtime"
 require "set"
 require_relative "../mir"
 require_relative "../fsm_wrapper_emitter"
+require_relative "context"
+require_relative "segments"
+require_relative "recursive_splitter"
+require_relative "liveness"
 require_relative "suspend_resolvers"
 
 module FsmTransform
@@ -26,7 +30,7 @@ module FsmTransform
     module_function
 
     PromotableFsmValue = T.type_alias { T.any(MIR::Node, Object) }
-    FsmBodyStmt = T.type_alias { T.any(MIR::Node, String) }
+    FsmBodyEmission = T.type_alias { T.any(MIR::Node, String) }
     FsmTail = T.type_alias do
       T.any(
         MIR::FsmTailDone,
@@ -52,6 +56,47 @@ module FsmTransform
       )
     end
 
+    class FsmBodyItem < T::Struct
+      extend T::Sig
+
+      const :emission, FsmBodyEmission
+      const :fact_node_value, T.nilable(MIR::Node)
+      const :blank_value, T::Boolean
+
+      sig { params(node: MIR::Node).returns(FsmBodyItem) }
+      def self.mir(node)
+        FsmBodyItem.new(
+          emission: node,
+          fact_node_value: node,
+          blank_value: false,
+        )
+      end
+
+      sig { params(zig: String).returns(FsmBodyItem) }
+      def self.opaque_zig(zig)
+        FsmBodyItem.new(
+          emission: zig,
+          fact_node_value: nil,
+          blank_value: zig.strip.empty?,
+        )
+      end
+
+      sig { returns(FsmBodyEmission) }
+      def emit_value
+        emission
+      end
+
+      sig { returns(T.nilable(MIR::Node)) }
+      def fact_node
+        fact_node_value
+      end
+
+      sig { returns(T::Boolean) }
+      def blank?
+        blank_value
+      end
+    end
+
     class FsmSegmentFacts < T::Struct
       extend T::Sig
 
@@ -67,116 +112,12 @@ module FsmTransform
       end
     end
 
-    class FsmEmitContext < T::Struct
-      extend T::Sig
-
-      const :id, Integer
-      const :bg_rt, String
-      const :blk_label, String
-      const :ctx_type, String
-      const :promise_zig, String
-      const :capture_fields, String
-      const :alloc_var, String
-      const :promise_var, String
-      const :ctx_var, String
-      const :rt_name, String
-      const :promoted_decls, String
-      const :capture_inits, String
-      const :captured, T::Hash[String, Object]
-      const :capture_close_zig, T::Hash[String, String]
-      const :pointer_captures, T::Set[String]
-      const :extra_ctx_fields, T::Array[String]
-      const :recursive_promoted_names, T::Array[String]
-      const :fresh_heap_cleanup_names, T::Array[String]
-      const :arena_init_flag, T::Boolean
-      const :is_void, T::Boolean
-      const :pin_mode, T.nilable(T.any(T::Boolean, Symbol))
-      const :parallel, T::Boolean
-      const :profile_site_id, T.nilable(Integer)
-      const :profile_line, T.nilable(Integer)
-      const :profile_column, T.nilable(Integer)
-      prop :destroy_actions, T::Array[MIR::FsmDestroyAction], default: []
-
-      sig { params(raw: T::Hash[Symbol, T.nilable(Object)]).returns(FsmEmitContext) }
-      def self.from_hash(raw)
-        FsmEmitContext.new(
-          id: T.cast(raw.fetch(:id), Integer),
-          bg_rt: T.cast(raw.fetch(:bg_rt), String),
-          blk_label: T.cast(raw.fetch(:blk_label), String),
-          ctx_type: T.cast(raw.fetch(:ctx_type), String),
-          promise_zig: T.cast(raw.fetch(:promise_zig), String),
-          capture_fields: T.cast(raw.fetch(:capture_fields), String),
-          alloc_var: T.cast(raw.fetch(:alloc_var), String),
-          promise_var: T.cast(raw.fetch(:promise_var), String),
-          ctx_var: T.cast(raw.fetch(:ctx_var), String),
-          rt_name: T.cast(raw.fetch(:rt_name), String),
-          promoted_decls: T.cast(raw[:promoted_decls] || "", String),
-          capture_inits: T.cast(raw[:capture_inits] || "", String),
-          captured: T.cast(raw[:captured] || {}, T::Hash[String, Object]),
-          capture_close_zig: T.cast(raw[:capture_close_zig] || {}, T::Hash[String, String]),
-          pointer_captures: T.cast(raw[:pointer_captures] || Set.new, T::Set[String]),
-          extra_ctx_fields: T.cast(raw[:extra_ctx_fields] || [], T::Array[String]),
-          recursive_promoted_names: T.cast(raw[:recursive_promoted_names] || [], T::Array[String]),
-          fresh_heap_cleanup_names: T.cast(raw[:fresh_heap_cleanup_names] || [], T::Array[String]),
-          arena_init_flag: raw[:arena_init_flag] == true,
-          is_void: raw[:is_void] == true,
-          pin_mode: T.cast(raw[:pin_mode], T.nilable(T.any(T::Boolean, Symbol))),
-          parallel: raw[:parallel] == true,
-          profile_site_id: T.cast(raw[:profile_site_id], T.nilable(Integer)),
-          profile_line: T.cast(raw[:profile_line], T.nilable(Integer)),
-          profile_column: T.cast(raw[:profile_column], T.nilable(Integer)),
-        )
-      end
-
-      sig { params(fields: T::Array[String]).returns(FsmEmitContext) }
-      def with_extra_ctx_fields(fields)
-        FsmEmitContext.new(
-          id: id,
-          bg_rt: bg_rt,
-          blk_label: blk_label,
-          ctx_type: ctx_type,
-          promise_zig: promise_zig,
-          capture_fields: capture_fields,
-          alloc_var: alloc_var,
-          promise_var: promise_var,
-          ctx_var: ctx_var,
-          rt_name: rt_name,
-          promoted_decls: promoted_decls,
-          capture_inits: capture_inits,
-          captured: captured,
-          capture_close_zig: capture_close_zig,
-          pointer_captures: pointer_captures,
-          extra_ctx_fields: fields,
-          recursive_promoted_names: recursive_promoted_names,
-          fresh_heap_cleanup_names: fresh_heap_cleanup_names,
-          arena_init_flag: arena_init_flag,
-          is_void: is_void,
-          pin_mode: pin_mode,
-          parallel: parallel,
-          profile_site_id: profile_site_id,
-          profile_line: profile_line,
-          profile_column: profile_column,
-          destroy_actions: destroy_actions,
-        )
-      end
-
-      sig { params(key: Symbol).returns(T.nilable(Object)) }
-      def [](key)
-        case key
-        when :id then id
-        when :bg_rt then bg_rt
-        when :captured then captured
-        else nil
-        end
-      end
-    end
-
     class FsmSegmentSpec < T::Struct
       extend T::Sig
 
       const :index, Integer
-      const :prologue_stmts, T::Array[FsmBodyStmt], default: []
-      const :body_stmts, T::Array[FsmBodyStmt], default: []
+      const :prologue_stmts, T::Array[FsmBodyItem], default: []
+      const :body_stmts, T::Array[FsmBodyItem], default: []
       const :structure_stmts, T::Array[MIR::Node], default: []
       const :tail, SegmentTail
       const :descriptor, T.nilable(MIR::SuspendDescriptor), default: nil
@@ -305,17 +246,17 @@ module FsmTransform
       #    matters once the recursive splitter produces non-linear
       #    segment graphs -- a suspend at position K can resume to
       #    any position M, and M's body must run K's bind.
-      bind_for_index = {}
+      bind_for_index = T.let({}, T::Hash[Integer, T::Array[FsmBodyItem]])
       segment_specs.each do |s|
         d = s.descriptor
         next unless d && d.bind_stmts && !d.bind_stmts.empty?
         target = tail_resume_target(s.tail) || (segment_specs.index(s) || 0) + 1
-        bind_for_index[target] = d.bind_stmts
+        bind_for_index[target] = fsm_body_mir_items(d.bind_stmts)
       end
 
       body_fn_names_by_index = T.let({}, T::Hash[Integer, String])
       member_fns = segment_specs.filter_map do |spec|
-        body = []
+        body = T.let([], T::Array[FsmBodyItem])
         body.concat(spec.prologue_stmts)
         incoming_bind = bind_for_index[spec.index]
         fn_name = spec.fn_name
@@ -327,15 +268,15 @@ module FsmTransform
         body_fn_names_by_index[spec.index] = fn_name
         body.concat(spec.body_stmts)
         if (d = spec.descriptor)
-          body.concat(d.setup_stmts || [])
+          body.concat(fsm_body_mir_items(d.setup_stmts || []))
         end
         body.compact!
-        body.reject! { |s| s.is_a?(String) && s.strip.empty? }
+        body.reject!(&:blank?)
 
         rt_suppress = spec.rt_suppress
 
         MIR::FsmMemberFn.new(
-          fn_name, id, bg_rt, rt_suppress, body,
+          fn_name, id, bg_rt, rt_suppress, fsm_body_emit_values(body),
           spec.extra_prologue_zig,
         )
       end
@@ -411,14 +352,14 @@ module FsmTransform
       capture_names = captured.keys.map(&:to_s)
       captures = capture_names.filter_map do |name|
         next nil unless cleanup_names.include?(name)
-        { name: name, cleanup_at: :finalize }
+        MIR::FsmCaptureFact.new(name: name, cleanup_at: :finalize)
       end
       steps = segment_specs.map do |spec|
-        {
+        MIR::FsmStepFact.new(
           index: spec.index,
           reads: spec.facts.ctx_reads,
           cleanups: [],
-        }
+        )
       end
       structure = MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
       structure.required_move_guards = segment_specs.flat_map { |spec| spec.facts.required_move_guards }.uniq
@@ -507,11 +448,61 @@ module FsmTransform
       roots
     end
 
-    sig { params(stmts: T::Array[FsmBodyStmt]).returns(T::Array[MIR::Node]) }
+    sig { params(stmts: T::Array[FsmBodyItem]).returns(T::Array[MIR::Node]) }
     def fsm_body_mir_nodes(stmts)
-      stmts.filter_map do |stmt|
-        stmt if stmt.is_a?(MIR::Emittable)
-      end
+      stmts.filter_map(&:fact_node)
+    end
+
+    sig { params(node: MIR::Node).returns(FsmBodyItem) }
+    def fsm_body_mir_item(node)
+      FsmBodyItem.mir(node)
+    end
+
+    sig { params(zig: String).returns(FsmBodyItem) }
+    def fsm_body_opaque_zig_item(zig)
+      FsmBodyItem.opaque_zig(zig)
+    end
+
+    sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[FsmBodyItem]) }
+    def fsm_body_mir_items(nodes)
+      nodes.map { |node| fsm_body_mir_item(node) }
+    end
+
+    sig { params(lines: T::Array[String]).returns(T::Array[FsmBodyItem]) }
+    def fsm_body_opaque_zig_items(lines)
+      lines.map { |line| fsm_body_opaque_zig_item(line) }
+    end
+
+    sig { params(items: T::Array[FsmBodyItem]).returns(T::Array[FsmBodyEmission]) }
+    def fsm_body_emit_values(items)
+      items.map(&:emit_value)
+    end
+
+    sig { params(items: T::Array[FsmBodyItem]).returns(String) }
+    def fsm_body_joined_text(items)
+      fsm_body_emit_values(items).join("\n")
+    end
+
+    sig { params(stmts: T::Array[MIR::Node], bg_rt: String).returns(String) }
+    def render_fsm_pre_body_zig(stmts, bg_rt)
+      emitter = MIREmitter.new
+      emitter.rt_name = bg_rt
+      emitter.emit_stmt_list(stmts)
+    end
+
+    sig { params(ctx_id: Integer, lock_index: Integer, lock_ref_zig: String, unlock_method: String).returns(T::Array[MIR::Node]) }
+    def prior_lock_release_stmts(ctx_id, lock_index, lock_ref_zig, unlock_method)
+      [
+        MIR::Set.new(
+          MIR::Ident.new("__ctx_#{ctx_id}.__lock_held_#{lock_index}"),
+          MIR::Lit.new("false"),
+          false,
+        ),
+        MIR::ExprStmt.new(
+          MIR::MethodCall.new(MIR::Ident.new(lock_ref_zig), unlock_method, [], false),
+          false,
+        ),
+      ]
     end
 
     sig { params(facts: T::Array[MIR::FsmOwnershipFact]).returns(T::Array[MIR::FsmOwnershipFact]) }
@@ -882,9 +873,10 @@ module FsmTransform
       seg_mir_codes = T.let([], T::Array[T::Array[MIR::Node]])
       seg_codes = segments.each_with_index.map do |seg, i|
         ast_stmts, raw_stmts = seg.stmts.partition { |s| !s.is_a?(String) }
+        raw_stmt_lines = raw_stmts.filter_map { |stmt| stmt if stmt.is_a?(String) }
         if ast_stmts.empty?
           seg_mir_codes[i] = []
-          raw_stmts
+          fsm_body_opaque_zig_items(raw_stmt_lines)
         else
           want_result = !is_void && result_seg_indices.include?(seg.index)
           inherited_capture_names = T.let(
@@ -930,7 +922,9 @@ module FsmTransform
           lowered = lowering_api.with_fiber_capture_map({}, rt_override: bg_rt) do
             lowering_api.render_mir_list(lowered_mir)
           end
-          [lowered, *raw_stmts].reject { |s| s.is_a?(String) && s.strip.empty? }
+          fsm_body_opaque_zig_items(
+            [lowered, *raw_stmt_lines].reject { |s| s.strip.empty? }
+          )
         end
       end
 
@@ -980,17 +974,18 @@ module FsmTransform
 
         body_stmts = Array(seg_codes[i])
         if void_assign_zig && seg.tail.is_a?(Segments::Done)
-          body_stmts = body_stmts + [void_assign_zig]
+          body_stmts = body_stmts + [fsm_body_opaque_zig_item(void_assign_zig)]
         end
 
-        rt_used = (body_stmts.join("\n") +
-                   (prologue || []).join("\n") +
+        prologue_stmts = fsm_body_opaque_zig_items(prologue || [])
+        rt_used = (fsm_body_joined_text(body_stmts) +
+                   fsm_body_joined_text(prologue_stmts) +
                    (descriptor && descriptor.setup_stmts || []).join("\n")).include?(bg_rt)
         rt_suppress = rt_used ? "" : "_ = &#{bg_rt};"
 
         FsmSegmentSpec.new(
           index:           seg.index,
-          prologue_stmts:  prologue || [],
+          prologue_stmts:  prologue_stmts,
           body_stmts:      body_stmts,
           structure_stmts: seg_mir_codes[i] || [],
           tail:            seg.tail,
@@ -1282,7 +1277,6 @@ module FsmTransform
             capture_map:      capture_map,
             pointer_captures: pointer_captures,
             bg_rt:            bg_rt,
-            rt_name:          ctx.rt_name,
           )
         else
           lowering_api.default_fsm_lock_error_arm_split(id)
@@ -1292,14 +1286,16 @@ module FsmTransform
       # Fail body: clear + unlock any prior caps in reverse, then
       # user clause. The held flag for THIS cap stays false (we
       # never set it because acquire failed).
-      prior_release_lines = prior_meta.each_with_index.map { |m, i|
-        ["__ctx_#{id}.__lock_held_#{i} = false;",
-         "#{m[:lock_field_ref]}.#{m[:unlock_method]}();"]
-      }.reverse.flatten
-      fail_body_pieces = []
-      fail_body_pieces.concat(prior_release_lines)
-      fail_body_pieces << err.body_zig unless err.body_zig.strip.empty?
-      fail_pre_body = fail_body_pieces.empty? ? nil : fail_body_pieces.join("\n")
+      prior_release_stmts = prior_meta.each_with_index.map do |m, i|
+        prior_lock_release_stmts(
+          id,
+          i,
+          m[:lock_field_ref].to_s,
+          m[:unlock_method].to_s,
+        )
+      end.reverse.flatten
+      fail_body_stmts = prior_release_stmts + err.body_stmts
+      fail_pre_body = render_fsm_pre_body_zig(fail_body_stmts, bg_rt)
 
       fail_tail = err.exit_kind == :done ?
                     Segments::Done.new(nil) :
@@ -1401,13 +1397,12 @@ module FsmTransform
     # encountered. Returns { seg.index => sp_N }. Suspends that are
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
-    sig { params(segments: T.untyped).returns(T::Hash[Integer, Integer]) }
+    sig { params(segments: T::Array[Segments::Segment]).returns(T::Hash[Integer, Integer]) }
     def compute_sp_indices(segments)
-      T.bind(self, T.untyped) rescue nil
-      out = {}
-      counter = 1
-      visited = {}
-      stack = [0]
+      out = T.let({}, T::Hash[Integer, Integer])
+      counter = T.let(1, Integer)
+      visited = T.let({}, T::Hash[Integer, T::Boolean])
+      stack = T.let([0], T::Array[Integer])
       while (idx = stack.pop)
         next if visited[idx]
         visited[idx] = true

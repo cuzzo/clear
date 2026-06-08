@@ -43,6 +43,19 @@ class MIRPass
     end
   end
 
+  class OwnershipPreparationPlan < T::Struct
+    extend T::Sig
+
+    const :function, AST::FunctionDef
+    const :bindings, T::Hash[String, CleanupEntry]
+    const :can_fail_fns, T::Set[String]
+
+    sig { returns(T::Boolean) }
+    def cleanup_bindings?
+      !bindings.empty?
+    end
+  end
+
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
   sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
@@ -57,6 +70,14 @@ class MIRPass
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
+    @can_fail_fns = T.let(self.class.fallible_function_names(fn_nodes), T::Set[String])
+  end
+
+  sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
+  def self.fallible_function_names(fn_nodes)
+    fn_nodes.each_with_object(Set.new) do |(name, fn), names|
+      names << name if fn.can_fail
+    end
   end
 
   sig { params(bindings: T::Hash[String, CleanupEntry], name: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -351,48 +372,36 @@ class MIRPass
 
   sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
   def transform_function!(fn)
-    bindings = @cleanup_bindings[fn.name] || {}
-    has_bindings = bindings && !bindings.empty?
+    plan = ownership_preparation_plan(fn)
+    return unless plan.cleanup_bindings?
 
-    return unless has_bindings
+    bindings = plan.bindings
+    function = plan.function
+    bc_errors = BorrowChecker.check(function, schema_lookup: @schema_lookup)
+    raise "[Borrow Error] #{bc_errors.first}" unless bc_errors.empty?
 
-    # Borrow checking: verify no moves of borrowed variables inside WITH blocks.
-    bc_errors = BorrowChecker.check(fn, schema_lookup: @schema_lookup)
-    unless bc_errors.empty?
-      raise "[Borrow Error] #{bc_errors.first}"
-    end
+    pre_mark_bg_resource_captures!(function, bindings)
+    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_fns, schema_lookup: @schema_lookup)
+    dataflow.cleanup_decisions!(function, bindings)
+    @last_dataflow = T.let(dataflow, T.untyped)
+    mark_returned_cleanup_bindings!(function, bindings)
+    function.cleanup_bindings = bindings
+    CleanupClassifier.stamp_field_pre_cleanups!(function.body, bindings, schema_lookup: @schema_lookup)
 
-    # Pre-mark bindings captured by BG blocks so has_moved_guard is correct
-    # BEFORE cleanup_decisions! runs and Drops snapshot cleanup_entry.
-    pre_mark_bg_resource_captures!(fn, bindings) if has_bindings
-
-    # Ownership dataflow refines cleanup decisions: determines WHETHER cleanup
-    # is needed and WHETHER a moved guard is required, based on per-path analysis.
-    # Also runs UseAfterMoveChecker (Rule 1: no use after move).
-    @last_dataflow = T.let(nil, T.untyped)
-    if has_bindings
-      can_fail_fns = Set.new
-      @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
-      @last_dataflow = T.let(OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup), T.untyped)
-      @last_dataflow.cleanup_decisions!(fn, bindings)
-    end
-
-    mark_returned_cleanup_bindings!(fn, bindings)
-
-    # Stamp cleanup_bindings on the FunctionDef so MIRLowering can read
-    # allocator + cleanup info without relying on old Drop siblings.
-    fn.cleanup_bindings = bindings
-
-    # Stamp field pre-cleanup info directly on Assignment nodes.
-    CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
-
-    @current_transform_fn = T.let(fn, T.untyped)
-    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings))
+    @current_transform_fn = T.let(function, T.untyped)
+    function.body = transform_body(function.body, WalkCtx.new(bindings: bindings))
     @current_transform_fn = T.let(nil, T.untyped)
+    stamp_moved_guard_info!(function, bindings)
+    nil
+  end
 
-    # Build moved_guard_info map: { var_name => bool } for all bindings.
-    stamp_moved_guard_info!(fn, bindings) if has_bindings
-
+  sig { params(fn: AST::FunctionDef).returns(OwnershipPreparationPlan) }
+  def ownership_preparation_plan(fn)
+    OwnershipPreparationPlan.new(
+      function: fn,
+      bindings: @cleanup_bindings[fn.name] || {},
+      can_fail_fns: @can_fail_fns,
+    )
   end
 
   # Pre-mark bindings that are captured by BG blocks as needing moved guards.

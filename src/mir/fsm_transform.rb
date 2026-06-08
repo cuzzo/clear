@@ -119,12 +119,33 @@ module FsmTransform
     liveness = Liveness.analyze(segments, ctx)
     ext_ctx = (ctx[:extra_ctx_fields] || []) +
               field_locals.map { |p| "#{p[:name]}: #{p[:zig_type]} = undefined," }
-    emit_ctx = Emit::FsmEmitContext.from_hash(
-      T.cast(
-        ctx.merge(extra_ctx_fields: ext_ctx,
-                  recursive_promoted_names: promoted_names),
-        T::Hash[Symbol, T.nilable(Object)],
-      ),
+    raw_ctx = T.cast(ctx, T::Hash[Symbol, T.nilable(Object)])
+    emit_ctx = Emit::FsmEmitContext.new(
+      id: T.cast(raw_ctx.fetch(:id), Integer),
+      bg_rt: T.cast(raw_ctx.fetch(:bg_rt), String),
+      blk_label: T.cast(raw_ctx.fetch(:blk_label), String),
+      ctx_type: T.cast(raw_ctx.fetch(:ctx_type), String),
+      promise_zig: T.cast(raw_ctx.fetch(:promise_zig), String),
+      capture_fields: T.cast(raw_ctx.fetch(:capture_fields), String),
+      alloc_var: T.cast(raw_ctx.fetch(:alloc_var), String),
+      promise_var: T.cast(raw_ctx.fetch(:promise_var), String),
+      ctx_var: T.cast(raw_ctx.fetch(:ctx_var), String),
+      rt_name: T.cast(raw_ctx.fetch(:rt_name), String),
+      promoted_decls: T.cast(raw_ctx[:promoted_decls] || "", String),
+      capture_inits: T.cast(raw_ctx[:capture_inits] || "", String),
+      captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, Object]),
+      capture_close_zig: T.cast(raw_ctx[:capture_close_zig] || {}, T::Hash[String, String]),
+      pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
+      extra_ctx_fields: T.cast(ext_ctx, T::Array[String]),
+      recursive_promoted_names: promoted_names,
+      fresh_heap_cleanup_names: T.cast(raw_ctx[:fresh_heap_cleanup_names] || [], T::Array[String]),
+      arena_init_flag: raw_ctx[:arena_init_flag] == true,
+      is_void: raw_ctx[:is_void] == true,
+      pin_mode: T.cast(raw_ctx[:pin_mode], T.nilable(T.any(T::Boolean, Symbol))),
+      parallel: raw_ctx[:parallel] == true,
+      profile_site_id: T.cast(raw_ctx[:profile_site_id], T.nilable(Integer)),
+      profile_line: T.cast(raw_ctx[:profile_line], T.nilable(Integer)),
+      profile_column: T.cast(raw_ctx[:profile_column], T.nilable(Integer)),
     )
     Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering)
   end

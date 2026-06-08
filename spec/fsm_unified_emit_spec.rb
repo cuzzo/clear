@@ -18,6 +18,14 @@ require_relative '../src/mir/fsm_transform/emit'
 # dispatch from segment tails, and wrap in FsmGenericBody.
 
 RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
+  def fsm_body_items(stmts)
+    stmts.map do |stmt|
+      stmt.is_a?(String) ?
+        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
+        FsmTransform::Emit.fsm_body_mir_item(stmt)
+    end
+  end
+
   def fsm_code(result)
     expect(result).to be_a(MIR::FsmLoweringResult)
     result.code
@@ -26,8 +34,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
   def fsm_spec(attrs)
     FsmTransform::Emit::FsmSegmentSpec.new(
       index: attrs.fetch(:index),
-      prologue_stmts: attrs.fetch(:prologue_stmts, []),
-      body_stmts: attrs.fetch(:body_stmts, []),
+      prologue_stmts: fsm_body_items(attrs.fetch(:prologue_stmts, [])),
+      body_stmts: fsm_body_items(attrs.fetch(:body_stmts, [])),
       structure_stmts: attrs.fetch(:structure_stmts, []),
       tail: attrs.fetch(:tail),
       descriptor: attrs[:descriptor],
@@ -57,7 +65,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
   }
 
   let(:base_ctx) {
-    FsmTransform::Emit::FsmEmitContext.from_hash(
+    FsmTransform::Emit::FsmEmitContext.new(
       id: 0,
       bg_rt: "__rt_bg0",
       blk_label: "__bg0",
@@ -71,6 +79,18 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       pin_mode: false,
       promoted_decls: "",
       capture_inits: "",
+      captured: {},
+      capture_close_zig: {},
+      pointer_captures: Set.new,
+      extra_ctx_fields: [],
+      recursive_promoted_names: [],
+      fresh_heap_cleanup_names: [],
+      arena_init_flag: false,
+      is_void: false,
+      parallel: false,
+      profile_site_id: nil,
+      profile_line: nil,
+      profile_column: nil,
     )
   }
 

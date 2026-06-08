@@ -52,6 +52,15 @@ RSpec.describe MIREmitter do
     expect(e.send(:emit_body_flow, [signal], :ret_no_commit)).to eq("__flow.* = .{ .kind = .raise_no_commit };\nreturn;")
   end
 
+  it "emits public statement lists through the standard body renderer" do
+    stmts = [
+      MIR::Set.new(MIR::Ident.new("x"), MIR::Lit.new("1"), false),
+      MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("lock"), "unlock", [], false), false),
+    ]
+
+    expect(e.emit_stmt_list(stmts)).to eq("x = 1;\nlock.unlock();")
+  end
+
   it "emits promise-list NEXT await-all expressions" do
     node = MIR::NextPromiseList.new(
       MIR::Ident.new("futures"),

@@ -751,16 +751,10 @@ RSpec.describe "annotator branch gap burndown" do
     ann = quiet_annotator
     ident = AST::Identifier.new(token, "owned")
     ident.full_type = Type.new(:Box)
-    existing = OwnershipGraph::Node.new(
-      path: "owned",
-      kind: :owned,
-      state: :moved,
-      type_info: Type.new(:Box),
-      scope_depth: 0,
-      line: 1,
-      move_action: :give
-    )
-    ann.instance_variable_get(:@og).instance_variable_get(:@nodes)["owned"] = existing
+    og = T.cast(ann.instance_variable_get(:@og), OwnershipGraph)
+    og.declare("owned", kind: :owned, type_info: Type.new(:Box), scope_depth: 0, line: 1)
+    og.mark_moved("owned", action: :give)
+    existing = T.must(og.nodes["owned"])
     consumer = Type.new(:Box)
 
     ann.send(:move_if_not_copyable!, ident, action: :takes, consumer_param_type: consumer)

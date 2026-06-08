@@ -67,6 +67,50 @@ RSpec.describe CleanupClassifier do
     node
   end
 
+  def var_decl(name:, type:, value:, mutable: false, storage: :heap)
+    node = AST::VarDecl.new(tok, name, type, value, mutable)
+    node.full_type = type
+    node.symbol = SymbolEntry.new(reg: name, type: type, mutable: mutable, storage: storage)
+    node
+  end
+
+  describe "binding cleanup facts" do
+    it "snapshots symbol and node provenance once for classification" do
+      node = var_decl(
+        name: "name",
+        type: Type.new(:String),
+        value: AST::Literal.new(tok, :STRING, "borrowed", :rodata),
+        storage: :borrow,
+      )
+      node.resource_close_zig = "{0}.close()"
+
+      facts = CleanupClassifier.send(:binding_cleanup_facts, node)
+
+      expect(facts.borrow_provenance).to be(true)
+      expect(facts.rodata_provenance).to be(false)
+      expect(facts.heap_storage).to be(false)
+      expect(facts.empty_initializer).to be(false)
+      expect(facts.mutable_binding_mutated).to be(false)
+      expect(facts.resource_close_zig).to eq("{0}.close()")
+    end
+
+    it "keeps mutated mutable optional nil bindings cleanup-eligible" do
+      node = var_decl(
+        name: "maybe",
+        type: Type.optional_of(:String),
+        value: AST::Literal.new(tok, :NIL, nil),
+        mutable: true,
+      )
+      node.var_mutated = true
+      facts = CleanupClassifier.send(:binding_cleanup_facts, node)
+
+      expect(facts.empty_initializer).to be(true)
+      expect(facts.mutable_binding_mutated).to be(true)
+      expect(CleanupClassifier.send(:classify_binding, Type.optional_of(:String), node, schema_lookup_for))
+        .to be_present
+    end
+  end
+
   # =========================================================================
   # Container borrows: data owned by container, no cleanup
   # =========================================================================

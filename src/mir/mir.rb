@@ -1438,14 +1438,48 @@ module MIR
   class ThunkBaseCase < T::Struct
     extend T::Sig
 
-    const :cond_zig, String
-    const :value_zig, String
+    const :cond, Emittable
+    const :value, Emittable
 
-    sig { params(key: Symbol).returns(String) }
+    sig { params(key: Symbol).returns(Emittable) }
     def fetch(key)
       case key
-      when :cond_zig then cond_zig
-      when :value_zig then value_zig
+      when :cond then cond
+      when :value then value
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class ThunkFrameInit < T::Struct
+    extend T::Sig
+
+    const :field_name, String
+    const :value, Emittable
+
+    sig { params(key: Symbol).returns(T.any(String, Emittable)) }
+    def fetch(key)
+      case key
+      when :field_name then field_name
+      when :value then value
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class ThunkVariant < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :param_field_decls, T::Array[String]
+
+    sig { params(key: Symbol).returns(T.any(String, T::Array[String])) }
+    def fetch(key)
+      case key
+      when :name then name
+      when :param_field_decls then param_field_decls
       else
         Kernel.raise KeyError, "key not found: #{key.inspect}"
       end
@@ -1458,9 +1492,9 @@ module MIR
     const :variant_name, String
     const :base_cases, T::Array[ThunkBaseCase]
     const :target_variant, String
-    const :target_arg_inits, T::Array[String]
+    const :target_arg_inits, T::Array[ThunkFrameInit]
 
-    sig { params(key: Symbol).returns(T.any(String, T::Array[ThunkBaseCase], T::Array[String])) }
+    sig { params(key: Symbol).returns(T.any(String, T::Array[ThunkBaseCase], T::Array[ThunkFrameInit])) }
     def fetch(key)
       case key
       when :variant_name then variant_name
@@ -1473,34 +1507,36 @@ module MIR
     end
   end
 
-  ThunkTrampoline = Struct.new(
-    :fn_name,
-    :ret_zig,
-    :param_field_decls,
-    :param_init_fields,
-    :base_cases,
-    :recurse_arg_inits,
-    :combine_lhs_zig,
-    :op_zig,
-    :yield_line
-  ) do
+  class ThunkTrampoline < T::Struct
+    extend T::Sig
     include Stmt
+
+    const :fn_name, String
+    const :ret_zig, String
+    const :param_field_decls, T::Array[String]
+    const :param_init_fields, T::Array[ThunkFrameInit]
+    const :base_cases, T::Array[ThunkBaseCase]
+    const :recurse_arg_inits, T::Array[ThunkFrameInit]
+    const :combine_lhs, Emittable
+    const :op_zig, String
+    const :yield_line, String
   end
 
   # Mutual THUNK trampoline body. This is the tagged-union sibling of
   # ThunkTrampoline: each mutually-recursive function is a union variant,
   # and each arm either returns a base-case value or overwrites current
   # with the next variant's payload.
-  MutualThunkTrampoline = Struct.new(
-    :fn_name,
-    :ret_zig,
-    :variants,
-    :initial_variant,
-    :initial_fields,
-    :arms,
-    :yield_line
-  ) do
+  class MutualThunkTrampoline < T::Struct
+    extend T::Sig
     include Stmt
+
+    const :fn_name, String
+    const :ret_zig, String
+    const :variants, T::Array[ThunkVariant]
+    const :initial_variant, String
+    const :initial_fields, T::Array[ThunkFrameInit]
+    const :arms, T::Array[MutualThunkArm]
+    const :yield_line, String
   end
 
   # Background block. Wraps raw Zig code for a fiber spawn but exposes
@@ -1592,19 +1628,14 @@ module MIR
   #     the cleanup inside that step's body — a UAF if any later
   #     step reads the capture.
   #
-  #   state_fields: [
-  #     { name: String, finalize_at: :finalize | Integer | nil,
-  #       error_handled_in_setup: Boolean }
-  #   ]
+  #   state_fields: [FsmStateFieldFact]
   #     Per-call state struct fields (e.g. rf_buf, rf_fd). Cleanup
   #     placement is template-driven via :fsm_state_finalize. The
   #     `error_handled_in_setup` flag indicates step-0 errdefer
   #     coverage so the checker can require it on heap-alloc'd
   #     state fields.
   #
-  #   steps: [
-  #     { index: Integer, reads: [String], cleanups: [String] }
-  #   ]
+  #   steps: [FsmStepFact]
   #     One entry per step. `reads` is the set of binding names
   #     (captures + state_fields + ctx fields) referenced in this
   #     step's emitted body, derived by scanning the rendered Zig
@@ -1631,6 +1662,23 @@ module MIR
   #     rf_buf — which is finalized — through `content`). The
   #     checker rejects on any non-nil value: the slice would
   #     escape the FSM but its backing storage dies at finalize.
+  class FsmCaptureFact < T::Struct
+    const :name, String
+    const :cleanup_at, T.any(Symbol, Integer)
+  end
+
+  class FsmStateFieldFact < T::Struct
+    const :name, String
+    const :finalize_at, T.nilable(T.any(Symbol, Integer))
+    const :error_handled_in_setup, T::Boolean, default: false
+  end
+
+  class FsmStepFact < T::Struct
+    const :index, Integer
+    const :reads, T::Array[String], default: []
+    const :cleanups, T::Array[String], default: []
+  end
+
   class FsmDestroyCleanup < T::Struct
     extend T::Sig
 

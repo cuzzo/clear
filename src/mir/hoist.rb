@@ -593,9 +593,8 @@ module MIRHoistLowering
   sig { params(mir: T.untyped, ast_node: T.untyped, context: String).returns(Type) }
   def mir_alloc_mark_type_info(mir, ast_node = nil, context: "MIR allocation")
     return T.unsafe(self).alloc_mark_type_info(mir, ast_node, context) if ast_node
-    if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-      return Type.new(T.must(T.unsafe(mir).result_type))
-    end
+    explicit_type = mir_explicit_result_type(mir)
+    return explicit_type if explicit_type
 
     alloc = mir_owned_alloc(mir) || :heap
     case mir
@@ -623,15 +622,9 @@ module MIRHoistLowering
     when MIR::Cast, MIR::TryExpr
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
     when MIR::Call, MIR::MethodCall, MIR::TailCall
-      sig = mir.respond_to?(:callable_contract) ? mir.callable_contract&.signature : nil
-      raise "#{context}: allocating #{mir.class} has no callable return type" unless sig
-
-      Type.new(sig.return_type)
+      raise "#{context}: allocating #{mir.class} has no callable return type"
     when MIR::InlineZig, MIR::InlineBc
-      sig = FunctionSignature.unwrap(mir.stdlib_def)
-      raise "#{context}: allocating #{mir.class} has no typed stdlib return" unless sig
-
-      Type.new(sig.return_type)
+      raise "#{context}: allocating #{mir.class} has no typed stdlib return"
     when MIR::BgBlock
       raise "#{context}: allocating MIR::BgBlock has no result type"
     when MIR::Pipeline
@@ -655,6 +648,18 @@ module MIRHoistLowering
     else
       raise "#{context}: unhandled allocating MIR node #{mir.class}"
     end
+  end
+
+  sig { params(mir: T.untyped).returns(T.nilable(Type)) }
+  def mir_explicit_result_type(mir)
+    raw_type = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
+      T.unsafe(mir).result_type
+    elsif mir.respond_to?(:callable_contract)
+      T.unsafe(mir).callable_contract&.signature&.return_type
+    elsif mir.is_a?(MIR::InlineZig) || mir.is_a?(MIR::InlineBc)
+      FunctionSignature.unwrap(mir.stdlib_def)&.return_type
+    end
+    raw_type ? Type.new(raw_type) : nil
   end
 
   sig { params(mir: MIR::BlockExpr).returns(T.nilable(Type)) }
@@ -1200,16 +1205,10 @@ module MIRHoistLowering
   sig { params(mir: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def typed_cleanup_entry_for_mir_result(mir, alloc: :heap)
     T.bind(self, MIRLowering) rescue nil
-    typed_result = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-      T.unsafe(mir).result_type
-    elsif mir.respond_to?(:callable_contract)
-      T.unsafe(mir).callable_contract&.signature&.return_type
-    elsif mir.is_a?(MIR::InlineZig) || mir.is_a?(MIR::InlineBc)
-      FunctionSignature.unwrap(mir.stdlib_def)&.return_type
-    end
+    typed_result = mir_explicit_result_type(mir)
 
     if typed_result
-      ti = Type.new(T.must(typed_result))
+      ti = typed_result
       ti = ti.success_type || ti
       return heap_string_entry(alloc: alloc) if ti.string?
       return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection? ||
@@ -1240,8 +1239,8 @@ module MIRHoistLowering
     when :heap_string
       heap_string_entry(alloc: alloc)
     when :uniform
-      if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-        typed = Type.new(T.must(T.unsafe(mir).result_type))
+      typed = mir_explicit_result_type(mir)
+      if typed
         return uniform_cleanup_entry(typed.zig_type, alloc: alloc)
       end
       typed = mir.is_a?(MIR::BlockExpr) ? block_expr_result_type(mir) : nil

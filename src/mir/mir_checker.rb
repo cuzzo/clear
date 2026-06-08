@@ -86,10 +86,12 @@ require "set"
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
 require_relative "../semantic/pass_state"
+require_relative "../semantic/ownership_identity"
 require_relative "placement"
 
 class MIRChecker
   extend T::Sig
+  PlaceId = OwnershipIdentity::PlaceId
 
   AggregateExpr = T.type_alias {
     T.nilable(T.any(MIR::Emittable, String, Symbol, Integer, Float, T::Boolean))
@@ -192,6 +194,85 @@ class MIRChecker
 
     sig { params(other: LinearOwnershipState).returns(T::Boolean) }
     def same_state?(other)
+      snapshot.same_state?(other.snapshot)
+    end
+
+    sig { returns(String) }
+    def summary
+      snapshot.summary
+    end
+
+    sig { returns(LinearOwnershipSnapshot) }
+    def snapshot
+      LinearOwnershipSnapshot.from_state(self)
+    end
+  end
+
+  class LinearOwnershipSnapshot
+    extend T::Sig
+
+    sig do
+      params(
+        owned: T::Set[PlaceId],
+        released: T::Set[PlaceId],
+        maybe_released: T::Set[PlaceId],
+        cleanup_finalizers: T::Set[PlaceId],
+        guarded_finalizers: T::Set[PlaceId],
+        err_finalizers: T::Set[PlaceId],
+        pending_return_transfers: T::Set[PlaceId],
+        pending_block_transfers: T::Set[PlaceId],
+        alloc_kinds: T::Hash[PlaceId, Symbol]
+      ).void
+    end
+    def initialize(
+      owned:,
+      released:,
+      maybe_released:,
+      cleanup_finalizers:,
+      guarded_finalizers:,
+      err_finalizers:,
+      pending_return_transfers:,
+      pending_block_transfers:,
+      alloc_kinds:
+    )
+      @owned = T.let(owned.freeze, T::Set[PlaceId])
+      @released = T.let(released.freeze, T::Set[PlaceId])
+      @maybe_released = T.let(maybe_released.freeze, T::Set[PlaceId])
+      @cleanup_finalizers = T.let(cleanup_finalizers.freeze, T::Set[PlaceId])
+      @guarded_finalizers = T.let(guarded_finalizers.freeze, T::Set[PlaceId])
+      @err_finalizers = T.let(err_finalizers.freeze, T::Set[PlaceId])
+      @pending_return_transfers = T.let(pending_return_transfers.freeze, T::Set[PlaceId])
+      @pending_block_transfers = T.let(pending_block_transfers.freeze, T::Set[PlaceId])
+      @alloc_kinds = T.let(alloc_kinds.freeze, T::Hash[PlaceId, Symbol])
+    end
+
+    sig { params(state: LinearOwnershipState).returns(LinearOwnershipSnapshot) }
+    def self.from_state(state)
+      new(
+        owned: place_set(state.owned),
+        released: place_set(state.released),
+        maybe_released: place_set(state.maybe_released),
+        cleanup_finalizers: place_set(state.cleanup_finalizers),
+        guarded_finalizers: place_set(state.guarded_finalizers),
+        err_finalizers: place_set(state.err_finalizers),
+        pending_return_transfers: place_set(state.pending_return_transfers),
+        pending_block_transfers: place_set(state.pending_block_transfers),
+        alloc_kinds: place_hash(state.alloc_kinds),
+      )
+    end
+
+    sig { returns(T::Set[PlaceId]) }
+    def owned
+      @owned
+    end
+
+    sig { returns(T::Hash[PlaceId, Symbol]) }
+    def alloc_kinds
+      @alloc_kinds
+    end
+
+    sig { params(other: LinearOwnershipSnapshot).returns(T::Boolean) }
+    def same_state?(other)
       @owned == other.owned &&
         @released == other.released &&
         @maybe_released == other.maybe_released &&
@@ -206,16 +287,44 @@ class MIRChecker
     sig { returns(String) }
     def summary
       [
-        "owned=#{@owned.to_a.sort.join(",")}",
-        "released=#{@released.to_a.sort.join(",")}",
-        "maybe=#{@maybe_released.to_a.sort.join(",")}",
-        "cleanup=#{@cleanup_finalizers.to_a.sort.join(",")}",
-        "guarded=#{@guarded_finalizers.to_a.sort.join(",")}",
-        "err=#{@err_finalizers.to_a.sort.join(",")}",
-        "return=#{@pending_return_transfers.to_a.sort.join(",")}",
-        "block=#{@pending_block_transfers.to_a.sort.join(",")}",
-        "alloc=#{@alloc_kinds.map { |k, v| "#{k}:#{v}" }.sort.join(",")}",
+        "owned=#{format_places(@owned)}",
+        "released=#{format_places(@released)}",
+        "maybe=#{format_places(@maybe_released)}",
+        "cleanup=#{format_places(@cleanup_finalizers)}",
+        "guarded=#{format_places(@guarded_finalizers)}",
+        "err=#{format_places(@err_finalizers)}",
+        "return=#{format_places(@pending_return_transfers)}",
+        "block=#{format_places(@pending_block_transfers)}",
+        "alloc=#{@alloc_kinds.map { |place, alloc| "#{place.path}:#{alloc}" }.sort.join(",")}",
       ].join(" ")
+    end
+
+    protected
+
+    sig { returns(T::Set[PlaceId]) }
+    attr_reader :released, :maybe_released, :cleanup_finalizers,
+      :guarded_finalizers, :err_finalizers, :pending_return_transfers,
+      :pending_block_transfers
+
+    private
+
+    sig { params(names: T::Set[String]).returns(T::Set[PlaceId]) }
+    def self.place_set(names)
+      out = T.let(Set.new, T::Set[PlaceId])
+      names.each { |name| out.add(PlaceId.from_path(name)) }
+      out
+    end
+
+    sig { params(allocs: T::Hash[String, Symbol]).returns(T::Hash[PlaceId, Symbol]) }
+    def self.place_hash(allocs)
+      out = T.let({}, T::Hash[PlaceId, Symbol])
+      allocs.each { |name, alloc| out[PlaceId.from_path(name)] = alloc }
+      out
+    end
+
+    sig { params(places: T::Set[PlaceId]).returns(String) }
+    def format_places(places)
+      places.map(&:path).sort.join(",")
     end
   end
 
@@ -254,8 +363,8 @@ class MIRChecker
     return_transfers = T.let(Set.new, NameSet)
     errdefer_destroy_names = T.let(Set.new, NameSet)
     hpt_leaks = []
-    owned_return_lets = []
-    owned_result_lets = []
+    owned_return_lets = T.let([], T::Array[MIR::Let])
+    owned_result_lets = T.let([], T::Array[MIR::Let])
     inline_alloc_nodes = T.let([], T::Array[MIR::InlineZig])
     all_zig_nodes = T.let([], T::Array[MIR::Node])  # InlineZig nodes scanned for CheatLib contracts
     inline_alloc_node_ids = T.let({}, T::Hash[Integer, T::Boolean])
@@ -1345,7 +1454,7 @@ class MIRChecker
     stdlib_owned_return?(node) && node.stdlib_def.fixed_return?
   end
 
-  sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(lets: T::Array[MIR::Let], allocs: AllocMarksByName).void }
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
       marks = allocs[let.name]
@@ -1371,7 +1480,7 @@ class MIRChecker
     effect.alloc
   end
 
-  sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(lets: T::Array[MIR::Let], allocs: AllocMarksByName).void }
   def verify_owned_result_alloc_marks!(lets, allocs)
     lets.each do |let|
       expected_alloc = expr_owned_result_alloc(let.init)
@@ -1449,16 +1558,16 @@ class MIRChecker
   sig { params(structure: T.nilable(MIR::FsmStructure), source: T.untyped).returns(NilClass) }
   def self.check_fsm_structure!(structure, source: nil)
     return unless structure
-    captures = structure.captures || []
+    captures = T.cast(structure.captures || [], T::Array[MIR::FsmCaptureFact])
     finalize_cleanups = structure.finalize_cleanups || []
-    steps = structure.steps || []
+    steps = T.cast(structure.steps || [], T::Array[MIR::FsmStepFact])
 
     # INV-FSM-CAPTURE-FINALIZE
     captures.each do |cap|
-      unless cap[:cleanup_at] == :finalize
+      unless cap.cleanup_at == :finalize
         raise FsmStructureError, format_fsm_error(
           "INV-FSM-CAPTURE-FINALIZE",
-          "capture '#{cap[:name]}' has cleanup_at=#{cap[:cleanup_at].inspect}; " \
+          "capture '#{cap.name}' has cleanup_at=#{cap.cleanup_at.inspect}; " \
           "captures may be read by any step and MUST cleanup at FSM finalize. " \
           "Cleanup placed in an earlier step fires before later steps run -> UAF.",
           source,
@@ -1468,10 +1577,10 @@ class MIRChecker
 
     # INV-FSM-CAPTURE-CLEANUP-PRESENT
     captures.each do |cap|
-      unless finalize_cleanups.include?(cap[:name])
+      unless finalize_cleanups.include?(cap.name)
         raise FsmStructureError, format_fsm_error(
           "INV-FSM-CAPTURE-CLEANUP-PRESENT",
-          "capture '#{cap[:name]}' has no entry in finalize_cleanups; " \
+          "capture '#{cap.name}' has no entry in finalize_cleanups; " \
           "the heap-dupe at spawn would leak.",
           source,
         )
@@ -1488,18 +1597,18 @@ class MIRChecker
     # INV-FSM-STEP-READS-LIVE
     cleanup_step_index = {}
     steps.each do |step|
-      (step[:cleanups] || []).each { |name| cleanup_step_index[name] = step[:index] }
+      step.cleanups.each { |name| cleanup_step_index[name] = step.index }
     end
     steps.each do |step|
-      (step[:reads] || []).each do |name|
+      step.reads.each do |name|
         next if finalize_cleanups.include?(name)  # lives until end
         cleanup_step = cleanup_step_index[name]
         next if cleanup_step.nil?                  # no cleanup recorded -> separate invariant
-        next if cleanup_step >= step[:index]
+        next if cleanup_step >= step.index
         raise FsmStructureError, format_fsm_error(
           "INV-FSM-STEP-READS-LIVE",
-          "step #{step[:index]} reads '#{name}' but its cleanup was placed in " \
-          "step #{cleanup_step} (earlier). The defer fires before step #{step[:index]} " \
+          "step #{step.index} reads '#{name}' but its cleanup was placed in " \
+          "step #{cleanup_step} (earlier). The defer fires before step #{step.index} " \
           "runs -> cross-step UAF.",
           source,
         )

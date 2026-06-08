@@ -4,8 +4,16 @@ require_relative "../src/mir/fsm_transform/emit"
 require_relative "../src/mir/fsm_transform/segments"
 
 RSpec.describe FsmTransform::Emit do
+  def fsm_body_items(stmts)
+    stmts.map do |stmt|
+      stmt.is_a?(String) ?
+        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
+        FsmTransform::Emit.fsm_body_mir_item(stmt)
+    end
+  end
+
   def fsm_ctx(overrides = {})
-    FsmTransform::Emit::FsmEmitContext.from_hash({
+    raw = {
       id: 1,
       bg_rt: "__rt_bg1",
       blk_label: "__bg1",
@@ -24,14 +32,48 @@ RSpec.describe FsmTransform::Emit do
       is_void: true,
       pin_mode: false,
       parallel: false,
-    }.merge(overrides))
+      extra_ctx_fields: [],
+      recursive_promoted_names: [],
+      fresh_heap_cleanup_names: [],
+      arena_init_flag: false,
+      profile_site_id: nil,
+      profile_line: nil,
+      profile_column: nil,
+    }.merge(overrides)
+    FsmTransform::Emit::FsmEmitContext.new(
+      id: raw.fetch(:id),
+      bg_rt: raw.fetch(:bg_rt),
+      blk_label: raw.fetch(:blk_label),
+      ctx_type: raw.fetch(:ctx_type),
+      promise_zig: raw.fetch(:promise_zig),
+      capture_fields: raw.fetch(:capture_fields),
+      alloc_var: raw.fetch(:alloc_var),
+      promise_var: raw.fetch(:promise_var),
+      ctx_var: raw.fetch(:ctx_var),
+      rt_name: raw.fetch(:rt_name),
+      promoted_decls: raw.fetch(:promoted_decls),
+      capture_inits: raw.fetch(:capture_inits),
+      captured: raw.fetch(:captured),
+      capture_close_zig: raw.fetch(:capture_close_zig),
+      pointer_captures: raw.fetch(:pointer_captures),
+      extra_ctx_fields: raw.fetch(:extra_ctx_fields),
+      recursive_promoted_names: raw.fetch(:recursive_promoted_names),
+      fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
+      arena_init_flag: raw.fetch(:arena_init_flag),
+      is_void: raw.fetch(:is_void),
+      pin_mode: raw.fetch(:pin_mode),
+      parallel: raw.fetch(:parallel),
+      profile_site_id: raw.fetch(:profile_site_id),
+      profile_line: raw.fetch(:profile_line),
+      profile_column: raw.fetch(:profile_column),
+    )
   end
 
   def fsm_spec(attrs)
     FsmTransform::Emit::FsmSegmentSpec.new(
       index: attrs.fetch(:index),
-      prologue_stmts: attrs.fetch(:prologue_stmts, []),
-      body_stmts: attrs.fetch(:body_stmts, []),
+      prologue_stmts: fsm_body_items(attrs.fetch(:prologue_stmts, [])),
+      body_stmts: fsm_body_items(attrs.fetch(:body_stmts, [])),
       structure_stmts: attrs.fetch(:structure_stmts, []),
       tail: attrs.fetch(:tail),
       descriptor: attrs[:descriptor],
@@ -53,13 +95,12 @@ RSpec.describe FsmTransform::Emit do
       .to eq("// CLEAR_PROFILE_TASK_SITE id=11 kind=BG line=22 column=5 dispatch=parallel form=fsm")
   end
 
-  it "exposes typed context compatibility reads and cloning" do
+  it "exposes typed context cloning" do
     ctx = fsm_ctx(id: 12, bg_rt: "__rt_bg12", captured: { "payload" => :stub })
 
-    expect(ctx[:id]).to eq(12)
-    expect(ctx[:bg_rt]).to eq("__rt_bg12")
-    expect(ctx[:captured]).to eq("payload" => :stub)
-    expect(ctx[:missing]).to be_nil
+    expect(ctx.id).to eq(12)
+    expect(ctx.bg_rt).to eq("__rt_bg12")
+    expect(ctx.captured).to eq("payload" => :stub)
 
     updated = ctx.with_extra_ctx_fields(["payload: i64 = 0,"])
     expect(updated.extra_ctx_fields).to eq(["payload: i64 = 0,"])
@@ -138,6 +179,20 @@ RSpec.describe FsmTransform::Emit do
       .to eq("payload_moved")
   end
 
+  it "keeps rendered FSM body text opaque to safety fact collection" do
+    rendered_guard = FsmTransform::Emit.fsm_body_opaque_zig_item("__ctx_12.payload_moved = true;")
+    structural_guard = FsmTransform::Emit.fsm_body_mir_item(
+      MIR::MoveMark.new("__ctx_12.payload")
+    )
+
+    expect(rendered_guard.fact_node).to be_nil
+    expect(rendered_guard.emit_value).to eq("__ctx_12.payload_moved = true;")
+    expect(structural_guard.fact_node).to be_a(MIR::MoveMark)
+    expect(structural_guard.emit_value).to be_a(MIR::MoveMark)
+    expect(FsmTransform::Emit.fsm_body_mir_nodes([rendered_guard, structural_guard]))
+      .to eq([structural_guard.fact_node])
+  end
+
   it "builds FSM structure from materialized segment facts" do
     cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
     action = MIR::FsmDestroyCleanup.new(
@@ -172,8 +227,15 @@ RSpec.describe FsmTransform::Emit do
       33,
     )
 
-    expect(structure.steps).to eq([{ index: 0, reads: ["payload"], cleanups: [] }])
-    expect(structure.captures).to eq([{ name: "payload", cleanup_at: :finalize }])
+    step = T.must(structure.steps.first)
+    capture = T.must(structure.captures.first)
+    expect(step).to be_a(MIR::FsmStepFact)
+    expect(step.index).to eq(0)
+    expect(step.reads).to eq(["payload"])
+    expect(step.cleanups).to eq([])
+    expect(capture).to be_a(MIR::FsmCaptureFact)
+    expect(capture.name).to eq("payload")
+    expect(capture.cleanup_at).to eq(:finalize)
     expect(structure.required_move_guards).to eq(["payload"])
     expect(structure.move_guard_writes).to eq(["payload"])
     expect(structure.ownership_facts).to eq([fact])
@@ -339,7 +401,7 @@ RSpec.describe FsmTransform::Emit do
       end
 
       def default_fsm_lock_error_arm_split(_id)
-        Struct.new(:body_zig, :exit_kind).new("", :goto_post)
+        Struct.new(:body_stmts, :exit_kind).new([], :goto_post)
       end
     }.new
     with_node = Struct.new(:lock_error_clause).new(nil)
@@ -390,9 +452,12 @@ RSpec.describe FsmTransform::Emit do
         }
       end
 
-      def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:, capture_map:, pointer_captures:, bg_rt:, rt_name:)
-        @error_calls << [clause, ctx_id, with_node, capture_map, pointer_captures, bg_rt, rt_name]
-        Struct.new(:body_zig, :exit_kind).new("handleLockError();", :done)
+      def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:, capture_map:, pointer_captures:, bg_rt:)
+        @error_calls << [clause, ctx_id, with_node, capture_map, pointer_captures, bg_rt]
+        Struct.new(:body_stmts, :exit_kind).new(
+          [MIR::ExprStmt.new(MIR::Lit.new("handleLockError()"), false)],
+          :done,
+        )
       end
     }.new
     with_node = Struct.new(:lock_error_clause).new(error_clause)
@@ -423,7 +488,6 @@ RSpec.describe FsmTransform::Emit do
       { "lock" => "__ctx_7.lock" },
       Set["lock"],
       "__rt_bg7",
-      "rt",
     ])
   end
 
@@ -445,7 +509,7 @@ RSpec.describe FsmTransform::Emit do
       end
 
       def default_fsm_lock_error_arm_split(_id)
-        Struct.new(:body_zig, :exit_kind).new("", :goto_post)
+        Struct.new(:body_stmts, :exit_kind).new([], :goto_post)
       end
     }.new
     with_node = Struct.new(:lock_error_clause).new(nil)

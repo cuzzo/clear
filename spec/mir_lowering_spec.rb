@@ -3930,11 +3930,12 @@ RSpec.describe MIRLowering do
       expect(thunk.fn_name).to eq("sum_down")
       expect(thunk.ret_zig).to eq("i64")
       expect(thunk.base_cases.length).to eq(1)
-      expect(thunk.base_cases.first.fetch(:value_zig)).to eq("0")
-      expect(thunk.combine_lhs_zig).to eq("current.n")
+      expect(MIREmitter.new.emit(thunk.base_cases.first.fetch(:value))).to eq("0")
+      expect(MIREmitter.new.emit(thunk.combine_lhs)).to eq("current.n")
       expect(thunk.op_zig).to eq("+")
       expect(thunk.recurse_arg_inits.length).to eq(1)
-      expect(thunk.recurse_arg_inits.first).to include("current.n")
+      expect(thunk.recurse_arg_inits.first).to be_a(MIR::ThunkFrameInit)
+      expect(MIREmitter.new.emit(thunk.recurse_arg_inits.first.value)).to include("current.n")
       expect(thunk.yield_line).to eq("rt.checkYield();")
       inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
       expect(inline_reasons).not_to include(:thunk_trampoline_body)
@@ -3948,7 +3949,8 @@ RSpec.describe MIRLowering do
       thunk_nodes.each do |thunk|
         expect(thunk.variants.map { |v| v.fetch(:name) }).to contain_exactly("is_even", "is_odd")
         expect(thunk.initial_variant).to eq(thunk.fn_name)
-        expect(thunk.initial_fields).to eq([".n = n"])
+        expect(thunk.initial_fields.map(&:field_name)).to eq(["n"])
+        expect(MIREmitter.new.emit(thunk.initial_fields.first.value)).to eq("n")
         expect(thunk.yield_line).to eq("rt.checkYield();")
       end
 
@@ -3956,17 +3958,17 @@ RSpec.describe MIRLowering do
       expect(even).not_to be_nil
       even_arm = even.arms.find { |a| a.fetch(:variant_name) == "is_even" }
       expect(even_arm).not_to be_nil
-      expect(even_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("true")
+      expect(MIREmitter.new.emit(even_arm.fetch(:base_cases).first.fetch(:value))).to eq("true")
       expect(even_arm.fetch(:target_variant)).to eq("is_odd")
-      expect(even_arm.fetch(:target_arg_inits).first).to include("f.n")
+      expect(MIREmitter.new.emit(even_arm.fetch(:target_arg_inits).first.value)).to include("f.n")
 
       odd = thunk_nodes.find { |n| n.fn_name == "is_odd" }
       expect(odd).not_to be_nil
       odd_arm = odd.arms.find { |a| a.fetch(:variant_name) == "is_odd" }
       expect(odd_arm).not_to be_nil
-      expect(odd_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("false")
+      expect(MIREmitter.new.emit(odd_arm.fetch(:base_cases).first.fetch(:value))).to eq("false")
       expect(odd_arm.fetch(:target_variant)).to eq("is_even")
-      expect(odd_arm.fetch(:target_arg_inits).first).to include("f.n")
+      expect(MIREmitter.new.emit(odd_arm.fetch(:target_arg_inits).first.value)).to include("f.n")
 
       inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
       expect(inline_reasons).not_to include(:thunk_trampoline_body)

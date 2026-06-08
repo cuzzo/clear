@@ -22,6 +22,14 @@ require_relative '../src/mir/fsm_transform/recursive_splitter'
 # slipped through.
 
 RSpec.describe FsmTransform::Emit do
+  def fsm_body_items(stmts)
+    stmts.map do |stmt|
+      stmt.is_a?(String) ?
+        FsmTransform::Emit.fsm_body_opaque_zig_item(stmt) :
+        FsmTransform::Emit.fsm_body_mir_item(stmt)
+    end
+  end
+
   let(:liveness_double) {
     Class.new {
       def initialize(names) ; @names = names ; end
@@ -66,15 +74,45 @@ RSpec.describe FsmTransform::Emit do
       extra_ctx_fields: [],
       recursive_promoted_names: [],
       fresh_heap_cleanup_names: [],
+      arena_init_flag: false,
+      profile_site_id: nil,
+      profile_line: nil,
+      profile_column: nil,
     }.merge(overrides)
     raw[:capture_inits] = raw[:capture_inits].join("\n") if raw[:capture_inits].is_a?(Array)
-    FsmTransform::Emit::FsmEmitContext.from_hash(raw)
+    FsmTransform::Emit::FsmEmitContext.new(
+      id: raw.fetch(:id),
+      bg_rt: raw.fetch(:bg_rt),
+      blk_label: raw.fetch(:blk_label),
+      ctx_type: raw.fetch(:ctx_type),
+      promise_zig: raw.fetch(:promise_zig),
+      capture_fields: raw.fetch(:capture_fields),
+      alloc_var: raw.fetch(:alloc_var),
+      promise_var: raw.fetch(:promise_var),
+      ctx_var: raw.fetch(:ctx_var),
+      rt_name: raw.fetch(:rt_name),
+      promoted_decls: raw.fetch(:promoted_decls),
+      capture_inits: raw.fetch(:capture_inits),
+      captured: raw.fetch(:captured),
+      capture_close_zig: raw.fetch(:capture_close_zig),
+      pointer_captures: raw.fetch(:pointer_captures),
+      extra_ctx_fields: raw.fetch(:extra_ctx_fields),
+      recursive_promoted_names: raw.fetch(:recursive_promoted_names),
+      fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
+      arena_init_flag: raw.fetch(:arena_init_flag),
+      is_void: raw.fetch(:is_void),
+      pin_mode: raw.fetch(:pin_mode),
+      parallel: raw.fetch(:parallel),
+      profile_site_id: raw.fetch(:profile_site_id),
+      profile_line: raw.fetch(:profile_line),
+      profile_column: raw.fetch(:profile_column),
+    )
   end
 
   def fsm_spec(attrs)
     FsmTransform::Emit::FsmSegmentSpec.new(
       index: attrs.fetch(:index),
-      body_stmts: attrs.fetch(:body_stmts, []),
+      body_stmts: fsm_body_items(attrs.fetch(:body_stmts, [])),
       tail: attrs.fetch(:tail),
       descriptor: attrs[:descriptor],
     )
@@ -204,7 +242,8 @@ RSpec.describe FsmTransform::Emit do
 
       expect(result).to be_a(MIR::FsmLoweringResult)
       expect(result.code).to include("__ctx_3.rt.close(__ctx_3.resource);")
-      expect(result.structure.captures).to include(name: "resource", cleanup_at: :finalize)
+      capture = T.must(result.structure.captures.find { |fact| fact.name == "resource" })
+      expect(capture.cleanup_at).to eq(:finalize)
       action = result.structure.destroy_actions.find { |entry| entry.is_a?(MIR::FsmDestroyCleanup) }
       expect(action.source_kind).to eq(:capture)
       expect(action.target_zig).to eq("__ctx_3.resource")

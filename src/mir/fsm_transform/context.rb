@@ -1,0 +1,72 @@
+# typed: strict
+
+require "sorbet-runtime"
+require "set"
+require_relative "../mir"
+
+module FsmTransform
+  module Emit
+    class FsmEmitContext < T::Struct
+      extend T::Sig
+
+      const :id, Integer
+      const :bg_rt, String
+      const :blk_label, String
+      const :ctx_type, String
+      const :promise_zig, String
+      const :capture_fields, String
+      const :alloc_var, String
+      const :promise_var, String
+      const :ctx_var, String
+      const :rt_name, String
+      const :promoted_decls, String
+      const :capture_inits, String
+      const :captured, T::Hash[String, Object]
+      const :capture_close_zig, T::Hash[String, String]
+      const :pointer_captures, T::Set[String]
+      const :extra_ctx_fields, T::Array[String]
+      const :recursive_promoted_names, T::Array[String]
+      const :fresh_heap_cleanup_names, T::Array[String]
+      const :arena_init_flag, T::Boolean
+      const :is_void, T::Boolean
+      const :pin_mode, T.nilable(T.any(T::Boolean, Symbol))
+      const :parallel, T::Boolean
+      const :profile_site_id, T.nilable(Integer)
+      const :profile_line, T.nilable(Integer)
+      const :profile_column, T.nilable(Integer)
+      prop :destroy_actions, T::Array[MIR::FsmDestroyAction], default: []
+
+      sig { params(fields: T::Array[String]).returns(FsmEmitContext) }
+      def with_extra_ctx_fields(fields)
+        FsmEmitContext.new(
+          id: id,
+          bg_rt: bg_rt,
+          blk_label: blk_label,
+          ctx_type: ctx_type,
+          promise_zig: promise_zig,
+          capture_fields: capture_fields,
+          alloc_var: alloc_var,
+          promise_var: promise_var,
+          ctx_var: ctx_var,
+          rt_name: rt_name,
+          promoted_decls: promoted_decls,
+          capture_inits: capture_inits,
+          captured: captured,
+          capture_close_zig: capture_close_zig,
+          pointer_captures: pointer_captures,
+          extra_ctx_fields: fields,
+          recursive_promoted_names: recursive_promoted_names,
+          fresh_heap_cleanup_names: fresh_heap_cleanup_names,
+          arena_init_flag: arena_init_flag,
+          is_void: is_void,
+          pin_mode: pin_mode,
+          parallel: parallel,
+          profile_site_id: profile_site_id,
+          profile_line: profile_line,
+          profile_column: profile_column,
+          destroy_actions: destroy_actions,
+        )
+      end
+    end
+  end
+end

@@ -15,44 +15,72 @@
 
 require "sorbet-runtime"
 require_relative "../ast/type"
+require_relative "ownership_identity"
 
 class OwnershipGraph
     extend T::Sig
 
   MoveConsumerParamType = T.type_alias { T.nilable(Type::TypeInput) }
+  PlaceId = OwnershipIdentity::PlaceId
 
   class LightweightSnapshot < T::Struct
     extend T::Sig
 
-    const :states, T::Hash[String, Symbol]
-    const :move_lines, T::Hash[String, Integer]
-    const :move_cols, T::Hash[String, Integer]
-    const :move_actions, T::Hash[String, Symbol]
+    const :states, T::Hash[PlaceId, Symbol]
+    const :move_lines, T::Hash[PlaceId, Integer]
+    const :move_cols, T::Hash[PlaceId, Integer]
+    const :move_actions, T::Hash[PlaceId, Symbol]
     const :edge_count, Integer
 
     sig { params(path: String).returns(T.nilable(Symbol)) }
     def state_for(path)
-      states[path]
+      state_for_place(PlaceId.from_path(path))
+    end
+
+    sig { params(place: PlaceId).returns(T.nilable(Symbol)) }
+    def state_for_place(place)
+      states[place]
     end
 
     sig { params(path: String).returns(T.nilable(Integer)) }
     def move_line_for(path)
-      move_lines[path]
+      move_line_for_place(PlaceId.from_path(path))
+    end
+
+    sig { params(place: PlaceId).returns(T.nilable(Integer)) }
+    def move_line_for_place(place)
+      move_lines[place]
     end
 
     sig { params(path: String).returns(T.nilable(Integer)) }
     def move_col_for(path)
-      move_cols[path]
+      move_col_for_place(PlaceId.from_path(path))
+    end
+
+    sig { params(place: PlaceId).returns(T.nilable(Integer)) }
+    def move_col_for_place(place)
+      move_cols[place]
     end
 
     sig { params(path: String).returns(T.nilable(Symbol)) }
     def move_action_for(path)
-      move_actions[path]
+      move_action_for_place(PlaceId.from_path(path))
+    end
+
+    sig { params(place: PlaceId).returns(T.nilable(Symbol)) }
+    def move_action_for_place(place)
+      move_actions[place]
     end
 
     sig { params(block: T.proc.params(path: String, state: Symbol).void).void }
     def each_state(&block)
-      states.each { |path, state| block.call(path, state) }
+      states.each { |place, state| block.call(place.path, state) }
+      nil
+    end
+
+    sig { params(block: T.proc.params(place: PlaceId, state: Symbol).void).void }
+    def each_place_state(&block)
+      states.each { |place, state| block.call(place, state) }
       nil
     end
   end
@@ -101,17 +129,20 @@ class OwnershipGraph
 
   sig { void }
   def initialize
-    @nodes = T.let({}, T::Hash[String, OwnershipGraph::Node])           # path => Node
+    @nodes = T.let({}, T::Hash[PlaceId, OwnershipGraph::Node])           # place => Node
     @edges = T.let([], T::Array[OwnershipGraph::Edge])           # Array of Edge
-    @edges_by_target = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[String, T::Array[OwnershipGraph::Edge]])  # target_path => [Edge]
-    @edges_by_source = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[String, T::Array[OwnershipGraph::Edge]])  # source_path => [Edge]
-    @children = T.let(Hash.new { |h, k| h[k] = T.let(Set.new, T::Set[String]) }, T::Hash[String, T::Set[String]])    # parent_path => Set of child paths
-    @completed_nodes = T.let({}, T::Hash[String, OwnershipGraph::Node])
+    @edges_by_target = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[PlaceId, T::Array[OwnershipGraph::Edge]])  # target_place => [Edge]
+    @edges_by_source = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[PlaceId, T::Array[OwnershipGraph::Edge]])  # source_place => [Edge]
+    @children = T.let(Hash.new { |h, k| h[k] = T.let(Set.new, T::Set[PlaceId]) }, T::Hash[PlaceId, T::Set[PlaceId]])    # parent_place => Set of child places
+    @completed_nodes = T.let({}, T::Hash[PlaceId, OwnershipGraph::Node])
   end
 
   sig { returns(T::Hash[String, OwnershipGraph::Node]) }
   def nodes
-    @nodes.empty? ? @completed_nodes : @nodes
+    out = T.let({}, T::Hash[String, OwnershipGraph::Node])
+    @completed_nodes.each { |place, node| out[place.path] = node }
+    @nodes.each { |place, node| out[place.path] = node }
+    out
   end
 
   sig { void }
@@ -132,8 +163,8 @@ class OwnershipGraph
   sig { params(edge: OwnershipGraph::Edge).returns(T.nilable(OwnershipGraph::Edge)) }
   def remove_edge(edge)
     @edges.delete(edge)
-    @edges_by_target[edge.to]&.delete(edge)
-    @edges_by_source[edge.from]&.delete(edge)
+    edges_to(edge.to).delete(edge)
+    edges_from(edge.from).delete(edge)
   end
 
   # ── Core Operations ───────────────────────────────────────────────
@@ -141,25 +172,25 @@ class OwnershipGraph
   # Declare a new variable or field path.
   sig { params(path: String, kind: Symbol, type_info: Type, scope_depth: Integer, line: Integer).returns(T.nilable(T::Set[String])) }
   def declare(path, kind: :affine, type_info: Type.new(:Any), scope_depth: 0, line: 0)
-    @nodes[path] = Node.new(
+    place = place_id(path)
+    @nodes[place] = Node.new(
       path: path, kind: kind, state: :live,
       type_info: type_info, scope_depth: scope_depth, line: line
     )
     # Register as child of parent path (e.g., "x.child" is child of "x")
-    if path.include?('.')
-      parent = path.rpartition('.').first
-      children_for(parent).add(path)
-    end
+    parent = place.parent
+    children_for_place(parent).add(place) if parent
+    nil
   end
 
   # Move ownership from source to target. Invalidates source and all children.
   sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[String])) }
   def transfer(from, to, at_token: nil, action: :move)
-    source = @nodes[from]
+    source = node_for(from)
     return unless source
 
     # Create target node with source's type
-    @nodes[to] = Node.new(
+    @nodes[place_id(to)] = Node.new(
       path: to, kind: source.kind, state: :live,
       type_info: source.full_type, scope_depth: source.scope_depth, line: source.line
     )
@@ -173,7 +204,7 @@ class OwnershipGraph
 
   sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
   def mark_moved(path, at_token: nil, action: :move, consumer_param_type: nil)
-    source = @nodes[path]
+    source = node_for(path)
     return unless source
     record_move_site(source, at_token, action, consumer_param_type: consumer_param_type)
     invalidate(path, source)
@@ -182,7 +213,7 @@ class OwnershipGraph
   # Add a borrow edge. Returns nil on success, error string on conflict.
   sig { params(borrower: String, source: String, mutable: T::Boolean).returns(T.nilable(String)) }
   def borrow(borrower, source, mutable: false)
-    source_node = @nodes[source]
+    source_node = node_for(source)
     return "cannot borrow '#{source}': not declared" unless source_node
     return "cannot borrow '#{source}': already moved" if source_node.moved?
 
@@ -203,28 +234,28 @@ class OwnershipGraph
   # Remove all borrow edges from a borrower.
   sig { params(borrower: String).returns(T::Array[OwnershipGraph::Edge]) }
   def release_borrow(borrower)
-    to_remove = @edges_by_source[borrower]&.select { |e| e.kind == :borrows || e.kind == :borrows_mut } || []
+    to_remove = edges_from(borrower).select { |e| e.kind == :borrows || e.kind == :borrows_mut }
     to_remove.each { |e| remove_edge(e) }
   end
 
   # Drop a path and all owned children. Returns list of paths to emit cleanup for.
   sig { params(path: String).returns(T::Array[String]) }
   def drop(path)
-    node = @nodes[path]
+    node = node_for(path)
     return [] unless node && node.live?
 
     # Collect all owned children (depth-first, reverse order for cleanup)
     owned = owned_children(path).reverse
-    to_cleanup = (owned + [path]).select { |p| @nodes[p]&.live? }
+    to_cleanup = (owned + [path]).select { |p| node_for(p)&.live? }
 
     to_cleanup.each do |p|
-      node_to_drop = @nodes[p]
+      node_to_drop = node_for(p)
       node_to_drop.state = :dropped if node_to_drop
     end
 
     # Remove borrow edges from/to dropped paths
-    dropped_set = to_cleanup.to_set
-    to_remove = @edges.select { |e| dropped_set.include?(e.from) || dropped_set.include?(e.to) }
+    dropped_set = to_cleanup.map { |p| place_id(p) }.to_set
+    to_remove = @edges.select { |e| dropped_set.include?(place_id(e.from)) || dropped_set.include?(place_id(e.to)) }
     to_remove.each { |e| remove_edge(e) }
 
     to_cleanup
@@ -232,27 +263,28 @@ class OwnershipGraph
 
   sig { params(scope_depth: Integer, archive: T::Boolean).returns(Integer) }
   def prune_scope!(scope_depth, archive: false)
-    paths = @nodes.select { |_path, node| node.scope_depth >= scope_depth }.keys
-    return 0 if paths.empty?
+    places = @nodes.select { |_place, node| node.scope_depth >= scope_depth }.keys
+    return 0 if places.empty?
 
-    @completed_nodes = paths.to_h { |path| [path, T.must(@nodes[path])] } if archive
-    path_set = paths.to_set
-    paths.each { |path| @nodes.delete(path) }
-    @edges.select { |edge| path_set.include?(edge.from) || path_set.include?(edge.to) }.each { |edge| remove_edge(edge) }
-    @children.each_value { |children| children.subtract(path_set) }
-    @children.delete_if { |parent, children| path_set.include?(parent) || children.empty? }
-    paths.size
+    @completed_nodes = places.to_h { |place| [place, T.must(@nodes[place])] } if archive
+    place_set = places.to_set
+    places.each { |place| @nodes.delete(place) }
+    @edges.select { |edge| place_set.include?(place_id(edge.from)) || place_set.include?(place_id(edge.to)) }.each { |edge| remove_edge(edge) }
+    @children.each_value { |children| children.subtract(place_set) }
+    @children.delete_if { |parent, children| place_set.include?(parent) || children.empty? }
+    places.size
   end
 
   # Check if a path can be written to (no active borrows on it or ancestors).
   sig { params(path: String).returns(T::Boolean) }
   def can_write?(path)
     # Check this path and all ancestors
-    current = path
+    current = place_id(path)
     loop do
       return false if edges_to(current).any? { |e| e.kind == :borrows || e.kind == :borrows_mut }
-      break unless current.include?('.')
-      current = current.rpartition('.').first
+      parent = current.parent
+      break unless parent
+      current = parent
     end
     true
   end
@@ -260,13 +292,13 @@ class OwnershipGraph
   # Is the path live?
   sig { params(path: String).returns(T::Boolean) }
   def live?(path)
-    @nodes[path]&.live? || false
+    node_for(path)&.live? || false
   end
 
   # Is the path moved?
   sig { params(path: String).returns(T::Boolean) }
   def moved?(path)
-    @nodes[path]&.moved? || false
+    node_for(path)&.moved? || false
   end
 
   # ── Branch Analysis ───────────────────────────────────────────────
@@ -275,19 +307,18 @@ class OwnershipGraph
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
   sig { returns(LightweightSnapshot) }
   def fork_lightweight
-    states = T.let({}, T::Hash[String, Symbol])
-    move_lines = T.let({}, T::Hash[String, Integer])
-    move_cols = T.let({}, T::Hash[String, Integer])
-    move_actions = T.let({}, T::Hash[String, Symbol])
-    @nodes.each do |k, v|
-      key = k.to_s
-      states[key] = v.state
+    states = T.let({}, T::Hash[PlaceId, Symbol])
+    move_lines = T.let({}, T::Hash[PlaceId, Integer])
+    move_cols = T.let({}, T::Hash[PlaceId, Integer])
+    move_actions = T.let({}, T::Hash[PlaceId, Symbol])
+    @nodes.each do |place, v|
+      states[place] = v.state
       move_line = v.move_line
       move_col = v.move_col
       move_action = v.move_action
-      move_lines[key] = move_line if move_line
-      move_cols[key] = move_col if move_col
-      move_actions[key] = move_action if move_action
+      move_lines[place] = move_line if move_line
+      move_cols[place] = move_col if move_col
+      move_actions[place] = move_action if move_action
     end
     LightweightSnapshot.new(
       states: states,
@@ -301,20 +332,18 @@ class OwnershipGraph
   # Restore from lightweight snapshot: reset states and truncate edges.
   sig { params(snapshot: LightweightSnapshot).void }
   def restore_lightweight(snapshot)
-    snapshot.each_state do |path, state|
-      node = @nodes[path]
+    snapshot.each_place_state do |place, state|
+      node = @nodes[place]
       next unless node
 
       node.state = state
-      node.move_line = snapshot.move_line_for(path)
-      node.move_col = snapshot.move_col_for(path)
-      node.move_action = snapshot.move_action_for(path)
+      node.move_line = snapshot.move_line_for_place(place)
+      node.move_col = snapshot.move_col_for_place(place)
+      node.move_action = snapshot.move_action_for_place(place)
     end
     target_count = snapshot.edge_count
     while @edges.size > target_count
-      removed = T.must(@edges.pop)
-      @edges_by_target[removed.to]&.delete(removed)
-      @edges_by_source[removed.from]&.delete(removed)
+      remove_edge(T.must(@edges.last))
     end
   end
 
@@ -323,10 +352,10 @@ class OwnershipGraph
   sig { params(other: OwnershipGraph).returns(T::Array[String]) }
   def merge(other)
     errors = T.let([], T::Array[String])
-    all_paths = (@nodes.keys + other.nodes.keys).uniq
+    all_paths = (nodes.keys + other.nodes.keys).uniq
 
     all_paths.each do |path|
-      mine = @nodes[path]
+      mine = node_for(path)
       theirs = other.nodes[path]
       next unless mine && theirs
 
@@ -363,7 +392,7 @@ class OwnershipGraph
   # Get the node for a path.
   sig { params(path: String).returns(T.nilable(OwnershipGraph::Node)) }
   def [](path)
-    @nodes[path] || @completed_nodes[path]
+    node_for(path) || @completed_nodes[place_id(path)]
   end
 
   # All paths that are children of the given path.
@@ -378,7 +407,7 @@ class OwnershipGraph
 
   sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(T::Set[String])) }
   def invalidate(path, move_source = nil)
-    node = @nodes[path]
+    node = node_for(path)
     return unless node
     if move_source && node != move_source
       node.move_line = move_source.move_line
@@ -387,8 +416,9 @@ class OwnershipGraph
     end
     node.state = :moved
     children_for(path).each do |child|
-      invalidate(child, move_source)  # recurse for nested children
+      invalidate(child.path, move_source)  # recurse for nested children
     end
+    nil
   end
 
   sig { params(node: OwnershipGraph::Node, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: MoveConsumerParamType).returns(T.nilable(Integer)) }
@@ -404,16 +434,17 @@ class OwnershipGraph
   sig { params(path: String, result: T::Array[String]).returns(T::Set[String]) }
   def collect_descendants(path, result)
     children_for(path).each do |child|
-      result << child
-      collect_descendants(child, result)
+      result << child.path
+      collect_descendants(child.path, result)
     end
+    result.to_set
   end
 
   sig { params(path: String).returns(T.nilable(String)) }
   def find_borrow_conflict(path)
     b = edges_to(path).find { |e| e.kind == :borrows || e.kind == :borrows_mut }
     return nil unless b
-    borrower_node = @nodes[b.from]
+    borrower_node = node_for(b.from)
     line_info = borrower_node ? " (declared at line #{borrower_node.line})" : ""
     "cannot borrow '#{path}' mutably: already borrowed by '#{b.from}'#{line_info}"
   end
@@ -425,18 +456,34 @@ class OwnershipGraph
     "cannot borrow '#{path}': mutably borrowed by '#{b.from}'"
   end
 
-  sig { params(path: String).returns(T::Array[OwnershipGraph::Edge]) }
+  sig { params(path: T.any(String, PlaceId)).returns(T::Array[OwnershipGraph::Edge]) }
   def edges_to(path)
-    @edges_by_target[path] ||= T.let([], T::Array[OwnershipGraph::Edge])
+    @edges_by_target[place_id(path)] ||= T.let([], T::Array[OwnershipGraph::Edge])
   end
 
-  sig { params(path: String).returns(T::Array[OwnershipGraph::Edge]) }
+  sig { params(path: T.any(String, PlaceId)).returns(T::Array[OwnershipGraph::Edge]) }
   def edges_from(path)
-    @edges_by_source[path] ||= T.let([], T::Array[OwnershipGraph::Edge])
+    @edges_by_source[place_id(path)] ||= T.let([], T::Array[OwnershipGraph::Edge])
   end
 
-  sig { params(path: String).returns(T::Set[String]) }
+  sig { params(path: String).returns(T::Set[PlaceId]) }
   def children_for(path)
-    @children[path] ||= T.let(Set.new, T::Set[String])
+    children_for_place(place_id(path))
   end
+
+  sig { params(place: PlaceId).returns(T::Set[PlaceId]) }
+  def children_for_place(place)
+    @children[place] ||= T.let(Set.new, T::Set[PlaceId])
+  end
+
+  sig { params(path: T.any(String, PlaceId)).returns(PlaceId) }
+  def place_id(path)
+    PlaceId.from_path(path)
+  end
+
+  sig { params(path: String).returns(T.nilable(OwnershipGraph::Node)) }
+  def node_for(path)
+    @nodes[place_id(path)] || @completed_nodes[place_id(path)]
+  end
+
 end

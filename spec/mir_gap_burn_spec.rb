@@ -577,6 +577,40 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(dataflow.send(:stmt_moves_name?, call, "captured")).to eq(true)
   end
 
+  it "builds typed MIR ownership preparation plans before mutating function bodies" do
+    main_fn = fn([])
+    fallible_fn = fn([])
+    fallible_fn.name = "fallible"
+    fallible_fn.can_fail = true
+    pass = MIRPass.new(fn_nodes: { "main" => main_fn, "fallible" => fallible_fn }, schema_lookup: ->(_name) { nil })
+
+    entry = CleanupEntry.build(:uniform, alloc: :heap)
+    pass.cleanup_bindings["main"] = { "owned" => entry }
+    plan = pass.send(:ownership_preparation_plan, main_fn)
+
+    expect(plan.function).to eq(main_fn)
+    expect(plan.bindings).to eq("owned" => entry)
+    expect(plan.cleanup_bindings?).to eq(true)
+    expect(plan.can_fail_fns).to eq(Set["fallible"])
+
+    empty = pass.send(:ownership_preparation_plan, fallible_fn)
+    expect(empty.cleanup_bindings?).to eq(false)
+  end
+
+  it "single-sources MIR result types for hoist cleanup planning" do
+    low = lowering
+    string_sig = FunctionSignature.new(params: [], return_type: Type.new(:String))
+    contract = MIR::CallableContract.new(string_sig, MIR::OwnershipContract.empty, 0)
+    call = MIR::Call.new("make", [], false, true, contract)
+    expect(low.mir_explicit_result_type(call).resolved).to eq(:String)
+
+    call.result_type = Type.new(:Int64)
+    expect(low.mir_explicit_result_type(call).resolved).to eq(:Int64)
+
+    inline = MIR::InlineZig.new("make()", "test", MIR::OwnershipContract.empty, string_sig)
+    expect(low.mir_explicit_result_type(inline).resolved).to eq(:String)
+  end
+
   it "covers MIR pass runtime, cleanup-stamping, and consumption helper edges" do
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
 
@@ -831,6 +865,8 @@ RSpec.describe "MIR gap-burn characterization" do
       binding_id: entry.binding_id,
       reason: :owning_return
     )
+    expect(fact.binding).to have_attributes(name: "local", binding_id: entry.binding_id)
+    expect(fact.binding.to_s).to eq("local##{entry.binding_id}")
   end
 
   it "retains escape placement facts on MIRPass as a phase artifact" do
@@ -2762,10 +2798,12 @@ RSpec.describe "MIR gap-burn characterization" do
     low.function_state.pending_stmts = old_pending
     seen_pointer_captures = nil
     seen_pending = nil
-    low.define_singleton_method(:emit_step_stmts) do |_body, no_result: false|
+    low.define_singleton_method(:lower_finalized_fsm_step_mir) do |_body, no_result: false|
       seen_pointer_captures = capture_state.current_bg_pointer_captures
       seen_pending = function_state.pending_stmts
-      no_result ? "handled_block();" : "handled_expr();"
+      no_result ?
+        [MIR::ExprStmt.new(MIR::Lit.new("handled_block()"), false)] :
+        [MIR::ExprStmt.new(MIR::Lit.new("handled_expr()"), false)]
     end
     low.define_singleton_method(:with_fiber_capture_map) { |_map, rt_override: nil, &blk| blk.call }
     block_clause = AST::ErrorClause.new(selectors: [], action: :block, retries: nil, token: tok,
@@ -2777,11 +2815,12 @@ RSpec.describe "MIR gap-burn characterization" do
       with_node: with_node,
       capture_map: { "cap" => "__ctx_4.cap" },
       pointer_captures: Set["fresh"],
-      bg_rt: "__rt_bg",
-      rt_name: "rt")
+      bg_rt: "__rt_bg")
 
     expect(split.exit_kind).to eq(:goto_post)
-    expect(split.body_zig).to eq("handled_block();")
+    expect(split.body_stmts.length).to eq(1)
+    expect(split.body_stmts.first).to be_a(MIR::ExprStmt)
+    expect(MIREmitter.new.emit(split.body_stmts.first)).to eq("handled_block();")
     expect(seen_pointer_captures).to eq(Set["fresh"])
     expect(seen_pending).to eq([])
     expect(low.capture_state.current_bg_pointer_captures).to eq(old_pointer_captures)

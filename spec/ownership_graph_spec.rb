@@ -262,17 +262,25 @@ RSpec.describe OwnershipGraph do
       graph.declare("x")
       graph.mark_moved("x", at_token: token, action: :give)
       snapshot = graph.fork_lightweight
+      place = OwnershipGraph::PlaceId.from_path("x")
       yielded = []
+      yielded_places = []
 
       snapshot.each_state { |path, state| yielded << [path, state] }
+      snapshot.each_place_state { |place_id, state| yielded_places << [place_id, state] }
 
       expect(snapshot.state_for("x")).to eq(:moved)
+      expect(snapshot.state_for_place(place)).to eq(:moved)
       expect(snapshot.move_line_for("x")).to eq(14)
+      expect(snapshot.move_line_for_place(place)).to eq(14)
       expect(snapshot.move_col_for("x")).to eq(6)
+      expect(snapshot.move_col_for_place(place)).to eq(6)
       expect(snapshot.move_action_for("x")).to eq(:give)
+      expect(snapshot.move_action_for_place(place)).to eq(:give)
       expect(snapshot.state_for("missing")).to be_nil
       expect(snapshot.move_line_for("missing")).to be_nil
       expect(yielded).to include(["x", :moved])
+      expect(yielded_places).to include([place, :moved])
     end
   end
 

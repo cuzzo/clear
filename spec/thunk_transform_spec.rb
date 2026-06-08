@@ -208,17 +208,18 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(node).to be_a(MIR::ThunkTrampoline)
     expect(node.fn_name).to eq("factorial")
     expect(node.base_cases.first).to be_a(MIR::ThunkBaseCase)
-    expect(node.base_cases.first.fetch(:value_zig)).to eq("1")
+    expect(FakeThunkLowering.new.emit_expr(node.base_cases.first.fetch(:cond))).to eq("current.n <= 1")
+    expect(FakeThunkLowering.new.emit_expr(node.base_cases.first.fetch(:value))).to eq("1")
     expect {
       node.base_cases.first.fetch(:missing)
     }.to raise_error(KeyError, /missing/)
-    expect(node.combine_lhs_zig).to eq("current.n")
+    expect(FakeThunkLowering.new.emit_expr(node.combine_lhs)).to eq("current.n")
     expect(node.op_zig).to eq("*")
     zig = MIREmitter.new.emit(node)
     expect(zig).to include("const Frame = struct")
     expect(zig).to include("rt.checkYield();")
     expect(zig).to include("const child = rt.heapAlloc().create(Frame) catch unreachable;")
-    expect(zig).to include(".n = current.n - 1")
+    expect(zig).to include(".n = (current.n - 1)")
     expect(zig).to include("const result: i64 = current.n * current.child_result;")
     expect(zig).to include("rt.heapAlloc().destroy(current);")
   end
@@ -330,6 +331,12 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(node.arms).to all(be_a(MIR::MutualThunkArm))
     expect(node.arms.first.fetch(:variant_name)).to eq("even")
     expect(node.arms.map { |a| a.fetch(:target_variant) }).to eq(%w[odd even])
+    expect(node.arms.first.target_arg_inits.first).to be_a(MIR::ThunkFrameInit)
+    expect(node.arms.first.target_arg_inits.first.fetch(:field_name)).to eq("n")
+    expect(FakeThunkLowering.new.emit_expr(node.arms.first.target_arg_inits.first.fetch(:value))).to eq("f.n - 1")
+    expect {
+      node.arms.first.target_arg_inits.first.fetch(:missing)
+    }.to raise_error(KeyError, /missing/)
     expect {
       node.arms.first.fetch(:missing)
     }.to raise_error(KeyError, /missing/)
@@ -340,7 +347,7 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(zig).to include("even: struct")
     expect(zig).to include("odd: struct")
     expect(zig).to include("var current: Frame = .{ .even")
-    expect(zig).to include("current = .{ .odd = .{ .n = f.n - 1 } };")
+    expect(zig).to include("current = .{ .odd = .{ .n = (f.n - 1) } };")
   end
 
   it "raises directed errors for invalid mutual thunk plans" do

@@ -32,6 +32,19 @@ require_relative "../semantic/local_binding_facts"
 module CleanupClassifier
     extend T::Sig
 
+  class BindingCleanupFacts < T::Struct
+    extend T::Sig
+
+    const :container_borrow, T::Boolean
+    const :heap_storage, T::Boolean
+    const :borrow_provenance, T::Boolean
+    const :rodata_provenance, T::Boolean
+    const :empty_initializer, T::Boolean
+    const :mutable_binding_mutated, T::Boolean
+    const :resource_close_zig, T.nilable(String)
+    const :sync, T.nilable(Symbol)
+  end
+
   # Classify all bindings in a function that need cleanup.
   #
   # @param fn_node [AST::FunctionDef]
@@ -564,22 +577,16 @@ module CleanupClassifier
   # array_struct_strings) stay as separate methods due to their size.
   sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(ti, node, schema_lookup)
-    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
-    return nil if binding_container_borrow?(node)
-    return nil if ti.optional? && optional_empty_initializer?(value) &&
-                  !(node.is_a?(AST::VarDecl) && node.mutable == true &&
-                    node.respond_to?(:var_mutated) && node.var_mutated)
-    unless node_sym&.heap_storage?
-      return nil if node_sym&.borrow_provenance? ||
-                    (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?)
+    facts = binding_cleanup_facts(node)
+    return nil if facts.container_borrow
+    return nil if ti.optional? && facts.empty_initializer && !facts.mutable_binding_mutated
+    unless facts.heap_storage
+      return nil if facts.borrow_provenance
       if ti.string? && !mutable_owning_slot?(ti, node, schema_lookup)
-        return nil if node_sym&.rodata_provenance? ||
-                      (node.respond_to?(:rodata_provenance?) && node.rodata_provenance?)
+        return nil if facts.rodata_provenance
       end
     end
 
-    sync = node_sym&.sync
     entry = nil
     schema = schema_lookup.call(ti.resolved) rescue nil
 
@@ -593,12 +600,12 @@ module CleanupClassifier
       entry[:fixed_alloc] = true
     end
     entry ||= entry(:uniform, has_moved_guard: true) if stream_handle_type?(ti)
-    if !entry && node.respond_to?(:resource_close_zig) && node.resource_close_zig
-      entry = entry(:resource, resource_close_zig: node.resource_close_zig)
+    if !entry && facts.resource_close_zig
+      entry = entry(:resource, resource_close_zig: facts.resource_close_zig)
     end
     entry ||= classify_mutable_owning_slot(ti, node, schema_lookup)
     entry ||= classify_optional(ti, schema_lookup, node: node)
-    if !entry && node_sym&.heap_storage? && ti.recursive_cleanup_shape?(schema_lookup)
+    if !entry && facts.heap_storage && ti.recursive_cleanup_shape?(schema_lookup)
       entry = entry(:uniform, has_moved_guard: false)
       entry[:fixed_alloc] = true
     end
@@ -610,13 +617,40 @@ module CleanupClassifier
     entry ||= entry(:uniform, has_moved_guard: true) if !ti.optional? && (ti.heap_ptr? || ti.indirect?)
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
     entry ||= classify_rc_or_link(ti, schema_lookup)
-    entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? || SymbolEntry.cleanup_sync?(sync)
+    entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? || SymbolEntry.cleanup_sync?(facts.sync)
     entry ||= classify_owned_string(ti, node, schema_lookup)
-    entry ||= classify_heap_storage(ti, node, schema_lookup, sync)
-    entry ||= classify_heap_composite(ti, node, schema_lookup, sync)
+    entry ||= classify_heap_storage(ti, node, schema_lookup, facts.sync)
+    entry ||= classify_heap_composite(ti, node, schema_lookup, facts.sync)
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
     finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+  end
+
+  sig { params(node: AST::Node).returns(BindingCleanupFacts) }
+  private_class_method def self.binding_cleanup_facts(node)
+    symbol = node.symbol
+    BindingCleanupFacts.new(
+      container_borrow: binding_container_borrow?(node),
+      heap_storage: node.heap_storage?,
+      borrow_provenance: node.borrow_provenance?,
+      rodata_provenance: node.rodata_provenance?,
+      empty_initializer: optional_empty_initializer?(binding_value(node)),
+      mutable_binding_mutated: node.is_a?(AST::VarDecl) && node.mutable == true && node.var_mutated == true,
+      resource_close_zig: node.resource_close_zig,
+      sync: symbol&.sync,
+    )
+  end
+
+  sig { params(node: AST::Node).returns(T.nilable(Object)) }
+  private_class_method def self.binding_value(node)
+    case node
+    when AST::VarDecl, AST::BindExpr
+      node.value
+    when AST::WhileBindLoop
+      node.condition
+    else
+      nil
+    end
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
