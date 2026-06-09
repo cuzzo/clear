@@ -2260,3 +2260,4 @@ class ZigType
   sig { returns(String) }
   def source; end
 end
+
