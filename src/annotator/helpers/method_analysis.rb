@@ -128,8 +128,8 @@ module MethodAnalysis
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = node.args[arg_idx]
-      move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil) if arg_node
+      arg_node = T.must(node.args[arg_idx])
+      move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.

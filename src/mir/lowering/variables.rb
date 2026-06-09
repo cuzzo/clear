@@ -1106,25 +1106,19 @@ module MIRLoweringVariables
         move_mark_field!(val_node)
       end
     end
-    ownership_operands = T.let([], T::Array[MIR::OwnershipOperandFact])
-    if op.intrinsic_takes_value?
-      ownership_operands = ownership_operands_for_value(
-        val,
-        val_node,
-        "indexed assignment",
-        dispatch.sink_alloc,
-      )
-    end
+    ownership_operands = ownership_operands_for_value(
+      val,
+      val_node,
+      "indexed assignment",
+      dispatch.sink_alloc,
+    )
     consumed_names = T.let(ownership_operands.filter_map { |operand|
       next nil unless operand.kind == :owned_binding
       operand.name
     }, T::Array[String])
 
     entry = op
-    ownership_contract = MIR::OwnershipContract.empty
-    if op.intrinsic_takes_value?
-      ownership_contract = MIR::OwnershipContract.consume_operands(ownership_operands)
-    end
+    ownership_contract = MIR::OwnershipContract.consume_operands(ownership_operands)
     setAt_stmt = MIR::ExprStmt.new(MIR::IndexedStore.new(
       target: target,
       index: idx,

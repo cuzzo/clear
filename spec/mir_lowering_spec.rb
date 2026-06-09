@@ -3365,6 +3365,14 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to eq("std.math.max(1, 2)")
     end
+
+    it "rejects static calls without matched stdlib metadata" do
+      node = AST::StaticCall.new(tok, "Math", "missing", [])
+      node.full_type = :Number
+
+      expect { lowering.send(:lower_static_call, node) }
+        .to raise_error(/lower_static_call: missing stdlib signature for AST::StaticCall/)
+    end
   end
 
   # =========================================================================

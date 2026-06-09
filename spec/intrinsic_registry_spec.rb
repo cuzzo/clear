@@ -98,6 +98,45 @@ RSpec.describe IntrinsicRegistry do
     expect(overridden.intrinsic_alloc(:alloc)).to eq(:sharded_receiver_storage)
   end
 
+  it "applies intrinsic overrides to empty signatures and rejects missing required templates" do
+    signature = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+
+    expect(signature.intrinsic_pattern).to be_nil
+    expect { signature.required_intrinsic_template(:zig) }
+      .to raise_error(/registry template missing :zig/)
+
+    overridden = signature.with_intrinsic_override(pattern: :identity)
+
+    expect(signature.emit).to be_nil
+    expect(overridden.intrinsic_pattern).to eq(:identity)
+    expect(overridden.intrinsic_alloc(:alloc)).to be_nil
+  end
+
+  it "classifies registry-backed collection ownership predicates from typed contracts" do
+    expect(IntrinsicRegistry.map_pair_evidence_method?("put", 2)).to be(true)
+    expect(IntrinsicRegistry.map_pair_evidence_method?("contains?", 2)).to be(false)
+    expect(IntrinsicRegistry.map_pair_evidence_method?("missing", 2)).to be(false)
+    expect(IntrinsicRegistry.map_pair_evidence_method?("put", 1)).to be(false)
+
+    expect(IntrinsicRegistry.collection_value_store_method?("append", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("insert", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("contains?", 1)).to be(false)
+    expect(IntrinsicRegistry.collection_value_store_method?("pop", 0)).to be(false)
+    expect(IntrinsicRegistry.collection_value_store_method?("missing", 1)).to be(false)
+  end
+
+  it "keeps indexed assignment set intrinsics value-consuming" do
+    INDEX_OPS.each do |kind, ops|
+      set_op = ops[:set]
+      next unless set_op
+
+      signature = IntrinsicRegistry.fs(set_op, "#{kind}_set")
+
+      expect(signature.intrinsic_takes_value?).to be(true)
+      expect(signature.takes_ownership?).to be(true)
+    end
+  end
+
   it "covers intrinsic template and allocation contract branch lookups" do
     template = IntrinsicTemplateContract.new(
       zig: "zig",

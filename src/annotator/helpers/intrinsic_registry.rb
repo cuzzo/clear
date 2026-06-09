@@ -261,7 +261,7 @@ module IntrinsicRegistry
       fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
       next false unless fs
       method_arity = fs.arity || [fs.params.length - 1, 0].max
-      !!(method_arity == arity && fs.intrinsic_contract&.behavior&.is_method &&
+      !!(method_arity == arity && fs.intrinsic_contract.behavior.is_method &&
         fs.mutates_receiver? && fs.takes_ownership?)
     end
   end

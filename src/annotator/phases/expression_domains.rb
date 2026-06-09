@@ -120,8 +120,8 @@ module Annotator
         node.stdlib_allocates = method_allocates
         node.mutates_receiver = method_def.mutates_receiver?
         node.can_fail = node.can_fail || method_def.can_fail
-        node.error_kind = method_def.intrinsic_error_kind if method_def.intrinsic_error_kind
-        node.error_type = method_def.intrinsic_error_type if method_def.intrinsic_error_type
+        node.error_kind = method_def.intrinsic_error_kind
+        node.error_type = method_def.intrinsic_error_type
         current_fn_ctx&.record_alloc_use! if method_allocates || method_def.can_fail
       end
 

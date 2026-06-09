@@ -1604,7 +1604,8 @@ module MIRLoweringFunctions
     # receiver/container allocator so cleanup remains one-allocator-per-owner.
     pre_resolved_alloc = nil
     entry = intrinsic_signature_for(node)
-    entry_alloc = entry&.intrinsic_alloc(:alloc)
+    raise "lower_intrinsic: missing stdlib signature for #{node.name}" unless entry
+    entry_alloc = entry.intrinsic_alloc(:alloc)
     if entry_alloc
       pre_resolved_alloc = resolve_alloc_sym(entry_alloc, nil, node)
     end
@@ -1651,10 +1652,9 @@ module MIRLoweringFunctions
     # When the entry has an explicit :bc_op, prefer it over the AST name so
     # the BC dispatch key is decoupled from CLEAR's surface naming
     # (e.g. fileReadAll -> :file_read_all).
-    if bc_target? && entry&.intrinsic_bc?
-      current_entry = entry
-      op_name = current_entry.intrinsic_bc_op_or(node.name.to_s.to_sym)
-      return MIR::InlineBc.new(op_name, mir_args, current_entry)
+    if bc_target? && entry.intrinsic_bc?
+      op_name = entry.intrinsic_bc_op_or(node.name.to_s.to_sym)
+      return MIR::InlineBc.new(op_name, mir_args, entry)
     end
 
     # Stdlib TAKES metadata feeds the same owned-sink materialization used by
@@ -1686,7 +1686,6 @@ module MIRLoweringFunctions
 
     result_type = Type.from_node!(node, context: "intrinsic result")
     alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
-    raise "lower_intrinsic: missing stdlib signature for #{node.name}" unless entry
     ownership_contract = MIR::OwnershipContract.empty
     if ownership_facts.takes_any?
       operands = consumed_operands.empty? ? consumed_names.map { |name|
@@ -1694,8 +1693,7 @@ module MIRLoweringFunctions
       } : consumed_operands
       ownership_contract = MIR::OwnershipContract.consume_operands(operands)
     end
-    receiver_mutates = node.mutates_receiver ||
-      (entry && entry.mutates_receiver?)
+    receiver_mutates = node.mutates_receiver || entry.mutates_receiver?
     target_var = T.let(nil, T.nilable(String))
     if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
       target_var = extract_root_var_name(node.object)

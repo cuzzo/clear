@@ -2951,9 +2951,11 @@ class MIRLowering
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
     # BC dispatches by op symbol in compile_inline_bc.
-    if node.matched_stdlib_def&.intrinsic_bc?
+    stdlib_def = FunctionSignature.unwrap(node.matched_stdlib_def)
+    raise "lower_static_call: missing stdlib signature for #{node.class.name}" unless stdlib_def
+
+    if stdlib_def.intrinsic_bc?
       mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-      stdlib_def = T.must(node.matched_stdlib_def)
       return MIR::InlineBc.new(stdlib_def.intrinsic_bc_op_or(node.method_name.to_s.to_sym), mir_args, stdlib_def)
     end
 
@@ -2961,8 +2963,6 @@ class MIRLowering
     # checker can verify their cleanup. Non-allocating args (and frame allocs)
     # stay as MIR children of the registry call expression.
     mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-    stdlib_def = FunctionSignature.unwrap(node.matched_stdlib_def)
-    raise "lower_static_call: missing stdlib signature for #{node.class.name}" unless stdlib_def
     MIR::RegistryCall.new(
       entry: stdlib_def,
       args: mir_args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },

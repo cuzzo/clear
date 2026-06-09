@@ -451,7 +451,8 @@ module EscapeAnalysis
       case node
       when AST::MethodCall
         sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-        next unless sig&.emits_allocating? && sig.mutates_receiver?
+        next unless sig
+        next unless sig.emits_allocating? && sig.mutates_receiver?
         root = AST.root_identifier(node.object)
       when AST::Assignment
         next unless node.name.is_a?(AST::GetIndex)
@@ -523,10 +524,11 @@ module EscapeAnalysis
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       case node
       when AST::MethodCall
-        sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-        next unless sig&.emits_allocating? && sig.mutates_receiver?
+        sig = FunctionSignature.unwrap(node.matched_signature)
+        next unless sig
+        next unless sig.emits_allocating? && sig.mutates_receiver?
         root = AST.root_identifier(node.object)
-        value_params = sig ? sig.params.drop(1) : []
+        value_params = sig.params.drop(1)
       when AST::Assignment
         next unless node.name.is_a?(AST::GetIndex)
         root = AST.root_identifier(node.name)

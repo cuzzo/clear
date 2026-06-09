@@ -97,6 +97,22 @@ RSpec.describe "predicate-impurity rejection" do
     end
   end
 
+  describe "typed stdlib impurity contracts" do
+    it "rejects allocating and suspending stdlib calls through matched metadata" do
+      annotator = SemanticAnnotator.new
+      alloc_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "make", 1, 1), "make", [])
+      alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_contract(allocates: true)
+
+      suspend_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "wait", 1, 1), "wait", [])
+      suspend_sig = FunctionSignature.intrinsic_contract
+      suspend_sig.emit = IntrinsicEmit.new(suspends: true)
+      suspend_call.matched_stdlib_def = suspend_sig
+
+      expect(annotator.send(:predicate_impurity_reason, alloc_call, "make")).to eq("allocates")
+      expect(annotator.send(:predicate_impurity_reason, suspend_call, "wait")).to eq("suspends")
+    end
+  end
+
   describe "user-defined fn impurity" do
     it "rejects a guard whose user-fn predicate has a non-failing effect" do
       # An unbounded `WHILE TRUE` loop records the LOOP_UNBOUND

@@ -3468,6 +3468,55 @@ RSpec.describe "annotator branch gap burndown" do
     )
     ann.send(:visit_StaticCall, unknown_static)
 
+    ann.current_scope.declare_type(:FallibleHandle, Schemas::ResourceSchema.new(
+      close_plan: Schemas::ResourceClosePlan.method("close"),
+      static_methods: {
+        "open" => { args: [], return: :FallibleHandle, allocates: true, can_fail: true },
+        "noop" => { args: [], return: :FallibleHandle }
+      }
+    ))
+    fallible_static = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+      "open",
+      []
+    )
+    expect(ann.current_fn_ctx).to be_nil
+    ann.send(:visit_StaticCall, fallible_static)
+    expect(fallible_static.stdlib_allocates).to eq(true)
+    expect(fallible_static.can_fail).to eq(true)
+
+    with_function_context(ann) do |ctx|
+      contextual_static = AST::StaticCall.new(
+        token(:COLON2, "::"),
+        AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+        "open",
+        []
+      )
+      ann.send(:visit_StaticCall, contextual_static)
+      expect(ctx.alloc_count).to eq(1)
+    end
+
+    pure_static = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+      "noop",
+      []
+    )
+    ann.send(:visit_StaticCall, pure_static)
+    expect(pure_static.stdlib_allocates).to eq(false)
+    expect(pure_static.can_fail).to be_falsey
+
+    pool_type = Type.new(:"String[]", collection: :pool)
+    pool_value = AST::Identifier.new(token(:IDENTIFIER, "pool"), "pool")
+    pool_value.full_type = pool_type
+    inserted = AST::Literal.new(token(:STRING, "value"), :STRING, "value", :rodata)
+    inserted.full_type = Type.new(:String)
+    pool_insert = AST::MethodCall.new(token(:DOT, "."), pool_value, "insert", [inserted])
+    ann.define_singleton_method(:move_if_takes_ownership!) { |_node, **_kwargs| nil }
+    expect(ann.send(:resolve_typed_method, pool_insert, pool_type, POOL_METHODS, :pool_method, "Pool<String>")).to eq(true)
+    expect(pool_insert.stdlib_allocates).to eq(true)
+
     no_overload = AST::FuncCall.new(token(:VAR_ID, "negative?"), "negative?", [])
     ann.send(:visit_IntrinsicFunc, no_overload, [])
 

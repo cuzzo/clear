@@ -1666,7 +1666,8 @@ module LoopFrameAnalysis
   def self.outer_mutating_receiver_call?(node, local_names)
     return false unless node.is_a?(AST::MethodCall) || node.is_a?(AST::FuncCall)
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
-    return false unless sig&.mutates_receiver?
+    return false unless sig
+    return false unless sig.mutates_receiver?
 
     receiver = if node.is_a?(AST::MethodCall)
       node.object
@@ -1683,8 +1684,9 @@ module LoopFrameAnalysis
     found = T.let(false, T::Boolean)
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       next unless node.is_a?(AST::MethodCall)
-      sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-      next unless sig&.emits_allocating? && sig.mutates_receiver?
+      sig = FunctionSignature.unwrap(node.matched_signature)
+      next unless sig
+      next unless sig.emits_allocating? && sig.mutates_receiver?
       root = AST.root_identifier(node.object)
       next unless root&.symbol
       next if local_names.include?(root.name.to_s)

@@ -771,6 +771,81 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(FsmTransform.foreach_local_entry(each_stmt)).to eq({ name: "item", zig_type: "anyopaque" })
   end
 
+  it "uses typed intrinsic contracts for loop frame and receiver escape facts" do
+    frame_alloc_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    frame_alloc_sig.emit = IntrinsicEmit.new(allocates: true, alloc: :frame)
+    allocating_call = AST::FuncCall.new(tok, "make_frame_value", [])
+    allocating_call.full_type = Type.new(:String)
+    allocating_call.matched_signature = frame_alloc_sig
+
+    expect(LoopFrameAnalysis.expression_allocates_frame_value?(allocating_call, {})).to be(true)
+
+    receiver_type = Type.new(:"Int64[]", collection: :list)
+    receiver = id("outer_items", type: receiver_type, storage: :frame)
+    mutating_sig = FunctionSignature.new(
+      params: [param("self", type: receiver_type)],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+    )
+    mutating_sig.emit = IntrinsicEmit.new(allocates: true, mutates_receiver: true)
+    mutating_call = AST::MethodCall.new(tok, receiver, "append", [])
+    mutating_call.full_type = Type.new(:Void)
+    mutating_call.matched_signature = mutating_sig
+    unmatched_call = AST::MethodCall.new(tok, receiver, "unknown", [])
+    unmatched_call.full_type = Type.new(:Void)
+    pure_sig = FunctionSignature.new(
+      params: [param("self", type: receiver_type)],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+    )
+    pure_sig.emit = IntrinsicEmit.new
+    pure_call = AST::MethodCall.new(tok, receiver, "length", [])
+    pure_call.full_type = Type.new(:Void)
+    pure_call.matched_signature = pure_sig
+
+    expect(LoopFrameAnalysis.outer_mutating_receiver_call?(unmatched_call, Set.new)).to be(false)
+    expect(LoopFrameAnalysis.outer_mutating_receiver_call?(mutating_call, Set.new)).to be(true)
+    expect(LoopFrameAnalysis.outer_mutating_receiver_call?(mutating_call, Set["outer_items"])).to be(false)
+    expect(LoopFrameAnalysis.outer_frame_receiver_alloc?([unmatched_call], Set.new)).to be(false)
+    expect(LoopFrameAnalysis.outer_frame_receiver_alloc?([pure_call], Set.new)).to be(false)
+    expect(LoopFrameAnalysis.outer_frame_receiver_alloc?([mutating_call], Set.new)).to be(true)
+
+    EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [unmatched_call])
+    expect(T.must(receiver.symbol).heap_storage?).to be(false)
+    EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [pure_call])
+    expect(T.must(receiver.symbol).heap_storage?).to be(false)
+    EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [mutating_call])
+
+    expect(T.must(receiver.symbol).heap_storage?).to be(true)
+  end
+
+  it "fails missing intrinsic metadata before lowering registry calls" do
+    call = AST::FuncCall.new(tok, "notRegistered", [])
+    call.full_type = Type.new(:Void)
+    call.zig_pattern = "notRegistered()"
+
+    expect { lowering.send(:lower_intrinsic, call) }
+      .to raise_error(/lower_intrinsic: missing stdlib signature for notRegistered/)
+  end
+
+  it "covers missing runtime metadata paths for MIR pass and InlineBc emission" do
+    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
+    plain_call = AST::FuncCall.new(tok, "plain", [])
+    plain_sig = FunctionSignature.intrinsic_contract
+    plain_call.matched_signature = plain_sig
+    runtime_call = AST::FuncCall.new(tok, "runtime", [])
+    runtime_sig = FunctionSignature.intrinsic_contract
+    runtime_sig.needs_rt = true
+    runtime_call.matched_signature = runtime_sig
+    missing_call = AST::FuncCall.new(tok, "missing", [])
+
+    expect(pass.send(:ast_call_needs_rt?, missing_call)).to be(false)
+    expect(pass.send(:ast_call_needs_rt?, plain_call)).to be(false)
+    expect(pass.send(:ast_call_needs_rt?, runtime_call)).to be(true)
+    expect { MIREmitter.new.emit(MIR::InlineBc.new(:missing, [], nil)) }
+      .to raise_error(/emit_inline_bc_as_zig: node has no stdlib_def/)
+  end
+
   def ownership_finalization_context(out: [], guarded_cleanup_names: Set.new, alloc_marks: {}, body_alloc_mark_names: Set.new)
     MIRLowering::OwnershipFinalizationContext.new(
       inherited_alloc_names: Set.new,
@@ -3012,6 +3087,16 @@ RSpec.describe "MIR gap-burn characterization" do
       expect(shard_get.resolved_allocs.shard_alloc).to be_nil
     ensure
       INDEX_OPS[:string_map][:get][:shard_direct_zig] = old_shard_template
+    end
+
+    old_get = INDEX_OPS[:string_map][:get]
+    begin
+      INDEX_OPS[:string_map][:get] = nil
+      expect {
+        low.send(:index_access_value, plan)
+      }.to raise_error(RuntimeError, /indexed access: missing registry signature for string_map/)
+    ensure
+      INDEX_OPS[:string_map][:get] = old_get
     end
 
     set_type = Type.new(:"Int64[]", collection: :set)

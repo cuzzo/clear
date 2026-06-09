@@ -97,7 +97,7 @@ class FunctionSignature
 
   sig { params(val: T.nilable(IntrinsicEmit)).void }
   def emit=(val)
-    @emit = val
+    @emit = T.let(val, T.nilable(IntrinsicEmit))
   end
 
   sig { returns(IntrinsicContract) }
