@@ -1082,8 +1082,6 @@ module MIRLoweringVariables
   end
   def lower_template_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
     T.bind(self, MIRLowering) rescue nil
-    emit = op.emit
-    raise "indexed assignment: registry signature for #{kind} has no typed emit metadata" unless emit
 
     val_node = node.value
     value_type_for_transfer = Type.from_node!(val_node, context: "indexed assignment value transfer")
@@ -1101,7 +1099,7 @@ module MIRLoweringVariables
     val = with_decl_alloc(dispatch.sink_alloc) do
       with_sink_type(sink_type) { lower(node.value) }
     end
-    if emit.takes_value && owns_transferred_value && !dispatch.shard_direct
+    if op.intrinsic_takes_value? && owns_transferred_value && !dispatch.shard_direct
       val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc, sink_type)
       val = hoist_alloc(val, val_node, err_cleanup: true)
       if val.is_a?(MIR::Ident)
@@ -1109,7 +1107,7 @@ module MIRLoweringVariables
       end
     end
     ownership_operands = T.let([], T::Array[MIR::OwnershipOperandFact])
-    if emit.takes_value
+    if op.intrinsic_takes_value?
       ownership_operands = ownership_operands_for_value(
         val,
         val_node,
@@ -1124,7 +1122,7 @@ module MIRLoweringVariables
 
     entry = op
     ownership_contract = MIR::OwnershipContract.empty
-    if emit.takes_value
+    if op.intrinsic_takes_value?
       ownership_contract = MIR::OwnershipContract.consume_operands(ownership_operands)
     end
     setAt_stmt = MIR::ExprStmt.new(MIR::IndexedStore.new(
@@ -1178,15 +1176,13 @@ module MIRLoweringVariables
   end
   def indexed_assignment_dispatch(kind, receiver_type, target_node, assignment, op, include_val_alloc:)
     T.bind(self, MIRLowering) rescue nil
-    emit = op.emit
-    raise "indexed assignment: registry signature for #{kind} has no typed emit metadata" unless emit
 
     target_var = indexed_assignment_target_var(target_node)
     shard = shard_context
-    shard_direct = !!(shard && target_var == shard[:map] && emit.shard_direct_zig)
+    shard_direct = !!(shard && target_var == shard[:map] && op.intrinsic_template(:shard_direct_zig))
     template_kind = if shard_direct
       :shard_direct_zig
-    elsif (receiver_type.sharded? || receiver_type.striped?) && emit.sharded_zig
+    elsif (receiver_type.sharded? || receiver_type.striped?) && op.intrinsic_template(:sharded_zig)
       :sharded_zig
     else
       :zig
@@ -1219,12 +1215,10 @@ module MIRLoweringVariables
   end
   def indexed_assignment_allocs(op, target_node, assignment, include_val_alloc:)
     T.bind(self, MIRLowering) rescue nil
-    emit = op.emit
-    raise "indexed assignment: allocator metadata requires typed emit metadata" unless emit
 
     resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
     [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-      registry_alloc = indexed_assignment_registry_alloc(emit, alloc_key)
+      registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
       next unless registry_alloc || (include_val_alloc && alloc_key == :val_alloc)
       alloc_sym = registry_alloc || :heap
       next if alloc_key == :val_alloc && registry_alloc.nil? && include_val_alloc
@@ -1233,14 +1227,9 @@ module MIRLoweringVariables
     MIR::InlineAllocMetadata.new(resolved_allocs)
   end
 
-  sig { params(emit: IntrinsicEmit, alloc_key: Symbol).returns(T.nilable(Symbol)) }
-  def indexed_assignment_registry_alloc(emit, alloc_key)
-    case alloc_key
-    when :alloc then emit.alloc
-    when :key_alloc then emit.key_alloc
-    when :val_alloc then emit.val_alloc
-    when :shard_alloc then emit.shard_alloc
-    end
+  sig { params(op: FunctionSignature, alloc_key: Symbol).returns(T.nilable(Symbol)) }
+  def indexed_assignment_registry_alloc(op, alloc_key)
+    op.intrinsic_alloc(alloc_key)
   end
 
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }

@@ -292,11 +292,7 @@ module Hoist
   def collection_value_store_call?(call)
     sig = FunctionSignature.unwrap(call.matched_stdlib_def)
     sig ||= FunctionSignature.unwrap(call.matched_signature) if call.respond_to?(:matched_signature)
-    emit = sig&.emit
-    takes_args = emit&.takes_args
-    takes_value = (takes_args && !takes_args.empty?) ||
-      (sig ? sig.params.drop(1).any?(&:takes) : false)
-    return false unless (emit&.mutates_receiver && takes_value) ||
+    return false unless (sig&.mutates_receiver? && sig.takes_ownership?) ||
       IntrinsicRegistry.collection_value_store_method?(call.name, call.args.length)
 
     obj = call.object

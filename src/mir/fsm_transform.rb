@@ -314,7 +314,7 @@ module FsmTransform
     return true if value.is_a?(AST::NextExpr)
     return false unless AST.call?(value)
     md = value.matched_stdlib_def
-    !!(md && md.emit&.suspends && md.emit&.fsm_setup)
+    !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
   end
 
   sig { params(name: T.untyped, type_obj: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }

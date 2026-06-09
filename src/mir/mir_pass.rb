@@ -261,8 +261,7 @@ class MIRPass
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
     return true if sig&.needs_rt == true
 
-    emit = sig&.emit
-    !!(emit && emit.allocates)
+    sig&.emits_allocating? == true
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

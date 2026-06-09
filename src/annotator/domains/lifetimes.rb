@@ -459,9 +459,8 @@ module Annotator
         # Path 1: stdlib functions with lifetime: "self"
         matched_def = call_node.matched_stdlib_def
         if matched_def
-          matched_emit = matched_def.emit
-          if matched_emit && !matched_emit.lifetime.empty?
-            lifetimes = matched_emit.lifetime
+          lifetimes = matched_def.intrinsic_lifetime
+          unless lifetimes.empty?
             if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
               return call_node.object
             end
@@ -1108,16 +1107,15 @@ module Annotator
           matched_def = val.matched_stdlib_def
           if matched_def
             # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
-            matched_emit = matched_def.emit
-            if matched_emit && !matched_emit.lifetime.empty?
+            unless matched_def.intrinsic_lifetime.empty?
               val.storage = :borrow if val.respond_to?(:storage=)
               node.storage = :borrow if node.respond_to?(:storage=)
               return
             end
-            ret_alloc = matched_def.emit&.return_alloc
+            ret_alloc = matched_def.return_alloc
             # For allocating methods without explicit return_alloc, the method's
             # alloc IS the return alloc (e.g. map.values() on sharded maps).
-            ret_alloc ||= matched_def.emit&.alloc if matched_def.emit&.allocates
+            ret_alloc ||= matched_def.intrinsic_alloc(:alloc) if matched_def.emits_allocating?
             if ret_alloc
               if [:heap, :frame].include?(ret_alloc)
                 val.storage = ret_alloc if val.respond_to?(:storage=)

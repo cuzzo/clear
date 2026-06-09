@@ -7,6 +7,7 @@
 # need for code generation and cleanup planning.
 require "sorbet-runtime"
 require_relative "intrinsic_emit"
+require_relative "intrinsic_contract"
 require_relative "function_return"
 
 class FunctionSignature
@@ -92,7 +93,18 @@ class FunctionSignature
   sig { returns(T.nilable(Integer)) }
   attr_accessor :arity
   sig { returns(T.nilable(IntrinsicEmit)) }
-  attr_accessor :emit
+  attr_reader :emit
+
+  sig { params(val: T.nilable(IntrinsicEmit)).void }
+  def emit=(val)
+    @emit = val
+  end
+
+  sig { returns(IntrinsicContract) }
+  def intrinsic_contract
+    emit = @emit
+    emit ? IntrinsicContract.from_emit(emit, @params) : IntrinsicContract.empty
+  end
   sig { returns(FunctionReturn) }
   attr_accessor :return_def
 
@@ -255,26 +267,120 @@ class FunctionSignature
 
   sig { returns(T::Boolean) }
   def emits_allocating?
-    @emit&.allocates == true
+    intrinsic_contract.allocation.allocates
   end
 
   sig { returns(T::Boolean) }
   def mutates_receiver?
-    @emit&.mutates_receiver == true
+    intrinsic_contract.ownership.mutates_receiver
   end
 
   sig { returns(T::Boolean) }
   def takes_ownership?
-    emit = @emit
-    return false unless emit
-
-    takes_args = emit.takes_args
-    emit.takes_value == true || (takes_args ? !takes_args.empty? : false)
+    intrinsic_contract.ownership.takes_any?
   end
 
   sig { returns(T.nilable(Symbol)) }
   def return_alloc
-    @emit&.return_alloc
+    intrinsic_contract.allocation.return_alloc
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_takes_value?
+    intrinsic_contract.ownership.takes_value
+  end
+
+  sig { returns(T::Set[Integer]) }
+  def intrinsic_argument_takes_indices
+    intrinsic_contract.ownership.argument_takes_indices
+  end
+
+  sig { returns(T.nilable(T.any(String, Symbol))) }
+  def intrinsic_pattern
+    intrinsic_contract.template.zig
+  end
+
+  sig { params(kind: Symbol).returns(T.nilable(T.any(String, Symbol))) }
+  def intrinsic_template(kind)
+    intrinsic_contract.template.pattern_for(kind)
+  end
+
+  sig { params(kind: Symbol).returns(String) }
+  def required_intrinsic_template(kind)
+    pattern = intrinsic_template(kind)
+    raise "registry template missing :#{kind} for #{inspect}" unless pattern
+
+    pattern.to_s.dup
+  end
+
+  sig { params(default_name: Symbol).returns(Symbol) }
+  def intrinsic_bc_op_or(default_name)
+    intrinsic_contract.template.bc_op_or(default_name)
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_bc?
+    intrinsic_contract.template.bc
+  end
+
+  sig { params(kind: Symbol).returns(T.nilable(Symbol)) }
+  def intrinsic_alloc(kind)
+    intrinsic_contract.allocation.placeholder(kind)
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_suspends?
+    intrinsic_contract.behavior.suspends
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_container_borrow?
+    intrinsic_contract.ownership.container_borrow
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_collection_narrowing?
+    intrinsic_contract.behavior.narrows_collection_type?
+  end
+
+  sig { returns(T::Boolean) }
+  def intrinsic_receiver_collection_narrowing?
+    intrinsic_contract.behavior.narrows_receiver_collection
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def intrinsic_reject_when
+    intrinsic_contract.behavior.reject_when
+  end
+
+  sig { returns(T.nilable(String)) }
+  def intrinsic_reject_error
+    intrinsic_contract.behavior.reject_error
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def intrinsic_error_kind
+    intrinsic_contract.behavior.error_kind
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def intrinsic_error_type
+    intrinsic_contract.behavior.error_type
+  end
+
+  sig { returns(T::Array[String]) }
+  def intrinsic_lifetime
+    intrinsic_contract.behavior.lifetime
+  end
+
+  sig { params(pattern: T.any(String, Symbol), alloc: T.nilable(Symbol)).returns(FunctionSignature) }
+  def with_intrinsic_override(pattern:, alloc: nil)
+    copy = dup
+    emit_copy = copy.emit ? T.must(copy.emit).dup : IntrinsicEmit.new
+    emit_copy.zig = pattern
+    emit_copy.alloc = alloc if alloc
+    copy.emit = emit_copy
+    copy
   end
 
   sig { returns(T::Boolean) }

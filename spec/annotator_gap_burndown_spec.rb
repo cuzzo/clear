@@ -1208,7 +1208,8 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "narrows receiver collections from mutating method calls" do
     ann = SemanticAnnotator.new(source_code: "")
-    emit = IntrinsicEmit.new(narrows_receiver_collection: true)
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    sig.emit = IntrinsicEmit.new(narrows_receiver_collection: true)
 
     list_type = Type.new(:"Any[]", collection: :list)
     list_type.mark_heap_allocated!
@@ -1222,7 +1223,7 @@ RSpec.describe "annotator branch gap burndown" do
     value.full_type = Type.new(:Int64)
     call = AST::MethodCall.new(token, receiver, "append", [value])
 
-    ann.send(:narrow_receiver_collection!, call, list_type, emit)
+    ann.send(:narrow_receiver_collection!, call, list_type, sig)
 
     expect(sym.type.element_type.resolved).to eq(:Int64)
     expect(sym.type.collection).to eq(:list)

@@ -240,9 +240,8 @@ module IntrinsicRegistry
     method_name = name.to_s
     [STD_LIB, POOL_METHODS, SET_METHODS].any? do |registry|
       fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
-      emit = fs&.emit
-      !!(emit&.is_method &&
-        (emit.narrows_collection || emit.narrows_receiver_collection))
+      !!(fs&.intrinsic_contract&.behavior&.is_method &&
+        fs.intrinsic_collection_narrowing?)
     end
   end
 
@@ -251,9 +250,8 @@ module IntrinsicRegistry
     return false unless arity == 2
 
     fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(MAP_METHODS, name.to_s))
-    emit = fs&.emit
-    takes_args = emit&.takes_args
-    !!(emit&.is_method && emit.mutates_receiver && takes_args && !takes_args.empty?)
+    !!(fs&.intrinsic_contract&.behavior&.is_method &&
+      fs.mutates_receiver? && fs.takes_ownership?)
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
@@ -262,13 +260,9 @@ module IntrinsicRegistry
     [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
       fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
       next false unless fs
-      emit = fs&.emit
-      takes_args = emit&.takes_args
       method_arity = fs.arity || [fs.params.length - 1, 0].max
-      takes_value = (takes_args && !takes_args.empty?) ||
-        fs.params.drop(1).any?(&:takes)
-      !!(method_arity == arity && emit&.is_method && emit.mutates_receiver &&
-        takes_value)
+      !!(method_arity == arity && fs.intrinsic_contract&.behavior&.is_method &&
+        fs.mutates_receiver? && fs.takes_ownership?)
     end
   end
 

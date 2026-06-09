@@ -230,7 +230,7 @@ class PipelineRewriter
       config = IntrinsicRegistry.sig(STD_LIB, T.unsafe(rhs).name)
       if config
         sig0 = config.is_a?(Array) ? config.first : config
-        call.zig_pattern = sig0.emit&.zig
+        call.zig_pattern = sig0.intrinsic_pattern
       end
       return call
     end
@@ -717,7 +717,7 @@ class PipelineRewriter
     defn = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
     call = AST::MethodCall.new(token, receiver, "append", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-    call.zig_pattern = defn.emit&.zig
+    call.zig_pattern = defn.intrinsic_pattern
     call.matched_stdlib_def = defn
     call
   end
@@ -727,7 +727,7 @@ class PipelineRewriter
     defn = T.must(IntrinsicRegistry.sig(SET_METHODS, "insert"))
     call = AST::MethodCall.new(token, receiver, "insert", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-    call.zig_pattern = defn.emit&.zig
+    call.zig_pattern = defn.intrinsic_pattern
     call.matched_stdlib_def = defn
     call
   end

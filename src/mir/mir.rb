@@ -486,6 +486,7 @@ module MIR
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[Node]) }
   DeferBody = T.type_alias { T.any(Emittable, T::Array[Emittable]) }
+  DeferBodyInput = T.type_alias { T.any(DeferBody, String) }
   FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
   BgBlockPlan = T.type_alias { T.any(MIR::BgStackfulPlan, MIR::BgStreamPlan, FsmBody) }
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
@@ -1405,7 +1406,7 @@ module MIR
   DeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    sig { params(body: DeferBody).void }
+    sig { params(body: DeferBodyInput).void }
     def initialize(body)
       MIR.validate_defer_body!(body, "MIR::DeferStmt")
       super(body)
@@ -1424,7 +1425,7 @@ module MIR
   ErrDeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    sig { params(body: DeferBody).void }
+    sig { params(body: DeferBodyInput).void }
     def initialize(body)
       MIR.validate_defer_body!(body, "MIR::ErrDeferStmt")
       super(body)
@@ -1574,7 +1575,7 @@ module MIR
     const :yield_policy, Symbol
   end
 
-  sig { params(body: DeferBody, label: String).void }
+  sig { params(body: DeferBodyInput, label: String).void }
   def self.validate_defer_body!(body, label)
     valid = if body.is_a?(Array)
       body.all? { |stmt| stmt.is_a?(MIR::Emittable) }

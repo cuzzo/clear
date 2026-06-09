@@ -1604,10 +1604,9 @@ module MIRLoweringFunctions
     # receiver/container allocator so cleanup remains one-allocator-per-owner.
     pre_resolved_alloc = nil
     entry = intrinsic_signature_for(node)
-    emit_facts = entry&.emit
-    if emit_facts&.alloc
-      alloc_sym = emit_facts.alloc || :node_storage
-      pre_resolved_alloc = resolve_alloc_sym(alloc_sym, nil, node)
+    entry_alloc = entry&.intrinsic_alloc(:alloc)
+    if entry_alloc
+      pre_resolved_alloc = resolve_alloc_sym(entry_alloc, nil, node)
     end
     receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
@@ -1652,9 +1651,9 @@ module MIRLoweringFunctions
     # When the entry has an explicit :bc_op, prefer it over the AST name so
     # the BC dispatch key is decoupled from CLEAR's surface naming
     # (e.g. fileReadAll -> :file_read_all).
-    if bc_target? && entry&.emit&.bc
-      current_entry = T.must(entry)
-      op_name = current_entry.emit&.bc_op || node.name.to_s.to_sym
+    if bc_target? && entry&.intrinsic_bc?
+      current_entry = entry
+      op_name = current_entry.intrinsic_bc_op_or(node.name.to_s.to_sym)
       return MIR::InlineBc.new(op_name, mir_args, current_entry)
     end
 
@@ -1664,7 +1663,7 @@ module MIRLoweringFunctions
     # in the allocator selected for that sink.
     alloc_placeholder = T.let(nil, T.nilable(Symbol))
     val_alloc_placeholder = T.let(nil, T.nilable(Symbol))
-    if emit_facts&.alloc
+    if entry_alloc
       resolved = pre_resolved_alloc || :heap
       alloc_placeholder = resolved
     end

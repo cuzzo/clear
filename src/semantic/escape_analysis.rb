@@ -451,8 +451,7 @@ module EscapeAnalysis
       case node
       when AST::MethodCall
         sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-        emit = sig&.emit
-        next unless emit&.allocates && emit&.mutates_receiver
+        next unless sig&.emits_allocating? && sig.mutates_receiver?
         root = AST.root_identifier(node.object)
       when AST::Assignment
         next unless node.name.is_a?(AST::GetIndex)
@@ -525,8 +524,7 @@ module EscapeAnalysis
       case node
       when AST::MethodCall
         sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-        emit = sig&.emit
-        next unless emit&.allocates && emit&.mutates_receiver
+        next unless sig&.emits_allocating? && sig.mutates_receiver?
         root = AST.root_identifier(node.object)
         value_params = sig ? sig.params.drop(1) : []
       when AST::Assignment

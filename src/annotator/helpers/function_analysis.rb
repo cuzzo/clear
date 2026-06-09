@@ -327,7 +327,7 @@ module FunctionAnalysis
       params: params,
       return_type: config.return_type,
       intrinsic: true,
-      zig_pattern: config.emit&.zig
+      zig_pattern: config.intrinsic_pattern
     )
   end
 

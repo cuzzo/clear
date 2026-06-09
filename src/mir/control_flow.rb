@@ -1649,10 +1649,9 @@ module LoopFrameAnalysis
     end
 
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
-    emit = sig&.emit
-    if emit && !emit.mutates_receiver
-      return true if MIR::Placement.frame?(emit.return_alloc)
-      return true if emit.allocates && MIR::Placement.frame?(emit.alloc)
+    if sig && !sig.mutates_receiver?
+      return true if MIR::Placement.frame?(sig.return_alloc)
+      return true if sig.emits_allocating? && MIR::Placement.frame?(sig.intrinsic_alloc(:alloc))
     end
 
     storage = node.respond_to?(:storage) ? T.unsafe(node).storage : nil
@@ -1667,8 +1666,7 @@ module LoopFrameAnalysis
   def self.outer_mutating_receiver_call?(node, local_names)
     return false unless node.is_a?(AST::MethodCall) || node.is_a?(AST::FuncCall)
     sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(T.unsafe(node).matched_signature) : nil
-    emit = sig&.emit
-    return false unless emit&.mutates_receiver
+    return false unless sig&.mutates_receiver?
 
     receiver = if node.is_a?(AST::MethodCall)
       node.object
@@ -1686,8 +1684,7 @@ module LoopFrameAnalysis
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       next unless node.is_a?(AST::MethodCall)
       sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-      emit = sig&.emit
-      next unless emit&.allocates && emit&.mutates_receiver
+      next unless sig&.emits_allocating? && sig.mutates_receiver?
       root = AST.root_identifier(node.object)
       next unless root&.symbol
       next if local_names.include?(root.name.to_s)

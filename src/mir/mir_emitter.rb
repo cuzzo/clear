@@ -440,8 +440,8 @@ class MIREmitter
   sig { params(node: MIR::InlineBc).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry.emit&.zig
-    pattern = entry.emit.zig.to_s.dup
+    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
+    pattern = entry.required_intrinsic_template(:zig)
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -478,7 +478,7 @@ class MIREmitter
   def sharded_map_template(node)
     op = node.stdlib_def
     kind = node.template_kind || :zig
-    op.emit&.public_send(kind) or raise "ShardedMap: op has no :#{kind} template (emit=#{op.emit.inspect})"
+    op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind} template (contract=#{op.intrinsic_contract.inspect})"
   end
 
   sig { params(pattern: String, node: T.untyped).returns(String) }
@@ -527,12 +527,7 @@ class MIREmitter
 
   sig { params(entry: FunctionSignature, template_kind: Symbol).returns(String) }
   def registry_template(entry, template_kind)
-    emit_spec = entry.emit
-    raise "registry template missing emit metadata for #{entry.inspect}" unless emit_spec
-
-    raw = T.unsafe(emit_spec).public_send(template_kind)
-    raise "registry template missing :#{template_kind} for #{entry.inspect}" unless raw
-    raw.to_s.dup
+    entry.required_intrinsic_template(template_kind)
   end
 
   sig { params(code: String, entry: FunctionSignature, allocs: T.nilable(MIR::InlineAllocMetadata), key_type: T.nilable(Type), value_type: T.nilable(Type)).returns(String) }

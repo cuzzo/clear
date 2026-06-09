@@ -2951,10 +2951,10 @@ class MIRLowering
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
     # BC dispatches by op symbol in compile_inline_bc.
-    if node.matched_stdlib_def&.emit&.bc
+    if node.matched_stdlib_def&.intrinsic_bc?
       mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
       stdlib_def = T.must(node.matched_stdlib_def)
-      return MIR::InlineBc.new(stdlib_def.emit&.bc_op, mir_args, stdlib_def)
+      return MIR::InlineBc.new(stdlib_def.intrinsic_bc_op_or(node.method_name.to_s.to_sym), mir_args, stdlib_def)
     end
 
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
@@ -3278,7 +3278,7 @@ class MIRLowering
   def emit_builtin(name, args)
     entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry
-    if bc_target? && entry.emit&.bc
+    if bc_target? && entry.intrinsic_bc?
       return MIR::InlineBc.new(name, args, entry)
     end
     MIR::RegistryCall.new(

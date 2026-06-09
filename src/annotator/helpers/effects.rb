@@ -864,7 +864,7 @@ module EffectTracker
       node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
     when AST::FuncCall, AST::MethodCall
       if func_call_suspends?(node)
-        kind = node.matched_stdlib_def&.emit&.suspends ? :io : :call
+        kind = node.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
         points << { id: points.size, kind: kind, node: node }
       end
       node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
@@ -887,7 +887,7 @@ module EffectTracker
   def func_call_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
-    return true if node.matched_stdlib_def&.emit&.suspends
+    return true if node.matched_stdlib_def&.intrinsic_suspends?
     return false if node.respond_to?(:fn_var_call) && node.fn_var_call
     callee = fn_nodes[node.name]
     return false unless callee
