@@ -265,15 +265,13 @@ module Annotator
         visit_fallible = T.let(nil, T.untyped)
         visit_fallible = lambda do |n|
           case n
-          when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+          when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef
             return
           when Array
             n.each { |item| visit_fallible.call(item) }
             return
           when Hash
             n.each_value { |v| visit_fallible.call(v) }
-            return
-          when AST::FunctionDef
             return
           when AST::Raise
             sources << "RAISE"
@@ -886,13 +884,9 @@ module Annotator
           # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
           # Does NOT mark as moved; multiple consumers may hold their own handles.
           stamp_type!(node, promise_type.tense_type.to_sym)
-        elsif promise_type.split_open_stream?
-          # NEXT on ~?T[]@split: returns ?T — each handle advances independently through
-          # the shared memoized sequence until exhaustion.
-          elem_sym = promise_type.open_stream_element_type.to_sym
-          stamp_type!(node, Type.new(:"?#{elem_sym}"))
-        elsif promise_type.open_stream?
-          # NEXT on ~?T[]: returns ?T — null signals stream exhaustion.
+        elsif promise_type.split_open_stream? || promise_type.open_stream?
+          # NEXT on open streams returns ?T — null signals stream exhaustion.
+          # Split stream handles advance independently through shared memoized sequence state.
           # Does NOT mark as moved — stream is a resource cleaned up via deinit.
           elem_sym = promise_type.open_stream_element_type.to_sym
           stamp_type!(node, Type.new(:"?#{elem_sym}"))

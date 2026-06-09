@@ -920,7 +920,7 @@ class MIRLowering
     when AST::ForRange          then lower_for_range(node)
     when AST::MatchStatement    then lower_match(node)
     when AST::ReturnNode        then lower_return(node)
-    when AST::BreakNode         then MIR::BreakStmt.new(nil, nil)
+    when AST::BreakNode, AST::OrBreak then MIR::BreakStmt.new(nil, nil)
     when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
     when AST::PassStmt          then MIR::Noop.new("pass")
 
@@ -980,9 +980,7 @@ class MIRLowering
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
     when AST::OrRaise          then MIR::Ident.new("error.OrRaise")
-    when AST::OrBreak          then MIR::BreakStmt.new(nil, nil)
-    when AST::OrPass           then MIR::Ident.new("undefined")
-    when AST::OrPrune          then MIR::Ident.new("undefined")
+    when AST::OrPass, AST::OrPrune then MIR::Ident.new("undefined")
     when AST::OrExit           then lower_or_exit(node)
     when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
     when AST::AssertRaises     then lower_assert_raises(node)
@@ -2609,15 +2607,14 @@ class MIRLowering
 
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
   # to a concrete :heap/:frame symbol for structural allocator metadata.
-  sig { params(alloc_sym: Symbol, target_node: T.untyped, node: T.untyped).returns(Symbol) }
+  sig { params(alloc_sym: Symbol, target_node: T.nilable(AST::Node), node: T.nilable(AST::Node)).returns(Symbol) }
   def resolve_alloc_sym(alloc_sym, target_node = nil, node = nil)
     case alloc_sym
-    when :heap  then :heap
     when :frame then :frame
     when :receiver_storage
       receiver = target_node
       receiver ||= node.object if node.is_a?(AST::MethodCall)
-      receiver ||= node.args&.first if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+      receiver ||= node.args.first if node.is_a?(AST::FuncCall) && node.mutates_receiver
       root = root_receiver_node(receiver)
       placement_for_node(root || receiver || node)
     when :node_storage
@@ -3192,7 +3189,6 @@ class MIRLowering
   sig { params(dispatch: BackgroundDispatch).returns(Integer) }
   def profile_dispatch_id(dispatch)
     case dispatch
-    when :local, true then 1
     when :parallel then 2
     when :shared then 3
     else 1
@@ -3495,7 +3491,7 @@ class MIRLowering
   # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
   sig { params(ti: Type).returns(String) }
   def bare_zig_type(ti)
-    t = transpile_type(ti.is_a?(Type) ? ti : ti)
+    t = transpile_type(ti)
     t.start_with?("*") ? T.must(t[1..]) : t
   end
 
@@ -3609,7 +3605,7 @@ class MIRLowering
   def owned_parameter_source_node?(source_node)
     return false unless source_node.is_a?(AST::Identifier)
     symbol = source_node.symbol
-    !!(symbol&.is_param && symbol&.takes)
+    !!(symbol&.is_param && symbol.takes)
   end
 
   sig { params(value: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }

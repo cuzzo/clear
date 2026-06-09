@@ -183,15 +183,7 @@ class Formatter::FormatLexer
       # suffix (if any) is closed: i8/i16/i32/i64/u8/u16/u32/u64/f32/f64.
       # Patterns mirror the main Lexer so FormatLexer preserves the exact
       # source text (including separators).
-      when m = @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
-        push(:NUM, m, sl, sc)
-      when m = @s.scan(/0o[0-7]+(?:_[0-7]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
-        push(:NUM, m, sl, sc)
-      when m = @s.scan(/0b[0-1]+(?:_[0-1]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
-        push(:NUM, m, sl, sc)
-      when m = @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
-        push(:NUM, m, sl, sc)
-      when m = @s.scan(/\d+(?:_\d+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
+      when m = @s.scan(/(?:0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*|0o[0-7]+(?:_[0-7]+)*|0b[0-1]+(?:_[0-1]+)*|\d+(?:_\d+)*\.\d+(?:_\d+)*|\d+(?:_\d+)*)(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
         push(:NUM, m, sl, sc)
       else
         raise Formatter::Error, "lex error at #{@line}:#{@col} near #{@s.peek(10).inspect}"
@@ -417,9 +409,7 @@ class Formatter::Emitter
     # non-default type that the suffix is the only way to express.
     # `1_f64` (integer with float suffix) is NOT stripped: dropping it
     # would silently change the type to i64.
-    if suffix == '_i64' && !has_decimal
-      suffix = ''
-    elsif suffix == '_f64' && has_decimal
+    if (suffix == '_i64' && !has_decimal) || (suffix == '_f64' && has_decimal)
       suffix = ''
     end
 
@@ -1301,10 +1291,8 @@ class Formatter::Emitter
     depth = 0
     (start + 1...end_idx).each do |j|
       t = toks[j]
-      if t.type == :SYM && t.raw == '('      then depth += 1
-      elsif t.type == :SYM && t.raw == ')'   then depth -= 1
-      elsif t.type == :SYM && t.raw == '['   then depth += 1
-      elsif t.type == :SYM && t.raw == ']'   then depth -= 1
+      if t.type == :SYM && ['(', '['].include?(t.raw) then depth += 1
+      elsif t.type == :SYM && [')', ']'].include?(t.raw) then depth -= 1
       elsif t.type == :KEYWORD && %w[THEN DO].include?(t.raw) && depth == 0
         term_idx = j
         break
@@ -2554,9 +2542,7 @@ class Formatter::Emitter
       out << format_line_body(line)
       out << "\n"
 
-      if last && OPEN_TERMINAL.include?(last.raw)
-        depth += 1
-      elsif outdent_leading
+      if (last && OPEN_TERMINAL.include?(last.raw)) || outdent_leading
         depth += 1
       end
       depth = [depth + post_delta, 0].max
@@ -2712,9 +2698,7 @@ class Formatter::Emitter
         when '>'
           depth -= 1
           return i if depth.zero?
-        when '(', ')', '[', ']', '{', '}'
-          return nil
-        when '='
+        when '(', ')', '[', ']', '{', '}', '='
           return nil
         end
       end

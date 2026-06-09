@@ -99,7 +99,7 @@ module CleanupClassifier
       entries_by_place[place] || bindings[place.path]
     end
 
-    sig { params(name: T.any(String, Symbol), node: T.untyped).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(T.nilable(CleanupEntry)) }
     def entry_for_node(name, node)
       place = CleanupClassifier.place_for_binding_node(name.to_s, node)
       entries_by_place[place] || bindings[place.path]
@@ -111,7 +111,7 @@ module CleanupClassifier
       entry&.needs_cleanup? ? entry : nil
     end
 
-    sig { params(name: T.any(String, Symbol), node: T.untyped).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(T.nilable(CleanupEntry)) }
     def live_entry_for_node(name, node)
       entry = entry_for_node(name, node)
       entry&.needs_cleanup? ? entry : nil
@@ -209,7 +209,7 @@ module CleanupClassifier
     CleanupClassificationPlan.from_function(fn_node, bindings)
   end
 
-  sig { params(name: String, node: T.untyped).returns(PlaceId) }
+  sig { params(name: String, node: AST::Node).returns(PlaceId) }
   def self.place_for_binding_node(name, node)
     sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
     symbol = sym.is_a?(SymbolEntry) ? sym : nil
@@ -353,7 +353,7 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment.field_pre_cleanup with the allocator Symbol (:heap or :frame).
-  sig { params(body: T::Array[T.untyped], facts: FrozenCleanupFacts, schema_lookup: T.nilable(Proc)).void }
+  sig { params(body: T::Array[AST::Node], facts: FrozenCleanupFacts, schema_lookup: T.nilable(Proc)).void }
   def self.stamp_field_pre_cleanups!(body, facts, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
@@ -791,7 +791,7 @@ module CleanupClassifier
     end
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   private_class_method def self.binding_container_borrow?(node)
     AST.container_borrow?(node) || AST.container_borrow?(binding_value(node))
   end
@@ -807,7 +807,7 @@ module CleanupClassifier
     entry
   end
 
-  sig { params(sym: T.untyped, node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(sym: T.nilable(SymbolEntry), node: AST::Node).returns(T.nilable(Symbol)) }
   private_class_method def self.storage_from_symbol(sym, node)
     symbol = sym.is_a?(SymbolEntry) ? (AST.declaration_symbol(sym) || sym) : sym
     storage = symbol&.storage

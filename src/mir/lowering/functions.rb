@@ -1697,7 +1697,7 @@ module MIRLoweringFunctions
     target_var = T.let(nil, T.nilable(String))
     if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
       target_var = extract_root_var_name(node.object)
-    elsif receiver_mutates && node.args&.first&.respond_to?(:name)
+    elsif receiver_mutates && node.args&.first.respond_to?(:name)
       target_var = extract_root_var_name(node.args.first)
     end
     MIR::RegistryCall.new(

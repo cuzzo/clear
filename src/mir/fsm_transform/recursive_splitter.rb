@@ -587,8 +587,6 @@ module FsmTransform
     def remap_tail(tail, mapping)
       T.bind(self, T.untyped) rescue nil
       case tail
-      when Segments::Done
-        tail
       when Segments::Goto
         Segments::Goto.new(mapping.fetch(tail.target_index))
       when Segments::LoopBack

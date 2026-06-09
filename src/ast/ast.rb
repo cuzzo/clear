@@ -412,11 +412,8 @@ module AST
 
       node.class.members.reverse_each do |member|
         value = node[member]
-        if value.is_a?(Array)
-          stack << value
-        elsif value.is_a?(Hash)
-          stack << value
-        elsif value.is_a?(Struct)
+        case value
+        when Array, Hash, Struct
           stack << value
         end
       end
@@ -467,7 +464,7 @@ module AST
     container_borrow?(node.left)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.borrowed_ownership_view?(node)
     return false unless node
     return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
@@ -685,7 +682,7 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
-    when MoveNode, ShareNode, CapabilityWrap, Cast
+    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr
       [node.value].compact
     when BinaryOp
       [node.left, node.right].compact
@@ -705,12 +702,8 @@ module AST
       node.items.compact
     when HashLit
       node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
-    when ReturnNode
-      [node.value].compact
     when Assert
       [node.condition].compact
-    when Assignment, VarDecl, BindExpr
-      [node.value].compact
     else
       []
     end
@@ -784,15 +777,13 @@ module AST
     case stmt
     when BgBlock, BgStreamBlock
       yield stmt
-    when VarDecl, BindExpr, Assignment
+    when VarDecl, BindExpr, Assignment, ReturnNode
       _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     when FuncCall
       stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     when MethodCall
       _expr_each_bg_block_shallow(stmt.object, &block)
       stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
-    when ReturnNode
-      _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     end
   end
 
@@ -854,9 +845,7 @@ module AST
       # contain ConcurrentOps in either side via nested expressions.)
       _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
       _expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
-    when VarDecl, BindExpr, Assignment
-      _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
-    when ReturnNode
+    when VarDecl, BindExpr, Assignment, ReturnNode
       _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
     when FuncCall
       node.args.each { |a| _expr_each_concurrent_capture(a, &block) }

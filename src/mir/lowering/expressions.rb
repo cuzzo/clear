@@ -198,12 +198,10 @@ module MIRLoweringExpressions
       else
         MIR::Lit.new(float_literal_text(node.value))
       end
-    when :INT64    then MIR::Lit.new(node.value.to_s)
     when :INT8, :INT16, :INT32, :UINT16, :UINT32, :UINT64
       MIR::Cast.new(MIR::Lit.new(node.value.to_s), INTEGER_LITERAL_CASTS.fetch(node.type), :as)
     when :FLOAT32
       MIR::Cast.new(MIR::Lit.new(float_literal_text(node.value)), "f32", :as)
-    when :BOOLEAN  then MIR::Lit.new(node.value.to_s)
     when :NIL      then MIR::Lit.new("null")
     else
       MIR::Lit.new(node.value.to_s)
@@ -1947,18 +1945,17 @@ module MIRLoweringExpressions
     elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
       copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
-    elsif dst_ti.collection? && !dst_ti.string?
-      MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
-    elsif union_schemas.key?(ti.resolved)
-      MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
-    elsif ti.any_sync?
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.collection_value?
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.collection? || (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
-      MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+      copy_zig = if dst_ti.collection? && !dst_ti.string?
+                   dst_ti.zig_type
+                 elsif union_schemas.key?(ti.resolved)
+                   transpile_type(ti.resolved.to_s)
+                 elsif ti.any_sync? || ti.collection_value? || ti.collection? ||
+                       (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
+                   ti.zig_type
+                 end
+      copy_zig ? MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc) :
+                 MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
     end
   end
 
@@ -1974,7 +1971,7 @@ module MIRLoweringExpressions
       return elem if elem
     end
 
-    sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
+    sym_type = if source.is_a?(AST::Identifier) && source.symbol.respond_to?(:type)
       T.must(source.symbol).type
     end
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
@@ -2164,8 +2161,7 @@ module MIRLoweringExpressions
     if type.is_a?(Type) && type.generic_payload_type_arg?
       return rc_payload_zig_type(type)
     end
-    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
-    t.zig_type
+    Type.new(type).zig_type
   end
 
 

@@ -776,9 +776,8 @@ module Annotator
         end
 
         # Effect tracking: WHILE TRUE or any non-trivially-bounded loop.
-        if node.condition.is_a?(AST::Identifier) && node.condition.name == "TRUE"
-          record_effect(EffectTracker::LOOP_UNBOUND)
-        elsif node.condition.is_a?(AST::Literal) && node.condition.value == true
+        if (node.condition.is_a?(AST::Identifier) && node.condition.name == "TRUE") ||
+           (node.condition.is_a?(AST::Literal) && node.condition.value == true)
           record_effect(EffectTracker::LOOP_UNBOUND)
         end
 

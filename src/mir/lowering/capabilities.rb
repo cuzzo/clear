@@ -767,14 +767,12 @@ module MIRLoweringCapabilities
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
     case node
-    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef
       false
     when Array
       node.any? { |item| ast_contains_return?(item) }
     when Hash
       node.values.any? { |item| ast_contains_return?(item) }
-    when AST::FunctionDef
-      false
     when AST::ReturnNode
       true
     else
@@ -791,8 +789,6 @@ module MIRLoweringCapabilities
     line = node.token&.line.to_s
     result = T.let([], T::Array[MIR::Emittable])
     case clause.action
-    when :pass
-      result
     when :return
       result << MIR::ReturnStmt.new(lower(T.must(clause.value)))
     when :raise
@@ -909,7 +905,7 @@ module MIRLoweringCapabilities
            .reduce { |acc, e| MIR::BinOp.new("and", acc, e) }
   end
 
-  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(T::Array[MIR::Emittable])) }
   def guard_fail_body(node, with_label)
     T.bind(self, MIRLowering) rescue nil
     clause = node.lock_error_clause

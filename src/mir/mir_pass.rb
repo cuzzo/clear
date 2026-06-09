@@ -425,7 +425,7 @@ class MIRPass
   # already correct. Without this, insert_bg_resource_suppress! would mutate
   # bindings AFTER Drops were created, causing a split between the Drop's
   # snapshot and the binding's current state.
-  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(T::Array[T.untyped]) }
+  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(T::Array[AST::Node]) }
   def pre_mark_bg_resource_captures!(fn, facts)
     AST.each_bg_block(fn.body) do |bg|
       resource_captures = bg.capture_analysis&.resource_captures
@@ -522,7 +522,7 @@ class MIRPass
   # Insert MIR::SuppressCleanup after statements that consume ownership of
   # tracked bindings. Replaces the transpiler's emit_move_suppression and
   # emit_consumed_moves methods.
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).returns(T.nilable(T::Set[String])) }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).returns(T.nilable(T::Set[String])) }
   def mark_consumed_cleanup_guards!(stmt, facts)
     return if stmt.is_a?(AST::ReturnNode) # handled by insert_return!
 
@@ -537,15 +537,13 @@ class MIRPass
   #   1. Direct RHS: identifier used as value in assignment/declaration
   #   2. Standalone GIVE: `GIVE x;` as a statement
   #   3. Nested: identifier passed as TAKES/GIVE arg or used as struct field
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).returns(T::Set[String]) }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).returns(T::Set[String]) }
   def collect_consumed_names(stmt, facts)
     names = Set.new
 
     # 1. Direct RHS consumption
     rhs = case stmt
-          when AST::VarDecl    then stmt.value
-          when AST::BindExpr   then stmt.value
-          when AST::Assignment then stmt.value
+          when AST::VarDecl, AST::BindExpr, AST::Assignment then stmt.value
           else nil
           end
 
@@ -563,8 +561,7 @@ class MIRPass
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
     value_expr = case stmt
-                 when AST::VarDecl, AST::BindExpr then stmt.value
-                 when AST::Assignment then stmt.value
+                 when AST::VarDecl, AST::BindExpr, AST::Assignment then stmt.value
                  else stmt
                  end
     value_expr = value_expr.value if value_expr.is_a?(AST::MoveNode)
@@ -617,10 +614,9 @@ class MIRPass
     when AST::BinaryOp
       walk_consumed(node.left, names, facts)
       walk_consumed(node.right, names, facts)
-    when AST::Assert
-      walk_consumed(node.condition, names, facts)
-    when AST::ReturnNode
-      walk_consumed(node.value, names, facts)
+    when AST::Assert, AST::ReturnNode
+      expr = node.is_a?(AST::Assert) ? node.condition : node.value
+      walk_consumed(expr, names, facts)
     end
   end
 
@@ -836,8 +832,8 @@ class MIRPass
     ids = collect_escaping_ids(ret_node.value)
     ids.select { |id|
         n = id.name.to_s
-        entry = id.symbol&.reg&.respond_to?(:mir_binding_entry) ? id.symbol.reg.mir_binding_entry : facts.entry_for_node(n, id)
-        (entry&.dig(:has_moved_guard) && entry&.dig(:needs_cleanup)) ||
+        entry = id.symbol&.reg.respond_to?(:mir_binding_entry) ? id.symbol.reg.mir_binding_entry : facts.entry_for_node(n, id)
+        (entry&.dig(:has_moved_guard) && entry.dig(:needs_cleanup)) ||
           (n.start_with?("__hoist_") &&
             AST.moved?(id) &&
             entry&.dig(:needs_cleanup))
@@ -856,7 +852,6 @@ class MIRPass
       node.fields.values.flat_map { |v| collect_escaping_ids(v) }
     when AST::FuncCall, AST::MethodCall
       node.args.select(&:was_moved).flat_map { |a| collect_escaping_ids(a) }
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []
     else []
     end
   end

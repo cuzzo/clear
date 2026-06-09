@@ -382,21 +382,8 @@ class PipelineMaterializer
   sig { params(value_expr: MIR::Node).returns(String) }
   def zig_type_for(value_expr)
     zig_type = case value_expr
-    when MIR::DeepCopy
-      value_expr.zig_type
-    when MIR::ContainerInit
-      value_expr.zig_type
-    when MIR::StructInit
-      value_expr.zig_type
-    when MIR::TypeSentinel
-      value_expr.zig_type
-    when MIR::Undef
-      value_expr.zig_type
-    when MIR::HeapCreate
-      value_expr.zig_type
-    when MIR::DiscardOwned
-      value_expr.zig_type
-    when MIR::UnionVariantGet
+    when MIR::DeepCopy, MIR::ContainerInit, MIR::StructInit, MIR::TypeSentinel,
+         MIR::Undef, MIR::HeapCreate, MIR::DiscardOwned, MIR::UnionVariantGet
       value_expr.zig_type
     end
     normalized_zig_type(zig_type)

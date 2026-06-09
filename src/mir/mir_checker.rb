@@ -666,13 +666,7 @@ class MIRChecker
       linear_exit_scope!(state, inner, "scope")
     when MIR::DebugOnly
       check_linear_stmts!(stmt.body, state.copy)
-    when MIR::SwitchStmt
-      check_linear_expr_uses!(stmt.subject, state)
-      states = T.let([], T::Array[LinearOwnershipState])
-      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm.body, state.copy), state, "match") }
-      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "match")
-      linear_merge_branch_states!(states, state, "match")
-    when MIR::UnionMatchStmt
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
       check_linear_expr_uses!(stmt.subject, state)
       states = T.let([], T::Array[LinearOwnershipState])
       stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm.body, state.copy), state, "match") }
@@ -692,7 +686,7 @@ class MIRChecker
       else
         check_linear_stmt!(stmt.body, state)
       end
-    when MIR::StreamSpawn
+    when MIR::StreamSpawn, MIR::FnDef, MIR::TestDef
       check_linear_stmts!(stmt.body, LinearOwnershipState.new)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
       inner = check_linear_stmts!(stmt.body, state.copy)
@@ -716,10 +710,6 @@ class MIRChecker
       stmt.branch_bodies&.each { |body| check_linear_stmts!(body, LinearOwnershipState.new) }
     when MIR::CatchWrapper
       stmt.clause_bodies&.each { |body| check_linear_stmts!(body, state.copy) }
-    when MIR::FnDef
-      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
-    when MIR::TestDef
-      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
     when MIR::StructDef
       stmt.methods&.each { |method| check_linear_stmt!(method, LinearOwnershipState.new) if method.is_a?(MIR::FnDef) }
     when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
@@ -1062,20 +1052,13 @@ class MIRChecker
           @errors << error(:MOVEMARK_WITHOUT_GUARD, stmt.name,
             "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")
         end
-      when MIR::IfStmt
+      when MIR::IfStmt, MIR::IfBindStmt
         verify_move_mark_scope!(stmt.then_body, visible.dup)
         verify_move_mark_scope!(stmt.else_body, visible.dup)
-      when MIR::IfBindStmt
-        verify_move_mark_scope!(stmt.then_body, visible.dup)
-        verify_move_mark_scope!(stmt.else_body, visible.dup)
-      when MIR::WhileStmt, MIR::ForStmt
+      when MIR::WhileStmt, MIR::ForStmt, MIR::ScopeBlock, MIR::BlockExpr,
+           MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         verify_move_mark_scope!(stmt.body, visible.dup)
-      when MIR::ScopeBlock, MIR::BlockExpr
-        verify_move_mark_scope!(stmt.body, visible.dup)
-      when MIR::SwitchStmt
-        stmt.arms&.each { |a| verify_move_mark_scope!(a.body, visible.dup) }
-        verify_move_mark_scope!(stmt.default_body, visible.dup)
-      when MIR::UnionMatchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         stmt.arms&.each { |a| verify_move_mark_scope!(a.body, visible.dup) }
         verify_move_mark_scope!(stmt.default_body, visible.dup)
       when MIR::IfChain
@@ -1087,8 +1070,6 @@ class MIRChecker
         stmt.branch_bodies&.each { |b| verify_move_mark_scope!(b, visible.dup) }
       when MIR::CatchWrapper
         stmt.clause_bodies&.each { |b| verify_move_mark_scope!(b, visible.dup) }
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        verify_move_mark_scope!(stmt.body, visible.dup)
       when MIR::WithMatchDispatch
         stmt.arms&.each { |a| verify_move_mark_scope!(a.body, visible.dup) }
       end
@@ -1149,16 +1130,12 @@ class MIRChecker
       case stmt
       when MIR::Let
         check_aggregate_expr!(stmt.init, alloc_by_name[stmt.name], alloc_by_name)
-      when MIR::Set
+      when MIR::Set, MIR::ReturnStmt, MIR::BreakStmt
         check_aggregate_expr!(stmt.value, nil, alloc_by_name)
       when MIR::ReassignWithCleanup
         check_reassign_cleanup_alloc!(stmt, alloc_by_name)
         check_aggregate_expr!(stmt.value, stmt.alloc, alloc_by_name)
-      when MIR::ReturnStmt, MIR::BreakStmt
-        check_aggregate_expr!(stmt.value, nil, alloc_by_name)
-      when MIR::ExprStmt
-        check_aggregate_expr!(stmt.expr, nil, alloc_by_name)
-      when MIR::DiscardOwned
+      when MIR::ExprStmt, MIR::DiscardOwned
         check_aggregate_expr!(stmt.expr, nil, alloc_by_name)
       when MIR::IfStmt
         check_aggregate_expr!(stmt.cond, nil, alloc_by_name)
@@ -1172,11 +1149,7 @@ class MIRChecker
         check_aggregate_stmts!(stmt.body, alloc_by_name)
       when MIR::ScopeBlock, MIR::BlockExpr
         check_aggregate_stmts!(stmt.body, alloc_by_name)
-      when MIR::SwitchStmt
-        check_aggregate_expr!(stmt.subject, nil, alloc_by_name)
-        stmt.arms&.each { |a| check_aggregate_stmts!(a.body, alloc_by_name) }
-        check_aggregate_stmts!(stmt.default_body, alloc_by_name)
-      when MIR::UnionMatchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         check_aggregate_expr!(stmt.subject, nil, alloc_by_name)
         stmt.arms&.each { |a| check_aggregate_stmts!(a.body, alloc_by_name) }
         check_aggregate_stmts!(stmt.default_body, alloc_by_name)
@@ -1217,17 +1190,9 @@ class MIRChecker
       end
     when MIR::ArrayInit
       expr.items&.each { |item| check_aggregate_expr!(item, owner_alloc, alloc_by_name) }
-    when MIR::DeepCopy
-      # DeepCopy reads its source and produces a fresh owned value in its own
-      # allocator; the source is not inserted into the destination aggregate.
-      return
-    when MIR::RcRetain
-      # Retain reads an Arc/Rc source and produces a new owned handle; the
-      # source binding itself is not inserted into the aggregate.
-      return
-    when MIR::RcDowngrade, MIR::WeakUpgrade
-      # Weak-link operations read their source handles and produce a distinct
-      # handle; they do not insert the source binding into the aggregate.
+    when MIR::DeepCopy, MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
+      # These read their source and produce a distinct handle/value; the
+      # source binding itself is not inserted into the destination aggregate.
       return
     when MIR::Ident
       child_alloc = alloc_by_name[expr.name]
@@ -1354,7 +1319,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(body: T::Array[T.untyped]).void }
+  sig { params(body: T::Array[MIR::Node]).void }
   def verify_cleanup_sources_in_scope!(body)
     lets = T.let({}, T::Hash[String, MIR::Let])
     body.each do |node|
@@ -1865,9 +1830,7 @@ class MIRChecker
   def allocator_metadata_for(node)
     carrier = allocator_metadata_carrier(node)
     case carrier
-    when MIR::RegistryCall
-      carrier.allocs
-    when MIR::IndexedStore
+    when MIR::RegistryCall, MIR::IndexedStore
       carrier.allocs
     when MIR::ShardedMapPut, MIR::ShardedMapGet
       carrier.resolved_allocs
@@ -1980,7 +1943,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(node: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
+  sig { params(node: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir_node(node, &block)
     return unless node.is_a?(MIR::Emittable) || node.is_a?(Array)
 
@@ -2555,16 +2518,21 @@ class MIRChecker
     !contract.empty? || contract.covers_consuming_params
   end
 
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::Node).returns(String) }
   def ownership_node_name(node)
     return ownership_node_name(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr)
-    target = node.respond_to?(:target_var) ? node.target_var : nil
+    target = case node
+             when MIR::RegistryCall, MIR::IndexedStore, MIR::ShardedMapPut
+               node.target_var
+             end
     return target.to_s if target
     return node.callee.to_s if node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall)
     return node.method.to_s if node.is_a?(MIR::MethodCall)
     return "MIR::BgBlock" if node.is_a?(MIR::BgBlock)
     return "MIR::StreamSpawn" if node.is_a?(MIR::StreamSpawn)
-    reason = node.respond_to?(:reason) ? node.reason : nil
+    reason = case node
+             when MIR::RegistryCall, MIR::Noop then node.reason
+             end
     reason ? reason.to_s : node.class.name.to_s
   end
 
@@ -2610,7 +2578,7 @@ class MIRChecker
   end
 
   # Does this statement list contain a per-iteration loop restore?
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  sig { params(stmts: T.nilable(T::Array[MIR::Node])).returns(T::Boolean) }
   def body_has_loop_restore?(stmts)
     found = T.let(false, T::Boolean)
     each_loop_local_node(stmts) do |node|

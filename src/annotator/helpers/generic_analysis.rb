@@ -267,7 +267,7 @@ module GenericAnalysis
 
   sig { params(schema: T.nilable(GenericSchema)).returns(T::Array[Symbol]) }
   def schema_type_params(schema)
-    return [] unless schema&.respond_to?(:type_params)
+    return [] unless schema.respond_to?(:type_params)
 
     T.cast(T.unsafe(schema).type_params || [], T::Array[Symbol])
   end

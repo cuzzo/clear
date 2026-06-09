@@ -180,8 +180,6 @@ module CapabilityPlan
     sig { returns(T::Boolean) }
     def sync_constrained?
       case capability
-      when :BORROWED, :RESTRICT, :VIEW, :MATERIALIZED_VIEW, :multiowned, :shared
-        false
       when :EXCLUSIVE, :write_locked_read, :SNAPSHOT, :ATOMIC
         true
       when :infer

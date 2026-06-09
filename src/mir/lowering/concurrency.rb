@@ -573,9 +573,8 @@ module MIRLoweringConcurrency
       context_init_field(:alloc, MIR::Ident.new(names.alloc_var)),
     ] + caps.specs.map { |s|
       outer_ref = outer_capture_map[s.name]
-      init_val = if s.requires_setup? || promoted_names[s.name] || outer_ref.nil?
-                   s.init_value_mir
-                 elsif pointer_captures.include?(s.name)
+      init_val = if s.requires_setup? || promoted_names[s.name] || outer_ref.nil? ||
+                    pointer_captures.include?(s.name)
                    s.init_value_mir
                  else
                    MIR::Ident.new(outer_ref)

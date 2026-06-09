@@ -19,10 +19,7 @@ module Annotator
         seed_body = lambda do |stmts|
           AST.walk_body(stmts) do |n|
             case n
-            when AST::Raise
-              next unless n.kind && n.error_name
-              resolve_error_registration!(n, n.kind, n.error_name, n.token)
-            when AST::OrExit
+            when AST::Raise, AST::OrExit
               next unless n.kind && n.error_name
               resolve_error_registration!(n, n.kind, n.error_name, n.token)
             end
@@ -679,12 +676,8 @@ module Annotator
           return
         end
 
-        # Standard OR behavior
-        if t_left_type.resolved == t_right_type.resolved
-          stamp_type!(node, t_left_type.resolved)
-        else
-          stamp_type!(node, t_left_type.resolved)
-        end
+        # Standard OR behavior.
+        stamp_type!(node, t_left_type.resolved)
       end
 
       # An empty collection fallback (`expr OR []` / `OR {}`) is visited

@@ -760,9 +760,7 @@ module EffectTracker
           traverse.call(arg)
         end
         traverse.call(n.is_a?(AST::MethodCall) ? n.object : nil)
-      when AST::VarDecl, AST::BindExpr
-        traverse.call(n.value)
-      when AST::ReturnNode
+      when AST::VarDecl, AST::BindExpr, AST::ReturnNode
         traverse.call(n.value)
       when AST::Identifier
         if n.respond_to?(:fn_ref) && n.fn_ref
@@ -1055,9 +1053,8 @@ module EffectTracker
       return_t = Type.new(return_t) if return_t && !return_t.is_a?(Type)
       declared_runtime_return = !!(return_t && (return_t.heap? || return_t.indirect? || return_t.needs_escape_promotion?))
 
-      tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
-        :standard
-      elsif fn_node.runtime_stack_required?(recursion_yield_needed?(fn_node), declared_runtime_return)
+      tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN) ||
+                fn_node.runtime_stack_required?(recursion_yield_needed?(fn_node), declared_runtime_return)
         :standard
       else
         :micro
@@ -1339,15 +1336,9 @@ module EffectTracker
         n.each_value { |v| traverse.call(v) }
       when AST::FunctionDef
         # Don't descend into nested function definitions.
-      when AST::Raise, AST::OrRaise
-        found[0] = true
-      when AST::BgBlock, AST::BgStreamBlock
-        # A BG / BG STREAM spawn lowers to `try CheatLib.Promise(T).spawn`
-        # / `try CheatLib.SplitStream(T).spawnNew` + `try alloc.create` --
-        # genuine Zig `try` (the scheduler can fail to spawn), NOT arena
-        # bump-alloc. So the enclosing fn is genuinely fallible. This is
-        # a real failure source like RAISE, not the alloc/`needs_rt`
-        # proxy removed for puck-clear-bugs.md #3.
+      when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock
+        # BG / BG STREAM spawning is genuinely fallible like RAISE/OR RAISE:
+        # scheduler spawn can fail, so the enclosing function is fallible.
         found[0] = true
       when AST::WithBlock
         # MVCC: SNAPSHOT-transactions emit `Versioned.update[Multi](...)

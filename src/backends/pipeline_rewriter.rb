@@ -54,11 +54,7 @@ class PipelineRewriter
       node.statements.map! { |s| rewrite!(s) }
     when AST::FunctionDef
       node.body.map! { |s| rewrite!(s) }
-    when AST::VarDecl, AST::BindExpr
-      node.value = rewrite!(node.value) if node.value
-    when AST::Assignment
-      node.value = rewrite!(node.value) if node.value
-    when AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
       node.value = rewrite!(node.value) if node.value
     when AST::IfStatement
       node.condition = rewrite!(node.condition)
@@ -271,14 +267,11 @@ class PipelineRewriter
 
     # Identify the terminal operation.
     right = node.right
-    if AST.pipeline_terminal_fold?(right) || right.is_a?(AST::EachOp) || AST.pipeline_list_terminal?(right)
-      terminal = right
-      cursor = node.left
-    elsif is_fusible?(right)
+    if is_fusible?(right)
       terminal = nil # implicit list terminal
       cursor = node
     else
-      # Standard function terminal
+      # Explicit pipeline terminal or standard function terminal.
       terminal = right
       cursor = node.left
     end
@@ -697,13 +690,8 @@ class PipelineRewriter
       key_expr = replace_placeholder(terminal.expression, current_val)
       insert_call = synthetic_set_insert_call(token, res_ident.dup, key_expr)
       [insert_call]
-    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
-      # Produces a list
-      value = AST::CopyNode.new(token, current_val.dup)
-      AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = synthetic_append_call(token, res_ident, value)
-      [call]
     else
+      # Produces a list.
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
       call = synthetic_append_call(token, res_ident, value)

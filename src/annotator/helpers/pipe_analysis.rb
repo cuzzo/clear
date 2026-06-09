@@ -293,7 +293,7 @@ module PipeAnalysis
   def analyze_collect_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_t = node.left.full_type!(context: "pipeline left")
-    unless lhs_t&.future? && lhs_t&.observable?
+    unless lhs_t&.future? && lhs_t.observable?
       ty = lhs_t&.resolved || "<unknown>"
       error!(node, :COLLECT_NEEDS_OBSERVABLE, got: ty)
     end

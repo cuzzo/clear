@@ -807,9 +807,8 @@ module FsmTransform
       done_idx = segments.find_index { |s| s.tail.is_a?(Segments::Done) }
       result_seg_indices = segments.each_with_index.with_object(Set.new) do |(seg, _i), acc|
         next if seg.stmts.empty?
-        if seg.tail.is_a?(Segments::Done)
-          acc << seg.index
-        elsif seg.tail.is_a?(Segments::Goto) && seg.tail.target_index == done_idx
+        if seg.tail.is_a?(Segments::Done) ||
+           (seg.tail.is_a?(Segments::Goto) && seg.tail.target_index == done_idx)
           acc << seg.index
         end
       end
@@ -1461,7 +1460,6 @@ module FsmTransform
     def profile_dispatch_id(dispatch)
       T.bind(self, T.untyped) rescue nil
       case dispatch
-      when :local, true then 1
       when :parallel then 2
       when :shared then 3
       else 1

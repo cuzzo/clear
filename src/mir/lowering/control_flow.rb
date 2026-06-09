@@ -225,13 +225,10 @@ module MIRLoweringControlFlow
       case s
       when MIR::AllocMark
         s.scope = scope if MIR::Placement.frame?(s.alloc)
-      when MIR::IfStmt
+      when MIR::IfStmt, MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
         stamp_loop_frame_alloc_scopes!(s.else_body, scope)
-      when MIR::IfBindStmt
-        stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(s.else_body, scope)
-      when MIR::ScopeBlock, MIR::BlockExpr
+      when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
@@ -239,8 +236,6 @@ module MIRLoweringControlFlow
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
         stamp_loop_frame_alloc_scopes!(s.default_body, scope)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::WithMatchDispatch
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
@@ -787,9 +782,7 @@ module MIRLoweringControlFlow
     case value
     when AST::GetField
       value.field.to_s
-    when AST::MethodCall
-      value.name.to_s
-    when AST::Identifier
+    when AST::MethodCall, AST::Identifier
       value.name.to_s
     else
       Kernel.raise "union MATCH variant must be a named variant, got #{value.class}"
@@ -853,11 +846,11 @@ module MIRLoweringControlFlow
     lower(value)
   end
 
-  sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.nilable(T::Array[MIR::Emittable]), ast_stmts: T.nilable(T::Array[AST::Node])).returns(T.nilable(T::Array[MIR::Emittable])) }
   def hoist_unhoisted_return_allocs(body, ast_stmts)
     T.bind(self, MIRLowering) rescue nil
     return body unless body
-    returns = T.let([], T::Array[T.untyped])
+    returns = T.let([], T::Array[AST::Node])
     Array(ast_stmts).each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
     ret_i = T.let(0, Integer)
 
@@ -1203,8 +1196,6 @@ module MIRLoweringControlFlow
         collect_returned_binding_names(expr.left, names)
         collect_returned_binding_names(expr.right, names)
       end
-    when AST::GetField, AST::GetIndex
-      return
     end
     nil
   end

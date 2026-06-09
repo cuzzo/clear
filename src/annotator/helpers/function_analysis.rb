@@ -503,7 +503,7 @@ module FunctionAnalysis
     )
     facts.inner_node.was_moved = true
     facts.arg_node.was_moved = true
-    T.unsafe(current_arg).was_moved = true if current_arg&.respond_to?(:was_moved=)
+    T.unsafe(current_arg).was_moved = true if current_arg.respond_to?(:was_moved=)
   end
 
   sig { params(facts: CallArgumentFacts).void }

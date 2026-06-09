@@ -106,7 +106,6 @@ class MIREmitter
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
-    when MIR::Noop             then nil
 
     # --- Memory operations ---
     when MIR::HeapCreate       then emit_heap_create(node)
@@ -139,7 +138,7 @@ class MIREmitter
     when MIR::SortedLockAcquire    then emit_sorted_lock_acquire(node)
     when MIR::FallibleLockBinding  then emit_fallible_lock_binding(node)
     # --- Verification-only (no codegen) ---
-    when MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark,
+    when MIR::Noop, MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark,
          MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
       nil
 
@@ -901,9 +900,7 @@ class MIREmitter
     return false unless stmts && !stmts.empty?
     last = stmts.last
     case last
-    when MIR::ReturnStmt
-      true
-    when MIR::PolymorphicFlowSignal
+    when MIR::ReturnStmt, MIR::PolymorphicFlowSignal
       true
     when MIR::ScopeBlock
       flow_body_terminates?(last.body || [])
@@ -1597,9 +1594,8 @@ class MIREmitter
 
   sig { params(clause: MIR::CatchClause, rt_name: String, snapshot_type: T.nilable(Type), first_clause: T::Boolean).returns(String) }
   def emit_catch_clause(clause, rt_name, snapshot_type, first_clause)
-    prefix = first_clause ? "if" : "if"
     body = emit_catch_body(rt_name, clause.body, snapshot_type)
-    "#{prefix} (#{emit_catch_condition(clause.meta, rt_name)}) {\n#{indent_block(body, 8)}\n}"
+    "if (#{emit_catch_condition(clause.meta, rt_name)}) {\n#{indent_block(body, 8)}\n}"
   end
 
   sig { params(node: MIR::CatchWrapper).returns(String) }
@@ -1911,7 +1907,7 @@ class MIREmitter
     THUNK_COMBINE_OPERATOR.fetch(op) { Kernel.raise "unknown thunk combine op: #{op.inspect}" }
   end
 
-  sig { params(node: T.untyped, source: String).returns(String) }
+  sig { params(node: T.any(MIR::BatchWindowPush, MIR::BatchWindowFlush), source: String).returns(String) }
   def emit_batch_window_emit(node, source)
     slice = "#{node.batch_var}_slice"
     val = "#{node.batch_var}_val"
@@ -2043,7 +2039,7 @@ class MIREmitter
 
   private
 
-  sig { params(node: T.untyped, errdefer: T::Boolean).returns(String) }
+  sig { params(node: T.any(MIR::Cleanup, MIR::ErrCleanup), errdefer: T::Boolean).returns(String) }
   def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)

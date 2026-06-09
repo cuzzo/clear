@@ -514,20 +514,14 @@ class Type
     t_right = right_type.resolved
 
     case op
-    when :AND, :OR
+    when :AND, :OR, *BOOL_RESULT_OPS
       BinaryOpResult.new(type: Type.new(:Bool))
 
-    when *BOOL_RESULT_OPS
-      BinaryOpResult.new(type: Type.new(:Bool))
-
-    when *NUMBER_RESULT_OPS
+    when *NUMBER_RESULT_OPS, :WRAP_ADD, :CHECK_ADD
       resolve_numeric_op(left_type, right_type)
 
     when :ADD
       resolve_add_op(t_left, t_right, left_type, right_type)
-
-    when :WRAP_ADD, :CHECK_ADD
-      resolve_numeric_op(left_type, right_type)
 
     else
       BinaryOpResult.new(error: "Unknown operator: #{op}")
@@ -1213,7 +1207,7 @@ class Type
   sig { params(final_type: Type, value_type: T.nilable(Type)).returns(TypeCapabilities) }
   def apply_finalized_value_shape!(final_type:, value_type:)
     final_shard_count = final_type.shard_count || value_type&.shard_count
-    final_soa = final_type.soa || (value_type&.respond_to?(:soa) && value_type.soa)
+    final_soa = final_type.soa || (value_type && value_type.respond_to?(:soa) && value_type.soa)
     observable = final_type.observable? ||
                  (!value_type.nil? && value_type.respond_to?(:observable?) && value_type.observable?)
     observable_terminal = if final_type.observable_terminal
@@ -1222,9 +1216,9 @@ class Type
       value_type.observable_terminal
     end
     elem_ownership = final_type.elem_ownership ||
-                     (value_type&.respond_to?(:elem_ownership) ? value_type.elem_ownership : nil)
+                     (value_type && value_type.respond_to?(:elem_ownership) ? value_type.elem_ownership : nil)
     elem_sync = final_type.elem_sync ||
-                (value_type&.respond_to?(:elem_sync) ? value_type.elem_sync : nil)
+                (value_type && value_type.respond_to?(:elem_sync) ? value_type.elem_sync : nil)
     link_src = value_type&.link? ? value_type.link_source : nil
     apply_capabilities!(
       shard_count: final_shard_count || TypeCapabilities::UNSET,
@@ -1244,9 +1238,9 @@ class Type
   def merge_capabilities_from!(source, preserve_existing: true, include_affine_ownership: false)
     source_ownership = source.ownership
     existing_concrete_ownership = ownership && ownership != :affine
-    next_ownership = if preserve_existing && existing_concrete_ownership
-      TypeCapabilities::UNSET
-    elsif source_ownership && (include_affine_ownership || source_ownership != :affine)
+    next_ownership = if source_ownership &&
+                        !(preserve_existing && existing_concrete_ownership) &&
+                        (include_affine_ownership || source_ownership != :affine)
       source_ownership
     else
       TypeCapabilities::UNSET
@@ -1854,14 +1848,11 @@ class Type
       # the element type (after deref).
       TypeFsmForEachDescriptor.new(kind: :iterator, init_method: "keyIterator", advance_method: "next",
         deref: true, var_zig_type: element_type&.zig_type || "anyopaque")
-    elsif list_collection?
+    elsif list_collection? || (array? && dynamic?)
       TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
         var_zig_type: element_type&.zig_type || "anyopaque")
     elsif array? && !dynamic?
       TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: "",
-        var_zig_type: element_type&.zig_type || "anyopaque")
-    elsif array? && dynamic?
-      TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
         var_zig_type: element_type&.zig_type || "anyopaque")
     else nil
     end

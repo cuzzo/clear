@@ -232,15 +232,10 @@ class FunctionCFG
         # BG body runs in separate fiber -- no fall-through back to parent
         current_block = after_block
 
-      when AST::ReturnNode
+      when AST::ReturnNode, AST::Raise
         current_block.stmts << stmt
         current_block.add_successor(cfg.exit_block)
-        return nil  # no fall-through after return
-
-      when AST::Raise
-        current_block.stmts << stmt
-        current_block.add_successor(cfg.exit_block)
-        return nil  # no fall-through after raise
+        return nil  # no fall-through after terminal statements
 
       when AST::BreakNode
         current_block.stmts << stmt
@@ -427,7 +422,7 @@ class OwnershipDataflow
     entries
   end
 
-  sig { params(name: String, node: T.untyped).returns(PlaceId) }
+  sig { params(name: String, node: AST::Node).returns(PlaceId) }
   def self.place_for_binding_node(name, node)
     sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
     symbol = sym.is_a?(SymbolEntry) ? sym : nil
@@ -449,8 +444,8 @@ class OwnershipDataflow
 
   sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
   def initialize(cfg, fn_node, schema_lookup: nil)
-    @cfg = cfg
-    @fn_node = fn_node
+    @cfg = T.let(cfg, FunctionCFG)
+    @fn_node = T.let(fn_node, AST::FunctionDef)
     @schema_lookup = schema_lookup
     @block_in  = T.let({}, T::Hash[Integer, OwnershipState]) # block.id => typed ownership state
     @block_out = T.let({}, T::Hash[Integer, T.nilable(OwnershipState)]) # block.id => typed ownership state
@@ -709,7 +704,7 @@ class OwnershipDataflow
     return false if stmt.is_a?(AST::ReturnNode)
     state = self.class.state_from_names(var => OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: true))
     collect_binding_move_places(stmt, state).any? { |place| place.path == var } ||
-      (AST.call?(stmt) && collect_bg_capture_places_in_args(stmt, state).any? { |place| place.path == var })
+      (AST.call?(stmt) && collect_bg_capture_places_in_args(T.cast(stmt, T.any(AST::FuncCall, AST::MethodCall)), state).any? { |place| place.path == var })
   end
 
   sig { params(place: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupDecision)) }
@@ -966,10 +961,7 @@ class OwnershipDataflow
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
       update_declared_owner!(state, stmt.name.to_s, stmt) if stmt.mode == :decl
 
-    when AST::Assignment
-      collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
-
-    when AST::ReturnNode
+    when AST::Assignment, AST::ReturnNode
       collect_binding_move_places(stmt.value, state).each { |place| mark_moved!(state, place) }
 
     when AST::MoveNode
@@ -1021,7 +1013,7 @@ class OwnershipDataflow
     end
   end
 
-  sig { params(stmt: T.untyped).returns(T.nilable(ControlHeaderTransfer)) }
+  sig { params(stmt: AST::Node).returns(T.nilable(ControlHeaderTransfer)) }
   def control_header_transfer(stmt)
     if stmt.is_a?(AST::IfStatement)
       return ControlHeaderTransfer.new(condition: stmt.condition, loop_name: nil, loop_binding: nil)
@@ -1095,9 +1087,6 @@ class OwnershipDataflow
         collect_explicit_in(node, step)
       end
 
-    when AST::FuncCall
-      collect_explicit_in(node, step)
-
     when AST::ListLit
       node.items.each { |i| collect_ownership_transfers(i, step) }
 
@@ -1168,7 +1157,7 @@ class OwnershipDataflow
     nil
   end
 
-  sig { params(node: T.untyped, state: OwnershipState).returns(T::Array[PlaceId]) }
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
   def collect_explicit_move_places(node, state)
     return [] unless node
     step = DataflowStep.new(state: state, consumed: Set.new)
@@ -1183,7 +1172,7 @@ class OwnershipDataflow
     end
   end
 
-  sig { params(node: AST::ShareNode, step: OwnershipDataflow::DataflowStep).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::ShareNode, step: OwnershipDataflow::DataflowStep).void }
   def collect_share_transfer(node, step)
     source = node.value
     return if source.is_a?(AST::CopyNode)
@@ -1202,7 +1191,7 @@ class OwnershipDataflow
   # Collect resource captures from BG blocks nested in function/method call args.
   # Without this, the dataflow doesn't see ownership transfers via BG capture
   # when the BG block appears inside a MethodCall like tasks.append(BG { ... }).
-  sig { params(stmt: T.untyped, state: OwnershipState).returns(T::Array[PlaceId]) }
+  sig { params(stmt: T.any(AST::FuncCall, AST::MethodCall), state: OwnershipState).returns(T::Array[PlaceId]) }
   def collect_bg_capture_places_in_args(stmt, state)
     consumed = T.let([], T::Array[PlaceId])
     args = stmt.args || []
@@ -1237,7 +1226,7 @@ class OwnershipDataflow
   # same field.
   sig { params(bg_node: T.untyped).returns(T::Array[String]) }
   def collect_bg_body_gives(bg_node)
-    bg_node.capture_analysis&.move_mark_names&.to_a || []
+    bg_node.capture_analysis&.move_mark_names.to_a || []
   end
 
   # Returns true if this identifier's type is Copy (no move on assignment).
@@ -1330,13 +1319,9 @@ class UseAfterMoveChecker
   sig { params(stmt: T.untyped, state: OwnershipDataflow::OwnershipState).returns(T.untyped) }
   def check_stmt_reads(stmt, state)
     case stmt
-    when AST::VarDecl
-      # RHS is read, LHS is declared (not a read).
-      check_reads_in_expr(stmt.value, state)
-
-    when AST::BindExpr
+    when AST::VarDecl, AST::BindExpr, AST::ReturnNode
       # RHS is read. LHS: if :assign mode, the name is NOT being read (it's
-      # being assigned to). If :decl mode, the name is new.
+      # being assigned to). If :decl mode or VarDecl, the name is new.
       check_reads_in_expr(stmt.value, state)
 
     when AST::Assignment
@@ -1346,9 +1331,6 @@ class UseAfterMoveChecker
       if stmt.name.is_a?(AST::GetField) || stmt.name.is_a?(AST::GetIndex)
         check_reads_in_expr(stmt.name, state)
       end
-      check_reads_in_expr(stmt.value, state)
-
-    when AST::ReturnNode
       check_reads_in_expr(stmt.value, state)
 
     when AST::MoveNode
@@ -1369,10 +1351,7 @@ class UseAfterMoveChecker
       check_reads_in_expr(stmt.object, state)
       check_call_reads(stmt, state)
 
-    when AST::IfStatement
-      check_reads_in_expr(stmt.condition, state)
-
-    when AST::WhileLoop
+    when AST::IfStatement, AST::WhileLoop
       check_reads_in_expr(stmt.condition, state)
 
     when AST::MatchStatement
@@ -1399,11 +1378,8 @@ class UseAfterMoveChecker
   sig { params(call_node: T.untyped, state: OwnershipDataflow::OwnershipState).returns(T::Array[T.untyped]) }
   def check_call_reads(call_node, state)
     (call_node.args || []).each do |arg|
-      if arg.is_a?(AST::Identifier) && arg.was_moved
+      if (arg.is_a?(AST::Identifier) && arg.was_moved) || arg.is_a?(AST::MoveNode)
         # This is a TAKES/GIVE arg -- the move itself is valid, not a read.
-        next
-      elsif arg.is_a?(AST::MoveNode)
-        # GIVE wrapper: inner is being moved, not read.
         next
       elsif arg.is_a?(AST::ShareNode)
         check_share_reads(arg, state)
@@ -1866,15 +1842,15 @@ class BorrowChecker
     checker.errors
   end
 
-  sig { params(fn_node: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
   def initialize(fn_node, schema_lookup:)
     @fn_name = T.let(fn_node.name, String)
-    @fn_node = fn_node
+    @fn_node = T.let(fn_node, AST::FunctionDef)
     @schema_lookup = schema_lookup
-    @errors = T.let([], T::Array[T.untyped])
+    @errors = T.let([], T::Array[String])
   end
 
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def check!
     check_stmts(@fn_node.body || [], BorrowState.empty)
     @errors
@@ -1906,15 +1882,7 @@ class BorrowChecker
     when AST::WithBlock
       handle_with_block(stmt, state)
 
-    when AST::VarDecl, AST::BindExpr
-      return if state.empty?
-      check_binding_moves(stmt.value, stmt.token, state)
-
-    when AST::Assignment
-      return if state.empty?
-      check_binding_moves(stmt.value, stmt.token, state)
-
-    when AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
       return if state.empty?
       check_binding_moves(stmt.value, stmt.token, state)
 
@@ -2003,7 +1971,7 @@ class BorrowChecker
 
   # Collect variable names being moved by an expression (binding RHS context).
   # Non-Copy identifiers in ownership-transferring positions are moves.
-  sig { params(node: T.untyped).returns(T::Set[String]) }
+  sig { params(node: AST::Node).returns(T::Set[String]) }
   def collect_moved_names(node)
     transfer_collector.send(:collect_binding_move_places, node, synthetic_owner_state).map(&:path).to_set
   end

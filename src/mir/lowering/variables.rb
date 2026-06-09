@@ -245,13 +245,7 @@ module MIRLoweringVariables
     # Borrowed-by-reference bindings force Zig `var` even when local mutation
     # analysis only sees field mutation through the callee.
     by_ref_borrow = node.symbol&.mutable_ref_target == true || node.symbol&.poly_borrow_target == true
-    keyword_mutable = if !is_mutable
-      false
-    elsif actually_mutated || forced_var || by_ref_borrow
-      true
-    else
-      false
-    end
+    keyword_mutable = is_mutable && (actually_mutated || forced_var || by_ref_borrow)
 
     zig_type = transpile_type(node.full_type!)
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
@@ -691,7 +685,7 @@ module MIRLoweringVariables
     false
   end
 
-  sig { params(init: T.untyped).returns(T::Boolean) }
+  sig { params(init: T.nilable(MIR::Node)).returns(T::Boolean) }
   def owned_return_call_init?(init)
     return owned_return_call_init?(init.expr) if init.is_a?(MIR::Cast)
     return owned_return_call_init?(init.expr) if init.is_a?(MIR::TryExpr)
@@ -896,7 +890,7 @@ module MIRLoweringVariables
   def assignment_value(node)
     T.bind(self, MIRLowering) rescue nil
     value = T.cast(lower(node.value), MIR::Emittable)
-    T.cast(copy_container_borrow_if_needed(value, node.value), MIR::Emittable)
+    copy_container_borrow_if_needed(value, node.value)
   end
 
   sig { params(result: MIR::Set, plan: AssignmentTargetPlan).void }

@@ -556,7 +556,7 @@ module Annotator
             next unless info
             next if name.start_with?('_')
             next if info.read
-            next if info.reg&.respond_to?(:var_used) && info.reg.var_used
+            next if info.reg.respond_to?(:var_used) && info.reg.var_used
             classify_ownership!(info) unless info.ownership_kind
             next if [:resource, :collection, :rc].include?(info.ownership_kind)
             next unless info.reg
@@ -573,8 +573,8 @@ module Annotator
             next unless info
             next if name.start_with?('_')
             next unless info.mutable
-            next unless info.read || (info.reg&.respond_to?(:var_used) && info.reg.var_used)
-            next if info.reg&.respond_to?(:var_mutated) && info.reg.var_mutated
+            next unless info.read || (info.reg.respond_to?(:var_used) && info.reg.var_used)
+            next if info.reg.respond_to?(:var_mutated) && info.reg.var_mutated
             # Also skip when the binding was passed as a MUTABLE arg to a
             # callee — the binding's contents get mutated through the
             # call, so the receiving function's MUTABLE-param signature
@@ -1141,7 +1141,7 @@ module Annotator
         kind = classify_og_kind(type_info, sync: entry&.sync)
         ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
         @og.declare(name, kind: kind, type_info: ti,
-                    scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
+                    scope_depth: @og_scope_depth, line: node && node.respond_to?(:line) ? node.line : 0)
       end
 
       sig { params(node: AST::Node).returns(T::Boolean) }

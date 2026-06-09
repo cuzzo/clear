@@ -274,15 +274,15 @@ module FsmTransform
     def stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
-      when AST::WhileLoop      then contains_suspend_anywhere?(stmt.do_branch)
-      when AST::WhileBindLoop  then contains_suspend_anywhere?(stmt.do_branch)
-      when AST::ForRange       then contains_suspend_anywhere?(stmt.body)
-      when AST::ForEach        then contains_suspend_anywhere?(stmt.body)
-      when AST::WithBlock      then true   # always treat as Stage 3
+      when AST::WhileLoop, AST::WhileBindLoop
+        contains_suspend_anywhere?(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        contains_suspend_anywhere?(stmt.body)
+      when AST::WithBlock, AST::CatchBlock
+        true   # Stage 3/4 territory.
       when AST::IfStatement
         branches = [stmt.then_branch, stmt.else_branch].compact
         branches.any? { |b| contains_suspend_anywhere?(b) }
-      when AST::CatchBlock     then true   # Stage 4 territory
       else
         # Top-level linear stmt (assign, var decl, bare expr).
         # Top-level suspends are handled by the splitter; nested
@@ -306,13 +306,11 @@ module FsmTransform
           contains_suspend_anywhere?(stmt.do_branch)
         when AST::ForRange, AST::ForEach
           contains_suspend_anywhere?(stmt.body)
-        when AST::WithBlock
+        when AST::WithBlock, AST::CatchBlock
           true
         when AST::IfStatement
           contains_suspend_anywhere?(stmt.then_branch) ||
             contains_suspend_anywhere?(stmt.else_branch || [])
-        when AST::CatchBlock
-          true
         else
           !classify_suspend(stmt).nil?
         end
