@@ -779,13 +779,13 @@ module CleanupClassifier
     )
   end
 
-  sig { params(node: AST::Node).returns(T.nilable(Object)) }
+  sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
   private_class_method def self.binding_value(node)
     case node
     when AST::VarDecl, AST::BindExpr
-      node.value
+      T.cast(node.value, T.nilable(AST::Node))
     when AST::WhileBindLoop
-      node.condition
+      T.cast(node.condition, T.nilable(AST::Node))
     else
       nil
     end

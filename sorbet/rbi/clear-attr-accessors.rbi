@@ -873,7 +873,7 @@ class BodySlot
 end
 
 class BorrowChecker
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def errors; end
 end
 
@@ -1346,8 +1346,6 @@ class FunctionSignature
   def effects=(value); end
   sig { returns(T.nilable(IntrinsicEmit)) }
   def emit; end
-  sig { params(value: T.nilable(IntrinsicEmit)).returns(T.nilable(IntrinsicEmit)) }
-  def emit=(value); end
   sig { returns(T.nilable(T::Boolean)) }
   def error_fallible; end
   sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }

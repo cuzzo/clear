@@ -455,7 +455,7 @@ module AST
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true

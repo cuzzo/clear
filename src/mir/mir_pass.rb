@@ -572,7 +572,7 @@ class MIRPass
 
   # Recursively walk an expression to find consumed identifiers in
   # StructLit fields and FuncCall/MethodCall TAKES/GIVE args.
-  sig { params(node: T.untyped, names: T::Set[String], facts: CleanupClassifier::FrozenCleanupFacts).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), names: T::Set[String], facts: CleanupClassifier::FrozenCleanupFacts).void }
   def walk_consumed(node, names, facts)
     return unless node
     case node
@@ -667,7 +667,7 @@ class MIRPass
     names << name
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::Node).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = node.full_type!(context: "MIR pass field move")
@@ -682,7 +682,7 @@ class MIRPass
   end
 
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).void }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_reassign_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
@@ -713,7 +713,7 @@ class MIRPass
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
   # Previously stamp-only; now inserts MIR::AllocMark + MIR::Drop + MIR::SuppressCleanup
   # so the checker verifies match_as cleanup like any other binding.
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).void }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_match_as_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.takes
@@ -752,7 +752,7 @@ class MIRPass
     src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry
   end
 
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).void }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_while_bind_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::WhileBindLoop)
     entry = live_cleanup_entry(facts, stmt.binding_name)
@@ -767,7 +767,7 @@ class MIRPass
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
   end
 
-  sig { params(stmt: T.untyped, facts: CleanupClassifier::FrozenCleanupFacts).void }
+  sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_if_bind_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
@@ -817,7 +817,7 @@ class MIRPass
   # Insert MIR::Return before a ReturnNode to mark which local variables'
   # ownership escapes to the caller. The checker uses this to know that
   # escaped vars don't need local cleanup.
-  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, facts: CleanupClassifier::FrozenCleanupFacts, fn_node: T.nilable(AST::FunctionDef)).returns(T.nilable(T::Array[String])) }
+  sig { params(result: T::Array[AST::Node], ret_node: AST::ReturnNode, facts: CleanupClassifier::FrozenCleanupFacts, fn_node: T.nilable(AST::FunctionDef)).void }
   def insert_return!(result, ret_node, facts, fn_node: nil)
     _ = [result, ret_node, facts, fn_node]
     nil
@@ -832,7 +832,8 @@ class MIRPass
     ids = collect_escaping_ids(ret_node.value)
     ids.select { |id|
         n = id.name.to_s
-        entry = id.symbol&.reg.respond_to?(:mir_binding_entry) ? id.symbol.reg.mir_binding_entry : facts.entry_for_node(n, id)
+        decl = id.symbol&.reg
+        entry = decl.respond_to?(:mir_binding_entry) ? T.unsafe(decl).mir_binding_entry : facts.entry_for_node(n, id)
         (entry&.dig(:has_moved_guard) && entry.dig(:needs_cleanup)) ||
           (n.start_with?("__hoist_") &&
             AST.moved?(id) &&
@@ -842,7 +843,7 @@ class MIRPass
        .uniq
   end
 
-  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Array[AST::Identifier]) }
   def collect_escaping_ids(node)
     return [] unless node
     case node

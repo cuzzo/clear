@@ -31,12 +31,12 @@ require_relative "../semantic/ownership_identity"
 module MIRControlFlowExpr
   extend T::Sig
 
-  sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(node: T.nilable(AST::Node), skip_copy: T::Boolean).returns(T::Array[AST::Node]) }
   def self.children(node, skip_copy: false)
     AST.expression_children(node, skip_copy: skip_copy)
   end
 
-  sig { params(node: T.untyped, skip_copy: T::Boolean, block: T.untyped).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), skip_copy: T::Boolean, block: T.proc.params(node: AST::Node).void).void }
   def walk_expr_node(node, skip_copy: false, &block)
     return unless node
     yield node
@@ -1054,16 +1054,16 @@ class OwnershipDataflow
   #   - List literal items: [a, b]
   #   - MoveNode: MOVE a
   # All other positions: only was_moved (set by annotator for TAKES/GIVE).
-  sig { params(node: T.untyped, state: OwnershipState).returns(T::Array[PlaceId]) }
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
   def collect_binding_move_places(node, state)
     return [] unless node
-    step = DataflowStep.new(state: state, consumed: Set.new)
+    step = DataflowStep.new(state: state, consumed: T.let(Set.new, T::Set[PlaceId]))
     collect_ownership_transfers(node, step)
     step.consumed.to_a
   end
 
   # Recursively find ownership-transferring identifiers.
-  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), step: OwnershipDataflow::DataflowStep).void }
   def collect_ownership_transfers(node, step)
     return unless node
 
@@ -1130,7 +1130,7 @@ class OwnershipDataflow
   # Collect only was_moved identifiers from an expression subtree.
   # Skips CopyNode children: COPY wraps a was_moved identifier but the
   # source is NOT consumed (the copy is what transfers ownership).
-  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), step: OwnershipDataflow::DataflowStep).void }
   def collect_explicit_in(node, step)
     walk_expr_node(node, skip_copy: true) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
@@ -1160,12 +1160,12 @@ class OwnershipDataflow
   sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
   def collect_explicit_move_places(node, state)
     return [] unless node
-    step = DataflowStep.new(state: state, consumed: Set.new)
+    step = DataflowStep.new(state: state, consumed: T.let(Set.new, T::Set[PlaceId]))
     collect_explicit_in(node, step)
     step.consumed.to_a
   end
 
-  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), step: OwnershipDataflow::DataflowStep).void }
   def collect_share_transfers_in(node, step)
     walk_expr_node(node) do |n|
       collect_share_transfer(n, step) if n.is_a?(AST::ShareNode)
@@ -1224,7 +1224,7 @@ class OwnershipDataflow
   # of bug). Now there is one writer and three readers (this method,
   # MIRPass.insert_bg_give_suppress!, EscapeAnalysis), all reading the
   # same field.
-  sig { params(bg_node: T.untyped).returns(T::Array[String]) }
+  sig { params(bg_node: T.any(AST::BgBlock, AST::BgStreamBlock)).returns(T::Array[String]) }
   def collect_bg_body_gives(bg_node)
     bg_node.capture_analysis&.move_mark_names.to_a || []
   end
@@ -1375,7 +1375,7 @@ class UseAfterMoveChecker
 
   # Check reads in function/method call arguments.
   # was_moved args are moves (not reads) -- skip them.
-  sig { params(call_node: T.untyped, state: OwnershipDataflow::OwnershipState).returns(T::Array[T.untyped]) }
+  sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall), state: OwnershipDataflow::OwnershipState).void }
   def check_call_reads(call_node, state)
     (call_node.args || []).each do |arg|
       if (arg.is_a?(AST::Identifier) && arg.was_moved) || arg.is_a?(AST::MoveNode)
@@ -1393,7 +1393,7 @@ class UseAfterMoveChecker
   end
 
   # Recursively walk an expression, checking all Identifier reads.
-  sig { params(node: T.untyped, state: OwnershipDataflow::OwnershipState).returns(T.untyped) }
+  sig { params(node: T.nilable(AST::Node), state: OwnershipDataflow::OwnershipState).void }
   def check_reads_in_expr(node, state)
     return unless node
 
@@ -1457,7 +1457,7 @@ class UseAfterMoveChecker
     end
   end
 
-  sig { params(node: AST::ShareNode, state: OwnershipDataflow::OwnershipState).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: AST::ShareNode, state: OwnershipDataflow::OwnershipState).void }
   def check_share_reads(node, state)
     source = node.value
     if source.is_a?(AST::CopyNode)
