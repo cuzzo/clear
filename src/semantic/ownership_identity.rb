@@ -52,7 +52,7 @@ module OwnershipIdentity
       PlaceId.from_path(path.rpartition(".").first)
     end
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: Object).returns(T::Boolean) }
     def ==(other)
       case other
       when PlaceId
@@ -64,7 +64,7 @@ module OwnershipIdentity
       end
     end
 
-    sig { params(other: T.untyped).returns(T::Boolean) }
+    sig { params(other: Object).returns(T::Boolean) }
     def eql?(other)
       self == other
     end

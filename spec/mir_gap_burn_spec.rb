@@ -3623,7 +3623,7 @@ RSpec.describe "MIR gap-burn characterization" do
       MIR::Ident.new("m"),
       concat_key,
       :string_map,
-      INDEX_OPS[:string_map][:set],
+      IntrinsicRegistry.fs(INDEX_OPS[:string_map][:set], :string_map_set),
     )
     expect(map_put.key.alloc).to eq(:frame)
 

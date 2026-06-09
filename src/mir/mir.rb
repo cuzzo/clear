@@ -485,6 +485,9 @@ module MIR
 
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[Node]) }
+  DeferBody = T.type_alias { T.any(Emittable, T::Array[Emittable]) }
+  FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
+  BgBlockPlan = T.type_alias { T.any(MIR::BgStackfulPlan, MIR::BgStreamPlan, FsmBody) }
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
 
   class OwnershipEffect
@@ -1402,7 +1405,7 @@ module MIR
   DeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    sig { params(body: T.untyped).void }
+    sig { params(body: DeferBody).void }
     def initialize(body)
       MIR.validate_defer_body!(body, "MIR::DeferStmt")
       super(body)
@@ -1421,7 +1424,7 @@ module MIR
   ErrDeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    sig { params(body: T.untyped).void }
+    sig { params(body: DeferBody).void }
     def initialize(body)
       MIR.validate_defer_body!(body, "MIR::ErrDeferStmt")
       super(body)
@@ -1571,7 +1574,7 @@ module MIR
     const :yield_policy, Symbol
   end
 
-  sig { params(body: T.untyped, label: String).void }
+  sig { params(body: DeferBody, label: String).void }
   def self.validate_defer_body!(body, label)
     valid = if body.is_a?(Array)
       body.all? { |stmt| stmt.is_a?(MIR::Emittable) }
@@ -1599,10 +1602,10 @@ module MIR
     include Stmt
     sig do
       params(
-        code: T.untyped,
-        captures: T.untyped,
+        code: BgBlockPlan,
+        captures: T.nilable(T::Hash[String, Type]),
         run_body: T.nilable(T::Array[Emittable]),
-        fsm_structure: T.untyped,
+        fsm_structure: Object,
       ).void
     end
     def initialize(code, captures = nil, run_body = nil, fsm_structure = nil)
@@ -2597,7 +2600,7 @@ module MIR
     end
   end
 
-  sig { params(plan: T.untyped).returns(T::Boolean) }
+  sig { params(plan: Object).returns(T::Boolean) }
   def self.structural_bg_block_plan?(plan)
     plan.is_a?(MIR::BgStackfulPlan) ||
       plan.is_a?(MIR::BgStreamPlan) ||
@@ -4513,10 +4516,10 @@ module MIR
                               :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: T.untyped, key: T.untyped, value: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.untyped, template_kind: T.untyped, target_var: T.nilable(String)).void }
+    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol, target_var: T.nilable(String)).void }
     def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
       super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs), template_kind, target_var)
+        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind, target_var)
     end
     sig { returns(T::Boolean) }
     def expr?; true; end
@@ -4555,10 +4558,10 @@ module MIR
                               :resolved_allocs, :template_kind) do
     extend T::Sig
     include Expr
-    sig { params(target: T.untyped, key: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.untyped, template_kind: T.untyped).void }
+    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol).void }
     def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
       super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs), template_kind)
+        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind)
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key])

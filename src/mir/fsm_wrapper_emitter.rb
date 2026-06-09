@@ -586,7 +586,7 @@ module FsmWrapperEmitter
     end.to_s
   end
 
-  sig { params(stmts: T::Array[T.untyped], mir_emitter: MIREmitter).returns(T::Array[String]) }
+  sig { params(stmts: T::Array[MIR::Emittable], mir_emitter: MIREmitter).returns(T::Array[String]) }
   def render_body_items(stmts, mir_emitter)
     stmts.filter_map do |stmt|
       unless stmt.is_a?(MIR::Emittable)

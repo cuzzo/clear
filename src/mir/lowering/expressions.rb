@@ -1209,7 +1209,11 @@ module MIRLoweringExpressions
     if plan.target_ast.metatype == :hashmap
       map_ft = Type.from_node!(plan.target_ast, context: "hashmap index target")
       kind = map_ft.numeric_map? ? :numeric_map : :string_map
-      op = INDEX_OPS.dig(kind, :get)
+      op_spec = INDEX_OPS.dig(kind, :get)
+      op = FunctionSignature.unwrap(IntrinsicRegistry.fs(op_spec, :"#{kind}_get"))
+      raise "indexed access: missing registry signature for #{kind}" unless op
+      emit = op.emit
+      raise "indexed access: registry signature for #{kind} has no typed emit metadata" unless emit
 
       # Structural MIR::ShardedMapGet for both backends. Carries the
       # full INDEX_OPS entry (templates, ownership effects) so the
@@ -1219,14 +1223,15 @@ module MIRLoweringExpressions
       # routing.
       shard_direct = shard && plan.target_name == shard[:map]
       template_kind = if shard_direct then :shard_direct_zig
-                      elsif (map_ft.sharded? || map_ft.striped?) && op[:sharded_zig]
+                      elsif (map_ft.sharded? || map_ft.striped?) && emit.sharded_zig
                         :sharded_zig
                       else :zig
                       end
       resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-        next unless op[alloc_key]
-        sym = op[alloc_key] || :heap
+        registry_alloc = indexed_assignment_registry_alloc(emit, alloc_key)
+        next unless registry_alloc
+        sym = registry_alloc || :heap
         resolved_allocs[alloc_key] = resolve_alloc_sym(sym, plan.target_ast, plan.target_ast)
       end
       alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)

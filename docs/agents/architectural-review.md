@@ -14,19 +14,62 @@ implementations would be `A+`, and Go 1.0 would be roughly `A-` / `B+`.
 The rating is architectural/design quality for the file as it exists now, not
 a judgement of whether the file is useful.
 
-## Major Red Flags Before Release
+## Current Red / Yellow Flags Before Feature Work
 
-1. `src/mir/fsm_transform/emit.rb` still has memory-safety cleanup relocation
-   paths that manipulate rendered or template Zig strings (`close_zig`,
-   `defer ` stripping, `rt.` replacement) while building FSM destroy behavior.
-   This should become structural MIR cleanup/finalization data before a memory
-   safety release. The code has improved and now checks MIR cleanup nodes in
-   places, but this remaining string-template cleanup path is still too brittle
-   for a critical ownership boundary.
+### Red Flags
 
-No other reviewed issue looked like an immediate release-stopping "obviously
-will not work in general" problem. The remaining concerns are mostly
-complexity, lifecycle pressure, typed-boundary debt, and coverage prioritization.
+No open release-stopping red flags are visible in the reviewed compiler source
+after the current `architectural-review` work.
+
+### Yellow Flags
+
+1. `src/ast/std_lib.rb` and the intrinsic registry still mix backend Zig
+   emission patterns with callable, ownership, allocation, and fallibility
+   metadata. The current path is contract-backed and no longer travels through
+   opaque MIR text carriers, but the next architectural step is typed
+   emitter-owned emit specs and typed std-lib records.
+2. Annotation still has more shared receiver state than ideal. The phase split
+   is real, but `SemanticAnnotator`, capability validation, control-flow
+   analysis, and pipe analysis still rely on broad mutable phase context.
+3. MIR ownership/control-flow facts are much better centralized, but a few
+   compatibility readers still expose string-name identity. Continue moving
+   callers to stable typed binding/place IDs and frozen fact snapshots.
+4. Hoist, cleanup classification, and `MIRPass` remain high-correctness
+   surfaces. They now use more explicit facts, but regressions there still map
+   directly to leaks, double cleanup, stale move guards, or missed ownership
+   transfer checks.
+5. Emission is now the correct boundary for Zig source text. Keep it that way:
+   new lowerers should add structural MIR/facts, not new pre-emission rendered
+   fragments or helper-side Zig synthesis.
+6. FSM/thunk recursive splitting and liveness still have some loose walker
+   shape. The critical cleanup/string relocation risk is closed, but follow-up
+   work should keep moving splitter/liveness records toward typed segment-plan
+   data.
+
+Parser slop is intentionally not listed here. The parser is large and mutable,
+but it has not been the source of the memory-safety/correctness problems this
+review is trying to prevent.
+
+## Resolved Major Items On This Branch
+
+- ~~`src/mir/fsm_transform/emit.rb` relocated critical FSM cleanup behavior by
+  manipulating rendered/template Zig strings.~~ FSM cleanup/finalization data is
+  now structural, checker-visible, and rendered only at the emission edge.
+- ~~Production `RawZig`, `InlineZig`, `ZigTemplate`, and
+  `FsmOps::ZigLit` paths existed before final emission.~~ Those production
+  pre-emission Zig carriers are gone under `src/`.
+- ~~FSM/thunk cleanup and async lowering accepted loose `MIR::Node | String`
+  body fragments and synthetic Zig fragments.~~ The boundary now uses typed MIR
+  body items, segment facts, cleanup facts, and emitter-edge plans.
+- ~~Pipeline host acted like a second compiler and MIR lowering was a
+  mega-owner.~~ Pipeline lowering now lives under `src/mir/lower/pipeline` with
+  typed plans/lowerers, and MIR lowering delegates through typed phase state.
+- ~~Type, ownership, capability, escape, and phase-boundary facts were spread
+  across too many implicit hashes/slots.~~ The major memory-safety paths now
+  use stronger typed records, stable ownership identities, and explicit fact
+  handoffs, with the yellow-flag cleanup above left for the next pass.
+- ~~Current PR `Src Type Guardrails` findings for added/changed `src/**/*.rb`
+  lines.~~ The changed source now has no added guardrail findings.
 
 ## Overall Component Ratings
 
@@ -34,28 +77,28 @@ complexity, lifecycle pressure, typed-boundary debt, and coverage prioritization
 | --- | --- | --- |
 | Lexer | `A-` | Small and direct, but token rules are regex-order-sensitive and should keep maximal-munch tests for every new token family. |
 | Parser | `C+` | Large mutable recursive-descent owner, rule tables use untyped/dynamic construction, and `Parser.gradual_mode` is process-global. |
-| Annotation | `B-` | The phase/domain split is real progress, but `SemanticAnnotator`, capability validation, branch ownership state, and pipe analysis still have broad lifecycle and state-based branch pressure. |
-| Pipeline Fusion and Desugaring | `B` | MIR pipeline lowering now has typed plans and lowerers; the AST rewriter still has branchy recursive special cases and pipeline semantic decisions are split between annotator analysis, rewriter, and MIR plan builder. |
-| MIR Preparation / Hoisting / Ownership Analysis | `B-` | Cleanup, CFG, and ownership facts are explicit, but hoist and MIR pass remain high-churn, high-gap, state-heavy correctness surfaces. |
-| MIR Lowering | `B-` | The mega-owner work paid off, but `MIRLowering` remains the broadest delegator and several lowering modules still encode large decision tables as branch hubs. |
-| MIR Emission / Zig Transpilation | `B` | The emitter is mostly mechanical, but raw/stdlib Zig templates and FSM cleanup string relocation still leak backend text into semantic safety paths. |
+| Annotation | `B` | The phase/domain split and capability cleanup are real progress, but `SemanticAnnotator`, control-flow state, and pipe analysis still have broad lifecycle and state-based branch pressure. |
+| Pipeline Fusion and Desugaring | `B+` | MIR pipeline lowering now has typed plans and lowerers; the AST rewriter still has branchy recursive special cases and pipeline semantic decisions are split between annotator analysis, rewriter, and MIR plan builder. |
+| MIR Preparation / Hoisting / Ownership Analysis | `B` | Cleanup, CFG, and ownership facts are explicit and more strongly typed, but hoist and MIR pass remain high-churn correctness surfaces. |
+| MIR Lowering | `B+` | The mega-owner work paid off; `MIRLowering` is now mostly a typed coordinator, though several lowering modules still encode large decision tables as branch hubs. |
+| MIR Emission / Zig Transpilation | `B+` | Production pre-emission Zig carriers are gone and FSM cleanup no longer derives semantic facts from strings; the emitter remains broad and must stay a final rendering boundary only. |
 
-Overall architecture/design: `B`. Overall implementation: `B-`.
+Overall architecture/design: `B+`. Overall implementation: `B`.
 
 ## Cross-Cutting Outstanding Issues
 
 - `SemanticAnnotator`, `Type`, `SymbolEntry`, `Scope`, `MIRLowering`,
   `MIRChecker`, and `FunctionSignature` remain implicit lifecycle owners with
   many public state-dependent operations.
-- `src/ast/std_lib.rb` and intrinsic registries are still large raw contract
-  tables with `T.untyped` values. They need typed contract records if they keep
-  carrying allocation, ownership, fallibility, and backend emission metadata.
+- `src/ast/std_lib.rb` and intrinsic registries are still large contract
+  tables. They need typed emitter-owned contract records if they keep carrying
+  allocation, ownership, fallibility, and backend emission metadata.
 - The top current fix-risk files are `src/annotator/domains/control_flow.rb`,
-  `src/mir/lowering/capabilities.rb`, `src/mir/fsm_lowering.rb`,
-  `src/ast/ast.rb`, and `src/mir/hoist.rb`.
+  `src/annotator/helpers/pipe_analysis.rb`, `src/mir/hoist.rb`,
+  `src/mir/mir_pass.rb`, and `src/mir/control_flow.rb`.
 - The highest current state-based branch hotspots include `AST` construction,
-  FSM recursive emission, cleanup classification, intrinsic lowering, return
-  handling, parser function parsing, and formatter spacing/expansion.
+  cleanup classification, intrinsic lowering, return handling, parser function
+  parsing, and formatter spacing/expansion.
 - The largest remaining multi-file fix blast-radius signal still points at
   `src/mir/mir_lowering.rb`, even though its local state pressure is much lower
   than before.
@@ -144,7 +187,7 @@ Overall architecture/design: `B`. Overall implementation: `B-`.
 | `schemas.rb` | `B` | Schema helpers are simple, but repeated enum/resource/struct/union predicates show alias pressure. |
 | `scope.rb` | `B-` | Binding/type storage is clearer after wrapping, but `Scope#dup`/branch-copy semantics can stale nested symbol references. |
 | `source_error.rb` | `C+` | Error helper reaches into including objects with `instance_variable_get`/`T.unsafe`; brittle but diagnostic-only. |
-| `std_lib.rb` | `C+` | Core intrinsic/std-lib contracts are still raw hash + Zig template data carrying ownership/fallibility semantics. |
+| `std_lib.rb` | `B-` | Core intrinsic/std-lib contracts are contract-backed, but the source table still mixes backend emit patterns with ownership/fallibility semantics and should move to typed emitter-owned specs. |
 | `symbol_entry.rb` | `C+` | Binding identity, flow, storage, sync, lifetime, and layout are still mutable on one public lifecycle object. |
 | `syntax_typo_scanner.rb` | `B` | Bounded typo helper; no major issue beyond some untyped scanner inputs. |
 | `type.rb` | `C+` | Type parsing, semantic capabilities, placement, resource flags, and Zig type computation remain coupled in one mutable owner. |
@@ -182,21 +225,21 @@ Overall architecture/design: `B`. Overall implementation: `B-`.
 | --- | --- | --- |
 | `README.md` | `B+` | Must keep tracking explicit fact/plan boundaries as lowering internals move. |
 | `alloc.rb` | `B` | Small mixin, but annotation-side storage helpers living under MIR are a boundary smell. |
-| `cleanup_classifier.rb` | `B-` | Cleanup facts are explicit, but classification branches over many symbol/type/storage facts and remains high-gap. |
+| `cleanup_classifier.rb` | `B` | Cleanup facts are explicit and snapshot-backed, but classification still branches over many symbol/type/storage facts. |
 | `cleanup_entry.rb` | `A-` | Strong cleanup recipe object; keep new lifecycle metadata here rather than in hashes. |
 | `control_flow.rb` | `B-` | CFG/ownership dataflow is essential, but active borrow and transfer checks still have broad state scatter. |
 | `fiber_ctx_builder.rb` | `B` | Good shared capture materializer; capture cleanup/fresh-copy output should continue moving from strings to MIR facts. |
-| `fsm_lowering.rb` | `C+` | FSM step/result/lock-error lowering has high fix risk and uncovered branch pressure. |
-| `fsm_ops.rb` | `B` | DSL improves FSM templates, but string/code fragments still exist at the boundary. |
+| `fsm_lowering.rb` | `B` | FSM step/result/lock-error lowering is now structural enough for checker visibility; remaining risk is branch pressure in async state/result cases. |
+| `fsm_ops.rb` | `A-` | Typed FSM op DSL; production `ZigLit`/pre-emission Zig escape paths are gone. |
 | `fsm_transform.rb` | `B` | Good facade; no major local issue. |
-| `fsm_wrapper_emitter.rb` | `B` | Mostly mechanical wrapper emission; keep semantic decisions out. |
-| `hoist.rb` | `C+` | High SlopCop/Boobytrap risk; anonymous allocation hoisting and cleanup target stamping remain complex branch surfaces. |
+| `fsm_wrapper_emitter.rb` | `B+` | Mostly mechanical wrapper emission; keep semantic decisions out and maintain typed wrapper body inputs. |
+| `hoist.rb` | `B-` | Anonymous allocation hoisting and cleanup target stamping are more typed, but this remains a complex ownership/cleanup branch surface. |
 | `materialization.rb` | `A-` | Good packet abstraction for allocation/binding/cleanup emission. |
-| `mir.rb` | `C+` | Large IR/fact definition file; `@result_type` lifecycle and many node classes make it hard to isolate ownership shape changes. |
-| `mir_checker.rb` | `B-` | Critical safety gate with explicit facts, but `check_fn!` and `@errors` lifecycle remain broad. |
-| `mir_emitter.rb` | `B` | Mostly mechanical; still a broad delegator and must not absorb semantic decisions from lowering. |
-| `mir_lowering.rb` | `B-` | Much less stateful than before, but still the top broad delegator and largest multi-file fix blast-radius file. |
-| `mir_pass.rb` | `B-` | Useful phase coordinator; return allocator, BG resource capture, and consumed-walk logic still have branch/coverage pressure. |
+| `mir.rb` | `B-` | Large IR/fact definition file; typed aliases and structural nodes improved the safety surface, but the node/fact inventory is still broad. |
+| `mir_checker.rb` | `B` | Critical safety gate with explicit typed facts and closed ownership surfaces, but `check_fn!` and `@errors` lifecycle remain broad. |
+| `mir_emitter.rb` | `B+` | Mostly mechanical final rendering edge; must not absorb semantic decisions from lowering. |
+| `mir_lowering.rb` | `B+` | Much less stateful than before and mostly delegates through typed phase state; still the broadest coordinator. |
+| `mir_pass.rb` | `B` | Useful phase coordinator with stronger ownership preparation facts; return allocator, BG resource capture, and consumed-walk logic still need branch discipline. |
 | `placement.rb` | `A-` | Small typed placement helper; no major issue identified. |
 | `pre_mir_type_check.rb` | `B+` | Good invariant boundary; coverage should stay high for new AST node kinds. |
 | `test_lowering.rb` | `B` | Test DSL lowering is bounded; active stub state creates some state scatter. |
@@ -206,11 +249,11 @@ Overall architecture/design: `B`. Overall implementation: `B-`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
-| `emit.rb` | `D+` | Major red flag: critical FSM cleanup relocation still manipulates Zig strings/templates instead of only structural MIR facts. |
+| `emit.rb` | `B+` | Former major red flag closed: cleanup/finalization is structural and checker-visible; remaining work is keeping recursive emission/liveness inputs typed. |
 | `liveness.rb` | `B` | Liveness facts are isolated; fat-union candidate around assignment/bind/var-decl common fields. |
-| `recursive_splitter.rb` | `C+` | Recursive splitter uses loose context hashes and untyped segment values; many helper paths still depend on broad lowering APIs. |
+| `recursive_splitter.rb` | `B-` | Splitter is no longer part of an opaque cleanup/string path, but some loose walker and context shapes remain. |
 | `segments.rb` | `B` | Segment records are a good shape; split helpers still branch over many AST statement variants. |
-| `suspend_resolvers.rb` | `B` | Bounded resolver module; uncovered lock/stream suspend arms need targeted tests. |
+| `suspend_resolvers.rb` | `B+` | Bounded resolver module with typed FSM state-field declarations; uncovered lock/stream suspend arms should stay covered as new cases land. |
 
 ### `src/mir/lower/pipeline/`
 
@@ -252,8 +295,8 @@ Overall architecture/design: `B`. Overall implementation: `B-`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
-| `emit.rb` | `B-` | Trampoline emission still has loose values and template-like output decisions. |
-| `recursive_splitter.rb` | `C+` | Splitter remains untyped/hash-heavy and should converge toward the typed FSM segment-plan style. |
+| `emit.rb` | `B+` | Trampoline emission now uses typed MIR records through the cleanup boundary; keep final Zig rendering isolated here. |
+| `recursive_splitter.rb` | `B-` | Splitter remains the loosest thunk transform piece and should continue converging toward typed segment-plan records. |
 
 ### `src/semantic/`
 
@@ -264,9 +307,9 @@ Overall architecture/design: `B`. Overall implementation: `B-`.
 | `concurrency_checks.rb` | `B` | Useful semantic checks; some inputs remain loose AST/function metadata. |
 | `effect_inference.rb` | `B+` | Small inference helper; no major issue identified. |
 | `effect_set.rb` | `B+` | Small effect value; branch coverage is low because it is tiny and should be easy to close. |
-| `escape_analysis.rb` | `B-` | Important shared phase, but caller sync, placement, and lambda capture logic remain broad and high-gap. |
+| `escape_analysis.rb` | `B` | Important shared phase with stronger typed ownership identities; caller sync, placement, and lambda capture logic remain broad. |
 | `local_binding_facts.rb` | `B+` | Good local fact object; no major issue identified. |
-| `ownership_graph.rb` | `B-` | Centralizing move/borrow facts is right, but graph/node lifecycle is still a temporal-ordering surface. |
+| `ownership_graph.rb` | `B` | Centralizing move/borrow facts is right and stable place IDs help; graph/node lifecycle is still a temporal-ordering surface. |
 | `pass_state.rb` | `A-` | Good explicit pass-state contract; keep new phases registered here rather than inferred. |
 | `pass_work_profiler.rb` | `B` | Useful instrumentation; no core compiler risk, but profiling state is mutable and broad. |
 

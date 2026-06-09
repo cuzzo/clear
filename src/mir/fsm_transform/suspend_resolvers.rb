@@ -272,12 +272,12 @@ module FsmTransform
       MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
     end
 
-    sig { params(decl: T.untyped).returns(MIR::ContextFieldDecl) }
+    sig { params(decl: FsmOps::StateFieldDecl).returns(MIR::ContextFieldDecl) }
     def state_field_decl(decl)
       ctx_field_decl(
         decl.name.to_s,
         decl.zig_type.to_s,
-        T.cast(decl.default_value, MIR::Emittable),
+        decl.default_value,
       )
     end
 

@@ -331,6 +331,10 @@ class MIRChecker
   AllocMarksByName = T.type_alias { T::Hash[String, T::Array[MIR::AllocMark]] }
   CleanupMarksByName = T.type_alias { T::Hash[String, T::Array[T.any(MIR::Cleanup, MIR::ErrCleanup)]] }
   NameSet = T.type_alias { T::Set[String] }
+  AllocatorMetadataCarrier = T.type_alias { T.any(MIR::RegistryCall, MIR::IndexedStore, MIR::ShardedMapPut, MIR::ShardedMapGet) }
+  AllocatorMetadataSource = T.type_alias { T.any(MIR::Node, MIR::CallableContract) }
+  RegistryOwnershipNode = T.type_alias { T.any(MIR::RegistryCall, MIR::IndexedStore) }
+  OwnershipSurfaceNode = T.type_alias { T.any(MIR::RegistryCall, MIR::IndexedStore, MIR::ShardedMapPut, MIR::ReassignWithCleanup) }
 
   class InlineStoredAllocCheck < T::Struct
     extend T::Sig
@@ -1532,7 +1536,7 @@ class MIRChecker
   )
   VALID_FSM_UNLOCK_METHODS = T.let(%w[unlock unlockShared].freeze, T::Array[String])
 
-  sig { params(structure: T.nilable(MIR::FsmStructure), source: T.untyped).returns(NilClass) }
+  sig { params(structure: T.nilable(MIR::FsmStructure), source: T.nilable(AST::Node)).returns(NilClass) }
   def self.check_fsm_structure!(structure, source: nil)
     return unless structure
     captures = T.cast(structure.captures || [], T::Array[MIR::FsmCaptureFact])
@@ -1663,7 +1667,7 @@ class MIRChecker
       actions: T::Array[MIR::FsmDestroyAction],
       finalize_cleanups: T::Array[String],
       ctx_id: T.nilable(Integer),
-      source: T.nilable(Object),
+      source: T.nilable(AST::Node),
     ).void
   end
   def self.check_fsm_destroy_actions!(actions, finalize_cleanups, ctx_id, source)
@@ -1705,7 +1709,7 @@ class MIRChecker
       action: MIR::FsmDestroyCleanup,
       finalize_cleanups: T::Array[String],
       ctx_id: Integer,
-      source: T.nilable(Object),
+      source: T.nilable(AST::Node),
     ).void
   end
   def self.check_fsm_destroy_cleanup_action!(action, finalize_cleanups, ctx_id, source)
@@ -1768,7 +1772,7 @@ class MIRChecker
     check_fsm_destroy_optional_expr!("allocator", action.name, action.allocator, source)
   end
 
-  sig { params(action: MIR::FsmDestroyLockRelease, ctx_id: Integer, source: T.nilable(Object)).void }
+  sig { params(action: MIR::FsmDestroyLockRelease, ctx_id: Integer, source: T.nilable(AST::Node)).void }
   def self.check_fsm_destroy_lock_action!(action, ctx_id, source)
     unless action.guard_field.start_with?("__lock_held_")
       raise FsmStructureError, format_fsm_error(
@@ -1807,14 +1811,14 @@ class MIRChecker
     check_fsm_destroy_required_expr!("lock target", action.name, action.lock_ref, source)
   end
 
-  sig { params(kind: String, name: String, value: T.nilable(MIR::Emittable), source: T.nilable(Object)).void }
+  sig { params(kind: String, name: String, value: T.nilable(MIR::Emittable), source: T.nilable(AST::Node)).void }
   def self.check_fsm_destroy_optional_expr!(kind, name, value, source)
     return unless value
 
     check_fsm_destroy_required_expr!(kind, name, value, source)
   end
 
-  sig { params(kind: String, name: String, value: MIR::Emittable, source: T.nilable(Object)).void }
+  sig { params(kind: String, name: String, value: MIR::Emittable, source: T.nilable(AST::Node)).void }
   def self.check_fsm_destroy_required_expr!(kind, name, value, source)
     text = fsm_destroy_expr_text(value)
     if text.strip.empty? || text.include?("\n") || text.include?(";")
@@ -1840,7 +1844,7 @@ class MIRChecker
     object.is_a?(MIR::Ident) && object.name.to_s == "__ctx_#{ctx_id}"
   end
 
-  sig { params(invariant: String, message: String, source: T.untyped).returns(String) }
+  sig { params(invariant: String, message: String, source: T.nilable(AST::Node)).returns(String) }
   def self.format_fsm_error(invariant, message, source)
     loc = source&.line ? " at line #{source.line}" : ""
     "[FSM checker]#{loc} #{invariant}: #{message}"
@@ -1851,51 +1855,65 @@ class MIRChecker
   VALID_ALLOCATORS = T.let([:heap, :frame].freeze, T::Array[Symbol])
   VALID_ALLOC_SCOPES = T.let([:heap, :function, :iteration].freeze, T::Array[Symbol])
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: MIR::Node).returns(T::Boolean) }
   def allocator_metadata_node?(node)
     metadata = allocator_metadata_for(node)
     metadata.is_a?(MIR::InlineAllocMetadata) && !metadata.empty?
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(MIR::InlineAllocMetadata)) }
+  sig { params(node: AllocatorMetadataSource).returns(T.nilable(MIR::InlineAllocMetadata)) }
   def allocator_metadata_for(node)
-    if node.respond_to?(:allocs)
-      metadata = T.unsafe(node).allocs
-      return metadata if metadata.is_a?(MIR::InlineAllocMetadata)
+    carrier = allocator_metadata_carrier(node)
+    case carrier
+    when MIR::RegistryCall
+      carrier.allocs
+    when MIR::IndexedStore
+      carrier.allocs
+    when MIR::ShardedMapPut, MIR::ShardedMapGet
+      carrier.resolved_allocs
     end
-    if node.respond_to?(:resolved_allocs)
-      metadata = T.unsafe(node).resolved_allocs
-      return metadata if metadata.is_a?(MIR::InlineAllocMetadata)
-    end
-    nil
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(String)) }
-  def allocator_metadata_target(node)
-    if node.respond_to?(:target_var)
-      target = T.unsafe(node).target_var
-      return target.to_s if target && !target.to_s.empty?
+  sig { params(node: AllocatorMetadataSource).returns(T.nilable(AllocatorMetadataCarrier)) }
+  def allocator_metadata_carrier(node)
+    case node
+    when MIR::RegistryCall, MIR::IndexedStore, MIR::ShardedMapPut, MIR::ShardedMapGet
+      node
     end
-    if node.respond_to?(:target)
-      target_expr = T.unsafe(node).target
+  end
+
+  sig { params(node: AllocatorMetadataSource).returns(T.nilable(String)) }
+  def allocator_metadata_target(node)
+    carrier = allocator_metadata_carrier(node)
+    case carrier
+    when MIR::RegistryCall
+      target = carrier.target_var
+      return target.to_s if target && !target.to_s.empty?
+    when MIR::IndexedStore, MIR::ShardedMapPut
+      target = carrier.target_var
+      return target.to_s if target && !target.to_s.empty?
+      target_expr = carrier.target
+      return target_expr.name.to_s if target_expr.is_a?(MIR::Ident)
+    when MIR::ShardedMapGet
+      target_expr = carrier.target
       return target_expr.name.to_s if target_expr.is_a?(MIR::Ident)
     end
     nil
   end
 
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: AllocatorMetadataSource).returns(String) }
   def allocator_metadata_label(node)
     target = allocator_metadata_target(node)
     return target if target
 
-    reason = node.respond_to?(:reason) ? T.unsafe(node).reason : nil
+    reason = node.is_a?(MIR::RegistryCall) ? node.reason : nil
     reason ? reason.to_s : node.class.name.to_s
   end
 
   sig do
     params(
-      allocs: T::Hash[String, T::Array[T.untyped]],
-      cleanups: T::Hash[String, T::Array[T.untyped]],
+      allocs: AllocMarksByName,
+      cleanups: CleanupMarksByName,
       metadata_nodes: T::Array[MIR::Node],
     ).returns(T.nilable(T::Array[MIR::Node]))
   end
@@ -1977,7 +1995,7 @@ class MIRChecker
   end
 
   # HPT_LEAK: heap-returning call result discarded.
-  sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.nilable(MIR::Node), leaks: T::Array[String]).returns(NilClass) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
 
@@ -2001,16 +2019,17 @@ class MIRChecker
     nil
   end
 
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::Node).returns(String) }
   def ownership_effect_label(node)
     case node
     when MIR::Call
       node.callee.to_s
     when MIR::MethodCall
       node.method.to_s
+    when MIR::RegistryCall
+      node.reason
     else
-      reason = node.respond_to?(:reason) ? node.reason : nil
-      reason ? reason.to_s : node.class.name.to_s
+      node.class.name.to_s
     end
   end
 
@@ -2019,7 +2038,7 @@ class MIRChecker
   # Checks ALL allocator params (:alloc, :key_alloc, :val_alloc) against the
   # container's AllocMark. A frame-allocated key/value stored in a heap
   # container becomes a dangling pointer after frame rewind.
-  sig { params(metadata_nodes: T::Array[MIR::Node], allocs: T::Hash[String, T::Array[T.untyped]], fn_def: MIR::FnDef).returns(T.nilable(T::Array[MIR::Node])) }
+  sig { params(metadata_nodes: T::Array[MIR::Node], allocs: AllocMarksByName, fn_def: MIR::FnDef).returns(T.nilable(T::Array[MIR::Node])) }
   def verify_allocator_metadata_contracts!(metadata_nodes, allocs, fn_def)
     param_names = T.let(fn_def.params.map { |param| param.name.to_s }.to_set, T::Set[String])
     metadata_nodes.each do |node|
@@ -2037,7 +2056,7 @@ class MIRChecker
         next
       end
 
-      container_alloc = T.must(allocs[target]).first.alloc
+      container_alloc = T.must(T.must(allocs[target]).first).alloc
 
       # Check primary allocator.
       if alloc_metadata.primary
@@ -2428,25 +2447,24 @@ class MIRChecker
     nil
   end
 
-  sig { params(contract: T.untyped).returns(T::Boolean) }
+  sig { params(contract: T.nilable(MIR::CallableContract)).returns(T::Boolean) }
   def callable_contract_consumes?(contract)
     return false unless contract.is_a?(MIR::CallableContract)
     !ownership_contract_consumes(contract.ownership_contract).empty?
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: RegistryOwnershipNode).returns(T::Boolean) }
   def registry_ownership_side_channel?(node)
-    sig = node.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(node).stdlib_def) : nil
+    sig = FunctionSignature.unwrap(node.stdlib_def)
     if stdlib_takes_ownership?(node)
       return false if ownership_surface_has_no_owned_operands?(node)
       return true
     end
 
-    contract = node.respond_to?(:ownership_contract) ? T.unsafe(node).ownership_contract : nil
+    contract = node.ownership_contract
     return true if contract.is_a?(MIR::OwnershipContract) && !contract.empty?
 
-    return false if node.respond_to?(:mutating_receiver_allocator_op?) &&
-                    T.unsafe(node).mutating_receiver_allocator_op?
+    return false if node.mutating_receiver_allocator_op?
 
     return false unless sig
 
@@ -2474,7 +2492,7 @@ class MIRChecker
     end
   end
 
-  sig { params(node: T.untyped, consumes: T::Array[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  sig { params(node: AllocatorMetadataSource, consumes: T::Array[String], allocs: AllocMarksByName).void }
   def check_consumed_allocators_match_sink!(node, consumes, allocs)
     return if consumes.empty?
     sink_alloc = allocator_metadata_for(node)&.sink_alloc
@@ -2490,23 +2508,26 @@ class MIRChecker
     end
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: MIR::Node).returns(T::Boolean) }
   def ownership_consumption_has_no_owned_operands?(node)
-    fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+    fact = node.ownership_consumption
     return false unless fact.is_a?(MIR::OwnershipConsumptionFact)
 
     fact.operands.none? { |operand| operand.kind == :owned_binding && operand.name }
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: OwnershipSurfaceNode).returns(T::Boolean) }
   def ownership_contract_has_no_owned_operands?(node)
-    contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
+    contract = case node
+    when MIR::RegistryCall, MIR::IndexedStore
+      node.ownership_contract
+    end
     return false unless contract.is_a?(MIR::OwnershipContract)
 
     contract.operands.none? { |operand| operand.kind == :owned_binding && operand.name }
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: OwnershipSurfaceNode).returns(T::Boolean) }
   def ownership_surface_has_no_owned_operands?(node)
     ownership_consumption_has_no_owned_operands?(node) ||
       ownership_contract_has_no_owned_operands?(node)

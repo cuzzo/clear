@@ -271,7 +271,7 @@ class MIREmitter
     text.include?(plan.bg_rt) ? "" : "_ = &#{plan.bg_rt};"
   end
 
-  sig { params(plan: T.untyped).returns(T::Boolean) }
+  sig { params(plan: Object).returns(T::Boolean) }
   def fsm_bg_body_plan?(plan)
     plan.is_a?(MIR::FsmIoBody) || plan.is_a?(MIR::FsmB1Body) || plan.is_a?(MIR::FsmGenericBody)
   end
@@ -2241,7 +2241,7 @@ class MIREmitter
     node.try_wrap ? "try #{call}" : call
   end
 
-  sig { params(callee: T.untyped).returns(String) }
+  sig { params(callee: String).returns(String) }
   def runtime_scoped_callee(callee)
     text = callee.to_s
     text.start_with?("rt.") ? "#{@rt_name}.#{text.delete_prefix("rt.")}" : text

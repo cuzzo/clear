@@ -650,7 +650,7 @@ module MIRHoistLowering
     end
   end
 
-  sig { params(mir: T.untyped).returns(T.nilable(Type)) }
+  sig { params(mir: MIR::Node).returns(T.nilable(Type)) }
   def mir_explicit_result_type(mir)
     raw_type = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
       T.unsafe(mir).result_type

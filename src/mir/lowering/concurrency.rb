@@ -824,7 +824,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step.expr)
     binding = step.binding
-    mir = finalize_bg_discard_expr(step.expr, mir) unless binding
+    mir = finalize_bg_discard_expr(step.expr, T.cast(mir, MIR::NodeRoot)) unless binding
     step_pending = flush_pending
     body_mir.concat(step_pending)
     mir_nodes = bg_mir_nodes(mir)
@@ -851,20 +851,21 @@ module MIRLoweringConcurrency
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).void }
   def lower_bg_statement_result(step, body_mir)
     T.bind(self, MIRLowering) rescue nil
-    last_mir = T.cast(finalize_bg_discard_expr(step.expr, lower(step.expr)), MIR::Node)
+    last_mir = T.cast(finalize_bg_discard_expr(step.expr, T.cast(lower(step.expr), MIR::NodeRoot)), MIR::Node)
     last_pending = flush_pending
     body_mir.concat(last_pending)
     body_mir << last_mir
     nil
   end
 
-  sig { params(expr: AST::Node, mir: T.untyped).returns(T.untyped) }
+  sig { params(expr: AST::Node, mir: MIR::NodeRoot).returns(MIR::NodeRoot) }
   def finalize_bg_discard_expr(expr, mir)
     T.bind(self, MIRLowering) rescue nil
     finalized, hoisted_discard = materialize_statement_discard(expr, mir)
+    finalized = T.cast(finalized, MIR::NodeRoot)
     return finalized unless discard_expr_stmt?(expr) && !hoisted_discard
 
-    MIR::ExprStmt.new(finalized, true)
+    MIR::ExprStmt.new(T.cast(finalized, MIR::Node), true)
   end
 
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node], id: MIRLoweringGeneratedId, inner_t: Type).void }
