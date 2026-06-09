@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../mir_checker"
 
 module MIRLoweringConcurrency
     extend T::Sig
@@ -55,6 +56,7 @@ module MIRLoweringConcurrency
     const :stmt_code, String
     const :result_line, String
     const :run_body, T::Array[MIR::Node]
+    const :emit_body, T::Array[MIR::Node], default: []
   end
 
   class BgBodyStep < T::Struct
@@ -655,6 +657,7 @@ module MIRLoweringConcurrency
       ctx_type: ctx_type,
       ctx_var: ctx_var,
       task_config: task_config,
+      pass_ctx_by_address: true,
     )
   end
 
@@ -736,7 +739,7 @@ module MIRLoweringConcurrency
       arena_init: scheduler.arena_init,
       spawn_call: scheduler.spawn_call,
       alloc_expr: bg_alloc_expr(node, rt_name),
-      run_body: body.run_body,
+      run_body: body.emit_body.empty? ? body.run_body : body.emit_body,
     )
     bg = MIR::BgBlock.new(plan, captured, body.run_body)
     bg.result_type = Type.new(node.full_type!)
@@ -775,6 +778,7 @@ module MIRLoweringConcurrency
   def bg_body_materialization(node, caps, analysis, pointer_captures, bg_rt, id, is_void, inner_t, capture_close_plans)
     T.bind(self, MIRLowering) rescue nil
     run_body = T.let([], T::Array[MIR::Node])
+    emit_body = T.let([], T::Array[MIR::Node])
     stmt_code, result_line = with_bg_fiber_body_context(pointer_captures) do
       with_fiber_capture_map(caps.capture_map,
                              capture_symbols: caps.capture_symbols,
@@ -785,10 +789,11 @@ module MIRLoweringConcurrency
             capture_cleanup_stmts(caps.specs, "__ctx_#{id}") +
             lowered.run_body
         )
+        emit_body = run_body.reject { |mir| capture_ownership_mirror_node?(mir, "__ctx_#{id}") }
         [lowered.stmt_code, lowered.result_line]
       end
     end
-    BgBodyMaterialization.new(stmt_code: stmt_code, result_line: result_line, run_body: run_body)
+    BgBodyMaterialization.new(stmt_code: stmt_code, result_line: result_line, run_body: run_body, emit_body: emit_body)
   end
 
   sig { params(node: AST::BgBlock).returns(T::Array[BgBodyStep]) }
@@ -811,17 +816,18 @@ module MIRLoweringConcurrency
     body_mir = T.let([], T::Array[MIR::Node])
     steps.each { |step| lower_bg_pre_step(step, body_mir) }
     lower_bg_result_step(last_step, body_mir, id, is_void, inner_t)
-    BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: body_mir)
+    BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: body_mir, emit_body: body_mir)
   end
 
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).void }
   def lower_bg_pre_step(step, body_mir)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step.expr)
+    binding = step.binding
+    mir = finalize_bg_discard_expr(step.expr, mir) unless binding
     step_pending = flush_pending
     body_mir.concat(step_pending)
     mir_nodes = bg_mir_nodes(mir)
-    binding = step.binding
     if binding
       body_mir << MIR::Let.new(binding, T.must(mir_nodes.last), false, nil, nil)
     else
@@ -845,11 +851,20 @@ module MIRLoweringConcurrency
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).void }
   def lower_bg_statement_result(step, body_mir)
     T.bind(self, MIRLowering) rescue nil
-    last_mir = T.cast(lower(step.expr), MIR::Node)
+    last_mir = T.cast(finalize_bg_discard_expr(step.expr, lower(step.expr)), MIR::Node)
     last_pending = flush_pending
     body_mir.concat(last_pending)
     body_mir << last_mir
     nil
+  end
+
+  sig { params(expr: AST::Node, mir: T.untyped).returns(T.untyped) }
+  def finalize_bg_discard_expr(expr, mir)
+    T.bind(self, MIRLowering) rescue nil
+    finalized, hoisted_discard = materialize_statement_discard(expr, mir)
+    return finalized unless discard_expr_stmt?(expr) && !hoisted_discard
+
+    MIR::ExprStmt.new(finalized, true)
   end
 
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node], id: MIRLoweringGeneratedId, inner_t: Type).void }

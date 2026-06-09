@@ -417,6 +417,91 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("try fetch(rt)")
   end
 
+  it "rebases runtime-scoped calls and allocators" do
+    e.rt_name = "__rt"
+
+    expect(e.emit(MIR::Call.new("rt.sleep", [MIR::Lit.new("1")], false))).to eq("__rt.sleep(1)")
+    expect(e.emit(MIR::FreezeExpr.new(MIR::Ident.new("value"), "Payload")))
+      .to eq("try CheatLib.freeze(Payload, __rt.heapAlloc(), value)")
+    expect(e.send(:emit_thunk_yield_statement, :check)).to eq("__rt.checkYield();")
+  end
+
+  it "rebases runtime-owned thunk frame allocation" do
+    e.rt_name = "__rt"
+    node = MIR::ThunkTrampoline.new(
+      fn_name: "fact",
+      return_type: Type.new(:Int64),
+      param_fields: [MIR::ThunkFrameField.new(name: "n", type_info: Type.new(:Int64))],
+      param_init_fields: [MIR::ThunkFrameInit.new(field_name: "n", value: MIR::Ident.new("n"))],
+      base_cases: [MIR::ThunkBaseCase.new(cond: MIR::BinOp.new("<=", MIR::Ident.new("current.n"), MIR::Lit.new("1")), value: MIR::Lit.new("1"))],
+      recurse_arg_inits: [MIR::ThunkFrameInit.new(field_name: "n", value: MIR::BinOp.new("-", MIR::Ident.new("current.n"), MIR::Lit.new("1")))],
+      combine_lhs: MIR::Ident.new("current.n"),
+      combine_op: :MUL,
+      yield_policy: :check,
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("__rt.checkYield();")
+    expect(zig).to include("const child = __rt.heapAlloc().create(Frame) catch unreachable;")
+    expect(zig).to include("if (current != &initial) __rt.heapAlloc().destroy(current);")
+  end
+
+  it "rebases structural DO block wait-group runtime access" do
+    e.rt_name = "__outer_rt"
+    plan = MIR::DoBlockPlan.new(wg_var: "__wg", branches: [])
+
+    expect(e.emit(MIR::DoBlock.new(plan, []))).to include(
+      "var __wg = CheatHeader.WaitGroup.init(__outer_rt.getSched());"
+    )
+  end
+
+  it "rebases stackful BG run-body allocation and cleanup to the BG runtime" do
+    cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+    task_config = MIR::TaskConfigPlan.new(stack_variant: "Large")
+    plan = MIR::BgStackfulPlan.new(
+      id: 0,
+      ctx_type: "__BgCtx0",
+      alloc_var: "__bg0_alloc",
+      promise_var: "__bg0_promise",
+      ctx_var: "__bg0_ctx",
+      blk_label: "__bg0",
+      bg_rt: "__rt_bg0",
+      rt_name: "rt",
+      promise_zig: "CheatLib.Promise(i64)",
+      is_void: false,
+      capture_fields: [],
+      capture_inits: [
+        MIR::StructInitField.new(name: :inner, value: MIR::Ident.new("__bg0_promise.inner")),
+        MIR::StructInitField.new(name: :alloc, value: MIR::Ident.new("__bg0_alloc")),
+      ],
+      capture_frees: [
+        MIR::CaptureCleanupAction.new(target: MIR::Ident.new("cap"), cleanup_entry: cleanup),
+      ],
+      promoted_decls: [],
+      profile_site: MIR::ProfileTaskSite.new(site_id: 1, line: 1, column: 1, dispatch: :local, form: :stack),
+      arena_init: nil,
+      spawn_call: MIR::FiberSpawnCall.new(
+        target: :runtime_submit,
+        runtime_name: "rt",
+        ctx_type: "__BgCtx0",
+        ctx_var: "__bg0_ctx",
+        task_config: task_config,
+      ),
+      alloc_expr: MIR::AllocatorRef.new(:heap),
+      run_body: [
+        MIR::Let.new("pool", MIR::ContainerInit.new("Pool(User)", :pool, :heap, 4), true, nil, nil),
+        MIR::Cleanup.new("pool", cleanup),
+      ],
+    )
+
+    zig = e.emit_bg_stackful_plan(plan)
+
+    expect(zig).to include("var pool = try Pool(User).initCapacity(__rt_bg0.heapAlloc(), 4);")
+    expect(zig).to include("defer CheatLib.cleanup(@TypeOf(pool), __rt_bg0.heapAlloc(), &pool);")
+    expect(zig).to include("defer CheatLib.cleanup(@TypeOf(cap), __rt_bg0.heapAlloc(), &cap)")
+  end
+
   it "emits method call" do
     node = MIR::MethodCall.new(MIR::Ident.new("list"), "append", [MIR::Lit.new("42")], false)
     expect(e.emit(node)).to eq("list.append(42)")
@@ -600,6 +685,20 @@ RSpec.describe MIREmitter do
       # guard). One unified emit form across all cleanup kinds.
       expect(zig).to include("var name_moved = false;")
       expect(zig).to include("defer if (!name_moved) CheatLib.cleanup(@TypeOf(name), rt.heapAlloc(), &name);")
+    end
+
+    it "terminates deferred guarded-if bodies but not deferred blocks" do
+      guarded = MIR::DeferStmt.new(MIR::IfStmt.new(
+        MIR::Ident.new("ready"),
+        [MIR::Set.new(MIR::Ident.new("ready"), MIR::Lit.new("false"))],
+        nil,
+      ))
+      block = MIR::DeferStmt.new(MIR::ScopeBlock.new([
+        MIR::Set.new(MIR::Ident.new("ready"), MIR::Lit.new("false")),
+      ]))
+
+      expect(e.emit(guarded)).to eq("defer if (ready) {\nready = false;\n};")
+      expect(e.emit(block)).to eq("defer {\nready = false;\n}")
     end
 
     it "emits resource cleanup" do

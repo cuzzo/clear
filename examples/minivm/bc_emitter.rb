@@ -14,6 +14,9 @@ require_relative "../../src/ast/error_registry"
 class BcEmitter
   class Unimplemented < StandardError; end
 
+  MIR_INLINE_ZIG_CLASS = MIR.const_defined?(:InlineZig, false) ? MIR.const_get(:InlineZig) : nil
+  MIR_RAW_BC_CLASS = MIR.const_defined?(:RawBc, false) ? MIR.const_get(:RawBc) : nil
+
   BC_STRUCTURAL_NOOP_MIR_NODES = [
     MIR::AllocMark,
     MIR::ReturnMark,
@@ -36,6 +39,66 @@ class BcEmitter
     MIR::DeferStmt,
     MIR::ErrDeferStmt,
   ].freeze
+
+  def inline_zig_node?(node)
+    klass = MIR_INLINE_ZIG_CLASS
+    !klass.nil? && node.is_a?(klass)
+  end
+
+  def raw_bc_node?(node)
+    klass = MIR_RAW_BC_CLASS
+    !klass.nil? && node.is_a?(klass)
+  end
+
+  def switch_arm_patterns(arm)
+    if arm.respond_to?(:patterns)
+      arm.patterns || []
+    elsif arm.respond_to?(:[])
+      Array((arm[:patterns] if arm.respond_to?(:key?) && arm.key?(:patterns)) || arm[:pattern]).compact
+    else
+      []
+    end
+  end
+
+  def switch_arm_pattern(arm)
+    switch_arm_patterns(arm).first
+  end
+
+  def switch_arm_body(arm)
+    if arm.respond_to?(:body)
+      arm.body || []
+    elsif arm.respond_to?(:[])
+      arm[:body] || []
+    else
+      []
+    end
+  end
+
+  def union_match_arm_variant(arm)
+    if arm.respond_to?(:variant)
+      arm.variant
+    elsif arm.respond_to?(:[])
+      arm[:pattern]
+    end
+  end
+
+  def union_match_arm_payload(arm)
+    if arm.respond_to?(:payload)
+      arm.payload
+    elsif arm.respond_to?(:[])
+      arm[:payload]
+    end
+  end
+
+  def union_match_arm_body(arm)
+    if arm.respond_to?(:body)
+      arm.body || []
+    elsif arm.respond_to?(:[])
+      arm[:body] || []
+    else
+      []
+    end
+  end
 
   # Opcodes - must match interpreter exec! exactly.
   LOAD_CONST  = 0;  LOAD_NAME   = 1;  STORE_NAME  = 2;  POP         = 3
@@ -597,7 +660,7 @@ class BcEmitter
     if mir_fn.respond_to?(:comptime_params) && mir_fn.comptime_params &&
        !mir_fn.comptime_params.empty?
       body = mir_fn.respond_to?(:body) ? (mir_fn.body || []) : []
-      type_generator = body.empty? || (body.length == 1 && body.first.is_a?(MIR::InlineZig))
+      type_generator = body.empty? || (body.length == 1 && inline_zig_node?(body.first))
       return if type_generator
     end
     # MIR::CatchWrapper-only bodies are the user-facing wrappers around a
@@ -920,16 +983,27 @@ class BcEmitter
 
   def compile_stmt(mir_node, ast_node)
     @current_ast_stmt = ast_node
+    if inline_zig_node?(mir_node)
+      compile_inline_zig_stmt(mir_node)
+      return
+    end
+    if raw_bc_node?(mir_node)
+      compile_raw_bc(mir_node)
+      t = pop_type
+      emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
+      push_type(:void)
+      return
+    end
+
     case mir_node
     when MIR::Let
-      if mir_node.init.is_a?(MIR::InlineZig)
+      if inline_zig_node?(mir_node.init)
         # Recognized InlineZig reasons (e.g. bounded_concurrent_ctx_cast)
         # are dispatched in compile_expr's InlineZig handler, which raises
         # for unrecognized reasons. Letting these flow through compile_let
         # is what enables structural shapes like the bounded-concurrent
         # ctx cast to bind to a slot.
-        if mir_node.init.is_a?(MIR::InlineZig) &&
-           mir_node.init.reason.to_s == "bounded_concurrent_ctx_cast"
+        if mir_node.init.reason.to_s == "bounded_concurrent_ctx_cast"
           compile_let(mir_node)
         else
           raise Unimplemented, "InlineZig init not supported in VM path"
@@ -996,13 +1070,6 @@ class BcEmitter
       compile_sharded_map_put(mir_node)
       t = pop_type
       emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
-      push_type(:void)
-    when MIR::RawBc
-      # Statement-position RawBc — walk its template for side effects,
-      # discard the result.
-      compile_raw_bc(mir_node)
-      t = pop_type
-      emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
       push_type(:void)
     when MIR::MoveMark
       # MoveMark is a Zig-codegen artifact: it pairs with a guarded `defer
@@ -1124,162 +1191,6 @@ class BcEmitter
       else
         raise Unimplemented, "MIR::BreakStmt outside of a known loop"
       end
-    when MIR::InlineZig
-      # Reason-based pass-throughs for Zig-specific statement leaves the VM
-      # can safely ignore (no-op semantics). 'with_block_bindings' unwraps
-      # Rc/Arc/locked wrappers into aliases — VM has no sync distinction so
-      # the binding is inert. 'suppress_unused_inner_capture' is a Zig
-      # unused-var suppressor. Others still raise.
-      case mir_node.reason.to_s
-      when "with_block_bindings"
-        # Compiler-emitted WITH-block binding patterns:
-        #   const __X_unwrap = X.ctrl.data.*;        (Arc/multiowned unwrap)
-        #   const c = __X_guard_N.get();              (locked sync acquire)
-        # In both cases, bind the alias to the same slot value as the source.
-        # The VM has no Arc/lock indirection — alias and source share storage.
-        # The source is named in stdlib_def[:borrows].
-        sources = sd_get(mir_node.stdlib_def, :borrows) || []
-
-        # Prefetch captured-field sources. When this WITH runs inside a
-        # synthesized worker (bounded concurrent / DO / BG), the lock target
-        # is rooted at `ctx.FIELD.*` rather than a local Ident — the
-        # capture rewrite folded the original name into a ctx field path.
-        # The borrows[] entry still names the original variable (e.g. `total`),
-        # but no slot of that name exists in the worker frame.
-        # Detect this and load `ctx.FIELD` into a slot named after the
-        # borrows entry so alias_to_source below resolves correctly.
-        # The field holds the same Box as the original (AddressOf is
-        # identity in BC), so writes through the alias propagate.
-        if has_slot?("ctx")
-          mir_node.code.to_s.scan(/var\s+__(\w+)_guard_\d+\s*=\s*ctx\.(\w+)\.\*/).each do |borrow_name, field_name|
-            next if has_slot?(borrow_name)
-            fg = MIR::FieldGet.new(MIR::Ident.new("ctx"), field_name)
-            compile_expr_to_value(fg); pop_type
-            alloc_slot(borrow_name, :any)
-            emit_op(STORE_SLOT, @slots[borrow_name]); emit_op(POP)
-            @slot_types[borrow_name] = :any
-            (@boxed_slots ||= Set.new) << borrow_name
-          end
-        end
-
-        # LOCK_ACQUIRE: for each `var __X_guard_N = SRC<...>.acquire()`
-        # in the InlineZig (and `.write()` for write-locked, etc.), emit
-        # a real LOCK_ACQUIRE op against the SRC slot. The matching
-        # LOCK_RELEASE is emitted by the enclosing ScopeBlock handler
-        # on scope exit. Default timeout: 100ms (matches Zig debug
-        # builds; release uses 30s but 100ms is what tests like 263
-        # depend on).
-        @with_lock_releases ||= []
-        # Default timeout: 100ms (matches Zig debug-build behavior;
-        # release uses 30s but tests like 263 depend on the shorter
-        # debug-style window).
-        lock_timeout_ms = 100
-        # Fallible captures (ON / RETRY) supply structured clauses via
-        # stdlib_def[:fallible_clauses]. The bare-acquire regex below
-        # skips these so we don't double-emit LOCK_ACQUIRE; instead the
-        # explicit dispatch (after the regex pass) emits LOCK_ACQUIRE +
-        # IS_ERR + branch + action_mir + retry loop.
-        fallible_clauses = sd_get(mir_node.stdlib_def, :fallible_clauses) || []
-        fallible_var_names = fallible_clauses.map { |c| c.var_name.to_s }.to_set
-        # Emit fallible-acquire dispatch BEFORE the bare-acquire regex pass
-        # and BEFORE the alias-setup passes. On runtime success path, the
-        # alias bytecode that follows runs as usual; on the error path we
-        # JUMP forward past the body and the LOCK_RELEASE emitted by the
-        # ScopeBlock cleanup, then patch the JUMP at end-of-WITH via
-        # @with_fallible_escapes. ScopeBlock saves/restores the patch list
-        # so nested WITHs don't interfere.
-        @with_fallible_escapes ||= []
-        fallible_clauses.each do |fc|
-          emit_fallible_lock_dispatch(fc, lock_timeout_ms)
-        end
-        # Source slot extraction: BG capture-rewrites identifiers to
-        # `__ctx_N.NAME` so the body accesses the context-struct field;
-        # the bc_emitter strips that prefix in compile_ident, so the
-        # "post-strip" name is the slot. Strip here too. The Arc
-        # unwrap (`.ctrl.data.*`) and lock-acquire (`.acquire()` etc.)
-        # tail is the part after. The `__acq_N_X: { if (...)` prefix
-        # appears for fallible (`acquireOrErr`) acquires used by ON
-        # clauses; skip past it before matching.
-        mir_node.code.to_s.scan(/var\s+__\w+_guard_\d+\s*=\s*(?:__acq_\d+_\w+:\s*\{\s*if\s*\()?(?:__ctx_\d+\.)?(\w+)(?:\.([\w]+))?(?:\.[\w\.\*]+)?\.(?:acquire|write|read|acquireOrErr|writeOrErr|readOrErr)\(\)/).each do |src_match|
-          src_slot, sub_field = src_match
-          # `ctx.<name>` (CONCURRENT worker capture): the auto-lock guard
-          # source is `ctx.<name>.ctrl.data.*` rather than `<name>` --
-          # `ctx` is the worker's context-struct cast Let, not a real
-          # @shared:locked binding. The actual capture is the next
-          # segment, which the BC build_bounded_concurrent_callback
-          # pre-decodes into a same-named slot. Rewrite src_slot to the
-          # capture name so LOCK_ACQUIRE lands on the right slot.
-          src_slot = sub_field if src_slot == "ctx" && sub_field && has_slot?(sub_field)
-          next unless has_slot?(src_slot)
-          # Even after the `ctx.<name>` rewrite, `ctx` alone (without a
-          # following capture-named segment) is still the worker's
-          # context value, not a user @shared:locked -- skip it.
-          next if src_slot == "ctx"
-          # Skip captures that have a fallible_clauses entry — those are
-          # emitted below with explicit error dispatch, not a bare acquire.
-          next if fallible_var_names.include?(src_slot)
-          emit_op(LOCK_ACQUIRE, @slots[src_slot], lock_timeout_ms)
-          # LOCK_ACQUIRE always pushes (TrueVal on success / Value.Error on
-          # timeout). For non-fallible captures we always succeed in
-          # practice (the runtime panics for never-released locks), so
-          # discard the marker to keep the value stack balanced.
-          emit_op(POP)
-          @with_lock_releases << src_slot
-        end
-        # First pattern: Arc unwrap via .ctrl.data.*
-        mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
-          alias_to_source(alias_name, src_name)
-        end
-        # Second pattern: locked guard.get() — alias source is in borrows[].
-        # Each `const NAME = __VAR_guard_N.get();` introduces NAME aliased to
-        # the corresponding borrows entry. For un-sorted guards (single
-        # EXCLUSIVE), the index into borrows[] matches. For sorted guards
-        # (2+ EXCLUSIVE captures), the guard_decls preamble carries the
-        # mapping `var __sort_guard_N: @TypeOf(SOURCE.method())`, which we
-        # parse first to recover guard→source.
-        guard_to_src = {}
-        # Capture source from `@TypeOf(SOURCE.method())`. The source can be
-        # a plain Ident (`a.acquire`), an Arc unwrap (`a.ctrl.data.acquire`),
-        # or a BG-context field (`__ctx_N.a.acquire`). Pull the first
-        # identifier after `(` (or, when prefixed with `__ctx_N.`, the second)
-        # so BG-body sort guards resolve to the capture's outer name (which
-        # has a slot in the BG body — bc_emitter strips `__ctx_N.` prefixes
-        # in compile_ident).
-        mir_node.code.to_s.scan(/var\s+(__\w+_guard_\d+)\s*:\s*@TypeOf\(([\w.]+)\./).each do |g, expr|
-          parts = expr.split(".")
-          src = if parts[0]&.start_with?("__ctx_") || parts[0] == "ctx" || parts[0] == "__rt"
-                  parts[1] || parts[0]
-                else
-                  parts[0]
-                end
-          guard_to_src[g] = src
-        end
-        # Iterate `const NAME = __GUARD.get();` and resolve via guard_to_src
-        # when available, otherwise fall back to ordered borrows[].
-        i = 0
-        mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*(__\w+_guard_\d+)\.get\(\)/).each do |alias_name, guard_name|
-          src_name = guard_to_src[guard_name] || sources[i] || sources.last
-          alias_to_source(alias_name, src_name) if src_name
-          i += 1
-        end
-        # Third pattern: plain WITH BORROWED / RESTRICT — emits Zig-side
-        #   const ref = greeting;       (immutable borrow)
-        #   const ref = &greeting;      (mutable borrow, Zig pointer)
-        # The VM has no borrow indirection; alias and source share storage
-        # via alias_to_source. The mutable case still copies (writeback
-        # below) so reassigning through the alias is visible on the source.
-        mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*&?(\w+)(?:\.\w+)*\s*;/).each do |alias_name, src_name|
-          # Skip the patterns already handled above (Arc unwrap, guard.get()).
-          next if alias_name.start_with?("__") && alias_name.end_with?("_unwrap")
-          next if mir_node.code.to_s.match?(/const\s+#{Regexp.escape(alias_name)}\s*=\s*__\w+_guard_\d+\.get\(\)/)
-          alias_to_source(alias_name, src_name) if has_slot?(src_name)
-        end
-        push_type(:void)
-      when "suppress_unused_inner_capture", "item_cleanup"
-        push_type(:void)
-      else
-        raise Unimplemented, "InlineZig not supported in VM path"
-      end
     when MIR::BgBlock
       # Expression-position handler does the real work (emit deferred body
       # + BG_SPAWN). At stmt position we just evaluate and discard.
@@ -1360,22 +1271,21 @@ class BcEmitter
     saved_ast = @current_ast_stmt
     @current_ast_stmt = ast_node
     STDERR.puts "DBG compile_expr_stmt expr=#{expr.class}" if ENV["BC_TRACE_CALL"]
-    case expr
-    when MIR::Call
-      compile_call_expr(expr)
-    when MIR::MethodCall
-      compile_method_call_expr(expr)
-    when MIR::InlineZig
-      # Reason-based no-ops: OR EXIT writes rt.__error.{kind,error_name,
-      # message,clear_line}; the VM has no rt struct, the error
-      # sentinel carries kind+message directly via RAISE_ERR. These field
-      # assigns are dead in BC mode.
+    if inline_zig_node?(expr)
       reason = expr.respond_to?(:reason) ? expr.reason.to_s : ""
       if reason.start_with?("or_exit_")
         push_type(:void)
         return
       end
+
       raise Unimplemented, "#{expr.class.name.split('::').last} expr not supported in VM path"
+    end
+
+    case expr
+    when MIR::Call
+      compile_call_expr(expr)
+    when MIR::MethodCall
+      compile_method_call_expr(expr)
     else
       compile_expr(expr)
     end
@@ -2370,11 +2280,13 @@ class BcEmitter
     # compile_binop can lower the equality.
     arms = node.arms || []
     branches = arms.map do |arm|
-      pat  = arm[:pattern] || arm[:patterns]&.first
-      body = arm[:body]
+      pat  = switch_arm_pattern(arm)
+      body = switch_arm_body(arm)
       next unless pat && body
       pat_node = case pat
                  when MIR::Expr, MIR::Ident, MIR::Lit then pat
+                 when MIR::EnumSwitchPattern
+                   MIR::Ident.new(".#{pat.variant}")
                  when String
                    if pat.start_with?(".")
                      MIR::Ident.new(pat)  # Zig tag literal; handled by IfChain rewrite path
@@ -2392,7 +2304,7 @@ class BcEmitter
   def compile_union_match(node)
     end_jumps = []
     node.arms.each do |arm|
-      pattern = arm[:pattern].to_s.sub(/\A\./, "")
+      pattern = union_match_arm_variant(arm).to_s.sub(/\A\./, "")
       compile_expr_to_value(node.subject)
       pop_type
       emit_op(NATIVE_CALL, NATIVES["car"], 1)
@@ -2404,7 +2316,7 @@ class BcEmitter
       skip_idx = @ops.length
       emit_op(0)
 
-      payload = arm[:payload]
+      payload = union_match_arm_payload(arm)
       if payload
         payload_name = payload.to_s
         compile_expr_to_value(node.subject)
@@ -2415,7 +2327,7 @@ class BcEmitter
         emit_op(POP)
       end
 
-      emit_body_stmts(arm[:body])
+      emit_body_stmts(union_match_arm_body(arm))
 
       emit_op(JUMP)
       jump_idx = @ops.length
@@ -2474,6 +2386,15 @@ class BcEmitter
   # ================================================================
 
   def compile_expr(node)
+    if inline_zig_node?(node)
+      compile_inline_zig_expr(node)
+      return
+    end
+    if raw_bc_node?(node)
+      compile_raw_bc(node)
+      return
+    end
+
     case node
     when MIR::Lit
       compile_lit(node)
@@ -2730,43 +2651,6 @@ class BcEmitter
       end
     when MIR::Orelse
       compile_orelse(node)
-    when MIR::InlineZig
-      # Reason-based pass-throughs for Zig-specific leaves that the VM can
-      # substitute with a benign equivalent.
-      case node.reason.to_s
-      when "undef"
-        emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
-      when "alloc"
-        emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
-      when "mat_init"
-        # Pipeline materialization target (std.ArrayListUnmanaged(T).empty).
-        # VM: empty list.
-        emit_op(NATIVE_CALL, NATIVES["list"], 0); push_type(:any); return
-      when "pipe_items_access", "bc_src_items", "bc_unnest_items"
-        # @hasField-guarded .items unwrap — in VM, lists are already items.
-        emit_op(LOAD_SLOT, @slots["pipe_src_list"] || @slots["__soa_src"] || 0) if false
-        # Fall back to the global name lookup; the name is embedded in the
-        # Zig code string. Extract it as best-effort.
-        ident = node.code.to_s[/\b([a-zA-Z_][\w]*)\b/, 1] || "pipe_src_list"
-        if has_slot?(ident)
-          emit_op(LOAD_SLOT, @slots[ident])
-        else
-          emit_op(LOAD_NAME, add_const(ident))
-        end
-        push_type(:any); return
-      when "bounded_concurrent_ctx_cast"
-        # Worker callback context cast: the Zig backend casts the
-        # opaque raw_ctx pointer back to *Ctx. The VM passes the ctx
-        # value directly through the call slot, so the cast is identity --
-        # just load the raw_ctx slot.
-        if has_slot?("raw_ctx")
-          emit_op(LOAD_SLOT, @slots["raw_ctx"])
-        else
-          emit_op(LOAD_CONST, add_const(nil))
-        end
-        push_type(:any); return
-      end
-      raise Unimplemented, "InlineZig in expression position (no bc template in stdlib)"
     when MIR::InlineBc
       compile_inline_bc(node)
     when MIR::OrExitBcRewrite
@@ -2775,8 +2659,6 @@ class BcEmitter
       compile_sharded_map_put(node)
     when MIR::ShardedMapGet
       compile_sharded_map_get(node)
-    when MIR::RawBc
-      compile_raw_bc(node)
     when MIR::ConcatStr
       # Variadic string concat — the VM's CONCAT opcode takes two operands
       # and pushes the joined string. Chain it for 3+ parts: push a, push b,
@@ -4941,8 +4823,112 @@ class BcEmitter
       a.is_a?(MIR::AllocatorRef) ||
       (a.is_a?(MIR::Ident) && (a.name.to_s == "rt" || a.name.to_s == "alloc")) ||
       (a.is_a?(MIR::MethodCall) && a.method.to_s == "heapAlloc") ||
-      (a.is_a?(MIR::InlineZig) && a.reason.to_s == "alloc")
+      (inline_zig_node?(a) && a.reason.to_s == "alloc")
     }
+  end
+
+  def compile_inline_zig_stmt(mir_node)
+    # Reason-based pass-throughs for old Zig-specific statement leaves the VM
+    # can safely ignore (no-op semantics). New MIR should reach this backend
+    # structurally; this compatibility branch is only for stale generated data.
+    case mir_node.reason.to_s
+    when "with_block_bindings"
+      compile_inline_zig_with_block_bindings(mir_node)
+    when "suppress_unused_inner_capture", "item_cleanup"
+      push_type(:void)
+    else
+      raise Unimplemented, "InlineZig not supported in VM path"
+    end
+  end
+
+  def compile_inline_zig_with_block_bindings(mir_node)
+    sources = sd_get(mir_node.stdlib_def, :borrows) || []
+
+    if has_slot?("ctx")
+      mir_node.code.to_s.scan(/var\s+__(\w+)_guard_\d+\s*=\s*ctx\.(\w+)\.\*/).each do |borrow_name, field_name|
+        next if has_slot?(borrow_name)
+        fg = MIR::FieldGet.new(MIR::Ident.new("ctx"), field_name)
+        compile_expr_to_value(fg); pop_type
+        alloc_slot(borrow_name, :any)
+        emit_op(STORE_SLOT, @slots[borrow_name]); emit_op(POP)
+        @slot_types[borrow_name] = :any
+        (@boxed_slots ||= Set.new) << borrow_name
+      end
+    end
+
+    @with_lock_releases ||= []
+    lock_timeout_ms = 100
+    fallible_clauses = sd_get(mir_node.stdlib_def, :fallible_clauses) || []
+    fallible_var_names = fallible_clauses.map { |c| c.var_name.to_s }.to_set
+    @with_fallible_escapes ||= []
+    fallible_clauses.each { |fc| emit_fallible_lock_dispatch(fc, lock_timeout_ms) }
+
+    mir_node.code.to_s.scan(/var\s+__\w+_guard_\d+\s*=\s*(?:__acq_\d+_\w+:\s*\{\s*if\s*\()?(?:__ctx_\d+\.)?(\w+)(?:\.([\w]+))?(?:\.[\w\.\*]+)?\.(?:acquire|write|read|acquireOrErr|writeOrErr|readOrErr)\(\)/).each do |src_match|
+      src_slot, sub_field = src_match
+      src_slot = sub_field if src_slot == "ctx" && sub_field && has_slot?(sub_field)
+      next unless has_slot?(src_slot)
+      next if src_slot == "ctx"
+      next if fallible_var_names.include?(src_slot)
+      emit_op(LOCK_ACQUIRE, @slots[src_slot], lock_timeout_ms)
+      emit_op(POP)
+      @with_lock_releases << src_slot
+    end
+
+    mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
+      alias_to_source(alias_name, src_name)
+    end
+
+    guard_to_src = {}
+    mir_node.code.to_s.scan(/var\s+(__\w+_guard_\d+)\s*:\s*@TypeOf\(([\w.]+)\./).each do |g, expr|
+      parts = expr.split(".")
+      src = if parts[0]&.start_with?("__ctx_") || parts[0] == "ctx" || parts[0] == "__rt"
+              parts[1] || parts[0]
+            else
+              parts[0]
+            end
+      guard_to_src[g] = src
+    end
+
+    i = 0
+    mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*(__\w+_guard_\d+)\.get\(\)/).each do |alias_name, guard_name|
+      src_name = guard_to_src[guard_name] || sources[i] || sources.last
+      alias_to_source(alias_name, src_name) if src_name
+      i += 1
+    end
+
+    mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*&?(\w+)(?:\.\w+)*\s*;/).each do |alias_name, src_name|
+      next if alias_name.start_with?("__") && alias_name.end_with?("_unwrap")
+      next if mir_node.code.to_s.match?(/const\s+#{Regexp.escape(alias_name)}\s*=\s*__\w+_guard_\d+\.get\(\)/)
+      alias_to_source(alias_name, src_name) if has_slot?(src_name)
+    end
+
+    push_type(:void)
+  end
+
+  def compile_inline_zig_expr(node)
+    case node.reason.to_s
+    when "undef", "alloc"
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    when "mat_init"
+      emit_op(NATIVE_CALL, NATIVES["list"], 0); push_type(:any); return
+    when "pipe_items_access", "bc_src_items", "bc_unnest_items"
+      ident = node.code.to_s[/\b([a-zA-Z_][\w]*)\b/, 1] || "pipe_src_list"
+      if has_slot?(ident)
+        emit_op(LOAD_SLOT, @slots[ident])
+      else
+        emit_op(LOAD_NAME, add_const(ident))
+      end
+      push_type(:any); return
+    when "bounded_concurrent_ctx_cast"
+      if has_slot?("raw_ctx")
+        emit_op(LOAD_SLOT, @slots["raw_ctx"])
+      else
+        emit_op(LOAD_CONST, add_const(nil))
+      end
+      push_type(:any); return
+    end
+
+    raise Unimplemented, "InlineZig in expression position (no bc template in stdlib)"
   end
 
   def compile_method_call_expr(node)

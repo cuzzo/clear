@@ -9,6 +9,8 @@ require_relative "register_pipeline"
 class RegisterBcEmitter
   class Unsupported < StandardError; end
 
+  MIR_INLINE_ZIG_CLASS = MIR.const_defined?(:InlineZig, false) ? MIR.const_get(:InlineZig) : nil
+
   MiniVM::Register::OpcodeSpec::OPCODES.each do |op|
     const_set(op.name, op.code)
   end
@@ -63,6 +65,49 @@ class RegisterBcEmitter
   # serialized to disk + read by the runner in --debug mode.
   Binding = Struct.new(:source_line, :source_column, :end_source_line, :kind, :virt, :name, :type_name, keyword_init: true)
   VarNamesByFunction = Struct.new(:entry_ip, :bindings, keyword_init: true)
+
+  def inline_zig_node?(node)
+    klass = MIR_INLINE_ZIG_CLASS
+    !klass.nil? && node.is_a?(klass)
+  end
+
+  def switch_arm_patterns(arm)
+    if arm.respond_to?(:patterns)
+      arm.patterns || []
+    elsif arm.respond_to?(:fetch)
+      Array(arm.fetch(:patterns, nil) || arm.fetch(:pattern, nil)).compact
+    else
+      []
+    end
+  end
+
+  def switch_arm_pattern(arm)
+    switch_arm_patterns(arm).first
+  end
+
+  def switch_arm_pattern_value(arm)
+    pattern = switch_arm_pattern(arm)
+    case pattern
+    when MIR::Lit
+      pattern.value
+    when MIR::Ident
+      pattern.name
+    when MIR::EnumSwitchPattern
+      pattern.variant
+    else
+      pattern
+    end
+  end
+
+  def switch_arm_body(arm)
+    if arm.respond_to?(:body)
+      arm.body || []
+    elsif arm.respond_to?(:fetch)
+      arm.fetch(:body, nil) || []
+    else
+      []
+    end
+  end
 
   def initialize(frontend_result, source: nil, importer: nil)
     @frontend_result = frontend_result
@@ -624,6 +669,7 @@ class RegisterBcEmitter
 
   def compile_stmt_inner(stmt)
     return nil if reentrant_guard_stmt?(stmt)
+    return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
 
     case stmt
     when MIR::Comment, MIR::Suppress, MIR::Noop
@@ -660,8 +706,6 @@ class RegisterBcEmitter
       compile_inline_bc_stmt(stmt)
     when MIR::OrExitBcRewrite
       compile_or_exit(stmt)
-    when MIR::InlineZig
-      compile_inline_zig_stmt(stmt)
     when MIR::Call
       compile_call_stmt(stmt)
     when MIR::DeferStmt
@@ -715,6 +759,8 @@ class RegisterBcEmitter
       # `call() OR { ... };` at statement position -- run the catch
       # body if the call raised (ECLR first), else fall through.
       compile_try_catch_stmt(stmt)
+    when MIR::FallibleLockBinding
+      compile_fallible_lock_binding(stmt)
     when MIR::AssertStmt
       compile_assert_stmt(stmt)
     else
@@ -736,6 +782,9 @@ class RegisterBcEmitter
   def compile_defer_stmt(stmt)
     body = stmt.body
     return nil if body.is_a?(MIR::Call) && body.callee.to_s.match?(/\A(?:CheatLib\.)?(?:rcRelease|arcRelease|weakRcRelease|weakArcRelease)\z/)
+    return nil if body.is_a?(MIR::RcRelease)
+    return nil if body.is_a?(MIR::IfStmt) && capture_cleanup_defer?(body)
+    return nil if body.is_a?(MIR::MethodCall) && body.method.to_s == "release"
 
     # WITH EXCLUSIVE lock-release write-back: `defer { *_m_c = c }`.
     # In the bc field-decomposed cap-struct model the WITH body
@@ -747,6 +796,135 @@ class RegisterBcEmitter
     return nil if with_release_writeback?(body)
 
     raise Unsupported, "register emitter does not support MIR::DeferStmt yet"
+  end
+
+  def compile_lock_acquire_let(expr)
+    name = expr.name.to_s
+    expr = expr.init
+    source = lock_acquire_source(expr)
+    return unless source
+
+    record_shared_event(:acquire, source.fetch(:name), source.fetch(:kind), caps: source.fetch(:caps))
+    @lock_guard_sources ||= {}
+    @lock_guard_sources[name] = source
+    timeout = fresh_ireg
+    emit(ICONST, timeout, add_const(expr.fallible ? 100 : 30000))
+    emit(LOCKACQ, fresh_ireg, source.fetch(:cell), timeout)
+    @with_lock_releases ||= []
+    @with_lock_releases << source.fetch(:cell)
+  end
+
+  def compile_fallible_lock_binding(stmt)
+    source = lock_acquire_source(stmt.acquire_call)
+    raise Unsupported, "register emitter does not know fallible lock source" unless source
+
+    retries = stmt.retries
+    retry_reg = nil
+    retry_top = nil
+    if retries
+      retry_reg = fresh_ireg
+      emit(ICONST, retry_reg, add_const(0))
+      retry_top = @ops.length
+    end
+
+    record_shared_event(:acquire, source.fetch(:name), source.fetch(:kind), caps: source.fetch(:caps))
+    timeout = fresh_ireg
+    emit(ICONST, timeout, add_const(100))
+    acquired = fresh_ireg
+    emit(LOCKACQ, acquired, source.fetch(:cell), timeout)
+    emit(JF, acquired, 0)
+    fail_patch = @ops.length - 1
+    bind_lock_alias(stmt.alias_name.to_s, source)
+    @with_lock_releases ||= []
+    @with_lock_releases << source.fetch(:cell)
+    emit(JMP, 0)
+    success_patch = @ops.length - 1
+
+    @ops[fail_patch] = @ops.length
+    if retries
+      one = fresh_ireg
+      emit(ICONST, one, add_const(1))
+      nxt = fresh_ireg
+      emit(IADD, nxt, retry_reg, one)
+      lim = fresh_ireg
+      emit(ICONST, lim, add_const(retries.to_i))
+      lt = fresh_ireg
+      emit(ILT, lt, nxt, lim)
+      emit(JF, lt, 0)
+      giveup = @ops.length - 1
+      emit(IADD, retry_reg, retry_reg, one)
+      emit(JMP, retry_top)
+      @ops[giveup] = @ops.length
+    end
+    semantic_body(stmt.action.body || []).each { |child| compile_stmt(child) }
+    emit(JMP, 0)
+    @with_fallible_escapes ||= []
+    @with_fallible_escapes << (@ops.length - 1)
+    @ops[success_patch] = @ops.length
+  end
+
+  def bind_lock_guard_get_alias(stmt)
+    init = stmt.init
+    return false unless init.is_a?(MIR::MethodCall)
+    return false unless init.method.to_s == "get" && init.receiver.is_a?(MIR::Ident)
+
+    source = (@lock_guard_sources || {})[init.receiver.name.to_s]
+    return false unless source
+
+    bind_lock_alias(stmt.name.to_s, source)
+    true
+  end
+
+  def bind_lock_alias(alias_name, source)
+    @value_by_name[alias_name] = source.fetch(:value)
+    @cap_alias_source ||= {}
+    @cap_alias_source[alias_name] = {
+      name: source.fetch(:name),
+      kind: source.fetch(:kind),
+      caps: source.fetch(:caps),
+    }
+  end
+
+  def lock_acquire_source(expr)
+    source_expr = lock_source_expr(expr.lock_expr)
+    raw_src = source_expr.is_a?(MIR::Ident) ? @value_by_name[source_expr.name.to_s] : nil
+    src = value_for_field_get(source_expr) || compile_value_expr(source_expr)
+    src_caps = caps_for_value(raw_src) || caps_for_value(src)
+    return nil unless src && src_caps && %i[locked write_locked].include?(src_caps[:sync])
+
+    cell_reg = cell_backed_field_cell(src)
+    return nil unless cell_reg
+
+    {
+      name: lock_source_name(source_expr) || "lock",
+      kind: (raw_src && raw_src[:kind]) || src[:kind],
+      caps: src_caps,
+      value: struct_view_for_cap_source(src),
+      cell: cell_reg,
+    }
+  end
+
+  def lock_source_name(expr)
+    expr.name.to_s if expr.is_a?(MIR::Ident)
+  end
+
+  def lock_source_expr(expr)
+    expr.is_a?(MIR::CapabilityLockTarget) ? expr.source : expr
+  end
+
+  def struct_view_for_cap_source(src)
+    value = { kind: :struct, type: src[:type], fields: src[:fields] }
+    value[:lazy_struct_list] = src[:lazy_struct_list] if src[:lazy_struct_list]
+    value[:dirty_fields] = src[:dirty_fields] if src[:dirty_fields]
+    value
+  end
+
+  def capture_cleanup_defer?(body)
+    body.then_body.all? do |stmt|
+      stmt.is_a?(MIR::ExprStmt) &&
+        stmt.expr.is_a?(MIR::Call) &&
+        stmt.expr.callee.to_s == "CheatLib.cleanup"
+    end
   end
 
   def with_release_writeback?(body)
@@ -1064,7 +1242,7 @@ class RegisterBcEmitter
 
     # InlineBc / InlineZig as bare ExprStmt (e.g. `pool.remove(id);`,
     # `sleep(ms);`) -- delegate to the stmt-shaped dispatch.
-    if expr.is_a?(MIR::InlineBc) || expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::OrExitBcRewrite)
+    if expr.is_a?(MIR::InlineBc) || inline_zig_node?(expr) || expr.is_a?(MIR::OrExitBcRewrite)
       return compile_inline_bc_stmt(expr)
     end
 
@@ -1201,6 +1379,13 @@ class RegisterBcEmitter
   end
 
   def compile_let(stmt)
+    if stmt.init.is_a?(MIR::LockAcquire)
+      compile_lock_acquire_let(stmt)
+      return
+    end
+
+    return if bind_lock_guard_get_alias(stmt)
+
     if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(annotation_zig_type(stmt.annotation)))
       bind_value(stmt.name.to_s, compile_struct_list_map_init(struct_type))
       return
@@ -1671,13 +1856,13 @@ class RegisterBcEmitter
     end_patches = []
 
     stmt.arms.each do |arm|
-      pattern = arm.fetch(:pattern).to_s.delete_prefix(".")
+      pattern = switch_arm_pattern_value(arm).to_s.delete_prefix(".")
       pattern_reg = tag_type ? compile_tag_const(tag_type, pattern) : compile_i64_expr(MIR::Lit.new(pattern))
       cond = fresh_ireg
       emit(IEQ, cond, subject_reg, pattern_reg)
       emit(JF, cond, 0)
       next_target_idx = @ops.length - 1
-      semantic_body(arm.fetch(:body) || []).each { |child| compile_stmt(child) }
+      semantic_body(switch_arm_body(arm)).each { |child| compile_stmt(child) }
       emit(JMP, 0)
       end_patches << (@ops.length - 1)
       @ops[next_target_idx] = @ops.length
@@ -1755,7 +1940,7 @@ class RegisterBcEmitter
   end
 
   def compile_inline_bc_stmt(stmt)
-    return compile_inline_zig_stmt(stmt) if stmt.is_a?(MIR::InlineZig)
+    return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
     return compile_or_exit(stmt) if stmt.is_a?(MIR::OrExitBcRewrite)
 
     case stmt.op
@@ -2316,6 +2501,8 @@ class RegisterBcEmitter
   end
 
   def compile_i64_expr(expr)
+    return compile_i64_inline_zig(expr) if inline_zig_node?(expr)
+
     case expr
     when MIR::Lit
       value = parse_i64_literal(expr.value)
@@ -2336,8 +2523,6 @@ class RegisterBcEmitter
       compile_i64_index_get(expr)
     when MIR::InlineBc
       compile_i64_inline_bc(expr)
-    when MIR::InlineZig
-      compile_i64_inline_zig(expr)
     when MIR::BinOp
       compile_i64_binop(expr)
     when MIR::UnaryOp
@@ -2439,6 +2624,8 @@ class RegisterBcEmitter
   end
 
   def compile_string_expr(expr)
+    return compile_string_inline_zig(expr) if inline_zig_node?(expr)
+
     case expr
     when MIR::Lit
       text = expr.value.to_s
@@ -2477,8 +2664,6 @@ class RegisterBcEmitter
       compile_string_expr(expr.expr)
     when MIR::InlineBc
       compile_string_inline_bc(expr)
-    when MIR::InlineZig
-      compile_string_inline_zig(expr)
     when MIR::TryExpr
       compile_try_expr(compile_string_expr(expr.expr))
     when MIR::TryCatch
@@ -2929,8 +3114,8 @@ class RegisterBcEmitter
     end_patches = []
 
     stmt.arms.each do |arm|
-      pattern = arm.fetch(:pattern)
-      body = arm.fetch(:body) || []
+      pattern = switch_arm_pattern_value(arm)
+      body = switch_arm_body(arm)
       unless body.length == 1 && body.first.is_a?(MIR::BreakStmt)
         raise Unsupported, "register emitter only supports MATCH expression arms with direct values"
       end
@@ -7473,7 +7658,7 @@ class RegisterBcEmitter
         end
       end
       return :i64
-    elsif expr.is_a?(MIR::InlineZig)
+    elsif inline_zig_node?(expr)
       return :i64 if expr.reason.to_s.start_with?("builtin_int")
     elsif expr.is_a?(MIR::Orelse)
       return inferred_expr_type(expr.fallback)
@@ -7887,6 +8072,9 @@ class RegisterBcEmitter
     # six-char literal string (including the outer `"` chars).
     return nil unless fmt == '"{s}\\n"'
     tuple = args[1]
+    if tuple.is_a?(MIR::TupleLiteral) && tuple.items.length == 1
+      return compile_string_expr(tuple.items.first)
+    end
     return nil unless tuple.is_a?(MIR::Ident)
     text = tuple.name.to_s
     # Tuple shape: `.{<expr>}`. Strip the wrapper.

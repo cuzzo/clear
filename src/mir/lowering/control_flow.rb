@@ -9,6 +9,8 @@ module MIRLoweringControlFlow
 
   MatchBody = T.type_alias { T::Array[MIR::Emittable] }
   MatchDefaultBody = T.type_alias { T::Array[AST::Node] }
+  IfBindAliasAllocMap = T.type_alias { T::Hash[String, T.nilable(Symbol)] }
+  IfBindAliasOwnerMap = T.type_alias { T::Hash[String, String] }
 
   class MatchLoweringFacts < T::Struct
     const :expr_label, T.nilable(String)
@@ -150,10 +152,40 @@ module MIRLoweringControlFlow
       end
       { expr: loop_condition_expr(expr, pending), capture: b.name }
     end
-    then_body = capture_markers + lower_body(node.then_branch)
+    then_body = capture_markers + with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(node: AST::IfBind, blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_if_bind_alias_maps(node, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    prev_alias_alloc = capability_state.with_alias_alloc_map
+    prev_alias_owner = capability_state.with_alias_owner_map
+    alias_alloc_map = T.let((prev_alias_alloc || {}).dup, IfBindAliasAllocMap)
+    alias_owner_map = T.let((prev_alias_owner || {}).dup, IfBindAliasOwnerMap)
+
+    node.bindings.each do |binding|
+      owner = extract_root_var_name(binding.expr)
+      next unless owner
+
+      alias_name = binding.name.to_s
+      alias_owner_map[alias_name] = owner
+      alias_alloc_map[alias_name] = placement_for_node(binding.expr)
+    end
+
+    capability_state.with_alias_alloc_map = alias_alloc_map
+    capability_state.with_alias_owner_map = alias_owner_map
+    blk.call
+  ensure
+    T.bind(self, MIRLowering) rescue nil
+    capability_state.with_alias_alloc_map = prev_alias_alloc
+    capability_state.with_alias_owner_map = prev_alias_owner
   end
 
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }

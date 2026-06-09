@@ -1894,6 +1894,7 @@ module MIR
     const :ctx_type, String
     const :ctx_var, String
     const :task_config, TaskConfigPlan
+    const :pass_ctx_by_address, T::Boolean, default: false
   end
 
   class BgStackfulPlan < T::Struct
@@ -4369,16 +4370,17 @@ module MIR
       compact_child_exprs(children)
     end
 
-    sig { returns(OwnershipEffect) }
-    def ownership_effect
-      heap_return = stdlib_def.heap_return_alloc? == true
-      OwnershipEffect.from_callable_facts(
-        emits_allocating: stdlib_def.emits_allocating? == true,
-        heap_return_alloc: heap_return,
-        fixed_void_without_alloc_metadata: stdlib_def.fixed_return? && stdlib_def.return_type.void?,
-        mutates_receiver_without_heap_return: stdlib_def.mutates_receiver? && !heap_return,
-        result_owns: nil,
-        result_type: return_type,
+	    sig { returns(OwnershipEffect) }
+	    def ownership_effect
+	      heap_return = stdlib_def.heap_return_alloc? == true
+	      actual_return = return_type.success_type || return_type
+	      OwnershipEffect.from_callable_facts(
+	        emits_allocating: stdlib_def.emits_allocating? == true,
+	        heap_return_alloc: heap_return,
+	        fixed_void_without_alloc_metadata: stdlib_def.fixed_return? && actual_return.void?,
+	        mutates_receiver_without_heap_return: stdlib_def.mutates_receiver? && !heap_return,
+	        result_owns: nil,
+	        result_type: return_type,
         alloc: alloc_kind,
         target_var: nil
       )
@@ -4508,18 +4510,44 @@ module MIR
   #   shard-context inspection.
   ShardedMapPut = Struct.new(:target, :key, :value, :shard_idx, :shard_key,
                               :map_kind, :stdlib_def, :key_type, :value_type,
-                              :resolved_allocs, :template_kind) do
+                              :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: T.untyped, key: T.untyped, value: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.untyped, template_kind: T.untyped).void }
-    def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
+    sig { params(target: T.untyped, key: T.untyped, value: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.untyped, template_kind: T.untyped, target_var: T.nilable(String)).void }
+    def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
       super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs), template_kind)
+        InlineAllocMetadata.from(resolved_allocs), template_kind, target_var)
     end
     sig { returns(T::Boolean) }
     def expr?; true; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key, value])
+    sig { returns(T::Boolean) }
+    def has_alloc_metadata?
+      !resolved_allocs.empty?
+    end
+    sig { returns(T::Boolean) }
+    def mutating_receiver_allocator_op?
+      has_alloc_metadata?
+    end
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      OwnershipContract.empty
+    end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      heap_return = stdlib_def.heap_return_alloc? == true
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: stdlib_def.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: !!(stdlib_def.fixed_return? && stdlib_def.return_type.void? && !has_alloc_metadata?),
+        mutates_receiver_without_heap_return: mutating_receiver_allocator_op? && !heap_return,
+        result_owns: nil,
+        result_type: stdlib_def.return_type,
+        alloc: heap_return ? :heap : resolved_allocs.single_alloc,
+        target_var: nil,
+      )
+    end
   end
 
   ShardedMapGet = Struct.new(:target, :key, :shard_idx, :shard_key,

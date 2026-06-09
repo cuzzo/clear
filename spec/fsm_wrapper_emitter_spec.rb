@@ -307,7 +307,7 @@ RSpec.describe FsmWrapperEmitter do
           name: "owned",
           target: ctx_field("__ctx_2", "owned"),
           cleanup_entry: cleanup_entry,
-          allocator: ctx_field("__ctx_2", "alloc"),
+          allocator: MIR::Call.new("rt.heapAlloc", [], false),
         ),
       ]
       generic_ctx = MIR::FsmGenericCtxStruct.new(
@@ -326,7 +326,7 @@ RSpec.describe FsmWrapperEmitter do
 
       expect(out).to include("if (__ctx_2.__lock_held_0) __ctx_2.lock.unlock();")
       expect(out).to include(
-        "if (!__ctx_2.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_2.owned), __ctx_2.alloc, &__ctx_2.owned);"
+        "if (!__ctx_2.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_2.owned), __ctx_2.rt.heapAlloc(), &__ctx_2.owned);"
       )
     end
 

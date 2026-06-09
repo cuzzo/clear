@@ -22,13 +22,14 @@ PipelineMaterializerCoverageHarness = Struct.new(:host, :state, keyword_init: tr
 
 class PipelineConcurrentCoverageHost
   attr_reader :calls, :builtins
-  attr_accessor :bc_target, :mutates_each
+  attr_accessor :bc_target, :mutates_each, :guarded_cleanup_names
 
   def initialize
     @calls = []
     @builtins = []
     @bc_target = false
     @mutates_each = false
+    @guarded_cleanup_names = []
   end
 
   def services
@@ -77,7 +78,7 @@ class PipelineConcurrentCoverageHost
         block
       },
       task_config_variant: ->(size_name) { size_name ? size_name.to_s.capitalize : "Standard" },
-      guarded_cleanup_name: ->(_name) { false },
+      guarded_cleanup_name: ->(name) { @guarded_cleanup_names.include?(name.to_s) },
       do_rt_name: -> { "rt" },
       agg_min_sentinel_mir: ->(zig_type) { MIR::TypeSentinel.new(:max, zig_type) },
       agg_max_sentinel_mir: ->(zig_type, result_type) {
@@ -740,6 +741,12 @@ RSpec.describe "pipeline backend coverage" do
       concurrent_host.calls.last
     end
 
+    def ordered_mir_nodes(root)
+      nodes = []
+      MIR.each_node(root) { |node| nodes << node }
+      nodes
+    end
+
     it "routes every concurrent source and terminal shape through the typed host boundary" do
       list = id("items", type: Type.new(:"Int64[]", collection: :list))
       range = typed(AST::RangeLit.new(tok, lit(0), lit(4), false), Type.new(:"~Int64[]"))
@@ -794,6 +801,42 @@ RSpec.describe "pipeline backend coverage" do
       concurrent_call(bind, AST::WhereOp.new(tok, id("_")))
       expect(concurrent_host.calls[-2]).to eq([:bind, "$u", "__item"])
       expect(concurrent_host.calls[-1]).to eq(:list_where)
+    end
+
+    it "keeps bounded stream source transfers reachable after runtime calls" do
+      bounded = id("bounded", type: Type.new(:"~Int64[4]"))
+      concurrent_host.guarded_cleanup_names = ["bounded"]
+
+      select = AST::ConcurrentOp.new(tok, AST::SelectOp.new(tok, id("_")), {})
+      typed(select, Type.new(:"Int64[]"))
+      select_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, select), select))
+      select_call = select_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedSelect"
+      end
+      select_break = select_nodes.find_index { |node| node.is_a?(MIR::BreakStmt) }
+      select_transfer = select_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(select_transfer).to be > select_call
+      expect(select_transfer).to be < select_break
+
+      where = AST::ConcurrentOp.new(tok, AST::WhereOp.new(tok, id("_")), {})
+      typed(where, Type.new(:"Int64[]"))
+      where_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, where), where))
+      where_call = where_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedWhere"
+      end
+      where_break = where_nodes.find_index { |node| node.is_a?(MIR::BreakStmt) }
+      where_transfer = where_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(where_transfer).to be > where_call
+      expect(where_transfer).to be < where_break
+
+      each = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
+      typed(each, Type.new(:Void))
+      each_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, each), each))
+      each_call = each_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedEach"
+      end
+      each_transfer = each_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(each_transfer).to be > each_call
     end
 
     it "builds typed concurrent plans for source, terminal, and semantic facts" do
@@ -2273,6 +2316,21 @@ RSpec.describe "pipeline backend coverage" do
       find_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, find), Type.optional_of(:String))
       find_result = pipeline_host.send(:lower_range_fold_observable_default,
         owned_prefix, find, find_smooth, "__obs_find", owned_source, terminal: :find)
+      find_spawn = find_result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
+      find_loop = T.must(T.must(find_spawn).expr).body.first
+      find_loop_nodes = []
+      MIR.each_node(find_loop) { |node| find_loop_nodes << node }
+      find_item_alloc = find_loop_nodes.find { |node| node.is_a?(MIR::AllocMark) && node.name == "__name" }
+      expect(find_item_alloc).not_to be_nil
+      expect(T.must(find_item_alloc).type_info).to eq(Type.new(:String))
+      owned_distinct_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, distinct),
+        Type.new(:"~String[]", collection: :set, observable: true, observable_terminal: :distinct))
+      owned_distinct_result = pipeline_host.send(:lower_range_fold_observable_distinct,
+        owned_prefix, distinct, owned_distinct_smooth, "__obs_distinct_string", owned_source)
+      owned_distinct_nodes = []
+      MIR.each_node(owned_distinct_result) { |node| owned_distinct_nodes << node }
+      owned_submit = owned_distinct_nodes.find { |node| node.is_a?(MIR::MethodCall) && node.method == "submit" }
+      expect(T.must(owned_submit).callable_contract.ownership_contract.consumes).to eq(["__name"])
 
       bounded_distinct_smooth = typed(AST::BinaryOp.new(tok, source, :SMOOTH, distinct),
         Type.new(:"~Int64[4]", collection: :set, observable: true, observable_terminal: :distinct))
@@ -2286,7 +2344,8 @@ RSpec.describe "pipeline backend coverage" do
       expect(any_result).to be_a(MIR::BlockExpr)
       expect(find_result).to be_a(MIR::BlockExpr)
       expect(bounded_distinct_result).to be_a(MIR::BlockExpr)
-      [scaffold, default_result, distinct_result, avg_result, any_result, find_result, bounded_distinct_result].each do |block|
+      [scaffold, default_result, distinct_result, avg_result, any_result, find_result,
+       owned_distinct_result, bounded_distinct_result].each do |block|
         spawn = block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
         expect(spawn).not_to be_nil
         expect(T.must(MIREmitter.new.emit(T.must(spawn).expr))).to include(".gen = ")

@@ -272,17 +272,20 @@ module MIRLoweringCapabilities
   sig { params(var_node: CapabilityVarNode, raw_atomic: T::Boolean).returns(MIR::Emittable) }
   def with_capability_source_mir(var_node, raw_atomic: false)
     lowerer = T.cast(self, MIRLowering)
-    if raw_atomic
-      prev_raw = lowerer.capability_state.atomic_emit_raw
-      lowerer.capability_state.atomic_emit_raw = true
-      begin
-        return T.cast(lowerer.lower(var_node), MIR::Emittable)
-      ensure
-        lowerer.capability_state.atomic_emit_raw = prev_raw
-      end
-    end
+    prev_locked = lowerer.capability_state.locked_unwrap_map
+    prev_rc = lowerer.capability_state.rc_unwrap_map
+    prev_raw = lowerer.capability_state.atomic_emit_raw
+    lowerer.capability_state.locked_unwrap_map = nil
+    lowerer.capability_state.rc_unwrap_map = nil
+    lowerer.capability_state.atomic_emit_raw = true if raw_atomic
 
-    T.cast(lowerer.lower(var_node), MIR::Emittable)
+    begin
+      T.cast(lowerer.lower(var_node), MIR::Emittable)
+    ensure
+      lowerer.capability_state.atomic_emit_raw = prev_raw
+      lowerer.capability_state.locked_unwrap_map = prev_locked
+      lowerer.capability_state.rc_unwrap_map = prev_rc
+    end
   end
 
   sig { params(alias_name: String).returns(String) }
@@ -379,7 +382,13 @@ module MIRLoweringCapabilities
     source_mir = with_capability_source_mir(context.var_node)
     is_param = with_cap_is_param?(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    aliased_value = borrowed_const_param_alias?(context, is_param) ? MIR::Deref.new(source_mir) : source_mir
+    aliased_value = if context.node.polymorphic
+      MIR::CapabilityUnwrap.new(source_mir)
+    elsif borrowed_const_param_alias?(context, is_param)
+      MIR::Deref.new(source_mir)
+    else
+      source_mir
+    end
     [MIR::Let.new(safe_alias, aliased_value, false, nil, nil), MIR::Suppress.new(safe_alias)]
   end
 
@@ -398,7 +407,9 @@ module MIRLoweringCapabilities
 
     source_mir = with_capability_source_mir(context.var_node)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    value = if with_cap_is_param?(context.var_node)
+    value = if context.node.polymorphic
+      MIR::CapabilityUnwrap.new(source_mir)
+    elsif with_cap_is_param?(context.var_node)
       MIR::Deref.new(source_mir)
     elsif context.cap.alias_mutable
       MIR::AddressOf.new(source_mir)

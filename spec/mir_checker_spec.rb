@@ -151,6 +151,26 @@ RSpec.describe MIRChecker do
       errors = checker.check_fn!(fn_def("registry_resource_cleanup", body))
       expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
     end
+
+    it "allows cleanup when an extern trampoline allocates its result" do
+      signature = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+      signature.emit = IntrinsicEmit.new(zig: "parse()", allocates: true)
+      trampoline = MIR::ExternTrampoline.new(
+        id: 1,
+        callee_name: "parse",
+        alloc_kind: :heap,
+        return_type: Type.new(:Parsed),
+        stdlib_def: signature,
+      )
+      body = [
+        alloc_mark("parsed", :heap, Type.new(:Parsed)),
+        MIR::Let.new("parsed", trampoline, false, nil, nil),
+        MIR::Cleanup.new("parsed", CleanupEntry.from({ kind: :resource, alloc: :heap, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("extern_trampoline_resource_cleanup", body))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
   end
 
   # ===========================================================================
@@ -295,6 +315,42 @@ RSpec.describe MIRChecker do
       ]
       errors = checker.check_fn!(fn_def("stdlib_void", body))
       expect(errors.any? { |e| e.include?("OWNERSHIP_FACT_REQUIRED") }).to be true
+    end
+
+    it "does not require ownership facts for pure receiver-growth allocator metadata" do
+      sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true)
+      T.must(sig.emit).mutates_receiver = true
+      iz = registry_call("append", sig, allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "parts")
+      body = [
+        alloc_mark("parts", :heap, Type.new(:"Int64[]", collection: :list)),
+        MIR::ExprStmt.new(iz, false),
+      ]
+
+      errors = checker.check_fn!(fn_def("receiver_growth", body))
+
+      expect(errors.none? { |e| e.include?("OWNERSHIP_FACT_REQUIRED") }).to be true
+    end
+
+    it "does not require finalized owned facts for TAKES calls with only non-owning operands" do
+      value_param = AST::Param.new(name: "value", type: Type.new(:Int64), default: nil, mutable: false,
+        takes: true, comptime: false, name_token: nil, required: nil, sync: nil)
+      sig = FunctionSignature.new(params: [value_param], return_type: Type.new(:Void), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(zig: "append({0})", allocates: true, mutates_receiver: true)
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.non_owning(Type.new(:Int64), "spec"),
+      ])
+      iz = registry_call("append_scalar", sig,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap),
+        target_var: "parts",
+        ownership_contract: contract)
+      body = [
+        alloc_mark("parts", :heap, Type.new(:"Int64[]", collection: :list)),
+        MIR::ExprStmt.new(iz, false),
+      ]
+
+      errors = checker.check_fn!(fn_def("non_owning_takes", body))
+
+      expect(errors.none? { |e| e.include?("OWNERSHIP_FACT_REQUIRED") }).to be true
     end
 
     it "detects HPT_LEAK inside nested lambda" do

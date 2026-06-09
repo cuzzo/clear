@@ -1137,6 +1137,10 @@ RSpec.describe MIRLowering do
       expect(result.key_type).to be_nil
       expect(result.value_type).to be_nil
       expect(result.template_kind).to eq(:zig)
+      expect(result.target_var).to eq("m")
+      expect(result.has_alloc_metadata?).to eq(true)
+      expect(result.mutating_receiver_allocator_op?).to eq(true)
+      expect(MIR::OwnershipEffect.of(result)).to eq(MIR::OwnershipEffect.none)
     end
 
     it "carries numeric HashMap key/value Zig types into ShardedMapPut" do
@@ -2344,6 +2348,26 @@ RSpec.describe MIRLowering do
       expect(then_zig).to include("break;")
     end
 
+    it "attributes IF-bind alias field map writes to the captured owner" do
+      mir = lower_source_mir(<<~CLEAR)
+        STRUCT Env { vars: HashMap<Int64> }
+
+        FN main() RETURNS Void ->
+          MUTABLE pool: Env[4]@pool = [];
+          id: Id<Env> = pool.insert(Env{ vars: {} });
+          IF pool[id] AS env THEN
+            env.vars["a"] = 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      puts = collect_mir_nodes(mir, MIR::ShardedMapPut)
+
+      expect(puts.map(&:target_var)).to include("pool")
+      expect(puts.map(&:target_var)).not_to include("env")
+    end
+
     it "stamps frame allocation scopes inside IF-bind bodies" do
       mark = MIR::AllocMark.new("tmp", :frame, Type.new(:String), :iteration)
       if_bind = MIR::IfBindStmt.new([{ expr: MIR::Ident.new("maybe"), capture: "value" }], [mark], nil)
@@ -2906,6 +2930,7 @@ RSpec.describe MIRLowering do
       expect(zig).to include(".wait()")
       expect(zig).to include("__DoBranchCtx")
       expect(zig).to include("fn run(")
+      expect(zig).to include("&__do0_ctx0")
     end
 
     it "lowers multi-branch DoBlock" do
@@ -2930,6 +2955,8 @@ RSpec.describe MIRLowering do
       # Pinned branch uses submitSpawn, unpinned uses spawnBest
       expect(zig).to include("spawnBest")
       expect(zig).to include("submitSpawn")
+      expect(zig).to include("&__do0_ctx0")
+      expect(zig).to include("&__do0_ctx1")
     end
 
     it "lowers DoBlock with captures" do

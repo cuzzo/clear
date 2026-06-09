@@ -1041,7 +1041,8 @@ module MIRLoweringVariables
         MIR::ShardedMapPut.new(target, idx, val,
           MIR::Ident.new(T.must(shard)[:idx]),
           MIR::Ident.new(T.must(shard)[:key]),
-          kind, op, dispatch.key_type, dispatch.value_type, dispatch.resolved_allocs, dispatch.template_kind),
+          kind, op, dispatch.key_type, dispatch.value_type, dispatch.resolved_allocs, dispatch.template_kind,
+          extract_root_var_name(target_node)),
         val,
         node.value,
         "MIR::ShardedMapPut",
@@ -1049,7 +1050,8 @@ module MIRLoweringVariables
       ), MIR::ShardedMapPut)
     end
     T.cast(with_ownership_consumption_for_value(
-      MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, dispatch.key_type, dispatch.value_type, dispatch.resolved_allocs, dispatch.template_kind),
+      MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, dispatch.key_type, dispatch.value_type, dispatch.resolved_allocs, dispatch.template_kind,
+        extract_root_var_name(target_node)),
       val,
       node.value,
       "MIR::ShardedMapPut",

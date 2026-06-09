@@ -401,6 +401,60 @@ RSpec.describe "MIR gap-burn characterization" do
     )
   end
 
+  it "treats sharded map allocator metadata as store consumption, not an owned result" do
+    low = lowering
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+    sig.emit = IntrinsicEmit.new(zig: "put({0})", allocates: true, mutates_receiver: true)
+    put = MIR::ShardedMapPut.new(
+      MIR::Ident.new("map"),
+      MIR::Lit.new("\"k\""),
+      MIR::Ident.new("owned_value"),
+      nil,
+      nil,
+      :string_map,
+      sig,
+      nil,
+      Type.new(:String),
+      { alloc: :heap },
+      :zig,
+      "map",
+    )
+    put.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+      operands: [MIR::OwnershipOperandFact.owned_binding("owned_value", Type.new(:String), "spec", :heap)],
+      target: :owned_sink,
+      target_alloc: :heap,
+      source: "spec",
+      covers_consuming_params: true,
+    )
+    facts = T.let([], T::Array[MIRLowering::OwnershipFact])
+
+    expect(put.has_alloc_metadata?).to eq(true)
+    expect(put.mutating_receiver_allocator_op?).to eq(true)
+    expect(low.send(:ownership_fact_targets_for_node, put)).to eq([])
+    expect { low.send(:append_ownership_facts_for_mir_node!, facts, put) }.not_to raise_error
+    expect(facts).to include(an_instance_of(MIR::OwnedStore), an_instance_of(MIR::OwnedTransfer))
+    expect(facts.none? { |fact| fact.is_a?(MIR::OwnedCreate) }).to eq(true)
+  end
+
+  it "uses typed extern trampoline return types for owned result facts" do
+    low = lowering
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    sig.emit = IntrinsicEmit.new(zig: "makeString()", allocates: true, return_alloc: :heap)
+    trampoline = MIR::ExternTrampoline.new(
+      id: 1,
+      callee_name: "makeString",
+      alloc_kind: :heap,
+      return_type: Type.new(:String),
+      stdlib_def: sig,
+    )
+    facts = T.let([], T::Array[MIRLowering::OwnershipFact])
+
+    expect(low.send(:mir_alloc_mark_type_info, trampoline, nil, context: "spec")).to eq(Type.new(:String))
+    expect { low.send(:append_ownership_facts_for_mir_node!, facts, MIR::Let.new("s", trampoline, false, nil, nil)) }.not_to raise_error
+    expect(facts).to include(an_instance_of(MIR::OwnedCreate))
+    expect(facts.grep(MIR::OwnedCreate).first.type_info).to eq(Type.new(:String))
+  end
+
   it "derives ownership effects for fallback expressions without node-local rediscovery" do
     heap_left = MIR::DupeSlice.new(MIR::Lit.new("\"left\""), :heap)
     heap_right = MIR::DupeSlice.new(MIR::Lit.new("\"right\""), :heap)

@@ -654,6 +654,8 @@ module MIRHoistLowering
   def mir_explicit_result_type(mir)
     raw_type = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
       T.unsafe(mir).result_type
+    elsif mir.respond_to?(:return_type) && T.unsafe(mir).return_type
+      T.unsafe(mir).return_type
     elsif mir.respond_to?(:callable_contract)
       T.unsafe(mir).callable_contract&.signature&.return_type
     elsif mir.is_a?(MIR::RegistryCall)

@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "mir"
+require_relative "../ast/symbol_entry"
 require_relative "../semantic/capture_strategy"
 
 # FiberCtxBuilder

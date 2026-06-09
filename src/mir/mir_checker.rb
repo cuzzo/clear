@@ -211,15 +211,15 @@ class MIRChecker
 
     sig do
       params(
-        owned: T::Set[PlaceId],
-        released: T::Set[PlaceId],
-        maybe_released: T::Set[PlaceId],
-        cleanup_finalizers: T::Set[PlaceId],
-        guarded_finalizers: T::Set[PlaceId],
-        err_finalizers: T::Set[PlaceId],
-        pending_return_transfers: T::Set[PlaceId],
-        pending_block_transfers: T::Set[PlaceId],
-        alloc_kinds: T::Hash[PlaceId, Symbol]
+        owned: T::Set[MIRChecker::PlaceId],
+        released: T::Set[MIRChecker::PlaceId],
+        maybe_released: T::Set[MIRChecker::PlaceId],
+        cleanup_finalizers: T::Set[MIRChecker::PlaceId],
+        guarded_finalizers: T::Set[MIRChecker::PlaceId],
+        err_finalizers: T::Set[MIRChecker::PlaceId],
+        pending_return_transfers: T::Set[MIRChecker::PlaceId],
+        pending_block_transfers: T::Set[MIRChecker::PlaceId],
+        alloc_kinds: T::Hash[MIRChecker::PlaceId, Symbol]
       ).void
     end
     def initialize(
@@ -233,15 +233,15 @@ class MIRChecker
       pending_block_transfers:,
       alloc_kinds:
     )
-      @owned = T.let(owned.freeze, T::Set[PlaceId])
-      @released = T.let(released.freeze, T::Set[PlaceId])
-      @maybe_released = T.let(maybe_released.freeze, T::Set[PlaceId])
-      @cleanup_finalizers = T.let(cleanup_finalizers.freeze, T::Set[PlaceId])
-      @guarded_finalizers = T.let(guarded_finalizers.freeze, T::Set[PlaceId])
-      @err_finalizers = T.let(err_finalizers.freeze, T::Set[PlaceId])
-      @pending_return_transfers = T.let(pending_return_transfers.freeze, T::Set[PlaceId])
-      @pending_block_transfers = T.let(pending_block_transfers.freeze, T::Set[PlaceId])
-      @alloc_kinds = T.let(alloc_kinds.freeze, T::Hash[PlaceId, Symbol])
+      @owned = T.let(owned.freeze, T::Set[MIRChecker::PlaceId])
+      @released = T.let(released.freeze, T::Set[MIRChecker::PlaceId])
+      @maybe_released = T.let(maybe_released.freeze, T::Set[MIRChecker::PlaceId])
+      @cleanup_finalizers = T.let(cleanup_finalizers.freeze, T::Set[MIRChecker::PlaceId])
+      @guarded_finalizers = T.let(guarded_finalizers.freeze, T::Set[MIRChecker::PlaceId])
+      @err_finalizers = T.let(err_finalizers.freeze, T::Set[MIRChecker::PlaceId])
+      @pending_return_transfers = T.let(pending_return_transfers.freeze, T::Set[MIRChecker::PlaceId])
+      @pending_block_transfers = T.let(pending_block_transfers.freeze, T::Set[MIRChecker::PlaceId])
+      @alloc_kinds = T.let(alloc_kinds.freeze, T::Hash[MIRChecker::PlaceId, Symbol])
     end
 
     sig { params(state: LinearOwnershipState).returns(LinearOwnershipSnapshot) }
@@ -2341,6 +2341,7 @@ class MIRChecker
           "Finalize method ownership into OwnedCreate/OwnedTransfer/OwnedStore facts.")
       when MIR::RegistryCall, MIR::IndexedStore
         next unless registry_ownership_side_channel?(node)
+        next if stdlib_takes_ownership?(node) && ownership_surface_has_no_owned_operands?(node)
         next if facts_seen && ownership_fact_covers_node?(fact_sources, node)
 
         @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
@@ -2436,13 +2437,20 @@ class MIRChecker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def registry_ownership_side_channel?(node)
     sig = node.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(node).stdlib_def) : nil
-    return true if sig&.emits_allocating? && sig.return_type.void?
-    return true if stdlib_takes_ownership?(node)
+    if stdlib_takes_ownership?(node)
+      return false if ownership_surface_has_no_owned_operands?(node)
+      return true
+    end
 
     contract = node.respond_to?(:ownership_contract) ? T.unsafe(node).ownership_contract : nil
-    return false unless contract.is_a?(MIR::OwnershipContract)
+    return true if contract.is_a?(MIR::OwnershipContract) && !contract.empty?
 
-    !contract.empty?
+    return false if node.respond_to?(:mutating_receiver_allocator_op?) &&
+                    T.unsafe(node).mutating_receiver_allocator_op?
+
+    return false unless sig
+
+    sig.emits_allocating? == true && sig.return_type.void?
   end
 
   sig { params(fact_sources: T::Set[String], node: MIR::Node).returns(T::Boolean) }
@@ -2488,6 +2496,20 @@ class MIRChecker
     return false unless fact.is_a?(MIR::OwnershipConsumptionFact)
 
     fact.operands.none? { |operand| operand.kind == :owned_binding && operand.name }
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def ownership_contract_has_no_owned_operands?(node)
+    contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
+    return false unless contract.is_a?(MIR::OwnershipContract)
+
+    contract.operands.none? { |operand| operand.kind == :owned_binding && operand.name }
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def ownership_surface_has_no_owned_operands?(node)
+    ownership_consumption_has_no_owned_operands?(node) ||
+      ownership_contract_has_no_owned_operands?(node)
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

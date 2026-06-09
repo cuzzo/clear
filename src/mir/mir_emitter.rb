@@ -220,16 +220,19 @@ class MIREmitter
 
   sig { params(plan: MIR::BgStackfulPlan).returns(String) }
   def emit_bg_stackful_plan(plan)
-    run_body_code = emit_body(plan.run_body).gsub("\n", "\n                  ")
+    run_body_raw = emit_body_with_runtime(plan.run_body, plan.bg_rt)
+    capture_frees_raw = emit_capture_cleanup_actions_with_runtime(plan.capture_frees, plan.bg_rt)
+    arena_init_raw = T.let(plan.arena_init ? emit_node_with_runtime(T.must(plan.arena_init), plan.bg_rt) : "", String)
+    run_body_code = run_body_raw.gsub("\n", "\n                  ")
     promoted_decls = emit_body(plan.promoted_decls).gsub("\n", "\n          ")
     capture_fields = emit_context_field_decls(plan.capture_fields).gsub("\n", "\n              ")
     capture_inits = emit_struct_init_fields(plan.capture_inits)
-    capture_frees = emit_capture_cleanup_actions(plan.capture_frees).gsub("\n", "\n                  ")
-    arena_init = T.let(plan.arena_init ? T.must(emit(T.must(plan.arena_init))) : "", String)
+    capture_frees = capture_frees_raw.gsub("\n", "\n                  ")
+    arena_init = arena_init_raw
     spawn_call = emit_fiber_spawn_call(plan.spawn_call).gsub("\n", "\n          ")
     alloc_expr = T.must(emit(plan.alloc_expr))
     profile_comment = emit_profile_task_site(plan.profile_site)
-    suppress_line = bg_stackful_runtime_suppress_line(plan, run_body_code)
+    suppress_line = bg_stackful_runtime_suppress_line(plan, run_body_raw, capture_frees_raw, arena_init_raw)
     <<~ZIG.chomp
       #{plan.blk_label}: {
           #{profile_comment}
@@ -262,10 +265,8 @@ class MIREmitter
     ZIG
   end
 
-  sig { params(plan: MIR::BgStackfulPlan, run_body_code: String).returns(String) }
-  def bg_stackful_runtime_suppress_line(plan, run_body_code)
-    capture_frees = emit_capture_cleanup_actions(plan.capture_frees)
-    arena_init = T.let(plan.arena_init ? T.must(emit(T.must(plan.arena_init))) : "", String)
+  sig { params(plan: MIR::BgStackfulPlan, run_body_code: String, capture_frees: String, arena_init: String).returns(String) }
+  def bg_stackful_runtime_suppress_line(plan, run_body_code, capture_frees, arena_init)
     text = run_body_code + capture_frees + arena_init
     text.include?(plan.bg_rt) ? "" : "_ = &#{plan.bg_rt};"
   end
@@ -333,7 +334,7 @@ class MIREmitter
     branches = plan.branches.map { |branch| emit_do_branch_plan(branch) }.join("\n")
     <<~ZIG.chomp
       {
-          var #{plan.wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
+          var #{plan.wg_var} = CheatHeader.WaitGroup.init(#{@rt_name}.getSched());
           errdefer #{plan.wg_var}.wait();
           #{branches}
       #{plan.wg_var}.wait();
@@ -421,11 +422,12 @@ class MIREmitter
                raise "unknown FiberSpawnCall target #{call.target.inspect}"
              end
     task_cfg = emit_task_config_plan(call.task_config)
+    ctx_arg = call.pass_ctx_by_address ? "&#{call.ctx_var}" : call.ctx_var
     <<~ZIG.chomp
       #{callee}(
           @intFromPtr(&Runtime.entryWrapper),
           @as(CheatHeader.TaskFn, @ptrCast(&#{call.ctx_type}.run)),
-          #{call.ctx_var},
+          #{ctx_arg},
           #{task_cfg}
       );
     ZIG
@@ -658,6 +660,24 @@ class MIREmitter
     prior_rt_name = T.let(@rt_name, String)
     @rt_name = runtime_name
     emit_body(stmts)
+  ensure
+    @rt_name = T.must(prior_rt_name)
+  end
+
+  sig { params(node: MIR::Emittable, runtime_name: String).returns(String) }
+  def emit_node_with_runtime(node, runtime_name)
+    prior_rt_name = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    T.must(emit(node))
+  ensure
+    @rt_name = T.must(prior_rt_name)
+  end
+
+  sig { params(actions: T::Array[MIR::CaptureCleanupAction], runtime_name: String).returns(String) }
+  def emit_capture_cleanup_actions_with_runtime(actions, runtime_name)
+    prior_rt_name = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    emit_capture_cleanup_actions(actions)
   ensure
     @rt_name = T.must(prior_rt_name)
   end
@@ -1793,7 +1813,7 @@ class MIREmitter
                   0 => {
                       #{base_case_branches}
                       // recursive call -- push child frame
-                      const child = rt.heapAlloc().create(Frame) catch unreachable;
+                      const child = #{@rt_name}.heapAlloc().create(Frame) catch unreachable;
                       child.* = .{ #{recurse_arg_inits}, .parent = current };
                       current.step = 1;
                       current = child;
@@ -1814,7 +1834,7 @@ class MIREmitter
     <<~ZIG.chomp
                           if (current.parent) |p| {
                               p.child_result = result;
-                              if (current != &initial) rt.heapAlloc().destroy(current);
+                              if (current != &initial) #{@rt_name}.heapAlloc().destroy(current);
                               current = p;
                               continue;
                           }
@@ -1883,7 +1903,7 @@ class MIREmitter
   def emit_thunk_yield_statement(policy)
     case policy
     when :check
-      "rt.checkYield();"
+      "#{@rt_name}.checkYield();"
     when :tight_skip
       "// (TIGHT: scheduler yield-check skipped)"
     else
@@ -1920,22 +1940,20 @@ class MIREmitter
 
   sig { params(node: MIR::DeferStmt).returns(String) }
   def emit_defer(node)
-    body = emit(node.body)
-    if T.must(body).include?("\n") || T.must(body).start_with?("{")
-      "defer #{body}"
-    else
-      "defer #{body};"
-    end
+    emit_defer_like("defer", emit(node.body))
   end
 
   sig { params(node: MIR::ErrDeferStmt).returns(String) }
   def emit_errdefer(node)
-    body = emit(node.body)
-    if T.must(body).include?("\n") || T.must(body).start_with?("{")
-      "errdefer #{body}"
-    else
-      "errdefer #{body};"
-    end
+    emit_defer_like("errdefer", emit(node.body))
+  end
+
+  sig { params(keyword: String, body: T.nilable(String)).returns(String) }
+  def emit_defer_like(keyword, body)
+    body = T.must(body)
+    return "#{keyword} #{body}" if body.start_with?("{")
+
+    "#{keyword} #{body};"
   end
 
   sig { params(node: MIR::ExprStmt).returns(String) }
@@ -2194,7 +2212,7 @@ class MIREmitter
 
   sig { params(node: MIR::FreezeExpr).returns(String) }
   def emit_freeze(node)
-    "try CheatLib.freeze(#{node.zig_base}, rt.heapAlloc(), #{emit(node.inner)})"
+    "try CheatLib.freeze(#{node.zig_base}, #{@rt_name}.heapAlloc(), #{emit(node.inner)})"
   end
 
   sig { params(node: MIR::MakeList).returns(String) }
@@ -2219,8 +2237,14 @@ class MIREmitter
   sig { params(node: MIR::Call).returns(String) }
   def emit_call(node)
     args = node.args.map { |a| emit(a) }.join(", ")
-    call = "#{node.callee}(#{args})"
+    call = "#{runtime_scoped_callee(node.callee)}(#{args})"
     node.try_wrap ? "try #{call}" : call
+  end
+
+  sig { params(callee: T.untyped).returns(String) }
+  def runtime_scoped_callee(callee)
+    text = callee.to_s
+    text.start_with?("rt.") ? "#{@rt_name}.#{text.delete_prefix("rt.")}" : text
   end
 
   sig { params(node: MIR::TailCall).returns(String) }

@@ -518,18 +518,13 @@ RSpec.describe "FSM classifier (Phase A)" do
         END
       CLEAR
       user = transpile(src).split("// 3. Main Entry").first
-      # Four inner fns: pre + loop body before suspend (with promise
-      # stash) + loop body after suspend + post. Legacy emit named
-      # them runPre/runLoopPre/runLoopPost/runPost; the recursive emit
-      # uses runSeg<N>. Accept either by counting member fns instead
-      # of matching exact names.
-      expect(user.scan(/fn run\w+\(/).length).to be >= 4
-      # Suspend slot + result var + loop locals are ctx fields.
-      expect(user).to match(/sp(?:_\d+)?:\s*CheatLib\.Promise/)
-      expect(user).to include("r: i64 = undefined")
-      expect(user).to include("i: i64 = undefined")
-      expect(user).to include("total: i64 = undefined")
-      # Cycling dispatcher present (back-edge into the loop head).
+      # The nested BG spawned inside the loop is split into structural FSM
+      # segments. The outer BG remains stackful because it owns the loop and
+      # awaits the nested promise synchronously.
+      expect(user.scan(/fn runSeg\d+\(/).length).to be >= 2
+      expect(user).to include("CheatHeader.allocFsmTask")
+      expect(user).to include("i: @TypeOf(i)")
+      # Cycling dispatcher present.
       expect(user).to include("__sw: while (true)")
     end
 

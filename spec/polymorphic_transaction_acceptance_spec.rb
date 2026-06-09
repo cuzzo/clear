@@ -220,6 +220,8 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       expect(tick_body).not_to match(/\.update\(rt, rt\.heapAlloc/)
       expect(tick_body).not_to include("error.UpdateRetriesExhausted")
       expect(tick_body).not_to include("error.AtomicConflict")
+      expect(tick_body).to include("const x = (if (comptime @typeInfo(@TypeOf(c)) == .pointer)")
+      expect(tick_body).not_to include("const x = c.*;")
     end
 
     it "@multiowned binding compiles and lowers WITH to Rc deref (no lock, no snapshot)" do
@@ -238,6 +240,26 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       tick_body = zig[/fn tick_Multi.*?\nfn /m] || zig[/fn tick_Multi.*/m]
       expect(tick_body).not_to match(/\.acquire\(\)/)
       expect(tick_body).not_to match(/\.update\(rt, rt\.heapAlloc/)
+      expect(tick_body).to include("comptime @hasField")
+      expect(tick_body).not_to include("const x = c.*;")
+    end
+
+    it "read-only @multiowned polymorphic aliases use the structural payload unwrap" do
+      src = fn_with_requires(
+        suffix: "ReadMulti",
+        requires_clause: "REQUIRES c: LOCAL",
+        with_form: "WITH POLYMORPHIC c AS x { r = x.value; }",
+      ) + <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE c = CounterReadMulti{ value: 0 } @multiowned;
+          _ = tick_ReadMulti!(c);
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      tick_body = zig[/fn tick_ReadMulti.*?\nfn /m] || zig[/fn tick_ReadMulti.*/m]
+      expect(tick_body).to include("comptime @hasField")
+      expect(tick_body).not_to include("const x = c.*;")
     end
 
     it "plain T (no capability) compiles and lowers WITH to direct field access" do

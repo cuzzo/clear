@@ -162,14 +162,17 @@ def mir_checker_negative_case(case_name)
   when :aggregate_child_alloc_mismatch_call_contract
     <<~RUBY
       contract = MIR::OwnershipContract.consumes(["child"])
-      iz = inline_zig("try target.append(alloc, value)", :frame, "items")
-      iz.allocs = { alloc: :frame, val_alloc: :frame }
-      iz.ownership_contract = contract
+      call = registry_call(
+        :frame,
+        "items",
+        ownership_contract: contract,
+        allocs: MIR.inline_alloc_metadata(alloc: :frame, val_alloc: :frame),
+      )
       [
         alloc_mark("child", :heap),
         MIR::TransferMark.new("child", :owned_sink, :frame),
         alloc_mark("items", :frame),
-        MIR::ExprStmt.new(iz, false),
+        MIR::ExprStmt.new(call, false),
       ]
     RUBY
   when :owned_return_alloc_not_heap
@@ -309,10 +312,10 @@ def mir_checker_negative_case(case_name)
     RUBY
   when :invalid_inline_allocator
     <<~RUBY
-      iz = inline_zig("try target.append(alloc, value)", :stack, "items")
+      call = registry_call(:stack, "items")
       [
         alloc_mark("items", :heap),
-        MIR::ExprStmt.new(iz, false),
+        MIR::ExprStmt.new(call, false),
       ]
     RUBY
   when :allocating_let_without_alloc
@@ -401,15 +404,15 @@ def mir_checker_negative_source(case_name, error_code)
       CleanupEntry.from({ kind: :uniform, alloc: alloc, has_moved_guard: moved_guard })
     end
 
-    def registry_call(alloc, target)
+    def registry_call(alloc, target, ownership_contract: MIR::OwnershipContract.empty, allocs: nil)
       sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
       sig.emit = IntrinsicEmit.new(mutates_receiver: true)
       MIR::RegistryCall.new(
         entry: sig,
         args: [],
         reason: "inline_contract",
-        ownership_contract: MIR::OwnershipContract.empty,
-        allocs: alloc ? MIR.inline_alloc_metadata(alloc: alloc) : MIR.inline_alloc_metadata,
+        ownership_contract: ownership_contract,
+        allocs: allocs || (alloc ? MIR.inline_alloc_metadata(alloc: alloc) : MIR.inline_alloc_metadata),
         target_var: target,
       )
     end

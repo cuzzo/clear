@@ -654,7 +654,7 @@ module FsmWrapperEmitter
         when MIR::FsmDestroyCleanup
           render_destroy_cleanup_action(action, mir_emitter)
         when MIR::FsmDestroyLockRelease
-          render_destroy_lock_action(ctx_id, action)
+          render_destroy_lock_action(ctx_id, action, mir_emitter)
         end
       end.compact.join("\n")
     end, String)
@@ -662,13 +662,13 @@ module FsmWrapperEmitter
 
   sig { params(action: MIR::FsmDestroyCleanup, mir_emitter: MIREmitter).returns(String) }
   def render_destroy_cleanup_action(action, mir_emitter)
-    allocator = action.allocator ? render_fsm_expr(T.must(action.allocator)) : nil
+    allocator = action.allocator ? mir_emitter.emit(T.must(action.allocator)) : nil
     cleanup = mir_emitter.emit_direct_cleanup(
-      render_fsm_expr(action.target),
+      T.must(mir_emitter.emit(action.target)),
       action.cleanup_entry,
       alloc_override: allocator,
     )
-    guard = action.guard ? render_fsm_expr(T.must(action.guard)) : nil
+    guard = action.guard ? mir_emitter.emit(T.must(action.guard)) : nil
     return cleanup if guard.nil? || guard.strip.empty?
 
     if cleanup.include?("\n")
@@ -678,9 +678,9 @@ module FsmWrapperEmitter
     end
   end
 
-  sig { params(ctx_id: Integer, action: MIR::FsmDestroyLockRelease).returns(String) }
-  def render_destroy_lock_action(ctx_id, action)
-    "if (__ctx_#{ctx_id}.#{action.guard_field}) #{render_fsm_expr(action.lock_ref)}.#{action.unlock_method}();"
+  sig { params(ctx_id: Integer, action: MIR::FsmDestroyLockRelease, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_lock_action(ctx_id, action, mir_emitter)
+    "if (__ctx_#{ctx_id}.#{action.guard_field}) #{mir_emitter.emit(action.lock_ref)}.#{action.unlock_method}();"
   end
 
   sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(Object)).returns(Object) }

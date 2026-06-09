@@ -741,7 +741,10 @@ class PipelineRangeLowerer
       MIR::ExprStmt.new(set_completion, nil),
     ]
 
-    body_mir = [p.loop_stmt(nil, publish_stmts)]
+    body_mir = [p.loop_stmt(nil, [
+      *observable_stream_item_alloc_marks(p.item_var, source_node),
+      *publish_stmts,
+    ])]
     fid = observable_id || @host.range_next_observable_id
     spawn = MIR::ObservableConsumerSpawn.new(
       id: fid,
@@ -849,6 +852,15 @@ class PipelineRangeLowerer
   end
 
   sig { params(item_var: String, source_node: AST::Node).returns(T::Array[MIR::Emittable]) }
+  def observable_stream_item_alloc_marks(item_var, source_node)
+    src_t = source_node.full_type!(context: "observable pipeline source item")
+    elem_t = src_t.tense_type&.element_type
+    return [] unless elem_t && pipeline_element_owns_heap?(elem_t)
+
+    [MIR::AllocMark.new(item_var, :heap, elem_t, :heap)]
+  end
+
+  sig { params(item_var: String, source_node: AST::Node).returns(T::Array[MIR::Emittable]) }
   def consumed_stream_item_cleanup(item_var, source_node)
     src_t = source_node.full_type!(context: "pipeline source cleanup")
     elem_t = src_t.tense_type&.element_type
@@ -934,16 +946,30 @@ class PipelineRangeLowerer
     obs_zig = @host.range_transpile_type(smooth_node.full_type!)
     target = without_pointer_prefix(obs_zig)
     set_type = smooth_node.full_type!.tense_type
-    elem_zig = @host.range_transpile_type(T.must(set_type.element_type))
+    elem_type = T.must(set_type.element_type)
+    elem_zig = @host.range_transpile_type(elem_type)
     is_bounded = set_type.fixed?
     cap = set_type.capacity
 
+    submit_contract = if pipeline_element_owns_heap?(elem_type)
+      MIR::CallableContract.new(
+        FunctionSignature.new(params: [
+          AST::Param.new(name: "item", type: elem_type, takes: true),
+        ], return_type: Type.new(:Void)),
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(item_var, elem_type, "observable distinct item", :heap),
+        ]),
+        1,
+      )
+    else
+      MIR::CallableContract.no_ownership(1)
+    end
     submit_expr = MIR::MethodCall.new(
       MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner"),
       "submit",
       [key_expr_mir],
       false,
-      MIR::CallableContract.no_ownership(1),
+      submit_contract,
     )
     submit_expr = MIR::TryCatch.new(submit_expr, MIR::Lit.new("unreachable"), nil) unless is_bounded
     publish = [MIR::ExprStmt.new(submit_expr, true)]

@@ -1702,6 +1702,11 @@ class MIRLowering
     effect = MIR::OwnershipEffect.of(source_expr)
     return true if effect.produces_owned
 
+    if source_expr.respond_to?(:mutating_receiver_allocator_op?) &&
+       T.unsafe(source_expr).mutating_receiver_allocator_op?
+      return false
+    end
+
     sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
     sig&.emits_allocating? == true
   end

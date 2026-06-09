@@ -127,16 +127,16 @@ module Schemas
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
     attr_reader :close_plan, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
-    sig { params(close_plan: ResourceClosePlan, static_methods: StaticMethodsMap, fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: MethodsMap).void }
+    sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
     def initialize(close_plan:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
-      @close_plan      = T.let(close_plan, ResourceClosePlan)
-      @static_methods  = T.let(static_methods, StaticMethodsMap)
+      @close_plan      = T.let(close_plan, Schemas::ResourceClosePlan)
+      @static_methods  = T.let(static_methods, Schemas::ResourceSchema::StaticMethodsMap)
       @fields          = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params     = T.let(type_params, T.nilable(T::Array[Symbol]))
       @extern_module   = T.let(extern_module, T.nilable(String))
       @as_type         = T.let(as_type, T.nilable(String))
       @visibility      = T.let(visibility, Symbol)
-      @methods         = T.let(methods, MethodsMap)
+      @methods         = T.let(methods, Schemas::ResourceSchema::MethodsMap)
       freeze
     end
 

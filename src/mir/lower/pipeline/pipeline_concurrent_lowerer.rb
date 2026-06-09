@@ -576,6 +576,27 @@ class PipelineConcurrentLowerer < T::Struct
     ).marks
   end
 
+  sig do
+    params(
+      label: String,
+      result_var: String,
+      result_type: Type,
+      source: PipelineConcurrentSourcePointer,
+      call: MIR::Emittable,
+      source_move: T::Array[MIR::Emittable],
+    ).returns(T::Array[MIR::Emittable])
+  end
+  def bounded_result_break_stmts(label, result_var, result_type, source, call, source_move)
+    return [*source.setup, MIR::BreakStmt.new(label, call)] if source_move.empty?
+
+    [
+      *source.setup,
+      MIR::Let.new(result_var, call, false, result_type, nil),
+      *source_move,
+      MIR::BreakStmt.new(label, MIR::Ident.new(result_var)),
+    ]
+  end
+
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_bounded_select(lhs, conc_op, inner)
     item_t = T.must(lhs.full_type!.stream_element_type)
@@ -592,14 +613,12 @@ class PipelineConcurrentLowerer < T::Struct
     ])
 
     label = self.next_label.call
+    result_type = Type.from_node!(conc_op, context: "bounded concurrent SELECT result")
     self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::BreakStmt.new(label, call),
-      ],
-    ), Type.from_node!(conc_op, context: "bounded concurrent SELECT result"))
+      after_context: bounded_result_break_stmts(label, "__bounded_select_result_#{numeric_label_id(label)}",
+        result_type, source, call, source_move),
+    ), result_type)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::WhereOp).returns(MIR::BlockExpr) }
@@ -616,14 +635,12 @@ class PipelineConcurrentLowerer < T::Struct
     ])
 
     label = self.next_label.call
+    result_type = Type.from_node!(conc_op, context: "bounded concurrent WHERE result")
     self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::BreakStmt.new(label, call),
-      ],
-    ), Type.from_node!(conc_op, context: "bounded concurrent WHERE result"))
+      after_context: bounded_result_break_stmts(label, "__bounded_where_result_#{numeric_label_id(label)}",
+        result_type, source, call, source_move),
+    ), result_type)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::EachOp).returns(MIR::ScopeBlock) }
@@ -641,13 +658,13 @@ class PipelineConcurrentLowerer < T::Struct
 
     MIR::ScopeBlock.new(invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::ExprStmt.new(call, false),
-      ],
-    ))
-  end
+	      after_context: [
+	        *source.setup,
+	        MIR::ExprStmt.new(call, false),
+	        *source_move,
+	      ],
+	    ))
+	  end
 
   sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
   def lower_bc_plan(plan)
