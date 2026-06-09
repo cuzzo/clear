@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require "set"
 
 require_relative "cleanup_entry"
 require_relative "placement"
@@ -7,6 +8,7 @@ require_relative "../ast/type"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator/helpers/function_signature"
 require_relative "../semantic/local_binding_facts"
+require_relative "../semantic/ownership_identity"
 
 # =========================================================================
 # Pass C (caller side): Cleanup Classification
@@ -32,6 +34,8 @@ require_relative "../semantic/local_binding_facts"
 module CleanupClassifier
     extend T::Sig
 
+  PlaceId = OwnershipIdentity::PlaceId
+
   class BindingCleanupFacts < T::Struct
     extend T::Sig
 
@@ -45,6 +49,128 @@ module CleanupClassifier
     const :sync, T.nilable(Symbol)
   end
 
+  class FrozenCleanupFacts < T::Struct
+    extend T::Sig
+
+    const :entries_by_place, T::Hash[PlaceId, CleanupEntry]
+
+    sig { params(bindings: T::Hash[String, CleanupEntry]).returns(FrozenCleanupFacts) }
+    def self.from_bindings(bindings)
+      entries = T.let({}, T::Hash[PlaceId, CleanupEntry])
+      bindings.each do |name, entry|
+        entries[PlaceId.from_path(name)] = entry
+      end
+      build(entries)
+    end
+
+    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(FrozenCleanupFacts) }
+    def self.from_function(fn_node, bindings)
+      entries = T.let({}, T::Hash[PlaceId, CleanupEntry])
+      body = fn_node.body
+      if body
+        AST.each_locatable(body) do |node|
+          name = MIR::LocalBindingAnalysis.binding_decl_name(node)
+          next unless name
+          entry = MIR::LocalBindingAnalysis.binding_entry(node)
+          next unless entry
+
+          entries[CleanupClassifier.place_for_binding_node(name, node)] = entry
+        end
+      end
+      bindings.each do |name, entry|
+        entries[PlaceId.from_path(name)] = entry
+      end
+      build(entries)
+    end
+
+    sig { params(entries: T::Hash[PlaceId, CleanupEntry]).returns(FrozenCleanupFacts) }
+    def self.build(entries)
+      new(entries_by_place: entries.freeze)
+    end
+
+    sig { returns(T::Boolean) }
+    def empty?
+      entries_by_place.empty?
+    end
+
+    sig { params(name: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupEntry)) }
+    def entry_for(name)
+      place = PlaceId.from_path(name)
+      entries_by_place[place] || bindings[place.path]
+    end
+
+    sig { params(name: T.any(String, Symbol), node: T.untyped).returns(T.nilable(CleanupEntry)) }
+    def entry_for_node(name, node)
+      place = CleanupClassifier.place_for_binding_node(name.to_s, node)
+      entries_by_place[place] || bindings[place.path]
+    end
+
+    sig { params(name: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupEntry)) }
+    def live_entry_for(name)
+      entry = entry_for(name)
+      entry&.needs_cleanup? ? entry : nil
+    end
+
+    sig { params(name: T.any(String, Symbol), node: T.untyped).returns(T.nilable(CleanupEntry)) }
+    def live_entry_for_node(name, node)
+      entry = entry_for_node(name, node)
+      entry&.needs_cleanup? ? entry : nil
+    end
+
+    sig { params(names: T::Enumerable[T.any(String, Symbol, PlaceId)]).returns(FrozenCleanupFacts) }
+    def without_names(names)
+      removed_paths = T.let(names.map { |name| PlaceId.from_path(name).path }.to_set, T::Set[String])
+      kept = entries_by_place.reject { |place, _entry| removed_paths.include?(place.path) }
+      FrozenCleanupFacts.build(kept)
+    end
+
+    sig { returns(T::Hash[String, CleanupEntry]) }
+    def bindings
+      entries_by_place.each_with_object({}) do |(place, entry), out|
+        out[place.path] = entry
+      end
+    end
+
+    sig { params(block: T.proc.params(place: PlaceId, entry: CleanupEntry).void).void }
+    def each_entry(&block)
+      entries_by_place.each { |place, entry| block.call(place, entry) }
+      nil
+    end
+  end
+
+  class CleanupClassificationPlan < T::Struct
+    extend T::Sig
+
+    const :function_name, String
+    const :facts, FrozenCleanupFacts
+
+    sig { params(function_name: String, bindings: T::Hash[String, CleanupEntry]).returns(CleanupClassificationPlan) }
+    def self.from_bindings(function_name, bindings)
+      new(
+        function_name: function_name,
+        facts: FrozenCleanupFacts.from_bindings(bindings),
+      )
+    end
+
+    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(CleanupClassificationPlan) }
+    def self.from_function(fn_node, bindings)
+      new(
+        function_name: fn_node.name.to_s,
+        facts: FrozenCleanupFacts.from_function(fn_node, bindings),
+      )
+    end
+
+    sig { returns(T::Boolean) }
+    def empty?
+      facts.empty?
+    end
+
+    sig { returns(T::Hash[String, CleanupEntry]) }
+    def bindings
+      facts.bindings
+    end
+  end
+
   # Classify all bindings in a function that need cleanup.
   #
   # @param fn_node [AST::FunctionDef]
@@ -52,7 +178,12 @@ module CleanupClassifier
   # @return [Hash] { var_name => entry_hash } or empty hash
   sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Hash[String, CleanupEntry]) }
   def self.classify(fn_node, schema_lookup:)
-    return {} unless fn_node.body
+    classify_plan(fn_node, schema_lookup: schema_lookup).bindings
+  end
+
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(CleanupClassificationPlan) }
+  def self.classify_plan(fn_node, schema_lookup:)
+    return CleanupClassificationPlan.from_bindings(fn_node.name.to_s, {}) unless fn_node.body
 
     bindings = {}
 
@@ -75,7 +206,14 @@ module CleanupClassifier
     prune_container_borrow_bindings(fn_node.body, bindings)
     stamp_cleanup_scopes!(fn_node.body, bindings)
 
-    bindings
+    CleanupClassificationPlan.from_function(fn_node, bindings)
+  end
+
+  sig { params(name: String, node: T.untyped).returns(PlaceId) }
+  def self.place_for_binding_node(name, node)
+    sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+    symbol = sym.is_a?(SymbolEntry) ? sym : nil
+    PlaceId.from_symbol(name, symbol)
   end
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
@@ -215,8 +353,8 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment.field_pre_cleanup with the allocator Symbol (:heap or :frame).
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry], schema_lookup: T.nilable(Proc)).void }
-  def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
+  sig { params(body: T::Array[T.untyped], facts: FrozenCleanupFacts, schema_lookup: T.nilable(Proc)).void }
+  def self.stamp_field_pre_cleanups!(body, facts, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
       next unless stmt.name.is_a?(AST::GetField)
@@ -234,7 +372,7 @@ module CleanupClassifier
         next
       end
 
-      heap_field_alloc = heap_owned_field_pre_cleanup_alloc(field_ti, target_node, bindings)
+      heap_field_alloc = heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts)
       if !field_needs_cleanup && heap_field_alloc
         stmt.field_pre_cleanup = heap_field_alloc
         next
@@ -242,21 +380,21 @@ module CleanupClassifier
 
       next unless field_needs_cleanup
 
-      stmt.field_pre_cleanup = field_owner_cleanup_alloc(target_node, bindings)
+      stmt.field_pre_cleanup = field_owner_cleanup_alloc(target_node, facts)
     end
   end
 
-  sig { params(field_ti: Type, target_node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
-  private_class_method def self.heap_owned_field_pre_cleanup_alloc(field_ti, target_node, bindings)
+  sig { params(field_ti: Type, target_node: AST::Node, facts: FrozenCleanupFacts).returns(T.nilable(Symbol)) }
+  private_class_method def self.heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts)
     return nil unless field_ti.string?
-    field_owner_cleanup_alloc(target_node, bindings) == :heap ? :heap : nil
+    field_owner_cleanup_alloc(target_node, facts) == :heap ? :heap : nil
   end
 
-  sig { params(target_node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(Symbol) }
-  private_class_method def self.field_owner_cleanup_alloc(target_node, bindings)
+  sig { params(target_node: AST::Node, facts: FrozenCleanupFacts).returns(Symbol) }
+  private_class_method def self.field_owner_cleanup_alloc(target_node, facts)
     return :frame unless target_node.is_a?(AST::Identifier)
 
-    target_entry = bindings[target_node.name.to_s]
+    target_entry = facts.entry_for_node(target_node.name.to_s, target_node)
     target_alloc = target_entry&.alloc
     target_alloc == :heap ? :heap : :frame
   end
@@ -503,7 +641,7 @@ module CleanupClassifier
     end
   end
 
-  sig { params(expr: T.untyped).returns(T::Boolean) }
+  sig { params(expr: AST::Node).returns(T::Boolean) }
   private_class_method def self.capture_expr_owns_result?(expr)
     AST.call?(expr) || expr.is_a?(AST::MethodCall) || expr.is_a?(AST::ResolveNode)
   end
@@ -655,29 +793,25 @@ module CleanupClassifier
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   private_class_method def self.binding_container_borrow?(node)
-    return true if node.respond_to?(:container_borrow) && node.container_borrow
-
-    value = node.respond_to?(:value) ? T.unsafe(node).value : nil
-    return true if value.respond_to?(:container_borrow) && value.container_borrow
-    if value.is_a?(AST::BinaryOp) && (value.op == :OR || value.op == :OR_RESCUE)
-      return true if value.left.respond_to?(:container_borrow) && value.left.container_borrow
-    end
-
-    false
+    AST.container_borrow?(node) || AST.container_borrow?(binding_value(node))
   end
 
   sig { params(entry: T.nilable(CleanupEntry), node: T.untyped, ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
     return nil unless entry
     return entry unless node.respond_to?(:symbol)
-    sym = node.symbol
-    decl = sym&.respond_to?(:reg) ? sym.reg : nil
-    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
-    storage = decl_sym&.storage || sym&.storage
+    storage = storage_from_symbol(node.symbol, node)
     type_alloc = ti.cleanup_allocator(schema_lookup)
     return entry if entry[:fixed_alloc]
     entry[:alloc] = (type_alloc == :heap || storage == :heap) ? :heap : :frame
     entry
+  end
+
+  sig { params(sym: T.untyped, node: T.untyped).returns(T.nilable(Symbol)) }
+  private_class_method def self.storage_from_symbol(sym, node)
+    symbol = sym.is_a?(SymbolEntry) ? (AST.declaration_symbol(sym) || sym) : sym
+    storage = symbol&.storage
+    storage || (node.respond_to?(:storage) ? node.storage : nil)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
@@ -798,10 +932,7 @@ module CleanupClassifier
   # post-escape-analysis storage.
   sig { params(sym: T.untyped, node: T.untyped).returns(Symbol) }
   private_class_method def self.container_alloc_from(sym, node)
-    decl = sym && sym.respond_to?(:reg) ? sym.reg : nil
-    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
-    storage = decl_sym&.storage || sym&.storage ||
-              (node.respond_to?(:storage) ? node.storage : nil)
+    storage = storage_from_symbol(sym, node)
     case storage
     when :frame, :stack then :frame
     else :heap

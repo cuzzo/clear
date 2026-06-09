@@ -648,14 +648,7 @@ module FunctionAnalysis
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_takes_argument?(node)
-    return true if node.respond_to?(:container_borrow) && node.container_borrow
-    return true if node.is_a?(AST::GetIndex)
-    return false unless node.is_a?(AST::GetField)
-
-    root = AST.root_identifier(node)
-    return false if root&.token&.type == :TYPE_ID
-    sym = root&.symbol
-    !!(sym && (sym.is_param || sym.reg))
+    AST.borrowed_ownership_view?(node)
   end
 
   sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }

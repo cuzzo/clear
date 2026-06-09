@@ -1144,9 +1144,7 @@ module MIRLoweringFunctions
   def borrowed_ownership_operand?(arg)
     return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
 
-    node = arg
-    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ||
-      !!(node.respond_to?(:container_borrow) && node.container_borrow)
+    AST.borrowed_ownership_view?(arg)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(StdlibCallFacts) }

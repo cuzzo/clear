@@ -27,6 +27,8 @@ module OwnershipIdentity
     extend T::Sig
 
     const :path, String
+    const :binding_name, T.nilable(String), default: nil
+    const :binding_id, T.nilable(Integer), default: nil
 
     sig { params(path: T.any(String, Symbol, PlaceId)).returns(PlaceId) }
     def self.from_path(path)
@@ -35,9 +37,21 @@ module OwnershipIdentity
       new(path: path.to_s)
     end
 
-    sig { returns(String) }
-    def to_s
-      path
+    sig { params(path: T.any(String, Symbol), symbol: T.nilable(SymbolEntry)).returns(PlaceId) }
+    def self.from_symbol(path, symbol)
+      return from_path(path) unless symbol
+
+      name = path.to_s
+      new(path: name, binding_name: name, binding_id: symbol.binding_id)
+    end
+
+    sig { returns(T.nilable(BindingId)) }
+    def binding_identity
+      name = binding_name
+      id = binding_id
+      return nil unless name && id
+
+      BindingId.new(name: name, binding_id: id)
     end
 
     sig { returns(T::Boolean) }
@@ -53,25 +67,16 @@ module OwnershipIdentity
     end
 
     sig { params(other: Object).returns(T::Boolean) }
-    def ==(other)
-      case other
-      when PlaceId
-        path == other.path
-      when String, Symbol
-        path == other.to_s
-      else
-        false
-      end
-    end
-
-    sig { params(other: Object).returns(T::Boolean) }
     def eql?(other)
-      self == other
+      other.is_a?(PlaceId) &&
+        path == other.path &&
+        binding_name == other.binding_name &&
+        binding_id == other.binding_id
     end
 
     sig { returns(Integer) }
     def hash
-      path.hash
+      [path, binding_name, binding_id].hash
     end
   end
 end

@@ -584,9 +584,19 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   def owner_state(*names)
-    names.to_h do |name|
-      [name, OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)]
-    end
+    OwnershipDataflow.state_from_names(
+      names.to_h do |name|
+        [name, OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)]
+      end,
+    )
+  end
+
+  def owner_entry(state, name)
+    state[OwnershipDataflow::PlaceId.from_path(name)]
+  end
+
+  def cleanup_facts(bindings)
+    CleanupClassifier::FrozenCleanupFacts.from_bindings(bindings)
   end
 
   def lowering
@@ -845,13 +855,13 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(dataflow.send(:linear_scope_decl_always_moves?, [decl], "owned")).to eq(false)
     expect(dataflow.send(:linear_scope_decl_always_moves?, [AST::PassStmt.new(tok)], "missing")).to eq(false)
 
-    raw_state = { "raw" => OwnershipDataflow::OWNED }
-    dataflow.send(:mark_moved!, raw_state, "raw")
-    expect(raw_state["raw"]).to eq(OwnershipDataflow::MOVED)
+    raw_state = owner_state("raw")
+    dataflow.send(:mark_moved!, raw_state, OwnershipDataflow::PlaceId.from_path("raw"))
+    expect(owner_entry(raw_state, "raw").state).to eq(OwnershipDataflow::MOVED)
 
     moved = id("moved", storage: :heap)
     moved.was_moved = true
-    expect(dataflow.send(:collect_map_store_moves, AST::MoveNode.new(tok, moved), owner_state("moved"))).to eq(["moved"])
+    expect(dataflow.send(:collect_binding_move_places, AST::MoveNode.new(tok, moved), owner_state("moved")).map(&:path)).to eq(["moved"])
 
     untyped_field = AST::GetField.new(tok, id("root", storage: :heap), "payload")
     expect(dataflow.send(:owning_field_move?, untyped_field)).to eq(false)
@@ -875,6 +885,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     expect(plan.function).to eq(main_fn)
     expect(plan.bindings).to eq("owned" => entry)
+    expect(plan.cleanup_facts.entry_for("owned")).to eq(entry)
     expect(plan.cleanup_bindings?).to eq(true)
     expect(plan.can_fail_fns).to eq(Set["fallible"])
 
@@ -941,10 +952,10 @@ RSpec.describe "MIR gap-burn characterization" do
 
     captured_bg = AST::BgBlock.new(tok, [AST::PassStmt.new(tok)], nil, nil, false, false, nil, false)
     captured_bg.capture_analysis = double(captures: { "outer" => true })
-    pass.send(:recurse_branches!, captured_bg, MIRPass::WalkCtx.new(bindings: {
+    pass.send(:recurse_branches!, captured_bg, MIRPass::WalkCtx.new(cleanup_facts: cleanup_facts({
       "outer" => CleanupEntry.build(:uniform, alloc: :heap),
       "inner" => CleanupEntry.build(:uniform, alloc: :heap),
-    }))
+    })))
     expect(captured_bg.body.first).to be_a(AST::PassStmt)
 
     bindings = {
@@ -954,15 +965,16 @@ RSpec.describe "MIR gap-burn characterization" do
     names = Set.new
     owner_field = AST::GetField.new(tok, id("owner", type: :String, storage: :heap), "payload")
     owner_field.full_type = Type.new(:Payload, layout: :indirect)
-    pass.send(:walk_consumed, owner_field, names, bindings)
+    facts = cleanup_facts(bindings)
+    pass.send(:walk_consumed, owner_field, names, facts)
     expect(names).to include("owner")
     expect(bindings["owner"].has_moved_guard?).to eq(true)
 
     plain_field = AST::GetField.new(tok, id("moved", type: :String, storage: :heap), "plain")
     plain_field.full_type = Type.new(:Int64)
-    pass.send(:walk_consumed, AST::MoveNode.new(tok, plain_field), names, bindings)
+    pass.send(:walk_consumed, AST::MoveNode.new(tok, plain_field), names, facts)
     returned_struct = AST::StructLit.new(tok, "Box", { "value" => id("moved", type: :String, storage: :heap) }, :heap, [])
-    pass.send(:walk_consumed, AST::ReturnNode.new(tok, returned_struct), names, bindings)
+    pass.send(:walk_consumed, AST::ReturnNode.new(tok, returned_struct), names, facts)
     expect(names).to include("moved")
 
     expect(pass.send(:owning_field_move?, AST::GetField.new(tok, id("bad", type: :String), "missing_type"))).to eq(false)
@@ -978,13 +990,13 @@ RSpec.describe "MIR gap-burn characterization" do
       "subject" => CleanupEntry.build(:uniform, alloc: :heap),
       "payload" => CleanupEntry.build(:uniform, alloc: :heap),
     }
-    pass.send(:stamp_match_as_cleanup!, match, match_bindings)
+    pass.send(:stamp_match_as_cleanup!, match, cleanup_facts(match_bindings))
     expect(match_case.body).to include(an_instance_of(MIR::SuppressCleanup), an_instance_of(MIR::AllocMark), an_instance_of(MIR::Drop))
 
     while_bind = AST::WhileBindLoop.new(tok, id("maybe", type: :"?String"), "item", tok, [], nil)
-    pass.send(:stamp_while_bind_cleanup!, while_bind, {
+    pass.send(:stamp_while_bind_cleanup!, while_bind, cleanup_facts({
       "item" => CleanupEntry.build(:uniform, alloc: :heap),
-    })
+    }))
     expect(while_bind.do_branch).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Drop))
 
     if_binding = AST::Binding.new(
@@ -996,9 +1008,9 @@ RSpec.describe "MIR gap-burn characterization" do
       capture: nil,
     )
     if_bind = AST::IfBind.new(tok, [if_binding], [], nil)
-    pass.send(:stamp_if_bind_cleanup!, if_bind, {
+    pass.send(:stamp_if_bind_cleanup!, if_bind, cleanup_facts({
       "bound" => CleanupEntry.build(:uniform, alloc: :heap),
-    })
+    }))
     expect(if_bind.then_branch).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Drop))
 
     escaped_move = pass.send(:collect_escaping_ids, AST::MoveNode.new(tok, id("escaped", type: :String)))
@@ -1061,10 +1073,12 @@ RSpec.describe "MIR gap-burn characterization" do
     dataflow = OwnershipDataflow.analyze(fn_node, schema_lookup: nil)
     cleanup = { "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false) }
 
-    expect { dataflow.cleanup_decisions!(fn_node, cleanup) }.to raise_error(/Ownership Error/)
+    expect { dataflow.cleanup_decisions!(fn_node, cleanup_facts(cleanup)) }.to raise_error(/Ownership Error/)
 
     checker = UseAfterMoveChecker.new(fn([]), OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([])))
-    moved_state = { "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true) }
+    moved_state = OwnershipDataflow.state_from_names(
+      "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true),
+    )
     complex_stmt_move = AST::MoveNode.new(tok, AST::GetField.new(tok, id("dead", storage: :heap), "field"))
     checker.send(:check_stmt_reads, complex_stmt_move, moved_state)
     complex_expr_move = AST::MoveNode.new(tok, AST::GetField.new(tok, id("dead", storage: :heap), "field"))
@@ -1085,6 +1099,10 @@ RSpec.describe "MIR gap-burn characterization" do
 
     dataflow = OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([]), schema_lookup: nil)
     state = owner_state("owned", "moved", "captured", "given", "items")
+    if_stmt = AST::IfStatement.new(tok, id("cond", type: :Bool), [], nil, nil, nil)
+    while_stmt = AST::WhileLoop.new(tok, id("keep_going", type: :Bool), [], nil)
+    match_stmt = AST::MatchStatement.new(tok, id("tag", type: :Int64), [], nil, nil, nil, false, false)
+    range_stmt = AST::ForRange.new(tok, "range_item", lit(0, type: :Int64), lit(1, type: :Int64), false, [], nil, nil)
 
     decl = AST::VarDecl.new(tok, "declared", nil, value, false)
     decl.full_type = Type.new(:Box, layout: :indirect)
@@ -1094,11 +1112,18 @@ RSpec.describe "MIR gap-burn characterization" do
     dataflow.send(:transfer_stmt, each_stmt, state)
     dataflow.send(:transfer_stmt, bg, state)
 
-    expect(state["declared"].state).to eq(OwnershipDataflow::OWNED)
-    expect(state["owned"].state).to eq(OwnershipDataflow::MOVED)
-    expect(state["moved"].state).to eq(OwnershipDataflow::MOVED)
-    expect(state["captured"].state).to eq(OwnershipDataflow::MOVED)
-    expect(state["loop_item"].state).to eq(OwnershipDataflow::OWNED)
+    expect(owner_entry(state, "declared").state).to eq(OwnershipDataflow::OWNED)
+    expect(owner_entry(state, "owned").state).to eq(OwnershipDataflow::MOVED)
+    expect(owner_entry(state, "moved").state).to eq(OwnershipDataflow::MOVED)
+    expect(owner_entry(state, "captured").state).to eq(OwnershipDataflow::MOVED)
+    expect(owner_entry(state, "loop_item").state).to eq(OwnershipDataflow::OWNED)
+
+    expect(dataflow.send(:control_header_transfer, if_stmt).condition).to be(if_stmt.condition)
+    expect(dataflow.send(:control_header_transfer, while_stmt).condition).to be(while_stmt.condition)
+    expect(dataflow.send(:control_header_transfer, match_stmt).condition).to be(match_stmt.expr)
+    expect(dataflow.send(:control_header_transfer, each_stmt).loop_name).to eq("loop_item")
+    expect(dataflow.send(:control_header_transfer, range_stmt).loop_name).to eq("range_item")
+    expect(dataflow.send(:control_header_transfer, AST::WithBlock.new(tok, [], nil, nil))).to be_nil
   end
 
   it "exercises escape return and call heap facts without source fuzz" do
@@ -1800,20 +1825,22 @@ RSpec.describe "MIR gap-burn characterization" do
     list = AST::ListLit.new(tok, [string_concat.call], :heap)
     list.full_type = Type.new(:"String[]", collection: :list)
     list_hoists = []
-    Hoist.hoist_concats_within!(list, list_hoists, [0])
+    counter = Hoist::HoistCounter.new
+    expect(counter.next_name).to eq("__hoist_1")
+    Hoist.hoist_concats_within!(list, list_hoists, counter)
     expect(list.items.first).to be_a(AST::Identifier)
-    expect(list_hoists.first.name).to eq("__hoist_1")
+    expect(list_hoists.first.name).to eq("__hoist_2")
 
     heap_needed = string_concat.call("c", "d")
     heap_needed.needs_heap_create = true
-    indirect_replacement = Hoist.make_temp!(heap_needed, [], [0])
+    indirect_replacement = Hoist.make_temp!(heap_needed, [], "__hoist_1")
     expect(indirect_replacement.needs_heap_create).to eq(true)
 
     owner = id("owner", type: Type.new(:Box, location: :heap), storage: :heap)
     field = AST::GetField.new(tok, owner, "name")
     field.full_type = Type.new(:String)
     borrow_hoists = []
-    borrowed_replacement = Hoist.make_temp!(field, borrow_hoists, [0], moved: false)
+    borrowed_replacement = Hoist.make_temp!(field, borrow_hoists, "__hoist_1", moved: false)
     expect(borrowed_replacement.symbol.storage).to eq(:borrow)
 
     borrowed_left = id("maybe_owned", storage: :heap)
@@ -1822,7 +1849,7 @@ RSpec.describe "MIR gap-burn characterization" do
     fallback.full_type = Type.new(:String)
     expect(Hoist.owned_fallback_temp?(fallback, nil)).to eq(true)
     fallback_hoists = []
-    Hoist.make_temp!(fallback, fallback_hoists, [0])
+    Hoist.make_temp!(fallback, fallback_hoists, "__hoist_1")
     expect(fallback_hoists.first.symbol.storage).to eq(:heap)
 
     collection_type = Type.new(:"Box[]", collection: :list)
@@ -1836,16 +1863,21 @@ RSpec.describe "MIR gap-burn characterization" do
     store_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
     store_call.matched_signature = store_sig
     store_hoists = []
-    Hoist.collect_stmt_hoists!(store_call, store_hoists, [0], nil)
+    Hoist.collect_stmt_hoists!(store_call, store_hoists, Hoist::HoistCounter.new, nil)
     expect(store_call.args.first).to be_a(AST::Identifier)
     expect(store_hoists.first.value).to be(stored_concat)
 
     yielded_concat = string_concat.call("g", "h")
     yield_expr = AST::YieldExpr.new(tok, yielded_concat)
     yield_hoists = []
-    Hoist.collect_stmt_hoists!(yield_expr, yield_hoists, [0], nil)
+    Hoist.collect_stmt_hoists!(yield_expr, yield_hoists, Hoist::HoistCounter.new, nil)
     expect(yield_expr.expr).to be_a(AST::Identifier)
     expect(yield_hoists.first.value).to be(yielded_concat)
+
+    decl_sym = SymbolEntry.new(reg: AST::VarDecl.new(tok, "local", nil, lit("v"), false), type: :String, mutable: false, storage: :heap)
+    decl_sym.reg.symbol = decl_sym
+    expect(AST.declaration_symbol(decl_sym)).to be(decl_sym)
+    expect(AST.declaration_symbol(nil)).to be_nil
   end
 
   it "covers MIR hoist type and cleanup inference edges" do
@@ -1940,11 +1972,11 @@ RSpec.describe "MIR gap-burn characterization" do
 
     struct_lit = AST::StructLit.new(tok, "Box", { "name" => string_concat.call("s", "t") }, :heap, [])
     struct_hoists = []
-    Hoist.hoist_concats_within!(struct_lit, struct_hoists, [0])
+    Hoist.hoist_concats_within!(struct_lit, struct_hoists, Hoist::HoistCounter.new)
     expect(struct_lit.fields["name"]).to be_a(AST::Identifier)
 
     nested_list = AST::ListLit.new(tok, [lit("plain")], :heap)
-    Hoist.hoist_concats_within!(nested_list, [], [0])
+    Hoist.hoist_concats_within!(nested_list, [], Hoist::HoistCounter.new)
 
     low = lowering
     wrapped = MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", :as)
@@ -2258,7 +2290,9 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:owned_binding_visible?, "missing")).to eq(false)
 
     expect(low.send(:borrowed_ownership_ast?, nil)).to eq(false)
-    expect(low.send(:borrowed_ownership_ast?, AST::CopyNode.new(tok, AST::GetIndex.new(tok, id("items"), lit(0, type: :Int64))))).to eq(true)
+    indexed_read = AST::GetIndex.new(tok, id("items"), lit(0, type: :Int64))
+    expect(low.send(:borrowed_ownership_ast?, indexed_read)).to eq(true)
+    expect(low.send(:borrowed_ownership_ast?, AST::CopyNode.new(tok, indexed_read))).to eq(false)
     borrowed = id("borrowed", storage: :heap)
     borrowed.container_borrow = true
     expect(low.send(:borrowed_ownership_ast?, borrowed)).to eq(true)
@@ -2327,9 +2361,9 @@ RSpec.describe "MIR gap-burn characterization" do
     indirect.layout = :indirect
     get.full_type = indirect
 
-    consumed = dataflow.send(:collect_binding_moves,
+    consumed = dataflow.send(:collect_binding_move_places,
       AST::ListLit.new(tok, [struct_lit, list_lit, union_ctor, share, cap, get, AST::CopyNode.new(tok, id("g", storage: :heap))], :heap),
-      state)
+      state).map(&:path)
 
     expect(consumed).to include("a", "b", "c", "d", "e", "f")
     expect(consumed).not_to include("g")
@@ -2338,7 +2372,9 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers ownership read checks and shard allocation facts" do
     fn_node = fn([])
     checker = UseAfterMoveChecker.new(fn_node, OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node))
-    moved_state = { "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true) }
+    moved_state = OwnershipDataflow.state_from_names(
+      "dead" => OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::MOVED, allocator: :heap, needs_cleanup: true),
+    )
     checker.send(:check_identifier_read, "dead", moved_state, tok)
     checker.send(:check_identifier_read, "unknown", moved_state, tok)
     expect(checker.errors.join).to include("USE_AFTER_MOVE")
@@ -2347,11 +2383,11 @@ RSpec.describe "MIR gap-burn characterization" do
     shared_type = Type.new(:String)
     shared_type.ownership = :shared
     shared.full_type = shared_type
-    checker.send(:check_share_reads, AST::ShareNode.new(tok, shared), { "shared" => moved_state["dead"] })
-    checker.send(:check_share_reads, AST::ShareNode.new(tok, AST::CopyNode.new(tok, shared)), { "shared" => moved_state["dead"] })
-    checker.send(:check_share_reads, AST::ShareNode.new(tok, AST::BinaryOp.new(tok, shared, :ADD, lit("x"))), { "shared" => moved_state["dead"] })
+    checker.send(:check_share_reads, AST::ShareNode.new(tok, shared), OwnershipDataflow.state_from_names("shared" => owner_entry(moved_state, "dead")))
+    checker.send(:check_share_reads, AST::ShareNode.new(tok, AST::CopyNode.new(tok, shared)), OwnershipDataflow.state_from_names("shared" => owner_entry(moved_state, "dead")))
+    checker.send(:check_share_reads, AST::ShareNode.new(tok, AST::BinaryOp.new(tok, shared, :ADD, lit("x"))), OwnershipDataflow.state_from_names("shared" => owner_entry(moved_state, "dead")))
     plain = id("plain", storage: :heap)
-    checker.send(:check_share_reads, AST::ShareNode.new(tok, plain), { "plain" => moved_state["dead"] })
+    checker.send(:check_share_reads, AST::ShareNode.new(tok, plain), OwnershipDataflow.state_from_names("plain" => owner_entry(moved_state, "dead")))
     expect(checker.errors.join).to include("shared")
 
     call = AST::FuncCall.new(tok, "allocates", [])
@@ -2372,11 +2408,11 @@ RSpec.describe "MIR gap-burn characterization" do
     bg.capture_analysis = double(resource_captures: Set["captured"], captures: { "captured" => true }, move_mark_names: Set["given"])
     call = AST::FuncCall.new(tok, "enqueue", [bg])
 
-    expect(dataflow.send(:collect_bg_captures_in_args, call, state)).to include("captured", "given")
+    expect(dataflow.send(:collect_bg_capture_places_in_args, call, state).map(&:path)).to include("captured", "given")
 
     missing = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
     missing.capture_analysis = double(resource_captures: Set["missing"], captures: {}, move_mark_names: Set["also_missing"])
-    expect(dataflow.send(:collect_bg_captures_in_args, AST::FuncCall.new(tok, "enqueue", [missing]), state)).to eq([])
+    expect(dataflow.send(:collect_bg_capture_places_in_args, AST::FuncCall.new(tok, "enqueue", [missing]), state)).to eq([])
   end
 
   it "covers FSM result-transfer roots, marks, and owned-result guard clearing" do
@@ -3446,7 +3482,7 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "covers variable lowering edge branches" do
-    facts_for = lambda do |ft:, binding_entry: CleanupEntry::NONE, heap_return_var: false, decl_alloc: :heap, generic_id: false, has_mir_drop: false|
+    facts_for = lambda do |ft:, binding_entry: CleanupEntry::NONE, heap_return_var: false, decl_alloc: :heap, generic_id: false, has_mir_drop: false, source_owned_binding: false|
       MIRLoweringVariables::VarDeclFacts.new(
         ft: ft,
         binding_entry: binding_entry,
@@ -3458,6 +3494,7 @@ RSpec.describe "MIR gap-burn characterization" do
         heap_return_var: heap_return_var,
         decl_alloc: decl_alloc,
         init_ownership_effect: MIR::OwnershipEffect.none,
+        source_owned_binding: source_owned_binding,
         has_caps: false,
         bare_zig: ft.bare_data_type.zig_type,
         generic_id: generic_id,
@@ -3508,6 +3545,16 @@ RSpec.describe "MIR gap-burn characterization" do
     source_decl = AST::VarDecl.new(tok, "dst", nil, id("src", type: Type.new(:Payload, ownership: :shared), storage: :heap), false)
     source_decl.full_type = Type.new(:Int64)
     source_decl.symbol = SymbolEntry.new(reg: "dst", type: Type.new(:Int64), mutable: false, storage: :frame)
+    source_facts = facts_for.call(ft: Type.new(:Payload), source_owned_binding: true)
+    expect(source_low.send(:var_decl_source_transfer_required?, source_decl, source_facts, MIR::OwnershipEffect.none)).to eq(true)
+    expect(source_low.send(:var_decl_source_transfer_required?, source_decl, source_facts, MIR::OwnershipEffect.owned(alloc: :heap))).to eq(true)
+    source_decl.container_borrow = true
+    expect(source_low.send(:var_decl_source_transfer_required?, source_decl, source_facts, MIR::OwnershipEffect.none)).to eq(false)
+    source_decl.container_borrow = false
+    source_decl.symbol = SymbolEntry.new(reg: "dst", type: Type.new(:Int64), mutable: false, storage: :borrow)
+    expect(source_low.send(:var_decl_source_borrowed?, source_decl)).to eq(true)
+    source_decl.symbol = SymbolEntry.new(reg: "dst", type: Type.new(:Int64), mutable: false, storage: :frame)
+    expect(source_low.send(:var_decl_source_transfer_required?, source_decl, facts_for.call(ft: Type.new(:Payload)), MIR::OwnershipEffect.owned(alloc: :heap))).to eq(false)
     source_nodes = source_low.send(:lower_var_decl, source_decl)
     expect(source_nodes).to include(a_kind_of(MIR::Let))
 

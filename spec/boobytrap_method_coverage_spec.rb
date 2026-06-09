@@ -42,8 +42,8 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   end
 
   it "covers cleanup-classifier allocator and owned-value classification helpers" do
-    frame_decl = OpenStruct.new(symbol: OpenStruct.new(storage: :frame))
-    sym = OpenStruct.new(reg: frame_decl, storage: :heap)
+    frame_decl = OpenStruct.new(symbol: SymbolEntry.new(reg: "frame_decl", type: Type.new(:String), mutable: false, storage: :frame))
+    sym = SymbolEntry.new(reg: frame_decl, type: Type.new(:String), mutable: false, storage: :heap)
     expect(CleanupClassifier.send(:container_alloc_from, sym, OpenStruct.new(storage: :heap))).to eq(:frame)
     expect(CleanupClassifier.send(:container_alloc_from, OpenStruct.new(storage: :stack), Object.new)).to eq(:frame)
     expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :heap))).to eq(:heap)
@@ -155,11 +155,12 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, needs_cleanup: true, zig_type: "Thing"),
       "__hoist_tmp" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false, needs_cleanup: true, zig_type: "Thing"),
     }
+    facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(bindings)
     ret = AST::ReturnNode.new(tok, AST::StructLit.new(tok, "Pair", { "v" => escape }, :heap, []))
-    expect(pass.send(:collect_return_escapes, ret, bindings)).to eq(["owned"])
+    expect(pass.send(:collect_return_escapes, ret, facts)).to eq(["owned"])
 
     hoist = id("__hoist_tmp", moved: true)
-    expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), bindings)).to eq(["__hoist_tmp"])
+    expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), facts)).to eq(["__hoist_tmp"])
   end
 
   it "keeps raw bytecode carriers deleted and covers discard-owned paths" do

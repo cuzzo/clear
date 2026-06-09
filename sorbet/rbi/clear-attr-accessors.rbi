@@ -1653,6 +1653,8 @@ end
 class MIRPass
   sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   def cleanup_bindings; end
+  sig { returns(T::Hash[String, CleanupClassifier::CleanupClassificationPlan]) }
+  def cleanup_plans; end
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   def escape_placement_facts; end
 end
@@ -1740,9 +1742,9 @@ class OwnershipContract
 end
 
 class OwnershipDataflow
-  sig { returns(T::Hash[Integer, T::Hash[String, OwnerEntry]]) }
+  sig { returns(T::Hash[Integer, OwnershipState]) }
   def block_in; end
-  sig { returns(T::Hash[Integer, T.nilable(T::Hash[String, OwnerEntry])]) }
+  sig { returns(T::Hash[Integer, T.nilable(OwnershipState)]) }
   def block_out; end
 end
 

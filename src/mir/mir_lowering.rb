@@ -2261,17 +2261,9 @@ class MIRLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_ownership_ast?(node)
     return false unless node
-    node = node.value if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
     return false if owner_transfer_node?(node)
 
-    return true if node.respond_to?(:container_borrow) && node.container_borrow
-    return true if node.is_a?(AST::GetIndex)
-    return false unless node.is_a?(AST::GetField)
-
-    root = AST.root_identifier(node)
-    return false if root&.token&.type == :TYPE_ID
-    sym = root&.symbol
-    !!(sym && (sym.is_param || sym.reg))
+    AST.borrowed_ownership_view?(node)
   end
 
   sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T.nilable(String)) }
@@ -3641,7 +3633,7 @@ class MIRLowering
     return false if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
     return false unless source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetIndex)
     root = AST.root_identifier(ast_node) rescue nil
-    borrowed = (root&.symbol&.borrow_provenance?) || (ast_node.respond_to?(:container_borrow) && ast_node.container_borrow)
+    borrowed = (root&.symbol&.borrow_provenance?) || AST.container_borrow?(ast_node)
     return false unless borrowed
     return false unless union_schemas.key?(ti.resolved)
     return false if ti.respond_to?(:implicitly_copyable?) && ti.implicitly_copyable?(mir_schema_lookup)

@@ -280,7 +280,7 @@ RSpec.describe OwnershipGraph do
       expect(snapshot.state_for("missing")).to be_nil
       expect(snapshot.move_line_for("missing")).to be_nil
       expect(yielded).to include(["x", :moved])
-      expect(yielded_places).to include([place, :moved])
+      expect(yielded_places.any? { |place_id, state| place_id.eql?(place) && state == :moved }).to be(true)
     end
   end
 

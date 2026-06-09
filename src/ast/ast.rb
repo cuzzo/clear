@@ -439,6 +439,15 @@ module AST
     end
   end
 
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
+  def self.declaration_symbol(symbol)
+    return nil unless symbol
+    decl = symbol.reg
+    return nil unless decl.respond_to?(:symbol)
+
+    decl.symbol
+  end
+
   # Is this node a call expression (function or method)? The
   # `is_a?(AST::FuncCall) || is_a?(AST::MethodCall)` predicate-use was
   # recomputed inline across the MIR pipeline (decomplex
@@ -447,6 +456,30 @@ module AST
   sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
   def self.call?(node)
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.container_borrow?(node)
+    return false unless node
+    return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
+    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
+
+    container_borrow?(node.left)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.borrowed_ownership_view?(node)
+    return false unless node
+    return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+    return true if container_borrow?(node)
+    return true if node.is_a?(AST::GetIndex)
+    return false unless node.is_a?(AST::GetField)
+
+    root = root_identifier(node)
+    return false if root&.token&.type == :TYPE_ID
+
+    sym = root&.symbol
+    !!(sym && (sym.is_param || sym.reg))
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }

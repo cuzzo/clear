@@ -375,6 +375,163 @@ RSpec.describe "coverage gap tools" do
     expect(remaining).to be_empty
   end
 
+  it "removes audit-only runtime-header hits when DWARF ownership proves the orphan" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    source_path = File.join(@tmp, "zig/runtime/runtime-header.zig")
+    File.write(source_path, <<~ZIG)
+      pub const CheatLib = struct {
+          pub fn intAdd(a: i64, b: i64) i64 {
+              return a + b;
+          }
+
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = File.readlines(source_path).index { |line| line.include?("parts[0] =") } + 1
+    coverage_xml = File.join(@tmp, "cobertura.xml")
+    File.write(coverage_xml, <<~XML)
+      <?xml version="1.0"?>
+      <coverage>
+        <packages>
+          <package name="runtime">
+            <classes>
+              <class name="runtime-header" filename="runtime/runtime-header.zig">
+                <lines>
+                  <line number="#{hit_line}" hits="1"/>
+                </lines>
+              </class>
+            </classes>
+          </package>
+        </packages>
+      </coverage>
+    XML
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    allow(ZigCoverageSanitizer).to receive(:symbol_names_for).and_return(["runtime.runtime-header.CheatLib.intAdd"])
+    allow(ZigCoverageSanitizer).to receive(:dwarf_orphan_removal_keys).and_return(
+      ZigCoverageSanitizer.removal_key("runtime/runtime-header.zig", "parseIpv4Addr", hit_line) => true,
+    )
+
+    removals = ZigCoverageSanitizer.sanitize_file!(coverage_xml, root: @tmp, binary: binary)
+
+    expect(removals.map { |r| [r.function, r.line, r.hits] }).to eq([["parseIpv4Addr", hit_line, 1]])
+    sanitized = REXML::Document.new(File.read(coverage_xml))
+    remaining = REXML::XPath.match(sanitized, "//class[@filename='runtime/runtime-header.zig']/lines/line")
+    expect(remaining).to be_empty
+  end
+
+  it "keeps audit-only runtime-header hits without a matching DWARF ownership proof" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    source_path = File.join(@tmp, "zig/runtime/runtime-header.zig")
+    File.write(source_path, <<~ZIG)
+      pub const CheatLib = struct {
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = File.readlines(source_path).index { |line| line.include?("parts[0] =") } + 1
+    coverage_xml = File.join(@tmp, "cobertura.xml")
+    File.write(coverage_xml, <<~XML)
+      <?xml version="1.0"?>
+      <coverage>
+        <packages>
+          <package name="runtime">
+            <classes>
+              <class name="runtime-header" filename="runtime/runtime-header.zig">
+                <lines>
+                  <line number="#{hit_line}" hits="1"/>
+                </lines>
+              </class>
+            </classes>
+          </package>
+        </packages>
+      </coverage>
+    XML
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    allow(ZigCoverageSanitizer).to receive(:symbol_names_for).and_return(["runtime.runtime-header.CheatLib.intAdd"])
+    allow(ZigCoverageSanitizer).to receive(:dwarf_orphan_removal_keys).and_return({})
+
+    removals = ZigCoverageSanitizer.sanitize_file!(coverage_xml, root: @tmp, binary: binary)
+
+    expect(removals).to be_empty
+    expect {
+      ZigCoverageSanitizer.assert_no_orphan_hits!(coverage_xml, root: @tmp)
+    }.to raise_error(ZigCoverageSanitizer::Error, /parseIpv4Addr:#{hit_line}/)
+  end
+
+  it "builds sanitizer proof keys from cross-file DWARF ownership contradictions" do
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    symbols = [ZigDwarfLineAudit::Symbol.new(addr: 1, size: 10, name: "all-fuzz.clearMain")]
+    rows = [ZigDwarfLineAudit::LineRow.new(file: "zig/runtime/runtime-header.zig", line: 2290, pc: 5, flags: "x")]
+    issue = ZigDwarfLineAudit::Issue.new(
+      row: rows.fetch(0),
+      symbol: symbols.fetch(0),
+      owner_file: "zig/all-fuzz.zig",
+      owner_function: "clearMain",
+      source_function: ZigDwarfLineAudit::FunctionRange.new(
+        name: "parseIpv4Addr",
+        start_line: 2275,
+        end_line: 2305,
+        inline_fn: false,
+      ),
+    )
+    allow(ZigDwarfLineAudit).to receive(:run_command!).and_return("stub")
+    allow(ZigDwarfLineAudit).to receive(:parse_nm).and_return(symbols)
+    allow(ZigDwarfLineAudit).to receive(:parse_decoded_line).and_return(rows)
+    expect(ZigDwarfLineAudit).to receive(:audit_rows)
+      .with(rows, symbols, root: @tmp, same_file_only: false)
+      .and_return([[issue], { checked: 1 }])
+
+    keys = ZigCoverageSanitizer.dwarf_orphan_removal_keys(binary, root: @tmp)
+
+    expect(keys).to eq(
+      ZigCoverageSanitizer.removal_key("zig/runtime/runtime-header.zig", "parseIpv4Addr", 2290) => true,
+    )
+  end
+
+  it "builds sanitizer proof keys for runtime-header rows owned by generated symbols" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    File.write(File.join(@tmp, "zig/runtime/runtime-header.zig"), <<~ZIG)
+      pub const CheatLib = struct {
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = 4
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    symbols = [
+      ZigDwarfLineAudit::Symbol.new(
+        addr: 0x100,
+        size: 0x20,
+        name: "all-fuzz.test.generated_case.cht.S.clearMain.__SgCtx0.run",
+      ),
+    ]
+    rows = [ZigDwarfLineAudit::LineRow.new(file: "zig/runtime/runtime-header.zig", line: hit_line, pc: 0x110, flags: "x")]
+    allow(ZigDwarfLineAudit).to receive(:run_command!).and_return("stub")
+    allow(ZigDwarfLineAudit).to receive(:parse_nm).and_return(symbols)
+    allow(ZigDwarfLineAudit).to receive(:parse_decoded_line).and_return(rows)
+    allow(ZigDwarfLineAudit).to receive(:audit_rows).and_return([[], { checked: 0 }])
+
+    keys = ZigCoverageSanitizer.dwarf_orphan_removal_keys(binary, root: @tmp)
+
+    expect(keys).to eq(
+      ZigCoverageSanitizer.removal_key("zig/runtime/runtime-header.zig", "parseIpv4Addr", hit_line) => true,
+    )
+  end
+
   it "removes merged orphan runtime-header hits only when an input run already proved them false" do
     FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
     source_path = File.join(@tmp, "zig/runtime/runtime-header.zig")

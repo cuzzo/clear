@@ -16,6 +16,20 @@ RSpec.describe OwnershipDataflow do
     OwnershipDataflow.analyze(fn_node)
   end
 
+  def annotated_function(src, fn_name)
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    PipelineRewriter.new.rewrite!(ast)
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    StringConcatRewriter.new.rewrite!(ast)
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
+
+    fn_node
+  end
+
   describe "basic ownership" do
     it "does not track copy-like primitive bindings" do
       df = analyze("FN main() RETURNS Void -> x = 42; RETURN; END", "main")
@@ -146,7 +160,22 @@ RSpec.describe OwnershipDataflow do
 
       expect(snapshot.names).to eq(Set["a"])
       expect(snapshot.entry_for("a").state).to eq(:owned)
-      expect(yielded).to include([OwnershipDataflow::PlaceId.from_path("a"), :owned])
+      place, state = yielded.first
+      expect(place.path).to eq("a")
+      expect(place.binding_identity).not_to be_nil
+      expect(state).to eq(:owned)
+    end
+
+    it "keeps the legacy string snapshot adapter backed by typed places" do
+      entry = OwnershipDataflow::OwnerEntry.new(state: :owned, allocator: :heap, needs_cleanup: true)
+      snapshot = OwnershipDataflow::OwnershipSnapshot.from_state("legacy" => entry)
+
+      yielded = []
+      snapshot.each_entry { |place, owner_entry| yielded << [place, owner_entry] }
+
+      expect(snapshot.entry_for("legacy")).to eq(entry)
+      expect(snapshot.names).to eq(Set["legacy"])
+      expect(yielded.first.first).to be_a(OwnershipIdentity::PlaceId)
     end
 
     it "reports has_moved_guard for maybe_moved variables" do
@@ -190,6 +219,22 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = analyze(src, "consume!")
       expect(df.exit_states["u"]).to eq(:owned)
+    end
+
+    it "treats explicit GIVE calls as linear-scope moves for heap values" do
+      fn_node = annotated_function(<<~SRC, "main")
+        STRUCT User { id: Int64 }
+        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          consume!(GIVE a);
+          RETURN;
+        END
+      SRC
+      df = OwnershipDataflow.analyze(fn_node)
+
+      expect(df.stmt_moves_name?(fn_node.body.fetch(1), "a")).to be(true)
+      expect(df.linear_scope_decl_always_moves?(fn_node.body, "a")).to be(true)
     end
   end
 

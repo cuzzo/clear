@@ -3,6 +3,7 @@
 require "optparse"
 require "open3"
 require "rexml/document"
+require_relative "zig_dwarf_line_audit"
 
 module ZigCoverageSanitizer
   ROOT = File.expand_path("..", __dir__)
@@ -45,6 +46,7 @@ module ZigCoverageSanitizer
     return [] if ranges.empty?
 
     symbol_names = symbols || (binary && symbol_names_for(binary))
+    audit_issue_keys = nil
     xml = File.read(path)
     doc = REXML::Document.new(xml)
     removals = []
@@ -59,7 +61,10 @@ module ZigCoverageSanitizer
       ranges.each do |name, range|
         entries = line_entries(lines_node, range)
         next unless orphan_runtime_header_hit?(entries, range)
-        next unless proof_backed_false_positive?(name, functions.fetch(name), symbol_names) ||
+        config = functions.fetch(name)
+        audit_issue_keys ||= dwarf_orphan_removal_keys(binary, root: root) if binary && config.fetch(:proof) == :audit_only
+        next unless proof_backed_false_positive?(name, config, symbol_names) ||
+                    proof_backed_dwarf_audit?(filename, name, entries, config, audit_issue_keys) ||
                     proof_backed_merge_removal?(filename, name, entries, allowed_removals)
 
         entries.select { |line| line.attributes["hits"].to_i.positive? }.each do |line|
@@ -154,6 +159,18 @@ module ZigCoverageSanitizer
     symbol_names.none? { |symbol| symbol.match?(pattern) }
   end
 
+  def self.proof_backed_dwarf_audit?(filename, name, entries, config, audit_issue_keys)
+    return false unless config.fetch(:proof) == :audit_only
+    return false unless audit_issue_keys
+
+    covered = entries.select { |line| line.attributes["hits"].to_i.positive? }
+    return false if covered.empty?
+
+    covered.all? do |line|
+      audit_issue_keys[removal_key(filename, name, line.attributes["number"].to_i)]
+    end
+  end
+
   def self.proof_backed_merge_removal?(filename, name, entries, allowed_removals)
     return false unless allowed_removals
 
@@ -174,6 +191,38 @@ module ZigCoverageSanitizer
     raise Error, "nm failed for #{binary}:\n#{output}" unless status.success?
 
     output.lines.map(&:strip)
+  end
+
+  def self.dwarf_orphan_removal_keys(binary, root: ROOT, functions: SUSPECT_RUNTIME_HEADER_FUNCTIONS)
+    return {} unless binary && File.file?(binary)
+
+    symbols = ZigDwarfLineAudit.parse_nm(ZigDwarfLineAudit.run_command!("nm", "-n", "-S", "-C", binary))
+    rows = ZigDwarfLineAudit.parse_decoded_line(
+      ZigDwarfLineAudit.run_command!("readelf", "--debug-dump=decodedline", binary),
+      root: root,
+    )
+    issues, = ZigDwarfLineAudit.audit_rows(rows, symbols, root: root, same_file_only: false)
+    keys = issues.each_with_object({}) do |issue, issue_keys|
+      issue_keys[removal_key(issue.row.file, issue.source_function.name, issue.row.line)] = true
+    end
+    runtime_ranges = ZigDwarfLineAudit.function_ranges_for(RUNTIME_HEADER_SOURCE, root: root, cache: {})
+    rows.each do |row|
+      next unless normalize_filename(row.file) == RUNTIME_HEADER_COVERAGE
+
+      source_function = ZigDwarfLineAudit.function_at(runtime_ranges, row.line)
+      next unless source_function
+      next unless functions[source_function.name]&.fetch(:proof) == :audit_only
+
+      symbol = ZigDwarfLineAudit.owner_for_pc(symbols, row.pc)
+      next unless symbol
+
+      owner_file = ZigDwarfLineAudit.owner_file_from_symbol(symbol.name)
+      next if owner_file == row.file
+      next if owner_file.nil? && symbol.name.start_with?("runtime.runtime-header")
+
+      keys[removal_key(row.file, source_function.name, row.line)] = true
+    end
+    keys
   end
 
   def self.normalize_filename(filename)

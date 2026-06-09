@@ -44,6 +44,7 @@ module MIRLoweringVariables
     const :heap_return_var, T::Boolean
     const :decl_alloc, Symbol
     const :init_ownership_effect, MIR::OwnershipEffect
+    const :source_owned_binding, T::Boolean
     const :has_caps, T::Boolean
     const :bare_zig, String
     const :generic_id, T::Boolean
@@ -168,18 +169,7 @@ module MIRLoweringVariables
       var_decl_suppression(safe_name, node, facts, init)
     )
     init_effect = MIR::OwnershipEffect.of(init)
-    if (node.respond_to?(:container_borrow) && node.container_borrow) || node.symbol&.borrow_provenance?
-      # Borrowed container views never transfer ownership into the binding.
-    elsif ownership_tracked_transfer_type?(facts.ft) && !init_effect.produces_owned
-      let_node = T.cast(with_ownership_consumption_for_value(
-        let_node,
-        init,
-        node.value,
-        "var init",
-        :owned_sink,
-        target_alloc: facts.decl_alloc,
-      ), MIR::Let)
-    elsif owned_binding_source_alloc(node.value)
+    if var_decl_source_transfer_required?(node, facts, init_effect)
       let_node = T.cast(with_ownership_consumption_for_value(
         let_node,
         init,
@@ -311,6 +301,7 @@ module MIRLoweringVariables
       heap_return_var: heap_return_var == true,
       decl_alloc: decl_alloc,
       init_ownership_effect: init_ownership_effect,
+      source_owned_binding: !source_owned_alloc.nil?,
       has_caps: has_caps,
       bare_zig: bare_zig,
       generic_id: ft.id_handle?
@@ -338,6 +329,23 @@ module MIRLoweringVariables
     return nil unless entry&.needs_cleanup?
 
     entry.alloc
+  end
+
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, init_effect: MIR::OwnershipEffect).returns(T::Boolean) }
+  def var_decl_source_transfer_required?(node, facts, init_effect)
+    T.bind(self, MIRLowering) rescue nil
+    return false if var_decl_source_borrowed?(node)
+    return true if facts.source_owned_binding
+    return false if init_effect.produces_owned
+
+    ownership_tracked_transfer_type?(facts.ft)
+  end
+
+  sig { params(node: AST::VarDecl).returns(T::Boolean) }
+  def var_decl_source_borrowed?(node)
+    return true if AST.container_borrow?(node)
+
+    node.symbol&.borrow_provenance? == true
   end
 
   sig { params(node: AST::VarDecl, has_mir_drop: T::Boolean).returns(String) }
@@ -662,7 +670,7 @@ module MIRLoweringVariables
     Type.indirect_type?(value.full_type!(context: "field owner move"))
   end
 
-  sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }
+  sig { params(binding_entry: CleanupEntry, init: MIR::Node).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
     T.bind(self, MIRLowering) rescue nil
     return false if binding_entry.needs_cleanup?

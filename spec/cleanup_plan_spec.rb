@@ -37,6 +37,19 @@ RSpec.describe CleanupClassifier do
     )
   end
 
+  def cleanup_plan_for(src, fn_name)
+    result = compile_mir_frontend(src)
+    ast = result.ast
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
+
+    CleanupClassifier.classify_plan(
+      fn_node,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
+    )
+  end
+
   def schema_lookup_for(schemas = {})
     ->(name) {
       schemas[name] ||
@@ -75,6 +88,37 @@ RSpec.describe CleanupClassifier do
   end
 
   describe "binding cleanup facts" do
+    it "builds cleanup classification plans from legacy binding maps" do
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+
+      plan = CleanupClassifier::CleanupClassificationPlan.from_bindings("legacy", "item" => entry)
+      empty_plan = CleanupClassifier::CleanupClassificationPlan.from_bindings("empty", {})
+
+      expect(plan.function_name).to eq("legacy")
+      expect(plan.facts.entry_for("item")).to eq(entry)
+      expect(plan.empty?).to be(false)
+      expect(empty_plan.empty?).to be(true)
+    end
+
+    it "freezes cleanup facts under stable binding-aware places" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          RETURN;
+        END
+      CLEAR
+      yielded = []
+
+      plan.facts.each_entry { |place, entry| yielded << [place, entry] }
+
+      place, entry = yielded.first
+      expect(place.path).to eq("a")
+      expect(place.binding_identity).not_to be_nil
+      expect(entry).to eq(plan.facts.entry_for("a"))
+      expect(plan.bindings.keys).to include("a")
+    end
+
     it "snapshots symbol and node provenance once for classification" do
       node = var_decl(
         name: "name",
@@ -336,7 +380,11 @@ RSpec.describe CleanupClassifier do
       auto_assign = AST::Assignment.new(tok, auto_field, AST::Literal.new(tok, :STRING, "next", :rodata))
       auto_assign.auto_lock = true
 
-      CleanupClassifier.stamp_field_pre_cleanups!([auto_assign], {}, schema_lookup: schema_lookup_for)
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [auto_assign],
+        CleanupClassifier::FrozenCleanupFacts.from_bindings({}),
+        schema_lookup: schema_lookup_for,
+      )
       expect(auto_assign.field_pre_cleanup).to eq(:heap)
 
       heap_field = AST::GetField.new(tok, cleanup_identifier("box", storage: :heap), "label")
@@ -346,7 +394,11 @@ RSpec.describe CleanupClassifier do
         "box" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
       }
 
-      CleanupClassifier.stamp_field_pre_cleanups!([heap_assign], bindings, schema_lookup: schema_lookup_for)
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [heap_assign],
+        CleanupClassifier::FrozenCleanupFacts.from_bindings(bindings),
+        schema_lookup: schema_lookup_for,
+      )
       expect(heap_assign.field_pre_cleanup).to eq(:heap)
     end
 

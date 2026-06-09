@@ -40,14 +40,27 @@ module Hoist
   extend T::Sig
   module_function
 
+  class HoistCounter < T::Struct
+    extend T::Sig
+
+    prop :value, Integer, default: 0
+
+    sig { returns(String) }
+    def next_name
+      next_value = value + 1
+      self.value = next_value
+      "__hoist_#{next_value}"
+    end
+  end
+
   sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
-    ctr = T.let([0], T::Array[Integer])
+    counter = HoistCounter.new
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       next if synthesized_body?(stmt)
-      hoist_body!(stmt.body, ctr, schema_lookup, return_type: stmt.return_type)
+      hoist_body!(stmt.body, counter, schema_lookup, return_type: stmt.return_type)
     end
     MIRPassState.for!(ast).mark!(:hoisted)
   end
@@ -64,22 +77,23 @@ module Hoist
 
   # Walk a statement list. For each statement, lift the hoistable
   # sub-expressions into temp decls inserted immediately before it.
-  sig { params(body: T.untyped, ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
-  def hoist_body!(body, ctr, schema_lookup, return_type: nil)
+  sig { params(body: T.untyped, counter: HoistCounter, schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
+  def hoist_body!(body, counter, schema_lookup, return_type: nil)
     return unless body.is_a?(Array)
     i = 0
     while i < body.length
       stmt = body[i]
-      hoists = T.let([], T::Array[T.untyped])
-      collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup, return_type: return_type)
+      hoists = T.let([], T::Array[AST::VarDecl])
+      collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: return_type)
       hoists.each_with_index { |decl, j| body.insert(i + j, decl) }
       i += hoists.length
       # Recurse into nested statement bodies (control flow). Nested
       # functions / lambdas / BG blocks are separate frames -- each is
       # reached as its own AST::FunctionDef or handled separately.
-      child_bodies(stmt).each { |b| hoist_body!(b, ctr, schema_lookup, return_type: return_type) }
+      child_bodies(stmt).each { |b| hoist_body!(b, counter, schema_lookup, return_type: return_type) }
       i += 1
     end
+    nil
   end
 
   sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
@@ -99,14 +113,14 @@ module Hoist
   # Find element-store method calls in this statement's expression tree.
   # Composite element stores are escaping positions; hoist allocating
   # argument fragments so the escape pass sees bindings.
-  sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
-  def collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup, return_type: nil)
+  sig { params(stmt: T.untyped, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
+  def collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: nil)
     each_call(stmt) do |call|
       next if call.is_a?(AST::MethodCall) && collection_value_store_call?(call)
       call.args.each_with_index do |arg, idx|
         next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
-        call.args[idx] = make_temp!(arg, hoists, ctr, moved: moved_arg?(arg), schema_lookup: schema_lookup)
+        call.args[idx] = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg), schema_lookup: schema_lookup)
       end
     end
 
@@ -115,9 +129,9 @@ module Hoist
       next unless composite_element_store?(call)
       call.args.each_with_index do |arg, idx|
         if concat?(arg)
-          call.args[idx] = make_temp!(arg, hoists, ctr)
+          call.args[idx] = make_temp!(arg, hoists, counter.next_name)
         else
-          hoist_concats_within!(arg, hoists, ctr)
+          hoist_concats_within!(arg, hoists, counter)
         end
       end
     end
@@ -134,24 +148,31 @@ module Hoist
         right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node!(stmt.value.right, context: "return OR right hoist")
         expected = right_type if right_type&.collection?
       end
-      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected)
+      stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup, expected_type: expected)
     when AST::YieldExpr
-      stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
+      if stmt.expr
+        stmt.expr = hoist_escape_value!(stmt.expr, hoists, counter, schema_lookup)
+      end
     when AST::Assignment
       if stmt.name.is_a?(AST::GetField)
-        stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup) if stmt.value
+        if stmt.value
+          stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup)
+        end
       end
     end
+    nil
   end
 
-  sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), expected_type: T.untyped).returns(T.untyped) }
-  def hoist_escape_value!(value, hoists, ctr, schema_lookup, expected_type: nil)
-    return value if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
-    return make_temp!(value, hoists, ctr, expected_type: expected_type) if allocating?(value, schema_lookup)
-    if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
-      hoist_concats_within!(value, hoists, ctr)
+  sig { params(value: T.untyped, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), expected_type: T.untyped).returns(AST::Node) }
+  def hoist_escape_value!(value, hoists, counter, schema_lookup, expected_type: nil)
+    return T.cast(value, AST::Node) if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
+    if allocating?(value, schema_lookup)
+      return make_temp!(value, hoists, counter.next_name, expected_type: expected_type)
     end
-    value
+    if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
+      hoist_concats_within!(value, hoists, counter)
+    end
+    T.cast(value, AST::Node)
   end
 
   # An anonymous expression that allocates a fresh heap-able value and so
@@ -230,28 +251,29 @@ module Hoist
 
   # Replace every string concat directly held by `node` (struct/union
   # field value, list element) with a hoisted temp; recurse otherwise.
-  sig { params(node: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).void }
-  def hoist_concats_within!(node, hoists, ctr)
+  sig { params(node: T.untyped, hoists: T::Array[AST::VarDecl], counter: HoistCounter).void }
+  def hoist_concats_within!(node, hoists, counter)
     case node
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_key do |k|
         v = node.fields[k]
         if concat?(v)
-          node.fields[k] = make_temp!(v, hoists, ctr)
+          node.fields[k] = make_temp!(v, hoists, counter.next_name)
         else
-          hoist_concats_within!(v, hoists, ctr)
+          hoist_concats_within!(v, hoists, counter)
         end
       end
     when AST::ListLit
       node.items.each_index do |idx|
         v = node.items[idx]
         if concat?(v)
-          node.items[idx] = make_temp!(v, hoists, ctr)
+          node.items[idx] = make_temp!(v, hoists, counter.next_name)
         else
-          hoist_concats_within!(v, hoists, ctr)
+          hoist_concats_within!(v, hoists, counter)
         end
       end
     end
+    nil
   end
 
   # Composite element stores can own nested heap-bearing fields, so
@@ -291,11 +313,8 @@ module Hoist
 
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl
   # to `hoists`, and return the Identifier that replaces the concat.
-  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], moved: T::Boolean, expected_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
-  def make_temp!(concat, hoists, ctr, moved: true, expected_type: nil, schema_lookup: nil)
-    n = T.must(ctr[0]) + 1
-    ctr[0] = n
-    name = "__hoist_#{n}"
+  sig { params(concat: T.untyped, hoists: T::Array[AST::VarDecl], name: String, moved: T::Boolean, expected_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
+  def make_temp!(concat, hoists, name, moved: true, expected_type: nil, schema_lookup: nil)
     tok = concat.respond_to?(:token) ? concat.token : nil
     expected = Type.from_node(expected_type)
     ti = if expected && (concat.is_a?(AST::BgStreamBlock) ? expected.stream? : true)
