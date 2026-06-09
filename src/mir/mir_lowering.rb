@@ -836,7 +836,7 @@ class MIRLowering
     type_info = alloc_mark_type_info(mir, ast_node, "branch ownership placement")
     entry = hoist_cleanup_entry(mir, ast_node)
     if entry
-      entry[:has_moved_guard] = true
+      entry.mark_moved_guard!
     end
     materialized = MIR::BindingMaterialization.new(
       name: name,
@@ -1504,12 +1504,12 @@ class MIRLowering
     unless guarded
       owner_cleanup = owner_cleanup_for_transfer(state, name)
       if owner_cleanup
-        owner_cleanup.cleanup_entry[:has_moved_guard] = true
+        owner_cleanup.cleanup_entry.mark_moved_guard!
         state.guarded_cleanup_names << name
         state.parent&.guarded_cleanup_names&.add(name)
         guarded = true
       elsif (entry = function_state.bindings[name]) && entry.needs_cleanup?
-        entry[:has_moved_guard] = true
+        entry.mark_moved_guard!
         state.guarded_cleanup_names << name
         state.parent&.guarded_cleanup_names&.add(name)
         guarded = true

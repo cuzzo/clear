@@ -3,6 +3,7 @@
 
 require "sorbet-runtime"
 require_relative "../ast/schemas"
+require_relative "placement"
 
 # CleanupEntry -- one binding's cleanup recipe, produced by
 # CleanupClassifier and consumed by MIRLowering / MIREmitter.
@@ -40,7 +41,7 @@ class CleanupEntry < Hash
     e = new
     e[:needs_cleanup] = true
     e[:alloc] = alloc
-    e[:scope] = alloc == :heap ? :heap : :function
+    e[:scope] = cleanup_scope_for_alloc(alloc, frame_scope: :function)
     e[:kind] = kind
     e[:has_moved_guard] = has_moved_guard
     extra.each { |k, v| e[k] = v }
@@ -65,6 +66,11 @@ class CleanupEntry < Hash
     e = new
     h.each { |k, v| e[k] = v }
     e
+  end
+
+  sig { params(alloc: Symbol, frame_scope: Symbol).returns(Symbol) }
+  def self.cleanup_scope_for_alloc(alloc, frame_scope:)
+    MIR::Placement.heap?(alloc) ? :heap : frame_scope
   end
 
   sig { returns(Symbol) }
@@ -109,18 +115,58 @@ class CleanupEntry < Hash
   sig { returns(T::Boolean) }
   def rc_release_fields_cleanup? = kind == :rc && needs_release_fields?
 
+  sig { returns(CleanupEntry) }
+  def mark_moved_guard!
+    self[:has_moved_guard] = true
+    self
+  end
+
+  sig { returns(CleanupEntry) }
+  def clear_moved_guard!
+    self[:has_moved_guard] = false
+    self
+  end
+
+  sig { returns(CleanupEntry) }
+  def suppress_cleanup!
+    self[:needs_cleanup] = false
+    clear_moved_guard!
+  end
+
+  sig { params(scope: Symbol).returns(CleanupEntry) }
+  def set_cleanup_scope!(scope)
+    self[:scope] = scope
+    self
+  end
+
+  sig { params(alloc: Symbol).returns(CleanupEntry) }
+  def set_alloc!(alloc)
+    self[:alloc] = alloc
+    self[:scope] = self.class.cleanup_scope_for_alloc(alloc, frame_scope: scope)
+    self
+  end
+
+  sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean).returns(CleanupEntry) }
+  def promote_to_cleanup!(kind:, alloc:, has_moved_guard:)
+    self[:needs_cleanup] = true
+    self[:kind] = kind
+    self[:alloc] = alloc
+    self[:scope] = self.class.cleanup_scope_for_alloc(alloc, frame_scope: :function)
+    self[:has_moved_guard] = has_moved_guard
+    self
+  end
+
   sig { params(alloc: Symbol).returns(CleanupEntry) }
   def with_alloc(alloc)
     updated = dup
-    updated[:alloc] = alloc
-    updated[:scope] = alloc == :heap ? :heap : updated.scope
+    updated.set_alloc!(alloc)
     updated
   end
 
   sig { returns(CleanupEntry) }
   def with_moved_guard
     updated = dup
-    updated[:has_moved_guard] = true
+    updated.mark_moved_guard!
     updated
   end
 

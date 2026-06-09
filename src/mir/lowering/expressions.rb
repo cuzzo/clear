@@ -1694,7 +1694,7 @@ module MIRLoweringExpressions
       entry = function_state.bindings[raw_name]
       transfer_name = zig_safe_name(raw_name)
       if entry&.needs_cleanup?
-        entry[:has_moved_guard] = true
+        entry.mark_moved_guard!
         function_state.guarded_cleanup_names[transfer_name] = true
       end
     end
@@ -1705,7 +1705,7 @@ module MIRLoweringExpressions
         (stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)) && stmt.name.to_s == transfer_name
       end
       if cleanup
-        T.cast(cleanup, T.any(MIR::Cleanup, MIR::ErrCleanup)).cleanup_entry[:has_moved_guard] = true
+        T.cast(cleanup, T.any(MIR::Cleanup, MIR::ErrCleanup)).cleanup_entry.mark_moved_guard!
         body.concat(ownership_transfer_marks(transfer_name, :block_result, move_guarded: true))
       end
     end
@@ -2022,7 +2022,7 @@ module MIRLoweringExpressions
     nm = rename_map.fetch(nm, nm)
     entry = function_state.bindings[v.name.to_s] || CleanupEntry::NONE
     return unless entry.present?
-    entry[:has_moved_guard] = true
+    entry.mark_moved_guard!
     function_state.guarded_cleanup_names[nm] = true
   end
 

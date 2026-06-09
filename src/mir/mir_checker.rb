@@ -1943,7 +1943,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(node: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
+  sig { params(node: T.nilable(Object), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir_node(node, &block)
     return unless node.is_a?(MIR::Emittable) || node.is_a?(Array)
 

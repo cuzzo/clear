@@ -93,28 +93,46 @@ module CleanupClassifier
       entries_by_place.empty?
     end
 
-    sig { params(name: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol, PlaceId)).returns(CleanupEntry) }
     def entry_for(name)
       place = PlaceId.from_path(name)
-      entries_by_place[place] || bindings[place.path]
+      entries_by_place[place] || entries_by_place[PlaceId.from_path(place.path)] || CleanupEntry::NONE
     end
 
-    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(CleanupEntry) }
     def entry_for_node(name, node)
       place = CleanupClassifier.place_for_binding_node(name.to_s, node)
-      entries_by_place[place] || bindings[place.path]
+      entries_by_place[place] || entries_by_place[PlaceId.from_path(place.path)] || CleanupEntry::NONE
     end
 
-    sig { params(name: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol, PlaceId)).returns(CleanupEntry) }
     def live_entry_for(name)
       entry = entry_for(name)
-      entry&.needs_cleanup? ? entry : nil
+      entry.needs_cleanup? ? entry : CleanupEntry::NONE
     end
 
-    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(T.nilable(CleanupEntry)) }
+    sig { params(name: T.any(String, Symbol), node: AST::Node).returns(CleanupEntry) }
     def live_entry_for_node(name, node)
       entry = entry_for_node(name, node)
-      entry&.needs_cleanup? ? entry : nil
+      entry.needs_cleanup? ? entry : CleanupEntry::NONE
+    end
+
+    sig { params(name: T.any(String, Symbol, PlaceId), block: T.proc.params(entry: CleanupEntry).void).returns(T::Boolean) }
+    def with_live_entry_for(name, &block)
+      entry = live_entry_for(name)
+      return false unless entry.present?
+
+      yield entry
+      true
+    end
+
+    sig { params(name: T.any(String, Symbol), node: AST::Node, block: T.proc.params(entry: CleanupEntry).void).returns(T::Boolean) }
+    def with_live_entry_for_node(name, node, &block)
+      entry = live_entry_for_node(name, node)
+      return false unless entry.present?
+
+      yield entry
+      true
     end
 
     sig { params(names: T::Enumerable[T.any(String, Symbol, PlaceId)]).returns(FrozenCleanupFacts) }
@@ -233,7 +251,7 @@ module CleanupClassifier
       next unless node.is_a?(AST::Identifier)
       next unless AST.moved?(node)
       entry = bindings[node.name.to_s]
-      entry[:has_moved_guard] = true if entry&.present?
+      entry&.mark_moved_guard!
     end
   end
 
@@ -257,14 +275,15 @@ module CleanupClassifier
     return unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return if node.is_a?(AST::BindExpr) && node.mode == :assign
     entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
-    return unless entry&.present?
-    entry[:scope] = if entry.heap?
-                      :heap
-                    elsif loop_depth.positive?
-                      :iteration
-                    else
-                      :function
-                    end
+    return unless entry
+    scope = if entry.heap?
+              :heap
+            elsif loop_depth.positive?
+              :iteration
+            else
+              :function
+            end
+    entry.set_cleanup_scope!(scope)
   end
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
@@ -288,7 +307,7 @@ module CleanupClassifier
         next unless node.mode == :assign
         next if local_names.include?(node.name.to_s)
         entry = bindings[node.name.to_s]
-        promote_entry_to_heap_cleanup!(entry, node.value) if entry&.present? && value_extends_loop?(node.value)
+        promote_entry_to_heap_cleanup!(entry, node.value) if entry && value_extends_loop?(node.value)
       when AST::Assignment
         target = AST.root_identifier(node.name)
         next if target&.name && local_names.include?(target.name.to_s)
@@ -311,11 +330,7 @@ module CleanupClassifier
   sig { params(entry_obj: CleanupEntry, value: T.untyped).void }
   private_class_method def self.promote_entry_to_heap_cleanup!(entry_obj, value)
     ti = Type.from_node!(value, context: "cleanup lifetime promotion")
-    entry_obj[:needs_cleanup] = true
-    entry_obj[:alloc] = :heap
-    entry_obj[:scope] = :heap
-    entry_obj[:kind] = ti.string? ? :heap_string : :uniform
-    entry_obj[:has_moved_guard] = true
+    entry_obj.promote_to_cleanup!(kind: ti.string? ? :heap_string : :uniform, alloc: :heap, has_moved_guard: true)
   end
 
   sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], local_entries: T::Hash[String, CleanupEntry], receiver_nonlocal: T.nilable(T::Boolean)).void }
@@ -334,9 +349,9 @@ module CleanupClassifier
     return unless ident
 
     entry = local_entries[ident.name.to_s]
-    return unless entry&.present?
+    return unless entry
 
-    entry[:scope] = :function if entry.frame? && entry.scope == :iteration
+    entry.set_cleanup_scope!(:function) if entry.frame? && entry.scope == :iteration
   end
 
   sig { params(call: AST::FuncCall).returns(T::Array[AST::Param]) }
@@ -395,8 +410,7 @@ module CleanupClassifier
     return :frame unless target_node.is_a?(AST::Identifier)
 
     target_entry = facts.entry_for_node(target_node.name.to_s, target_node)
-    target_alloc = target_entry&.alloc
-    target_alloc == :heap ? :heap : :frame
+    target_entry.heap? ? :heap : :frame
   end
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
@@ -420,7 +434,7 @@ module CleanupClassifier
           end
         end
         if cleanup
-          cleanup[:alloc] = moved_alloc if moved_alloc
+          cleanup.set_alloc!(moved_alloc) if moved_alloc
         else
           cleanup = no_cleanup_alloc_entry(node.full_type!, schema_lookup)
         end
@@ -512,8 +526,8 @@ module CleanupClassifier
       base = takes_param_base_entry(ti, schema_lookup)
       next unless base
 
-      base[:has_moved_guard] = true
-      base[:alloc] = :heap
+      base.mark_moved_guard!
+      base.set_alloc!(:heap)
       base[:source_kind] ||= :takes_param
       base[:via_pointer] = true if ti.respond_to?(:needs_pointer_passing?) && ti.needs_pointer_passing?
       bindings[name] = base
@@ -584,7 +598,7 @@ module CleanupClassifier
 
         e = match_as_entry_for(variant_type, union_lookup, variant_name)
         src_entry = bindings[node.expr.name.to_s]
-        e[:alloc] = src_entry.alloc if e && src_entry
+        e.set_alloc!(src_entry.alloc) if e && src_entry
         bindings[c.binding] = e if e
       end
     end
@@ -595,13 +609,12 @@ module CleanupClassifier
   # pointees, plain non-heap-bearing inline structs).
   sig { params(variant_type: T.untyped, union_lookup: T.untyped, variant_name: T.untyped).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.match_as_entry_for(variant_type, union_lookup, variant_name)
-    common = { needs_cleanup: true, alloc: :heap, has_moved_guard: true, match_as: true }
     if Schemas.inline_struct?(variant_type)
       return nil unless Type.variant_has_heap?(variant_type)
       # Inline-struct variant cleanup uses the unified :non_copy_union path
       # (same CheatLib.cleanup emit). match_as: true distinguishes the MATCH
       # AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :uniform))
+      return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true)
     end
     return nil unless variant_type
     return nil if variant_type.indirect?
@@ -609,9 +622,9 @@ module CleanupClassifier
     pt = variant_type
     if pt.array? && !pt.string?
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
-      return CleanupEntry.from(common.merge(kind: :uniform, elem_zig_type: elem_zig))
+      return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true, elem_zig_type: elem_zig)
     elsif pt.map?
-      return CleanupEntry.from(common.merge(kind: :uniform))
+      return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true)
     end
     nil
   end
@@ -632,7 +645,7 @@ module CleanupClassifier
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
       e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
       next unless e
-      e[:alloc] = :heap if capture_expr_heap?(expr, schema_lookup)
+      e.set_alloc!(:heap) if capture_expr_heap?(expr, schema_lookup)
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
         e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
@@ -803,15 +816,15 @@ module CleanupClassifier
     storage = storage_from_symbol(node.symbol, node)
     type_alloc = ti.cleanup_allocator(schema_lookup)
     return entry if entry[:fixed_alloc]
-    entry[:alloc] = (type_alloc == :heap || storage == :heap) ? :heap : :frame
+    entry.set_alloc!((type_alloc == :heap || storage == :heap) ? :heap : :frame)
     entry
   end
 
-  sig { params(sym: T.nilable(SymbolEntry), node: AST::Node).returns(T.nilable(Symbol)) }
+  sig { params(sym: T.nilable(SymbolEntry), node: Object).returns(T.nilable(Symbol)) }
   private_class_method def self.storage_from_symbol(sym, node)
     symbol = sym.is_a?(SymbolEntry) ? (AST.declaration_symbol(sym) || sym) : sym
     storage = symbol&.storage
-    storage || (node.respond_to?(:storage) ? node.storage : nil)
+    storage || (node.respond_to?(:storage) ? T.cast(node.public_send(:storage), T.nilable(Symbol)) : nil)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
@@ -993,7 +1006,7 @@ module CleanupClassifier
     alloc = storage == :heap ? :heap : :frame
     e = entry(:uniform, alloc: alloc)
     if value.is_a?(AST::NextExpr)
-      e[:alloc] = :heap
+      e.set_alloc!(:heap)
       e[:fixed_alloc] = true
     end
     e

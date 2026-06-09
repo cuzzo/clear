@@ -45,9 +45,10 @@ RSpec.describe "architecture invariants: placement-field writers" do
     rel == "semantic/escape_analysis.rb"
   end
 
-  # CleanupEntry#alloc is set once, by cleanup classification.
-  CLEANUP_ALLOC_OK = lambda do |rel|
-    rel == "mir/cleanup_classifier.rb" || rel == "mir/cleanup_entry.rb"
+  # Cleanup facts are decided by cleanup classification, but raw Hash writes
+  # belong only to CleanupEntry's typed mutation API.
+  CLEANUP_RAW_WRITE_OK = lambda do |rel|
+    rel == "mir/cleanup_entry.rb"
   end
 
   # ── scan every source file for placement-field writes ───────────────
@@ -56,7 +57,6 @@ RSpec.describe "architecture invariants: placement-field writers" do
     node_w = []
     sym_w = []
     cleanup_w = []
-    cleanup_scope_w = []
     Dir[File.join(SRC, "**", "*.rb")].sort.each do |path|
       rel = path.sub(SRC + "/", "")
       File.readlines(path).each_with_index do |line, idx|
@@ -66,24 +66,23 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
         if (m = line.match(/([\w.\[\]]*)\.storage\s*=(?![=~])/))
           recv = m[1]
+          next if rel == "ast/symbol_entry.rb" && %w[@lifecycle lifecycle].include?(recv)
+
           symbol_write = recv.end_with?(".symbol") ||
                          %w[sym symbol node_sym decl_sym entry sym_entry].include?(recv)
           (symbol_write ? sym_w : node_w) << [loc, code]
         end
 
-        # CleanupEntry is a typed Hash-subclass written via [:alloc]=.
+        # CleanupEntry is a typed Hash-subclass for compatibility, but raw
+        # lifecycle writes must stay inside CleanupEntry's typed mutators.
         # Restrict to entry/cleanup-named receivers so plain Hashes
         # (effects[:alloc], resolved_allocs[:alloc]) are not flagged.
-        if line.match(/\b\w*(?:entry|cleanup)\w*\[:alloc\]\s*=(?![=~])/i)
+        if line.match(/\b\w*(?:entry|cleanup)\w*\[:(?:alloc|scope|needs_cleanup|has_moved_guard)\]\s*=(?![=~])/i)
           cleanup_w << [loc, code]
-        end
-
-        if line.match(/\b\w*(?:entry|cleanup)\w*\[:scope\]\s*=(?![=~])/i)
-          cleanup_scope_w << [loc, code]
         end
       end
     end
-    { node: node_w, symbol: sym_w, cleanup: cleanup_w, cleanup_scope: cleanup_scope_w }
+    { node: node_w, symbol: sym_w, cleanup: cleanup_w }
   end
 
   WRITES = scan
@@ -107,14 +106,9 @@ RSpec.describe "architecture invariants: placement-field writers" do
     expect(bad).to be_empty, report("symbol.storage", bad)
   end
 
-  it "CleanupEntry#alloc is written ONLY by cleanup classification" do
-    bad = renegades(WRITES[:cleanup], CLEANUP_ALLOC_OK)
-    expect(bad).to be_empty, report("CleanupEntry#alloc", bad)
-  end
-
-  it "CleanupEntry#scope is written ONLY by cleanup classification" do
-    bad = renegades(WRITES[:cleanup_scope], CLEANUP_ALLOC_OK)
-    expect(bad).to be_empty, report("CleanupEntry#scope", bad)
+  it "CleanupEntry lifecycle fields are written only by typed CleanupEntry APIs" do
+    bad = renegades(WRITES[:cleanup], CLEANUP_RAW_WRITE_OK)
+    expect(bad).to be_empty, report("CleanupEntry lifecycle", bad)
   end
 end
 

@@ -199,7 +199,7 @@ module FsmLowering
         rendered_name = rename_map.fetch(node_name, node_name)
         next unless node_name == fact.name || rendered_name == fact.name
 
-        node.cleanup_entry[:has_moved_guard] = true
+        node.cleanup_entry.mark_moved_guard!
         guarded_cleanup_names[fact.name] = true
       end
     end
@@ -232,7 +232,7 @@ module FsmLowering
       owner_name = rename_map.fetch(owner_name, owner_name)
       mir_entry = bindings[result_owner.name.to_s] || bindings[owner_name] || CleanupEntry::NONE
       if mir_entry.present?
-        mir_entry[:has_moved_guard] = true
+        mir_entry.mark_moved_guard!
         guarded_cleanup_names[owner_name] = true
       end
       facts << MIR::FsmResultTransferFact.new(

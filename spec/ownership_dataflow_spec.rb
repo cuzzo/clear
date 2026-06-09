@@ -196,6 +196,39 @@ RSpec.describe OwnershipDataflow do
       expect(summary["a"].has_moved_guard).to be true
     end
 
+    it "marks cleanup facts guarded when dataflow finds a partial move" do
+      src = <<~SRC
+        STRUCT User { id: Int64 }
+        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          IF TRUE THEN
+            consume!(a);
+          END
+          RETURN;
+        END
+      SRC
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      PipelineRewriter.new.rewrite!(ast)
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      StringConcatRewriter.new.rewrite!(ast)
+      fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+      schema = ->(name) { annotator.lookup_type_schema(name) }
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        CleanupClassifier.classify(fn_node, schema_lookup: schema),
+      )
+      entry = facts.entry_for("a")
+      entry.clear_moved_guard!
+
+      expect(entry.has_moved_guard?).to be(false)
+
+      OwnershipDataflow.analyze(fn_node, schema_lookup: schema).cleanup_decisions!(fn_node, facts)
+
+      expect(entry.has_moved_guard?).to be(true)
+    end
+
     it "reports no cleanup for fully moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }

@@ -435,7 +435,7 @@ module MIRHoistLowering
         next unless stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)
         next unless stmt.name.to_s == name
 
-        stmt.cleanup_entry[:has_moved_guard] = true
+        stmt.cleanup_entry.mark_moved_guard!
         function_state.guarded_cleanup_names[name] = true
         function_state.lowered_guarded_cleanup_names.add(name)
       end
@@ -732,7 +732,7 @@ module MIRHoistLowering
     tmp_id = lowering_counters.next_tmp_id
     entry = cleanup_entry
     if entry
-      entry[:has_moved_guard] = transfer_on_success ? true : false
+      transfer_on_success ? entry.mark_moved_guard! : entry.clear_moved_guard!
     end
     MIR::BindingMaterialization.new(
       name: "__tmp_#{tmp_id}",

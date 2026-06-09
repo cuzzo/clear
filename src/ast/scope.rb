@@ -14,7 +14,12 @@ class Scope
   ScopeTypeSchema = T.type_alias do
     T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
   end
-  ScopeTypeEntry = T.type_alias { T::Hash[Symbol, ScopeTypeSchema] }
+
+  class ScopeTypeEntry < T::Struct
+    extend T::Sig
+
+    const :schema, Scope::ScopeTypeSchema
+  end
 
   class ScopeBindings
     extend T::Sig
@@ -77,7 +82,7 @@ class Scope
 
     sig { params(name: Symbol, schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeEntry) }
     def declare(name, schema)
-      @entries[name] = { schema: schema }
+      @entries[name] = Scope::ScopeTypeEntry.new(schema: schema)
     end
 
     sig { params(name: Symbol).returns(T.nilable(Scope::ScopeTypeEntry)) }
@@ -91,7 +96,9 @@ class Scope
     end
   end
 
-  attr_accessor :dependencies, :owned_names
+  attr_accessor :owned_names
+  sig { returns(T::Hash[String, String]) }
+  attr_reader :dependencies
   attr_accessor :depth   # stack depth at scope creation; 0 for root
   attr_reader   :types, :parent
 
@@ -99,7 +106,7 @@ class Scope
   def initialize
     @parent = T.let(nil, T.nilable(Scope))
     @bindings = T.let(ScopeBindings.new, ScopeBindings)
-    @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
+    @dependencies = T.let({}, T::Hash[String, String])
     @type_store = T.let(ScopeTypes.new, ScopeTypes)
     @types = T.let(@type_store.entries, T::Hash[Symbol, Scope::ScopeTypeEntry])
     @owned_names = T.let(Set.new, T::Set[String])  # Variables declared in THIS scope (not inherited from parent)
@@ -185,8 +192,7 @@ class Scope
 
   sig { params(name: Symbol).returns(T.untyped) }
   def resolve_type_definition(name)
-    entry = @type_store[name] || @parent&.resolve_type_entry(name)
-    entry ? entry[:schema] : nil
+    resolve_type_entry(name)&.schema
   end
 
   sig { params(name: Symbol).returns(T.nilable(ScopeTypeEntry)) }
@@ -476,8 +482,7 @@ module ScopeHelper
   def all_known_type_names
     names = []
     scope_stack.each do |scope|
-      types = scope.instance_variable_get(:@types)
-      names.concat(types.keys.map(&:to_s)) if types
+      names.concat(scope.types.keys.map(&:to_s))
     end
     names.uniq
   end

@@ -422,7 +422,7 @@ class OwnershipDataflow
     entries
   end
 
-  sig { params(name: String, node: AST::Node).returns(PlaceId) }
+  sig { params(name: String, node: T.any(AST::Node, AST::Param)).returns(PlaceId) }
   def self.place_for_binding_node(name, node)
     sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
     symbol = sym.is_a?(SymbolEntry) ? sym : nil
@@ -609,18 +609,17 @@ class OwnershipDataflow
         # Moved on ALL paths -> normally no cleanup needed.
         # Exception: MATCH TAKES unions need the defer with a moved guard.
         if preserve_guard_after_full_move?(var, entry, decision_facts, ambiguous_names)
-          entry[:has_moved_guard] = true
+          entry.mark_moved_guard!
         else
-          entry[:needs_cleanup] = false
-          entry[:has_moved_guard] = false
+          entry.suppress_cleanup!
         end
       elsif !df_entry.has_moved_guard && entry.has_moved_guard?
         # Never moved on any path -> unconditional cleanup, no guard.
-        entry[:has_moved_guard] = false
+        entry.clear_moved_guard!
       elsif df_entry.has_moved_guard && !entry.has_moved_guard?
         # Moved on at least one path -> guard cleanup and let SuppressCleanup
         # mark the transfer at the consuming statement.
-        entry[:has_moved_guard] = true
+        entry.mark_moved_guard!
       end
     end
     facts

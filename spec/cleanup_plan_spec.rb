@@ -6,6 +6,7 @@ require_relative "../src/annotator"
 require_relative "../src/mir/cleanup_classifier"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
+require_relative "../src/mir/mir_pass"
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.
@@ -98,6 +99,57 @@ RSpec.describe CleanupClassifier do
       expect(plan.facts.entry_for("item")).to eq(entry)
       expect(plan.empty?).to be(false)
       expect(empty_plan.empty?).to be(true)
+    end
+
+    it "returns the non-nil cleanup sentinel for missing and inactive facts" do
+      inactive = CleanupEntry.no_cleanup(alloc: :frame, scope: :function)
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("inactive" => inactive)
+
+      expect(facts.entry_for("missing")).to equal(CleanupEntry::NONE)
+      expect(facts.live_entry_for("missing")).to equal(CleanupEntry::NONE)
+      expect(facts.entry_for(:inactive)).to eq(inactive)
+      expect(facts.live_entry_for(:inactive)).to equal(CleanupEntry::NONE)
+    end
+
+    it "falls back from binding-aware places to path facts without nil guards" do
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+      node = var_decl(name: "item", type: Type.new(:String), value: nil)
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("item" => entry)
+
+      expect(facts.entry_for_node("item", node)).to eq(entry)
+      expect(facts.live_entry_for_node("item", node)).to eq(entry)
+      expect(facts.live_entry_for_node("other", node)).to equal(CleanupEntry::NONE)
+    end
+
+    it "updates cleanup lifecycle through typed mutators" do
+      entry = CleanupEntry.no_cleanup(alloc: :frame, scope: :function)
+
+      entry.promote_to_cleanup!(kind: :uniform, alloc: :heap, has_moved_guard: false)
+      expect(entry.needs_cleanup?).to be(true)
+      expect(entry.kind).to eq(:uniform)
+      expect(entry.alloc).to eq(:heap)
+      expect(entry.scope).to eq(:heap)
+      expect(entry.has_moved_guard?).to be(false)
+
+      entry.mark_moved_guard!
+      expect(entry.has_moved_guard?).to be(true)
+
+      entry.set_alloc!(:frame)
+      entry.set_cleanup_scope!(:match_branch)
+      expect(entry.alloc).to eq(:frame)
+      expect(entry.scope).to eq(:match_branch)
+
+      entry.suppress_cleanup!
+      expect(entry.needs_cleanup?).to be(false)
+      expect(entry.has_moved_guard?).to be(false)
+    end
+
+    it "returns the non-nil cleanup sentinel for non-binding MIRPass lookup nodes" do
+      pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings({})
+      literal = AST::Literal.new(tok, :INT64, 1, :stack)
+
+      expect(pass.send(:cleanup_entry_for_binding_node, literal, facts)).to equal(CleanupEntry::NONE)
     end
 
     it "freezes cleanup facts under stable binding-aware places" do

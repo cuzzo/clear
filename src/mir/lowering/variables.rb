@@ -437,7 +437,7 @@ module MIRLoweringVariables
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
     build_drop_entry!(cleanup_entry, node.full_type!, node)
-    cleanup_entry[:has_moved_guard] = true
+    cleanup_entry.mark_moved_guard!
     mark_guarded_cleanup_name!(safe_name)
     MIR::MaterializationPacket.owned(
       var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry),
@@ -523,7 +523,7 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: alloc, has_moved_guard: true)
     build_drop_entry!(entry, node.full_type!, node)
-    entry[:has_moved_guard] = true
+    entry.mark_moved_guard!
     entry
   end
 

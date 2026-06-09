@@ -67,35 +67,76 @@ class SymbolEntry
     prop :init_contents_heap, T::Boolean, default: false
   end
 
-  attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
-                :size, :capabilities, :resource, :close_plan,
+  class BindingLifecycleFacts < T::Struct
+    prop :type, Type
+    prop :storage, Symbol
+    prop :sync, T.nilable(Symbol), default: nil
+    prop :layout, T.nilable(Symbol), default: nil
+    prop :resource, T.nilable(T::Boolean), default: nil
+    prop :close_plan, T.nilable(Schemas::ResourceClosePlan), default: nil
+    prop :ownership_kind, T.nilable(Symbol), default: nil
+    prop :takes, T::Boolean, default: false
+    prop :is_param, T::Boolean, default: false
+    prop :link_source, T.nilable(Symbol), default: nil
+    prop :async_result_shape, T.nilable(AsyncResultShape), default: nil
+  end
+
+  attr_accessor :reg, :mutable, :rebindable,
+                :size, :capabilities,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # declaring scope depth (0 = root)
-                :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
-                :takes,          # true if parameter declared with TAKES (callee owns)
-                :is_param,       # true when entry was declared as a function parameter
                 :param_decl_token, # for is_param entries: the VAR_ID token at the
                                    # param's position in the function signature.
                                    # Used by build_declare_mutable_fix to point an
                                    # auto-fix at the parameter when the body
                                    # mutates it without `MUTABLE`.
-                :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
-                :sync_families,  # Set of families when bound by REQUIRES disjunction
-                :layout          # nil | :indirect — heap-pinned cell with stable address
+                :sync_families   # Set of families when bound by REQUIRES disjunction
 
-  # Explicit async handle shape for bindings whose surface Type cannot
-  # distinguish Promise<List<T>> from List<Promise<T>>.
-  sig { returns(T.nilable(AsyncResultShape)) }
-  attr_accessor :async_result_shape
+  sig { returns(BindingLifecycleFacts) }
+  attr_reader :lifecycle
 
-  # The binding's type. Single coercing seam: every input is laundered
-  # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
-  # discriminator. A function binding is a Type whose @raw is its
-  # FunctionSignature (Type#fn_type?); a legacy bare Symbol becomes
-  # Type.new(sym); an unresolved binding becomes Type.new(:Untyped) so
-  # the pre-MIR invariant can catch it. Mirrors FunctionSignature#return_type=.
-  sig { returns(Type) }
-  attr_reader :type
+  class << self
+    extend T::Sig
+
+    sig { params(name: Symbol).void }
+    def lifecycle_attr(name)
+      define_method(name) do
+        T.bind(self, SymbolEntry).lifecycle.public_send(name)
+      end
+      define_method(:"#{name}=") do |value|
+        T.bind(self, SymbolEntry).lifecycle.public_send(:"#{name}=", value)
+      end
+    end
+
+    sig { params(name: Symbol).void }
+    def flow_attr(name)
+      define_method(name) do
+        T.bind(self, SymbolEntry).flow_facts.public_send(name)
+      end
+    end
+  end
+
+  lifecycle_attr :async_result_shape
+  lifecycle_attr :type
+  lifecycle_attr :storage
+  lifecycle_attr :sync
+  lifecycle_attr :layout
+  lifecycle_attr :resource
+  lifecycle_attr :close_plan
+  lifecycle_attr :ownership_kind
+  lifecycle_attr :takes
+  lifecycle_attr :is_param
+  lifecycle_attr :link_source
+
+  flow_attr :non_escaping
+  flow_attr :borrowed_alias
+  flow_attr :valid
+  flow_attr :invalid_reason
+  flow_attr :read
+  flow_attr :mutated
+  flow_attr :mutable_ref_target
+  flow_attr :poly_borrow_target
+  flow_attr :init_contents_heap
 
   sig { returns(T::Array[SymbolEntry]) }
   attr_reader :lifetime
@@ -118,7 +159,7 @@ class SymbolEntry
   # require ordering.
   sig { returns(T.nilable(FunctionSignature)) }
   def fn_signature
-    @type.function_signature
+    type.function_signature
   end
 
   # Backward-compat alias for `lifetime == :current_scope`.
@@ -129,7 +170,7 @@ class SymbolEntry
   # across the annotator seam (decomplex #1 Reification-Miss).
   sig { returns(T::Boolean) }
   def atomic?
-    self.class.atomic_sync?(@sync)
+    self.class.atomic_sync?(sync)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
@@ -141,7 +182,7 @@ class SymbolEntry
   # `sym.sync == :atomic && sym.layout == :indirect` was reinvented inline.
   sig { returns(T::Boolean) }
   def indirect?
-    @layout == :indirect
+    layout == :indirect
   end
 
   sig { returns(T::Boolean) }
@@ -153,17 +194,17 @@ class SymbolEntry
   # `sym.sync == :local` reinvented inline (decomplex Reification-Miss).
   sig { returns(T::Boolean) }
   def locked?
-    self.class.locked_sync?(@sync)
+    self.class.locked_sync?(sync)
   end
 
   sig { returns(T::Boolean) }
   def local?
-    self.class.local_sync?(@sync)
+    self.class.local_sync?(sync)
   end
 
   sig { returns(T::Boolean) }
   def write_locked?
-    self.class.write_locked_sync?(@sync)
+    self.class.write_locked_sync?(sync)
   end
 
   sig { returns(T::Boolean) }
@@ -188,12 +229,12 @@ class SymbolEntry
 
   sig { returns(T::Boolean) }
   def with_match_capability_family?
-    !@sync.nil? || rc_stored? || local_storage? || heap_storage?
+    !sync.nil? || rc_stored? || local_storage? || heap_storage?
   end
 
   sig { returns(T::Boolean) }
   def plain_local_family?
-    @sync.nil? && (@storage.nil? || @storage == :stack || heap_storage?)
+    sync.nil? && (storage == :stack || heap_storage?)
   end
 
   sig { params(live: T::Boolean).returns(T::Boolean) }
@@ -248,7 +289,7 @@ class SymbolEntry
   # (ownership axis).
   sig { returns(T::Boolean) }
   def rc_stored?
-    self.class.rc_storage?(@storage)
+    self.class.rc_storage?(storage)
   end
 
   sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
@@ -268,34 +309,34 @@ class SymbolEntry
   )
   sig { returns(T.nilable(Symbol)) }
   def provenance
-    return nil unless PROVENANCE_STORAGE.include?(@storage)
-    @storage
+    return nil unless PROVENANCE_STORAGE.include?(storage)
+    storage
   end
 
   # Provenance predicates — SIMP-13f. Symbol#storage is the canonical source.
   sig { returns(T::Boolean) }
   def heap_storage?
-    self.class.heap_storage_value?(@storage)
+    self.class.heap_storage_value?(storage)
   end
 
   sig { returns(T::Boolean) }
   def frame_provenance?
-    self.class.frame_storage_value?(@storage)
+    self.class.frame_storage_value?(storage)
   end
 
   sig { returns(T::Boolean) }
   def rodata_provenance?
-    @storage == :rodata
+    storage == :rodata
   end
 
   sig { returns(T::Boolean) }
   def borrow_provenance?
-    @storage == :borrow
+    storage == :borrow
   end
 
   sig { returns(T::Boolean) }
   def local_storage?
-    self.class.local_storage_value?(@storage)
+    self.class.local_storage_value?(storage)
   end
 
   sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
@@ -311,51 +352,6 @@ class SymbolEntry
   sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
   def self.local_storage_value?(storage)
     storage == :local
-  end
-
-  sig { returns(T::Boolean) }
-  def non_escaping
-    @flow.non_escaping
-  end
-
-  sig { returns(T::Boolean) }
-  def borrowed_alias
-    @flow.borrowed_alias
-  end
-
-  sig { returns(T::Boolean) }
-  def valid
-    @flow.valid
-  end
-
-  sig { returns(T.nilable(String)) }
-  def invalid_reason
-    @flow.invalid_reason
-  end
-
-  sig { returns(T::Boolean) }
-  def read
-    @flow.read
-  end
-
-  sig { returns(T::Boolean) }
-  def mutated
-    @flow.mutated
-  end
-
-  sig { returns(T::Boolean) }
-  def mutable_ref_target
-    @flow.mutable_ref_target
-  end
-
-  sig { returns(T::Boolean) }
-  def poly_borrow_target
-    @flow.poly_borrow_target
-  end
-
-  sig { returns(T::Boolean) }
-  def init_contents_heap
-    @flow.init_contents_heap
   end
 
   sig { params(reason: String).void }
@@ -413,9 +409,16 @@ class SymbolEntry
   sig { params(original: SymbolEntry).void }
   def initialize_copy(original)
     super
+    @lifecycle = original.lifecycle
     @flow = original.instance_variable_get(:@flow).dup
     @lifetime = original.lifetime.empty? ? EMPTY_LIFETIME : original.lifetime.dup
   end
+
+  sig { returns(BindingFlowFacts) }
+  def flow_facts
+    @flow
+  end
+  protected :flow_facts
 
   sig { returns(BindingFlowFacts) }
   def flow_snapshot
@@ -452,29 +455,28 @@ class SymbolEntry
                  valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
     @reg = reg
-    @type = T.let(Type.new(:Untyped), Type)
+    @lifecycle = T.let(
+      BindingLifecycleFacts.new(
+        type: Type.new(:Untyped),
+        storage: storage,
+        sync: sync,
+        layout: layout,
+        resource: resource,
+        close_plan: close_plan,
+      ),
+      BindingLifecycleFacts
+    )
     self.type = type
     @mutable = T.let(mutable, T::Boolean)
-    @storage = T.let(storage, Symbol)
-    @sync = T.let(sync, T.nilable(Symbol))
-    @layout = T.let(layout, T.nilable(Symbol))
     @rebindable = T.let(rebindable, T::Boolean)
     @size = T.let(size, Integer)
     @capabilities = T.let(capabilities, T::Set[Symbol])
-    @valid = T.let(valid, T::Boolean)
-    @resource = T.let(resource, T.nilable(T::Boolean))
-    @close_plan = T.let(close_plan, T.nilable(Schemas::ResourceClosePlan))
     @lifetime = T.let([], T::Array[SymbolEntry])
     @flow = T.let(BindingFlowFacts.new(valid: valid, invalid_reason: invalid_reason), BindingFlowFacts)
     @sync_families = T.let(nil, T.untyped)
     @scope = T.let(nil, T.nilable(Scope))
     @scope_depth = T.let(nil, T.nilable(Integer))
-    @ownership_kind = T.let(nil, T.nilable(Symbol))
-    @takes = T.let(false, T::Boolean)
-    @is_param = T.let(false, T::Boolean)
     @param_decl_token = T.let(nil, T.untyped)
-    @link_source = T.let(nil, T.nilable(Symbol))
-    @async_result_shape = T.let(nil, T.nilable(AsyncResultShape))
   end
 
   # The laundering seam input is a real bounded union, not untyped:
@@ -484,7 +486,7 @@ class SymbolEntry
   # anything outside it is a compiler bug, surfaced here.
   sig { params(val: TypeInput).void }
   def type=(val)
-    @type = val.nil? ? Type.new(:Untyped) : Type.new(val)
+    @lifecycle.type = val.nil? ? Type.new(:Untyped) : Type.new(val)
   end
 
   private

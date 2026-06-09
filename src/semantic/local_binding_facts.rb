@@ -82,7 +82,7 @@ module MIR
       end
     end
 
-    sig { params(node: AST::Node).returns(T.nilable(CleanupEntry)) }
+    sig { params(node: T.nilable(T.any(AST::Locatable, Object))).returns(T.nilable(CleanupEntry)) }
     def self.binding_entry(node)
       case node
       when AST::VarDecl, AST::BindExpr

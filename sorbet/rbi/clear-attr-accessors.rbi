@@ -1980,6 +1980,8 @@ class SymbolEntry
   def async_result_shape=(value); end
   sig { returns(Integer) }
   def binding_id; end
+  sig { returns(T::Boolean) }
+  def borrowed_alias; end
   sig { returns(T::Set[Symbol]) }
   def capabilities; end
   sig { params(value: T::Set[Symbol]).returns(T::Set[Symbol]) }
@@ -1988,6 +1990,10 @@ class SymbolEntry
   def close_plan; end
   sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
   def close_plan=(value); end
+  sig { returns(T::Boolean) }
+  def init_contents_heap; end
+  sig { returns(T.nilable(String)) }
+  def invalid_reason; end
   sig { returns(T::Boolean) }
   def is_param; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -2006,6 +2012,12 @@ class SymbolEntry
   def mutable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutable=(value); end
+  sig { returns(T::Boolean) }
+  def mutable_ref_target; end
+  sig { returns(T::Boolean) }
+  def mutated; end
+  sig { returns(T::Boolean) }
+  def non_escaping; end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -2014,6 +2026,10 @@ class SymbolEntry
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
+  sig { returns(T::Boolean) }
+  def poly_borrow_target; end
+  sig { returns(T::Boolean) }
+  def read; end
   sig { returns(T::Boolean) }
   def rebindable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -2056,6 +2072,8 @@ class SymbolEntry
   def takes=(value); end
   sig { returns(Type) }
   def type; end
+  sig { returns(T::Boolean) }
+  def valid; end
 end
 
 class TestBlock
@@ -2260,4 +2278,3 @@ class ZigType
   sig { returns(String) }
   def source; end
 end
-

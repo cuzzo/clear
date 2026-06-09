@@ -16,10 +16,10 @@ RSpec.describe "annotator completion phases" do
     scope = SemanticAnnotator.new.current_scope
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
-    expect(scope.types.fetch(:Range).fetch(:schema)).to be_a(Schemas::StructSchema)
-    expect(scope.types.fetch(:File).fetch(:schema)).to be_a(Schemas::ResourceSchema)
-    expect(scope.types.fetch(:TCPServer).fetch(:schema)).to be_a(Schemas::ResourceSchema)
-    expect(scope.types.fetch(:TCPClient).fetch(:schema)).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)
+    expect(scope.types.fetch(:File).schema).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:TCPServer).schema).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:TCPClient).schema).to be_a(Schemas::ResourceSchema)
   end
 
   it "marks an empty program annotated through the boundary phase" do

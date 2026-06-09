@@ -739,8 +739,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(ownership: value)
+    apply_capabilities!(ownership: value)
     value
   end
 
@@ -751,8 +750,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def sync=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(sync: value)
+    apply_capabilities!(sync: value)
     value
   end
 
@@ -763,8 +761,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(layout: value)
+    apply_capabilities!(layout: value)
     value
   end
 
@@ -775,7 +772,7 @@ class Type
 
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def lock_rank=(value)
-    @capabilities = @capabilities.with(lock_rank: value)
+    apply_capabilities!(lock_rank: value)
     value
   end
 
@@ -786,8 +783,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def collection=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(collection: value)
+    apply_capabilities!(collection: value)
     value
   end
 
@@ -798,8 +794,7 @@ class Type
 
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def shard_count=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(shard_count: value)
+    apply_capabilities!(shard_count: value)
     value
   end
 
@@ -810,8 +805,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def soa=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(soa: value)
+    apply_capabilities!(soa: value)
     value
   end
 
@@ -822,8 +816,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def elem_ownership=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(elem_ownership: value)
+    apply_capabilities!(elem_ownership: value)
     value
   end
 
@@ -834,8 +827,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def elem_sync=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(elem_sync: value)
+    apply_capabilities!(elem_sync: value)
     value
   end
 
@@ -846,8 +838,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def link_source=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(link_source: value)
+    apply_capabilities!(link_source: value)
     value
   end
 
@@ -858,8 +849,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def is_observable=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(observable: value)
+    apply_capabilities!(observable: value)
     value
   end
 
@@ -870,8 +860,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def observable_terminal=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(observable_terminal: value)
+    apply_capabilities!(observable_terminal: value)
     value
   end
 
@@ -882,7 +871,7 @@ class Type
 
   sig { params(value: T.nilable(Object)).returns(T.nilable(Object)) }
   def observable_token=(value)
-    @capabilities = @capabilities.with(observable_token: value)
+    apply_capabilities!(observable_token: value)
     value
   end
 
@@ -893,8 +882,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def polymorphic_shared=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(polymorphic_shared: value)
+    apply_capabilities!(polymorphic_shared: value)
     value
   end
 

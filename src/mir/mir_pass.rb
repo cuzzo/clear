@@ -81,7 +81,7 @@ class MIRPass
     end
   end
 
-  sig { params(facts: CleanupClassifier::FrozenCleanupFacts, name: T.any(String, Symbol, CleanupClassifier::PlaceId)).returns(T.nilable(CleanupEntry)) }
+  sig { params(facts: CleanupClassifier::FrozenCleanupFacts, name: T.any(String, Symbol, CleanupClassifier::PlaceId)).returns(CleanupEntry) }
   def live_cleanup_entry(facts, name)
     facts.live_entry_for(name)
   end
@@ -249,7 +249,7 @@ class MIRPass
   def runtime_cleanup_facts?(facts)
     found = T.let(false, T::Boolean)
     facts.each_entry do |_place, entry|
-      found = true if entry.present? && [:heap, :frame].include?(entry.alloc)
+      found = true if [:heap, :frame].include?(entry.alloc)
     end
     found
   end
@@ -432,8 +432,7 @@ class MIRPass
       next unless resource_captures&.any?
 
       resource_captures.each do |name|
-        entry = live_cleanup_entry(facts, name)
-        entry[:has_moved_guard] = true if entry
+        facts.with_live_entry_for(name) { |entry| entry.mark_moved_guard! }
       end
     end
     fn.body
@@ -593,9 +592,8 @@ class MIRPass
       if owning_field_move?(node)
         root = AST.root_identifier(node)
         if root
-          entry = facts.live_entry_for_node(root.name, root)
-          if entry
-            entry[:has_moved_guard] = true
+          facts.with_live_entry_for_node(root.name, root) do |entry|
+            entry.mark_moved_guard!
             names << root.name.to_s
           end
         end
@@ -643,14 +641,14 @@ class MIRPass
   def add_if_consumed(ident, names, facts, is_move)
     name = ident.name.to_s
     entry = facts.entry_for_node(name, ident)
-    return unless entry
+    return unless entry.present?
 
     ti = ident.full_type!
     owns_transferable_value = ti && ti.needs_cleanup?(@schema_lookup)
     return unless entry.needs_cleanup? || owns_transferable_value
 
     if is_move
-      entry[:has_moved_guard] = true
+      entry.mark_moved_guard!
     elsif !entry.has_moved_guard?
       return
     end
@@ -687,7 +685,7 @@ class MIRPass
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
     entry = cleanup_entry_for_binding_node(stmt, facts)
-    return unless entry && entry.kind != :resource
+    return unless entry.present? && entry.kind != :resource
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
@@ -699,15 +697,16 @@ class MIRPass
     stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
   end
 
-  sig { params(node: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).returns(T.nilable(CleanupEntry)) }
+  sig { params(node: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).returns(CleanupEntry) }
   def cleanup_entry_for_binding_node(node, facts)
     symbol = node.respond_to?(:symbol) ? node.symbol : nil
     decl = symbol&.reg
-    if decl && decl.respond_to?(:mir_binding_entry)
-      entry = decl.mir_binding_entry
-      return entry if entry
-    end
-    facts.entry_for_node(node.public_send(:name).to_s, node) if node.respond_to?(:name)
+    entry = MIR::LocalBindingAnalysis.binding_entry(decl)
+    return entry if entry
+
+    return facts.entry_for_node(node.public_send(:name).to_s, node) if node.respond_to?(:name)
+
+    CleanupEntry::NONE
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
@@ -721,50 +720,51 @@ class MIRPass
 
     src_entry = live_cleanup_entry(facts, stmt.expr.name)
     has_as_cleanup = T.let(false, T::Boolean)
+    has_source_cleanup = src_entry.needs_cleanup?
 
     stmt.cases.each do |c|
       next unless c.binding
-      as_entry = live_cleanup_entry(facts, c.binding)
-      next unless as_entry
 
-      has_as_cleanup = true
+      facts.with_live_entry_for(c.binding) do |as_entry|
+        has_as_cleanup = true
 
-      # Insert MIR nodes at the start of case body for checker coverage.
-      # Order: source suppression, then AS binding Alloc + Drop.
-      mir_prefix = []
-      if src_entry
-        mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
+        # Insert MIR nodes at the start of case body for checker coverage.
+        # Order: source suppression, then AS binding Alloc + Drop.
+        mir_prefix = []
+        if has_source_cleanup
+          mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
+        end
+        alloc_type = if c.destructure.is_a?(AST::Locatable)
+          c.destructure.full_type!(context: "match AS allocation marker")
+        else
+          Type.from_node!(stmt.expr, context: "match AS allocation marker")
+        end
+        mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
+        drop = MIR::Drop.new(stmt.token, c.binding.to_s)
+        drop.cleanup_entry = as_entry
+        mir_prefix << drop
+        c.body = mir_prefix + c.body
       end
-      alloc_type = if c.destructure.is_a?(AST::Locatable)
-        c.destructure.full_type!(context: "match AS allocation marker")
-      else
-        Type.from_node!(stmt.expr, context: "match AS allocation marker")
-      end
-      mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
-      drop = MIR::Drop.new(stmt.token, c.binding.to_s)
-      drop.cleanup_entry = as_entry
-      mir_prefix << drop
-      c.body = mir_prefix + c.body
     end
 
     # Ensure source has moved guard so _moved variable exists for suppression.
     # Only set if the source still needs cleanup (dataflow may have eliminated it).
-    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry
+    src_entry.mark_moved_guard! if has_as_cleanup && has_source_cleanup
   end
 
   sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_while_bind_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::WhileBindLoop)
-    entry = live_cleanup_entry(facts, stmt.binding_name)
-    return unless entry
-    alloc_node = alloc_marker(
-      stmt.binding_name.to_s,
-      entry.alloc,
-      T.must(Type.from_node!(stmt.condition, context: "while-bind allocation marker").wrapped_type),
-    )
-    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
-    drop.cleanup_entry = entry
-    stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
+    facts.with_live_entry_for(stmt.binding_name) do |entry|
+      alloc_node = alloc_marker(
+        stmt.binding_name.to_s,
+        entry.alloc,
+        T.must(Type.from_node!(stmt.condition, context: "while-bind allocation marker").wrapped_type),
+      )
+      drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
+      drop.cleanup_entry = entry
+      stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
+    end
   end
 
   sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
@@ -772,12 +772,12 @@ class MIRPass
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      entry = live_cleanup_entry(facts, b.name)
-      next unless entry
-      mir_prefix << alloc_marker(b.name.to_s, entry.alloc, b.unwrapped_type)
-      drop = MIR::Drop.new(stmt.token, b.name.to_s)
-      drop.cleanup_entry = entry
-      mir_prefix << drop
+      facts.with_live_entry_for(b.name) do |entry|
+        mir_prefix << alloc_marker(b.name.to_s, entry.alloc, b.unwrapped_type)
+        drop = MIR::Drop.new(stmt.token, b.name.to_s)
+        drop.cleanup_entry = entry
+        mir_prefix << drop
+      end
     end
     stmt.then_branch = mir_prefix + (stmt.then_branch || []) unless mir_prefix.empty?
   end
@@ -808,9 +808,7 @@ class MIRPass
     end
 
     returned.each do |name|
-      entry = live_cleanup_entry(facts, name)
-      next unless entry&.needs_cleanup?
-      entry[:has_moved_guard] = true
+      facts.with_live_entry_for(name) { |entry| entry.mark_moved_guard! }
     end
   end
 
@@ -833,11 +831,12 @@ class MIRPass
     ids.select { |id|
         n = id.name.to_s
         decl = id.symbol&.reg
-        entry = decl.respond_to?(:mir_binding_entry) ? T.unsafe(decl).mir_binding_entry : facts.entry_for_node(n, id)
-        (entry&.dig(:has_moved_guard) && entry.dig(:needs_cleanup)) ||
+        entry = MIR::LocalBindingAnalysis.binding_entry(decl)
+        cleanup_entry = entry || facts.entry_for_node(n, id)
+        (cleanup_entry.has_moved_guard? && cleanup_entry.needs_cleanup?) ||
           (n.start_with?("__hoist_") &&
             AST.moved?(id) &&
-            entry&.dig(:needs_cleanup))
+            cleanup_entry.needs_cleanup?)
       }
       .map { |id| id.name.to_s }
        .uniq

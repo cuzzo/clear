@@ -35,10 +35,12 @@ RSpec.describe Scope do
 
     materialized = child.entry_for_write!("x")
     materialized.mark_read!
+    original.sync = :locked
 
     expect(materialized).not_to equal(original)
     expect(materialized.scope).to equal(child)
     expect(materialized.capabilities).to eq(Set[:READ])
+    expect(materialized.sync).to eq(:locked)
     expect(original.read).to eq(false)
     expect(child.local_entries.keys).to eq(["x"])
   end
@@ -79,8 +81,8 @@ RSpec.describe Scope do
     child = parent.dup
 
     expect(child.resolve_type_definition(:Counter)).to equal(schema)
-    expect(child.resolve_type_entry(:Counter)).to eq({ schema: schema })
-    expect(child.visible_types.fetch(:Counter).fetch(:schema)).to equal(schema)
+    expect(child.resolve_type_entry(:Counter)&.schema).to equal(schema)
+    expect(child.visible_types.fetch(:Counter).schema).to equal(schema)
     expect(child.resolve_type_definition(:Missing)).to be_nil
   end
 
@@ -133,10 +135,19 @@ RSpec.describe Scope do
 
     types = Scope::ScopeTypes.new
     schema = Schemas::StructSchema.new(fields: {})
-    expect(types.declare(:Thing, schema)).to eq({ schema: schema })
-    expect(types[:Thing]).to eq({ schema: schema })
+    declared = types.declare(:Thing, schema)
+    expect(declared.schema).to equal(schema)
+    expect(types[:Thing]).to equal(declared)
     expect(types[:Missing]).to be_nil
     expect(types.keys).to eq([:Thing])
+
+    root = Scope.new
+    root.dependencies["main.cht"] = "lib.cht"
+    copied = root.dup
+    copied.dependencies["other.cht"] = "dep.cht"
+    expect(root.dependencies["main.cht"]).to eq("lib.cht")
+    expect(root.dependencies["other.cht"]).to be_nil
+    expect(copied.dependencies["other.cht"]).to eq("dep.cht")
   end
 
   it "normalizes legacy hash struct fields into typed StructField values" do

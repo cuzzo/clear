@@ -635,10 +635,11 @@ private
 
     # Import type definitions (structs, unions, enums) respecting visibility.
     mod.global_scope.types.each do |type_name, type_entry|
-      vis = type_entry[:schema].visibility || :package
+      schema = type_entry.schema
+      vis = schema.visibility || :package
       next if vis == :private
       next unless (vis == :pub) || (vis == :package && same_dir)
-      current_scope.declare_type(type_name, type_entry[:schema])
+      current_scope.declare_type(type_name, schema)
     end
   end
 
