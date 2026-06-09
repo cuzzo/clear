@@ -16,6 +16,10 @@ def sh(*args)
   IO.popen(args, chdir: ROOT, err: [:child, :out], &:read)
 end
 
+def sh_quiet(*args)
+  IO.popen(args, chdir: ROOT, err: File::NULL, &:read)
+end
+
 def parse_options(argv)
   options = { format: "text" }
   OptionParser.new do |parser|
@@ -463,7 +467,97 @@ def print_markdown(base, rows)
 end
 
 def type_guardrail_findings(adds_by_path)
-  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings
+  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
+    rubocop_guardrail_findings(adds_by_path)
+end
+
+RUBOCOP_GUARDRAIL_COPS = [
+  "Lint/DuplicateBranch",
+  "Lint/RedundantSafeNavigation",
+  "Lint/SafeNavigationConsistency",
+].freeze
+
+RUBOCOP_GUARDRAIL_KIND = {
+  "Lint/DuplicateBranch" => "rubocop_duplicate_branch",
+  "Lint/RedundantSafeNavigation" => "rubocop_redundant_safe_navigation",
+  "Lint/SafeNavigationConsistency" => "rubocop_safe_navigation_consistency",
+}.freeze
+
+def src_ruby_added_paths(adds_by_path, root: ROOT)
+  adds_by_path.keys.select do |path|
+    path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path))
+  end.sort
+end
+
+def rubocop_guardrail_findings(adds_by_path, root: ROOT)
+  paths = src_ruby_added_paths(adds_by_path, root: root)
+  return [] if paths.empty?
+
+  output = sh_quiet(
+    "bundle", "exec", "rubocop",
+    "--only", RUBOCOP_GUARDRAIL_COPS.join(","),
+    "--format", "json",
+    *paths,
+  )
+  rubocop_guardrail_findings_from_json(adds_by_path, output, root: root)
+rescue StandardError => e
+  [rubocop_guardrail_unavailable_finding(e.message)]
+end
+
+def rubocop_guardrail_findings_from_json(adds_by_path, output, root: ROOT)
+  payload = JSON.parse(output)
+  payload.fetch("files", []).flat_map do |file|
+    path = normalize_rubocop_path(file.fetch("path", ""), root)
+    added = adds_by_path.fetch(path, Set.new)
+    next [] if added.empty? || !path.start_with?("src/") || !path.end_with?(".rb")
+
+    file.fetch("offenses", []).filter_map do |offense|
+      cop = offense.fetch("cop_name", "")
+      next unless RUBOCOP_GUARDRAIL_COPS.include?(cop)
+      location = offense.fetch("location", {})
+      next unless rubocop_location_lines(location).any? { |line| added.include?(line) }
+
+      line = location.fetch("line", 0).to_i
+      column = location.fetch("column", 0).to_i
+      message = offense.fetch("message", "RuboCop offense")
+      code = source_line_at(root, path, line).strip
+      NilKill::StaticDiffAudit::Finding.new(
+        kind: RUBOCOP_GUARDRAIL_KIND.fetch(cop),
+        path: path,
+        line: line,
+        message: "added src line trips #{cop}",
+        detail: [message, column.positive? ? "column #{column}" : nil].compact.join("; "),
+        code: code,
+      )
+    end
+  end.sort_by { |finding| [finding.path, finding.line, finding.kind] }
+rescue JSON::ParserError => e
+  [rubocop_guardrail_unavailable_finding("could not parse RuboCop JSON: #{e.message}")]
+end
+
+def rubocop_location_lines(location)
+  first = location.fetch("line", 0).to_i
+  last = location.fetch("last_line", first).to_i
+  return [] unless first.positive?
+
+  (first..[last, first].max).to_a
+end
+
+def normalize_rubocop_path(path, root)
+  value = path.to_s
+  absolute_prefix = "#{root}/"
+  value.start_with?(absolute_prefix) ? value.delete_prefix(absolute_prefix) : value
+end
+
+def rubocop_guardrail_unavailable_finding(message)
+  NilKill::StaticDiffAudit::Finding.new(
+    kind: "rubocop_guardrail_unavailable",
+    path: "src",
+    line: 0,
+    message: "RuboCop guardrail check did not run",
+    detail: message.to_s,
+    code: "",
+  )
 end
 
 def print_type_guardrails_text(findings)

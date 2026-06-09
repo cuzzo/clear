@@ -204,6 +204,175 @@ RSpec.describe "coverage gap tools" do
     expect(alerts).to be_empty
   end
 
+  it "filters src RuboCop guardrail offenses to added lines and target cops" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), <<~RUBY)
+      def x(value)
+        value&.to_s
+        case value
+        when 1 then :same
+        when 2 then :same
+        end
+        value&.upcase
+      end
+    RUBY
+    payload = {
+      "files" => [
+        {
+          "path" => File.join(@tmp, "src/probe.rb"),
+          "offenses" => [
+            {
+              "cop_name" => "Lint/RedundantSafeNavigation",
+              "message" => "Redundant safe navigation detected.",
+              "location" => { "line" => 2, "column" => 10 },
+            },
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 4, "column" => 9 },
+            },
+            {
+              "cop_name" => "Lint/SafeNavigationConsistency",
+              "message" => "Safe navigation is inconsistent.",
+              "location" => { "line" => 7, "column" => 10 },
+            },
+            {
+              "cop_name" => "Style/RedundantCondition",
+              "message" => "Non-guardrail cop.",
+              "location" => { "line" => 4, "column" => 9 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      { "src/probe.rb" => Set[2, 4] },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq([
+      "rubocop_redundant_safe_navigation",
+      "rubocop_duplicate_branch",
+    ])
+    expect(findings.map(&:line)).to eq([2, 4])
+    expect(findings.map(&:code)).to eq(["value&.to_s", "when 1 then :same"])
+    expect(findings.map(&:message)).to all(start_with("added src line trips Lint/"))
+  end
+
+  it "reports RuboCop guardrail offenses whose span intersects an added line" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/span_probe.rb"), <<~RUBY)
+      def y(value)
+        case value
+        when 1
+          :same
+        when 2
+          :same
+        end
+      end
+    RUBY
+    payload = {
+      "files" => [
+        {
+          "path" => "src/span_probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 3, "last_line" => 6, "column" => 9 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      { "src/span_probe.rb" => Set[5] },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq(["rubocop_duplicate_branch"])
+    expect(findings.first.line).to eq(3)
+  end
+
+  it "ignores RuboCop guardrail offenses outside src Ruby additions" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), "value&.to_s\n")
+    payload = {
+      "files" => [
+        {
+          "path" => "src/probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/RedundantSafeNavigation",
+              "message" => "Redundant safe navigation detected.",
+              "location" => { "line" => 1, "column" => 6 },
+            },
+          ],
+        },
+        {
+          "path" => "tools/probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 1, "column" => 1 },
+            },
+          ],
+        },
+        {
+          "path" => "src/probe.txt",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 1, "column" => 1 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      {
+        "src/probe.rb" => Set[2],
+        "tools/probe.rb" => Set[1],
+        "src/probe.txt" => Set[1],
+      },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings).to be_empty
+  end
+
+  it "selects only existing added src Ruby paths for RuboCop guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), "value&.to_s\n")
+
+    paths = src_ruby_added_paths(
+      {
+        "src/probe.rb" => Set[1],
+        "src/missing.rb" => Set[1],
+        "src/probe.txt" => Set[1],
+        "tools/probe.rb" => Set[1],
+      },
+      root: @tmp,
+    )
+
+    expect(paths).to eq(["src/probe.rb"])
+  end
+
+  it "returns an unavailable RuboCop guardrail finding for invalid JSON" do
+    findings = rubocop_guardrail_findings_from_json({}, "not-json", root: @tmp)
+
+    expect(findings.map(&:kind)).to eq(["rubocop_guardrail_unavailable"])
+    expect(findings.first.detail).to include("could not parse RuboCop JSON")
+  end
+
   it "sanitizes Zig coverage suite and run names for kcov directories" do
     expect(ZigCoverageSupport.sanitize_name("examples/benchmarks shard 1/5")).to eq("examples_benchmarks_shard_1_5")
     expect(ZigCoverageSupport.sanitize_name("///")).to eq("run")
