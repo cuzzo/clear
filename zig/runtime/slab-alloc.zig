@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const compat = @import("../lib/compat.zig");
 
 const root = @import("root");
@@ -23,7 +24,7 @@ pub fn SlabAllocator(comptime T: type) type {
         const Magazine = struct {
             objects: [MAGAZINE_SIZE]?*T = [_]?*T{null} ** MAGAZINE_SIZE,
             count: usize = 0,
-            owner: ?*Self = null, // which instance owns these objects
+            owner: ?*Self = null,
         };
         // Scale magazine size inversely with object size to keep total
         // pre-allocated memory per thread roughly constant (~1 MB).
@@ -42,8 +43,10 @@ pub fn SlabAllocator(comptime T: type) type {
             prev: ?*SlabHeader,
             next: ?*SlabHeader,
             free_head: ?*Node,
+            thread_free: Atomic(?*Node),
             used_count: usize,
             is_full: bool,
+            owner: *Self,
             /// Slot index into the allocator's `slabs` registry. Stable for
             /// the lifetime of this slab; recycled (with bumped epoch) when
             /// the slab is freed.
@@ -59,7 +62,7 @@ pub fn SlabAllocator(comptime T: type) type {
             pin_count: Atomic(u32),
         };
 
-        allocator: std.mem.Allocator,
+        backing_allocator: std.mem.Allocator,
         slab_size: usize,
 
         partial_slabs: ?*SlabHeader = null,
@@ -92,46 +95,21 @@ pub fn SlabAllocator(comptime T: type) type {
             break :blk @max(header_end, guard);
         };
 
-        pub fn init(allocator: std.mem.Allocator, slab_size: usize) Self {
+        pub fn init(backing_allocator: std.mem.Allocator, slab_size: usize) Self {
             std.debug.assert(std.math.isPowerOfTwo(slab_size));
             std.debug.assert(slab_size > first_obj_offset + object_size);
 
-            local_alloc_mag.count = 0;
-            local_free_mag.count = 0;
-
             return .{
-                .allocator = allocator,
+                .backing_allocator = backing_allocator,
                 .slab_size = slab_size,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            // Clear threadlocal magazines completely — prevents stale
-            // pointers (into our about-to-be-freed slabs, or into a
-            // different allocator's slabs that are also dying with us
-            // on this thread) from being followed by a future
-            // SlabAllocator(T) instance on this thread via
-            // ensureMagazineOwnership.
-            local_alloc_mag = .{};
-            local_free_mag = .{};
-            // INTENTIONALLY no flushThreadCache call here. The reset
-            // above already nukes the magazines, so a flush would do
-            // no work — but its lock.lock() would still execute. For
-            // an allocator that was never used on this thread (e.g.
-            // fsm_task_slab when a test only spawns stackful tasks),
-            // this is the FIRST lock attempt on self.lock, which
-            // forces TSan to lazily build a SyncVar and capture the
-            // creation stack. Under heavy fiber contention that
-            // capture has been observed to SEGV inside TSan's
-            // stack-depot machinery (shadow-stack interaction with
-            // green-thread switches — see the parking-lot-cycle-test
-            // multi-OS-thread regression). Real flushing of in-flight
-            // magazine items happens via create()/destroy()'s
-            // ensureMagazineOwnership before the owning allocator
-            // ever reaches deinit.
+            self.clearThreadCacheForDeinit();
 
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
 
             var it = self.partial_slabs;
             while (it) |slab| {
@@ -148,35 +126,85 @@ pub fn SlabAllocator(comptime T: type) type {
             self.partial_slabs = null;
             self.full_slabs = null;
             self.empty_slab_count = 0;
-            self.slabs.deinit(self.allocator);
-            self.epochs.deinit(self.allocator);
-            self.free_slot_ids.deinit(self.allocator);
+            self.slabs.deinit(self.backing_allocator);
+            self.epochs.deinit(self.backing_allocator);
+            self.free_slot_ids.deinit(self.backing_allocator);
         }
 
-        /// If the threadlocal magazine belongs to a different instance, flush it.
+        pub fn allocator(self: *Self) std.mem.Allocator {
+            return .{
+                .ptr = self,
+                .vtable = &.{
+                    .alloc = allocBytes,
+                    .resize = resizeBytes,
+                    .remap = remapBytes,
+                    .free = freeBytes,
+                },
+            };
+        }
+
+        fn allocBytes(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            if (len != @sizeOf(T) or alignment.toByteUnits() > @alignOf(T)) return null;
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            const obj = self.create() catch return null;
+            return @ptrCast(obj);
+        }
+
+        fn resizeBytes(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
+            return new_len == buf.len;
+        }
+
+        fn remapBytes(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+            return if (new_len == buf.len) buf.ptr else null;
+        }
+
+        fn freeBytes(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+            _ = ret_addr;
+            std.debug.assert(buf.len == @sizeOf(T));
+            std.debug.assert(alignment.toByteUnits() <= @alignOf(T));
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            const obj: *T = @ptrCast(@alignCast(buf.ptr));
+            self.destroy(obj);
+        }
+
+        fn lockSelf(self: *Self) void {
+            if (!builtin.single_threaded) self.lock.lock();
+        }
+
+        fn unlockSelf(self: *Self) void {
+            if (!builtin.single_threaded) self.lock.unlock();
+        }
+
+        fn clearThreadCacheForDeinit(self: *Self) void {
+            if (local_alloc_mag.owner == self) local_alloc_mag = .{};
+            if (local_free_mag.owner == self) local_free_mag = .{};
+        }
+
+        /// Thread-local magazines are shared by all SlabAllocator(T)
+        /// instances. When this thread switches instances, return the previous
+        /// instance's cached objects through each slab's atomic mailbox instead
+        /// of locking the previous allocator.
         fn ensureMagazineOwnership(self: *Self) void {
             if (local_alloc_mag.owner != null and local_alloc_mag.owner != self) {
-                // Magazine has objects from a different instance — flush them
-                // back to their owner before we use the magazine.
-                const old_owner = local_alloc_mag.owner.?;
-                old_owner.lock.lock();
-                for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
-                    old_owner.destroyToDepot(o.?);
-                }
-                old_owner.lock.unlock();
-                local_alloc_mag = .{};
+                Self.releaseMagazineToMailbox(&local_alloc_mag);
             }
             if (local_free_mag.owner != null and local_free_mag.owner != self) {
-                const old_owner = local_free_mag.owner.?;
-                old_owner.lock.lock();
-                for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                    old_owner.destroyToDepot(o.?);
-                }
-                old_owner.lock.unlock();
-                local_free_mag = .{};
+                Self.releaseMagazineToMailbox(&local_free_mag);
             }
             local_alloc_mag.owner = self;
             local_free_mag.owner = self;
+        }
+
+        fn releaseMagazineToMailbox(mag: *Magazine) void {
+            const owner = mag.owner orelse {
+                mag.* = .{};
+                return;
+            };
+            for (mag.objects[0..mag.count]) |maybe_obj| {
+                owner.pushRemoteFree(maybe_obj.?);
+            }
+            mag.* = .{};
         }
 
         pub fn create(self: *Self) !*T {
@@ -197,8 +225,10 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         noinline fn createSlow(self: *Self) !*T {
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
+
+            self.reclaimAllMailboxesLocked();
 
             // Refill magazine with a batch
             var refilled: usize = 0;
@@ -263,6 +293,11 @@ pub fn SlabAllocator(comptime T: type) type {
 
         pub fn destroy(self: *Self, obj: *T) void {
             self.ensureMagazineOwnership();
+            if (!self.ownsSlab(obj)) {
+                self.pushRemoteFree(obj);
+                return;
+            }
+
             // Try local free magazine first (no lock!)
             if (local_free_mag.count < MAGAZINE_SIZE) {
                 local_free_mag.objects[local_free_mag.count] = obj;
@@ -275,24 +310,39 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         fn destroySlow(self: *Self, obj: *T) void {
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
 
             // Magazine is full — flush all objects back to depot
             for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                self.destroyToDepot(o.?);
+                const owned = o.?;
+                self.destroyOwnedToDepotLocked(self.slabForObject(owned), owned);
             }
             local_free_mag = .{ .owner = self };
 
-            self.destroyToDepot(obj);
+            self.destroyOwnedToDepotLocked(self.slabForObject(obj), obj);
         }
 
-        fn destroyToDepot(self: *Self, obj: *T) void {
+        fn slabForObject(self: *Self, obj: *T) *SlabHeader {
             const ptr_addr = @intFromPtr(obj);
             const mask = ~(self.slab_size - 1);
             const header_addr = ptr_addr & mask;
-            const slab = @as(*SlabHeader, @ptrFromInt(header_addr));
+            return @as(*SlabHeader, @ptrFromInt(header_addr));
+        }
 
+        fn destroyToDepot(self: *Self, obj: *T) void {
+            const slab = self.slabForObject(obj);
+            if (slab.owner != self) {
+                self.pushRemoteFree(obj);
+                return;
+            }
+
+            self.lockSelf();
+            defer self.unlockSelf();
+            self.destroyOwnedToDepotLocked(slab, obj);
+        }
+
+        fn destroyOwnedToDepotLocked(self: *Self, slab: *SlabHeader, obj: *T) void {
             const node: *Node = @ptrCast(@alignCast(obj));
             node.next = slab.free_head;
             slab.free_head = node;
@@ -316,6 +366,58 @@ pub fn SlabAllocator(comptime T: type) type {
             }
         }
 
+        fn pushRemoteFree(self: *Self, obj: *T) void {
+            const slab = self.slabForObject(obj);
+            const node: *Node = @ptrCast(@alignCast(obj));
+            var head = slab.thread_free.load(.monotonic);
+            while (true) {
+                node.next = head;
+                if (slab.thread_free.cmpxchgWeak(head, node, .release, .monotonic)) |actual| {
+                    head = actual;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        fn reclaimAllMailboxesLocked(self: *Self) void {
+            var it = self.partial_slabs;
+            while (it) |slab| {
+                const next = slab.next;
+                self.reclaimMailboxLocked(slab);
+                it = next;
+            }
+            it = self.full_slabs;
+            while (it) |slab| {
+                const next = slab.next;
+                self.reclaimMailboxLocked(slab);
+                it = next;
+            }
+        }
+
+        fn reclaimMailboxLocked(self: *Self, slab: *SlabHeader) void {
+            var curr = slab.thread_free.swap(null, .acquire) orelse return;
+            const was_full = slab.is_full;
+            const old_used = slab.used_count;
+            while (true) {
+                const next = curr.next;
+                curr.next = slab.free_head;
+                slab.free_head = curr;
+                std.debug.assert(slab.used_count > 0);
+                slab.used_count -= 1;
+                curr = next orelse break;
+            }
+
+            if (was_full and slab.free_head != null) {
+                self.removeSlab(slab, &self.full_slabs);
+                self.prependSlab(slab, &self.partial_slabs);
+                slab.is_full = false;
+            }
+            if (old_used > 0 and slab.used_count == 0) {
+                self.empty_slab_count += 1;
+            }
+        }
+
         noinline fn grow(self: *Self) !*SlabHeader {
             // Reserve a registry slot first, so a failed allocAligned doesn't
             // leave us with a half-initialized slab.
@@ -323,12 +425,12 @@ pub fn SlabAllocator(comptime T: type) type {
                 reused
             else blk: {
                 const new_id: u32 = @intCast(self.slabs.items.len);
-                try self.slabs.append(self.allocator, null);
+                try self.slabs.append(self.backing_allocator, null);
                 errdefer _ = self.slabs.pop();
-                try self.epochs.append(self.allocator, 0);
+                try self.epochs.append(self.backing_allocator, 0);
                 break :blk new_id;
             };
-            errdefer self.free_slot_ids.append(self.allocator, slot_id) catch {};
+            errdefer self.free_slot_ids.append(self.backing_allocator, slot_id) catch {};
 
             // Allocate raw memory with correct alignment
             const bytes = try self.allocAligned(self.slab_size);
@@ -338,7 +440,7 @@ pub fn SlabAllocator(comptime T: type) type {
             const addr = @intFromPtr(bytes.ptr);
             if (addr & (self.slab_size - 1) != 0) {
                 std.debug.print("SlabAllocator: unaligned memory: expected {d}-byte alignment, got ptr 0x{x}\n", .{ self.slab_size, addr });
-                self.allocator.rawFree(
+                self.backing_allocator.rawFree(
                     bytes,
                     std.mem.Alignment.fromByteUnits(self.slab_size),
                     @returnAddress(),
@@ -356,8 +458,10 @@ pub fn SlabAllocator(comptime T: type) type {
                 .prev = null,
                 .next = null,
                 .free_head = null,
+                .thread_free = Atomic(?*Node).init(null),
                 .used_count = 0,
                 .is_full = false,
+                .owner = self,
                 .id = slot_id,
                 .epoch = slot_epoch,
                 .pin_count = Atomic(u32).init(0),
@@ -384,24 +488,24 @@ pub fn SlabAllocator(comptime T: type) type {
             const Alignment = std.mem.Alignment;
 
             return switch (size) {
-                4096 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(4096), 4096),
-                8192 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(8192), 8192),
-                16384 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(16384), 16384),
-                32768 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(32768), 32768),
-                65536 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(65536), 65536),
-                131072 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(131072), 131072),
-                262144 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(262144), 262144),
-                524288 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(524288), 524288),
-                1048576 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(1048576), 1048576),
-                2097152 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(2097152), 2097152),
-                4194304 => self.allocator.alignedAlloc(u8, Alignment.fromByteUnits(4194304), 4194304),
+                4096 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(4096), 4096),
+                8192 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(8192), 8192),
+                16384 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(16384), 16384),
+                32768 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(32768), 32768),
+                65536 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(65536), 65536),
+                131072 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(131072), 131072),
+                262144 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(262144), 262144),
+                524288 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(524288), 524288),
+                1048576 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(1048576), 1048576),
+                2097152 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(2097152), 2097152),
+                4194304 => self.backing_allocator.alignedAlloc(u8, Alignment.fromByteUnits(4194304), 4194304),
                 else => error.InvalidSlabSize,
             };
         }
 
         fn freeSlabMemory(self: *Self, slab: *SlabHeader) void {
             const raw_ptr: [*]u8 = @ptrCast(slab);
-            self.allocator.rawFree(
+            self.backing_allocator.rawFree(
                 raw_ptr[0..self.slab_size],
                 std.mem.Alignment.fromByteUnits(self.slab_size),
                 @returnAddress(),
@@ -430,7 +534,7 @@ pub fn SlabAllocator(comptime T: type) type {
             slab.prev = null;
         }
 
-        pub fn scanUnsafe(self: *Self, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
+        pub fn scanUnsafe(self: *Self, context: anytype, comptime func: fn (ctx: @TypeOf(context), ptr: *T) void) void {
             var it = self.partial_slabs;
             while (it) |slab| {
                 self.scanSlab(slab, context, func);
@@ -443,7 +547,7 @@ pub fn SlabAllocator(comptime T: type) type {
             }
         }
 
-        fn scanSlab(self: *Self, slab: *SlabHeader, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
+        fn scanSlab(self: *Self, slab: *SlabHeader, context: anytype, comptime func: fn (ctx: @TypeOf(context), ptr: *T) void) void {
             var offset = first_obj_offset;
             while (offset + object_size <= self.slab_size) {
                 const node_addr = @intFromPtr(slab) + offset;
@@ -455,32 +559,35 @@ pub fn SlabAllocator(comptime T: type) type {
 
         /// Check if an object's slab header belongs to this instance.
         fn ownsSlab(self: *Self, obj: *T) bool {
-            const mask = ~(self.slab_size - 1);
-            const slab: *SlabHeader = @ptrFromInt(@intFromPtr(obj) & mask);
-            var it = self.partial_slabs;
-            while (it) |s| : (it = s.next) { if (s == slab) return true; }
-            it = self.full_slabs;
-            while (it) |s| : (it = s.next) { if (s == slab) return true; }
-            return false;
+            return self.slabForObject(obj).owner == self;
         }
 
         pub fn flushThreadCache(self: *Self) void {
-            self.lock.lock();
-            defer self.lock.unlock();
+            if (local_alloc_mag.owner != null and local_alloc_mag.owner != self) {
+                Self.releaseMagazineToMailbox(&local_alloc_mag);
+            }
+            if (local_free_mag.owner != null and local_free_mag.owner != self) {
+                Self.releaseMagazineToMailbox(&local_free_mag);
+            }
 
-            // Only flush if this thread's magazine belongs to this instance.
+            self.lockSelf();
+            defer self.unlockSelf();
+
             if (local_alloc_mag.owner == self) {
                 for (local_alloc_mag.objects[0..local_alloc_mag.count]) |o| {
-                    self.destroyToDepot(o.?);
+                    const owned = o.?;
+                    self.destroyOwnedToDepotLocked(self.slabForObject(owned), owned);
                 }
                 local_alloc_mag = .{};
             }
             if (local_free_mag.owner == self) {
                 for (local_free_mag.objects[0..local_free_mag.count]) |o| {
-                    self.destroyToDepot(o.?);
+                    const owned = o.?;
+                    self.destroyOwnedToDepotLocked(self.slabForObject(owned), owned);
                 }
                 local_free_mag = .{};
             }
+            self.reclaimAllMailboxesLocked();
         }
 
         // ────────────────────────────────────────────────────────────────
@@ -511,8 +618,8 @@ pub fn SlabAllocator(comptime T: type) type {
             const mask = ~(self.slab_size - 1);
             const slab_base: *SlabHeader = @ptrFromInt(@intFromPtr(ptr) & mask);
 
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
 
             for (self.slabs.items, 0..) |maybe_slab, i| {
                 if (maybe_slab) |s| {
@@ -532,8 +639,8 @@ pub fn SlabAllocator(comptime T: type) type {
         /// the slot has been recycled with a new epoch). The returned
         /// pointer remains valid until `unpin` is called.
         pub fn pin(self: *Self, ref: Ref) ?*SlabHeader {
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
 
             if (ref.id >= self.slabs.items.len) return null;
             if (self.epochs.items[ref.id] != ref.epoch) return null;
@@ -581,9 +688,9 @@ pub fn SlabAllocator(comptime T: type) type {
                 while (slab.pin_count.load(.acquire) > 0) {
                     std.atomic.spinLoopHint();
                 }
-                self.lock.lock();
+                self.lockSelf();
                 self.freeSlabMemory(slab);
-                self.lock.unlock();
+                self.unlockSelf();
                 freed += 1;
             }
         }
@@ -594,8 +701,10 @@ pub fn SlabAllocator(comptime T: type) type {
         /// empty slab exists. Holds the lock for the duration; the
         /// caller releases the slab's memory after pin_count drains.
         fn popEmptyForShrink(self: *Self, keep_count: usize) ?*SlabHeader {
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lockSelf();
+            defer self.unlockSelf();
+
+            self.reclaimAllMailboxesLocked();
 
             if (self.empty_slab_count <= keep_count) return null;
 
@@ -612,7 +721,7 @@ pub fn SlabAllocator(comptime T: type) type {
                     // outstanding Ref to this slab becomes stale.
                     self.slabs.items[slab.id] = null;
                     self.epochs.items[slab.id] +%= 1;
-                    self.free_slot_ids.append(self.allocator, slab.id) catch {
+                    self.free_slot_ids.append(self.backing_allocator, slab.id) catch {
                         // Leak the slot id rather than the slab memory:
                         // appending fails only on OOM, which is fine here
                         // (next grow() falls back to slabs.append).
