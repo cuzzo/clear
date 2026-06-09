@@ -3550,7 +3550,7 @@ module NilKill
 
     def hash_shape_site_key(path, line, code)
       shape = hash_shape_site_index[[path.to_s, line.to_i, code.to_s]]
-      Array(shape&.fetch("keys", nil)).map(&:to_s).sort.join("\0") unless shape.nil?
+      Array(shape.fetch("keys", nil)).map(&:to_s).sort.join("\0") unless shape.nil?
     end
 
     def hash_shape_site_index

@@ -260,11 +260,12 @@ module MIRLoweringExpressions
 
     # Atomic reads normally lower to `.load()`, but raw emission and
     # atomic-borrow call sites need the cell reference itself.
-    if node.symbol&.atomic? && !capability_state.atomic_emit_raw
+    symbol = node.symbol
+    if symbol&.atomic? && !capability_state.atomic_emit_raw
       return ident if node.atomic_borrow
       # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
       # cell pointer and AtomicPtr has no `.load()` method.
-      if node.symbol&.indirect?
+      if symbol.indirect?
         return ident
       end
       # Dereference bare atomic cells before loading; AtomicPtr reads use the

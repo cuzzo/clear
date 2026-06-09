@@ -250,12 +250,13 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         alloc_kind = method_sig.extern_effects&.dig(:alloc)
-        return unless alloc_kind && current_fn_ctx
+        fn_ctx = current_fn_ctx
+        return unless alloc_kind && fn_ctx
 
         if alloc_kind == :heap
-          current_fn_ctx&.record_heap_use!
+          fn_ctx.record_heap_use!
         else
-          current_fn_ctx&.record_frame_use!
+          fn_ctx.record_frame_use!
         end
       end
       private :record_extern_method_alloc!

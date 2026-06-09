@@ -1268,7 +1268,10 @@ module CapabilityAudit
   sig { params(var_name: String, node: AST::Locatable, final_type: T.any(Type, Symbol), storage: Symbol).returns(T.nilable(BindingAuditRecord)) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless current_fn_ctx&.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx
+    fn_name = fn_ctx.name
+    return unless fn_name
 
     info = current_scope.resolve_entry(var_name)
     sync = info&.sync
@@ -1276,12 +1279,10 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
     fn_nodes = function_node_map
-    fn_node = fn_name ? fn_nodes[fn_name] : nil
+    fn_node = fn_nodes[fn_name]
     return if fn_node&.visibility == :pub
 
-    fn_name = T.must(fn_name)
     key = capability_audit_key(fn_name, var_name)
     line   = node.token&.line
     column = node.token&.column

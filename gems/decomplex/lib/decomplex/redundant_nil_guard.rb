@@ -4,12 +4,13 @@ require "set"
 require_relative "ast"
 
 module Decomplex
-  # Redundant nil-guard detector. Finds local-variable nil checks or
-  # safe-navigation performed after the same local is already proven
-  # non-nil on the current intra-method path.
+  # Redundant nil-guard detector. Finds nil checks or safe-navigation
+  # performed after the same stable subject is already proven non-nil
+  # on the current intra-method path.
   #
-  # Conservative by design: local variables only, no loop reasoning, no
-  # interprocedural facts. Reassignment invalidates the proof.
+  # Conservative by design: local variables and no-arg accessor-style
+  # subjects only, no loop reasoning, no interprocedural facts. Local
+  # reassignment invalidates the proof.
   class RedundantNilGuard
     Finding = Struct.new(:file, :defn, :line, :span, :local, :guard,
                          :proof, keyword_init: true) do
@@ -101,17 +102,13 @@ module Decomplex
 
     def known_for_branch(node_type, body_branch, cond, known)
       next_known = known.dup
-      fact = nil_fact(cond)
-      return next_known unless fact
-
       cond_true_branch =
         if node_type == :IF
           body_branch
         else
           !body_branch
         end
-      proves_non_nil = cond_true_branch == fact.non_nil_when_true
-      next_known.add(fact.local) if proves_non_nil
+      branch_nil_facts(cond, cond_true_branch).each { |fact| next_known.add(fact.local) }
       next_known
     end
 
@@ -142,7 +139,7 @@ module Decomplex
     end
 
     def redundant_nil_subject(node, known)
-      return qcall_local(node, known) if node.type == :QCALL
+      return qcall_subject(node, known) if node.type == :QCALL
 
       fact = nil_fact(node)
       return nil unless fact && known.include?(fact.local)
@@ -158,8 +155,8 @@ module Decomplex
         recv, mid, args = node.children
         return nil unless mid == :nil? && args.nil?
 
-        local = local_name(recv)
-        local ? NilFact.new(local: local, non_nil_when_true: false) : nil
+        subject = subject_key(recv)
+        subject ? NilFact.new(local: subject, non_nil_when_true: false) : nil
       when :OPCALL
         recv, mid, args = node.children
         return negated_nil_fact(recv) if mid == :!
@@ -171,6 +168,43 @@ module Decomplex
       end
     end
 
+    def branch_nil_facts(node, cond_truth)
+      return [] unless Ast.node?(node)
+
+      if node.type == :AND
+        return [] unless cond_truth
+
+        return Ast.flatten_and(node).flat_map { |child| branch_nil_facts(child, true) }
+      end
+
+      if node.type == :OPCALL && node.children[1] == :!
+        return branch_nil_facts(node.children[0], !cond_truth)
+      end
+
+      safe_receiver = safe_nav_receiver_fact(node)
+      return [safe_receiver] if safe_receiver && cond_truth
+
+      fact = nil_fact(node)
+      return [fact] if fact && cond_truth == fact.non_nil_when_true
+
+      truthy = truthy_subject_fact(node)
+      truthy && cond_truth ? [truthy] : []
+    end
+
+    def safe_nav_receiver_fact(node)
+      return nil unless Ast.node?(node) && node.type == :QCALL
+
+      subject = subject_key(node.children[0])
+      subject ? NilFact.new(local: subject, non_nil_when_true: true) : nil
+    end
+
+    def truthy_subject_fact(node)
+      subject = subject_key(node)
+      return nil unless subject
+
+      NilFact.new(local: subject, non_nil_when_true: true)
+    end
+
     def negated_nil_fact(node)
       fact = nil_fact(node)
       return nil unless fact
@@ -180,16 +214,41 @@ module Decomplex
     end
 
     def comparison_nil_fact(recv, mid, args)
-      local = local_name(recv)
-      return nil unless local && nil_arg?(args)
+      subject = subject_key(recv)
+      return nil unless subject && nil_arg?(args)
 
-      NilFact.new(local: local, non_nil_when_true: mid == :!=)
+      NilFact.new(local: subject, non_nil_when_true: mid == :!=)
     end
 
-    def qcall_local(node, known)
+    def qcall_subject(node, known)
       recv = node.children[0]
-      local = local_name(recv)
-      local if local && known.include?(local)
+      subject = subject_key(recv)
+      subject if subject && known.include?(subject)
+    end
+
+    def subject_key(node)
+      return nil unless Ast.node?(node)
+
+      case node.type
+      when :LVAR, :DVAR
+        node.children[0].to_s
+      when :VCALL
+        node.children[0].to_s
+      when :CALL
+        recv, mid, args = node.children
+        return nil unless args.nil? && stable_reader_name?(mid)
+        return "self.#{mid}" if recv&.type == :SELF
+
+        recv_key = subject_key(recv)
+        recv_key ? "#{recv_key}.#{mid}" : nil
+      else
+        nil
+      end
+    end
+
+    def stable_reader_name?(mid)
+      name = mid.to_s
+      !(name.end_with?("=", "!") || name == "[]")
     end
 
     def local_name(node)
@@ -212,7 +271,7 @@ module Decomplex
 
     def terminating?(node)
       return false unless Ast.node?(node)
-      return true if node.type == :RETURN
+      return true if %i[RETURN NEXT BREAK].include?(node.type)
       return false unless %i[FCALL VCALL CALL].include?(node.type)
 
       mid = if node.type == :CALL

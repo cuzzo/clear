@@ -203,12 +203,13 @@ class SemanticAnnotator
   # as SUSPENDS:CONDITIONAL.
   sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def with_conditional_context(&blk)
-    if current_fn_ctx
-      current_fn_ctx&.enter_conditional!
+    fn_ctx = current_fn_ctx
+    if fn_ctx
+      fn_ctx.enter_conditional!
       begin
         blk.call
       ensure
-        current_fn_ctx&.exit_conditional!
+        fn_ctx.exit_conditional!
       end
     else
       @conditional_depth += 1

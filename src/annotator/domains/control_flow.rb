@@ -698,7 +698,8 @@ module Annotator
         error!(node, :FOR_RANGE_END_NEEDS_INT64, got: end_type) unless end_type == :Int64
 
         # 2. Analyze body in new scope with loop variable declared as immutable Int64
-        if current_fn_ctx then current_fn_ctx&.enter_loop! else @loop_depth += 1 end
+        fn_ctx = current_fn_ctx
+        if fn_ctx then fn_ctx.enter_loop! else @loop_depth += 1 end
         analyze_control_flow_branches([
           proc {
             current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
@@ -710,7 +711,7 @@ module Annotator
             node.deferred_drops
           }
         ], merge_to_parent: false)
-        if current_fn_ctx then current_fn_ctx&.exit_loop! else @loop_depth -= 1 end
+        if fn_ctx then fn_ctx.exit_loop! else @loop_depth -= 1 end
 
         # 4. TIGHT validation (same as WhileLoop).
         if node.tight
@@ -782,7 +783,8 @@ module Annotator
         end
 
         # 2. Analyze Body in a New Scope AND increment loop depth
-        if current_fn_ctx then current_fn_ctx&.enter_loop! else @loop_depth += 1 end
+        fn_ctx = current_fn_ctx
+        if fn_ctx then fn_ctx.enter_loop! else @loop_depth += 1 end
 
         # We use analyze_control_flow_branches to handle state merging and drops.
         # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
@@ -823,7 +825,7 @@ module Annotator
           }
         ], merge_to_parent: false)
 
-        if current_fn_ctx then current_fn_ctx&.exit_loop! else @loop_depth -= 1 end
+        if fn_ctx then fn_ctx.exit_loop! else @loop_depth -= 1 end
 
         # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
         # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.

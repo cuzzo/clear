@@ -73,6 +73,127 @@ class RedundantNilGuardTest < Minitest::Test
     assert_equal ["x.nil?", "y.nil?"], hits
   end
 
+  def test_truthy_guard_clause_proves_later_nil_check_and_safe_nav_redundant
+    hits = guards(<<~RB)
+      def use(x)
+        return unless x
+        x.nil?
+        x&.call
+      end
+    RB
+
+    assert_equal ["x.nil?", "x&.call"], hits
+  end
+
+  def test_truthy_branch_proves_later_nil_check_redundant_inside_branch
+    assert_equal ["x.nil?"], guards(<<~RB)
+      def use(x)
+        if x
+          x.nil?
+        end
+      end
+    RB
+  end
+
+  def test_conjunction_truthy_branch_proves_each_local_non_nil
+    hits = guards(<<~RB)
+      def use(x, y)
+        if x && y
+          x.nil?
+          y&.call
+        end
+      end
+    RB
+
+    assert_equal ["x.nil?", "y&.call"], hits
+  end
+
+  def test_conjunction_truthy_guard_clause_proves_each_local_non_nil
+    hits = guards(<<~RB)
+      def use(x, y)
+        return unless x && y
+        x&.call
+        y.nil?
+      end
+    RB
+
+    assert_equal ["x&.call", "y.nil?"], hits
+  end
+
+  def test_safe_nav_guard_clause_proves_receiver_non_nil
+    hits = guards(<<~RB)
+      def use
+        return unless current_fn_ctx&.name
+        current_fn_ctx&.record_heap_use!
+      end
+    RB
+
+    assert_equal ["current_fn_ctx&.record_heap_use!"], hits
+  end
+
+  def test_safe_nav_guard_clause_proves_self_accessor_receiver_non_nil
+    hits = scan(<<~RB)
+      def use
+        return unless self.current_fn_ctx&.name
+        self.current_fn_ctx&.record_heap_use!
+      end
+    RB
+
+    assert_equal ["self.current_fn_ctx&.record_heap_use!"], hits.map { |hit| hit[:guard] }
+    assert_equal ["self.current_fn_ctx"], hits.map { |hit| hit[:local] }
+  end
+
+  def test_safe_nav_guard_does_not_track_calls_with_arguments
+    assert_empty scan(<<~RB)
+      def use(id)
+        return unless lookup(id)&.name
+        lookup(id)&.record_heap_use!
+      end
+    RB
+  end
+
+  def test_reader_chain_guard_proves_later_safe_nav_receiver_redundant
+    hits = scan(<<~RB)
+      def use(info)
+        next unless info.reg
+        next if info.reg&.respond_to?(:var_mutated) && info.reg.var_mutated
+      end
+    RB
+
+    assert_equal ["info.reg&.respond_to?(:var_mutated)"], hits.map { |hit| hit[:guard] }
+    assert_equal ["info.reg"], hits.map { |hit| hit[:local] }
+  end
+
+  def test_safe_nav_guard_does_not_prove_receiver_on_false_branch
+    assert_empty scan(<<~RB)
+      def use
+        unless current_fn_ctx&.name
+          current_fn_ctx&.record_heap_use!
+        end
+      end
+    RB
+  end
+
+  def test_disjunction_truthy_branch_does_not_prove_each_local_non_nil
+    assert_empty scan(<<~RB)
+      def use(x, y)
+        if x || y
+          x.nil?
+          y.nil?
+        end
+      end
+    RB
+  end
+
+  def test_non_nil_proof_does_not_make_later_truthiness_guard_redundant
+    assert_empty scan(<<~RB)
+      def use(x)
+        return if x.nil?
+        return unless x
+      end
+    RB
+  end
+
   def test_reassignment_invalidates_prior_non_nil_proof
     assert_empty scan(<<~RB)
       def use(x, y)

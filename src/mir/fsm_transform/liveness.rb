@@ -221,7 +221,8 @@ module FsmTransform
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << stmt.type                if stmt.respond_to?(:type)
       candidates << stmt.declared_type       if stmt.respond_to?(:declared_type)
-      candidates << stmt.value&.full_type!(context: "FSM liveness declaration value") if stmt.value
+      value = stmt.value
+      candidates << value.full_type!(context: "FSM liveness declaration value") if value
       candidates.compact.first
     end
 

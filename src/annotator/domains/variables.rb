@@ -479,9 +479,10 @@ module Annotator
       def accumulate_stack_bytes(storage, node)
         T.bind(self, SemanticAnnotator)
 
-        return unless storage == :stack && current_fn_ctx
+        fn_ctx = current_fn_ctx
+        return unless storage == :stack && fn_ctx
         bytes = (node.slot_size || 1) * 8
-        current_fn_ctx&.record_stack_bytes!(bytes)
+        fn_ctx.record_stack_bytes!(bytes)
         bytes
       end
 

@@ -203,11 +203,12 @@ module FunctionAnalysis
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
         alloc_kind = signature.extern_effects&.dig(:alloc)
-        if alloc_kind && current_fn_ctx
+        fn_ctx = current_fn_ctx
+        if alloc_kind && fn_ctx
           if alloc_kind == :heap
-            current_fn_ctx&.record_heap_use!
+            fn_ctx.record_heap_use!
           else
-            current_fn_ctx&.record_frame_use!
+            fn_ctx.record_frame_use!
           end
         end
       end
