@@ -84,7 +84,7 @@ BG { @micro:arena -> foo() }
 In CLEAR, you can handle all synchronization methods with a single function:
 
 ```ruby clear illustrative
-FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Bool ->
+FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Void ->
   IF amount <= 0 -> RAISE Input, TransactionFailure, "Invalid Amount, must be positive";
 
   WITH
@@ -95,7 +95,6 @@ FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Bool
       acctA.balance -= amount;
       acctB.balance += amount;
     }
-  RETURN True;
 END
 ```
 
