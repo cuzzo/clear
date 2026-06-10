@@ -743,9 +743,9 @@ RSpec.describe MIREmitter do
         MIR::FieldGet.new(MIR::Ident.new("ctx"), "shared"),
         "Payload",
         "arcRelease",
-        MIR::Ident.new("std.heap.page_allocator"),
+        MIR::FieldGet.new(MIR::Ident.new("ctx"), "alloc"),
       )
-      expect(e.emit(release)).to eq("CheatLib.arcRelease(Payload, std.heap.page_allocator, ctx.shared)")
+      expect(e.emit(release)).to eq("CheatLib.arcRelease(Payload, ctx.alloc, ctx.shared)")
 
       e.rt_name = "rt"
       entry = CleanupEntry.build(

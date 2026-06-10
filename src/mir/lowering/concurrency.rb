@@ -383,10 +383,19 @@ module MIRLoweringConcurrency
                                    source_overrides: fiber_capture_source_overrides(analysis),
                                    schema_lookup: mir_schema_lookup)
 
-      capture_fields = caps.specs.map { |s| context_field_decl(s.name, s.field_type_zig) } +
+      capture_fields = [context_field_decl("alloc", "std.mem.Allocator")] +
+                       caps.specs.map { |s| context_field_decl(s.name, s.field_type_zig) } +
                        capture_moved_guard_fields(caps.specs)
-      capture_inits = [context_init_field(:wg, MIR::AddressOf.new(MIR::Ident.new(wg_var)))] +
-                      caps.specs.map { |s| context_init_field(s.name, s.init_value_mir) }
+      capture_inits = [
+        context_init_field(:wg, MIR::AddressOf.new(MIR::Ident.new(wg_var))),
+        context_init_field(:alloc, MIR::MethodCall.new(
+          MIR::Ident.new(runtime_binding_name),
+          "heapAlloc",
+          [],
+          false,
+          MIR::CallableContract.no_ownership(0),
+        )),
+      ] + caps.specs.map { |s| context_init_field(s.name, s.init_value_mir) }
       capture_pre_decls = capture_setup_stmts(caps.specs)
 
       # Lower branch body to MIR nodes, finalize ownership once, then emit from

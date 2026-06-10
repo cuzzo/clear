@@ -3523,6 +3523,31 @@ RSpec.describe MIRLowering do
       expect([string_default, list_default, int_default].any? { |node| node.is_a?(MIR::Lit) }).to be(false)
     end
 
+    it "materializes owned OR PASS results before stdlib TAKES argument verification" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN inner() RETURNS !String ->
+          MUTABLE v: String = ""; v = v + "x";
+          RETURN v;
+        END
+
+        FN run() RETURNS !Void ->
+          MUTABLE outer: String[]@list = [];
+          outer.append(inner() OR PASS);
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      consuming_call = collect_mir_nodes(mir, MIR::RegistryCall).find do |call|
+        call.ownership_contract.consumes.any?
+      end
+      expect(consuming_call).not_to be_nil
+      consumed = T.must(consuming_call).ownership_contract.consumes
+      expect(consumed.length).to eq(1)
+      expect(consumed.first).to match(/\A__tmp_\d+\z/)
+      expect(T.must(consuming_call).args[1].expr).to be_a(MIR::Ident)
+    end
+
     it "lowers OR BREAK catch fallback as a structural break expression" do
       fallible = AST::FuncCall.new(tok, "fallible", [])
       fallible.full_type = :Int64

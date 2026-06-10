@@ -910,6 +910,9 @@ module EffectTracker
         return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :reentrant)
       end
       return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :extern) if effs.include?(EXTERN)
+      if effs.any? { |effect| SUSPENDS_FAMILY.include?(effect) }
+        return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :suspending_callee)
+      end
       (function_call_graph[T.must(name)] || []).each { |c| queue << c }
     end
     Annotator::Phases::BgSpawnDecision.new(spawn_form: :fsm, reason: nil)

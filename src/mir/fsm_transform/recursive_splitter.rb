@@ -102,6 +102,7 @@ module FsmTransform
         @synthetic_fields = T.let([], T::Array[MIR::ContextFieldDecl])
         @alias_overrides_for = T.let({}, AliasOverrideTable)
         @current_alias_overrides = T.let(nil, T.nilable(AliasOverrideMap))
+        @next_lock_index = T.let(0, Integer)
       end
 
       # Push a frame of alias overrides during a recursive emit call.
@@ -142,6 +143,13 @@ module FsmTransform
         T.bind(self, T.untyped) rescue nil
         idx = @segments.length
         @segments << :placeholder
+        idx
+      end
+
+      sig { returns(Integer) }
+      def reserve_lock_index
+        idx = @next_lock_index
+        @next_lock_index += 1
         idx
       end
 
@@ -509,6 +517,7 @@ module FsmTransform
       end
 
       cap_indices = caps.map { builder.reserve_index }
+      lock_indices = caps.map { builder.reserve_lock_index }
       release_idx = builder.reserve_index
 
       body_stmts = with_stmt.body.is_a?(Array) ? with_stmt.body : [with_stmt.body]
@@ -516,27 +525,28 @@ module FsmTransform
       caps_meta.each do |m|
         alias_overrides[m.fetch(:alias_name).to_s] = m.fetch(:alias_data_ref).to_s
       end
-      cs_entry = builder.with_alias_overrides(alias_overrides) do
+      cs_entry = T.cast(builder.with_alias_overrides(alias_overrides) do
         lowering.with_fiber_capture_map(
           alias_overrides, rt_override: bg_rt,
         ) do
           emit_stmts(body_stmts, release_idx, builder, lowering, ctx)
         end
-      end
+      end, Integer)
 
       caps.each_with_index do |cap, i|
-        post_acquire = (i + 1 < caps.length) ? cap_indices[i + 1] : cs_entry
-        prior        = caps[0...i]
+        post_acquire = T.let((i + 1 < caps.length) ? T.must(cap_indices[i + 1]) : cs_entry, Integer)
+        prior        = T.must(caps[0...i])
         builder.fill(T.must(cap_indices[i]), [],
           Segments::LockSuspend.new(with_stmt, cap, prior,
-                                    post_acquire, after_idx))
+                                    post_acquire, after_idx,
+                                    T.must(lock_indices[i]), lock_indices[0...i]))
       end
 
       release_stmts = T.let([], T::Array[MIR::Node])
       caps_meta.each_with_index.to_a.reverse.each do |m, i|
         release_stmts.concat(lock_release_stmts(
           ctx_id,
-          i,
+          T.must(lock_indices[i]),
           m.fetch(:lock_field_ref).to_s,
           m.fetch(:unlock_method).to_s,
         ))
@@ -604,6 +614,8 @@ module FsmTransform
           tail.with_node, tail.cap, tail.prior_caps,
           tail.post_acquire_idx ? mapping.fetch(tail.post_acquire_idx) : nil,
           tail.next_index ? mapping.fetch(tail.next_index) : nil,
+          tail.lock_index,
+          tail.prior_lock_indices,
         )
       else
         tail

@@ -1331,7 +1331,7 @@ module DiagnosticRegistry
     },
     RETURN_FROM_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "Cannot RETURN '%{name}' from inside a WITH block. Either RETURN COPY alias (breaks the borrow), or restructure so the value's lifetime exceeds the WITH (move the value out of the cell before the WITH body ends).",
+      template: "Cannot RETURN '%{name}' from inside a WITH block. WITH aliases are borrows of locked data and cannot escape their scope. Either RETURN COPY alias (breaks the borrow), or restructure so the value's lifetime exceeds the WITH (move the value out of the cell before the WITH body ends).",
       summary:  "WITH-scoped aliases (`AS x`) are non-escaping — they can't be returned.",
       cause: "A WITH ... AS alias block creates a scoped binding that doesn't outlive the WITH body. Returning the alias would let the caller see a value whose backing storage is gone.",
       fix_hint: "Either RETURN COPY alias (breaks the borrow), or restructure so the value's lifetime exceeds the WITH (move the value out of the cell before the WITH body ends).",

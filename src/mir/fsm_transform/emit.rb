@@ -1213,7 +1213,7 @@ module FsmTransform
       meta = lowering_api.fsm_cap_metadata(cap, with_node, id, captured)
       return nil if meta.nil?
 
-      cap_idx = prior.length
+      cap_idx = tail.lock_index
 
       woken_idx    = base_idx
       retry_idx    = base_idx + 1
@@ -1253,7 +1253,7 @@ module FsmTransform
       prior_release_stmts = prior_meta.each_with_index.map do |m, i|
         prior_lock_release_stmts(
           id,
-          i,
+          T.cast(tail.prior_lock_indices[i], Integer),
           m[:lock_field_ref].to_s,
           m[:unlock_method].to_s,
         )

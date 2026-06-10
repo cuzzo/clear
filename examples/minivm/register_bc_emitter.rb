@@ -2637,6 +2637,11 @@ class RegisterBcEmitter
       reg = fresh_ireg
       emit(ICONST, reg, add_const(value))
       reg
+    when MIR::EnumTag
+      unless @tag_context_type
+        raise Unsupported, "register emitter cannot compile enum tag #{expr.variant.inspect} without a tag context"
+      end
+      compile_tag_const(@tag_context_type, expr.variant)
     when MIR::Ident
       if expr.name.to_s.start_with?(".") && @tag_context_type
         return compile_tag_const(@tag_context_type, expr.name.to_s.delete_prefix("."))
@@ -3516,8 +3521,16 @@ class RegisterBcEmitter
 
   def returns_cheat_error?(stmt)
     stmt.is_a?(MIR::ReturnStmt) &&
-      stmt.value.is_a?(MIR::Ident) &&
-      stmt.value.name.to_s == "error.CheatError"
+      cheat_error_value?(stmt.value)
+  end
+
+  def cheat_error_value?(node)
+    return true if node.is_a?(MIR::Ident) && node.name.to_s == "error.CheatError"
+
+    node.is_a?(MIR::FieldGet) &&
+      node.object.is_a?(MIR::Ident) &&
+      node.object.name.to_s == "error" &&
+      node.field.to_s == "CheatError"
   end
 
   # ErrorKind ids -- fixed enum, must match zig/runtime/runtime.zig
@@ -3528,11 +3541,16 @@ class RegisterBcEmitter
   }.freeze
 
   def error_kind_id(node)
+    return error_kind_id_for_name(node.variant) if node.is_a?(MIR::EnumTag)
+
     unless node.is_a?(MIR::Ident)
       raise Unsupported, "register emitter expected error-kind ident, got #{node.class.name}"
     end
 
-    name = node.name.to_s.sub(/\A\./, "")
+    error_kind_id_for_name(node.name.to_s.sub(/\A\./, ""))
+  end
+
+  def error_kind_id_for_name(name)
     ERROR_KIND_IDS.fetch(name) do
       raise Unsupported, "register emitter unknown error kind #{name.inspect}"
     end
@@ -3561,16 +3579,25 @@ class RegisterBcEmitter
     end
 
     kind_id = error_kind_id(args[0])
-    name_arg = args[1]
-    name_id =
-      if name_arg.is_a?(MIR::Ident) && name_arg.name.to_s =~ /ErrorName\.(\w+)/
-        error_name_id(Regexp.last_match(1))
-      else
-        0
-      end
+    name_id = error_name_id_arg(args[1])
     msg = args[2].is_a?(MIR::Lit) ? string_lit_text(args[2]) : ""
     line = args[3].is_a?(MIR::Lit) ? parse_i64_literal(args[3].value) : 0
     emit(ERAISE, add_const(kind_id), add_const(name_id), add_const(msg), add_const(line))
+  end
+
+  def error_name_id_arg(node)
+    if node.is_a?(MIR::EnumOrdinal) &&
+       node.value.is_a?(MIR::FieldGet) &&
+       node.value.object.is_a?(MIR::Ident) &&
+       node.value.object.name.to_s == "ErrorName"
+      return error_name_id(node.value.field)
+    end
+
+    if node.is_a?(MIR::Ident) && node.name.to_s =~ /ErrorName\.(\w+)/
+      return error_name_id(Regexp.last_match(1))
+    end
+
+    0
   end
 
   # Propagate the error one level out, context-aware:
@@ -7232,6 +7259,8 @@ class RegisterBcEmitter
       value = arg.is_a?(MIR::Ident) ? @value_by_name[arg.name.to_s] : nil
       return value.fetch(:type) if value && value.fetch(:kind) == :union
     elsif expr.is_a?(MIR::Ident) && expr.name.to_s.start_with?(".")
+      return @tag_context_type
+    elsif expr.is_a?(MIR::EnumTag)
       return @tag_context_type
     end
 

@@ -1751,8 +1751,14 @@ module MIRLoweringFunctions
       index = arg_fact.index
       next unless ownership_facts.takes?(index)
 
-      materialized_args[index] = materialize_owned_sink_value(
+      placed_arg = place_value_for_destination(
         T.must(materialized_args[index]),
+        arg_fact.ast_arg,
+        sink_alloc,
+        arg_fact.sink_type,
+      )
+      materialized_args[index] = materialize_owned_sink_value(
+        placed_arg,
         arg_fact.ast_arg,
         sink_alloc,
         arg_fact.sink_type,

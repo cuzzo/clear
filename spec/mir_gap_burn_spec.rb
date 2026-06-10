@@ -146,7 +146,11 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     rc = FiberCtxBuilder.build(rc_analysis, body_access_prefix: "ctx", fresh_heap_id: 3)
     expect(rc.specs.first.setup_mir.first.init.callee).to eq("CheatLib.arcRetain")
-    expect(rc.specs.first.cleanup_mir_for("ctx").body.func).to eq("arcRelease")
+    rc_cleanup = T.must(rc.specs.first.cleanup_mir_for("ctx")).body
+    expect(rc_cleanup.func).to eq("arcRelease")
+    expect(MIREmitter.new.emit(rc_cleanup.alloc)).to eq("ctx.alloc")
+    rc_finalizer = T.must(rc.specs.first.finalizer_mir_for("ctx"))
+    expect(MIREmitter.new.emit(rc_finalizer.alloc)).to eq("ctx.alloc")
 
     moved_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "owned" => Type.new(:String), "count" => Type.new(:Int64) },
@@ -1783,6 +1787,33 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(hoisted_discard).to eq(true)
     expect(discarded).to be_a(MIR::ScopeBlock)
     expect(discarded.body).to include(an_instance_of(MIR::AllocMark), an_instance_of(MIR::Let), an_instance_of(MIR::Cleanup))
+
+    discarded_or = AST::BinaryOp.new(tok, id("fallible", type: Type.new(:"!String")), :OR_RESCUE, AST::OrPass.new(tok))
+    discarded_or.full_type = Type.new(:String)
+    try_call = MIR::Call.new("run", [], false, true, nil)
+    try_call.result_type = Type.new(:String)
+    try_catch = MIR::TryCatch.new(try_call, MIR::DefaultValue.new(kind: :string_empty), nil)
+    try_catch.result_type = Type.new(:String)
+    discarded_try, hoisted_try = low.send(:materialize_statement_discard, discarded_or, try_catch)
+    expect(hoisted_try).to eq(true)
+    try_let = T.cast(discarded_try, MIR::ScopeBlock).body.grep(MIR::Let).first
+    expect(try_let.init).to be_a(MIR::TryCatch)
+    try_catch_fallback = T.cast(try_let.init, MIR::TryCatch).catch_body
+    expect(try_catch_fallback).to be_a(MIR::BlockExpr)
+    expect(T.cast(try_catch_fallback, MIR::BlockExpr).body.grep(MIR::Let).first.init).to be_a(MIR::DupeSlice)
+    expect(MIR::OwnershipEffect.of(try_let.init).produces_owned).to eq(true)
+
+    discarded_optional = AST::BinaryOp.new(tok, id("maybe", type: Type.new(:"?String")), :OR_RESCUE, lit("fallback", type: :String))
+    discarded_optional.full_type = Type.new(:String)
+    optional_call = MIR::Call.new("maybe", [], false, true, nil)
+    optional_call.result_type = Type.new(:String)
+    orelse = MIR::Orelse.new(optional_call, MIR::DefaultValue.new(kind: :string_empty))
+    orelse.result_type = Type.new(:String)
+    discarded_orelse, hoisted_orelse = low.send(:materialize_statement_discard, discarded_optional, orelse)
+    expect(hoisted_orelse).to eq(true)
+    orelse_init = T.cast(discarded_orelse, MIR::ScopeBlock).body.grep(MIR::Let).first.init
+    expect(orelse_init).to be_a(MIR::IfOptional)
+    expect(MIR::OwnershipEffect.of(orelse_init).produces_owned).to eq(true)
 
     if_bind = MIR::IfBindStmt.new([
       { capture: nil, expr: MIR::Ident.new("a") },

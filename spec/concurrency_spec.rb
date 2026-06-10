@@ -1956,6 +1956,8 @@ RSpec.describe SemanticAnnotator do
       expect(out).not_to include("var __ctx_0.c_moved")
       expect(out).not_to include("CheatLib.cleanup(@TypeOf(__ctx_0.c)")
       expect(out).to include("defer CheatLib.arcRelease(CheatLib.Locked(Counter)")
+      expect(out).to include("ctx.alloc")
+      expect(out).not_to include("std.heap.page_allocator")
     end
   end
 

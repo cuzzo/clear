@@ -6,16 +6,34 @@ module Annotator
     module Errors
       extend T::Sig
 
-      # Resolve CATCH clauses after body typing. RAISE/OR EXIT type
-      # registrations happen during the normal body traversal, so source-order
-      # independent CATCH Type clauses do not require a declaration-index body
-      # walk.
+      # Resolve CATCH clauses after body typing. Explicit RAISE/OR EXIT type
+      # declarations are already seeded from DeclarationIndex, so CATCH Type
+      # clauses are source-order independent while type-only error sites stay
+      # strict about requiring a registered name.
       sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
       def resolve_catch_clauses_from_declarations!(declarations)
         T.bind(self, SemanticAnnotator)
 
         declarations.function_declarations.each do |fn|
           fn.catch_clauses.each { |clause| resolve_catch_clause!(clause) }
+        end
+      end
+
+      sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
+      def seed_error_type_registrations!(declarations)
+        T.bind(self, SemanticAnnotator)
+
+        declarations.error_type_registrations.each do |registration|
+          _, conflict = AST.register_type!(
+            registration.type_name.to_sym,
+            registration.kind,
+            site_token: registration.token
+          )
+          emit_error_type_conflict!(
+            registration.token,
+            registration.type_name,
+            conflict
+          ) if conflict
         end
       end
 
@@ -320,15 +338,22 @@ module Annotator
 
         # Kind + type: first use registers, subsequent verifies.
         _, conflict = AST.register_type!(type_sym, kind_sym, site_token: site_tok)
-        return unless conflict
+        emit_error_type_conflict!(site_tok || node, type_name_str, conflict) if conflict
+        nil
+      end
+
+      sig { params(site: T.any(AST::Locatable, Lexer::Token), type_name: String, conflict: T::Hash[Symbol, T.untyped]).void }
+      def emit_error_type_conflict!(site, type_name, conflict)
+        T.bind(self, SemanticAnnotator)
+
         first_site = conflict[:first_site]
-        first_loc  = first_site ? " (first registered at line #{first_site.line})" : ""
+        first_loc = first_site ? " (first registered at line #{first_site.line})" : ""
         if conflict[:is_stdlib]
-          error!(site_tok || node, :ERROR_TYPE_RESERVED_BY_STDLIB,
-                 name: type_name_str, kind: conflict[:existing_kind])
+          error!(site, :ERROR_TYPE_RESERVED_BY_STDLIB,
+                 name: type_name, kind: conflict[:existing_kind])
         else
-          error!(site_tok || node, :ERROR_TYPE_KIND_CONFLICT,
-                 name: type_name_str, kind: conflict[:existing_kind], first_loc: first_loc)
+          error!(site, :ERROR_TYPE_KIND_CONFLICT,
+                 name: type_name, kind: conflict[:existing_kind], first_loc: first_loc)
         end
       end
 

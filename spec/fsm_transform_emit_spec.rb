@@ -475,7 +475,7 @@ RSpec.describe FsmTransform::Emit do
       end
     }.new
     with_node = Struct.new(:lock_error_clause).new(error_clause)
-    tail = FsmTransform::Segments::LockSuspend.new(with_node, :current, [:prior], 9, 10)
+    tail = FsmTransform::Segments::LockSuspend.new(with_node, :current, [:prior], 9, 10, 1, [0])
     spec = fsm_spec(
       index: 1,
       body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("beforeLock()"), false)],
@@ -498,6 +498,8 @@ RSpec.describe FsmTransform::Emit do
     retry_field = expanded.extra_fields.find { |field| field.name == "retry_count" }
     expect(retry_field&.type_zig).to eq("u32")
     expect(retry_field&.default_value&.value).to eq("0")
+    held_field = expanded.extra_fields.find { |field| field.name == "__lock_held_1" }
+    expect(held_field&.type_zig).to eq("bool")
     expect(lowering.error_calls.first).to eq([
       error_clause,
       7,

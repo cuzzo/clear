@@ -179,7 +179,7 @@ module FiberCtxBuilder
         captured_field,
         payload_type_zig,
         rc_kind.release_func,
-        MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("std"), "heap"), "page_allocator"),
+        MIR::FieldGet.new(receiver_expr, "alloc"),
       ))
     end
 
@@ -196,7 +196,7 @@ module FiberCtxBuilder
         captured_field,
         payload_type_zig,
         rc_kind.release_func,
-        MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("std"), "heap"), "page_allocator"),
+        MIR::FieldGet.new(receiver_expr, "alloc"),
       )
     end
 

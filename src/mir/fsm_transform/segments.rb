@@ -107,8 +107,25 @@ module FsmTransform
     # splitter, may itself contain suspends) and a release segment
     # that explicitly unlocks every cap.
     LockSuspend  = Struct.new(:with_node, :cap, :prior_caps,
-                              :post_acquire_idx, :next_index) do
+                              :post_acquire_idx, :next_index,
+                              :lock_index, :prior_lock_indices) do
       extend T::Sig
+
+      sig do
+        params(
+          with_node: T.untyped,
+          cap: T.untyped,
+          prior_caps: T::Array[T.untyped],
+          post_acquire_idx: T.nilable(Integer),
+          next_index: T.nilable(Integer),
+          lock_index: T.nilable(Integer),
+          prior_lock_indices: T.nilable(T::Array[Integer]),
+        ).void
+      end
+      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = nil)
+        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices || [])
+      end
+
       sig { returns(Symbol) }
       def kind; :lock; end
     end

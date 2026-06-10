@@ -2398,6 +2398,14 @@ class BcEmitter
     case node
     when MIR::Lit
       compile_lit(node)
+    when MIR::VoidLiteral
+      emit_op(NATIVE_CALL, NATIVES["vector"], 0)
+      push_type(:any)
+    when MIR::EnumTag
+      emit_op(LOAD_CONST, add_const(node.variant.to_s))
+      push_type(:any)
+    when MIR::EnumOrdinal
+      compile_enum_ordinal(node)
     when MIR::Ident
       compile_ident(node)
     when MIR::BinOp
@@ -4695,12 +4703,12 @@ class BcEmitter
   end
 
   # Detect the lowering shape `lower_raise` produces:
-  #   ScopeBlock([ExprStmt(MethodCall(rt, "setError", [.Kind, name_id, msg, line])),
+  #   ScopeBlock([ExprStmt(MethodCall(rt, "setError", [EnumTag(Kind), name_id, msg, line])),
   #               ReturnStmt(Ident("error.CheatError"))])
   # Return [kind_string, type_string, msg_mir_expr] when matched, nil otherwise.
   # type_string is "" for kind-only RAISE; otherwise the error_name (e.g.
-  # "ParseErr"). lower_raise emits the type as `@intFromEnum(ErrorName.Foo)`
-  # via MIR::Ident; we extract the bare name for VM string compares.
+  # "ParseErr"). lower_raise emits the type as MIR::EnumOrdinal(ErrorName.Foo);
+  # older fixtures may still carry the textual Ident form.
   # Inside a CATCH body, the user can reference `snapshot.field` to
   # inspect the SMOOTH pipe LHS that the failed call saw. captureSnapshot
   # stashes the value via STORE_NAME ("__snapshot") inside the inner
@@ -4796,8 +4804,7 @@ class BcEmitter
     err_call, ret_stmt = body
     return nil unless err_call.is_a?(MIR::ExprStmt)
     return nil unless ret_stmt.is_a?(MIR::ReturnStmt) &&
-                      ret_stmt.value.is_a?(MIR::Ident) &&
-                      ret_stmt.value.name.to_s == "error.CheatError"
+                      cheat_error_value?(ret_stmt.value)
     call = err_call.expr
     return nil unless call.is_a?(MIR::MethodCall) &&
                       call.method.to_s == "setError"
@@ -4805,14 +4812,41 @@ class BcEmitter
     kind_arg = call.args[0]
     name_arg = call.args[1]
     msg_arg  = call.args[2]
-    return nil unless kind_arg.is_a?(MIR::Ident) && kind_arg.name.to_s.start_with?(".")
-    type_str = if name_arg.is_a?(MIR::Ident) &&
-                  name_arg.name.to_s =~ /@intFromEnum\(ErrorName\.(\w+)\)/
-                 $1
-               else
-                 ""
-               end
-    [kind_arg.name.to_s.sub(/\A\./, ""), type_str, msg_arg]
+    kind = error_kind_name_from_mir(kind_arg)
+    return nil unless kind
+
+    [kind, error_type_name_from_mir(name_arg), msg_arg]
+  end
+
+  def error_kind_name_from_mir(node)
+    return node.variant.to_s if node.is_a?(MIR::EnumTag)
+    return node.name.to_s.sub(/\A\./, "") if node.is_a?(MIR::Ident) && node.name.to_s.start_with?(".")
+
+    nil
+  end
+
+  def error_type_name_from_mir(node)
+    if node.is_a?(MIR::EnumOrdinal) &&
+       node.value.is_a?(MIR::FieldGet) &&
+       node.value.object.is_a?(MIR::Ident) &&
+       node.value.object.name.to_s == "ErrorName"
+      return node.value.field.to_s
+    end
+
+    if node.is_a?(MIR::Ident) && node.name.to_s =~ /@intFromEnum\(ErrorName\.(\w+)\)/
+      return Regexp.last_match(1).to_s
+    end
+
+    ""
+  end
+
+  def cheat_error_value?(node)
+    return true if node.is_a?(MIR::Ident) && node.name.to_s == "error.CheatError"
+
+    node.is_a?(MIR::FieldGet) &&
+      node.object.is_a?(MIR::Ident) &&
+      node.object.name.to_s == "error" &&
+      node.field.to_s == "CheatError"
   end
 
   # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls,
@@ -5199,9 +5233,10 @@ class BcEmitter
 
     # Union variant construction: Shape{ Circle: 5.0 } or Shape{ Point: {} }
     # becomes Pair(car=Str("Circle"), cdr=payload_vector). A unit variant
-    # (MIR::Lit{"{}"}) gets an empty vector payload. Multi-field inline-struct
-    # variants are already lowered by annotator as a single StructInit field,
-    # so node.fields has at most one entry here. Strip any generic suffix
+    # (MIR::VoidLiteral or legacy MIR::Lit{"{}"}) gets an empty vector
+    # payload. Multi-field inline-struct variants are already lowered by
+    # annotator as a single StructInit field, so node.fields has at most one
+    # entry here. Strip any generic suffix
     # so `Option(Float64){Some: ...}` resolves to the registered `Option`
     # union schema (otherwise the lookup misses and we fall through to the
     # plain-struct path, which constructs a vector instead of a cons-pair).
@@ -5211,7 +5246,7 @@ class BcEmitter
       variant = node.fields.first&.[](:name).to_s
       value   = node.fields.first&.[](:value)
       emit_op(LOAD_CONST, add_const(variant))
-      if value.nil? || (value.is_a?(MIR::Lit) && value.value.to_s == "{}")
+      if value.nil? || unit_payload_value?(value)
         emit_op(NATIVE_CALL, NATIVES["vector"], 0)
       else
         compile_expr_to_value(value); pop_type
@@ -5454,6 +5489,24 @@ class BcEmitter
       emit_op(LOAD_CONST, add_const(nil))
     end
     push_type(:any)
+  end
+
+  def unit_payload_value?(value)
+    value.is_a?(MIR::VoidLiteral) ||
+      (value.is_a?(MIR::Lit) && value.value.to_s == "{}")
+  end
+
+  def compile_enum_ordinal(node)
+    value = node.value
+    if value.is_a?(MIR::FieldGet) &&
+       value.object.is_a?(MIR::Ident) &&
+       value.object.name.to_s == "ErrorName"
+      emit_op(LOAD_CONST, add_const([:i64, AST.id_of_type(value.field.to_s.to_sym).to_i]))
+      push_type(:any)
+      return
+    end
+
+    compile_expr(value)
   end
 
   def compile_index_get(node)

@@ -1245,11 +1245,23 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(id: Integer, ctx_name: String, fields: T::Array[MIR::FieldDef], fn: MIR::FnDef, specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(PipelineConcurrentCallback) }
   def callback_record(id, ctx_name, fields, fn, specs)
+    callback_fields = fields + [MIR::FieldDef.new("alloc", "std.mem.Allocator", nil)]
     ctx_init = MIR::StructInit.new(ctx_name, specs.map { |s|
       MIR::StructInitField.new(name: s.name, value: s.init_value_mir)
-    })
+    } + [
+      MIR::StructInitField.new(
+        name: :alloc,
+        value: MIR::MethodCall.new(
+          MIR::Ident.new(self.do_rt_name.call),
+          "heapAlloc",
+          [],
+          false,
+          MIR::CallableContract.no_ownership(0),
+        ),
+      ),
+    ])
     ctx_var = "__bounded_conc_ctx_#{id}"
-    ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
+    ctx_def = MIR::StructDef.new(ctx_name, callback_fields, [fn], nil)
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
     pre_ctx_stmts = specs.flat_map { |spec|
       setup = spec.setup_mir

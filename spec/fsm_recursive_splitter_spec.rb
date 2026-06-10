@@ -274,6 +274,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # entry (which Gotos to the release segment, then Done).
       expect(lock_seg.tail.post_acquire_idx).to be_a(Integer)
       expect(lock_seg.tail.prior_caps).to eq([])
+      expect(lock_seg.tail.lock_index).to eq(0)
+      expect(lock_seg.tail.prior_lock_indices).to eq([])
     end
 
     it "produces N LockSuspend segments for an N-cap WITH" do
@@ -293,6 +295,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
       # to the CS body entry (not another cap).
       expect(lock_segs[0].tail.cap).to eq(cap_facts[0])
       expect(lock_segs[0].tail.post_acquire_idx).to eq(lock_segs[1].index)
+      expect(lock_segs.map { |seg| seg.tail.lock_index }).to eq([0, 1])
+      expect(lock_segs[1].tail.prior_lock_indices).to eq([0])
       expect(lock_segs[0].tail.prior_caps).to eq([])
       expect(lock_segs[1].tail.cap).to eq(cap_facts[1])
       expect(lock_segs[1].tail.post_acquire_idx).to be_a(Integer)

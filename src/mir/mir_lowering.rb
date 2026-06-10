@@ -1290,6 +1290,9 @@ class MIRLowering
   sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
     return [mir, false] unless discard_expr_stmt?(stmt)
+
+    discard_type = Type.from_node!(stmt, context: "discard allocation mark")
+    mir = place_discarded_owned_branch_value(mir, discard_type)
     return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
 
     entry = hoist_cleanup_entry(mir, stmt)
@@ -1301,7 +1304,7 @@ class MIRLowering
       name: discard_name,
       expr: T.cast(mir, MIR::Node),
       alloc: alloc,
-      type_info: Type.from_node!(stmt, context: "discard allocation mark"),
+      type_info: discard_type,
       mutable: true,
       annotation: Type.new(discard_owned_zig_type(stmt, entry)),
       suppression: "_ = &#{discard_name};",
@@ -1309,6 +1312,24 @@ class MIRLowering
     )
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
     [MIR::ScopeBlock.new(materialized.statements), true]
+  end
+
+  sig { params(mir: T.untyped, type_info: Type).returns(T.untyped) }
+  def place_discarded_owned_branch_value(mir, type_info)
+    return mir unless mir_allocates?(mir)
+
+    result_type = type_info.success_type || type_info
+    return mir unless ownership_bearing_type?(result_type)
+
+    dest_alloc = mir_owned_alloc(mir) || :heap
+    case mir
+    when MIR::TryCatch
+      place_owned_try_catch_for_destination(mir, result_type, dest_alloc)
+    when MIR::Orelse
+      place_owned_orelse_for_destination(mir, result_type, dest_alloc)
+    else
+      mir
+    end
   end
 
   sig { params(stmt: LowerableStmt).returns(T::Boolean) }

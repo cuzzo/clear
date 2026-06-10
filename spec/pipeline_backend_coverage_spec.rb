@@ -963,6 +963,8 @@ RSpec.describe "pipeline backend coverage" do
       expr_callback = concurrent_lowerer.send(:build_bounded_concurrent_callback,
         conc, Type.new(:Int64), Type.new(:Int64), :expr)
       expect(expr_callback.ctx_def.methods.first.body).to include(an_object_having_attributes(name: "c"))
+      expect(expr_callback.ctx_def.fields.map(&:name)).to include("alloc")
+      expect(expr_callback.ctx_let.init.fields.map(&:name)).to include(:alloc)
 
       each_conc = typed(AST::ConcurrentOp.new(tok, each, {}), Type.new(:Void))
       each_conc.capture_analysis = analysis
@@ -2450,6 +2452,7 @@ RSpec.describe "pipeline backend coverage" do
       field = callback.ctx_def.fields.first
       expect(field.name).to eq("c")
       expect(field.boxed_capture).to eq("Counter")
+      expect(callback.ctx_def.fields.map(&:name)).to include("alloc")
     end
 
     it "lowers bytecode identifier streams through for-loops for distinct and reduce terminals" do

@@ -1477,7 +1477,7 @@ module AST
     # fsm_suspend_points is an Array of Semantic::SuspendPointFact enumerating
     # the yield-relevant call sites inside the body.
     attr_accessor :fsm_eligible
-    attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends
+    attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends, :suspending_callee
     attr_accessor :fsm_suspend_points
     # PRE clauses: Array of expression AST nodes parsed from
     # `PRE: <expr>` between RETURNS and `->`. Each predicate is checked

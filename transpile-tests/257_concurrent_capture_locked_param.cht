@@ -11,24 +11,10 @@
 # didn't see -- same shape as the BG bug fixed in 04062213. Migrated
 # to the `@TypeOf(name)` pattern that BG and DO share.
 #
-# Bug 2 (OPEN): the WITH EXCLUSIVE c lowering inside the CONCURRENT
-# body emits the polymorphic
-#    (if (@hasField(@TypeOf(c.*), "ctrl")) c.ctrl.data.* else c.*)
-# pattern, which assumes c is a pointer. Inside a CONCURRENT callback
-# c is captured by value (Arc(Locked(T)) directly), so c.* fails to
-# deref. The polymorphism (mir_lowering.comptime_arc_unwrap_expr) is
-# the right fallback for non-shared params where the caller's wrapper
-# isn't statically known; for the shared/Arc case it should pick the
-# direct c.ctrl.data.* path. Dispatch logic at mir_lowering.rb:2090
-# reads var_node.symbol.storage -- if storage is :shared, direct path;
-# else polymorphic. Inside the CONCURRENT body, var_node.symbol's
-# storage hasn't been propagated to :shared (likely the dual-
-# SymbolEntry issue called out in docs/agents/bg-fibers-postmortem.md).
-#
-# Re-enable when the WITH lowering picks the right path for shared
-# captures inside CONCURRENT callbacks. Likely fix: have the dispatch
-# consult capture_analysis.capture_symbols (the live entry) instead
-# of var_node.symbol when inside a fiber-like context.
+# Bug 2 (FIXED): WITH POLYMORPHIC lowering inside the CONCURRENT body
+# now consults the live capture SymbolEntry, not the stale AST snapshot,
+# so a REQUIRES LOCKED parameter captured as @shared:locked lowers via
+# the direct Arc(Locked(T)) unwrap path instead of a pointer-only fallback.
 
 STRUCT Acc { count: Int64 }
 
@@ -40,7 +26,7 @@ FN doIt(c: Acc) RETURNS !Void
     items.append(2_i64);
     items.append(3_i64);
     items |> CONCURRENT(workers: 2) EACH {
-        WITH EXCLUSIVE c AS inner { inner.count = inner.count + _; }
+        WITH POLYMORPHIC EXCLUSIVE c AS inner { inner.count = inner.count + _; }
     };
 END
 

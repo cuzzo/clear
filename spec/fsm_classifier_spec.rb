@@ -214,6 +214,25 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect([:reentrant, :explicit_stack_size]).to include(bg.fsm_ineligible_reason)
     end
 
+    it "classifies a BG body that calls a suspending user function as :stackful" do
+      ast = annotate(<<~CLEAR)
+        FN napFor(ms: Int64) RETURNS !Void ->
+          sleep(ms);
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          p: ~Void = BG { napFor(20); };
+          _ = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      bg = bgs(ast).first
+      expect(bg.spawn_form).to eq(:stackful)
+      expect(bg.fsm_ineligible_reason).to eq(:suspending_callee)
+      expect(bg.fsm_suspend_points).to be_nil
+    end
+
     it "classifies BG with explicit stack_size as :stackful (preserves user intent)" do
       ast = annotate(<<~CLEAR)
         FN main() RETURNS Void ->
@@ -671,6 +690,49 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user).to include(".Error =>")
       # Error path surfaces a LockError into inner.result.
       expect(user).to match(/inner\.result = error\.LockError/)
+    end
+
+    it "uses distinct held flags for nested FSM WITH locks" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+        STRUCT Gauge { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 0 } @locked;
+          b = Gauge{ value: 0 } @locked;
+          p: ~Void = BG {
+            WITH EXCLUSIVE a AS av {
+              av.value = av.value + 1;
+              WITH EXCLUSIVE b AS bv { bv.value = bv.value + 1; }
+            }
+          };
+          NEXT p;
+          RETURN;
+        END
+      CLEAR
+      user = transpile(src).split("// 3. Main Entry").first
+
+      expect(user).to include("__lock_held_0: bool = false")
+      expect(user).to include("__lock_held_1: bool = false")
+      expect(user).to match(/__ctx_\d+\.__lock_held_0 = true/)
+      expect(user).to match(/__ctx_\d+\.__lock_held_1 = true/)
+      expect(user).to match(/if \(__ctx_\d+\.__lock_held_0\) __ctx_\d+\.a\.unlock\(\)/)
+      expect(user).to match(/if \(__ctx_\d+\.__lock_held_1\) __ctx_\d+\.b\.unlock\(\)/)
+    end
+
+    it "finalizes retained shared FSM captures with the context allocator" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 0 } @shared:locked;
+          p: ~Void = BG { WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; } };
+          NEXT p;
+          RETURN;
+        END
+      CLEAR
+      user = transpile(src).split("// 3. Main Entry").first
+
+      expect(user).to include("CheatLib.arcRelease(CheatLib.Locked(Counter), __ctx_0.alloc, __ctx_0.c)")
+      expect(user).not_to include("std.heap.page_allocator")
     end
 
     it "lowers WITH + ON Transient RAISE into the .Error arm (FSM, not stackful)" do

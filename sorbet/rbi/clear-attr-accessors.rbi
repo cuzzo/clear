@@ -1902,8 +1902,6 @@ class ScopeTypes
 end
 
 class SemanticAnnotator
-  sig { returns(T::Array[T.untyped]) }
-  def scope_stack; end
   sig { returns(T.nilable(SemanticIndex)) }
   def semantic_index; end
   sig { returns(T.untyped) }
