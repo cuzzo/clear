@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "type"
 require_relative "../mir/fsm_ops"
 
 STRING_TYPE = :String
@@ -1086,6 +1087,79 @@ POOL_METHODS = T.let({
     is_method: true,
   },
 }.freeze, T::Hash[String, T.untyped])
+
+class StdLibGlobalBinding < T::Struct
+  const :name, String
+  const :type, Type::TypeInput
+  const :storage, Symbol
+end
+
+class StdLibTypeBinding < T::Struct
+  const :name, Symbol
+  const :schema_factory, T.proc.returns(T.untyped)
+end
+
+BUILTIN_GLOBAL_BINDINGS = T.let([
+  StdLibGlobalBinding.new(name: "argv", type: Type::STRING_TYPE, storage: :heap),
+].freeze, T::Array[StdLibGlobalBinding])
+
+BUILTIN_TYPE_BINDINGS = T.let([
+  StdLibTypeBinding.new(
+    name: :Range,
+    schema_factory: -> {
+      Schemas::StructSchema.new(fields: {
+        "start" => AST::StructField.new(type: :Float64),
+        "end"   => AST::StructField.new(type: :Float64),
+      })
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :File,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.method("close"),
+        static_methods: {
+          "open" => {
+            args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})",
+            bc: true, bc_op: :file_open, can_fail: true
+          },
+          "create" => {
+            args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})",
+            bc: true, bc_op: :file_create, can_fail: true
+          }
+        }
+      )
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :TCPServer,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
+        static_methods: {
+          "listen" => {
+            args: [:Int64], return: :TCPServer,
+            zig: "try CheatLib.socketListen(@intCast({0}))", can_fail: true
+          }
+        }
+      )
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :TCPClient,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
+        static_methods: {
+          "connect" => {
+            args: [:String, :Int64], return: :TCPClient,
+            zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true
+          }
+        }
+      )
+    }
+  ),
+].freeze, T::Array[StdLibTypeBinding])
 
 SET_METHODS = T.let({
   "insert" => {

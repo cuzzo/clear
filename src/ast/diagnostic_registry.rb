@@ -1158,7 +1158,7 @@ module DiagnosticRegistry
     # Setup / imports / fn metadata
     REQUIRE_NEEDS_IMPORTER: {
       severity: :error, category: :registry,
-      template: "REQUIRE is only supported when using the Importer. %{hint}",
+      template: "REQUIRE is only supported when using the Importer. Pass importer: and source_dir: to SemanticAnnotator.new.",
       summary:  "REQUIRE statement reached annotation without an active importer (script-mode invocation).",
     },
     STYLE_MUTABLE_PARAM_NEEDS_BANG: {
@@ -1788,6 +1788,11 @@ module DiagnosticRegistry
       severity: :error, category: :reentrance,
       template: "Stack safety: @%{size} (%{budget} bytes) %{hint}",
       summary:  "User-declared stack tier is too small for the fiber's worst-case path.",
+    },
+    STACK_SAFETY_STACK_ALIAS: {
+      severity: :warning, category: :reentrance,
+      template: "Stack sizing: @stack resolved to @%{computed}; replace @stack with @%{computed}. In STRICT mode, @stack will be rejected.",
+      summary:  "`@stack` was accepted as a compatibility alias and resolved to a concrete stack tier.",
     },
 
     # Borrow store
@@ -2687,7 +2692,7 @@ module DiagnosticRegistry
     },
     STACK_NEEDS_SERVICE_FIXABLE: {
       severity: :error, category: :reentrance,
-      template: "%{message}",
+      template: "Stack safety: this fiber transitively calls '%{reentrant_fn}' which is `EFFECTS REENTRANT` (plain) -- the call chain is unbounded and MUST run on an OS thread. Declare `@service` explicitly on the spawn site (the compiler no longer auto-infers this). Alternatively, change '%{reentrant_fn}' to a bounded reentrance variant: `:THUNK` (heap CPS, depth=1 fiber stack), `:TAIL_CALL` (TCO loop, depth=1), `:NOT_LOGICAL` (asserts non-recursion), or `:MAX_DEPTH(N)` (bounded counter).",
       summary:  "Spawn site transitively calls a plain :reentrant function and must run on @service (OS thread).",
       cause: "A BG/DO spawn site transitively calls a function declared as plain `EFFECTS REENTRANT` (unbounded recursion). Plain reentrant chains can't fit on a fiber stack — they require an OS thread (`@service`).",
       fix_hint: "Either declare `@service` on the spawn site (`clear fix` replaces the existing tier sigil), or change the callee to a bounded reentrance variant (`:THUNK`, `:TAIL_CALL`, `:NOT_LOGICAL`, `:MAX_DEPTH(N)`).",

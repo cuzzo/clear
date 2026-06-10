@@ -186,9 +186,10 @@ class Scope
   end
 
   sig { params(name: Symbol, schema: ScopeTypeSchema).returns(ScopeTypeEntry) }
-  def declare_type(name, schema)
+  def install_type(name, schema)
     @type_store.declare(name, schema)
   end
+  alias_method :declare_type, :install_type
 
   sig { params(name: Symbol).returns(T.untyped) }
   def resolve_type_definition(name)

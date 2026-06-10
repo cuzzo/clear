@@ -1263,7 +1263,7 @@ module FixableHelper
   # generated per candidate via `build_decl_cap_insert_fix`. Falls
   # back to plain `error!` (registry-formatted) when no candidate
   # is locatable (e.g. WITH target is a GetField / param).
-  sig { params(node: AST::WithBlock, name: String, code: Symbol, candidates: T::Array[CapabilityFixCandidate], confidence: Symbol, kw: DiagnosticKwValue).returns(T.noreturn) }
+  sig { params(node: AST::WithBlock, name: String, code: Symbol, candidates: T::Array[CapabilityFixCandidate], confidence: Symbol, kw: DiagnosticKwValue).void }
   def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
     T.bind(self, SemanticAnnotator) rescue nil
     fixes = candidates.filter_map do |c|

@@ -79,6 +79,23 @@ RSpec.describe DiagnosticRegistry do
       out = DiagnosticRegistry.format(:ARITY_MISMATCH, name: "foo")
       expect(out).to include("Internal Args Error")
     end
+
+    it "formats stack-service errors from registry context only" do
+      out = DiagnosticRegistry.format(:STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: "fib")
+      expect(out).to include("transitively calls 'fib'")
+      expect(out).to include("Declare `@service` explicitly")
+      expect(out).to include(":MAX_DEPTH(N)")
+    end
+
+    it "formats stack alias warnings from registry context only" do
+      out = DiagnosticRegistry.format(:STACK_SAFETY_STACK_ALIAS, computed: :micro)
+      expect(out).to eq("Stack sizing: @stack resolved to @micro; replace @stack with @micro. In STRICT mode, @stack will be rejected.")
+    end
+
+    it "formats REQUIRE importer guidance without ad-hoc hint kwargs" do
+      out = DiagnosticRegistry.format(:REQUIRE_NEEDS_IMPORTER)
+      expect(out).to include("Pass importer: and source_dir:")
+    end
   end
 
   describe "backward compatibility with ErrorDefinitions::MESSAGES" do

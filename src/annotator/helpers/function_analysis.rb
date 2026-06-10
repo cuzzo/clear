@@ -161,6 +161,171 @@ module FunctionAnalysis
     FunctionSignature.new(params: normalized_params, return_type: Type.new(return_type))
   end
 
+  sig { params(node: AST::LambdaLit).returns(T.nilable(FunctionSignature)) }
+  def visit_LambdaLit(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return_type = with_body_fact_nested_body do
+      analyze_routine(node, node.body, :Any, true)
+    end
+
+    stamp_type!(node, build_lambda_signature(node.params, T.cast(return_type, Symbol)))
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T.nilable(FunctionContext)) }
+  def visit_FunctionDef(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    effects_begin_function(node.name)
+
+    is_implicit_return = node.implicit_return_type?
+    node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
+    declared_return = node.annotation_return_type
+    lifetime_paths = get_lifetime_paths(node)
+    fn_type_params = (node.type_params || []).map(&:to_sym)
+    fn_ctx = FunctionContext.new(
+      name: node.name, return_type: node.annotation_return_type,
+      lifetime: lifetime_paths, type_params: fn_type_params
+    )
+    push_function_context!(fn_ctx)
+    begin
+      has_mutable_param = node.params.any? { |p| p.mutable }
+      if has_mutable_param && !node.name.end_with?("!")
+        emit_style_mutable_param_needs_bang!(node)
+      end
+      verify_lifetime!(node)
+
+      validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
+
+      node.params.each { |p| validate_type_annotation!(node, p.type, is_param: true) if p.type }
+      validate_type_annotation!(node, node.return_type) if node.return_type
+
+      signature = FunctionSignature.new(
+        params: node.params.map { |p| AST::Param.new(
+          name: p.name, type: p.type, required: p.default.nil?,
+          default: p.default, mutable: p.mutable, takes: p.takes,
+          sync: p.type.any_sync? ? p.type.sync : nil
+        )},
+        return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
+        visibility: node.visibility,
+        type_params: fn_type_params.any? ? fn_type_params : nil,
+        reentrant: node.reentrant == :reentrant
+      )
+      signature.requires = node.requires
+      current_scope.declare(node.name, nil, signature, false, false, nil, :static)
+
+      register_function_node!(node)
+      body_identity = body_identity_for_function(node.name)
+      node.semantic_with_blocks = []
+
+      final_return_type = T.let(nil, T.nilable(Symbol))
+      body_scan = with_body_fact_frame(body_identity) do
+        final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
+      end
+      called_names = body_scan.callees
+      has_fnptr = body_scan.has_fnptr_call
+      unabsorbed_calls = body_scan.propagating_callees
+      raises_in_body = body_scan.raises_directly
+      directly_recursive = called_names.include?(node.name)
+      fn_ctx.mark_runtime_used! if has_fnptr
+      offer_plain_reentrant_variant_fix!(node, body_scan)
+      route_thunk_to_tail_call_compat!(node, body_scan)
+
+      if directly_recursive
+        record_effect(EffectTracker::REENTRANT)
+        case node.reentrant
+        when :non_reentrant
+          unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
+            emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE,
+              hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).")
+          end
+        when nil
+          emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE,
+            hint: "Add `EFFECTS REENTRANT` to the function signature to allow this.")
+        end
+
+        validate_tail_call!(node, body_scan) if node.tail_call
+
+        if node.reentrance_kind == :reentrant_thunk && !node.tail_call
+          plan = ThunkTransform::RecursiveSplitter.split(node.body, node.name, self)
+          if plan
+            node.thunk_plan = plan
+          else
+            error!(node, :REENTRANCE_THUNK_NON_TAIL, name: node.name, hint: "a shape this phase does not yet recognize. Supported: simple " \
+                   "recurrence (zero or more `IF base -> RETURN const;` followed by a final " \
+                   "`RETURN expr <op> #{node.name}(args);`). Wider shapes (multi-recursion, " \
+                   "arbitrary control flow with recursion) land in later sub-phases. For " \
+                   "now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.")
+          end
+        end
+      elsif node.tail_call
+        error!(node, :REENTRANCE_TAIL_CALL_NOT_RECURSIVE, name: node.name, hint: "Remove :tailCall - it only applies to self-recursive functions.")
+      elsif node.reentrance_kind == :reentrant_thunk
+        # Mutual :THUNK validation runs after the complete call graph exists.
+      end
+
+      resolved_return_type = T.must(final_return_type)
+      if (is_implicit_return || declared_return == :Any)
+        node.return_type = resolved_return_type
+        signature.return_type = resolved_return_type
+      end
+
+      signature.return_strategy = get_return_strategy(signature.return_type)
+      stamp_type!(node, signature)
+      ctx = fn_ctx
+      node.uses_frame = (ctx.frame_count > 0)
+      node.uses_heap  = (ctx.heap_count > 0)
+      node.uses_alloc = (ctx.alloc_count > 0)
+      node.uses_rt    = ctx.uses_rt
+      node.stack_vars_bytes = ctx.stack_vars_bytes
+      raises_directly =
+        has_fnptr ||
+        (node.reentrant == :non_reentrant) ||
+        function_has_pre_clauses?(node) ||
+        raises_in_body == true
+      record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
+        name: node.name,
+        definition_id: body_identity.definition_id,
+        body_id: body_identity.body_id,
+        callees: called_names - [node.name],
+        propagating_callees: (unabsorbed_calls || called_names) - [node.name],
+        has_fnptr_call: has_fnptr,
+        raises_directly: raises_directly,
+        call_site_facts: body_scan.call_site_facts,
+        local_facts: body_scan.local_facts,
+        return_nodes: body_scan.return_nodes,
+        binding_nodes: body_scan.binding_nodes,
+        assignment_nodes: body_scan.assignment_nodes,
+        escape_nodes: body_scan.escape_nodes,
+        with_scope_nodes: body_scan.with_scope_nodes,
+        with_blocks: body_scan.with_blocks,
+        suspend_points: body_scan.suspend_points
+      ))
+      fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
+
+      if function_has_catch_clauses?(node)
+        candidate_snap_types = body_scan.pipe_input_types
+        snap_types = T.let(Set.new, T::Set[String])
+        all_catch_bodies = node.catch_clauses.map { |c| c.body }
+        all_catch_bodies << node.default_catch if function_has_default_catch?(node)
+        catch_body_scan = with_body_fact_frame(Semantic::BodyIdentity.unassigned) do
+          all_catch_bodies.compact.each do |clause_body|
+            with_new_scope do
+              current_scope.declare("__error", nil, :ErrorContext, false, false, nil, :stack)
+              if candidate_snap_types.size == 1
+                current_scope.declare("snapshot", nil, T.must(candidate_snap_types.first).to_sym, false, false, nil, :stack)
+              end
+              visit_stmts(clause_body)
+            end
+          end
+        end
+        snap_types.merge(candidate_snap_types) if catch_body_scan.references_snapshot
+        node.snapshot_types = snap_types
+      end
+      nil
+    ensure
+      pop_function_context!
+    end
+  end
+
   # Resolve a function call: look up the function, dispatch based on type
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
