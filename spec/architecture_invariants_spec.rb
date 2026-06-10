@@ -45,9 +45,10 @@ RSpec.describe "architecture invariants: placement-field writers" do
     rel == "semantic/escape_analysis.rb"
   end
 
-  # CleanupEntry#alloc is set once, by cleanup classification.
-  CLEANUP_ALLOC_OK = lambda do |rel|
-    rel == "mir/cleanup_classifier.rb" || rel == "mir/cleanup_entry.rb"
+  # Cleanup facts are decided by cleanup classification, but raw Hash writes
+  # belong only to CleanupEntry's typed mutation API.
+  CLEANUP_RAW_WRITE_OK = lambda do |rel|
+    rel == "mir/cleanup_entry.rb"
   end
 
   # ── scan every source file for placement-field writes ───────────────
@@ -56,7 +57,6 @@ RSpec.describe "architecture invariants: placement-field writers" do
     node_w = []
     sym_w = []
     cleanup_w = []
-    cleanup_scope_w = []
     Dir[File.join(SRC, "**", "*.rb")].sort.each do |path|
       rel = path.sub(SRC + "/", "")
       File.readlines(path).each_with_index do |line, idx|
@@ -66,24 +66,23 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
         if (m = line.match(/([\w.\[\]]*)\.storage\s*=(?![=~])/))
           recv = m[1]
+          next if rel == "ast/symbol_entry.rb" && %w[@lifecycle lifecycle].include?(recv)
+
           symbol_write = recv.end_with?(".symbol") ||
                          %w[sym symbol node_sym decl_sym entry sym_entry].include?(recv)
           (symbol_write ? sym_w : node_w) << [loc, code]
         end
 
-        # CleanupEntry is a typed Hash-subclass written via [:alloc]=.
+        # CleanupEntry is a typed Hash-subclass for compatibility, but raw
+        # lifecycle writes must stay inside CleanupEntry's typed mutators.
         # Restrict to entry/cleanup-named receivers so plain Hashes
         # (effects[:alloc], resolved_allocs[:alloc]) are not flagged.
-        if line.match(/\b\w*(?:entry|cleanup)\w*\[:alloc\]\s*=(?![=~])/i)
+        if line.match(/\b\w*(?:entry|cleanup)\w*\[:(?:alloc|scope|needs_cleanup|has_moved_guard)\]\s*=(?![=~])/i)
           cleanup_w << [loc, code]
-        end
-
-        if line.match(/\b\w*(?:entry|cleanup)\w*\[:scope\]\s*=(?![=~])/i)
-          cleanup_scope_w << [loc, code]
         end
       end
     end
-    { node: node_w, symbol: sym_w, cleanup: cleanup_w, cleanup_scope: cleanup_scope_w }
+    { node: node_w, symbol: sym_w, cleanup: cleanup_w }
   end
 
   WRITES = scan
@@ -107,14 +106,44 @@ RSpec.describe "architecture invariants: placement-field writers" do
     expect(bad).to be_empty, report("symbol.storage", bad)
   end
 
-  it "CleanupEntry#alloc is written ONLY by cleanup classification" do
-    bad = renegades(WRITES[:cleanup], CLEANUP_ALLOC_OK)
-    expect(bad).to be_empty, report("CleanupEntry#alloc", bad)
+  it "CleanupEntry lifecycle fields are written only by typed CleanupEntry APIs" do
+    bad = renegades(WRITES[:cleanup], CLEANUP_RAW_WRITE_OK)
+    expect(bad).to be_empty, report("CleanupEntry lifecycle", bad)
+  end
+end
+
+RSpec.describe "architecture invariants: annotator shell" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
   end
 
-  it "CleanupEntry#scope is written ONLY by cleanup classification" do
-    bad = renegades(WRITES[:cleanup_scope], CLEANUP_ALLOC_OK)
-    expect(bad).to be_empty, report("CleanupEntry#scope", bad)
+  it "keeps concrete AST visitors out of SemanticAnnotator except program orchestration" do
+    visitor_names = source("src/annotator/annotator.rb").scan(/^\s*def (visit_[A-Z]\w*)/).flatten
+    expect(visitor_names).to eq(["visit_Program"])
+  end
+
+  it "keeps annotator error hints registry-backed" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].filter_map do |path|
+      matches = File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        "#{path.delete_prefix("#{ARCH_ROOT}/")}:#{index + 1}" if line.match?(/hint:\s*"/)
+      end
+      matches unless matches.empty?
+    end.flatten
+
+    expect(offenders).to be_empty,
+      -> { "Annotator local hint strings should move to DiagnosticRegistry:\n  - #{offenders.join("\n  - ")}" }
+  end
+
+  it "routes annotator source errors through error helpers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].filter_map do |path|
+      matches = File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        "#{path.delete_prefix("#{ARCH_ROOT}/")}:#{index + 1}" if line.include?("CompilerError.new")
+      end
+      matches unless matches.empty?
+    end.flatten
+
+    expect(offenders).to be_empty,
+      -> { "Annotator source errors should use error!/fixable!:\n  - #{offenders.join("\n  - ")}" }
   end
 end
 
@@ -234,7 +263,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps ownership-significant MIR node classes in an explicit registry" do
     expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
     expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
-    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("ReturnMark, DiscardOwned, RegistryCall")
     expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
   end
 
@@ -286,13 +315,78 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps WITH capability expansion behind typed fact records" do
     capabilities = source("src/annotator/helpers/capabilities.rb")
     execution = source("src/annotator/domains/execution_boundaries.rb")
+    plan = source("src/semantic/capability_plan.rb")
+    mir_caps = source("src/mir/lowering/capabilities.rb")
+    deferred = source("src/annotator/phases/deferred_validation.rb")
 
-    expect(capabilities).to include("class WithCapabilityFact < T::Struct")
-    expect(capabilities).to include("class WithCapabilityExpansion < T::Struct")
-    expect(capabilities).to include("source_entry: source_entry")
-    expect(capabilities).to include("borrowed_qualifier:")
+    expect(plan).to include("class CapabilityRequest < T::Struct")
+    expect(plan).to include("class CapabilityTargetFact < T::Struct")
+    expect(plan).to include("class CapabilityTransition < T::Struct")
+    expect(plan).to include("class WithCapabilityPlan < T::Struct")
+    expect(capabilities).to include("WithCapabilityFact = CapabilityPlan::CapabilityTransition")
     expect(execution).to include("capability_expansion = CapabilityHelper::WithCapabilityExpansion.new")
-    expect(execution).to include("lock_capabilities = capability_expansion.locks")
+    expect(execution).to include("node.capability_plan = capability_expansion")
+    expect(deferred).to include("const :fact, CapabilityPlan::CapabilityTransition")
+    expect(deferred).not_to include("const :var_node")
+    expect(deferred).not_to include("const :capability")
+    expect(mir_caps).to include("CapabilityPlan.require_for(node).all")
+  end
+
+  it "does not reach into removed annotator function-node ivars" do
+    production_paths = [
+      File.join(ARCH_ROOT, "clear"),
+      *Dir[File.join(ARCH_ROOT, "src", "**", "*.rb")],
+    ]
+
+    offenders = production_paths.uniq.sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).filter_map.with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("instance_variable_get(:@fn_nodes)") ||
+                    line.include?("instance_variable_get('@fn_nodes')") ||
+                    line.include?('instance_variable_get("@fn_nodes")')
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Production code must use SemanticAnnotator#semantic_function_nodes instead of stale @fn_nodes reach-ins:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps MIR capability lowering on typed plans, not raw source capability hashes" do
+    sanctioned = [
+      "src/mir/lower/pipeline/pipeline_context.rb",
+    ]
+    raw_field_reads = [
+      "[:capability]",
+      "[:var_node]",
+      "[:alias]",
+      "[:alias_mutable]",
+      "[:guard_expr]",
+      "[:resolved_type]",
+      "[:old_scope]",
+    ]
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if sanctioned.include?(rel)
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\b(?:node|stmt|with_node|with_stmt)\.capabilities\b/) ||
+                    line.match?(/\bAST::Capability\b/) ||
+                    line.include?("T::Array[AST::Capability]") ||
+                    raw_field_reads.any? { |field| line.include?(field) }
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR must consume CapabilityPlan::WithCapabilityPlan facts instead of raw source capability hashes:\n" \
+      "#{offenders.join("\n")}"
   end
 
   it "does not let production capability consumers rediscover raw lock facts" do
@@ -529,6 +623,8 @@ RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
     expect(mir).to include("const :type_info, Type")
     expect(mir).to include("const :operands, T::Array[OwnershipOperandFact]")
     expect(mir).not_to include("const :names, T::Array[String]")
+    expect(mir).not_to include("def self.consumes")
+    expect(mir).not_to include("def consumes")
   end
 
   it "requires MIRChecker to reject missing or borrowed ownership operands" do
@@ -1044,7 +1140,7 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
       allowed: [],
     ),
     ForbiddenPattern.new(
-      name: "InlineZig allocator hash protocol",
+      name: "structural allocator metadata hash protocol",
       glob: "src/**/*.rb",
       pattern: /(?<!resolved_)allocs\.is_a\?\(Hash\)|\.allocs\.values|\.allocs\.key\?\(|\.allocs\[:|\.allocs\.transform_values|resolved_allocs\.is_a\?\(Hash\)|resolved_allocs\[:/,
       allowed: [],

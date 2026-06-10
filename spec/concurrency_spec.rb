@@ -1750,6 +1750,26 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("__ctx_0.base")
       expect(out).to include("p.next()")
     end
+
+    it "discards value-returning stackful BG pre-step calls" do
+      src = <<~CLEAR
+        STRUCT Entity { health: Int64 }
+        FN f() RETURNS !Void ->
+          p: ~Int64 = BG {
+            MUTABLE pool: Entity[8]@pool = [];
+            pool.insert(Entity{ health: 10_i64 });
+            sleep(1_i64);
+            1_i64;
+          };
+          r: Int64 = NEXT p;
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile_fn(src)
+
+      expect(out).to match(/_ = try pool(?:_L\d+)?\.insert\(/)
+    end
   end
 
   # ===================================================================
@@ -1928,6 +1948,16 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("client_moved")
       expect(out).to include("defer if (!client_moved) CheatLib.socketClose(client)")
       expect(out).to include("defer CheatLib.socketClose(__ctx_0.client)")
+    end
+
+    it "does not emit verifier-only cleanup mirrors for moved locked BG captures" do
+      out = transpile_fn(File.read(File.expand_path("../transpile-tests/263_with_lock_contention.cht", __dir__)))
+
+      expect(out).not_to include("var __ctx_0.c_moved")
+      expect(out).not_to include("CheatLib.cleanup(@TypeOf(__ctx_0.c)")
+      expect(out).to include("defer CheatLib.arcRelease(CheatLib.Locked(Counter)")
+      expect(out).to include("ctx.alloc")
+      expect(out).not_to include("std.heap.page_allocator")
     end
   end
 

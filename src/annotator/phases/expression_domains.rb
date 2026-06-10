@@ -112,17 +112,17 @@ module Annotator
           end
         end
 
-        emit = method_def.emit
-        node.zig_pattern = emit&.zig
+        node.zig_pattern = method_def.intrinsic_pattern
         stamp_type!(node, method_def.return_def.resolve(nil, node.args, self))
         node.matched_stdlib_def = method_def
         node.matched_signature = method_def if node.respond_to?(:matched_signature=)
-        node.stdlib_allocates = true if emit&.allocates
-        node.mutates_receiver = true if emit&.mutates_receiver
-        node.can_fail = true if method_def.can_fail
-        node.error_kind = emit.error_kind if emit&.error_kind
-        node.error_type = emit.error_type if emit&.error_type
-        current_fn_ctx&.record_alloc_use! if emit&.allocates || method_def.can_fail
+        method_allocates = method_def.emits_allocating?
+        node.stdlib_allocates = method_allocates
+        node.mutates_receiver = method_def.mutates_receiver?
+        node.can_fail = node.can_fail || method_def.can_fail
+        node.error_kind = method_def.intrinsic_error_kind
+        node.error_type = method_def.intrinsic_error_type
+        current_fn_ctx&.record_alloc_use! if method_allocates || method_def.can_fail
       end
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }
@@ -148,10 +148,10 @@ module Annotator
           verify_function_signature!(call_node, signature)
         end
 
-        emit = matched_def.emit
-        if emit&.reject_when && reject_arg_type_matches?(args.first, emit.reject_when)
+        reject_when = matched_def.intrinsic_reject_when
+        if reject_when && reject_arg_type_matches?(args.first, reject_when)
           first_arg = T.must(args.first)
-          reason = emit&.reject_error ||
+          reason = matched_def.intrinsic_reject_error ||
                    "#{node.name}() is not valid for #{first_arg.resolved_type}"
           error!(node, :INTRINSIC_REJECTED, message: reason)
           return
@@ -159,18 +159,19 @@ module Annotator
 
         stamp_type!(node, matched_def.return_def.resolve(nil, args, self))
 
-        node.zig_pattern = emit&.zig
+        node.zig_pattern = matched_def.intrinsic_pattern
         node.matched_stdlib_def = matched_def
         node.matched_signature = matched_def if node.respond_to?(:matched_signature=)
-        node.stdlib_allocates = true if emit&.allocates
-        node.mutates_receiver = true if emit&.mutates_receiver
-        node.can_fail = true if matched_def.can_fail || emit&.allocates
-        node.error_kind = emit.error_kind if emit&.error_kind
-        node.error_type = emit.error_type if emit&.error_type
-        current_fn_ctx&.record_alloc_use! if emit&.allocates || matched_def.can_fail || matched_def.needs_rt
-        record_effect(EffectTracker::SUSPENDS) if emit&.suspends
+        matched_allocates = matched_def.emits_allocating?
+        node.stdlib_allocates = matched_allocates
+        node.mutates_receiver = matched_def.mutates_receiver?
+        node.can_fail = node.can_fail || matched_def.can_fail || matched_allocates
+        node.error_kind = matched_def.intrinsic_error_kind if matched_def.intrinsic_error_kind
+        node.error_type = matched_def.intrinsic_error_type if matched_def.intrinsic_error_type
+        current_fn_ctx&.record_alloc_use! if matched_allocates || matched_def.can_fail || matched_def.needs_rt
+        record_effect(EffectTracker::SUSPENDS) if matched_def.intrinsic_suspends?
 
-        if emit&.mutates_receiver && node.is_a?(AST::MethodCall)
+        if matched_def.mutates_receiver? && node.is_a?(AST::MethodCall)
           mark_chain_needs_mut_ref!(node.object)
           root = chain_root_name(node.object)
           mark_var_mutated(root) if root
@@ -249,12 +250,13 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         alloc_kind = method_sig.extern_effects&.dig(:alloc)
-        return unless alloc_kind && current_fn_ctx
+        fn_ctx = current_fn_ctx
+        return unless alloc_kind && fn_ctx
 
         if alloc_kind == :heap
-          current_fn_ctx&.record_heap_use!
+          fn_ctx.record_heap_use!
         else
-          current_fn_ctx&.record_frame_use!
+          fn_ctx.record_frame_use!
         end
       end
       private :record_extern_method_alloc!

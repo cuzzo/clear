@@ -9,6 +9,7 @@ require "sorbet-runtime"
 
 require 'set'
 require_relative "../../semantic/capture_strategy"
+require_relative "../../semantic/capability_plan"
 
 # ============================================================================
 # Capabilities — Static validation of capability combinations
@@ -97,105 +98,9 @@ module CapabilityHelper
     multiowned: "@multiowned",
   }.freeze, T::Hash[Symbol, String])
 
-  class WithCapabilityFact < T::Struct
-    extend T::Sig
-
-    const :source, AST::Capability
-    const :capability, Symbol
-    const :var_node, AST::Locatable
-    const :var_name, String
-    const :alias_name, String
-    const :alias_explicit, T::Boolean
-    const :alias_mutable, T::Boolean
-    const :resolved_type, Type
-    const :old_scope, T.nilable(Scope)
-    const :source_entry, T.nilable(SymbolEntry)
-    const :field_target, T::Boolean
-    const :sync, T.nilable(Symbol)
-    const :storage, T.nilable(Symbol)
-    const :layout, T.nilable(Symbol)
-    const :source_type, Type
-    const :lock_identity_value, T.nilable(Symbol)
-    const :lock_capability, T::Boolean
-    const :restrict_capability, T::Boolean
-    const :borrowed_capability, T::Boolean
-    const :snapshot_capability, T::Boolean
-    const :view_capability, T::Boolean
-    const :deferred_lock_param, T::Boolean
-    const :sync_alias_unwrapped, T::Boolean
-    const :plain_restrict_alias, T::Boolean
-    const :borrowed_qualifier, T.nilable(String)
-
-    sig { returns(T::Boolean) }
-    def lock_capability?
-      lock_capability
-    end
-
-    sig { returns(T::Boolean) }
-    def restrict?
-      restrict_capability
-    end
-
-    sig { returns(T::Boolean) }
-    def borrowed?
-      borrowed_capability
-    end
-
-    sig { returns(T::Boolean) }
-    def snapshot?
-      snapshot_capability
-    end
-
-    sig { returns(T::Boolean) }
-    def view?
-      view_capability
-    end
-
-    sig { returns(T::Boolean) }
-    def deferred_lock_param?
-      deferred_lock_param
-    end
-
-    sig { returns(T::Boolean) }
-    def unwraps_sync_alias?
-      sync_alias_unwrapped
-    end
-
-    sig { returns(T::Boolean) }
-    def declares_plain_restrict_alias?
-      plain_restrict_alias
-    end
-
-    sig { returns(Type) }
-    def declared_source_type
-      source_type
-    end
-
-    sig { returns(T.nilable(String)) }
-    def borrowed_rejection_qualifier
-      borrowed_qualifier
-    end
-
-    sig { returns(T.nilable(Symbol)) }
-    def lock_identity
-      lock_identity_value
-    end
-  end
-
+  WithCapabilityFact = CapabilityPlan::CapabilityTransition
   WithCapabilityFacts = T.type_alias { T::Array[WithCapabilityFact] }
-
-  class WithCapabilityExpansion < T::Struct
-    extend T::Sig
-
-    prop :all, WithCapabilityFacts, factory: -> { [] }
-    prop :locks, WithCapabilityFacts, factory: -> { [] }
-
-    sig { params(fact: WithCapabilityFact).void }
-    def add(fact)
-      all << fact
-      locks << fact if fact.lock_capability?
-    end
-  end
+  WithCapabilityExpansion = CapabilityPlan::WithCapabilityPlan
 
   # WITH can be applied to an Identifier or a GetField (`obj.field`).
   # For an Identifier, sync/ownership lives on the SymbolEntry. For a
@@ -230,55 +135,58 @@ module CapabilityHelper
   end
 
   sig { params(var_node: AST::Locatable).returns(String) }
-  def cap_var_label(var_node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    case var_node
-    when AST::Identifier then var_node.name
-    when AST::GetField then var_node.field.to_s
-    when AST::GetIndex then cap_var_name(var_node)
-    else "__unknown"
-    end
-  end
+	  def cap_var_label(var_node)
+	    T.bind(self, SemanticAnnotator) rescue nil
+	    case var_node
+	    when AST::Identifier then var_node.name
+	    when AST::GetField then var_node.field.to_s
+	    when AST::GetIndex then CapabilityPlan.var_name_for(var_node)
+	    else "__unknown"
+	    end
+	  end
 
-  # Validate that a capability type is legal for the given variable.
-  sig { params(node: AST::WithBlock, capability_type: Symbol, var_node: AST::Locatable).void }
-  def validate_capability(node, capability_type, var_node)
+  # Validate that a typed capability transition is legal for its target.
+  sig { params(node: AST::WithBlock, fact: WithCapabilityFact).void }
+  def validate_capability_transition!(node, fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    var_type = var_node.full_type!(context: "WITH capability target")
-    unless valid_capability_target?(capability_type, var_node)
-      error!(var_node, :WITH_CAP_BAD_TARGET, capability: capability_type, got: var_node.class)
+    var_node = fact.var_node
+    var_type = fact.resolved_type
+    unless valid_capability_target?(fact.capability, var_node)
+      error!(var_node, :WITH_CAP_BAD_TARGET, capability: fact.capability, got: var_node.class)
     end
 
-    case capability_type
+    case fact.capability
     when :EXCLUSIVE
-      syn = cap_var_sync(var_node)
-      unless syn
-        # Function parameters may not have propagated sync yet; locals error
-        # eagerly because no later propagation can fix them.
-        if var_node.symbol&.is_param
-          record_deferred_with_validation!(node, var_node, :EXCLUSIVE)
-        else
-          storage = cap_var_storage(var_node)
-          name = cap_var_label(var_node)
-          emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
-            [
-              { sigil: '@locked',
-                description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)." },
-              { sigil: '@writeLocked',
-                description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)." },
-            ],
-            confidence: :interactive,
-            got: storage || 'unknown')
-        end
+      case fact.exclusive_validation_action
+      when :valid, :declared_contract
+        # REQUIRES-family parameters are checked after the body walk, once
+        # the whole function's polymorphic contract is available.
+      when :defer
+        record_deferred_with_validation!(node, fact)
+      else
+        storage = fact.storage
+        name = fact.target_label
+        emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@locked",
+              description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)."
+            ),
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@writeLocked",
+              description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)."
+            ),
+          ],
+          confidence: :interactive,
+          got: storage || fact.sync || 'unknown')
       end
 
     when :write_locked_read
-      syn = cap_var_sync(var_node)
-      unless syn == :write_locked
-        if var_node.symbol&.is_param && syn.nil?
-          record_deferred_with_validation!(node, var_node, :write_locked_read)
+      unless fact.write_locked_sync?
+        if fact.deferred_sync_param?
+          record_deferred_with_validation!(node, fact)
         else
-          name = cap_var_label(var_node)
+          name = fact.target_label
           emit_with_read_needs_write_lock!(node, name, var_node)
         end
       end
@@ -298,9 +206,9 @@ module CapabilityHelper
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future? && t.observable?
         if var_node.is_a?(AST::Identifier)
-          emit_view_not_observable_finding!(node, var_node, t)
+          emit_view_not_observable_finding!(node, fact, t)
         else
-          name = cap_var_label(var_node)
+          name = fact.target_label
           error!(node, :CAPABILITY_VIOLATION_FIXABLE,
             message: "WITH VIEW requires an `@observable` source, but '#{name}' has type #{t.resolved}.")
         end
@@ -310,79 +218,95 @@ module CapabilityHelper
       # Any tense aggregate is allowed; non-tense sources are rejected.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future?
-        name = cap_var_label(var_node)
+        name = fact.target_label
         emit_with_materialized_needs_tense!(node, name, t.resolved)
       end
 
-    when :SNAPSHOT
-      # Versioned cells and indirect atomic cells share the WITH SNAPSHOT
-      # surface; lowering chooses the Guard or update/CAS path per capability.
-      syn = cap_var_sync(var_node)
-      lay = cap_var_layout(var_node)
-      atomic_ptr_ok = syn == :atomic && lay == :indirect
-      unless syn == :versioned || atomic_ptr_ok
-        name = cap_var_label(var_node)
-        storage = cap_var_storage(var_node)
-        actual = if syn && lay == :indirect
-          "@#{lay}:#{syn}"
-        elsif syn
-          "@#{syn}"
-        elsif storage
-          "@#{storage}"
-        else
+	    when :SNAPSHOT
+	      # Versioned cells and indirect atomic cells share the WITH SNAPSHOT
+	      # surface; lowering chooses the Guard or update/CAS path per capability.
+	      snapshot_sync = fact.sync
+	      snapshot_layout = fact.layout
+	      atomic_ptr_ok = snapshot_sync == :atomic && snapshot_layout == :indirect
+	      unless snapshot_sync == :versioned || atomic_ptr_ok
+	        name = fact.target_label
+	        storage = fact.storage
+	        actual = if snapshot_sync && snapshot_layout == :indirect
+	          "@#{snapshot_layout}:#{snapshot_sync}"
+	        elsif snapshot_sync
+	          "@#{snapshot_sync}"
+	        elsif storage
+	          "@#{storage}"
+	        else
           "plain"
         end
         emit_with_cap_mismatch!(node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC,
           [
-            { sigil: '@versioned',
-              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)." },
-            { sigil: '@indirect:atomic',
-              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)." },
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@versioned",
+              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)."
+            ),
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@indirect:atomic",
+              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)."
+            ),
           ],
           confidence: :interactive,
           name: name, actual: actual)
       end
 
     when :multiowned
-      unless cap_var_storage(var_node) == :multiowned
-        name = cap_var_label(var_node)
+      unless fact.storage == :multiowned
+        name = fact.target_label
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_MULTIOWNED,
-          [{ sigil: '@multiowned',
-             description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)." }],
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@multiowned",
+              description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)."
+            ),
+          ],
           confidence: :auto,
           name: name)
       end
 
     when :shared
-      unless cap_var_storage(var_node) == :shared
-        name = cap_var_label(var_node)
+      unless fact.storage == :shared
+        name = fact.target_label
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_SHARED,
-          [{ sigil: '@shared',
-             description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)." }],
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@shared",
+              description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)."
+            ),
+          ],
           confidence: :auto,
           name: name)
       end
 
     when :ATOMIC
       # Polymorphic params may not have sync propagated yet; defer those checks.
-      syn = cap_var_sync(var_node)
+      syn = fact.sync
       unless syn == :atomic
-        if var_node.symbol&.is_param && syn.nil?
-          record_deferred_with_validation!(node, var_node, :ATOMIC)
+        if fact.deferred_sync_param?
+          record_deferred_with_validation!(node, fact)
         else
-          name = cap_var_label(var_node)
-          storage = cap_var_storage(var_node)
+          name = fact.target_label
+          storage = fact.storage
           actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
           emit_with_cap_mismatch!(node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC,
-            [{ sigil: '@shared:atomic',
-               description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)." }],
+            [
+              FixableHelper::CapabilityFixCandidate.new(
+                sigil: "@shared:atomic",
+                description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)."
+              ),
+            ],
             confidence: :auto,
             name: name, actual: actual)
         end
       end
 
     else
-      error!(node, :UNKNOWN_WITH_CAP_TYPE, type: capability_type)
+      error!(node, :UNKNOWN_WITH_CAP_TYPE, type: fact.capability)
     end
   end
 
@@ -399,15 +323,14 @@ module CapabilityHelper
   # :interactive fix proposes adding `@observable` at the source's
   # declaration -- skipped here because the declaration may be in
   # another module / file; `clear fix` will surface only the :auto fix.
-  sig { params(node: AST::WithBlock, var_node: AST::Identifier, var_type: Type).returns(NilClass) }
-  def emit_view_not_observable_finding!(node, var_node, var_type)
+  sig { params(node: AST::WithBlock, fact: WithCapabilityFact, var_type: Type).returns(NilClass) }
+  def emit_view_not_observable_finding!(node, fact, var_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    name = var_node.respond_to?(:name) ? var_node.name : var_node.find
+    name = fact.target_label
     msg = "WITH VIEW requires an `@observable` source, but '#{name}' has type #{var_type.resolved}. " \
           "Use `WITH MATERIALIZED VIEW` for non-observable aggregates, or annotate the binding as `~T@observable`."
 
-    cap_entry = node.capabilities.find { |c| c[:capability] == :VIEW && c[:var_node].equal?(var_node) }
-    view_tok = cap_entry && cap_entry[:view_token]
+    view_tok = fact.source[:view_token]
 
     fixes = []
     if view_tok
@@ -433,8 +356,7 @@ module CapabilityHelper
   sig { params(node: AST::Identifier).returns(NilClass) }
   def predicate_identifier_allowed!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    ctx = @current_predicate_context
+    ctx = current_predicate_context
     return unless ctx
     return if %w[TRUE FALSE].include?(node.name)
 
@@ -482,13 +404,13 @@ module CapabilityHelper
         error!(node, :DEBUG_POST_NEEDS_UNSYNC_PARAM, name: node.name)
       end
     end
+    nil
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).void }
   def record_predicate_call_site!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    ctx = @current_predicate_context
+    ctx = current_predicate_context
     return unless ctx
     predicate_call_sites_store << PredicateCallSite.new(
       kind: ctx.kind,
@@ -527,27 +449,26 @@ module CapabilityHelper
   sig { returns(T::Array[PredicateCallSite]) }
   def predicate_call_sites_store
     T.bind(self, SemanticAnnotator) rescue nil
-    T.cast(instance_variable_get(:@predicate_call_sites), T::Array[PredicateCallSite])
+    predicate_call_sites
   end
   private :predicate_call_sites_store
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
-    return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
-    return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
-    return "can fail" if call.respond_to?(:can_fail) && call.can_fail
+    return "is an extern call" if call.extern_call
+    extern_effects = call.extern_effects
+    return "has extern effects" if extern_effects && !extern_effects.empty?
+    return "can fail" if call.can_fail
     if call.matched_stdlib_def
       md = T.must(call.matched_stdlib_def)
-      return "allocates" if md.emit&.allocates
+      return "allocates" if md.emits_allocating?
       return "can fail" if md.can_fail
-      return "suspends" if md.emit&.suspends
-      return "mutates its receiver" if md.emit&.mutates_receiver
+      return "suspends" if md.intrinsic_suspends?
+      return "mutates its receiver" if md.mutates_receiver?
       return nil
     end
-
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn = fn_nodes[callee]
     return nil unless fn
     return "can fail" if fn.can_fail
@@ -559,9 +480,9 @@ module CapabilityHelper
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    caps = node.capabilities || []
-    guarded = caps.select { |cap| cap[:guard_expr] }
+    capability_plan = CapabilityPlan.require_for(node)
+    caps = capability_plan.all
+    guarded = capability_plan.guarded
     return if guarded.empty?
 
     error!(node, :WITH_GUARD_NOT_WITH_MATCH) if node.arms
@@ -572,38 +493,37 @@ module CapabilityHelper
     # Every participating capability must bind an alias so the guard can
     # name it, and every alias must be immutable. MUTABLE aliases could
     # change inside the body and silently invalidate the predicate.
-    missing_alias = caps.reject { |c| c[:alias] }
+    missing_alias = caps.reject(&:alias_explicit)
     unless missing_alias.empty?
       emit_with_guard_all_bindings_need_as!(node, missing_alias)
     end
 
-    aliases = caps.map { |c| c[:alias] }.compact
-    prev_guard = @current_predicate_context
-    begin
-      guarded.each do |gcap|
-        own = gcap[:alias]
-        siblings = aliases - [own]
-        @current_predicate_context = T.let(PredicateContext.new(
+    aliases = caps.map(&:alias_name)
+    guarded.each do |gcap|
+      own = gcap.alias_name
+      siblings = aliases - [own]
+      guard_expr = T.must(gcap.guard_expr)
+      with_predicate_context(
+        PredicateContext.new(
           kind: :guard,
           with_node: node,
           fn_node: nil,
-          pred_expr: T.cast(gcap[:guard_expr], AST::Locatable),
+          pred_expr: guard_expr,
           guard_alias: own,
           sibling_aliases: siblings,
           param_names: [],
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: nil,
-        ), T.nilable(PredicateContext))
-        visit(gcap[:guard_expr])
+        )
+      ) do
+        visit(guard_expr)
 
-        guard_type = gcap[:guard_expr].full_type!(context: "WITH guard expression")
+        guard_type = guard_expr.full_type!(context: "WITH guard expression")
         unless guard_type && guard_type.resolved == :Bool
-          error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
+          error!(guard_expr, :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
       end
-    ensure
-      @current_predicate_context = prev_guard
     end
   end
 
@@ -621,11 +541,10 @@ module CapabilityHelper
   sig { params(fn_node: AST::FunctionDef).void }
   def visit_pre_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    pre_clauses = fn_node.respond_to?(:pre_clauses) ? (fn_node.pre_clauses || []) : []
+    pre_clauses = fn_node.pre_clauses || []
     return if pre_clauses.empty?
 
-    unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
+    unless fn_node.explicit_return_type
       message = "Function '#{fn_node.name}' has PRE clauses but no explicit return type. " \
                 "PRE clauses can fail at runtime, so the function must declare an error-union " \
                 "return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) " \
@@ -651,11 +570,10 @@ module CapabilityHelper
     end
 
     param_names = fn_node.params.map { |p| p.name.to_s }
-    prev_ctx = @current_predicate_context
-    begin
-      pre_clauses.each do |entry|
-        expr = entry[:expr]
-        @current_predicate_context = T.let(PredicateContext.new(
+    pre_clauses.each do |entry|
+      expr = entry[:expr]
+      with_predicate_context(
+        PredicateContext.new(
           kind: :pre,
           with_node: nil,
           fn_node: fn_node,
@@ -666,7 +584,8 @@ module CapabilityHelper
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: fn_node.name,
-        ), T.nilable(PredicateContext))
+        )
+      ) do
         visit(expr)
 
         pred_type = expr.full_type!(context: "PRE expression")
@@ -674,8 +593,6 @@ module CapabilityHelper
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
       end
-    ensure
-      @current_predicate_context = prev_ctx
     end
   end
 
@@ -690,15 +607,14 @@ module CapabilityHelper
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Scope)) }
   def visit_post_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     post_clauses = fn_node.respond_to?(:post_clauses) ? (fn_node.post_clauses || []) : []
     return if post_clauses.empty?
 
     # POST + CATCH on the same function is not yet supported. Reject at
     # annotation time with a clean CLEAR diagnostic rather than letting
     # MIR lowering hit an internal raise.
-    has_catch = fn_node.respond_to?(:catch_clauses) && fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
-    has_default_catch = fn_node.respond_to?(:default_catch) && fn_node.default_catch.is_a?(Array) && fn_node.default_catch.any?
+    has_catch = function_has_catch_clauses?(fn_node)
+    has_default_catch = function_has_default_catch?(fn_node)
     if has_catch || has_default_catch
       error!(fn_node, :DEBUG_POST_NOT_WITH_CATCH)
     end
@@ -723,11 +639,10 @@ module CapabilityHelper
       end
 
       allowed_names = param_names + ["result"]
-      prev_ctx = @current_predicate_context
-      begin
-        post_clauses.each do |entry|
-          expr = entry[:expr]
-          @current_predicate_context = T.let(PredicateContext.new(
+      post_clauses.each do |entry|
+        expr = entry[:expr]
+        with_predicate_context(
+          PredicateContext.new(
             kind: :post,
             with_node: nil,
             fn_node: fn_node,
@@ -738,7 +653,8 @@ module CapabilityHelper
             allowed_names: allowed_names,
             rejected_param_names: rejected,
             fn_name: fn_node.name,
-          ), T.nilable(PredicateContext))
+          )
+        ) do
           visit(expr)
 
           pred_type = expr.full_type!(context: "DEBUG_POST expression")
@@ -746,10 +662,9 @@ module CapabilityHelper
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
         end
-      ensure
-        @current_predicate_context = prev_ctx
       end
     end
+    nil
   end
 
   # Post-body check: a MUTABLE GUARD alias is fine as long as the body
@@ -762,13 +677,13 @@ module CapabilityHelper
   sig { params(node: AST::WithBlock).returns(NilClass) }
   def validate_with_guard_no_body_mutation!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    caps = node.capabilities || []
-    return if caps.none? { |cap| cap[:guard_expr] }
+    capability_plan = CapabilityPlan.require_for(node)
+    return if capability_plan.guarded.empty?
 
-    mutable_caps = caps.select { |c| c[:alias_mutable] && c[:alias] }
+    mutable_caps = capability_plan.all.select { |cap| cap.alias_mutable && cap.alias_explicit }
     return if mutable_caps.empty?
 
-    mutated = mutable_caps.map { |c| c[:alias] }.select { |a| alias_mutated?(a) }
+    mutated = mutable_caps.map(&:alias_name).select { |alias_name| alias_mutated?(alias_name) }
     return if mutated.empty?
 
     is_or_are = mutated.length == 1 ? 'is' : 'are'
@@ -797,7 +712,7 @@ module CapabilityHelper
     visit(var_node)
     cap[:resolved_type] = var_node.full_type!(context: "WITH resolved capability target")
 
-    cap[:old_scope] = lookup_scope_for(cap_var_name(var_node))
+	    cap[:old_scope] = lookup_scope_for(CapabilityPlan.var_name_for(var_node))
 
     # Infer capability from the variable's storage when not stated explicitly
     if cap[:capability] == :infer
@@ -836,7 +751,8 @@ module CapabilityHelper
                          end
     end
 
-    validate_capability(node, cap[:capability], var_node)
+    fact = with_capability_fact(cap)
+    validate_capability_transition!(node, fact)
 
     # Effect tracking: lock-based caps may block the fiber AND contend on
     # the lock's cache line. Lock-free SNAPSHOT (MVCC read) just contends
@@ -850,7 +766,7 @@ module CapabilityHelper
     if node.respond_to?(:arms) && node.arms
       # WITH MATCH form: per-arm recording in visit_WithBlock handles it.
     else
-      case cap[:capability]
+      case fact.capability
       when :EXCLUSIVE, :write_locked_read
         record_effect(EffectTracker::BLOCKING)
         record_effect(EffectTracker::CONTENTION)
@@ -860,7 +776,7 @@ module CapabilityHelper
     end
 
     # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
-    if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
+    if fact.capability == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
       audit_mark_mutated(var_node.name)
     end
 
@@ -903,59 +819,37 @@ module CapabilityHelper
       )
       expanded.add(with_capability_fact(expanded_cap))
     else
-      expanded.add(with_capability_fact(cap))
+      expanded.add(fact)
     end
   end
 
   sig { params(cap: AST::Capability).returns(WithCapabilityFact) }
   def with_capability_fact(cap)
     T.bind(self, SemanticAnnotator) rescue nil
+    request = CapabilityPlan::CapabilityRequest.from_ast(cap)
     var_node = T.cast(cap[:var_node], AST::Locatable)
-    var_name = cap_var_name(var_node)
-    alias_value = cap[:alias]
-    alias_explicit = T.let(!alias_value.nil?, T::Boolean)
+	    var_name = CapabilityPlan.var_name_for(var_node)
     resolved = cap.resolved_type
     old_scope = T.cast(cap[:old_scope], T.nilable(Scope))
     source_entry = old_scope&.resolve_entry(var_name)
     source_type = source_entry ? Type.new(source_entry.type) : Type.new(resolved)
-    capability = T.cast(cap[:capability], Symbol)
-    lock_capability = LOCK_CAPABILITIES.include?(capability)
-    restrict_capability = capability == :RESTRICT
-    borrowed_capability = capability == :BORROWED
-    snapshot_capability = capability == :SNAPSHOT
-    view_capability = VIEW_CAPABILITIES.include?(capability)
-    field_target = var_node.is_a?(AST::GetField)
     sync = cap_var_sync(var_node)
-    deferred_lock_param = source_entry&.is_param == true && sync.nil? && lock_capability
-    sync_alias_unwrapped = (field_target && !sync.nil?) ||
-      (!field_target && (!sync.nil? || deferred_lock_param))
-    WithCapabilityFact.new(
-      source: cap,
-      capability: capability,
+    target = CapabilityPlan::CapabilityTargetFact.new(
       var_node: var_node,
       var_name: var_name,
-      alias_name: (alias_value || var_name).to_s,
-      alias_explicit: alias_explicit,
-      alias_mutable: cap[:alias_mutable] == true,
+      target_label: cap_var_label(var_node),
+      field_target: var_node.is_a?(AST::GetField),
+      index_target: var_node.is_a?(AST::GetIndex),
       resolved_type: Type.new(resolved),
       old_scope: old_scope,
       source_entry: source_entry,
-      field_target: field_target,
       sync: sync,
       storage: cap_var_storage(var_node),
       layout: cap_var_layout(var_node),
       source_type: source_type,
-      lock_identity_value: Type.new(resolved).base_type,
-      lock_capability: lock_capability,
-      restrict_capability: restrict_capability,
-      borrowed_capability: borrowed_capability,
-      snapshot_capability: snapshot_capability,
-      view_capability: view_capability,
-      deferred_lock_param: deferred_lock_param,
-      sync_alias_unwrapped: sync_alias_unwrapped,
-      plain_restrict_alias: restrict_capability && alias_explicit && sync.nil?,
-      borrowed_qualifier: borrowed_capability ? borrowed_source_qualifier(source_entry) : nil,
+      live_symbol_refreshed: false,
     )
+    CapabilityPlan.transition_from(request, target, borrowed_source_qualifier(source_entry))
   end
 
   sig { params(entry: T.nilable(SymbolEntry)).returns(T.nilable(String)) }
@@ -972,16 +866,9 @@ module CapabilityHelper
   # For locked/write_locked vars, declares the alias as the plain inner type
   # (mutable, stack-allocated) and re-declares the locked var for accessibility.
   # For all others, delegates to scope.declare_with_new_capability.
-  sig { params(var_node: T.untyped).returns(String) }
-  def cap_var_name(var_node)
+	  sig { params(fact: WithCapabilityFact).returns(T.nilable(String)) }
+	  def declare_capability_scope!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    AST.root_identifier(var_node)&.name || "__unknown"
-  end
-
-  sig { params(fact: WithCapabilityFact).returns(T.nilable(String)) }
-  def declare_capability_scope!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
-    @og = T.let(@og, T.any(OwnershipGraph, T.untyped))
     declare_unwrapped_capability_alias!(fact) if fact.unwraps_sync_alias?
     declare_capability_binding_or_error!(fact)
     declare_capability_projection!(fact)
@@ -1035,7 +922,7 @@ module CapabilityHelper
   sig { params(fact: WithCapabilityFact).void }
   def declare_restrict_capability!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    @og.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
+    ownership_graph.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
     mark_var_mutated(fact.var_name) if fact.alias_mutable
     declare_restrict_alias!(fact) if fact.declares_plain_restrict_alias?
   end
@@ -1099,7 +986,7 @@ module CapabilityHelper
     sym.mark_non_escaping!
     sym.mark_borrowed_alias!
     og_declare(alias_name, nil, resolved_type)
-    @og.borrow("__borrowed_#{fact.var_name}", fact.var_name, mutable: false)
+    ownership_graph.borrow("__borrowed_#{fact.var_name}", fact.var_name, mutable: false)
   end
 
   sig { params(fact: WithCapabilityFact, qualifier: String).void }
@@ -1139,7 +1026,7 @@ module CapabilityHelper
     prop :has_non_escaping_capture, T::Boolean, default: false
     prop :captures, T::Hash[String, Type], factory: -> { {} }
     prop :capture_symbols, T::Hash[String, SymbolEntry], factory: -> { {} }
-    prop :close_patterns, T::Hash[String, String], factory: -> { {} }
+    prop :close_plans, T::Hash[String, Schemas::ResourceClosePlan], factory: -> { {} }
     prop :pointer_captures, T::Set[String], factory: -> { Set.new }
     prop :string_captures, T::Set[String], factory: -> { Set.new }
     prop :resource_captures, T::Set[String], factory: -> { Set.new }
@@ -1156,7 +1043,7 @@ module CapabilityHelper
     def merge_nested!(nested)
       captures.merge!(nested.captures) { |_name, old, _new| old }
       capture_symbols.merge!(nested.capture_symbols) { |_name, old, _new| old }
-      close_patterns.merge!(nested.close_patterns) { |_name, old, _new| old }
+      close_plans.merge!(nested.close_plans) { |_name, old, _new| old }
       pointer_captures.merge(nested.pointer_captures)
       string_captures.merge(nested.string_captures)
       resource_captures.merge(nested.resource_captures)
@@ -1183,8 +1070,9 @@ module CapabilityHelper
 
   sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
   def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
-    T.bind(self, SemanticAnnotator) rescue nil
-    @capture_stack = T.let(@capture_stack, T.untyped)
+    T.bind(self, SemanticAnnotator)
+    ctx = T.let(nil, T.nilable(CaptureContext))
+    state = T.let(phase_receiver_state, SemanticAnnotator::ReceiverState)
     ctx = CaptureContext.new(
       analysis: new_capture_analysis,
       outer_scope: current_scope,
@@ -1192,17 +1080,18 @@ module CapabilityHelper
       is_parallel: !!is_parallel,
       mark_moves: mark_moves
     )
-    (@capture_stack ||= []) << ctx
+    state.capture_stack << ctx
     blk.call
     ctx.analysis
   ensure
-    @capture_stack.pop if @capture_stack
+    popped = T.must(state).capture_stack.pop
+    Kernel.raise "BUG: capture context mismatch" if popped && !popped.equal?(ctx)
   end
 
   sig { returns(T.nilable(CapabilityHelper::CaptureContext)) }
   def current_capture_context
-    @capture_stack = T.let(@capture_stack, T.untyped)
-    @capture_stack&.last
+    T.bind(self, SemanticAnnotator)
+    phase_receiver_state.capture_stack.last
   end
 
   sig { params(name: T.nilable(String)).void }
@@ -1259,21 +1148,21 @@ module CapabilityHelper
       result.captures[name] = cap_type
       result.capture_symbols[name] = info
       t = cap_type
-      close_pattern = info.close_zig
+      close_plan = info.close_plan
       add_capture_name_when(result.pointer_captures, name, t.needs_pointer_passing?)
       add_capture_name_when(result.string_captures, name, t.string?)
-      add_capture_name_when(result.resource_captures, name, t.resource? || !close_pattern.nil?)
-      string_map_cleanup = t.captured_plain_string_map_needs_deinit? && close_pattern.nil?
+      add_capture_name_when(result.resource_captures, name, t.resource? || !close_plan.nil?)
+      string_map_cleanup = t.captured_plain_string_map_needs_deinit? && close_plan.nil?
       add_capture_name_when(result.resource_captures, name, string_map_cleanup)
-      set_capture_close_pattern_when(
-        result.close_patterns,
+      set_capture_close_plan_when(
+        result.close_plans,
         name,
-        "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())",
+        Schemas::ResourceClosePlan.method("deinit", runtime_heap_alloc_args: 2),
         string_map_cleanup
       )
     end
-    close_pattern = info.close_zig
-    set_capture_close_pattern_when(result.close_patterns, name, close_pattern || "", !close_pattern.nil?)
+    close_plan = info.close_plan
+    set_capture_close_plan_when(result.close_plans, name, close_plan, !close_plan.nil?)
     result.has_local ||= info.local?
     result.has_rc ||= info.storage == :multiowned
     ti = info.type
@@ -1293,32 +1182,31 @@ module CapabilityHelper
     names << name
   end
 
-  sig { params(patterns: T::Hash[String, String], name: String, pattern: String, active: T::Boolean).void }
-  def set_capture_close_pattern_when(patterns, name, pattern, active)
+  sig { params(plans: T::Hash[String, Schemas::ResourceClosePlan], name: String, plan: T.nilable(Schemas::ResourceClosePlan), active: T::Boolean).void }
+  def set_capture_close_plan_when(plans, name, plan, active)
     return unless active
 
-    patterns[name] ||= pattern
+    plans[name] ||= T.must(plan)
   end
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_move!(ctx, name, info, node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
-    return unless ctx.mark_moves && (@capture_move_suppressed || 0).zero?
+    return unless ctx.mark_moves && phase_receiver_state.capture_move_suppression_depth.zero?
     return unless ctx.outer_scope.owned_names.include?(name)
     classify_ownership!(info) unless info.ownership_kind
-    if info.capture_move_required?(@og.live?(name))
+    if info.capture_move_required?(ownership_graph.live?(name))
       og_set_moved(name, at_token: node.token, action: :capture)
     end
   end
 
   sig { params(blk: T.untyped).returns(T.untyped) }
   def without_capture_moves(&blk)
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
-    @capture_move_suppressed = (@capture_move_suppressed || 0) + 1
+    T.bind(self, SemanticAnnotator)
+    phase_receiver_state.capture_move_suppression_depth += 1
     blk.call
   ensure
-    @capture_move_suppressed = T.must(@capture_move_suppressed) - 1
+    phase_receiver_state.capture_move_suppression_depth -= 1
   end
 
   sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
@@ -1390,7 +1278,10 @@ module CapabilityAudit
   sig { params(var_name: String, node: AST::Locatable, final_type: T.any(Type, Symbol), storage: Symbol).returns(T.nilable(BindingAuditRecord)) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless current_fn_ctx&.name
+    fn_ctx = current_fn_ctx
+    return unless fn_ctx
+    fn_name = fn_ctx.name
+    return unless fn_name
 
     info = current_scope.resolve_entry(var_name)
     sync = info&.sync
@@ -1398,13 +1289,10 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    fn_node = fn_name ? fn_nodes[fn_name] : nil
+    fn_nodes = function_node_map
+    fn_node = fn_nodes[fn_name]
     return if fn_node&.visibility == :pub
 
-    fn_name = T.must(fn_name)
     key = capability_audit_key(fn_name, var_name)
     line   = node.token&.line
     column = node.token&.column
@@ -1471,7 +1359,7 @@ module CapabilityAudit
   sig { returns(BindingAuditStore) }
   def capability_audit_store
     T.bind(self, SemanticAnnotator) rescue nil
-    T.cast(instance_variable_get(:@capability_audit), BindingAuditStore)
+    capability_audit
   end
   private :capability_audit_store
 

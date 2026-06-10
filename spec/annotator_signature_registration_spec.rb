@@ -51,7 +51,7 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator.register_type_declarations(index)
     annotator.register_program_signatures(index)
 
-    parser_schema = annotator.current_scope.types.fetch(:Parser).fetch(:schema)
+    parser_schema = annotator.current_scope.types.fetch(:Parser).schema
     expect(parser_schema.methods.fetch("parse")).to be_a(FunctionSignature)
     expect(annotator.current_scope.entry?("parse")).to eq(false)
     expect(annotator.current_scope.entry?("skip")).to eq(false)

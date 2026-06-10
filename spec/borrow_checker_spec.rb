@@ -32,6 +32,7 @@ RSpec.describe BorrowChecker do
       guard_expr: nil,
     )
     with = AST::WithBlock.new(token, [cap], body, nil)
+    attach_capability_plan!(with)
     fn = AST::FunctionDef.new(token, "main", [], [], Type.new(:Void), nil, [with], [], nil, :private, [], false)
     BorrowChecker.check(fn, schema_lookup: ->(_name) { nil })
   end
@@ -362,7 +363,7 @@ RSpec.describe BorrowChecker do
       ident.full_type = Type.new(:User)
       ident.was_moved = true
       share = AST::ShareNode.new(token, ident)
-      fn = Struct.new(:name, :body).new("main", [])
+      fn = AST::FunctionDef.new(token, "main", [], [], Type.new(:Void), nil, [], [], nil, :private, [], false)
       checker = BorrowChecker.new(fn, schema_lookup: nil)
       seen = []
 

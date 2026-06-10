@@ -16,10 +16,10 @@ RSpec.describe "annotator completion phases" do
     scope = SemanticAnnotator.new.current_scope
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
-    expect(scope.types.fetch(:Range).fetch(:schema)).to be_a(Schemas::StructSchema)
-    expect(scope.types.fetch(:File).fetch(:schema)).to be_a(Schemas::ResourceSchema)
-    expect(scope.types.fetch(:TCPServer).fetch(:schema)).to be_a(Schemas::ResourceSchema)
-    expect(scope.types.fetch(:TCPClient).fetch(:schema)).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)
+    expect(scope.types.fetch(:File).schema).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:TCPServer).schema).to be_a(Schemas::ResourceSchema)
+    expect(scope.types.fetch(:TCPClient).schema).to be_a(Schemas::ResourceSchema)
   end
 
   it "marks an empty program annotated through the boundary phase" do
@@ -44,6 +44,53 @@ RSpec.describe "annotator completion phases" do
 
     expect(program.full_type!.resolved).to eq(:Int64)
     expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
+  end
+
+  it "publishes a frozen semantic index after annotation completes" do
+    annotator = SemanticAnnotator.new
+    program = parse(<<~CLEAR)
+      FN main() RETURNS Int64 ->
+        RETURN 1;
+      END
+    CLEAR
+
+    annotator.annotate!(program)
+    index = T.must(annotator.semantic_index)
+
+    expect(index.program).to eq(program)
+    expect(index.root_scope).to eq(annotator.semantic_root_scope)
+    expect(index.function_node("main")).to eq(annotator.function_node_for("main"))
+    expect(index.function_nodes.keys).to include("main")
+    expect(index.id_index.definition_id_for("main")&.value).to be > 0
+    expect(index.id_index.body_id_for("main")&.value).to be > 0
+    expect(index.body_summaries.fetch("main").definition_id).to eq(index.id_index.definition_id_for("main"))
+    expect(index.body_summaries.fetch("main").body_id).to eq(index.id_index.body_id_for("main"))
+  end
+
+  it "publishes typed local and call-site facts in function body summaries" do
+    annotator = SemanticAnnotator.new
+    program = parse(<<~CLEAR)
+      FN callee() RETURNS Int64 ->
+        RETURN 1;
+      END
+
+      FN main() RETURNS Int64 ->
+        value = callee();
+        RETURN value;
+      END
+    CLEAR
+
+    annotator.annotate!(program)
+    summary = T.must(annotator.function_body_summary_for("main"))
+
+    expect(summary.definition_id.value).to be > 0
+    expect(summary.body_id.value).to be > 0
+    expect(summary.local_facts.map(&:name)).to include("value")
+    expect(summary.local_facts.map { |fact| fact.id.value }).to all(be > 0)
+    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(be > 0)
+    expect(summary.call_site_facts.map(&:callee_name)).to include("callee")
+    expect(summary.call_site_facts.map(&:fn_var_call)).to eq([false])
+    expect(summary.call_site_facts.map(&:propagates_failure)).to eq([true])
   end
 
   it "appends synthesized functions during body analysis" do
@@ -90,7 +137,10 @@ RSpec.describe "annotator completion phases" do
     with_node = AST::WithBlock.new(tok("WITH"), [], [], [])
     var_node = AST::Identifier.new(tok("cell"), "cell")
     var_node.full_type = Type.new(:Int64)
-    annotator.record_deferred_with_validation!(with_node, var_node, :EXCLUSIVE)
+    annotator.record_deferred_with_validation!(
+      with_node,
+      capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: var_node))
+    )
 
     expect {
       annotator.mark_annotation_complete!(program)
@@ -104,7 +154,10 @@ RSpec.describe "annotator completion phases" do
     var_node.full_type = Type.new(:Int64)
     var_node.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :stack)
     var_node.symbol.is_param = true
-    annotator.record_deferred_with_validation!(with_node, var_node, :ATOMIC)
+    annotator.record_deferred_with_validation!(
+      with_node,
+      capability_transition(AST::Capability.new(capability: :ATOMIC, var_node: var_node))
+    )
 
     expect {
       annotator.run_deferred_validations!

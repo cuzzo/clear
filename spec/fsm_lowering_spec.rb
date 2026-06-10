@@ -36,8 +36,10 @@ RSpec.describe FsmLowering do
       old_scope: nil,
     )
     with_node = AST::WithBlock.new(token, [cap], [], nil)
+    attach_capability_plan!(with_node)
+    transition = CapabilityPlan.require_for(with_node).first_transition
 
-    meta = lowering.fsm_cap_metadata(cap, with_node, 7, { "c" => Object.new })
+    meta = lowering.fsm_cap_metadata(transition, with_node, 7, { "c" => Object.new })
 
     expect(meta).not_to be_nil
     expect(meta[:lock_field_ref]).to include("comptime @hasField")
@@ -66,8 +68,10 @@ RSpec.describe FsmLowering do
       old_scope: nil,
     )
     with_node = AST::WithBlock.new(token, [cap], [], nil)
+    attach_capability_plan!(with_node)
+    transition = CapabilityPlan.require_for(with_node).first_transition
 
-    meta = lowering.fsm_cap_metadata(cap, with_node, 7, { "c" => Object.new })
+    meta = lowering.fsm_cap_metadata(transition, with_node, 7, { "c" => Object.new })
 
     expect(meta).not_to be_nil
     expect(meta[:lock_field_ref]).to include("comptime @hasField")
@@ -96,8 +100,10 @@ RSpec.describe FsmLowering do
       old_scope: nil,
     )
     with_node = AST::WithBlock.new(token, [cap], [], nil)
+    attach_capability_plan!(with_node)
+    transition = CapabilityPlan.require_for(with_node).first_transition
 
-    meta = lowering.fsm_cap_metadata(cap, with_node, 7, { "c" => Object.new })
+    meta = lowering.fsm_cap_metadata(transition, with_node, 7, { "c" => Object.new })
 
     expect(meta).not_to be_nil
     expect(meta[:lock_field_ref]).to eq("__ctx_7.c")

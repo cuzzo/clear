@@ -48,17 +48,19 @@ RSpec.describe SymbolEntry do
   end
 
   describe "dup" do
-    it "shallow copies all fields" do
+    it "shares lifecycle facts and shallow-copies overlays" do
       copy = entry.dup
       expect(copy.type).to eq(:Int64)
       expect(copy.storage).to eq(:stack)
+      expect(copy.lifecycle).to equal(entry.lifecycle)
       expect(copy.capabilities).to equal(entry.capabilities) # same object (shallow)
     end
 
-    it "does not affect original when copy is modified" do
+    it "shares storage lifecycle changes across branch copies" do
       copy = entry.dup
       copy.storage = :heap
-      expect(entry.storage).to eq(:stack)
+
+      expect(entry.storage).to eq(:heap)
     end
 
     it "forks binding flow facts when copied" do
@@ -104,7 +106,7 @@ RSpec.describe SymbolEntry do
       expect(minimal.valid).to eq(true)
       expect(minimal.invalid_reason).to be_nil
       expect(minimal.resource).to be_nil
-      expect(minimal.close_zig).to be_nil
+      expect(minimal.close_plan).to be_nil
       expect(minimal.scope).to be_nil
     end
   end

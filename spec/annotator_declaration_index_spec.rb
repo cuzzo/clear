@@ -49,4 +49,19 @@ RSpec.describe Annotator::Phases::DeclarationIndexer do
     expect(index.union_method_declarations).to eq([])
     expect(index.body_statements).to eq([])
   end
+
+  it "does not inspect function bodies while indexing declarations" do
+    raise_node = AST::Raise.new(tok("RAISE"), :System, "DeclaredInBody", nil)
+    exit_node = AST::OrExit.new(tok("OR"), :Input, "DeclaredInCatch", nil)
+    catch_clause = AST::CatchClause.new(body: [exit_node])
+    fn = function_def("main")
+    fn.body = [raise_node]
+    fn.catch_clauses = [catch_clause]
+    program = AST::Program.new(tok("program"), [fn])
+
+    index = described_class.index(program)
+
+    expect(index.function_declarations).to eq([fn])
+    expect(index.body_statements).to eq([fn])
+  end
 end

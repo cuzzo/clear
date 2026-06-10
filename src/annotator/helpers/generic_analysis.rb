@@ -267,7 +267,7 @@ module GenericAnalysis
 
   sig { params(schema: T.nilable(GenericSchema)).returns(T::Array[Symbol]) }
   def schema_type_params(schema)
-    return [] unless schema&.respond_to?(:type_params)
+    return [] unless schema.respond_to?(:type_params)
 
     T.cast(T.unsafe(schema).type_params || [], T::Array[Symbol])
   end
@@ -329,8 +329,7 @@ module GenericAnalysis
     error!(node, :POLY_SHARED_INCONSISTENT,
       fn: node.name,
       first: first[:name], first_cap: shared_call_capability_display(first[:type]),
-      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]),
-      hint: "")
+      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]))
   end
 
   # Recursively match param_type against actual_type to bind type params.
@@ -595,8 +594,7 @@ module GenericAnalysis
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-    @og = T.let(@og, T.untyped)
-    @og[var_name]&.kind = :borrowed
+    ownership_graph[var_name]&.kind = :borrowed
     node.symbol.mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
     node.storage = :borrow if node.respond_to?(:storage=)

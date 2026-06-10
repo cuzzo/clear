@@ -60,6 +60,17 @@ RSpec.describe "annotator branch gap burndown" do
     SymbolEntry.new(reg: nil, type: type, mutable: false, storage: storage)
   end
 
+  def call_site_fact(call, id: 1)
+    Semantic::CallSiteFact.new(
+      id: Semantic::CallSiteId.new(value: id),
+      node: call,
+      callee_name: call.name,
+      args: call.args,
+      fn_var_call: call.fn_var_call == true,
+      propagates_failure: true
+    )
+  end
+
   def with_function_context(ann, return_type: Type.new(:Void))
     ctx = FunctionContext.new(name: "gap", return_type: return_type)
     ann.send(:push_function_context!, ctx)
@@ -81,45 +92,109 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def with_capability_fact(cap, var_name: nil, type: Type.new(:Counter), sync: :locked, storage: :stack)
-    var_node = cap[:var_node]
-    fact_var_name = var_name || (var_node.respond_to?(:name) ? var_node.name : "cap")
-    old_scope = cap[:old_scope]
-    source_entry = old_scope&.resolve_entry(fact_var_name)
-    capability = cap[:capability]
-    lock_capability = CapabilityHelper::LOCK_CAPABILITIES.include?(capability)
-    restrict_capability = capability == :RESTRICT
-    borrowed_capability = capability == :BORROWED
-    snapshot_capability = capability == :SNAPSHOT
-    field_target = var_node.is_a?(AST::GetField)
-    deferred_lock_param = source_entry&.is_param == true && sync.nil? && lock_capability
-    CapabilityHelper::WithCapabilityFact.new(
-      source: cap,
-      capability: capability,
-      var_node: var_node,
-      var_name: fact_var_name,
-      alias_name: (cap[:alias] || (var_node.respond_to?(:name) ? var_node.name : "cap")).to_s,
-      alias_explicit: !cap[:alias].nil?,
-      alias_mutable: cap[:alias_mutable] == true,
-      resolved_type: type,
-      old_scope: old_scope,
-      source_entry: source_entry,
-      field_target: field_target,
-      sync: sync,
-      storage: storage,
-      layout: nil,
-      source_type: source_entry ? Type.new(source_entry.type) : Type.new(type),
-      lock_identity_value: Type.new(type).base_type,
-      lock_capability: lock_capability,
-      restrict_capability: restrict_capability,
-      borrowed_capability: borrowed_capability,
-      snapshot_capability: snapshot_capability,
-      view_capability: CapabilityHelper::VIEW_CAPABILITIES.include?(capability),
-      deferred_lock_param: deferred_lock_param,
-      sync_alias_unwrapped: (field_target && !sync.nil?) ||
-        (!field_target && (!sync.nil? || deferred_lock_param)),
-      plain_restrict_alias: restrict_capability && !cap[:alias].nil? && sync.nil?,
-      borrowed_qualifier: nil,
+    cap[:resolved_type] = type
+    if cap[:var_node].respond_to?(:symbol) && cap[:var_node].symbol.nil?
+      cap[:var_node].symbol = SymbolEntry.new(reg: nil, type: type, mutable: true, storage: storage, sync: sync)
+    end
+    capability_transition(cap)
+  end
+
+  def transition_for_sync(name, sync: nil, sync_families: nil)
+    ident = AST::Identifier.new(token(:IDENTIFIER, name), name)
+    ident.full_type = Type.new(:Counter)
+    ident.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: sync)
+    ident.symbol.sync_families = sync_families
+    capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: ident))
+  end
+
+  it "covers capability-plan request helpers and atomic admission facts" do
+    inferred_cap = AST::Capability.new(
+      capability: :infer,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "cell"), "cell"),
     )
+    inferred_request = CapabilityPlan::CapabilityRequest.from_ast(inferred_cap)
+
+    expect(inferred_request.inferred?).to be(true)
+    expect(inferred_request.effective_alias_name).to eq("cell")
+
+    view_cap = AST::Capability.new(
+      capability: :VIEW,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "row"), "row"),
+      alias: "view_alias",
+    )
+    view_request = CapabilityPlan::CapabilityRequest.from_ast(view_cap)
+    view_transition = capability_transition(view_cap)
+
+    expect(view_request.effective_alias_name).to eq("view_alias")
+    expect(view_transition.view?).to be(true)
+    expect(transition_for_sync("plain").view?).to be(false)
+
+    missing_symbol = capability_transition(AST::Capability.new(
+      capability: :EXCLUSIVE,
+      var_node: AST::Identifier.new(token(:IDENTIFIER, "missing"), "missing"),
+    ))
+
+    expect(missing_symbol.admits_atomic?).to be(false)
+    expect(transition_for_sync("direct_locked", sync: :locked).exclusive_sync?).to be(true)
+    expect(transition_for_sync("direct_write_locked", sync: :write_locked).exclusive_sync?).to be(true)
+    expect(transition_for_sync("direct_write_locked", sync: :write_locked).write_locked_sync?).to be(true)
+    expect(transition_for_sync("direct_locked", sync: :locked).write_locked_sync?).to be(false)
+    expect(transition_for_sync("direct_atomic", sync: :atomic).exclusive_sync?).to be(false)
+    expect(transition_for_sync("direct_locked", sync: :locked).exclusive_validation_action).to eq(:valid)
+    expect(transition_for_sync("direct_atomic", sync: :atomic).exclusive_validation_action).to eq(:mismatch)
+    expect(transition_for_sync("direct_atomic", sync: :atomic).admits_atomic?).to be(true)
+    expect(transition_for_sync("bad_family_shape", sync_families: :ATOMIC).admits_atomic?).to be(false)
+    expect(transition_for_sync("atomic_family", sync_families: Set[:ATOMIC]).admits_atomic?).to be(true)
+    expect(transition_for_sync("snapshotted_family", sync_families: Set[:SNAPSHOTTED]).admits_atomic?).to be(true)
+    expect(transition_for_sync("locked_family", sync_families: Set[:LOCKED]).admits_atomic?).to be(false)
+
+    param_ident = AST::Identifier.new(token(:IDENTIFIER, "param_lock"), "param_lock")
+    param_ident.full_type = Type.new(:Counter)
+    param_ident.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: nil)
+    param_ident.symbol.is_param = true
+    expect(param_ident.symbol.declared_sync_contract?).to be(false)
+    param_transition = capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: param_ident))
+    expect(param_transition.parameter_target?).to be(true)
+    expect(param_transition.declared_sync_contract?).to be(false)
+    expect(param_transition.deferred_sync_param?).to be(true)
+    expect(param_transition.deferred_lock_param?).to be(true)
+    expect(param_transition.exclusive_validation_action).to eq(:defer)
+
+    declared_family_param = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: nil)
+    declared_family_param.sync_families = Set[:LOCKED]
+    expect(declared_family_param.declared_sync_contract?).to be(true)
+
+    versioned_param = AST::Identifier.new(token(:IDENTIFIER, "versioned_param"), "versioned_param")
+    versioned_param.full_type = Type.new(:Counter)
+    versioned_param.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack, sync: :versioned)
+    versioned_param.symbol.is_param = true
+    versioned_param.symbol.sync_families = Set[:VERSIONED]
+    expect(versioned_param.symbol.declared_sync_contract?).to be(true)
+    versioned_transition = capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: versioned_param))
+    expect(versioned_transition.parameter_target?).to be(true)
+    expect(versioned_transition.exclusive_sync?).to be(false)
+    expect(versioned_transition.declared_sync_contract?).to be(true)
+    expect(versioned_transition.deferred_sync_param?).to be(false)
+    expect(versioned_transition.exclusive_validation_action).to eq(:declared_contract)
+    versioned_param.symbol.sync = nil
+    versioned_param.symbol.sync_families = :VERSIONED
+    expect(versioned_param.symbol.declared_sync_contract?).to be(false)
+
+    literal_target = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    literal_field = AST::GetField.new(token(:DOT, "."), literal_target, "fallback")
+    expect(CapabilityPlan.var_name_for(literal_field)).to eq("fallback")
+
+    with_without_plan = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
+    expect {
+      CapabilityPlan.require_for(with_without_plan)
+    }.to raise_error(/without a CapabilityPlan/)
+
+    param = AST::Param.new(name: "cell", type: Type.new(:Counter), mutable: true)
+    param.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap)
+    fn = function_def("refresh_without_plan", params: [param])
+    fn.body = [with_without_plan]
+
+    expect { CapabilityPlan.refresh_function_plans!(fn, []) }.not_to raise_error
   end
 
   it "annotates default fixed-array literals with their target type" do
@@ -190,6 +265,25 @@ RSpec.describe "annotator branch gap burndown" do
     end
   end
 
+  def empty_body_summary
+    Annotator::Phases::BodyScanSummary.new(
+      callees: Set.new,
+      propagating_callees: Set.new,
+      has_fnptr_call: false,
+      raises_directly: false
+    )
+  end
+
+  def body_fact_summary(ann, nodes = nil, &block)
+    ann.send(:with_body_fact_frame, Semantic::BodyIdentity.unassigned) do
+      if block
+        block.call
+      else
+        Array(nodes).each { |node| ann.send(:record_body_fact_node!, node) }
+      end
+    end
+  end
+
   it "marks non-stack list literal backing storage as frame-allocated" do
     ann = quiet_annotator
     item = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
@@ -255,7 +349,9 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:validate_no_multi_object_atomic!) { |_node| nil }
     ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
     ann.define_singleton_method(:validate_snapshot_match_arms!) { |_node| nil }
-    ann.define_singleton_method(:visit_stmts) { |_body| nil }
+    ann.define_singleton_method(:visit_stmts) do |_body|
+      send(:ownership_graph).mark_moved("captured", action: :capture)
+    end
 
     ann.send(:visit_WithBlock, with_node)
 
@@ -275,8 +371,8 @@ RSpec.describe "annotator branch gap burndown" do
       sync: :atomic,
     )
 
-    expect(ann.send(:sync_constrained_cap?, infer_without_symbol)).to be(false)
-    expect(ann.send(:sync_constrained_cap?, infer_with_sync)).to be(true)
+    expect(capability_transition(infer_without_symbol).sync_constrained?).to be(false)
+    expect(capability_transition(infer_with_sync).sync_constrained?).to be(true)
     expect(ann.send(:field_name_for_msg, AST::GetField.new(token, AST::Identifier.new(token, "x"), nil))).to eq("<field>")
     expect(ann.send(:match_variant_name, AST::MethodCall.new(token, AST::Identifier.new(token, "Result"), "Ok", []))).to eq("Ok")
 
@@ -401,20 +497,7 @@ RSpec.describe "annotator branch gap burndown" do
     end
     capture_context = Struct.new(:analysis).new(Struct.new(:captures).new({ "captured" => true }))
     ann.define_singleton_method(:current_capture_context) { capture_context }
-    og_snapshot = Class.new do
-      define_method(:state_for) { |_name| :live }
-    end.new
-    move_node = Struct.new(:move_action).new(:capture)
-    fake_og = Class.new do
-      define_method(:initialize) do |snapshot, move|
-        @snapshot = snapshot
-        @move = move
-      end
-      define_method(:fork_lightweight) { @snapshot }
-      define_method(:moved?) { |_name| true }
-      define_method(:[]) { |_name| @move }
-    end.new(og_snapshot, move_node)
-    ann.instance_variable_set(:@og, fake_og)
+    ann.send(:ownership_graph).declare("captured", kind: :affine, type_info: Type.new(:String), scope_depth: 0)
 
     loop = AST::WhileBindLoop.new(
       token(:WHILE, "WHILE"),
@@ -430,17 +513,25 @@ RSpec.describe "annotator branch gap burndown" do
     expect(direct_errors(ann).map { |err| err[1] }).not_to include(:USE_OF_MOVED_IN_LOOP_SHORT)
   end
 
-  it "seeds OR EXIT error types from function bodies" do
+  it "resolves CATCH types after body traversal registers error types" do
     ann = quiet_annotator
     exit_node = AST::OrExit.new(token(:OR, "OR"), :Input, "GapSeededError", nil)
     fn = function_def("seeded")
     fn.body = [exit_node]
+    clause = AST::CatchClause.new(
+      items: [AST::CatchItem.new(form: :type, name: "GapSeededError", token: token(:TYPE_ID, "GapSeededError"))],
+      body: []
+    )
+    fn.catch_clauses = [clause]
     program = AST::Program.new(token(:PROGRAM, "PROGRAM"), [fn])
 
-    ann.send(:seed_error_types_from_raises!, program)
+    declarations = Annotator::Phases::DeclarationIndexer.index(program)
+    ann.send(:visit, exit_node)
+    ann.send(:resolve_catch_clauses_from_declarations!, declarations)
 
     expect(AST.error_type?(:GapSeededError)).to be(true)
     expect(AST.kind_of_type(:GapSeededError)).to eq(:Input)
+    expect(clause.types).to eq(["GapSeededError"])
   end
 
   it "visits sync-policy exit messages and block bodies" do
@@ -514,7 +605,7 @@ RSpec.describe "annotator branch gap burndown" do
     target.symbol = entry
     value = AST::GetIndex.new(token, target, AST::Literal.new(token(:INT64, "0"), :INT64, 0, :stack))
     value.full_type = Type.new(:Int64)
-    ann.instance_variable_set(:@with_block_depth, 1)
+    ann.send(:phase_receiver_state).with_block_depth = 1
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:collect_bg_sources_in_expr) { |_node| [] }
     ann.define_singleton_method(:verify_return) { |_node| nil }
@@ -544,8 +635,7 @@ RSpec.describe "annotator branch gap burndown" do
     break_right = AST::OrBreak.new(token(:OR, "OR"))
     break_right.full_type = Type.new(:NoReturn)
     break_expr = AST::BinaryOp.new(token(:OR, "OR"), left, :OR_RESCUE, break_right)
-    ann.instance_variable_set(:@loop_depth, 1)
-    ann.send(:visit_OrRescue, break_expr)
+    ann.send(:with_loop_context) { ann.send(:visit_OrRescue, break_expr) }
     expect(break_expr.full_type!.resolved).to eq(:Int64)
 
     optional_left = AST::Identifier.new(token, "maybe")
@@ -667,8 +757,8 @@ RSpec.describe "annotator branch gap burndown" do
     promise.ownership_kind = :affine
     ann.current_scope.install_entry("file_handle", resource)
     ann.current_scope.install_entry("promise", promise)
-    ann.instance_variable_get(:@og).declare("file_handle", kind: :resource, type_info: Type.new(:File), scope_depth: 0, line: 1)
-    ann.instance_variable_get(:@og).declare("promise", kind: :affine, type_info: Type.new(:"~String"), scope_depth: 0, line: 1)
+    ann.send(:ownership_graph).declare("file_handle", kind: :resource, type_info: Type.new(:File), scope_depth: 0, line: 1)
+    ann.send(:ownership_graph).declare("promise", kind: :affine, type_info: Type.new(:"~String"), scope_depth: 0, line: 1)
     match = AST::MatchStatement.new(token(:MATCH, "MATCH"), AST::Identifier.new(token, "tag"), [], nil, nil, nil, true, false)
 
     drops = ann.send(:collect_scope_drops, node: match)
@@ -706,7 +796,7 @@ RSpec.describe "annotator branch gap burndown" do
     source = symbol_entry(type: Type.new(:String), storage: :stack)
     param = AST::Param.new(name: "arg", type: Type.new(:String), default: nil, mutable: false, takes: false, symbol: source)
     fn = function_def("source_name", params: [param])
-    ann.instance_variable_set(:@fn_nodes, { "source_name" => fn })
+    ann.semantic_function_nodes.replace({ "source_name" => fn })
 
     expect(ann.send(:lookup_source_name, source)).to eq("arg")
   end
@@ -726,16 +816,10 @@ RSpec.describe "annotator branch gap burndown" do
     ann = quiet_annotator
     ident = AST::Identifier.new(token, "owned")
     ident.full_type = Type.new(:Box)
-    existing = OwnershipGraph::Node.new(
-      path: "owned",
-      kind: :owned,
-      state: :moved,
-      type_info: Type.new(:Box),
-      scope_depth: 0,
-      line: 1,
-      move_action: :give
-    )
-    ann.instance_variable_get(:@og).instance_variable_get(:@nodes)["owned"] = existing
+    og = ann.send(:ownership_graph)
+    og.declare("owned", kind: :owned, type_info: Type.new(:Box), scope_depth: 0, line: 1)
+    og.mark_moved("owned", action: :give)
+    existing = T.must(og.nodes["owned"])
     consumer = Type.new(:Box)
 
     ann.send(:move_if_not_copyable!, ident, action: :takes, consumer_param_type: consumer)
@@ -759,8 +843,8 @@ RSpec.describe "annotator branch gap burndown" do
 
     root = AST::Identifier.new(token, "root")
     root.full_type = Type.new(:Box)
-    ann.instance_variable_get(:@og).declare("root", kind: :affine, type_info: Type.new(:Box), scope_depth: 0, line: 1)
-    ann.instance_variable_get(:@og).nodes["root"].state = :moved
+    ann.send(:ownership_graph).declare("root", kind: :affine, type_info: Type.new(:Box), scope_depth: 0, line: 1)
+    T.must(ann.send(:ownership_graph).nodes["root"]).state = :moved
     moved_field = AST::GetField.new(token(:DOT, "."), root, "*")
     ann.send(:visit_GetField, moved_field)
     expect(moved_field.full_type!.resolved).to eq(:Void)
@@ -815,9 +899,10 @@ RSpec.describe "annotator branch gap burndown" do
       false
     )
 
-    expect {
-      ann.send(:promote_pipe_to_observable_dest!, decl)
-    }.to raise_error(CompilerError, /Observable terminal mismatch/)
+    ann.send(:promote_pipe_to_observable_dest!, decl)
+    error = direct_errors(ann).find { |err| err[1] == :OBSERVABLE_TERMINAL_MISMATCH }
+    expect(error).not_to be_nil
+    expect(error[3]).to include(lhs: ":count", pipe: ":sum")
   end
 
   it "notes bare affine versioned declarations without a token-local fix" do
@@ -1189,7 +1274,8 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "narrows receiver collections from mutating method calls" do
     ann = SemanticAnnotator.new(source_code: "")
-    emit = IntrinsicEmit.new(narrows_receiver_collection: true)
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    sig.emit = IntrinsicEmit.new(narrows_receiver_collection: true)
 
     list_type = Type.new(:"Any[]", collection: :list)
     list_type.mark_heap_allocated!
@@ -1203,7 +1289,7 @@ RSpec.describe "annotator branch gap burndown" do
     value.full_type = Type.new(:Int64)
     call = AST::MethodCall.new(token, receiver, "append", [value])
 
-    ann.send(:narrow_receiver_collection!, call, list_type, emit)
+    ann.send(:narrow_receiver_collection!, call, list_type, sig)
 
     expect(sym.type.element_type.resolved).to eq(:Int64)
     expect(sym.type.collection).to eq(:list)
@@ -1213,12 +1299,49 @@ RSpec.describe "annotator branch gap burndown" do
     expect(receiver.full_type.element_type.resolved).to eq(:Int64)
   end
 
-  it "returns Any for iterable element analysis when no element type is known" do
+  it "returns an invalid source fact when no pipeline item type is known" do
     ann = SemanticAnnotator.new(source_code: "")
     source = AST::Identifier.new(token, "mystery")
     source.full_type = Type.new(:Mystery)
+    fact = ann.send(:pipeline_source_fact, source, Type.new(:Mystery))
 
-    expect(ann.send(:pipeline_iterable_element_type, source, Type.new(:Mystery))).to eq(:Any)
+    expect(fact.valid?).to be(false)
+    expect(fact.item_type).to eq(:Any)
+  end
+
+  it "returns a typed source fact with the item type and source kind" do
+    ann = SemanticAnnotator.new(source_code: "")
+    list = AST::Identifier.new(token, "items")
+    list_type = Type.new(:"String[]")
+    list.full_type = list_type
+    stream = AST::Identifier.new(token, "finite")
+    stream_type = Type.new(:"~Bool[]")
+    stream.full_type = stream_type
+    inf = AST::Identifier.new(token, "stream")
+    inf_type = Type.new(:"~Int64[INF]")
+    inf.full_type = inf_type
+    scalar = AST::Identifier.new(token, "scalar")
+    scalar_type = Type.new(:Int64)
+    scalar.full_type = scalar_type
+
+    list_fact = ann.send(:pipeline_source_fact, list, list_type)
+    stream_fact = ann.send(:pipeline_source_fact, stream, stream_type)
+    inf_fact = ann.send(:pipeline_source_fact, inf, inf_type, include_inf_stream: true)
+
+    expect(list_fact.item_type).to eq(:String)
+    expect(list_fact.kind).to eq(:collection)
+    expect(stream_fact.item_type).to eq(:Bool)
+    expect(stream_fact.finite_stream?).to be(true)
+    expect(inf_fact.item_type).to eq(:Int64)
+    expect(inf_fact.inf_stream?).to be(true)
+    expect(ann.send(:pipeline_source_fact, scalar, scalar_type).valid?).to be(false)
+  end
+
+  it "uses one compact predicate for all annotator pipeline operators" do
+    ann = SemanticAnnotator.new(source_code: "")
+    expect(ann.send(:pipe_complex_op?, AST::CollectOp.new(token(:COLLECT, "COLLECT")))).to be(true)
+    expect(ann.send(:pipe_complex_op?, AST::RecoverOp.new(token(:RECOVER, "RECOVER"), AST::DefaultLit.new(token(:DEFAULT, "DEFAULT"))))).to be(true)
+    expect(ann.send(:pipe_complex_op?, AST::Identifier.new(token, "not_pipeline"))).to be(false)
   end
 
   it "uses Any after reporting non-iterable auto-shard inputs" do
@@ -1231,7 +1354,11 @@ RSpec.describe "annotator branch gap burndown" do
     left = AST::Identifier.new(token, "n")
     left.full_type = Type.new(:Int64)
     smooth = AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::EachOp.new(token(:KEYWORD, "EACH"), []))
-    conc = double(op: double(body: []))
+    conc = AST::ConcurrentOp.new(
+      token(:CONCURRENT, "CONCURRENT"),
+      AST::EachOp.new(token(:EACH, "EACH"), []),
+      {}
+    )
 
     ann.send(:analyze_auto_shard_each_op, smooth, conc, smooth)
 
@@ -1311,25 +1438,25 @@ RSpec.describe "annotator branch gap burndown" do
     left = AST::Literal.new(token(:STRING, "abc"), :STRING, "abc", :rodata)
     left.full_type = Type.new(:String)
     pipe = AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::Identifier.new(token, "f"))
-    optional_sig = FunctionSignature.new(
-      params: [AST::Param.new(name: "x", type: Type.new(:Int64), required: false)],
+    range_mismatch_sig = FunctionSignature.new(
+      params: [
+        AST::Param.new(name: "x", type: Type.new(:Int64), required: true),
+        AST::Param.new(name: "y", type: Type.new(:Int64), required: true),
+        AST::Param.new(name: "z", type: Type.new(:Int64), required: false),
+      ],
       return_type: Type.new(:"!String")
     )
-    pipe_ann.send(:analyze_pipe_to_named_function, pipe, optional_sig, "f")
+    pipe_ann.send(:analyze_pipe_to_named_function, pipe, range_mismatch_sig, "f")
     no_arg_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
     pipe_ann.send(:analyze_pipe_to_named_function, pipe, no_arg_sig, "zero")
     expect(direct_errors(pipe_ann).map { |e| e[1] }).to include(:ARITY_MISMATCH_RANGE, :ARITY_MISMATCH, :ARGUMENT_TYPE_ERROR)
     expect(pipe.full_type.resolved).to eq(:Void)
 
     cap_ann = quiet_annotator
-    fake_og = Struct.new(:calls) do
-      def declare(*args, **kwargs) = calls << [:declare, args, kwargs]
-      def borrow(*args, **kwargs)
-        calls << [:borrow, args, kwargs]
-        nil
-      end
-    end.new([])
-    cap_ann.instance_variable_set(:@og, fake_og)
+    cap_graph = cap_ann.send(:ownership_graph)
+    %w[locked plain borrowed cell borrowed_lock].each do |name|
+      cap_graph.declare(name, kind: :affine, type_info: Type.new(:Counter), scope_depth: 0)
+    end
 
     locked_var = AST::Identifier.new(token, "locked")
     locked_var.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: :locked)
@@ -1376,13 +1503,12 @@ RSpec.describe "annotator branch gap burndown" do
     expect(direct_errors(cap_ann).map { |e| e[1] }).to include(:WITH_CAP_BINDING_LOST)
     borrowed_error = direct_errors(cap_ann).find { |e| e[1] == :WITH_BORROWED_ON_QUALIFIED_VAR }
     expect(borrowed_error[3][:qualifier]).to eq("@writeLocked")
-    expect(fake_og.calls.map(&:first)).to include(:borrow)
+    expect(cap_graph.edges.map(&:kind)).to include(:borrows)
   end
 
 
   it "covers direct capability and parameter validation branch clusters" do
     cap_ann = quiet_annotator
-    cap_ann.instance_variable_set(:@deferred_with_validations, [])
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [], [])
 
     mk_var = lambda do |name, type, storage: nil, sync: nil, layout: nil, is_param: false|
@@ -1393,28 +1519,33 @@ RSpec.describe "annotator branch gap burndown" do
       ident
     end
 
-    cap_ann.send(:validate_capability, with_node, :write_locked_read, mk_var.call("read_param", Type.new(:Counter), is_param: true))
-    cap_ann.send(:validate_capability, with_node, :write_locked_read, mk_var.call("plain_read", Type.new(:Counter)))
+    validate = lambda do |capability, var_node|
+      cap = AST::Capability.new(capability: capability, var_node: var_node)
+      cap_ann.send(:validate_capability_transition!, with_node, capability_transition(cap))
+    end
+
+    validate.call(:write_locked_read, mk_var.call("read_param", Type.new(:Counter), is_param: true))
+    validate.call(:write_locked_read, mk_var.call("plain_read", Type.new(:Counter)))
     view_target = AST::Identifier.new(token, "source")
     view_target.full_type = Type.new(:Row)
     view_field = AST::GetField.new(token, view_target, "count")
     view_field.full_type = Type.new(:Int64)
-    cap_ann.send(:validate_capability, with_node, :VIEW, view_field)
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("atomic_cell", Type.new(:Counter, ownership: :shared, sync: :atomic, layout: :indirect), sync: :atomic, layout: :indirect))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("indirect_locked", Type.new(:Counter, sync: :locked, layout: :indirect), sync: :locked, layout: :indirect))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("locked", Type.new(:Counter, sync: :locked), sync: :locked))
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, mk_var.call("shared", Type.new(:Counter, ownership: :shared), storage: :shared))
+    validate.call(:VIEW, view_field)
+    validate.call(:SNAPSHOT, mk_var.call("atomic_cell", Type.new(:Counter, ownership: :shared, sync: :atomic, layout: :indirect), sync: :atomic, layout: :indirect))
+    validate.call(:SNAPSHOT, mk_var.call("indirect_locked", Type.new(:Counter, sync: :locked, layout: :indirect), sync: :locked, layout: :indirect))
+    validate.call(:SNAPSHOT, mk_var.call("locked", Type.new(:Counter, sync: :locked), sync: :locked))
+    validate.call(:SNAPSHOT, mk_var.call("shared", Type.new(:Counter, ownership: :shared), storage: :shared))
     plain = AST::Identifier.new(token, "plain")
     plain.full_type = Type.new(:Counter)
-    cap_ann.send(:validate_capability, with_node, :SNAPSHOT, plain)
-    cap_ann.send(:validate_capability, with_node, :multiowned, mk_var.call("not_multi", Type.new(:Counter), storage: :stack))
-    cap_ann.send(:validate_capability, with_node, :shared, mk_var.call("not_shared", Type.new(:Counter), storage: :stack))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("param_atomic", Type.new(:Counter), is_param: true))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("locked_atomic", Type.new(:Counter, sync: :locked), sync: :locked))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, mk_var.call("wrong_atomic", Type.new(:Counter), storage: :shared))
-    cap_ann.send(:validate_capability, with_node, :ATOMIC, plain)
-    cap_ann.send(:validate_capability, with_node, :RESTRICT, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))
-    cap_ann.send(:validate_capability, with_node, :UNKNOWN, mk_var.call("unknown", Type.new(:Counter)))
+    validate.call(:SNAPSHOT, plain)
+    validate.call(:multiowned, mk_var.call("not_multi", Type.new(:Counter), storage: :stack))
+    validate.call(:shared, mk_var.call("not_shared", Type.new(:Counter), storage: :stack))
+    validate.call(:ATOMIC, mk_var.call("param_atomic", Type.new(:Counter), is_param: true))
+    validate.call(:ATOMIC, mk_var.call("locked_atomic", Type.new(:Counter, sync: :locked), sync: :locked))
+    validate.call(:ATOMIC, mk_var.call("wrong_atomic", Type.new(:Counter), storage: :shared))
+    validate.call(:ATOMIC, plain)
+    validate.call(:RESTRICT, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))
+    validate.call(:UNKNOWN, mk_var.call("unknown", Type.new(:Counter)))
 
     guard_expr = AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)
     guard_expr.full_type = Type.new(:Bool)
@@ -1427,6 +1558,7 @@ RSpec.describe "annotator branch gap burndown" do
       )
     ], [])
     guarded.snapshot_mode = :transaction
+    attach_capability_plan!(guarded)
     cap_ann.define_singleton_method(:visit) { |_node| nil }
     cap_ann.send(:validate_and_visit_with_guards!, guarded)
 
@@ -1450,7 +1582,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
     expect(atomic_cap[:capability]).to eq(:ATOMIC)
     expect(unknown_cap[:capability]).to eq(:unknown)
-    expect(cap_ann.instance_variable_get(:@deferred_with_validations)).not_to be_empty
+    expect(cap_ann.pending_deferred_validation_count).to be > 0
 
     bad_param_ann = SemanticAnnotator.new(source_code: "")
     bad_fn = AST::FunctionDef.new(token, "bad_default", [
@@ -1489,19 +1621,23 @@ RSpec.describe "annotator branch gap burndown" do
     err_lit.full_type = Type.new(:"!String")
     int_lit = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
     int_lit.full_type = Type.new(:Int64)
-    body = [
-      AST::BinaryOp.new(token(:PIPE, "|>"), void_lit, :SMOOTH, AST::Identifier.new(token, "f")),
-      AST::BinaryOp.new(token(:PIPE, "|>"), err_lit, :SMOOTH, AST::Identifier.new(token, "f")),
-      AST::BinaryOp.new(token(:PIPE, "|>"), int_lit, :SMOOTH, AST::Identifier.new(token, "f"))
-    ]
-    types = Set.new
-    pipe_ann.send(:collect_pipe_input_types, body, types)
-    expect(types).to eq(Set["Int64"])
+    pipe_summary = body_fact_summary(pipe_ann) do
+      [void_lit, err_lit, int_lit].each do |source|
+        source_type = source.full_type!(context: "test pipe source")
+        pipe_ann.send(:record_body_fact_pipe_input_type!, source_type.resolved.to_s) if source_type.catch_snapshot_payload?
+      end
+    end
+    snapshot_summary = body_fact_summary(pipe_ann, [AST::Identifier.new(token(:IDENTIFIER, "snapshot"), "snapshot")])
+    expect(void_lit.full_type.catch_snapshot_payload?).to be(false)
+    expect(err_lit.full_type.catch_snapshot_payload?).to be(false)
+    expect(int_lit.full_type.catch_snapshot_payload?).to be(true)
+    expect(pipe_summary.pipe_input_types).to eq(Set["Int64"])
+    expect(snapshot_summary.references_snapshot).to be(true)
   end
 
   it "covers function analysis call, capture, TAKES, and return lifetime branches directly" do
     missing_call_ann = quiet_annotator
-    missing_call_ann.instance_variable_set(:@fn_nodes, {})
+    missing_call_ann.semantic_function_nodes.replace({})
     missing_call = AST::FuncCall.new(token(:VAR_ID, "missing_fn"), "missing_fn", [])
     missing_call_ann.send(:resolve_call, missing_call, missing_call.args)
 
@@ -1820,7 +1956,7 @@ RSpec.describe "annotator branch gap burndown" do
     nil_return = AST::FunctionDef.new(token, "nil_return", [], [], nil, nil, [], [], nil, :package)
     bad_return = function_def("bad_return")
     bad_return.define_singleton_method(:return_type) { raise StandardError, "broken return type" }
-    effects_ann.instance_variable_set(:@fn_nodes, {
+    effects_ann.semantic_function_nodes.replace({
       "caller" => caller,
       "callee" => callee,
       "nil_return" => nil_return,
@@ -1853,13 +1989,14 @@ RSpec.describe "annotator branch gap burndown" do
     returned_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym.instance_variable_set(:@lifetime, [source_sym])
     tied_ann.current_scope.install_entry("source", source_sym)
-    tied_ann.instance_variable_set(:@fn_nodes, {
+    tied_ann.semantic_function_nodes.replace({
       "tied" => AST::FunctionDef.new(token, "tied", [], [], Type.new(:String), nil, [], [], nil, :package)
     })
-    tied_ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "tied", return_type: Type.new(:String), lifetime: [], type_params: [])
-    returned = AST::Identifier.new(token, "returned")
-    returned.symbol = returned_sym
-    tied_ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), returned))
+    with_function_context(tied_ann, return_type: Type.new(:String)) do
+      returned = AST::Identifier.new(token, "returned")
+      returned.symbol = returned_sym
+      tied_ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), returned))
+    end
 
     fix_ann = quiet_annotator
     moved_ident = AST::Identifier.new(token, "moved")
@@ -1880,22 +2017,26 @@ RSpec.describe "annotator branch gap burndown" do
     static = AST::StaticCall.new(token, AST::Identifier.new(token(:TYPE_ID, "Box"), "Box"), "fallible_static", [arg])
     static.define_singleton_method(:error_union_type) { Type.new(:"!String") }
     frozen = AST::FreezeNode.new(token(:FREEZE, "FREEZE"), fn)
+    with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
+    attach_capability_plan!(with_node)
+    raise_node = AST::Raise.new(token(:RAISE, "RAISE"), nil, nil, nil)
+    or_raise = AST::OrRaise.new(token(:OR, "OR"))
 
-    sources = ann.send(:retryable_with_fallible_sources, [
-      { nested: [AST::Raise.new(token(:RAISE, "RAISE"), nil, nil, nil), AST::OrRaise.new(token(:OR, "OR"))] },
-      method,
-      static,
-      frozen,
-      function_def("nested", return_type: Type.new(:Void))
-    ])
+    body_fact_summary(ann) do
+      ann.send(:record_body_fact_with_block!, with_node)
+      ann.send(:with_body_fact_scope, with_node) do
+        [raise_node, or_raise, method, static, frozen, fn].each { |node| ann.send(:record_body_fact_node!, node) }
+      end
+      sources = ann.send(:retryable_with_fallible_sources, with_node)
+      expect(sources).to include("RAISE", "OR RAISE", "fallible_fn", "fallible_method()", "fallible_static", "FREEZE")
+    end
 
-    expect(sources).to include("RAISE", "OR RAISE", "fallible_fn", "fallible_method()", "fallible_static", "FREEZE")
   end
 
   it "covers effect maybe-resolution branch matrix directly" do
     ann = SemanticAnnotator.new(source_code: "")
-    families = Hash.new { |h, caller| h[caller] = Hash.new { |hh, callee| hh[callee] = [] } }
-    ann.instance_variable_set(:@call_site_arg_families, families)
+    families = ann.send(:effect_call_site_arg_families)
+    families.clear
 
     plain = Set[EffectTracker::HEAP]
     expect(ann.send(:resolve_maybe_effects, plain, "caller", "plain")).to equal(plain)
@@ -1947,8 +2088,8 @@ RSpec.describe "annotator branch gap burndown" do
     direct.reentrance_kind = :reentrant_not_logical
     mutual.reentrance_kind = :reentrant_not_logical
     other.reentrance_kind = :reentrant
-    ann.instance_variable_set(:@fn_nodes, { "direct" => direct, "mutual" => mutual, "other" => other })
-    ann.instance_variable_set(:@fn_direct_effects, { "direct" => Set[EffectTracker::REENTRANT], "mutual" => Set.new, "other" => Set.new })
+    ann.semantic_function_nodes.replace({ "direct" => direct, "mutual" => mutual, "other" => other })
+    ann.send(:effect_direct_effects).replace({ "direct" => Set[EffectTracker::REENTRANT], "mutual" => Set.new, "other" => Set.new })
     record_body_summaries(ann, { "direct" => Set.new, "mutual" => Set["other"], "other" => Set["mutual"] })
 
     ann.send(:validate_not_logical_recursion!)
@@ -1969,8 +2110,8 @@ RSpec.describe "annotator branch gap burndown" do
     max_depth.reentrance_kind = :reentrant_max_depth
     max_depth.max_depth_n = 8
     partner.reentrance_kind = :reentrant
-    ann.instance_variable_set(:@fn_nodes, { "bounded" => max_depth, "partner" => partner })
-    ann.instance_variable_set(:@fn_direct_effects, { "bounded" => Set.new, "partner" => Set.new })
+    ann.semantic_function_nodes.replace({ "bounded" => max_depth, "partner" => partner })
+    ann.send(:effect_direct_effects).replace({ "bounded" => Set.new, "partner" => Set.new })
     record_body_summaries(ann, { "bounded" => Set["partner"], "partner" => Set["bounded"] })
     ann.send(:validate_max_depth_mutual_cycle!)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
@@ -1982,7 +2123,7 @@ RSpec.describe "annotator branch gap burndown" do
       END
     CHT
     lonely.reentrance_kind = :reentrant_thunk
-    ann.instance_variable_set(:@fn_nodes, { "lonely" => lonely })
+    ann.semantic_function_nodes.replace({ "lonely" => lonely })
     record_body_summaries(ann, { "lonely" => Set.new })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, lonely)).to eq(false)
 
@@ -2000,7 +2141,7 @@ RSpec.describe "annotator branch gap burndown" do
     CHT
     a.reentrance_kind = :reentrant_thunk
     b.reentrance_kind = :reentrant_thunk
-    ann.instance_variable_set(:@fn_nodes, { "a" => a, "b" => b })
+    ann.semantic_function_nodes.replace({ "a" => a, "b" => b })
     record_body_summaries(ann, { "a" => Set["b"], "b" => Set["a"] })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, a)).to eq(false)
 
@@ -2018,7 +2159,7 @@ RSpec.describe "annotator branch gap burndown" do
     CHT
     c.reentrance_kind = :reentrant_thunk
     d.reentrance_kind = :reentrant_thunk
-    ann.instance_variable_set(:@fn_nodes, { "c" => c, "d" => d })
+    ann.semantic_function_nodes.replace({ "c" => c, "d" => d })
     record_body_summaries(ann, { "c" => Set["d"], "d" => Set["c"] })
     ann.send(:emit_mutual_thunk_unsupported!, c)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
@@ -2040,7 +2181,7 @@ RSpec.describe "annotator branch gap burndown" do
       fn.effects_span = nil
       fn.return_type_token = nil
     end
-    ann.instance_variable_set(:@fn_nodes, { "no_span" => no_span, "no_edit" => no_edit })
+    ann.semantic_function_nodes.replace({ "no_span" => no_span, "no_edit" => no_edit })
     record_body_summaries(ann, { "no_span" => Set["no_edit"], "no_edit" => Set["no_span"] })
     ann.send(:emit_mutual_thunk_unsupported!, no_span)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_MUTUAL_THUNK_UNSUPPORTED)
@@ -2048,8 +2189,8 @@ RSpec.describe "annotator branch gap burndown" do
     no_arrow = function_def("no_arrow")
     no_arrow.arrow_token = nil
     cycle_ann = quiet_annotator
-    cycle_ann.instance_variable_set(:@fn_nodes, { "no_arrow" => no_arrow })
-    cycle_ann.instance_variable_set(:@fn_direct_effects, { "no_arrow" => Set.new })
+    cycle_ann.semantic_function_nodes.replace({ "no_arrow" => no_arrow })
+    cycle_ann.send(:effect_direct_effects).replace({ "no_arrow" => Set.new })
     record_body_summaries(cycle_ann, { "no_arrow" => Set["no_arrow"] })
     cycle_ann.send(:check_indirect_reentrancy!)
     expect(direct_errors(cycle_ann).map { |e| e[1] }).to include(:REENTRANCY_MUTUAL_CYCLE)
@@ -2062,8 +2203,8 @@ RSpec.describe "annotator branch gap burndown" do
     no_fix.max_depth_n = 4
     no_fix_partner = function_def("no_fix_partner")
     no_fix_partner.reentrance_kind = :reentrant
-    max_ann.instance_variable_set(:@fn_nodes, { "no_fix" => no_fix, "no_fix_partner" => no_fix_partner })
-    max_ann.instance_variable_set(:@fn_direct_effects, { "no_fix" => Set.new, "no_fix_partner" => Set.new })
+    max_ann.semantic_function_nodes.replace({ "no_fix" => no_fix, "no_fix_partner" => no_fix_partner })
+    max_ann.send(:effect_direct_effects).replace({ "no_fix" => Set.new, "no_fix_partner" => Set.new })
     record_body_summaries(max_ann, { "no_fix" => Set["no_fix_partner"], "no_fix_partner" => Set["no_fix"] })
 
     max_ann.send(:validate_max_depth_mutual_cycle!)
@@ -2080,7 +2221,7 @@ RSpec.describe "annotator branch gap burndown" do
       END
     CHT
     direct_thunk.reentrance_kind = :reentrant_thunk
-    direct_ann.instance_variable_set(:@fn_nodes, { "direct_thunk" => direct_thunk })
+    direct_ann.semantic_function_nodes.replace({ "direct_thunk" => direct_thunk })
     record_body_summaries(direct_ann, { "direct_thunk" => Set["direct_thunk"] })
 
     direct_ann.send(:validate_thunk_recursion!)
@@ -2104,7 +2245,7 @@ RSpec.describe "annotator branch gap burndown" do
       fn.reentrance_kind = :reentrant_thunk
       fn.return_type_token = nil
     end
-    token_ann.instance_variable_set(:@fn_nodes, { "missing_rt_a" => missing_rt_a, "missing_rt_b" => missing_rt_b })
+    token_ann.semantic_function_nodes.replace({ "missing_rt_a" => missing_rt_a, "missing_rt_b" => missing_rt_b })
     record_body_summaries(token_ann, { "missing_rt_a" => Set["missing_rt_b"], "missing_rt_b" => Set["missing_rt_a"] })
 
     token_ann.send(:emit_mutual_thunk_unsupported!, missing_rt_a)
@@ -2124,7 +2265,7 @@ RSpec.describe "annotator branch gap burndown" do
                  end
       node.full_type = inferred
     end
-    ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "pipe", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    ann.send(:push_function_context!, FunctionContext.new(name: "pipe", return_type: Type.new(:Void), lifetime: [], type_params: []))
 
     left = AST::Identifier.new(token, "xs")
     left.full_type = Type.new(:"Int64[]")
@@ -2148,13 +2289,11 @@ RSpec.describe "annotator branch gap burndown" do
     observed_terminals = []
     distinct_ann.define_singleton_method(:visit) { |node| node.full_type = Type.new(:String) if node.respond_to?(:full_type=) }
     distinct_ann.define_singleton_method(:require_array_input!) { |_node, _op, **_kwargs| nil }
-    distinct_ann.define_singleton_method(:finite_stream_source?) { |_node| true }
-    distinct_ann.define_singleton_method(:finite_stream_element_type) { |_node| Type.new(:Int64) }
     distinct_ann.define_singleton_method(:mark_observable_terminal!) do |_node, **kwargs|
       observed_terminals << kwargs
       nil
     end
-    distinct_ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "distinct", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    distinct_ann.send(:push_function_context!, FunctionContext.new(name: "distinct", return_type: Type.new(:Void), lifetime: [], type_params: []))
     bounded_left = AST::Identifier.new(token, "stream")
     bounded_left.full_type = Type.new(:"~Int64[3]")
     key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
@@ -2163,7 +2302,6 @@ RSpec.describe "annotator branch gap burndown" do
 
     array_left = AST::Identifier.new(token, "array")
     array_left.full_type = Type.new(:"Int64[]")
-    distinct_ann.define_singleton_method(:finite_stream_source?) { |_node| false }
     distinct_ann.send(:analyze_distinct_op, AST::BinaryOp.new(token(:PIPE, "|>"), array_left, :SMOOTH, AST::DistinctOp.new(token(:DISTINCT, "DISTINCT"), key)))
     expect(observed_terminals.map { |t| t[:collection] }).to eq([:set, :set])
 
@@ -2369,6 +2507,7 @@ RSpec.describe "annotator branch gap burndown" do
     node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock"))
     ], [])
+    attach_capability_plan!(node)
     clause = AST::ErrorClause.new(
       token: token(:ON, "ON"),
       retries: 1,
@@ -2499,6 +2638,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:synthesize_clause_from_policy) { |_name| nil }
     node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     node.snapshot_mode = :transaction
+    attach_capability_plan!(node)
 
     ann.send(:validate_lock_error_clause!, node, [])
 
@@ -2511,13 +2651,15 @@ RSpec.describe "annotator branch gap burndown" do
     second = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "b"))
     node = AST::WithBlock.new(token(:WITH, "WITH"), [first, second], [])
     node.arms = [{ family: :ATOMIC, body: [], lock_error_clauses: [] }]
+    attach_capability_plan!(node)
 
     ann.send(:validate_no_multi_object_atomic!, node)
 
     error = direct_errors(ann).find { |err| err[1] == :WITH_MULTI_OBJECT_ATOMIC }
     expect(error).not_to be_nil
     expect(error[3][:name]).to eq("this WITH")
-    expect(ann.send(:sync_constrained_cap?, AST::Capability.new(capability: :unknown, var_node: AST::Identifier.new(token, "x")))).to be(false)
+    unknown_cap = AST::Capability.new(capability: :unknown, var_node: AST::Identifier.new(token, "x"))
+    expect(capability_transition(unknown_cap).sync_constrained?).to be(false)
   end
 
   it "strips BG error-union result types and rejects arena parallel blocks" do
@@ -2544,7 +2686,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann = quiet_annotator
     analysis = ann.send(:new_capture_analysis)
     analysis.has_outer_ref = true
-    ann.instance_variable_set(:@current_bg_pinned, true)
+    ann.send(:phase_receiver_state).current_bg_pinned = true
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:with_fiber_capture_analysis) do |is_parallel: false, mark_moves: false, &blk|
       blk.call
@@ -2576,7 +2718,9 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:record_capture_info!, ctx, "map", map_entry, map_node)
 
     expect(analysis.resource_captures).to include("map")
-    expect(analysis.close_patterns["map"]).to eq("{0}.deinit(rt.heapAlloc(), rt.heapAlloc())")
+    map_close = T.must(analysis.close_plans["map"])
+    expect(map_close.actions.map(&:name)).to eq(["deinit"])
+    expect(map_close.actions.first.runtime_heap_alloc_args).to eq(2)
 
     parallel_analysis = ann.send(:new_capture_analysis)
     parallel_analysis.has_local = true
@@ -2604,7 +2748,7 @@ RSpec.describe "annotator branch gap burndown" do
       capture_symbols: {
         "inner" => SymbolEntry.new(reg: "inner", type: Type.new(:Int64), mutable: false, storage: :stack)
       },
-      close_patterns: { "inner" => "{0}.deinit()" },
+      close_plans: { "inner" => Schemas::ResourceClosePlan.method("deinit") },
       pointer_captures: Set["inner"],
       string_captures: Set["outer"],
       resource_captures: Set["inner"],
@@ -2624,7 +2768,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(site_info.copied_names).to include("outer")
     expect(site_info.moved_names).to include("inner")
     expect(parent.strategies.select { |_name, strategy| strategy.is_a?(CaptureStrategy::Refuse) }.keys).to eq(["blocked"])
-    expect(parent.close_patterns["inner"]).to eq("{0}.deinit()")
+    expect(parent.close_plans["inner"]&.actions&.map(&:name)).to eq(["deinit"])
     expect(parent.pointer_captures).to include("inner")
     expect(parent.string_captures).to include("outer")
     expect(parent.resource_captures).to include("inner")
@@ -2635,15 +2779,16 @@ RSpec.describe "annotator branch gap burndown" do
   it "applies capture fact helpers only when their local predicate is active" do
     ann = quiet_annotator
     names = Set.new
-    patterns = {}
+    plans = {}
+    close_plan = Schemas::ResourceClosePlan.method("drop")
 
     ann.send(:add_capture_name_when, names, "inactive", false)
-    ann.send(:set_capture_close_pattern_when, patterns, "inactive", "drop()", false)
+    ann.send(:set_capture_close_plan_when, plans, "inactive", close_plan, false)
     ann.send(:add_capture_name_when, names, "active", true)
-    ann.send(:set_capture_close_pattern_when, patterns, "active", "drop()", true)
+    ann.send(:set_capture_close_plan_when, plans, "active", close_plan, true)
 
     expect(names).to eq(Set["active"])
-    expect(patterns).to eq("active" => "drop()")
+    expect(plans).to eq("active" => close_plan)
   end
 
   it "covers lock handler reachability branch matrix directly" do
@@ -2652,6 +2797,7 @@ RSpec.describe "annotator branch gap burndown" do
     self_loop_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "looped"))
     ], [])
+    attach_capability_plan!(self_loop_node)
     self_loop_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
       retries: nil,
@@ -2681,6 +2827,7 @@ RSpec.describe "annotator branch gap burndown" do
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "lock")),
       AST::Capability.new(capability: :RESTRICT, var_node: AST::Identifier.new(token, "guarded"), guard_expr: AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack)),
     ], [])
+    attach_capability_plan!(lock_node)
     lock_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
       retries: nil,
@@ -2705,6 +2852,7 @@ RSpec.describe "annotator branch gap burndown" do
     atomic_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: atomic_var)
     ], [])
+    attach_capability_plan!(atomic_node)
     atomic_node.snapshot_mode = :transaction
     atomic_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
@@ -2723,6 +2871,7 @@ RSpec.describe "annotator branch gap burndown" do
     versioned_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :SNAPSHOT, var_node: AST::Identifier.new(token, "versioned"))
     ], [])
+    attach_capability_plan!(versioned_node)
     versioned_node.snapshot_mode = :transaction
     versioned_node.lock_error_clause = AST::ErrorClause.new(
       action: :raise,
@@ -2769,7 +2918,7 @@ RSpec.describe "annotator branch gap burndown" do
     caller = mk.call("caller")
     missing_caller = mk.call("missing_caller")
 
-    ann.instance_variable_set(:@fn_nodes, {
+    ann.semantic_function_nodes.replace({
       "micro" => micro,
       "standard" => standard,
       "large" => large,
@@ -2815,7 +2964,7 @@ RSpec.describe "annotator branch gap burndown" do
     b.reentrance_kind = :reentrant_max_depth
     a.stack_tier = :unbounded
     b.stack_tier = :unbounded
-    ann.instance_variable_set(:@fn_nodes, { "caller" => caller, "a" => a, "b" => b })
+    ann.semantic_function_nodes.replace({ "caller" => caller, "a" => a, "b" => b })
     record_body_summaries(ann, {
       "caller" => Set["a"],
       "a" => Set["b"],
@@ -2835,7 +2984,7 @@ RSpec.describe "annotator branch gap burndown" do
     b = function_def("b")
     a.reentrance_kind = :reentrant_max_depth
     b.reentrance_kind = :reentrant_max_depth
-    ann.instance_variable_set(:@fn_nodes, { "caller" => caller, "wrapper" => wrapper, "a" => a, "b" => b })
+    ann.semantic_function_nodes.replace({ "caller" => caller, "wrapper" => wrapper, "a" => a, "b" => b })
     record_body_summaries(ann, {
       "caller" => Set["wrapper"],
       "wrapper" => Set["a"],
@@ -2844,6 +2993,51 @@ RSpec.describe "annotator branch gap burndown" do
     })
 
     expect(ann.send(:find_mutual_max_depth_callee, Set["caller"])).to eq("a")
+  end
+
+  it "returns typed BG spawn decisions for opaque and unsafe call graphs" do
+    ann = quiet_annotator
+    reentrant = function_def("reentrant_callee")
+    reentrant.effects = Set[EffectTracker::REENTRANT]
+    native = function_def("native_callee")
+    native.effects = Set[EffectTracker::EXTERN]
+    ann.semantic_function_nodes.replace({
+      "reentrant_callee" => reentrant,
+      "native_callee" => native,
+    })
+
+    fnptr_decision = ann.send(:bg_spawn_form_for, Set.new, true)
+    reentrant_decision = ann.send(:bg_spawn_form_for, Set["reentrant_callee"], false)
+    extern_decision = ann.send(:bg_spawn_form_for, Set["native_callee"], false)
+    fsm_decision = ann.send(:bg_spawn_form_for, Set.new, false)
+
+    expect(fnptr_decision).to be_a(Annotator::Phases::BgSpawnDecision)
+    expect(fnptr_decision.spawn_form).to eq(:stackful)
+    expect(fnptr_decision.reason).to eq(:fn_pointer)
+    expect(reentrant_decision.reason).to eq(:reentrant)
+    expect(extern_decision.reason).to eq(:extern)
+    expect(fsm_decision.spawn_form).to eq(:fsm)
+    expect(fsm_decision.reason).to be_nil
+  end
+
+  it "finalizes BG, BG STREAM, and DO execution shapes in one async pass" do
+    ann = quiet_annotator
+    bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
+    stream = AST::BgStreamBlock.new(token(:BG_STREAM, "BG STREAM"), [], [], nil)
+    branch = AST::DoBranch.new(body: [], stack_size: nil, can_smash: false)
+    do_block = AST::DoBlock.new(token(:DO, "DO"), [branch])
+    program = AST::Program.new(token(:PROGRAM, "PROGRAM"), [bg, stream, do_block])
+
+    ann.send(:record_async_body_fact!, bg, empty_body_summary, bg)
+    ann.send(:record_async_body_fact!, stream, empty_body_summary, stream)
+    ann.send(:record_async_body_fact!, branch, empty_body_summary, do_block)
+    ann.send(:finalize_async_execution_shapes!, program)
+
+    expect(bg.spawn_form).to eq(:fsm)
+    expect(bg.computed_stack_tier).to eq(:micro)
+    expect(stream.spawn_form).to eq(:fsm)
+    expect(stream.computed_stack_tier).to eq(:micro)
+    expect(branch.computed_stack_tier).to eq(:micro)
   end
 
   it "reports extern and reentrant method calls inside TIGHT loops" do
@@ -2868,8 +3062,8 @@ RSpec.describe "annotator branch gap burndown" do
   it "covers with-block arm effect and snapshot violation branches directly" do
     ann = quiet_annotator
     fn_ctx = FunctionContext.new(name: "with_fn", return_type: Type.new(:Void), lifetime: [], type_params: [])
-    ann.instance_variable_get(:@function_context_stack) << fn_ctx
-    ann.instance_variable_set(:@fn_direct_effects, { "with_fn" => Set.new })
+    ann.send(:push_function_context!, fn_ctx)
+    ann.send(:effect_direct_effects).replace({ "with_fn" => Set.new })
 
     fact_builder = method(:with_capability_fact)
     ann.define_singleton_method(:acquire_capability!) { |_node, cap, expanded| expanded.add(fact_builder.call(cap)) }
@@ -2890,7 +3084,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:validate_lock_error_clause!) { |_node, _caps| nil }
     ann.define_singleton_method(:visit_stmts) do |body|
       record_effect(EffectTracker::HEAP) if body.include?(:heap_arm)
-      @snapshot_txn_violations << SemanticAnnotator::SnapshotTxnViolation.new(effect: EffectTracker::BLOCKING, fn: "with_fn") if body.include?(:snapshot_violation)
+      record_snapshot_txn_violation!(EffectTracker::BLOCKING, "with_fn") if body.include?(:snapshot_violation)
     end
 
     cap_var = AST::Identifier.new(token, "locked")
@@ -2906,7 +3100,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     ann.send(:visit_WithBlock, node)
 
-    effects = ann.instance_variable_get(:@fn_direct_effects)["with_fn"]
+    effects = ann.send(:effect_direct_effects)["with_fn"]
     expect(effects).to include(EffectTracker::CONTENTION_MAYBE)
     expect(effects).to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::HEAP)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:WITH_SNAPSHOT_BODY_NOT_PURE)
@@ -2940,14 +3134,13 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers capability variable label shapes directly" do
     ann = quiet_annotator
-    root = AST::Identifier.new(token, "root")
-    field = AST::GetField.new(token, root, "field")
-    index = AST::GetIndex.new(token, root, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack))
-    ann.define_singleton_method(:cap_var_name) { |node| "index:#{node.target.name}" }
+	    root = AST::Identifier.new(token, "root")
+	    field = AST::GetField.new(token, root, "field")
+	    index = AST::GetIndex.new(token, root, AST::Literal.new(token(:NUMBER, "0_i64"), :INT64, 0, :stack))
 
-    expect(ann.send(:cap_var_label, root)).to eq("root")
-    expect(ann.send(:cap_var_label, field)).to eq("field")
-    expect(ann.send(:cap_var_label, index)).to eq("index:root")
+	    expect(ann.send(:cap_var_label, root)).to eq("root")
+	    expect(ann.send(:cap_var_label, field)).to eq("field")
+	    expect(ann.send(:cap_var_label, index)).to eq("root")
     expect(ann.send(:cap_var_label, AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack))).to eq("__unknown")
   end
 
@@ -3125,7 +3318,7 @@ RSpec.describe "annotator branch gap burndown" do
     entry = function_def("entry")
     blocking = function_def("blocking_fn")
     blocking.effects = Set[:BLOCKING]
-    ann.instance_variable_set(:@fn_nodes, { "entry" => entry, "blocking_fn" => blocking })
+    ann.semantic_function_nodes.replace({ "entry" => entry, "blocking_fn" => blocking })
     record_body_summaries(ann, {
       "entry" => Set["readFile", "blocking_fn"],
       "blocking_fn" => Set.new,
@@ -3134,7 +3327,7 @@ RSpec.describe "annotator branch gap burndown" do
     test = AST::TestThat.new(token(:TEST, "TEST"), "strict io", [
       AST::FuncCall.new(token(:VAR_ID, "entry"), "entry", [])
     ])
-    ann.send(:validate_strict_io!, test, Set.new)
+    ann.send(:validate_strict_io!, test, Set.new, body_fact_summary(ann, test.body))
 
     codes = direct_errors(ann).map { |err| err[1] }
     expect(codes).to include(:STRICT_TEST_NEEDS_STUB, :STRICT_TEST_HAS_IO_EFFECTS)
@@ -3146,12 +3339,33 @@ RSpec.describe "annotator branch gap burndown" do
     cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token(:IDENTIFIER, "c"), "c"))
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [])
     with_node.arms = []
+    attach_capability_plan!(with_node)
     fn = function_def("needs_requires", params: [param])
     fn.body = [with_node]
 
-    WithMatchCheck.check_function!(fn, ->(_node, message) { errors << message })
+    WithMatchCheck.check_function!(fn, [with_node], ->(_node, message) { errors << message })
 
     expect(errors.join).to include("not constrained by REQUIRES")
+
+    borrowed_param = AST::Param.new(name: "data", type: Type.new(:"Int64[]"), default: nil, mutable: false, takes: false)
+    borrowed_id = AST::Identifier.new(token(:IDENTIFIER, "data"), "data")
+    borrowed_id.symbol = SymbolEntry.new(reg: nil, type: Type.new(:"Int64[]"), mutable: false, storage: :stack)
+    borrowed_cap = AST::Capability.new(capability: :BORROWED, var_node: borrowed_id)
+    borrowed_with = AST::WithBlock.new(token(:WITH, "WITH"), [borrowed_cap], [])
+    attach_capability_plan!(borrowed_with)
+    borrowed_fn = function_def("borrow_only", params: [borrowed_param])
+    borrowed_errors = []
+
+    WithMatchCheck.check_function!(
+      borrowed_fn,
+      [borrowed_with],
+      ->(_node, message) { borrowed_errors << message },
+      warn_handler: ->(_node, message) { borrowed_errors << message },
+      policy_handlers: []
+    )
+
+    expect(borrowed_errors).to be_empty
+    expect(borrowed_fn.requires).to be_nil
 
     sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
     sig.requires = { "c" => Set[:LOCKED] }
@@ -3161,13 +3375,31 @@ RSpec.describe "annotator branch gap burndown" do
     caller.body = [call]
     call_errors = []
 
-    WithMatchCheck.check_call_sites!(caller, ->(_name) { sig }, ->(_node, message) { call_errors << message })
+    WithMatchCheck.check_call_sites!([call_site_fact(call)], ->(_name) { sig }, ->(_node, message) { call_errors << message })
 
     expect(call_errors.join).to include("belongs to no family")
+
+    no_requires = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+    plain_sym = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
+    plain_arg = AST::Identifier.new(token(:IDENTIFIER, "plain_mut"), "plain_mut")
+    plain_arg.symbol = plain_sym
+    universal_sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+    universal_sig.requires = { "c" => Set.new }
+    WithMatchCheck.check_call_sites!(
+      [
+        call_site_fact(AST::FuncCall.new(token(:VAR_ID, "none"), "none", [plain_arg]), id: 1),
+        call_site_fact(AST::FuncCall.new(token(:VAR_ID, "poly"), "poly", [plain_arg]), id: 2)
+      ],
+      ->(name) { name == "poly" ? universal_sig : no_requires },
+      ->(_node, message) { call_errors << message }
+    )
+
+    expect(plain_sym.poly_borrow_target).to be(true)
 
     warnings = []
     poly_node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [])
     poly_node.polymorphic = true
+    attach_capability_plan!(poly_node)
     WithMatchCheck.warn_polymorphic_unhandled_errors!(
       poly_node,
       Set["c"],
@@ -3210,7 +3442,7 @@ RSpec.describe "annotator branch gap burndown" do
     main.error_fallible = true
     main.explicit_return_type = true
 
-    ann.instance_variable_set(:@fn_nodes, {
+    ann.semantic_function_nodes.replace({
       "good" => good,
       "caught" => caught,
       "no_ret" => no_ret,
@@ -3228,8 +3460,8 @@ RSpec.describe "annotator branch gap burndown" do
   it "covers remaining helper guard and fallback branch matrix directly" do
     ann = quiet_annotator
 
-    families = Hash.new { |h, caller| h[caller] = Hash.new { |hh, callee| hh[callee] = [] } }
-    ann.instance_variable_set(:@call_site_arg_families, families)
+    families = ann.send(:effect_call_site_arg_families)
+    families.clear
     maybe = Set[EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE]
     families["caller"]["poly_sync"] << [Set[:ATOMIC, :VERSIONED]]
     poly_sync = ann.send(:resolve_maybe_effects, maybe, "caller", "poly_sync")
@@ -3382,6 +3614,189 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:function_body_summary_for, "missing")).to be_nil
   end
 
+  it "keeps lambda-contained calls out of function call-site facts" do
+    ann = SemanticAnnotator.new(source_code: "")
+    outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
+
+    summary = body_fact_summary(ann) do
+      ann.send(:record_body_fact_node!, outer_call)
+      ann.send(:with_body_fact_nested_body) do
+        ann.send(:record_body_fact_node!, lambda_call)
+      end
+      ann.send(:record_body_fact_node!, lambda_node)
+    end
+
+    expect(summary.callees).to include("outer", "lambda_inner")
+    expect(summary.call_site_facts.map(&:node)).to eq([outer_call])
+    expect(summary.call_site_facts.map(&:callee_name)).to eq(["outer"])
+    expect(summary.call_site_facts.map(&:node)).to eq([outer_call])
+    expect(summary.call_site_facts.map(&:args)).to eq([outer_call.args])
+    expect(summary.call_site_facts.map(&:fn_var_call)).to eq([false])
+    expect(summary.raises_directly).to be(false)
+  end
+
+  it "records direct failure sources in the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    call = AST::FuncCall.new(token(:VAR_ID, "callee"), "callee", [])
+    direct_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
+    bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
+
+    summary = body_fact_summary(ann, [call, direct_raise, bg])
+
+    expect(summary.callees).to include("callee")
+    expect(summary.call_site_facts.map(&:node)).to eq([call])
+    expect(summary.call_site_facts.map(&:callee_name)).to eq(["callee"])
+    expect(summary.call_site_facts.map(&:propagates_failure)).to eq([true])
+    expect(summary.raises_directly).to be(true)
+  end
+
+  it "marks call-site facts as locally absorbed by OR fallbacks" do
+    ann = SemanticAnnotator.new(source_code: "")
+    call = AST::FuncCall.new(token(:VAR_ID, "fallible"), "fallible", [])
+    fallback = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    rescue_expr = AST::BinaryOp.new(token(:OR_RESCUE, "OR"), call, :OR_RESCUE, fallback)
+
+    summary = body_fact_summary(ann) do
+      rhs_propagates =
+        fallback.is_a?(AST::OrRaise) ||
+        fallback.is_a?(AST::OrExit) ||
+        fallback.is_a?(AST::ThrowNode) ||
+        fallback.is_a?(AST::ReturnNode)
+      ann.send(:with_body_fact_failure_absorbed, !rhs_propagates) do
+        ann.send(:record_body_fact_node!, call)
+      end
+      ann.send(:record_body_fact_node!, rescue_expr)
+    end
+
+    expect(summary.callees).to include("fallible")
+    expect(summary.propagating_callees).to be_empty
+    expect(summary.call_site_facts.map(&:callee_name)).to eq(["fallible"])
+    expect(summary.call_site_facts.map(&:propagates_failure)).to eq([false])
+  end
+
+  it "records binding and assignment body facts during the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    value = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    decl = AST::VarDecl.new(token(:VAR, "VAR"), "created", Type.new(:Int64), value, false)
+    bind = AST::BindExpr.new(token(:IDENTIFIER, "created"), "created", nil, value)
+    bind.mode = :assign
+    assign = AST::Assignment.new(token(:IDENTIFIER, "created"), "created", value)
+
+    summary = body_fact_summary(ann, [decl, bind, assign])
+
+    expect(summary.binding_nodes).to eq([decl])
+    expect(summary.assignment_nodes).to eq([bind, assign])
+    expect(summary.escape_nodes).to include(decl, bind, assign)
+    expect(summary.local_facts.map(&:name)).to eq(["created"])
+    expect(summary.local_facts.map { |fact| fact.id.value }).to all(be > 0)
+    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(be > 0)
+  end
+
+  it "treats callees without effect sets as non-suspending body-scan calls" do
+    ann = SemanticAnnotator.new(source_code: "")
+    callee = AST::FunctionDef.new(token(:FN, "FN"), "plain", [], [], Type.new(:Void), nil, [], [], nil, :private, [], false)
+    ann.send(:register_function_node!, callee)
+    call = AST::FuncCall.new(token(:VAR_ID, "plain"), "plain", [])
+
+    expect(ann.send(:func_call_suspends?, call)).to be(false)
+    expect(body_fact_summary(ann, [call]).suspend_points).to eq([])
+  end
+
+  it "records WITH scope nodes without leaking nested WITH or lambda bodies into the outer scope" do
+    ann = SemanticAnnotator.new(source_code: "")
+    outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
+    inner_call = AST::FuncCall.new(token(:VAR_ID, "inner"), "inner", [])
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    bg_call = AST::FuncCall.new(token(:VAR_ID, "bg_inner"), "bg_inner", [])
+    concurrent_call = AST::FuncCall.new(token(:VAR_ID, "concurrent_inner"), "concurrent_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
+    inner_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [inner_call], nil, nil)
+    bg_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [bg_call], nil, nil)
+    bg_node = AST::BgBlock.new(token(:BG, "BG"), [bg_with], nil, nil, false, false, nil, false)
+    concurrent_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [concurrent_call], nil, nil)
+    concurrent_node = AST::ConcurrentOp.new(
+      token(:CONCURRENT, "CONCURRENT"),
+      AST::EachOp.new(token(:EACH, "EACH"), [concurrent_with]),
+      {}
+    )
+    outer_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [outer_call, lambda_node, inner_with, bg_node, concurrent_node], nil, nil)
+    allow(CapabilityPlan).to receive(:require_for).and_call_original
+    allow(CapabilityPlan).to receive(:require_for).with(outer_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(inner_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(bg_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(concurrent_with).and_return(double(locks: []))
+
+    summary = body_fact_summary(ann) do
+      ann.send(:record_body_fact_with_block!, outer_with)
+      ann.send(:with_body_fact_scope, outer_with) do
+        [outer_call, lambda_node, inner_with, bg_node, concurrent_node].each { |node| ann.send(:record_body_fact_node!, node) }
+        ann.send(:with_body_fact_nested_body) do
+          ann.send(:record_body_fact_node!, lambda_call)
+        end
+        ann.send(:record_body_fact_with_block!, inner_with)
+        ann.send(:with_body_fact_scope, inner_with) do
+          ann.send(:record_body_fact_node!, inner_call)
+        end
+        ann.send(:with_body_fact_scopes_cleared) do
+          ann.send(:record_body_fact_node!, bg_with)
+          ann.send(:record_body_fact_node!, bg_call)
+          ann.send(:record_body_fact_node!, concurrent_with)
+          ann.send(:record_body_fact_node!, concurrent_call)
+        end
+      end
+    end
+
+    expect(summary.with_blocks).to eq([outer_with, inner_with])
+    expect(summary.with_scope_nodes.fetch(outer_with.object_id)).to include(outer_call, lambda_node, inner_with, bg_node, concurrent_node)
+    expect(summary.with_scope_nodes.fetch(outer_with.object_id)).not_to include(inner_call, lambda_call, bg_call, bg_with, concurrent_call, concurrent_with)
+    expect(summary.with_scope_nodes.fetch(inner_with.object_id)).to include(inner_call)
+    expect(summary.callees).to include("concurrent_inner")
+  end
+
+  it "keeps lambda calls out of call-site facts while preserving lambda failure facts" do
+    ann = SemanticAnnotator.new(source_code: "")
+    lambda_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call, lambda_raise], :stack, nil)
+
+    summary = body_fact_summary(ann) do
+      ann.send(:with_body_fact_nested_body) do
+        ann.send(:record_body_fact_node!, lambda_call)
+        ann.send(:record_body_fact_node!, lambda_raise)
+      end
+      ann.send(:record_body_fact_node!, lambda_node)
+    end
+
+    expect(summary.callees).to include("lambda_inner")
+    expect(summary.call_site_facts).to be_empty
+    expect(summary.raises_directly).to be(true)
+  end
+
+  it "records suspension points in the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    promise = AST::Identifier.new(token(:IDENTIFIER, "promise"), "promise")
+    next_expr = AST::NextExpr.new(token(:NEXT, "NEXT"), promise)
+    yielded = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    yield_expr = AST::YieldExpr.new(token(:YIELD, "YIELD"), yielded)
+
+    summary = body_fact_summary(ann, [next_expr, yield_expr])
+
+    expect(summary.suspend_points.map(&:kind)).to eq([:next, :yield])
+    expect(summary.suspend_points.map { |point| point.id.value }).to eq([0, 1])
+  end
+
+  it "records an error and returns when YIELD has no BG STREAM frame" do
+    ann = quiet_annotator
+    yielded = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    yield_expr = AST::YieldExpr.new(token(:YIELD, "YIELD"), yielded)
+
+    ann.send(:visit_YieldExpr, yield_expr)
+
+    expect(direct_errors(ann).map { |entry| entry[1] }).to include(:YIELD_OUTSIDE_BG_STREAM)
+  end
+
   it "covers deferred WITH validation replay diagnostics directly" do
     ann = quiet_annotator
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
@@ -3389,8 +3804,12 @@ RSpec.describe "annotator branch gap burndown" do
     read_lock = AST::Identifier.new(token(:IDENTIFIER, "reader"), "reader")
     read_lock.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :atomic)
 
-    ann.send(:record_deferred_with_validation!, with_node, unknown, :EXCLUSIVE)
-    ann.send(:record_deferred_with_validation!, with_node, read_lock, :write_locked_read)
+    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+      AST::Capability.new(capability: :EXCLUSIVE, var_node: unknown)
+    ))
+    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+      AST::Capability.new(capability: :write_locked_read, var_node: read_lock)
+    ))
     ann.send(:flush_deferred_with_validations!)
 
     codes = direct_errors(ann).map { |e| e[1] }
@@ -3405,7 +3824,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:visit_FuncCall, native)
     expect(native.full_type!.resolved).to eq(:Any)
 
-    ann.current_scope.declare_type(:Handle, Schemas::ResourceSchema.new(close_zig: "close"))
+    ann.current_scope.declare_type(:Handle, Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close")))
     missing_static = AST::StaticCall.new(
       token(:COLON2, "::"),
       AST::Identifier.new(nil, "Handle"),
@@ -3421,6 +3840,55 @@ RSpec.describe "annotator branch gap burndown" do
       []
     )
     ann.send(:visit_StaticCall, unknown_static)
+
+    ann.current_scope.declare_type(:FallibleHandle, Schemas::ResourceSchema.new(
+      close_plan: Schemas::ResourceClosePlan.method("close"),
+      static_methods: {
+        "open" => { args: [], return: :FallibleHandle, allocates: true, can_fail: true },
+        "noop" => { args: [], return: :FallibleHandle }
+      }
+    ))
+    fallible_static = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+      "open",
+      []
+    )
+    expect(ann.current_fn_ctx).to be_nil
+    ann.send(:visit_StaticCall, fallible_static)
+    expect(fallible_static.stdlib_allocates).to eq(true)
+    expect(fallible_static.can_fail).to eq(true)
+
+    with_function_context(ann) do |ctx|
+      contextual_static = AST::StaticCall.new(
+        token(:COLON2, "::"),
+        AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+        "open",
+        []
+      )
+      ann.send(:visit_StaticCall, contextual_static)
+      expect(ctx.alloc_count).to eq(1)
+    end
+
+    pure_static = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "FallibleHandle"), "FallibleHandle"),
+      "noop",
+      []
+    )
+    ann.send(:visit_StaticCall, pure_static)
+    expect(pure_static.stdlib_allocates).to eq(false)
+    expect(pure_static.can_fail).to be_falsey
+
+    pool_type = Type.new(:"String[]", collection: :pool)
+    pool_value = AST::Identifier.new(token(:IDENTIFIER, "pool"), "pool")
+    pool_value.full_type = pool_type
+    inserted = AST::Literal.new(token(:STRING, "value"), :STRING, "value", :rodata)
+    inserted.full_type = Type.new(:String)
+    pool_insert = AST::MethodCall.new(token(:DOT, "."), pool_value, "insert", [inserted])
+    ann.define_singleton_method(:move_if_takes_ownership!) { |_node, **_kwargs| nil }
+    expect(ann.send(:resolve_typed_method, pool_insert, pool_type, POOL_METHODS, :pool_method, "Pool<String>")).to eq(true)
+    expect(pool_insert.stdlib_allocates).to eq(true)
 
     no_overload = AST::FuncCall.new(token(:VAR_ID, "negative?"), "negative?", [])
     ann.send(:visit_IntrinsicFunc, no_overload, [])
@@ -3609,5 +4077,73 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:observable_capability_explanation, nil, :shared)).to include("heap-pointer lifetime")
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, :GIVE_TO_BORROW_PARAM)
+  end
+
+  it "uses the function registry in execution-boundary, capability, and tight-loop helpers" do
+    ann = quiet_annotator
+    param_sym = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
+    param_sym.is_param = true
+    bound = AST::Identifier.new(token(:IDENTIFIER, "counter"), "counter")
+    bound.symbol = param_sym
+    with_node = AST::WithBlock.new(
+      token(:WITH, "WITH"),
+      [AST::Capability.new(capability: :EXCLUSIVE, var_node: bound)],
+      []
+    )
+    with_node.polymorphic = true
+    attach_capability_plan!(with_node)
+    fn = function_def("owner")
+    ann.semantic_function_nodes.replace({ "owner" => fn })
+    ctx = FunctionContext.new(name: "owner", return_type: Type.new(:Void))
+
+    ann.send(:mark_unrequired_polymorphic_with_runtime!, with_node, ctx)
+    expect(ann.send(:retryable_with_universal_poly_candidate?, with_node)).to eq(true)
+    ann.send(:push_function_context!, ctx)
+    retry_candidate = ann.send(:retryable_with_universal_poly_candidate?, with_node)
+    ann.send(:pop_function_context!)
+
+    expect(ctx.uses_rt).to eq(true)
+    expect(fn.can_fail).to eq(true)
+    expect(retry_candidate).to eq(true)
+
+    impure = function_def("impure")
+    impure.effects = Set[EffectTracker::BLOCKING]
+    ann.semantic_function_nodes.replace({ "impure" => impure })
+    call = AST::FuncCall.new(token(:VAR_ID, "impure"), "impure", [])
+    expect(ann.send(:predicate_impurity_reason, call, "impure")).to include("BLOCKING")
+
+    loop = AST::WhileLoop.new(
+      token(:WHILE, "WHILE"),
+      AST::Literal.new(token(:TRUE, "TRUE"), :BOOL, true, :stack),
+      [],
+      nil
+    )
+    impure.reentrance_kind = :reentrant
+    ann.send(:validate_tight_body!, [call], loop)
+
+    expect(direct_errors(ann).map { |err| err[1] }).to include(:TIGHT_CALLS_REENTRANT_FN)
+
+    source_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
+    returned_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
+    returned_sym.instance_variable_set(:@lifetime, [source_sym])
+    returned = AST::Identifier.new(token(:IDENTIFIER, "returned"), "returned")
+    returned.symbol = returned_sym
+    ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), returned))
+
+    expect(direct_errors(ann).map { |err| err[1] }).to include(:ATOMIC_ESCAPE_RETURN)
+  end
+
+  it "restores function context when function analysis raises" do
+    ann = quiet_annotator
+    fn = function_def("boom")
+    ann.define_singleton_method(:analyze_routine) do |_node, _body, _declared_return, _implicit_return|
+      raise "intentional"
+    end
+
+    expect {
+      ann.send(:visit_FunctionDef, fn)
+    }.to raise_error(RuntimeError, "intentional")
+
+    expect(ann.current_fn_ctx).to be_nil
   end
 end

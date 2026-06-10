@@ -56,7 +56,7 @@ class CompilerFrontend
     # Hoist after all annotation-preserving rewrites so escape analysis
     # only ever sees symbol-bearing declarations, including synthetic
     # allocation expressions introduced by those rewrites.
-    Hoist.apply!(ast, schema_lookup: schema_lookup)
+    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
 
     fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
@@ -78,7 +78,12 @@ class CompilerFrontend
     # (annotator failed to stamp it), surfaced before MIR consumes it.
     PreMirTypeCheck.verify!(ast)
 
-    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir_pass = MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: T.must(annotator.semantic_index).body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
+    )
     mir_pass.transform!(ast)
 
     struct_schemas = {}
@@ -104,7 +109,7 @@ class CompilerFrontend
 
     # Include module-imported function signatures so MIRLowering can
     # determine needs_rt/can_fail for cross-module calls.
-    annotator.scope_stack.first.visible_entries.each do |name, entry|
+    annotator.semantic_root_scope.visible_entries.each do |name, entry|
       next if fn_sigs.key?(name)
       sig = entry.fn_signature
       next unless sig && sig.module_alias

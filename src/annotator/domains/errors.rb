@@ -6,34 +6,37 @@ module Annotator
     module Errors
       extend T::Sig
 
-
-      # Pre-pass: walk every RAISE and OR EXIT site that provides both a
-      # kind and a type, and seed the registry with (kind, type). Lets
-      # CATCH Type clauses resolve regardless of source order. OR EXIT
-      # counts too because it can introduce new types that only the
-      # CATCH for a particular call needs to see.
-      sig { params(program_node: AST::Program).void }
-      def seed_error_types_from_raises!(program_node)
+      # Resolve CATCH clauses after body typing. Explicit RAISE/OR EXIT type
+      # declarations are already seeded from DeclarationIndex, so CATCH Type
+      # clauses are source-order independent while type-only error sites stay
+      # strict about requiring a registered name.
+      sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
+      def resolve_catch_clauses_from_declarations!(declarations)
         T.bind(self, SemanticAnnotator)
 
-        seed_body = lambda do |stmts|
-          AST.walk_body(stmts) do |n|
-            case n
-            when AST::Raise
-              next unless n.kind && n.error_name
-              resolve_error_registration!(n, n.kind, n.error_name, n.token)
-            when AST::OrExit
-              next unless n.kind && n.error_name
-              resolve_error_registration!(n, n.kind, n.error_name, n.token)
-            end
-          end
-        end
-        program_node.statements.each do |stmt|
-          next unless stmt.is_a?(AST::FunctionDef)
-          seed_body.call(stmt.body)
-          seed_body.call(stmt.catch_clauses&.map { |c| c.body }&.flatten || [])
+        declarations.function_declarations.each do |fn|
+          fn.catch_clauses.each { |clause| resolve_catch_clause!(clause) }
         end
       end
+
+      sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
+      def seed_error_type_registrations!(declarations)
+        T.bind(self, SemanticAnnotator)
+
+        declarations.error_type_registrations.each do |registration|
+          _, conflict = AST.register_type!(
+            registration.type_name.to_sym,
+            registration.kind,
+            site_token: registration.token
+          )
+          emit_error_type_conflict!(
+            registration.token,
+            registration.type_name,
+            conflict
+          ) if conflict
+        end
+      end
+
       SYNC_POLICY_REQUIRED_ERRORS = %i[LockTimeout MvccConflict AtomicConflict].freeze
       # Errors that may NEVER appear in a SYNC POLICY block.
       SYNC_POLICY_INLINE_ONLY_ERRORS = %i[Deadlock LockCycle].freeze
@@ -258,35 +261,6 @@ module Annotator
         clause.filter_messages = filter_messages
       end
 
-      # Collect input types from pipeline |> steps that can fail.
-      sig { params(body: T::Array[AST::Node], types: T::Set[String]).void }
-      def collect_pipe_input_types(body, types)
-        T.bind(self, SemanticAnnotator)
-
-        body.each do |stmt|
-          AST.each_locatable(stmt) do |node|
-            if node.is_a?(AST::BinaryOp) && node.smooth?
-              t = node.left.full_type!(context: "pipe input type")
-              types << t.resolved.to_s unless t.void? || t.error_union?
-            end
-          end
-        end
-      end
-
-      sig { params(bodies: T::Array[T.nilable(T::Array[AST::Node])]).returns(T::Boolean) }
-      def catch_bodies_reference_snapshot?(bodies)
-        T.bind(self, SemanticAnnotator)
-
-        bodies.compact.any? do |body|
-          found = T.let(false, T::Boolean)
-          AST.each_locatable(body) do |node|
-            found = true if node.is_a?(AST::Identifier) && node.name == "snapshot"
-          end
-          found
-        end
-      end
-
-
       # ==========================================
       # CONTROL FLOW
       # ==========================================
@@ -364,15 +338,22 @@ module Annotator
 
         # Kind + type: first use registers, subsequent verifies.
         _, conflict = AST.register_type!(type_sym, kind_sym, site_token: site_tok)
-        return unless conflict
+        emit_error_type_conflict!(site_tok || node, type_name_str, conflict) if conflict
+        nil
+      end
+
+      sig { params(site: T.any(AST::Locatable, Lexer::Token), type_name: String, conflict: T::Hash[Symbol, T.untyped]).void }
+      def emit_error_type_conflict!(site, type_name, conflict)
+        T.bind(self, SemanticAnnotator)
+
         first_site = conflict[:first_site]
-        first_loc  = first_site ? " (first registered at line #{first_site.line})" : ""
+        first_loc = first_site ? " (first registered at line #{first_site.line})" : ""
         if conflict[:is_stdlib]
-          error!(site_tok || node, :ERROR_TYPE_RESERVED_BY_STDLIB,
-                 name: type_name_str, kind: conflict[:existing_kind])
+          error!(site, :ERROR_TYPE_RESERVED_BY_STDLIB,
+                 name: type_name, kind: conflict[:existing_kind])
         else
-          error!(site_tok || node, :ERROR_TYPE_KIND_CONFLICT,
-                 name: type_name_str, kind: conflict[:existing_kind], first_loc: first_loc)
+          error!(site, :ERROR_TYPE_KIND_CONFLICT,
+                 name: type_name, kind: conflict[:existing_kind], first_loc: first_loc)
         end
       end
 
@@ -413,10 +394,8 @@ module Annotator
         # returned value cannot outlive those captures.
         inline_bg_sources = collect_bg_sources_in_expr(node.value).uniq
         if inline_bg_sources.any?
-          source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
           error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-                 type: node.value.full_type!(context: "inline BG return").to_s,
-                 hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
+            type: node.value.full_type!(context: "inline BG return").to_s)
         end
 
         # RETURN inside a WITH block is forbidden ONLY when the returned value
@@ -426,14 +405,15 @@ module Annotator
         # SymbolEntry#non_escaping flag is set on every WITH alias by
         # declare_capability_scope!; it's the same flag ensure_owned_value!
         # already uses to prevent storing WITH-scoped values in containers.
-        if (@with_block_depth || 0) > 0
+        if inside_with_block?
           val = node.value
           if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
-            error!(node, :RETURN_FROM_WITH_SCOPED, name: val.name, hint: "WITH aliases are borrows of locked data and cannot escape their scope.")
+            error!(node, :RETURN_FROM_WITH_SCOPED,
+              name: val.name)
           elsif val.is_a?(AST::GetField) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-            error!(node, :RETURN_FIELD_FROM_WITH_SCOPED, hint: "Field access borrows from the locked data; the borrow cannot escape the WITH scope.")
+            error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
           elsif val.is_a?(AST::GetIndex) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-            error!(node, :RETURN_INDEX_FROM_WITH_SCOPED, hint: "Index access borrows from the locked data; the borrow cannot escape the WITH scope.")
+            error!(node, :RETURN_INDEX_FROM_WITH_SCOPED)
           end
         end
         promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
@@ -579,7 +559,14 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         # Logic: val OR default
-        visit(node.left)
+        rhs_propagates =
+          node.right.is_a?(AST::OrRaise) ||
+          node.right.is_a?(AST::OrExit) ||
+          node.right.is_a?(AST::ThrowNode) ||
+          node.right.is_a?(AST::ReturnNode)
+        with_body_fact_failure_absorbed(!rhs_propagates) do
+          visit(node.left)
+        end
         visit(node.right)
 
 
@@ -631,7 +618,7 @@ module Annotator
 
         # Handle OR BREAK: error-to-break coercion (valid only inside loops)
         if node.right.is_a?(AST::OrBreak)
-          if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
+          if current_loop_depth <= 0
             error!(node, :OR_BREAK_OUTSIDE_WHILE)
           end
           if t_left_type.error_union?
@@ -679,12 +666,8 @@ module Annotator
           return
         end
 
-        # Standard OR behavior
-        if t_left_type.resolved == t_right_type.resolved
-          stamp_type!(node, t_left_type.resolved)
-        else
-          stamp_type!(node, t_left_type.resolved)
-        end
+        # Standard OR behavior.
+        stamp_type!(node, t_left_type.resolved)
       end
 
       # An empty collection fallback (`expr OR []` / `OR {}`) is visited

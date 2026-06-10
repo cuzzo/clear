@@ -1795,6 +1795,8 @@ pub fn bind(comptime deps: type) type {
 
             data: MAL = .{},
 
+            pub const empty: Self = .{};
+
             pub fn initCapacity(allocator: std.mem.Allocator, cap: usize) !Self {
                 var data: MAL = .{};
                 try data.setCapacity(allocator, cap);
@@ -2021,6 +2023,8 @@ pub fn bind(comptime deps: type) type {
 
             shards: [N]std.ArrayListUnmanaged(T) = [_]std.ArrayListUnmanaged(T){.empty} ** N,
             round_robin: usize = 0,
+
+            pub const empty: Self = .{};
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
                 for (&self.shards) |*s| s.deinit(allocator);

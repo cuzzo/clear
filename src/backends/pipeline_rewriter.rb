@@ -54,11 +54,7 @@ class PipelineRewriter
       node.statements.map! { |s| rewrite!(s) }
     when AST::FunctionDef
       node.body.map! { |s| rewrite!(s) }
-    when AST::VarDecl, AST::BindExpr
-      node.value = rewrite!(node.value) if node.value
-    when AST::Assignment
-      node.value = rewrite!(node.value) if node.value
-    when AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
       node.value = rewrite!(node.value) if node.value
     when AST::IfStatement
       node.condition = rewrite!(node.condition)
@@ -230,7 +226,7 @@ class PipelineRewriter
       config = IntrinsicRegistry.sig(STD_LIB, T.unsafe(rhs).name)
       if config
         sig0 = config.is_a?(Array) ? config.first : config
-        call.zig_pattern = sig0.emit&.zig
+        call.zig_pattern = sig0.intrinsic_pattern
       end
       return call
     end
@@ -271,14 +267,11 @@ class PipelineRewriter
 
     # Identify the terminal operation.
     right = node.right
-    if AST.pipeline_terminal_fold?(right) || right.is_a?(AST::EachOp) || AST.pipeline_list_terminal?(right)
-      terminal = right
-      cursor = node.left
-    elsif is_fusible?(right)
+    if is_fusible?(right)
       terminal = nil # implicit list terminal
       cursor = node
     else
-      # Standard function terminal
+      # Explicit pipeline terminal or standard function terminal.
       terminal = right
       cursor = node.left
     end
@@ -697,13 +690,8 @@ class PipelineRewriter
       key_expr = replace_placeholder(terminal.expression, current_val)
       insert_call = synthetic_set_insert_call(token, res_ident.dup, key_expr)
       [insert_call]
-    when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
-      # Produces a list
-      value = AST::CopyNode.new(token, current_val.dup)
-      AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
-      call = synthetic_append_call(token, res_ident, value)
-      [call]
     else
+      # Produces a list.
       value = AST::CopyNode.new(token, current_val.dup)
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
       call = synthetic_append_call(token, res_ident, value)
@@ -717,7 +705,7 @@ class PipelineRewriter
     defn = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
     call = AST::MethodCall.new(token, receiver, "append", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-    call.zig_pattern = defn.emit&.zig
+    call.zig_pattern = defn.intrinsic_pattern
     call.matched_stdlib_def = defn
     call
   end
@@ -727,7 +715,7 @@ class PipelineRewriter
     defn = T.must(IntrinsicRegistry.sig(SET_METHODS, "insert"))
     call = AST::MethodCall.new(token, receiver, "insert", [value])
     AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
-    call.zig_pattern = defn.emit&.zig
+    call.zig_pattern = defn.intrinsic_pattern
     call.matched_stdlib_def = defn
     call
   end

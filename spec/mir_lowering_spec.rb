@@ -76,7 +76,7 @@ RSpec.describe MIRLowering do
     node
   end
 
-  def capture_analysis(captures: {}, capture_symbols: {}, close_patterns: {},
+  def capture_analysis(captures: {}, capture_symbols: {}, close_plans: {},
                        pointer_captures: Set.new, string_captures: Set.new,
                        resource_captures: Set.new, strategies: {})
     typed_captures = captures.to_h { |name, type| [name.to_s, type.is_a?(Type) ? type : Type.new(type)] }
@@ -85,7 +85,7 @@ RSpec.describe MIRLowering do
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
       captures: typed_captures, capture_symbols: capture_symbols,
-      close_patterns: close_patterns,
+      close_plans: close_plans,
       pointer_captures: pointer_captures, string_captures: string_captures,
       resource_captures: resource_captures,
       site_moved: Set.new, site_copied: Set.new,
@@ -240,12 +240,14 @@ RSpec.describe MIRLowering do
   end
 
   describe "task profile helpers" do
-    it "injects profile fields into empty and non-empty task configs" do
+    it "injects profile fields into typed task configs" do
       low = lowering
+      base = low.send(:task_config_plan, nil, :large)
+      profiled = low.send(:profiled_task_config_plan, base, 9, :parallel)
 
-      expect(low.send(:task_config_with_profile, ".{}", 9, :parallel)).to eq(".{ .profile_site_id = 9, .profile_dispatch = 2 }")
-      expect(low.send(:task_config_with_profile, ".{ .stack_size = .Large }", 4, :shared))
-        .to eq(".{ .stack_size = .Large , .profile_site_id = 4, .profile_dispatch = 3 }")
+      expect(profiled).to be_a(MIR::TaskConfigPlan)
+      expect(MIREmitter.new.emit_task_config_plan(profiled))
+        .to eq(".{ .stack_size = .Large, .profile_site_id = 9, .profile_dispatch = 2 }")
     end
 
     it "maps unknown dispatches to local and emits profile comments" do
@@ -259,7 +261,9 @@ RSpec.describe MIRLowering do
     it "routes parallel fiber spawn through spawnBest" do
       low = lowering
 
-      out = low.send(:fiber_spawn_call_zig, "__rt", "__Worker", "__worker", ".{}", :parallel)
+      task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
+      spawn = low.send(:fiber_spawn_call_plan, "__rt", "__Worker", "__worker", task_config, :parallel)
+      out = MIREmitter.new.emit_fiber_spawn_call(spawn)
 
       expect(out).to include("CheatHeader.spawnBest")
       expect(out).to include("&__Worker.run")
@@ -276,7 +280,7 @@ RSpec.describe MIRLowering do
       types = low.send(:bg_type_plan, node)
       capture = low.send(:bg_capture_materialization, names, nil, {}, {}, Set.new)
       scheduler = low.send(:bg_scheduler_plan, node, names, "rt")
-      body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+      body = MIRLoweringConcurrency::BgBodyMaterialization.new(run_body: [])
       ctx = MIRLoweringConcurrency::BgFsmTransformContext.new(
         node: node,
         names: names,
@@ -285,20 +289,46 @@ RSpec.describe MIRLowering do
         body: body,
         scheduler: scheduler,
         captured: {},
-        capture_close_zig: {},
+        capture_close_plans: {},
         pointer_captures: Set.new,
         rt_name: "rt",
       )
 
       expect(names.ctx_type).to eq("__BgCtx12")
       expect(types.promise_zig).to include("Promise")
-      expect(capture.capture_inits).to include(".inner = __bg12_promise.inner")
+      expect(capture.capture_inits.map(&:name)).to include(:inner, :alloc)
+      expect(MIREmitter.new.emit_struct_init_fields(capture.capture_inits))
+        .to include(".inner = __bg12_promise.inner")
       expect(scheduler.dispatch).to eq(true)
-      expect(scheduler.arena_init).to eq("__rt_bg12.arena_mode = true;")
-      expect(low.send(:bg_runtime_suppress_line, body, capture, scheduler, names)).to eq("")
-      expect(low.send(:bg_alloc_expr, node, "rt")).to eq("rt.getSched().allocator")
+      expect(MIREmitter.new.emit(T.must(scheduler.arena_init))).to eq("__rt_bg12.arena_mode = true;")
+      expect(MIREmitter.new.emit(low.send(:bg_alloc_expr, node, "rt"))).to eq("rt.getSched().allocator")
       expect(ctx.to_transform_hash.fetch(:ctx_type)).to eq("__BgCtx12")
       expect(ctx.to_transform_hash.fetch(:parallel)).to eq(false)
+    end
+
+    it "renders stackful BG resource capture cleanup with explicit runtime placeholder" do
+      low = lowering
+      names = MIRLoweringConcurrency::BgLoweringNames.new(
+        id: 2,
+        ctx_type: "__BgCtx2",
+        alloc_var: "__alloc_2",
+        promise_var: "__promise_2",
+        ctx_var: "__ctx_2_ptr",
+        blk_label: "__bg2",
+        bg_rt: "__rt_bg2",
+      )
+
+      capture = low.send(
+        :bg_capture_materialization,
+        names,
+        nil,
+        { "map" => Type.new(:StringMap) },
+        { "map" => Schemas::ResourceClosePlan.method("deinit", runtime_heap_alloc_args: 2) },
+        Set.new,
+      )
+
+      expect(MIREmitter.new.emit_capture_cleanup_actions(capture.capture_frees))
+        .to include("defer __ctx_2.map.deinit(rt.heapAlloc(), rt.heapAlloc());")
     end
 
     it "strips leading try when assigning a BG value result" do
@@ -306,7 +336,7 @@ RSpec.describe MIRLowering do
       fake.extend(MIRLoweringConcurrency)
       expr = make_lit(:INT64, 1)
       step = MIRLoweringConcurrency::BgBodyStep.new(expr: expr, binding: nil)
-      lowered = MIR::InlineZig.new("try compute()", "spec")
+      lowered = MIR::Call.new("compute", [], true)
 
       fake.define_singleton_method(:escaping_value_alloc) { |_inner| :heap }
       fake.define_singleton_method(:with_decl_alloc) { |_alloc, &blk| blk.call }
@@ -314,14 +344,13 @@ RSpec.describe MIRLowering do
       fake.define_singleton_method(:place_value_for_destination) { |mir, _node, _alloc, _type| mir }
       fake.define_singleton_method(:mir_allocates?) { |_mir| false }
       fake.define_singleton_method(:flush_pending) { [] }
-      fake.define_singleton_method(:emit_expr) { |_mir| "try compute()" }
       fake.define_singleton_method(:ownership_marks_for_transferred_temp) { |_mir, target_alloc:| [] }
 
       body = []
       id = MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: 7)
-      result = fake.send(:lower_bg_value_result, step, body, id, Type.new(:Int64))
-      expect(result).to eq("__ctx_7.inner.result = compute();")
+      fake.send(:lower_bg_value_result, step, body, id, Type.new(:Int64))
       expect(body).to include(an_instance_of(MIR::Set))
+      expect(body.last.value).to eq(lowered)
     end
   end
 
@@ -338,10 +367,9 @@ RSpec.describe MIRLowering do
       fake = Object.new
       fake.extend(MIRLoweringControlFlow)
       fake.define_singleton_method(:lower) { |value| value }
-      fake.define_singleton_method(:emit_expr) { |_value| ".Fallback" }
       arm = AST::MatchCase.new(kind: :eq, value: AST::Identifier.new(tok, "fallback"), body: [], extra_values: [])
 
-      expect(fake.send(:union_match_case_variants, arm)).to eq(["Fallback"])
+      expect(fake.send(:union_match_case_variants, arm)).to eq(["fallback"])
     end
 
     it "builds pointer return payloads without regex parsing" do
@@ -429,7 +457,7 @@ RSpec.describe MIRLowering do
       mir = lowering.send(
         :emit_builtin,
         :dupeUnionValue,
-        [MIR::Ident.new("Value"), MIR::Ident.new("val"), MIR::Ident.new("rt.heapAlloc()")]
+        [MIR::Ident.new("Value"), MIR::Ident.new("val"), MIR::AllocatorRef.new(:heap)]
       )
       zig = emit(mir)
       expect(zig).to eq("try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc())")
@@ -488,6 +516,20 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to include('"\\\\"')
       expect(zig).not_to include('"\\"")')
+    end
+
+    it "lowers macro print arguments as a structural tuple literal" do
+      l = lowering
+      left = make_lit(:INT64, 1, full_type: :Int64)
+      right = make_lit(:BOOLEAN, true, full_type: :Bool)
+      call = AST::FuncCall.new(tok, "print", [left, right])
+
+      result = l.send(:lower_macro_print, call)
+
+      expect(result).to be_a(MIR::Call)
+      expect(result.callee).to eq("std.debug.print")
+      expect(result.args.last).to be_a(MIR::TupleLiteral)
+      expect(emit(result)).to eq('std.debug.print("{d} {}\\n", .{1, true})')
     end
 
     it "lowers integer literal" do
@@ -627,7 +669,7 @@ RSpec.describe MIRLowering do
       right = make_id("b", full_type: :Int64)
       node = make_binop(left, :ADD, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.intAdd(a, b)")
     end
@@ -646,7 +688,7 @@ RSpec.describe MIRLowering do
       right = make_lit(:STRING, "alice")
       node = make_binop(left, :EQ, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to include("CheatLib.eql(name,")
     end
@@ -664,7 +706,7 @@ RSpec.describe MIRLowering do
       right = make_id("b")
       node = make_binop(left, :WRAP_ADD, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.wrapAdd(a, b)")
     end
@@ -786,7 +828,7 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
     end
 
@@ -819,7 +861,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Int64
       node.zig_pattern = "CheatLib.len({0})"
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       expect(emit(result)).to eq("CheatLib.len(items)")
     end
 
@@ -1092,9 +1134,13 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ShardedMapPut)
       expect(result.map_kind).to eq(:string_map)
-      expect(result.key_zig).to be_nil
-      expect(result.val_zig).to be_nil
+      expect(result.key_type).to be_nil
+      expect(result.value_type).to be_nil
       expect(result.template_kind).to eq(:zig)
+      expect(result.target_var).to eq("m")
+      expect(result.has_alloc_metadata?).to eq(true)
+      expect(result.mutating_receiver_allocator_op?).to eq(true)
+      expect(MIR::OwnershipEffect.of(result)).to eq(MIR::OwnershipEffect.none)
     end
 
     it "carries numeric HashMap key/value Zig types into ShardedMapPut" do
@@ -1110,8 +1156,8 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ShardedMapPut)
       expect(result.map_kind).to eq(:numeric_map)
-      expect(result.key_zig).to eq("i64")
-      expect(result.val_zig).to eq("f64")
+      expect(result.key_type).to eq(Type.new(:Int64))
+      expect(result.value_type).to eq(Type.new(:Float64))
     end
 
     it "uses shard-direct placeholders when lowering inside a shard context" do
@@ -1146,8 +1192,7 @@ RSpec.describe MIRLowering do
       result = low.lower(assignment)
 
       expect(result).to be_a(MIR::ExprStmt)
-      expect(result.expr).to be_a(MIR::InlineZig)
-      expect(result.expr.reason).to eq("index_set")
+      expect(result.expr).to be_a(MIR::IndexedStore)
       expect(result.expr.target_var).to eq("xs")
       expect(emit(result)).to include("CheatLib.setAt(xs, 0, 9)")
     end
@@ -1481,7 +1526,12 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::SwitchStmt)
-      expect(result.arms.first[:pattern]).to eq("1, 2, 3")
+      expect(result.arms.first.patterns).to eq([
+        MIR::Lit.new("1"),
+        MIR::Lit.new("2"),
+        MIR::Lit.new("3"),
+      ])
+      expect(MIREmitter.new.emit(result)).to include("1, 2, 3 =>")
       expect(result.default_body).to eq([])
     end
 
@@ -1551,12 +1601,12 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::UnionMatchStmt)
       expect(result.arms.length).to eq(2)
-      expect(result.arms[0][:payload]).to start_with("__match_payload_")
-      expect(result.arms[0][:pattern]).to eq(".Ok")
-      expect(result.arms[1][:payload]).to start_with("__match_payload_")
-      expect(result.arms[1][:pattern]).to eq(".Err")
-      expect(result.arms[0][:body].grep(MIR::Let).map(&:name)).to include("payload")
-      expect(result.arms[1][:body].grep(MIR::Let).map(&:name)).to include("payload")
+      expect(result.arms[0].payload).to start_with("__match_payload_")
+      expect(result.arms[0].variant).to eq("Ok")
+      expect(result.arms[1].payload).to start_with("__match_payload_")
+      expect(result.arms[1].variant).to eq("Err")
+      expect(result.arms[0].body.grep(MIR::Let).map(&:name)).to include("payload")
+      expect(result.arms[1].body.grep(MIR::Let).map(&:name)).to include("payload")
     end
 
     it "lowers WHEN guard arms before subject equality dispatch" do
@@ -2193,8 +2243,14 @@ RSpec.describe MIRLowering do
       clause.matched_types = [:LockTimeout]
       clause.bubble_types = [:Deadlock]
       with_node = AST::WithBlock.new(tok, caps, [], nil)
+      typed_caps = caps.map { |cap| capability_transition(cap) }
 
-      zig = lowering.send(:emit_sorted_lock_acquires_fallible, caps, clause, "__with_label", with_node)
+      node = lowering.send(:sorted_lock_acquire, typed_caps, clause, "__with_label", with_node)
+      expect(node).to be_a(MIR::SortedLockAcquire)
+      expect(node.action).to be_a(MIR::FailureAction)
+      expect(node.entries).to all(be_a(MIR::SortedLockAcquireEntry))
+
+      zig = MIREmitter.new.emit(node)
 
       expect(zig).to include("acquireOrErr")
       expect(zig).to include("readOrErr")
@@ -2214,11 +2270,13 @@ RSpec.describe MIRLowering do
       lowering.send(:materialize_sorted_lock_bindings,
         with_node,
         materialization,
-        caps,
+        typed_caps,
         clause,
         "__with_label")
 
-      expect(materialization.bindings.first).to include("acquireOrErr")
+      materialized = materialization.bindings.first
+      expect(materialized).to be_a(MIR::SortedLockAcquire)
+      expect(MIREmitter.new.emit(materialized)).to include("acquireOrErr")
       expect(materialization.fallible_clauses.map(&:var_name)).to eq(["a", "b"])
     end
   end
@@ -2288,6 +2346,26 @@ RSpec.describe MIRLowering do
       expect(result.then_body[1]).to be_a(MIR::Cleanup)
       expect(result.then_body[1].name).to eq("node")
       expect(then_zig).to include("break;")
+    end
+
+    it "attributes IF-bind alias field map writes to the captured owner" do
+      mir = lower_source_mir(<<~CLEAR)
+        STRUCT Env { vars: HashMap<Int64> }
+
+        FN main() RETURNS Void ->
+          MUTABLE pool: Env[4]@pool = [];
+          id: Id<Env> = pool.insert(Env{ vars: {} });
+          IF pool[id] AS env THEN
+            env.vars["a"] = 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      puts = collect_mir_nodes(mir, MIR::ShardedMapPut)
+
+      expect(puts.map(&:target_var)).to include("pool")
+      expect(puts.map(&:target_var)).not_to include("env")
     end
 
     it "stamps frame allocation scopes inside IF-bind bodies" do
@@ -2542,10 +2620,10 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       node.zig_pattern = "try CheatLib.intToString({alloc}, {0})"
       sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(alloc: :frame)
+      sig.emit = IntrinsicEmit.new(zig: "try CheatLib.intToString({alloc}, {0})", alloc: :frame)
       node.matched_stdlib_def = sig
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       zig = emit(result)
       expect(zig).to include("CheatLib.intToString")
       expect(zig).to include("frameAlloc")
@@ -2693,6 +2771,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
@@ -2708,6 +2787,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2723,6 +2803,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2740,6 +2821,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2755,6 +2837,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2769,6 +2852,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2783,6 +2867,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2797,6 +2882,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -2808,6 +2894,7 @@ RSpec.describe MIRLowering do
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [], [body_lit], nil)
       node.full_type = :Void
+      attach_capability_plan!(node)
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
@@ -2835,12 +2922,15 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DoBlock)
+      expect(result.code).to be_a(MIR::DoBlockPlan)
+      expect(result.code.branches.first).to be_a(MIR::DoBranchPlan)
       zig = emit(result)
       expect(zig).to include("WaitGroup")
       expect(zig).to include(".add(1)")
       expect(zig).to include(".wait()")
       expect(zig).to include("__DoBranchCtx")
       expect(zig).to include("fn run(")
+      expect(zig).to include("&__do0_ctx0")
     end
 
     it "lowers multi-branch DoBlock" do
@@ -2865,6 +2955,8 @@ RSpec.describe MIRLowering do
       # Pinned branch uses submitSpawn, unpinned uses spawnBest
       expect(zig).to include("spawnBest")
       expect(zig).to include("submitSpawn")
+      expect(zig).to include("&__do0_ctx0")
+      expect(zig).to include("&__do0_ctx1")
     end
 
     it "lowers DoBlock with captures" do
@@ -2895,7 +2987,7 @@ RSpec.describe MIRLowering do
       nested_analysis = capture_analysis(
         captures: { "inner" => :Int64 },
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set.new
@@ -2907,7 +2999,7 @@ RSpec.describe MIRLowering do
       branch_analysis = capture_analysis(
         captures: {},
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set.new
@@ -2995,6 +3087,7 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BgBlock)
+      expect(result.code).to be_a(MIR::BgStackfulPlan)
       zig = emit(result)
       expect(zig).to include("__BgCtx")
       expect(zig).to include(".spawn(")
@@ -3010,7 +3103,7 @@ RSpec.describe MIRLowering do
       analysis = capture_analysis(
         captures: captures_hash,
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new(["x"]),
         string_captures: Set.new,
         resource_captures: Set.new
@@ -3035,7 +3128,7 @@ RSpec.describe MIRLowering do
       analysis = capture_analysis(
         captures: { "x" => :Int64 },
         capture_symbols: {},
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set["x"],
         string_captures: Set.new,
         resource_captures: Set.new
@@ -3123,6 +3216,7 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BgBlock)
+      expect(result.code).to be_a(MIR::BgStreamPlan)
       zig = emit(result)
       expect(zig).to include("__SgCtx")
       expect(zig).to include("spawnNew")
@@ -3215,6 +3309,9 @@ RSpec.describe MIRLowering do
       source = AST::StaticCall.new(tok, "Streams", "source", [])
       source.full_type = Type.new(:"~Int64[INF]")
       source.zig_pattern = "makeStream()"
+      source_sig = FunctionSignature.new(params: [], return_type: source.full_type!, intrinsic: true)
+      source_sig.emit = IntrinsicEmit.new(zig: "makeStream()")
+      source.matched_stdlib_def = source_sig
       node = AST::NextExpr.new(tok, source)
       node.full_type = Type.new(:Int64)
 
@@ -3224,7 +3321,7 @@ RSpec.describe MIRLowering do
       expect(result.label).to start_with("__next_recv_")
       temp = result.body.first
       expect(temp).to be_a(MIR::Let)
-      expect(temp.init).to be_a(MIR::InlineZig)
+      expect(temp.init).to be_a(MIR::RegistryCall)
       expect(result.body.last).to be_a(MIR::BreakStmt)
       expect(result.result_type).to eq(Type.new(:Int64))
     end
@@ -3241,9 +3338,12 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "sqrt", [arg])
       node.full_type = :Number
       node.zig_pattern = "std.math.sqrt({0})"
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(zig: "std.math.sqrt({0})")
+      node.matched_stdlib_def = sig
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
+      expect(result).to be_a(MIR::RegistryCall)
       zig = emit(result)
       expect(zig).to eq("std.math.sqrt(10)")
     end
@@ -3256,10 +3356,22 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "max", [arg0, arg1])
       node.full_type = :Number
       node.zig_pattern = "std.math.max({0}, {1})"
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
+      sig.emit = IntrinsicEmit.new(zig: "std.math.max({0}, {1})")
+      node.matched_stdlib_def = sig
 
       result = lowering.lower(node)
+      expect(result).to be_a(MIR::RegistryCall)
       zig = emit(result)
       expect(zig).to eq("std.math.max(1, 2)")
+    end
+
+    it "rejects static calls without matched stdlib metadata" do
+      node = AST::StaticCall.new(tok, "Math", "missing", [])
+      node.full_type = :Number
+
+      expect { lowering.send(:lower_static_call, node) }
+        .to raise_error(/lower_static_call: missing stdlib signature for AST::StaticCall/)
     end
   end
 
@@ -3268,10 +3380,10 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "Or* error chain lowering" do
-    it "lowers OrRaise to Ident" do
+    it "lowers OrRaise to a structural error value" do
       node = AST::OrRaise.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::FieldGet)
       expect(emit(result)).to eq("error.OrRaise")
     end
 
@@ -3282,17 +3394,17 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("break;")
     end
 
-    it "lowers OrPass to Ident undefined" do
+    it "lowers OrPass to a structural undefined default" do
       node = AST::OrPass.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrPrune to Ident undefined" do
+    it "lowers OrPrune to a structural undefined default" do
       node = AST::OrPrune.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
@@ -3387,6 +3499,68 @@ RSpec.describe MIRLowering do
 
       expect(lowering.lower(error_node)).to be_a(MIR::TryCatch)
       expect(lowering.lower(optional_node)).to be_a(MIR::Orelse)
+    end
+
+    it "uses structural OR PASS defaults instead of Zig-spelled literals" do
+      string_call = AST::FuncCall.new(tok, "fallible_string", [])
+      string_call.full_type = Type.new(:"!String")
+      string_default = lowering.send(:or_pass_fallback, string_call)
+
+      list_call = AST::FuncCall.new(tok, "fallible_list", [])
+      list_call.full_type = Type.new(:"!Int64[]", collection: :list)
+      list_default = lowering.send(:or_pass_fallback, list_call)
+
+      int_call = AST::FuncCall.new(tok, "fallible_int", [])
+      int_call.full_type = Type.new(:"!Int64")
+      int_default = lowering.send(:or_pass_fallback, int_call)
+
+      expect(string_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(string_default, MIR::DefaultValue).kind).to eq(:string_empty)
+      expect(list_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(list_default, MIR::DefaultValue).kind).to eq(:collection_empty)
+      expect(int_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(int_default, MIR::DefaultValue).kind).to eq(:undefined)
+      expect([string_default, list_default, int_default].any? { |node| node.is_a?(MIR::Lit) }).to be(false)
+    end
+
+    it "materializes owned OR PASS results before stdlib TAKES argument verification" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN inner() RETURNS !String ->
+          MUTABLE v: String = ""; v = v + "x";
+          RETURN v;
+        END
+
+        FN run() RETURNS !Void ->
+          MUTABLE outer: String[]@list = [];
+          outer.append(inner() OR PASS);
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      consuming_call = collect_mir_nodes(mir, MIR::RegistryCall).find do |call|
+        call.ownership_contract.owned_operand_names.any?
+      end
+      expect(consuming_call).not_to be_nil
+      consumed = T.must(consuming_call).ownership_contract.owned_operand_names
+      expect(consumed.length).to eq(1)
+      expect(consumed.first).to match(/\A__tmp_\d+\z/)
+      expect(T.must(consuming_call).args[1].expr).to be_a(MIR::Ident)
+    end
+
+    it "lowers OR BREAK catch fallback as a structural break expression" do
+      fallible = AST::FuncCall.new(tok, "fallible", [])
+      fallible.full_type = :Int64
+      fallible.error_union_type = Type.new(:"!Int64")
+      fallible.can_fail = true
+      node = AST::BinaryOp.new(tok, fallible, :OR_RESCUE, AST::OrBreak.new(tok))
+      node.full_type = :Int64
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::TryCatch)
+      expect(result.catch_body).to be_a(MIR::BreakExpr)
+      expect(emit(result)).to eq("(fallible(rt) catch break)")
     end
   end
 
@@ -3820,12 +3994,11 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "SMOOTH pipeline lowering" do
-    it "lowers simple pipe x |> f to function call via intrinsic pattern" do
+    it "lowers simple pipe x |> f to function call" do
       lhs = make_lit(:NUMBER, 42, full_type: :Number)
       lhs.coerced_type = nil
       rhs = AST::Identifier.new(tok, "double")
       rhs.full_type = :Number
-      rhs.zig_pattern = "double({0})"
 
       node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
       node.full_type = :Number
@@ -3836,14 +4009,13 @@ RSpec.describe MIRLowering do
       expect(zig).to include("42")
     end
 
-    it "lowers pipe with args x |> f(y) to f(x, y) via intrinsic pattern" do
+    it "lowers pipe with args x |> f(y) to f(x, y)" do
       lhs = make_lit(:NUMBER, 10, full_type: :Number)
       lhs.coerced_type = nil
       arg = make_lit(:NUMBER, 20, full_type: :Number)
       arg.coerced_type = nil
       rhs = AST::FuncCall.new(tok, "add", [arg])
       rhs.full_type = :Number
-      rhs.zig_pattern = "add({0}, {1})"
 
       node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
       node.full_type = :Number
@@ -3878,8 +4050,7 @@ RSpec.describe MIRLowering do
 
       expect(collect_mir_nodes(mir, MIR::BatchWindowPush)).not_to be_empty
       expect(collect_mir_nodes(mir, MIR::BatchWindowFlush)).not_to be_empty
-      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
-      expect(inline_reasons).not_to include("pipeline_legacy_host")
+      expect(MIR.const_defined?(:InlineZig, false)).to be(false)
 
       zig = emit(mir)
       expect(zig).to include("CheatLib.BatchWindow(i64).init")
@@ -3893,16 +4064,16 @@ RSpec.describe MIRLowering do
       expect(thunk_nodes.length).to eq(1)
       thunk = thunk_nodes.fetch(0)
       expect(thunk.fn_name).to eq("sum_down")
-      expect(thunk.ret_zig).to eq("i64")
+      expect(thunk.return_type.zig_type).to eq("i64")
       expect(thunk.base_cases.length).to eq(1)
-      expect(thunk.base_cases.first.fetch(:value_zig)).to eq("0")
-      expect(thunk.combine_lhs_zig).to eq("current.n")
-      expect(thunk.op_zig).to eq("+")
+      expect(MIREmitter.new.emit(thunk.base_cases.first.fetch(:value))).to eq("0")
+      expect(MIREmitter.new.emit(thunk.combine_lhs)).to eq("current.n")
+      expect(thunk.combine_op).to eq(:ADD)
       expect(thunk.recurse_arg_inits.length).to eq(1)
-      expect(thunk.recurse_arg_inits.first).to include("current.n")
-      expect(thunk.yield_line).to eq("rt.checkYield();")
-      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
-      expect(inline_reasons).not_to include(:thunk_trampoline_body)
+      expect(thunk.recurse_arg_inits.first).to be_a(MIR::ThunkFrameInit)
+      expect(MIREmitter.new.emit(thunk.recurse_arg_inits.first.value)).to include("current.n")
+      expect(thunk.yield_policy).to eq(:check)
+      expect(MIR.const_defined?(:InlineZig, false)).to be(false)
     end
 
     it "lowers mutual THUNK recursion through structural MIR instead of opaque Zig" do
@@ -3913,28 +4084,28 @@ RSpec.describe MIRLowering do
       thunk_nodes.each do |thunk|
         expect(thunk.variants.map { |v| v.fetch(:name) }).to contain_exactly("is_even", "is_odd")
         expect(thunk.initial_variant).to eq(thunk.fn_name)
-        expect(thunk.initial_fields).to eq([".n = n"])
-        expect(thunk.yield_line).to eq("rt.checkYield();")
+        expect(thunk.initial_fields.map(&:field_name)).to eq(["n"])
+        expect(MIREmitter.new.emit(thunk.initial_fields.first.value)).to eq("n")
+        expect(thunk.yield_policy).to eq(:check)
       end
 
       even = thunk_nodes.find { |n| n.fn_name == "is_even" }
       expect(even).not_to be_nil
       even_arm = even.arms.find { |a| a.fetch(:variant_name) == "is_even" }
       expect(even_arm).not_to be_nil
-      expect(even_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("true")
+      expect(MIREmitter.new.emit(even_arm.fetch(:base_cases).first.fetch(:value))).to eq("true")
       expect(even_arm.fetch(:target_variant)).to eq("is_odd")
-      expect(even_arm.fetch(:target_arg_inits).first).to include("f.n")
+      expect(MIREmitter.new.emit(even_arm.fetch(:target_arg_inits).first.value)).to include("f.n")
 
       odd = thunk_nodes.find { |n| n.fn_name == "is_odd" }
       expect(odd).not_to be_nil
       odd_arm = odd.arms.find { |a| a.fetch(:variant_name) == "is_odd" }
       expect(odd_arm).not_to be_nil
-      expect(odd_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("false")
+      expect(MIREmitter.new.emit(odd_arm.fetch(:base_cases).first.fetch(:value))).to eq("false")
       expect(odd_arm.fetch(:target_variant)).to eq("is_even")
-      expect(odd_arm.fetch(:target_arg_inits).first).to include("f.n")
+      expect(MIREmitter.new.emit(odd_arm.fetch(:target_arg_inits).first.value)).to include("f.n")
 
-      inline_reasons = collect_mir_nodes(mir, MIR::InlineZig).map(&:reason)
-      expect(inline_reasons).not_to include(:thunk_trampoline_body)
+      expect(MIR.const_defined?(:InlineZig, false)).to be(false)
     end
 
     it "collects named observables by calling next directly" do
@@ -4171,7 +4342,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :uniform, elem_zig_type: "i64")
     expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :uniform, zig_type: "std.ArrayListUnmanaged(i64)")
     expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :uniform, zig_type: "Node")
-    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :uniform)
+    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil), nil)).to include(kind: :uniform)
   end
 
   it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do

@@ -42,10 +42,10 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   end
 
   it "covers cleanup-classifier allocator and owned-value classification helpers" do
-    frame_decl = OpenStruct.new(symbol: OpenStruct.new(storage: :frame))
-    sym = OpenStruct.new(reg: frame_decl, storage: :heap)
+    frame_decl = OpenStruct.new(symbol: SymbolEntry.new(reg: "frame_decl", type: Type.new(:String), mutable: false, storage: :frame))
+    sym = SymbolEntry.new(reg: frame_decl, type: Type.new(:String), mutable: false, storage: :heap)
     expect(CleanupClassifier.send(:container_alloc_from, sym, OpenStruct.new(storage: :heap))).to eq(:frame)
-    expect(CleanupClassifier.send(:container_alloc_from, OpenStruct.new(storage: :stack), Object.new)).to eq(:frame)
+    expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :stack))).to eq(:frame)
     expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :heap))).to eq(:heap)
 
     schema_lookup = ->(_) { nil }
@@ -128,12 +128,25 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
 
   it "covers MIR checker and pass helpers for frame allocs and return escapes" do
     checker = MIRChecker.new
-    inline_mutator = MIR::InlineZig.new("x", "mutator", MIR::OwnershipContract.empty, { mutates_receiver: true }, nil)
-    expect(checker.send(:expr_has_frame_alloc?, inline_mutator)).to be(false)
+    mutator_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+    mutator_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+    registry_mutator = MIR::RegistryCall.new(
+      entry: mutator_sig,
+      args: [],
+      reason: "mutator",
+      ownership_contract: MIR::OwnershipContract.empty,
+    )
+    expect(checker.send(:expr_has_frame_alloc?, registry_mutator)).to be(false)
     expect(checker.send(:expr_has_frame_alloc?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(true)
-    inline_frame = MIR::InlineZig.new("frameAlloc()", "frame_alloc_probe")
-    inline_frame.allocs = { alloc: :frame }
-    expect(checker.send(:expr_has_frame_alloc?, inline_frame)).to be(true)
+    frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
+    registry_frame = MIR::RegistryCall.new(
+      entry: frame_sig,
+      args: [],
+      reason: "frame_alloc_probe",
+      ownership_contract: MIR::OwnershipContract.empty,
+      allocs: MIR.inline_alloc_metadata(alloc: :frame),
+    )
+    expect(checker.send(:expr_has_frame_alloc?, registry_frame)).to be(true)
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)
 
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_) { nil })
@@ -142,18 +155,17 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, needs_cleanup: true, zig_type: "Thing"),
       "__hoist_tmp" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false, needs_cleanup: true, zig_type: "Thing"),
     }
+    facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(bindings)
     ret = AST::ReturnNode.new(tok, AST::StructLit.new(tok, "Pair", { "v" => escape }, :heap, []))
-    expect(pass.send(:collect_return_escapes, ret, bindings)).to eq(["owned"])
+    expect(pass.send(:collect_return_escapes, ret, facts)).to eq(["owned"])
 
     hoist = id("__hoist_tmp", moved: true)
-    expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), bindings)).to eq(["__hoist_tmp"])
+    expect(pass.send(:collect_return_escapes, AST::ReturnNode.new(tok, hoist), facts)).to eq(["__hoist_tmp"])
   end
 
-  it "covers emitter raw-bytecode and discard-owned paths" do
+  it "keeps raw bytecode carriers deleted and covers discard-owned paths" do
     emitter = MIREmitter.new
-    raw = MIR::RawBc.new(nil, [MIR::Ident.new("x"), MIR::Lit.new("1")], { zig: "doIt({0}, {1})" })
-    expect(emitter.emit(raw)).to eq("doIt(x, 1)")
-    expect { emitter.emit(MIR::RawBc.new(nil, [], nil)) }.to raise_error(/no stdlib_def/)
+    expect(MIR.const_defined?(:RawBc, false)).to be(false)
 
     cleanup = CleanupEntry.build(:heap_string, alloc: :heap, has_moved_guard: true)
     success_only = MIR::TryCatch.new(MIR::Call.new("maybe", [], false, false), MIR::Undef.new, nil)
@@ -207,12 +219,16 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(l.send(:build_field_path_zig, Object.new)).to be_a(String)
   end
 
-  it "covers annotator recursive scans and stack/lifetime helpers" do
+  it "covers annotator body facts and stack/lifetime helpers" do
     a = annotator
     call = AST::FuncCall.new(tok, "recur", [])
     nested = AST::StructLit.new(tok, "Box", { "call" => call }, :stack, [])
-    expect(a.send(:contains_self_call?, nested, "recur")).to be(true)
-    expect(a.send(:contains_self_call?, nil, "recur")).to be(false)
+    ret = AST::ReturnNode.new(tok, call)
+    body_scan = a.send(:with_body_fact_frame, Semantic::BodyIdentity.unassigned) do
+      [nested, call, ret].each { |node| a.send(:record_body_fact_node!, node) }
+    end
+    expect(body_scan.call_site_facts.map(&:node)).to include(call)
+    expect(body_scan.return_nodes).to eq([ret])
 
     {
       "start" => Set["mid"],
@@ -228,7 +244,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     end
     fn = AST::FunctionDef.new(tok, "deep", [], [], :Void, nil, [], [], nil, :private, [], false)
     fn.stack_tier = :unbounded
-    a.instance_variable_set(:@fn_nodes, { "deep" => fn })
+    a.semantic_function_nodes.replace({ "deep" => fn })
     expect(a.send(:find_unbounded_callee, Set["start"])).to eq("deep")
 
     source = OpenStruct.new(scope_depth: 3)
@@ -255,7 +271,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.send(:visit_BlockExpr, block)
     expect(block.storage).to eq(:rodata)
 
-    a.current_scope.declare("counter", OpenStruct.new(token: tok), Type.new(:Int64), true, false, nil, :stack)
+    a.current_scope.declare("counter", id("counter", type: Type.new(:Int64)), Type.new(:Int64), true, false, nil, :stack)
     assign = AST::Assignment.new(tok, id("counter", type: Type.new(:Int64)), lit("2", type: Type.new(:Int64)))
     a.send(:visit_assignment_variable, assign.name, assign)
     expect(assign.full_type!(context: "assignment test").resolved).to eq(:Int64)

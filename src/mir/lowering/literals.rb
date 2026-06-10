@@ -37,7 +37,6 @@ module MIRLoweringLiterals
 
     const :type_info, Type
     const :alloc, Symbol
-    const :alloc_zig, String
     const :zig_type, String
     const :arc_wrapped, T::Boolean
     const :rc_wrapped, T::Boolean
@@ -175,7 +174,7 @@ module MIRLoweringLiterals
       # Empty list: MIR expression depends on collection type
       if plan.list_collection?
         inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
-        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :list_empty, list_alloc, nil)
+        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :array_list_empty, list_alloc, nil)
         return wrap_list_literal_capability(inner, ti, list_alloc)
       end
       # Dynamic empty list: use makeList with empty items
@@ -278,7 +277,7 @@ module MIRLoweringLiterals
     bare_type = Type.new(plan.type_info.resolved.to_s)
     bare_type.copy_striped_map_topology_from!(plan.type_info)
     zig_type = bare_type.zig_type
-    init_value = hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?)
+    init_value = hash_literal_init_struct(zig_type, plan.alloc, bare_type.map_init_needs_alloc?)
     wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
     empty_result = T.cast(
       with_ownership_consumption(
@@ -291,7 +290,7 @@ module MIRLoweringLiterals
     )
     HashLiteralCapabilityPlan.new(
       zig_type: zig_type,
-      init_value: hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?),
+      init_value: hash_literal_init_struct(zig_type, plan.alloc, bare_type.map_init_needs_alloc?),
       empty_result: empty_result,
       result_wrap: :striped,
       result_wrap_fn: wrap_fn,
@@ -303,7 +302,7 @@ module MIRLoweringLiterals
     T.bind(self, MIRLowering) rescue nil
     bare_type = plan.type_info.bare_data_type
     zig_type = bare_type.zig_type
-    init_value = hash_literal_init_struct(zig_type, plan.alloc_zig, bare_type.map_init_needs_alloc?)
+    init_value = hash_literal_init_struct(zig_type, plan.alloc, bare_type.map_init_needs_alloc?)
     HashLiteralCapabilityPlan.new(
       zig_type: zig_type,
       init_value: init_value,
@@ -313,9 +312,9 @@ module MIRLoweringLiterals
     )
   end
 
-  sig { params(zig_type: String, alloc_zig: String, needs_alloc: T::Boolean).returns(MIR::StructInit) }
-  def hash_literal_init_struct(zig_type, alloc_zig, needs_alloc)
-    fields = needs_alloc ? [MIR.named_field("alloc", MIR::Ident.new(alloc_zig))] : []
+  sig { params(zig_type: String, alloc: Symbol, needs_alloc: T::Boolean).returns(MIR::StructInit) }
+  def hash_literal_init_struct(zig_type, alloc, needs_alloc)
+    fields = needs_alloc ? [MIR.named_field("alloc", MIR::AllocatorRef.new(alloc))] : []
     MIR::StructInit.new(zig_type, fields)
   end
 
@@ -339,7 +338,7 @@ module MIRLoweringLiterals
     T.bind(self, MIRLowering) rescue nil
     items = T.let([], T::Array[MIR::Stmt])
     alloc_expr = hash_literal_allocator_expr(plan)
-    items << MIR::Let.new("__hm", capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc_zig, true), true, nil, nil)
+    items << MIR::Let.new("__hm", capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc, true), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       items << hash_literal_put_stmt(key_node, val_node, plan, alloc_expr)
     end
@@ -423,11 +422,9 @@ module MIRLoweringLiterals
     T.bind(self, MIRLowering) rescue nil
     ti = Type.new(node.coerced_type_info || node.full_type!)
     map_alloc = function_state.current_decl_alloc || alloc_for_node(node)
-    rt_name = runtime_binding_name
     HashLiteralPlan.new(
       type_info: ti,
       alloc: map_alloc,
-      alloc_zig: MIR::Placement.zig_allocator(map_alloc, rt_name),
       zig_type: transpile_type(ti),
       arc_wrapped: ti.shared?,
       rc_wrapped: ti.multiowned?,

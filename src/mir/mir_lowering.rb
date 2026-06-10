@@ -836,7 +836,7 @@ class MIRLowering
     type_info = alloc_mark_type_info(mir, ast_node, "branch ownership placement")
     entry = hoist_cleanup_entry(mir, ast_node)
     if entry
-      entry[:has_moved_guard] = true
+      entry.mark_moved_guard!
     end
     materialized = MIR::BindingMaterialization.new(
       name: name,
@@ -920,7 +920,7 @@ class MIRLowering
     when AST::ForRange          then lower_for_range(node)
     when AST::MatchStatement    then lower_match(node)
     when AST::ReturnNode        then lower_return(node)
-    when AST::BreakNode         then MIR::BreakStmt.new(nil, nil)
+    when AST::BreakNode, AST::OrBreak then MIR::BreakStmt.new(nil, nil)
     when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
     when AST::PassStmt          then MIR::Noop.new("pass")
 
@@ -937,7 +937,7 @@ class MIRLowering
 
     # --- Expressions ---
     when AST::Literal           then lower_literal(node)
-    when AST::DefaultLit        then MIR::Lit.new(".{}")
+    when AST::DefaultLit        then MIR::DefaultValue.new(kind: :aggregate_empty)
     when AST::Identifier        then lower_identifier(node)
     when AST::BinaryOp          then lower_binary_op(node)
     when AST::UnaryOp           then lower_unary_op(node)
@@ -952,7 +952,7 @@ class MIRLowering
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
-    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
     when AST::DieNode           then MIR::ExprStmt.new(MIR::Call.new("std.process.exit", [MIR::Lit.new((node.status || 1).to_s)], false), false)
 
     # --- Memory / capability expressions ---
@@ -979,10 +979,8 @@ class MIRLowering
     when AST::YieldExpr        then lower_yield(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
-    when AST::OrRaise          then MIR::Ident.new("error.OrRaise")
-    when AST::OrBreak          then MIR::BreakStmt.new(nil, nil)
-    when AST::OrPass           then MIR::Ident.new("undefined")
-    when AST::OrPrune          then MIR::Ident.new("undefined")
+    when AST::OrRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrRaise")
+    when AST::OrPass, AST::OrPrune then MIR::DefaultValue.new(kind: :undefined)
     when AST::OrExit           then lower_or_exit(node)
     when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
     when AST::AssertRaises     then lower_assert_raises(node)
@@ -1292,6 +1290,9 @@ class MIRLowering
   sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
     return [mir, false] unless discard_expr_stmt?(stmt)
+
+    discard_type = Type.from_node!(stmt, context: "discard allocation mark")
+    mir = place_discarded_owned_branch_value(mir, discard_type)
     return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
 
     entry = hoist_cleanup_entry(mir, stmt)
@@ -1303,7 +1304,7 @@ class MIRLowering
       name: discard_name,
       expr: T.cast(mir, MIR::Node),
       alloc: alloc,
-      type_info: Type.from_node!(stmt, context: "discard allocation mark"),
+      type_info: discard_type,
       mutable: true,
       annotation: Type.new(discard_owned_zig_type(stmt, entry)),
       suppression: "_ = &#{discard_name};",
@@ -1311,6 +1312,24 @@ class MIRLowering
     )
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
     [MIR::ScopeBlock.new(materialized.statements), true]
+  end
+
+  sig { params(mir: T.untyped, type_info: Type).returns(T.untyped) }
+  def place_discarded_owned_branch_value(mir, type_info)
+    return mir unless mir_allocates?(mir)
+
+    result_type = type_info.success_type || type_info
+    return mir unless ownership_bearing_type?(result_type)
+
+    dest_alloc = mir_owned_alloc(mir) || :heap
+    case mir
+    when MIR::TryCatch
+      place_owned_try_catch_for_destination(mir, result_type, dest_alloc)
+    when MIR::Orelse
+      place_owned_orelse_for_destination(mir, result_type, dest_alloc)
+    else
+      mir
+    end
   end
 
   sig { params(stmt: LowerableStmt).returns(T::Boolean) }
@@ -1506,12 +1525,12 @@ class MIRLowering
     unless guarded
       owner_cleanup = owner_cleanup_for_transfer(state, name)
       if owner_cleanup
-        owner_cleanup.cleanup_entry[:has_moved_guard] = true
+        owner_cleanup.cleanup_entry.mark_moved_guard!
         state.guarded_cleanup_names << name
         state.parent&.guarded_cleanup_names&.add(name)
         guarded = true
       elsif (entry = function_state.bindings[name]) && entry.needs_cleanup?
-        entry[:has_moved_guard] = true
+        entry.mark_moved_guard!
         state.guarded_cleanup_names << name
         state.parent&.guarded_cleanup_names&.add(name)
         guarded = true
@@ -1702,7 +1721,13 @@ class MIRLowering
     effect = MIR::OwnershipEffect.of(source_expr)
     return true if effect.produces_owned
 
-    source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating? == true
+    if source_expr.respond_to?(:mutating_receiver_allocator_op?) &&
+       T.unsafe(source_expr).mutating_receiver_allocator_op?
+      return false
+    end
+
+    sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+    sig&.emits_allocating? == true
   end
 
   sig { params(expr: MIR::Node).returns(T::Boolean) }
@@ -1711,7 +1736,7 @@ class MIRLowering
     return false unless source_expr.is_a?(MIR::Emittable)
 
     contract = source_expr.explicit_ownership_contract
-    contract.is_a?(MIR::OwnershipContract) && !contract.consumes.empty?
+    contract.is_a?(MIR::OwnershipContract) && !contract.owned_operand_names.empty?
   end
 
   sig { params(expr: MIR::Node).returns(OwnershipFactTarget) }
@@ -1788,7 +1813,8 @@ class MIRLowering
 
     effect = MIR::OwnershipEffect.of(source_expr)
     unless effect.produces_owned
-      return unless source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating?
+      sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+      return unless sig&.emits_allocating?
 
       facts << MIR::OwnedCreate.new(target_name, mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))
       return
@@ -2072,7 +2098,7 @@ class MIRLowering
   def ownership_contract_consumes(node)
     contract = node.explicit_ownership_contract
     return [] unless contract
-    contract.consumes.map(&:to_s)
+    contract.owned_operand_names.map(&:to_s)
   end
 
   sig do
@@ -2254,17 +2280,9 @@ class MIRLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_ownership_ast?(node)
     return false unless node
-    node = node.value if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
     return false if owner_transfer_node?(node)
 
-    return true if node.respond_to?(:container_borrow) && node.container_borrow
-    return true if node.is_a?(AST::GetIndex)
-    return false unless node.is_a?(AST::GetField)
-
-    root = AST.root_identifier(node)
-    return false if root&.token&.type == :TYPE_ID
-    sym = root&.symbol
-    !!(sym && (sym.is_param || sym.reg))
+    AST.borrowed_ownership_view?(node)
   end
 
   sig { params(node: T.nilable(T.any(AST::Node, Object))).returns(T.nilable(String)) }
@@ -2609,16 +2627,15 @@ class MIRLowering
   end
 
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
-  # to a concrete :heap/:frame symbol. Used by InlineZig allocs field.
-  sig { params(alloc_sym: Symbol, target_node: T.untyped, node: T.untyped).returns(Symbol) }
+  # to a concrete :heap/:frame symbol for structural allocator metadata.
+  sig { params(alloc_sym: Symbol, target_node: T.nilable(AST::Node), node: T.nilable(AST::Node)).returns(Symbol) }
   def resolve_alloc_sym(alloc_sym, target_node = nil, node = nil)
     case alloc_sym
-    when :heap  then :heap
     when :frame then :frame
     when :receiver_storage
       receiver = target_node
       receiver ||= node.object if node.is_a?(AST::MethodCall)
-      receiver ||= node.args&.first if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+      receiver ||= node.args.first if node.is_a?(AST::FuncCall) && node.mutates_receiver
       root = root_receiver_node(receiver)
       placement_for_node(root || receiver || node)
     when :node_storage
@@ -2652,12 +2669,6 @@ class MIRLowering
 
     decl = root.symbol&.reg
     (decl && function_state.decl_zig_names[decl.object_id]) || root.name.to_s
-  end
-
-  # Resolve allocator symbol to Zig string for InlineZig patterns.
-  sig { params(kind: Symbol).returns(String) }
-  def alloc_zig_str(kind)
-    MIR::Placement.zig_allocator(kind, runtime_binding_name)
   end
 
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
@@ -2757,11 +2768,11 @@ class MIRLowering
     MIR::EnumDef.new(node.name, node.variants.map(&:to_s), nil)
   end
 
-  sig { params(node: T.untyped).returns(MIR::Lit) }
+  sig { params(node: T.untyped).returns(MIR::Emittable) }
   def lower_field_default(node)
     case node
-    when AST::DefaultLit then MIR::Lit.new(".{}")
-    else lower(node)
+    when AST::DefaultLit then MIR::DefaultValue.new(kind: :aggregate_empty)
+    else T.cast(lower(node), MIR::Emittable)
     end
   end
 
@@ -2952,31 +2963,36 @@ class MIRLowering
   # These helpers paper over the difference for the lowering loop.
 
   # User-visible name of the bound entity — used for naming guard vars.
-  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def lower_static_call(node)
     # Structural MIR::InlineBc when the matched stdlib_def opts in via
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
     # BC dispatches by op symbol in compile_inline_bc.
-    if node.matched_stdlib_def&.emit&.bc
+    stdlib_def = FunctionSignature.unwrap(node.matched_stdlib_def)
+    raise "lower_static_call: missing stdlib signature for #{node.class.name}" unless stdlib_def
+
+    if stdlib_def.intrinsic_bc?
       mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-      stdlib_def = T.must(node.matched_stdlib_def)
-      return MIR::InlineBc.new(stdlib_def.emit&.bc_op, mir_args, stdlib_def)
+      return MIR::InlineBc.new(stdlib_def.intrinsic_bc_op_or(node.method_name.to_s.to_sym), mir_args, stdlib_def)
     end
 
-    pattern = T.cast(node.zig_pattern, String).dup
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
     # checker can verify their cleanup. Non-allocating args (and frame allocs)
-    # stay as MIR children of the template expression.
+    # stay as MIR children of the registry call expression.
     mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-    MIR::ZigTemplate.new(pattern, mir_args, "static_call", MIR::OwnershipContract.empty, node.matched_stdlib_def)
+    MIR::RegistryCall.new(
+      entry: stdlib_def,
+      args: mir_args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "static_call",
+    )
   end
 
   sig { params(node: AST::OrExit).returns(MIR::ScopeBlock) }
   def lower_or_exit(node)
     facts = or_exit_facts(node, node.token.line)
 
-    # Register VM: structured sibling of the InlineZig sequence below.
+    # Register VM: structural sibling of the Zig backend sequence below.
     # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
     # reassignment as one InlineBc with structured fields. The Zig
     # backend path (target != :bc) is byte-for-byte unchanged.
@@ -2984,12 +3000,12 @@ class MIRLowering
       msg_mir = node.message ? lower(node.message) : nil
       return MIR::ScopeBlock.new([
         MIR::ExprStmt.new(or_exit_bc_reassign(facts, msg_mir), false),
-        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
       ])
     end
 
     msg_mir = node.message ? lower(node.message) : nil
-    or_exit_scope(facts, msg_mir, MIR::Ident.new("error.CheatError"))
+    or_exit_scope(facts, msg_mir, MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
   end
 
   # Test-framework MIR lowering (lower_test_block, lower_assert_raises,
@@ -3191,51 +3207,9 @@ class MIRLowering
     end
   end
 
-  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
-  def task_config_zig(stack_size, computed_tier)
-    variant = task_config_variant(stack_size, computed_tier)
-    ".{ .stack_size = .#{variant} }"
-  end
-
-  sig { params(rt_name: String, ctx_type: String, ctx_var: String, task_cfg: String, pin_mode: T.nilable(T.any(Symbol, T::Boolean))).returns(String) }
-  def fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
-    spawn_args = "@intFromPtr(&Runtime.entryWrapper),\n" \
-      "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
-      "    #{ctx_var},\n" \
-      "    #{task_cfg}"
-    case pin_mode
-    when :local, true
-      "try #{rt_name}.getSched().submitSpawn(\n    #{spawn_args}\n);"
-    when :shared
-      "try CheatHeader.spawnPinned(\n    #{spawn_args}\n);"
-    when :parallel
-      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
-    else
-      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
-    end
-  end
-
-  sig { params(task_cfg: String, site_id: Integer, dispatch: BackgroundDispatch).returns(String) }
-  def task_config_with_profile(task_cfg, site_id, dispatch)
-    fields = ".profile_site_id = #{site_id}, .profile_dispatch = #{profile_dispatch_id(dispatch)}"
-    stripped = task_cfg.strip
-    return ".{ #{fields} }" if stripped == ".{}"
-    append_zig_struct_literal_fields(stripped, fields)
-  end
-
-  sig { params(literal: String, fields: String).returns(String) }
-  def append_zig_struct_literal_fields(literal, fields)
-    trimmed = literal.rstrip
-    return literal unless trimmed.end_with?("}")
-
-    prefix = T.must(trimmed[0...-1])
-    "#{prefix}, #{fields} }"
-  end
-
   sig { params(dispatch: BackgroundDispatch).returns(Integer) }
   def profile_dispatch_id(dispatch)
     case dispatch
-    when :local, true then 1
     when :parallel then 2
     when :shared then 3
     else 1
@@ -3276,8 +3250,7 @@ class MIRLowering
     formats = node.args.map { |arg| zig_format_for_type(arg.full_type!) }.join(" ")
     args_mir = node.args.map { |a| hoist_alloc(lower(a), a) }
     format_lit = MIR::Lit.new("\"#{formats}\\n\"")
-    tuple_inner = args_mir.map { |a| emit_expr(a) }.join(", ")
-    tuple = MIR::Ident.new(".{#{tuple_inner}}")
+    tuple = MIR::TupleLiteral.new(args_mir)
     MIR::Call.new("std.debug.print", [format_lit, tuple], false, false, MIR::CallableContract.no_ownership(2))
   end
 
@@ -3318,15 +3291,18 @@ class MIRLowering
 
   # Emit a builtin operation from BUILTIN_OPS registry with structured MIR
   # children and stdlib_def attached so the MIR checker can verify ownership.
-  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def emit_builtin(name, args)
     entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry
-    if bc_target? && entry.emit&.bc
+    if bc_target? && entry.intrinsic_bc?
       return MIR::InlineBc.new(name, args, entry)
     end
-    pattern = entry.emit&.zig.to_s.dup
-    MIR::ZigTemplate.new(pattern, args, "builtin_#{name}", MIR::OwnershipContract.empty, entry)
+    MIR::RegistryCall.new(
+      entry: entry,
+      args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "builtin_#{name}",
+    )
   end
 
   sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
@@ -3423,7 +3399,7 @@ class MIRLowering
 
   public
 
-  public :task_config_variant, :task_config_zig, :emit_expr, :emit_builtin,
+  public :task_config_variant, :emit_expr, :emit_builtin,
     :lower_head, :append_ownership_transfers_for_mir_body
 
   sig do
@@ -3489,9 +3465,9 @@ class MIRLowering
   #
   # `capture_symbols` (optional Hash<name => SymbolEntry>) carries the LIVE
   # SymbolEntry for each captured name so body-lowering passes that need
-  # current sync/storage (e.g. WITH EXCLUSIVE's Arc-vs-bare dispatch in
-  # with_cap_sync_storage) read post-`propagate_caller_sync!` state, not
-  # the AST-snapshot state that var_node.symbol may carry. Without this,
+  # current sync/storage (especially WITH EXCLUSIVE's Arc-vs-bare dispatch)
+  # read post-`propagate_caller_sync!` state, not the AST-snapshot state
+  # that var_node.symbol may carry. Without this,
   # a `WITH EXCLUSIVE c` inside a CONCURRENT/BG/DO callback that captures
   # c (received via REQUIRES LOCKED) emits the polymorphic `c.*` deref
   # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
@@ -3536,7 +3512,7 @@ class MIRLowering
   # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
   sig { params(ti: Type).returns(String) }
   def bare_zig_type(ti)
-    t = transpile_type(ti.is_a?(Type) ? ti : ti)
+    t = transpile_type(ti)
     t.start_with?("*") ? T.must(t[1..]) : t
   end
 
@@ -3555,7 +3531,7 @@ class MIRLowering
     when :rc_retain
       MIR::RcRetain.new(value, T.must(plan.zig_type), T.must(plan.rc_func))
     when :dupe_union
-      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::Ident.new(alloc_zig_str(plan.target_alloc))])
+      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::AllocatorRef.new(plan.target_alloc)])
     else
       value
     end
@@ -3650,7 +3626,7 @@ class MIRLowering
   def owned_parameter_source_node?(source_node)
     return false unless source_node.is_a?(AST::Identifier)
     symbol = source_node.symbol
-    !!(symbol&.is_param && symbol&.takes)
+    !!(symbol&.is_param && symbol.takes)
   end
 
   sig { params(value: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
@@ -3674,7 +3650,7 @@ class MIRLowering
     return false if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
     return false unless source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetIndex)
     root = AST.root_identifier(ast_node) rescue nil
-    borrowed = (root&.symbol&.borrow_provenance?) || (ast_node.respond_to?(:container_borrow) && ast_node.container_borrow)
+    borrowed = (root&.symbol&.borrow_provenance?) || AST.container_borrow?(ast_node)
     return false unless borrowed
     return false unless union_schemas.key?(ti.resolved)
     return false if ti.respond_to?(:implicitly_copyable?) && ti.implicitly_copyable?(mir_schema_lookup)

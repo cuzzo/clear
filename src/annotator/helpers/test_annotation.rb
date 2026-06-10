@@ -47,6 +47,15 @@ module TestAnnotation
     visit_test_lets(node)
     visit_test_hook_bodies(node)
 
+    test_body_summaries = T.let({}, T::Hash[Integer, Annotator::Phases::BodyScanSummary])
+    node.tests.each do |t|
+      with_new_scope(current_scope) do
+        test_body_summaries[t.object_id] = with_body_fact_frame(Semantic::BodyIdentity.unassigned) do
+          visit_TestThat(t)
+        end
+      end
+    end
+
     # Strict test mode: verify all IO functions are stubbed in this WHEN block.
     @strict_test = T.let(@strict_test, T.untyped)
     if @strict_test
@@ -54,14 +63,9 @@ module TestAnnotation
         .select { |s| s.is_a?(AST::StubDecl) }
         .map { |s| s.function_name }
         .to_set
-      node.tests.each { |t| validate_strict_io!(t, stubbed_fns) }
+      node.tests.each { |t| validate_strict_io!(t, stubbed_fns, T.must(test_body_summaries[t.object_id])) }
     end
 
-    node.tests.each do |t|
-      with_new_scope(current_scope) do
-        visit_TestThat(t)
-      end
-    end
     node.benchmarks.each { |b| visit(b) }
     stamp_type!(node, :Void)
   end
@@ -159,15 +163,15 @@ module TestAnnotation
   # has been stubbed in the enclosing WHEN block. Both runtime-level
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
-  sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[T.untyped]).returns(NilClass) }
-  def validate_strict_io!(test_that, stubbed_fns)
+  sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[String], body_summary: Annotator::Phases::BodyScanSummary).returns(NilClass) }
+  def validate_strict_io!(test_that, stubbed_fns, body_summary)
     T.bind(self, SemanticAnnotator) rescue nil
-    calls = scan_for_calls(test_that.body).first
+    calls = body_summary.callees
     visited = Set.new
     queue = calls.to_a.dup
 
     until queue.empty?
-      name = queue.shift
+      name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
       next if stubbed_fns.include?(name)
@@ -179,8 +183,7 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
-      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-      fn_nodes = T.must(@fn_nodes)
+      fn_nodes = function_node_map
       fn = fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)

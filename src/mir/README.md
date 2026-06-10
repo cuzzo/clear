@@ -104,13 +104,16 @@ capture, or type decisions.
 | Type and symbol facts (`full_type`, `storage`, `sync`, capture analysis) | Annotation, escape analysis, `BgCaptureClassifier` | `CleanupClassifier`, `MIRPass`, `MIRLowering`, `FiberCtxBuilder` | Keeps type, placement, and capture decisions outside the emitter. |
 | `CleanupEntry` plus `cleanup_bindings` | `CleanupClassifier`, refined by `MIRPass` for moved guards and special branch facts | `MIRLowering`, `MIRChecker`, `MIREmitter` | Gives each owned binding one cleanup recipe: kind, allocator, scope, guard requirement, and resource-specific cleanup data. |
 | `moved_guard_info` | `MIRPass` from ownership dataflow and cleanup entries | `MIRLowering` | Preserves branch-sensitive move state so cleanup can be guarded instead of unconditional. |
+| `MIR::AllocatorRef` | Lowering helpers, allocation/cleanup/freeze planning | `MIRChecker`, `MIREmitter`, FSM/thunk lowering | Carries allocator provenance as typed data instead of making the emitter infer allocator source from names or Zig type strings. |
 | `MIR::OwnershipEffect` | MIR node classes and lowering helpers | Hoist/lowering ownership finalization | States whether an expression produces an owned result, which allocator owns it, whether it needs hoisting, and what target binding carries it. |
 | `MIR::OwnershipOperandFact` and `MIR::OwnershipConsumptionFact` | Lowering at the consuming edge | `MIRLowering` ownership finalization and `MIRChecker` | Describes exactly which operands are owned, borrowed, or non-owning at a consuming operation. This avoids later tree/name inference. |
-| `MIR::OwnershipContract` and `MIR::CallableContract` | Function/intrinsic lowering and raw/inline escape hatches | `MIRChecker` and ownership finalization | Makes calls and template escape hatches declare their consuming parameters and checked arity. |
+| `MIR::OwnershipContract` and `MIR::CallableContract` | Function/intrinsic lowering and callable MIR nodes | `MIRChecker` and ownership finalization | Makes calls declare their consuming parameters and checked arity through operand facts, not through legacy name-list compatibility or rendered Zig behavior. |
 | `MIR::AllocMark`, `Cleanup`, `ErrCleanup`, `TransferMark`, `MoveMark` | MIR lowering and ownership finalization | `MIRChecker`, then `MIREmitter` | Turns abstract ownership decisions into a visible lifecycle surface that can be checked for leaks, double frees, and use-after-move. |
 | `MIR::BoundaryCaptureFact` and `MIR::ExecutionBoundaryFact` | Concurrency/BG lowering from capture analysis | `MIRChecker` and audit tooling | Records what crosses BG/DO/stream boundaries and whether dispatch is local, pinned, or parallel. |
 | `MIR::FsmOwnershipFact` and `MIR::FsmResultTransferFact` | FSM lowering and transform helpers | FSM finalization/emission and checker paths | Carries ownership transfer evidence across suspend/resume segmentation. |
-| `InlineAllocMetadata` and inline/raw Zig audit metadata | Intrinsic/template lowering | `MIRChecker` | Keeps legacy Zig escape hatches accountable for allocator and opaque ownership behavior until they are fully structural. |
+| `MIR::RuntimeCallSpec`, `MIR::RuntimeCall`, and `MIR::RuntimeCalls` | Runtime helper lowering and pipeline lowerers | `MIRChecker`, `MIREmitter` | Gives helper calls a closed typed contract for arguments, allocator effects, fallibility, and emission instead of letting lowerers construct ad hoc library calls. |
+| `InlineAllocMetadata`, intrinsic contracts, and structural inline-bytecode metadata | Intrinsic/std-lib lowering | `MIRChecker`, `MIREmitter` | Keeps allocator and opaque ownership behavior checker-visible for intrinsic calls. Registry Zig templates are emitter-edge contract data only, not MIR-stage escape hatches. |
+| `DeepCopy#copy_shape` and explicit container/default shapes | Lowering helpers | `MIREmitter` | Commits to array-list, slice, empty-container, and copy behavior before emission so the emitter does not infer semantic shape from Zig type strings. |
 
 ### Short-Lived Plans
 
@@ -126,10 +129,11 @@ ambient state. Common examples:
 | `ListLiteralPlan`, `HashLiteralPlan` | `MIRLoweringLiterals` | Literal lowering | Decides allocation, element type, ownership storage, and capability wrappers before building MIR nodes. |
 | `NextExprPlan`, `BgLoweringNames`, `BgBodyMaterialization`, `BgCaptureMaterialization` | `MIRLoweringConcurrency` | BG/stream/observable lowering | Keeps async result shape, runtime names, captures, and body materialization explicit at the boundary. |
 | `FiberCtxBuilder::CaptureSpec` and `FiberCtxBuilder::Result` | `FiberCtxBuilder` | BG, BG stream, DO, concurrent pipeline, and FSM-related lowering | Normalizes capture fields, initializers, body access rewrites, and FreshHeapCopy/RcClone cleanup wiring. |
+| `PipelineOperationPlan`, `PipelineSourcePlan`, `PipelineTerminalPlan`, `PipelineSemanticFacts`, and `PipelineSourceShape` | `src/mir/lower/pipeline` | `PipelineHost` and its domain lowerers | Reifies source, terminal, execution mode, and target facts before a pipeline lowerer emits MIR. |
 | `WithBindingMaterialization`, `LockBindingPlan`, `FallibleLockBindingPlan`, `MutableSnapshotPlan` | `MIRLoweringCapabilities` | `WITH` lowering | Separates lock acquisition, aliases, fallible clauses, sorted acquisition, and snapshot transactions from the body. |
 | `OwnershipFinalizationContext`, `OwnershipFactTarget`, `OwnershipTransferTarget`, `OwnershipSurfaceScan` | `MIRLowering` ownership finalization | The finalization pass over lowered MIR bodies | Tracks already-emitted alloc/transfer/move/cleanup facts while inserting missing ownership markers. |
 | `ThunkTransform::Plan`, `MutualPlan`, `MutualThunkPlan` | Thunk recursive splitters | Thunk emitters/lowering | Records recognized recursion shapes so trampoline emission does not infer them from text. |
-| FSM segment/liveness/suspend resolver records | `fsm_transform/*` | FSM emit and wrapper emission | Carries segment boundaries, cross-segment locals, suspend descriptors, and per-arm cleanup data across FSM lowering. |
+| FSM segment/liveness/suspend resolver records (`CrossSegmentVarFact`, `PromotedLocalFact`, `ThunkParamFact`, `MIR::FsmDestroyLockRelease`) | `fsm_transform/*`, `thunk_transform/*` | FSM emit, thunk emit, wrapper emission, checker paths | Carries segment boundaries, cross-segment locals, promoted locals, thunk parameters, suspend descriptors, and typed destroy/lock-release facts across async lowering. |
 
 ### Rules of Thumb
 
@@ -142,8 +146,9 @@ ambient state. Common examples:
   subtrees or rendered Zig text.
 * Allocator and cleanup facts have one writer. Architecture invariant specs
   enforce the sanctioned writers for storage and cleanup placement fields.
-* Template or raw Zig escape hatches must carry explicit ownership contracts and
-  allocation metadata until they are replaced with structural MIR.
+* MIR-stage nodes and facts must not carry raw Zig or template escape hatches.
+  If a pre-emission stage needs new behavior, add a structural MIR node, fact,
+  plan, or FSM op and let the emitter print Zig after MIR checking.
 
 ### 0. Annotated AST Input
 
@@ -421,9 +426,10 @@ pass state: :mir_pass_complete
 
 ### 10. MIR Lowering (`mir_lowering.rb`, `lowering/*`)
 
-Lowering is where the AST becomes an actual MIR tree. The lowering pass makes
-type, allocator, ownership, and runtime decisions. The emitter must not make
-those decisions later.
+Lowering is where the AST becomes an actual MIR tree. The lowering pass commits
+type, allocator, ownership, and runtime facts into structural MIR. It must not
+emit Zig text or use Zig spelling as semantic data, and the emitter must not
+make those decisions later.
 
 For `consume`, lowering creates a normal function with a cleanup for the owned
 parameter:
@@ -502,6 +508,31 @@ nodes, not recover intent from rendered Zig strings. Regex/text rewriting in
 FSM or thunk lowering is an architectural blocker because it hides ownership
 and capture facts from the checker.
 
+FSM std-lib behavior uses `FsmOps` operation trees for setup, bind, state, and
+finalization behavior. Those operation trees are the structural replacement for
+old FSM template fragments; they can be walked, checked, and emitted without a
+pre-rendered Zig body.
+
+#### Pipeline Lowering
+
+Pipeline syntax is rewritten before MIR, but MIR owns the runtime shape. The
+current pipeline lowering boundary is:
+
+```text
+typed AST pipeline expression
+  -> PipelinePlanBuilder
+  -> PipelineOperationPlan(source, terminal, execution, semantic facts)
+  -> PipelineHost orchestration
+  -> domain lowerer emits structural MIR
+```
+
+`PipelineHost` should remain a coordinator over typed plans. Source and
+terminal recognition belongs in `PipelinePlanBuilder`; range, list, scalar,
+batch-window, set-index, each, and concurrent emission belongs in the matching
+domain lowerer. The narrow `PipelineLoweringBridge` is the sanctioned adapter
+back to `MIRLowering`; direct dependence on broad lowerer lifecycle state should
+not grow outside that bridge.
+
 ### 11. MIR Checker (`mir_checker.rb`)
 
 The checker validates the lowered MIR ownership surface before Zig is emitted.
@@ -527,9 +558,10 @@ pass state: :mir_checked
 
 ### 12. MIR Emission (`mir_emitter.rb`)
 
-The emitter is a template engine. It maps MIR nodes to Zig text and does not
+The emitter is a renderer/printer. It maps MIR nodes to Zig text and does not
 perform ownership analysis, allocator selection, type inference, or schema
-lookup.
+lookup. Emitter-internal templates are allowed only at this final rendering edge
+and must be selected from typed MIR nodes or typed registry contracts.
 
 Schematic Zig for the example:
 
@@ -585,7 +617,7 @@ available:
 
 The MIR directory is split by responsibility:
 
-* [`mir.rb`](mir.rb): MIR node definitions and ownership fact structs.
+* [`mir.rb`](mir.rb): MIR node definitions plus ownership, allocator, runtime-call, and emission-shape fact structs.
 * [`alloc.rb`](alloc.rb): annotation-side storage helpers mixed into the semantic annotator.
 * [`hoist.rb`](hoist.rb): AST rewrite that creates bindings for anonymous owned values.
 * [`pre_mir_type_check.rb`](pre_mir_type_check.rb): AST-to-MIR type invariant.
@@ -594,6 +626,9 @@ The MIR directory is split by responsibility:
 * [`control_flow.rb`](control_flow.rb): CFG construction, ownership dataflow, and use-after-move checking.
 * [`mir_pass.rb`](mir_pass.rb): coordinates MIR-side AST analysis and stamping.
 * [`mir_lowering.rb`](mir_lowering.rb) and [`lowering/`](lowering/): AST-to-MIR lowering.
+* [`lower/pipeline/`](lower/pipeline): typed pipeline operation plans, pipeline
+  host orchestration, and domain lowerers for range, binding-chain, scalar,
+  list, batch-window, set-index, each, and concurrent pipeline execution.
 * [`materialization.rb`](materialization.rb): helper packets for emitting allocation marks, bindings, and cleanups together.
 * [`fiber_ctx_builder.rb`](fiber_ctx_builder.rb): shared capture-context builder for BG, DO, stream, concurrent, and FSM-adjacent lowering.
 * [`test_lowering.rb`](test_lowering.rb): TEST/WHEN/STUB/BENCHMARK lowering support.
@@ -602,7 +637,8 @@ The MIR directory is split by responsibility:
 * [`fsm_transform.rb`](fsm_transform.rb), [`fsm_transform/`](fsm_transform),
   [`fsm_lowering.rb`](fsm_lowering.rb), [`fsm_ops.rb`](fsm_ops.rb), and
   [`fsm_wrapper_emitter.rb`](fsm_wrapper_emitter.rb): async/background FSM
-  lowering and emission support.
+  lowering and emission support, including structural `FsmOps` operation trees
+  for std-lib FSM behavior.
 * [`thunk_transform.rb`](thunk_transform.rb) and
   [`thunk_transform/`](thunk_transform): recursion thunk/trampoline lowering
   support.

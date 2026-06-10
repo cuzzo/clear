@@ -9,6 +9,8 @@ module MIRLoweringControlFlow
 
   MatchBody = T.type_alias { T::Array[MIR::Emittable] }
   MatchDefaultBody = T.type_alias { T::Array[AST::Node] }
+  IfBindAliasAllocMap = T.type_alias { T::Hash[String, T.nilable(Symbol)] }
+  IfBindAliasOwnerMap = T.type_alias { T::Hash[String, String] }
 
   class MatchLoweringFacts < T::Struct
     const :expr_label, T.nilable(String)
@@ -150,10 +152,40 @@ module MIRLoweringControlFlow
       end
       { expr: loop_condition_expr(expr, pending), capture: b.name }
     end
-    then_body = capture_markers + lower_body(node.then_branch)
+    then_body = capture_markers + with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(node: AST::IfBind, blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_if_bind_alias_maps(node, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    prev_alias_alloc = capability_state.with_alias_alloc_map
+    prev_alias_owner = capability_state.with_alias_owner_map
+    alias_alloc_map = T.let((prev_alias_alloc || {}).dup, IfBindAliasAllocMap)
+    alias_owner_map = T.let((prev_alias_owner || {}).dup, IfBindAliasOwnerMap)
+
+    node.bindings.each do |binding|
+      owner = extract_root_var_name(binding.expr)
+      next unless owner
+
+      alias_name = binding.name.to_s
+      alias_owner_map[alias_name] = owner
+      alias_alloc_map[alias_name] = placement_for_node(binding.expr)
+    end
+
+    capability_state.with_alias_alloc_map = alias_alloc_map
+    capability_state.with_alias_owner_map = alias_owner_map
+    blk.call
+  ensure
+    T.bind(self, MIRLowering) rescue nil
+    capability_state.with_alias_alloc_map = prev_alias_alloc
+    capability_state.with_alias_owner_map = prev_alias_owner
   end
 
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
@@ -193,24 +225,19 @@ module MIRLoweringControlFlow
       case s
       when MIR::AllocMark
         s.scope = scope if MIR::Placement.frame?(s.alloc)
-      when MIR::IfStmt
+      when MIR::IfStmt, MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
         stamp_loop_frame_alloc_scopes!(s.else_body, scope)
-      when MIR::IfBindStmt
-        stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(s.else_body, scope)
-      when MIR::ScopeBlock, MIR::BlockExpr
+      when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
         stamp_loop_frame_alloc_scopes!(s.default_body, scope)
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
         stamp_loop_frame_alloc_scopes!(s.default_body, scope)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::WithMatchDispatch
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
     end
     nil
@@ -298,7 +325,6 @@ module MIRLoweringControlFlow
       source_name = "__for_src_#{lowering_counters.next_tmp_id}"
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
-      coll.target_var = source_name if coll.is_a?(MIR::InlineZig)
       collection_setup.concat(MIR::BindingMaterialization.new(
         name: source_name,
         expr: T.cast(coll, MIR::Node),
@@ -605,7 +631,7 @@ module MIRLoweringControlFlow
   sig { params(subject: MIR::Emittable, variant: String).returns(MIR::BinOp) }
   def union_tag_condition(subject, variant)
     T.bind(self, MIRLowering) rescue nil
-    MIR::BinOp.new("==", active_tag_call(subject), MIR::Ident.new(".#{variant}"))
+    MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: variant))
   end
 
   sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, subject: MIR::Emittable, body: MatchBody).returns(T::Array[MIR::IfChainBranch]) }
@@ -712,7 +738,7 @@ module MIRLoweringControlFlow
     default = union_match_default_body(node, facts, arms)
     default = hoist_unhoisted_return_allocs(default, node.default_case) if default
     MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
-      { pattern: ".#{arm.variant}", payload: arm.payload_name, body: arm.body }
+      MIR::UnionMatchArm.new(variant: arm.variant, payload: arm.payload_name, body: arm.body)
     }, default)
   end
 
@@ -747,14 +773,19 @@ module MIRLoweringControlFlow
   def union_match_case_variants(c)
     T.bind(self, MIRLowering) rescue nil
     [c.value, *(c.extra_values || [])].filter_map do |value|
-      case value
-      when AST::GetField
-        value.field.to_s
-      when AST::MethodCall
-        value.name.to_s
-      else
-	        emit_expr(lower(value)).to_s.delete_prefix(".")
-      end
+      union_match_variant_name(value)
+    end
+  end
+
+  sig { params(value: AST::Node).returns(String) }
+  def union_match_variant_name(value)
+    case value
+    when AST::GetField
+      value.field.to_s
+    when AST::MethodCall, AST::Identifier
+      value.name.to_s
+    else
+      Kernel.raise "union MATCH variant must be a named variant, got #{value.class}"
     end
   end
 
@@ -783,22 +814,11 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     arms = node.cases.map { |c|
       body = lower_match_branch(c.body, facts.expr_label)
-      # Multi-pattern arm: emit `.A, .B, .C` (Zig switch supports
-      # comma-separated prongs natively; the body is shared).
-      head_pat = if facts.is_enum_match
-        ".#{c.value.field}"
-      else
-        emit_expr(lower(c.value))
+      patterns = T.let([switch_match_pattern(c.value, facts.is_enum_match)], T::Array[MIR::SwitchPattern])
+      (c.extra_values || []).each do |ev|
+        patterns << switch_match_pattern(ev, facts.is_enum_match)
       end
-      extras_pats = (c.extra_values || []).map { |ev|
-        if facts.is_enum_match
-          ".#{ev.field}"
-        else
-          emit_expr(lower(ev))
-        end
-      }
-      pattern = ([head_pat] + extras_pats).join(", ")
-      { pattern: pattern, body: body }
+      MIR::SwitchArm.new(patterns: patterns, body: body)
     }
     default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : nil
     # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
@@ -818,11 +838,19 @@ module MIRLoweringControlFlow
     MIR::SwitchStmt.new(facts.subject, arms, default)
   end
 
-  sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(value: AST::Node, is_enum_match: T::Boolean).returns(MIR::SwitchPattern) }
+  def switch_match_pattern(value, is_enum_match)
+    T.bind(self, MIRLowering) rescue nil
+    return MIR::EnumSwitchPattern.new(variant: T.cast(value, AST::GetField).field.to_s) if is_enum_match
+
+    lower(value)
+  end
+
+  sig { params(body: T.nilable(T::Array[MIR::Emittable]), ast_stmts: T.nilable(T::Array[AST::Node])).returns(T.nilable(T::Array[MIR::Emittable])) }
   def hoist_unhoisted_return_allocs(body, ast_stmts)
     T.bind(self, MIRLowering) rescue nil
     return body unless body
-    returns = T.let([], T::Array[T.untyped])
+    returns = T.let([], T::Array[AST::Node])
     Array(ast_stmts).each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
     ret_i = T.let(0, Integer)
 
@@ -1168,8 +1196,6 @@ module MIRLoweringControlFlow
         collect_returned_binding_names(expr.left, names)
         collect_returned_binding_names(expr.right, names)
       end
-    when AST::GetField, AST::GetIndex
-      return
     end
     nil
   end

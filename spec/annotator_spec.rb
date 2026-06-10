@@ -2437,9 +2437,8 @@ RSpec.describe SemanticAnnotator do
           sym = find_symbol_in_mir_ast(@_escape_check)
           expect(sym&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap after MIRPass"
         else
-          og = @annotator.send(:instance_variable_get, :@og)
-          node = og[@_escape_check]
-          expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
+          node = @annotator.send(:ownership_graph)[@_escape_check]
+          expect(node&.full_type&.location).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
         end
       end
       if @_no_escape_check && @_no_escape_check != :any && @_mir_ast
@@ -2765,7 +2764,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :pub visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
+        sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:pub)
       end
     end
@@ -2779,7 +2778,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :private visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
+        sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:private)
       end
     end
@@ -2793,7 +2792,7 @@ RSpec.describe SemanticAnnotator do
 
       it "stores :package visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
-        sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("foo").type)
+        sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("foo").type)
         expect(sig.visibility).to eq(:package)
       end
     end
@@ -3514,7 +3513,7 @@ RSpec.describe SemanticAnnotator do
       it "direct EXTERN FN returning !Void with OR RAISE does not emit try { block }" do
         # Same root cause as above but via a direct (non-method) EXTERN call.
         # Both build_extern_trampoline_call and build_extern_trampoline_method produce
-        # MIR::InlineZig(reason: "extern_trampoline") which already handles error
+        # MIR::ExternTrampoline already handles error
         # propagation internally — wrapping in TryExpr generates invalid `try { block }`.
         code = <<~CLEAR
           EXTERN FN mkdir(path: String) RETURNS !Void FROM "std.fs";

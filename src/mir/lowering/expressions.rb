@@ -198,12 +198,10 @@ module MIRLoweringExpressions
       else
         MIR::Lit.new(float_literal_text(node.value))
       end
-    when :INT64    then MIR::Lit.new(node.value.to_s)
     when :INT8, :INT16, :INT32, :UINT16, :UINT32, :UINT64
       MIR::Cast.new(MIR::Lit.new(node.value.to_s), INTEGER_LITERAL_CASTS.fetch(node.type), :as)
     when :FLOAT32
       MIR::Cast.new(MIR::Lit.new(float_literal_text(node.value)), "f32", :as)
-    when :BOOLEAN  then MIR::Lit.new(node.value.to_s)
     when :NIL      then MIR::Lit.new("null")
     else
       MIR::Lit.new(node.value.to_s)
@@ -260,11 +258,12 @@ module MIRLoweringExpressions
 
     # Atomic reads normally lower to `.load()`, but raw emission and
     # atomic-borrow call sites need the cell reference itself.
-    if node.symbol&.atomic? && !capability_state.atomic_emit_raw
+    symbol = node.symbol
+    if symbol&.atomic? && !capability_state.atomic_emit_raw
       return ident if node.atomic_borrow
       # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
       # cell pointer and AtomicPtr has no `.load()` method.
-      if node.symbol&.indirect?
+      if symbol.indirect?
         return ident
       end
       # Dereference bare atomic cells before loading; AtomicPtr reads use the
@@ -552,7 +551,7 @@ module MIRLoweringExpressions
     MIR::BinOp.new(
       T.must(plan.op_str),
       active_tag_call(tag_target),
-      MIR::Lit.new(".#{T.must(plan.variant).variant_name}"),
+      MIR::EnumTag.new(variant: T.must(plan.variant).variant_name),
     )
   end
 
@@ -754,7 +753,7 @@ module MIRLoweringExpressions
     return nil unless current_function_has_catch? && current_function_snapshot_types.size == 1
 
     t = Type.new(node.left.full_type!)
-    return nil if t.void? || t.error_union?
+    return nil unless t.catch_snapshot_payload?
 
     snap_zig_type = transpile_type(t)
     [
@@ -816,7 +815,7 @@ module MIRLoweringExpressions
     if node.right.is_a?(AST::OrRaise)
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
-      return left if left.is_a?(MIR::InlineZig) && left.reason == "extern_trampoline"
+      return left if left.is_a?(MIR::ExternTrampoline)
       return MIR::TryExpr.new(strip_try(left)) if facts.left_is_error
       return left
     end
@@ -836,7 +835,7 @@ module MIRLoweringExpressions
         msg_mir = ex.message ? lower(ex.message) : nil
         catch_block = MIR::ScopeBlock.new([
           MIR::ExprStmt.new(or_exit_bc_reassign(exit_facts, msg_mir), false),
-          MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+          MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
         ])
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
@@ -859,7 +858,7 @@ module MIRLoweringExpressions
 
     # OR BREAK: error-to-break (Zig's catch break)
     if node.right.is_a?(AST::OrBreak)
-      return try_catch_with_provenance(left, MIR::Ident.new("break"), nil) if facts.left_is_error
+      return try_catch_with_provenance(left, MIR::BreakExpr.new(nil, nil), nil) if facts.left_is_error
       return left
     end
 
@@ -955,9 +954,9 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")
     ti = ti.success_type || ti
-    return MIR::Lit.new('@as([]const u8, "")') if ti.string?
-    return MIR::Lit.new("@as(#{ti.zig_type}, .empty)") if ti.list_collection?
-    MIR::Ident.new("undefined")
+    return MIR::DefaultValue.new(kind: :string_empty) if ti.string?
+    return MIR::DefaultValue.new(kind: :collection_empty, zig_type: ti.zig_type) if ti.list_collection?
+    MIR::DefaultValue.new(kind: :undefined)
   end
 
   sig { params(node: AST::GetField).returns(T.untyped) }
@@ -998,7 +997,7 @@ module MIRLoweringExpressions
     var_data = schema.variants[field_key]
     return nil if Schemas.inline_struct?(var_data)
 
-    MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
+    MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::VoidLiteral.new }])
   end
 
   sig { params(node: AST::GetField, target: MIR::Node).returns(FieldAccessPlan) }
@@ -1094,11 +1093,11 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     stmts = T.let([], T::Array[T.untyped])
     if facts.kind
-      stmts << MIR::Set.new(runtime_error_field("kind"), MIR::Ident.new(".#{facts.kind}"))
+      stmts << MIR::Set.new(runtime_error_field("kind"), MIR::EnumTag.new(variant: T.must(facts.kind)))
       if facts.error_name
-        name_id = MIR::Call.new("@intFromEnum", [
+        name_id = MIR::EnumOrdinal.new(
           MIR::FieldGet.new(MIR::Ident.new("ErrorName"), facts.error_name),
-        ], false, false, MIR::CallableContract.no_ownership(1))
+        )
         stmts << MIR::Set.new(runtime_error_field("error_name"), name_id)
       elsif facts.clear_type
         stmts << MIR::Set.new(runtime_error_field("error_name"), MIR::Lit.new("0"))
@@ -1209,7 +1208,9 @@ module MIRLoweringExpressions
     if plan.target_ast.metatype == :hashmap
       map_ft = Type.from_node!(plan.target_ast, context: "hashmap index target")
       kind = map_ft.numeric_map? ? :numeric_map : :string_map
-      op = INDEX_OPS.dig(kind, :get)
+      op_spec = INDEX_OPS.dig(kind, :get)
+      op = FunctionSignature.unwrap(IntrinsicRegistry.fs(op_spec, :"#{kind}_get"))
+      raise "indexed access: missing registry signature for #{kind}" unless op
 
       # Structural MIR::ShardedMapGet for both backends. Carries the
       # full INDEX_OPS entry (templates, ownership effects) so the
@@ -1219,27 +1220,27 @@ module MIRLoweringExpressions
       # routing.
       shard_direct = shard && plan.target_name == shard[:map]
       template_kind = if shard_direct then :shard_direct_zig
-                      elsif (map_ft.sharded? || map_ft.striped?) && op[:sharded_zig]
+                      elsif (map_ft.sharded? || map_ft.striped?) && op.intrinsic_template(:sharded_zig)
                         :sharded_zig
                       else :zig
                       end
-      template = op[template_kind]
       resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-        next unless template.include?("{#{alloc_key}}")
-        sym = op[alloc_key] || :heap
+        registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
+        next unless registry_alloc
+        sym = registry_alloc || :heap
         resolved_allocs[alloc_key] = resolve_alloc_sym(sym, plan.target_ast, plan.target_ast)
       end
       alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)
-      key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
-      val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
+      key_type = (kind == :numeric_map) ? map_ft.key_type : nil
+      value_type = (kind == :numeric_map) ? map_ft.value_type : nil
       if shard_direct
         return MIR::ShardedMapGet.new(target, index,
           MIR::Ident.new(shard[:idx]),
           MIR::Ident.new(shard[:key]),
-          kind, op, key_zig, val_zig, alloc_metadata, template_kind)
+          kind, op, key_type, value_type, alloc_metadata, template_kind)
       end
-      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, alloc_metadata, template_kind)
+      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_type, value_type, alloc_metadata, template_kind)
     elsif ti.pool?
       # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
       # BC dispatches via compile_inline_bc :get on tag == :pool_method
@@ -1283,7 +1284,7 @@ module MIRLoweringExpressions
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::ZigTemplate)) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1575,7 +1576,7 @@ module MIRLoweringExpressions
           # before destroying the pointer, otherwise those allocations leak.
           cleanup_call = emit_builtin(:cleanup, [
             MIR::Ident.new(zig_t),
-            MIR::Ident.new(alloc_zig_str(:heap)),
+            MIR::AllocatorRef.new(:heap),
             MIR::Ident.new(temp),
           ])
           hoisted << MIR::ErrDeferStmt.new(MIR::ScopeBlock.new([
@@ -1693,7 +1694,7 @@ module MIRLoweringExpressions
       entry = function_state.bindings[raw_name]
       transfer_name = zig_safe_name(raw_name)
       if entry&.needs_cleanup?
-        entry[:has_moved_guard] = true
+        entry.mark_moved_guard!
         function_state.guarded_cleanup_names[transfer_name] = true
       end
     end
@@ -1704,7 +1705,7 @@ module MIRLoweringExpressions
         (stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)) && stmt.name.to_s == transfer_name
       end
       if cleanup
-        T.cast(cleanup, T.any(MIR::Cleanup, MIR::ErrCleanup)).cleanup_entry[:has_moved_guard] = true
+        T.cast(cleanup, T.any(MIR::Cleanup, MIR::ErrCleanup)).cleanup_entry.mark_moved_guard!
         body.concat(ownership_transfer_marks(transfer_name, :block_result, move_guarded: true))
       end
     end
@@ -1760,7 +1761,7 @@ module MIRLoweringExpressions
     # CheatLib.assert for non-equality conditions and for `!=`.
     #
     # Skip for the :bc (register VM) target: the bytecode VM cannot
-    # execute raw Zig, so an InlineZig assert helper would leave the
+    # execute raw Zig, so a raw Zig assert helper would leave the
     # test register-pending forever. The CheatLib.assert fallback path
     # below evaluates the condition as a normal MIR expression and
     # routes through the runtime's bool-assert opcode.
@@ -1814,8 +1815,8 @@ module MIRLoweringExpressions
 
     left  = cond.left
     right = cond.right
-    left_zig  = emit_expr(hoist_alloc(lower(left), left))
-    right_zig = emit_expr(hoist_alloc(lower(right), right))
+    left_mir = hoist_alloc(lower(left), left)
+    right_mir = hoist_alloc(lower(right), right)
 
     helper, extra_args = pick_equality_helper(left, right)
     return nil unless helper
@@ -1823,12 +1824,9 @@ module MIRLoweringExpressions
     # Argument order matches the Zig stdlib convention: expected
     # first, actual second. CLEAR doesn't distinguish, so we use
     # left=expected, right=actual.
-    args = []
-    args.concat(extra_args)
-    args << left_zig
-    args << right_zig
-
-    args_mir = args.map { |arg| MIR::Lit.new(arg) }
+    args_mir = T.let(extra_args.map { |arg| MIR::Ident.new(arg) }, T::Array[MIR::Emittable])
+    args_mir << T.cast(left_mir, MIR::Emittable)
+    args_mir << T.cast(right_mir, MIR::Emittable)
     params = args_mir.each_index.map do |idx|
       AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
     end
@@ -1894,26 +1892,24 @@ module MIRLoweringExpressions
   def lower_raise(node)
     T.bind(self, MIRLowering) rescue nil
     rt = MIR::Ident.new(runtime_binding_name)
-    kind = ".#{node.kind || :Unknown}"
-    # error_name is a u32 id into the per-program ErrorName enum. Emit
-    # `@intFromEnum(ErrorName.Foo)` when a specific type is named; use
-    # `0` (the None sentinel) when it's a kind-only RAISE.
+    kind = (node.kind || :Unknown).to_s
+    # error_name is a u32 id into the per-program ErrorName enum.
     name_expr = if node.error_name && !node.error_name.empty?
-      "@intFromEnum(ErrorName.#{node.error_name})"
+      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), node.error_name))
     else
-      "0"
+      MIR::Lit.new("0")
     end
     msg_expr = node.message_expr ? lower(node.message_expr) : MIR::Lit.new('""')
     line = node.token.line.to_s
 
     set_error = MIR::MethodCall.new(rt, "setError", [
-      MIR::Ident.new(kind),
-      MIR::Ident.new(name_expr),
+      MIR::EnumTag.new(variant: kind),
+      name_expr,
       msg_expr,
       MIR::Lit.new(line)
     ], false, MIR::CallableContract.no_ownership(4))
 
-    ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    ret = MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
     MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
   end
 
@@ -1947,18 +1943,17 @@ module MIRLoweringExpressions
     elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
       copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
-    elsif dst_ti.collection? && !dst_ti.string?
-      MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
-    elsif union_schemas.key?(ti.resolved)
-      MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
-    elsif ti.any_sync?
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.collection_value?
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.collection? || (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
-      MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+      copy_zig = if dst_ti.collection? && !dst_ti.string?
+                   dst_ti.zig_type
+                 elsif union_schemas.key?(ti.resolved)
+                   transpile_type(ti.resolved.to_s)
+                 elsif ti.any_sync? || ti.collection_value? || ti.collection? ||
+                       (ti.struct? && ti.needs_promotion?(mir_schema_lookup))
+                   ti.zig_type
+                 end
+      copy_zig ? MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc) :
+                 MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
     end
   end
 
@@ -1974,7 +1969,7 @@ module MIRLoweringExpressions
       return elem if elem
     end
 
-    sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
+    sym_type = if source.is_a?(AST::Identifier) && source.symbol.respond_to?(:type)
       T.must(source.symbol).type
     end
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
@@ -2025,7 +2020,7 @@ module MIRLoweringExpressions
     nm = rename_map.fetch(nm, nm)
     entry = function_state.bindings[v.name.to_s] || CleanupEntry::NONE
     return unless entry.present?
-    entry[:has_moved_guard] = true
+    entry.mark_moved_guard!
     function_state.guarded_cleanup_names[nm] = true
   end
 
@@ -2146,7 +2141,7 @@ module MIRLoweringExpressions
     inner = lower(node.value)
     # Dereference Rc data pointer to get *const T for freeze()
     rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
-    MIR::FreezeExpr.new(rc_data, zig_base)
+    MIR::FreezeExpr.new(rc_data, zig_base, MIR::AllocatorRef.new(:heap))
   end
 
   sig { params(ti: Type).returns(String) }
@@ -2164,8 +2159,7 @@ module MIRLoweringExpressions
     if type.is_a?(Type) && type.generic_payload_type_arg?
       return rc_payload_zig_type(type)
     end
-    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
-    t.zig_type
+    Type.new(type).zig_type
   end
 
 

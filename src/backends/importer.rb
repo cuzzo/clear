@@ -184,13 +184,18 @@ class ModuleImporter
     StringConcatRewriter.new.rewrite!(ast)
     MIRPassState.for!(ast).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    Hoist.apply!(ast, schema_lookup: schema_lookup)
+    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
 
     # Run MIRPass on the module AST (needed for cleanup stamps in function bodies).
     PreMirTypeCheck.verify!(ast)
     fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir_pass = MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: T.must(annotator.semantic_index).body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
+    )
     mir_pass.transform!(ast)
     sync_global_scope_function_signatures!(ast, annotator)
 
@@ -232,7 +237,7 @@ class ModuleImporter
 
     CompiledModule.new(
       ast,
-      annotator.scope_stack.first,
+      annotator.semantic_root_scope,
       zig_body,
       source_dir,
       struct_schemas,
@@ -248,7 +253,7 @@ class ModuleImporter
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      entry = annotator.scope_stack.first.resolve_entry(stmt.name)
+      entry = annotator.semantic_root_scope.resolve_entry(stmt.name)
       sig = entry&.fn_signature
       next unless sig
       FunctionSignature.sync_from_function_def!(sig, stmt)

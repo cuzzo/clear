@@ -1097,8 +1097,8 @@ class CapabilityHelper::CaptureAnalysis
   def captures; end
   sig { returns(T.untyped) }
   def capture_symbols; end
-  sig { returns(T.untyped) }
-  def close_patterns; end
+  sig { returns(T::Hash[String, Schemas::ResourceClosePlan]) }
+  def close_plans; end
   sig { returns(T.untyped) }
   def pointer_captures; end
   sig { returns(T.untyped) }
@@ -1185,26 +1185,24 @@ class CompilerFrontend::Result
 end
 
 class FiberCtxBuilder::CaptureSpec
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def name; end
   sig { returns(String) }
   def field_type_zig; end
-  sig { returns(T.untyped) }
-  def init_value_zig; end
-  sig { returns(T.any(MIR::AddressOf, MIR::Ident)) }
+  sig { returns(MIR::Emittable) }
   def init_value_mir; end
-  sig { returns(T.untyped) }
-  def dupe_decl_zig; end
-  sig { returns(T.untyped) }
-  def body_cleanup_zig; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def setup_mir; end
+  sig { returns(FiberCtxBuilder::CaptureCleanupPlan) }
+  def cleanup_plan; end
 end
 
 class FiberCtxBuilder::Result
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[FiberCtxBuilder::CaptureSpec]) }
   def specs; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, String]) }
   def capture_map; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, SymbolEntry]) }
   def capture_symbols; end
 end
 
@@ -1332,8 +1330,8 @@ class FsmOps::StateFieldDecl
   def name; end
   sig { returns(String) }
   def zig_type; end
-  sig { returns(String) }
-  def init_zig; end
+  sig { returns(MIR::Emittable) }
+  def default_value; end
 end
 
 class FsmOps::StmtCall
@@ -1350,11 +1348,6 @@ class FsmOps::SubField
   def base; end
   sig { returns(String) }
   def name; end
-end
-
-class FsmOps::ZigLit
-  sig { returns(String) }
-  def zig; end
 end
 
 class FsmTransform::Liveness::Result
@@ -1667,7 +1660,7 @@ class MIR::Comment
 end
 
 class MIR::Comptime
-  sig { returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
+  sig { returns(T.untyped) }
   def expr; end
 end
 
@@ -1755,8 +1748,8 @@ class MIR::Drop
   def has_moved_guard; end
   sig { returns(T.untyped) }
   def type_info; end
-  sig { returns(T.untyped) }
-  def resource_close_zig; end
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def resource_close_plan; end
   sig { returns(T.untyped) }
   def source_node; end
 end
@@ -2000,12 +1993,12 @@ class MIR::FsmMemberFn
   def ctx_id; end
   sig { returns(T.untyped) }
   def bg_rt; end
-  sig { returns(String) }
-  def rt_suppress_zig; end
+  sig { returns(T.untyped) }
+  def suppress_runtime_ref; end
   sig { returns(T.untyped) }
   def body_stmts; end
   sig { returns(T.untyped) }
-  def extra_prologue_zig; end
+  def extra_prologue_stmts; end
 end
 
 class MIR::FsmSpawnSetup
@@ -2060,7 +2053,7 @@ class MIR::FsmStep
   sig { returns(T.untyped) }
   def bg_rt; end
   sig { returns(T.untyped) }
-  def rt_suppress_zig; end
+  def suppress_runtime_ref; end
   sig { returns(T.untyped) }
   def body_stmts; end
 end
@@ -2250,21 +2243,6 @@ class MIR::InlineBc
   def stdlib_def; end
 end
 
-class MIR::InlineZig
-  sig { returns(T.untyped) }
-  def code; end
-  sig { returns(String) }
-  def reason; end
-  sig { returns(T.untyped) }
-  def ownership_contract; end
-  sig { returns(T.untyped) }
-  def stdlib_def; end
-  sig { returns(T.untyped) }
-  def allocs; end
-  sig { returns(T.untyped) }
-  def target_var; end
-end
-
 class MIR::ItemsAccess
   sig { returns(T.untyped) }
   def expr; end
@@ -2342,18 +2320,18 @@ end
 class MIR::MutualThunkTrampoline
   sig { returns(T.untyped) }
   def fn_name; end
-  sig { returns(String) }
-  def ret_zig; end
+  sig { returns(Type) }
+  def return_type; end
   sig { returns(T.untyped) }
   def variants; end
   sig { returns(T.untyped) }
   def initial_variant; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T.untyped) }
   def initial_fields; end
   sig { returns(T.untyped) }
   def arms; end
-  sig { returns(String) }
-  def yield_line; end
+  sig { returns(Symbol) }
+  def yield_policy; end
 end
 
 class MIR::Noop
@@ -2403,29 +2381,29 @@ class MIR::Pipeline
 end
 
 class MIR::PolymorphicMutate
-  sig { returns(String) }
-  def cell_zig; end
+  sig { returns(T.untyped) }
+  def cell; end
   sig { returns(String) }
   def rt; end
   sig { returns(T.untyped) }
-  def alias_zig; end
-  sig { returns(String) }
-  def bare_t_zig; end
+  def alias_name; end
+  sig { returns(Type) }
+  def bare_type; end
   sig { returns(T.untyped) }
   def body; end
 end
 
 class MIR::PolymorphicMutateFlow
-  sig { returns(String) }
-  def cell_zig; end
+  sig { returns(T.untyped) }
+  def cell; end
   sig { returns(String) }
   def rt; end
   sig { returns(T.untyped) }
-  def alias_zig; end
-  sig { returns(String) }
-  def bare_t_zig; end
-  sig { returns(String) }
-  def ret_zig; end
+  def alias_name; end
+  sig { returns(Type) }
+  def bare_type; end
+  sig { returns(Type) }
+  def return_type; end
   sig { returns(T.untyped) }
   def body; end
   sig { returns(T.untyped) }
@@ -2470,26 +2448,6 @@ class MIR::RangeLit
   def elem_type; end
 end
 
-class MIR::RawBc
-  sig { returns(T.untyped) }
-  def template; end
-  sig { returns(T.untyped) }
-  def args; end
-  sig { returns(T.untyped) }
-  def stdlib_def; end
-end
-
-class MIR::RawZig
-  sig { returns(T.untyped) }
-  def code; end
-  sig { returns(String) }
-  def reason; end
-  sig { returns(T.untyped) }
-  def ownership_contract; end
-  sig { returns(T.untyped) }
-  def stdlib_def; end
-end
-
 class MIR::RcDowngrade
   sig { returns(T.untyped) }
   def source; end
@@ -2506,6 +2464,17 @@ class MIR::RcRetain
   def zig_base; end
   sig { returns(String) }
   def func; end
+end
+
+class MIR::RcRelease
+  sig { returns(T.untyped) }
+  def source; end
+  sig { returns(String) }
+  def zig_base; end
+  sig { returns(String) }
+  def func; end
+  sig { returns(T.untyped) }
+  def alloc; end
 end
 
 class MIR::ReassignCleanup
@@ -2594,7 +2563,7 @@ class MIR::ShardedMapPut
   def target; end
   sig { returns(T.untyped) }
   def key; end
-  sig { returns(MIR::InlineZig) }
+  sig { returns(T.untyped) }
   def value; end
   sig { returns(T.untyped) }
   def shard_idx; end
@@ -2635,17 +2604,17 @@ class MIR::SliceExpr
 end
 
 class MIR::SnapshotMultiTxn
-  sig { returns(String) }
-  def cells_tuple; end
+  sig { returns(T::Array[MIR::Emittable]) }
+  def cells; end
   sig { returns(String) }
   def rt; end
-  sig { returns(String) }
+  sig { returns(Symbol) }
   def alloc; end
-  sig { returns(String) }
-  def alias_decls; end
+  sig { returns(T::Array[String]) }
+  def aliases; end
   sig { returns(T.untyped) }
   def body; end
-  sig { returns(String) }
+  sig { returns(T.nilable(MIR::FailureAction)) }
   def conflict_action; end
   sig { returns(T.untyped) }
   def retries; end
@@ -2654,32 +2623,76 @@ class MIR::SnapshotMultiTxn
 end
 
 class MIR::SnapshotRead
-  sig { returns(String) }
+  sig { returns(T.untyped) }
   def cell_unwrap; end
   sig { returns(String) }
   def rt; end
   sig { returns(T.untyped) }
-  def alias_zig; end
+  def alias_name; end
   sig { returns(String) }
   def guard_var; end
   sig { returns(T.untyped) }
   def body; end
 end
 
-class MIR::SnapshotTransaction
+class MIR::SortedLockAcquire
+  sig { returns(T::Array[MIR::SortedLockAcquireEntry]) }
+  def entries; end
+  sig { returns(T.nilable(MIR::FailureAction)) }
+  def action; end
+  sig { returns(T::Array[Symbol]) }
+  def matched_types; end
+  sig { returns(T::Array[Symbol]) }
+  def bubble_types; end
+  sig { returns(T.nilable(Integer)) }
+  def retries; end
   sig { returns(String) }
+  def source_line; end
+  sig { returns(String) }
+  def loop_label; end
+  sig { returns(String) }
+  def rt_name; end
+  sig { returns(T::Boolean) }
+  def fallible; end
+end
+
+class MIR::FallibleLockBinding
+  sig { returns(String) }
+  def guard_var; end
+  sig { returns(String) }
+  def alias_name; end
+  sig { returns(MIR::Emittable) }
+  def acquire_call; end
+  sig { returns(MIR::FailureAction) }
+  def action; end
+  sig { returns(T.nilable(Integer)) }
+  def retries; end
+  sig { returns(T::Array[Symbol]) }
+  def matched_types; end
+  sig { returns(T::Array[Symbol]) }
+  def bubble_types; end
+  sig { returns(String) }
+  def source_line; end
+  sig { returns(String) }
+  def acquire_block; end
+  sig { returns(String) }
+  def rt_name; end
+end
+
+class MIR::SnapshotTransaction
+  sig { returns(MIR::Emittable) }
   def cell_unwrap; end
   sig { returns(String) }
   def rt; end
-  sig { returns(String) }
+  sig { returns(Symbol) }
   def alloc; end
   sig { returns(T.untyped) }
-  def alias_zig; end
-  sig { returns(String) }
-  def bare_t_zig; end
+  def alias_name; end
+  sig { returns(Type) }
+  def bare_type; end
   sig { returns(T.untyped) }
   def body; end
-  sig { returns(String) }
+  sig { returns(T.nilable(MIR::FailureAction)) }
   def conflict_action; end
   sig { returns(T.untyped) }
   def retries; end
@@ -2790,22 +2803,22 @@ end
 class MIR::ThunkTrampoline
   sig { returns(T.untyped) }
   def fn_name; end
-  sig { returns(String) }
-  def ret_zig; end
-  sig { returns(T::Array[String]) }
-  def param_field_decls; end
-  sig { returns(T::Array[String]) }
+  sig { returns(Type) }
+  def return_type; end
+  sig { returns(T.untyped) }
+  def param_fields; end
+  sig { returns(T.untyped) }
   def param_init_fields; end
   sig { returns(T.untyped) }
   def base_cases; end
   sig { returns(T.untyped) }
   def recurse_arg_inits; end
   sig { returns(T.untyped) }
-  def combine_lhs_zig; end
-  sig { returns(T.untyped) }
-  def op_zig; end
-  sig { returns(String) }
-  def yield_line; end
+  def combine_lhs; end
+  sig { returns(Symbol) }
+  def combine_op; end
+  sig { returns(Symbol) }
+  def yield_policy; end
 end
 
 class MIR::TransferMark

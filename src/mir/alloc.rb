@@ -39,7 +39,7 @@ module AllocHelper
   end
 
   # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
-  # Returns [is_resource, resource_close_zig].
+  # Returns [is_resource, resource_close_plan].
   # Delegates to Type#resolve_resource_close for type-specific logic.
   sig { params(node: AST::Node).returns(Type::ResourceCloseResult) }
   def resolve_resource_close(node)

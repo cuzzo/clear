@@ -9,11 +9,16 @@ require "set"
 ROOT = File.expand_path("..", __dir__)
 require_relative "../gems/nil-kill/lib/nil_kill"
 require_relative "loom_atomic_coverage"
+require_relative "src_ast_walk_guardrail"
 require_relative "vopr_coverage"
 require_relative "wait_loop_coverage"
 
 def sh(*args)
   IO.popen(args, chdir: ROOT, err: [:child, :out], &:read)
+end
+
+def sh_quiet(*args)
+  IO.popen(args, chdir: ROOT, err: File::NULL, &:read)
 end
 
 def parse_options(argv)
@@ -152,8 +157,7 @@ def merge_simplecov_file!(coverage, path)
       existing["lines"] ||= []
       max = [existing["lines"].length, lines.length].max
       existing["lines"] = Array.new(max) do |i|
-        vals = [existing["lines"][i], lines[i]].compact
-        vals.empty? ? nil : vals.max
+        merge_simplecov_line_hit(existing["lines"][i], lines[i])
       end
       existing["branches"] ||= {}
       (cov["branches"] || {}).each do |parent, children|
@@ -168,12 +172,30 @@ def merge_simplecov_file!(coverage, path)
   coverage
 end
 
+def merge_simplecov_line_hit(existing, incoming)
+  vals = [existing, incoming]
+  positive = vals.compact.select { |hit| hit.to_i.positive? }
+  return positive.max unless positive.empty?
+  return nil if vals.any?(&:nil?)
+
+  vals.compact.max
+end
+
 def parse_simplecov(paths)
   paths.each_with_object({}) { |path, coverage| merge_simplecov_file!(coverage, path) if File.exist?(path) }
 end
 
 def tuple_line(tuple)
   tuple.to_s.split(",")[2].to_i
+end
+
+def ruby_synthetic_branch_line?(stripped)
+  stripped.start_with?("sig ") ||
+    stripped == "sig do" ||
+    stripped.start_with?("def ") ||
+    stripped.start_with?("T.bind(") ||
+    stripped.include?("T.let(") ||
+    stripped.include?("T.cast(")
 end
 
 def ruby_added_coverage(adds, paths)
@@ -206,7 +228,16 @@ def ruby_added_coverage(adds, paths)
     end
     (cov["branches"] || {}).each_value do |children|
       children.each do |tuple, hits|
-        next unless adds[path].include?(tuple_line(tuple))
+        line = tuple_line(tuple)
+        next unless adds[path].include?(line)
+        next if lines[line - 1].nil?
+        source_lines = source_lines_by_path[path] ||= begin
+          full = File.join(ROOT, path)
+          File.exist?(full) ? File.readlines(full) : []
+        end
+        stripped = source_lines[line - 1].to_s.strip
+        next if stripped.empty? || stripped.start_with?("#") || stripped == "end"
+        next if ruby_synthetic_branch_line?(stripped)
 
         branch_total += 1
         branch_hit += 1 if hits.to_i.positive?
@@ -463,7 +494,118 @@ def print_markdown(base, rows)
 end
 
 def type_guardrail_findings(adds_by_path)
-  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings
+  NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
+    rubocop_guardrail_findings(adds_by_path) +
+    src_ast_walk_guardrail_findings(adds_by_path)
+end
+
+RUBOCOP_GUARDRAIL_COPS = [
+  "Lint/DuplicateBranch",
+  "Lint/RedundantSafeNavigation",
+  "Lint/SafeNavigationConsistency",
+].freeze
+
+RUBOCOP_GUARDRAIL_KIND = {
+  "Lint/DuplicateBranch" => "rubocop_duplicate_branch",
+  "Lint/RedundantSafeNavigation" => "rubocop_redundant_safe_navigation",
+  "Lint/SafeNavigationConsistency" => "rubocop_safe_navigation_consistency",
+}.freeze
+
+def src_ruby_added_paths(adds_by_path, root: ROOT)
+  adds_by_path.keys.select do |path|
+    path.start_with?("src/") && path.end_with?(".rb") && File.file?(File.join(root, path))
+  end.sort
+end
+
+def rubocop_guardrail_findings(adds_by_path, root: ROOT)
+  paths = src_ruby_added_paths(adds_by_path, root: root)
+  return [] if paths.empty?
+
+  output = sh_quiet(
+    "bundle", "exec", "rubocop",
+    "--only", RUBOCOP_GUARDRAIL_COPS.join(","),
+    "--format", "json",
+    *paths,
+  )
+  rubocop_guardrail_findings_from_json(adds_by_path, output, root: root)
+rescue StandardError => e
+  [rubocop_guardrail_unavailable_finding(e.message)]
+end
+
+def rubocop_guardrail_findings_from_json(adds_by_path, output, root: ROOT)
+  payload = JSON.parse(output)
+  payload.fetch("files", []).flat_map do |file|
+    path = normalize_rubocop_path(file.fetch("path", ""), root)
+    added = adds_by_path.fetch(path, Set.new)
+    next [] if added.empty? || !path.start_with?("src/") || !path.end_with?(".rb")
+
+    file.fetch("offenses", []).filter_map do |offense|
+      cop = offense.fetch("cop_name", "")
+      next unless RUBOCOP_GUARDRAIL_COPS.include?(cop)
+      location = offense.fetch("location", {})
+      next unless rubocop_location_lines(location).any? { |line| added.include?(line) }
+
+      line = location.fetch("line", 0).to_i
+      column = location.fetch("column", 0).to_i
+      message = offense.fetch("message", "RuboCop offense")
+      code = source_line_at(root, path, line).strip
+      NilKill::StaticDiffAudit::Finding.new(
+        kind: RUBOCOP_GUARDRAIL_KIND.fetch(cop),
+        path: path,
+        line: line,
+        message: "added src line trips #{cop}",
+        detail: [message, column.positive? ? "column #{column}" : nil].compact.join("; "),
+        code: code,
+      )
+    end
+  end.sort_by { |finding| [finding.path, finding.line, finding.kind] }
+rescue JSON::ParserError => e
+  [rubocop_guardrail_unavailable_finding("could not parse RuboCop JSON: #{e.message}")]
+end
+
+def rubocop_location_lines(location)
+  first = location.fetch("line", 0).to_i
+  last = location.fetch("last_line", first).to_i
+  return [] unless first.positive?
+
+  (first..[last, first].max).to_a
+end
+
+def normalize_rubocop_path(path, root)
+  value = path.to_s
+  absolute_prefix = "#{root}/"
+  value.start_with?(absolute_prefix) ? value.delete_prefix(absolute_prefix) : value
+end
+
+def rubocop_guardrail_unavailable_finding(message)
+  NilKill::StaticDiffAudit::Finding.new(
+    kind: "rubocop_guardrail_unavailable",
+    path: "src",
+    line: 0,
+    message: "RuboCop guardrail check did not run",
+    detail: message.to_s,
+    code: "",
+  )
+end
+
+def src_ast_walk_guardrail_findings(adds_by_path, root: ROOT)
+  paths = src_ruby_added_paths(adds_by_path, root: root)
+  return [] if paths.empty?
+
+  absolute_paths = paths.map { |path| File.join(root, path) }
+  SrcAstWalkGuardrail.scan(root: root, paths: absolute_paths).filter_map do |finding|
+    next if finding.allowed
+    next unless adds_by_path.fetch(finding.path, Set.new).include?(finding.line)
+
+    NilKill::StaticDiffAudit::Finding.new(
+      kind: "late_ast_walk",
+      path: finding.path,
+      line: finding.line,
+      message: "added src line introduces forbidden source AST walk",
+      detail: "#{finding.reason}; call=#{finding.call}",
+      code: finding.source,
+    )
+  end.sort_by { |finding| [finding.path, finding.line, finding.kind] }
 end
 
 def print_type_guardrails_text(findings)

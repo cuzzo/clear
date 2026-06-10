@@ -80,8 +80,6 @@ module Annotator
         case node.op
         when :NOT, "!"
           stamp_type!(node, :Bool)
-        when :SUB, "-"
-          stamp_type!(node, node.right.full_type!(context: "unary right")) # Keep as Number/Int64
         else
           stamp_type!(node, node.right.full_type!(context: "unary right"))
         end
@@ -111,8 +109,7 @@ module Annotator
             # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
             node.storage = :rodata
             Type.new(Type::STRING_TYPE, sync: :symbol, location: :rodata)
-          when :BYTE         then Type.new(:Byte)
-          when :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
+          when :BYTE, :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
           when :INT8    then Type.new(:Int8)
           when :INT16   then Type.new(:Int16)
           when :INT32   then Type.new(:Int32)
@@ -262,7 +259,9 @@ module Annotator
 
         if ti.primitive? && !is_atomic_primitive && node.capability?
           cap_name = node.sync || node.ownership || node.layout
-          error!(node, :CAPABILITY_ON_PRIMITIVE, cap: cap_name, type: base_type, hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
+          error!(node, :CAPABILITY_ON_PRIMITIVE,
+            cap: cap_name,
+            type: base_type)
         end
 
         # Struct atomics need AtomicPtr snapshot semantics; direct atomic ops only

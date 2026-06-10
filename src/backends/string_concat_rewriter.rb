@@ -46,11 +46,7 @@ class StringConcatRewriter
     case node
     when AST::FunctionDef
       node.body.map!.with_index { |s, _| rewrite_in_node!(s) }
-    when AST::VarDecl, AST::BindExpr
-      node.value = rewrite_in_node!(node.value) if node.value
-    when AST::Assignment
-      node.value = rewrite_in_node!(node.value) if node.value
-    when AST::ReturnNode
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::ReturnNode
       node.value = rewrite_in_node!(node.value) if node.value
     when AST::IfStatement
       node.then_branch&.map! { |s| rewrite_in_node!(s) }

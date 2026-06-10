@@ -38,6 +38,14 @@ module FsmTransform
   extend T::Sig
   module_function
 
+  class PromotedLocalFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :type_zig, String
+    const :is_suspend_result, T::Boolean, default: false
+  end
+
   # Public entry. Given a BG block and the surrounding lowering
   # context (captures, runtime, etc.), produce an MIR::FsmGenericBody
   # for the wrapper emitter to render.
@@ -49,7 +57,7 @@ module FsmTransform
   # nil-returning path shrinks until it disappears.
   #
   # ctx is a hash with keys:
-  #   :node, :captured, :capture_close_zig, :pointer_captures,
+  #   :node, :captured, :capture_close_plans, :pointer_captures,
   #   :alloc_var, :promise_var, :ctx_var,
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
@@ -71,9 +79,9 @@ module FsmTransform
     # control-flow that hides reads from Liveness:
     #   * WithBlock -- CS body lowers at LockSuspend expansion
     #     time, after Liveness has already run.
-    #   * IF / WHILE / FOR with a suspend in scope -- cond_ast is
-    #     rendered to a Zig string at split time so identifier
-    #     reads in the cond are invisible to Liveness's MIR walk.
+    #   * IF / WHILE / FOR with a suspend in scope -- nested
+    #     control-flow is split before all condition reads are visible
+    #     to Liveness's straight-line segment walk.
     # Pure linear bodies (NEXT chains, single IO + post-stmts) go
     # through Liveness cleanly; conservative promotion would
     # over-promote unused locals.
@@ -84,8 +92,8 @@ module FsmTransform
     # already declared as ctx fields by their suspend descriptor's
     # ctx_field_decls, so omit them from the field-decl list to
     # avoid duplicate struct members.
-    promoted_names = all_locals.map { |p| p[:name] }
-    field_locals   = all_locals.reject { |p| p[:is_suspend_result] }
+    promoted_names = all_locals.map(&:name)
+    field_locals   = all_locals.reject(&:is_suspend_result)
     captured_map   = (ctx[:captured] || {}).keys.to_a
     ctx_id         = ctx[:id]
     promo_capture_map = (captured_map + promoted_names).to_h { |n|
@@ -117,29 +125,122 @@ module FsmTransform
     return nil if expected != actual
 
     liveness = Liveness.analyze(segments, ctx)
-    ext_ctx = (ctx[:extra_ctx_fields] || []) +
-              field_locals.map { |p| "#{p[:name]}: #{p[:zig_type]} = undefined," }
-    Emit.build_recursive(
-      ctx.merge(extra_ctx_fields: ext_ctx,
-                recursive_promoted_names: promoted_names),
-      rec_segs, liveness, lowering,
+    ext_ctx = coerce_context_fields(ctx[:extra_ctx_fields]) +
+              field_locals.map do |p|
+                MIR::ContextFieldDecl.new(
+                  name: p.name,
+                  type_zig: p.type_zig,
+                  default_value: MIR::Undef.new(nil),
+                )
+              end
+    raw_ctx = T.cast(ctx, T::Hash[Symbol, T.nilable(Object)])
+    emit_ctx = Emit::FsmEmitContext.new(
+      id: T.cast(raw_ctx.fetch(:id), Integer),
+      bg_rt: T.cast(raw_ctx.fetch(:bg_rt), String),
+      blk_label: T.cast(raw_ctx.fetch(:blk_label), String),
+      ctx_type: T.cast(raw_ctx.fetch(:ctx_type), String),
+      promise_zig: T.cast(raw_ctx.fetch(:promise_zig), String),
+      capture_fields: coerce_context_fields(raw_ctx.fetch(:capture_fields)),
+      alloc_var: T.cast(raw_ctx.fetch(:alloc_var), String),
+      promise_var: T.cast(raw_ctx.fetch(:promise_var), String),
+      ctx_var: T.cast(raw_ctx.fetch(:ctx_var), String),
+      rt_name: T.cast(raw_ctx.fetch(:rt_name), String),
+      promoted_decls: coerce_promoted_decls(raw_ctx[:promoted_decls]),
+      capture_inits: coerce_context_inits(raw_ctx[:capture_inits]),
+      captured: T.cast(raw_ctx[:captured] || {}, T::Hash[String, Object]),
+      capture_close_plans: T.cast(raw_ctx[:capture_close_plans] || {}, T::Hash[String, Schemas::ResourceClosePlan]),
+      pointer_captures: T.cast(raw_ctx[:pointer_captures] || Set.new, T::Set[String]),
+      extra_ctx_fields: ext_ctx,
+      recursive_promoted_names: promoted_names,
+      fresh_heap_cleanup_names: T.cast(raw_ctx[:fresh_heap_cleanup_names] || [], T::Array[String]),
+      capture_finalizers: T.cast(raw_ctx[:capture_finalizers] || [], T::Array[MIR::Emittable]),
+      arena_init_flag: raw_ctx[:arena_init_flag] == true,
+      is_void: raw_ctx[:is_void] == true,
+      pin_mode: T.cast(raw_ctx[:pin_mode], T.nilable(T.any(T::Boolean, Symbol))),
+      parallel: raw_ctx[:parallel] == true,
+      profile_site_id: T.cast(raw_ctx[:profile_site_id], T.nilable(Integer)),
+      profile_line: T.cast(raw_ctx[:profile_line], T.nilable(Integer)),
+      profile_column: T.cast(raw_ctx[:profile_column], T.nilable(Integer)),
     )
+    Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering)
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::ContextFieldDecl]) }
+  def self.coerce_context_fields(raw)
+    return [] if raw.nil?
+
+    if raw.is_a?(Array)
+      return raw.flat_map { |field| coerce_context_field(field) }
+    end
+
+    raise TypeError, "FSM context fields must be MIR::ContextFieldDecl values, got #{raw.class}"
+  end
+
+  sig { params(raw: Object).returns(T::Array[MIR::ContextFieldDecl]) }
+  def self.coerce_context_field(raw)
+    if raw.is_a?(MIR::ContextFieldDecl)
+      return [raw]
+    end
+
+    if raw.is_a?(Array)
+      return raw.flat_map { |field| coerce_context_field(field) }
+    end
+
+    raise TypeError, "FSM context field must be MIR::ContextFieldDecl, got #{raw.class}"
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::StructInitField]) }
+  def self.coerce_context_inits(raw)
+    return [] if raw.nil?
+
+    if raw.is_a?(Array)
+      return raw.flat_map do |field|
+        if field.is_a?(MIR::StructInitField)
+          [field]
+        elsif field.is_a?(Array)
+          coerce_context_inits(field)
+        else
+          raise TypeError, "FSM context init must be MIR::StructInitField, got #{field.class}"
+        end
+      end
+    end
+
+    raise TypeError, "FSM context inits must be MIR::StructInitField values, got #{raw.class}"
+  end
+
+  sig { params(raw: T.nilable(Object)).returns(T::Array[MIR::Emittable]) }
+  def self.coerce_promoted_decls(raw)
+    return [] if raw.nil?
+
+    if raw.is_a?(Array)
+      return raw.flat_map do |node|
+        if node.is_a?(MIR::Emittable)
+          [node]
+        elsif node.is_a?(Array)
+          coerce_promoted_decls(node)
+        else
+          raise TypeError, "FSM promoted decl must be MIR::Emittable, got #{node.class}"
+        end
+      end
+    end
+
+    raise TypeError, "FSM promoted decls must be MIR::Emittable values, got #{raw.class}"
   end
 
   # Recursively walk the BG body collecting every VarDecl /
   # BindExpr(:decl) name and its Zig type. The recursive splitter
   # promotes all of them to ctx fields so reads/writes across
   # segment boundaries resolve via the capture_map. Returns
-  # `[{ name:, zig_type: }, ...]` (deduped on name).
-  sig { params(stmts: T.untyped).returns(T::Array[T.untyped]) }
+  # typed facts (deduped on name).
+  sig { params(stmts: T.untyped).returns(T::Array[PromotedLocalFact]) }
   def collect_body_locals(stmts)
     T.bind(self, T.untyped) rescue nil
-    out = []
-    seen = {}
+    out = T.let([], T::Array[PromotedLocalFact])
+    seen = T.let({}, T::Hash[String, T::Boolean])
     AST.each_locatable(stmts) do |node|
       entry = local_entry_for_node(node)
       next unless entry
-      name = entry[:name]
+      name = entry.name
       next if seen[name]
       seen[name] = true
       out << entry
@@ -147,7 +248,7 @@ module FsmTransform
     out
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: T.untyped).returns(T.nilable(PromotedLocalFact)) }
   def local_entry_for_node(node)
     T.bind(self, T.untyped) rescue nil
     case node
@@ -155,21 +256,17 @@ module FsmTransform
       local_entry(node.name, node.full_type!)
     when AST::BindExpr
       return nil unless node.mode == :decl
-      entry = local_entry(node.name, node.full_type!)
-      if entry
-        # Mark suspend-result decls so the caller can include them in the
-        # capture_map but skip duplicate ctx field declarations.
-        entry[:is_suspend_result] = true if suspend_value?(node.value)
-      end
-      entry
+      # Mark suspend-result decls so the caller can include them in the
+      # capture_map but skip duplicate ctx field declarations.
+      local_entry(node.name, node.full_type!, is_suspend_result: suspend_value?(node.value))
     when AST::ForRange
-      node.var_name ? { name: node.var_name, zig_type: "i64" } : nil
+      node.var_name ? PromotedLocalFact.new(name: node.var_name.to_s, type_zig: "i64") : nil
     when AST::ForEach
       foreach_local_entry(node)
     end
   end
 
-  sig { params(node: AST::ForEach).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::ForEach).returns(T.nilable(PromotedLocalFact)) }
   def foreach_local_entry(node)
     T.bind(self, T.untyped) rescue nil
     return nil unless node.var_name
@@ -179,7 +276,7 @@ module FsmTransform
       elem_t = ct.element_type
       elem_t ? Type.new(elem_t).zig_type : "anyopaque"
     end
-    { name: node.var_name, zig_type: elem_zig }
+    PromotedLocalFact.new(name: node.var_name.to_s, type_zig: elem_zig)
   end
 
   # True if the BG body contains a WithBlock or an IF/WHILE/FOR
@@ -222,15 +319,15 @@ module FsmTransform
     return true if value.is_a?(AST::NextExpr)
     return false unless AST.call?(value)
     md = value.matched_stdlib_def
-    !!(md && md.emit&.suspends && md.emit&.fsm_setup)
+    !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
   end
 
-  sig { params(name: T.untyped, type_obj: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-  def local_entry(name, type_obj)
+  sig { params(name: T.untyped, type_obj: T.untyped, is_suspend_result: T::Boolean).returns(T.nilable(PromotedLocalFact)) }
+  def local_entry(name, type_obj, is_suspend_result: false)
     T.bind(self, T.untyped) rescue nil
     return nil if name.nil?
     t = type_obj ? Type.new(type_obj) : nil
     zig_t = t ? t.zig_type : "anyopaque"
-    { name: name, zig_type: zig_t }
+    PromotedLocalFact.new(name: name.to_s, type_zig: zig_t, is_suspend_result: is_suspend_result)
   end
 end

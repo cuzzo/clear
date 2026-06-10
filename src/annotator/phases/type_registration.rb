@@ -36,7 +36,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
         schema = if node.close_method && node.from_module
           Schemas::ResourceSchema.new(
-            close_zig: "{0}.#{node.close_method}()",
+            close_plan: Schemas::ResourceClosePlan.method(node.close_method),
             fields: node.field_decls,
             type_params: type_params(node.type_params),
             extern_module: node.from_module,

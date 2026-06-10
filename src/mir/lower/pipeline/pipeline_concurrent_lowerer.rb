@@ -74,7 +74,7 @@ class PipelineConcurrentCallback < T::Struct
   const :ctx_let, MIR::Let
   const :pre_ctx_stmts, T::Array[MIR::Emittable]
   const :post_ctx_stmts, T::Array[MIR::Emittable]
-  const :apply_ident, MIR::Ident
+  const :apply_ident, MIR::Emittable
   const :context_arg, MIR::AddressOf
   const :context_stmts, T::Array[MIR::Emittable]
 end
@@ -83,7 +83,7 @@ class PipelineConcurrentInvocation < T::Struct
   extend T::Sig
 
   const :id, Integer
-  const :apply_ident, MIR::Ident
+  const :apply_ident, MIR::Emittable
   const :context_arg, MIR::AddressOf
   const :context_stmts, T::Array[MIR::Emittable]
   const :worker_count, MIR::Emittable
@@ -191,7 +191,6 @@ class PipelineConcurrentLowerer < T::Struct
   const :pipeline_result_alloc, T.proc.returns(Symbol)
   const :source_setup, T.proc.params(lhs: AST::Node).returns(T::Array[MIR::Emittable])
   const :emit_builtin, T.proc.params(name: Symbol, args: T::Array[MIR::Emittable]).returns(MIR::Node)
-  const :emit_expr, T.proc.params(node: MIR::Emittable).returns(String)
   const :lower_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :next_label, T.proc.returns(String)
   const :typed_block_expr, T.proc.params(label: String, body: T::Array[MIR::Emittable], result_type: Type).returns(MIR::BlockExpr)
@@ -491,7 +490,7 @@ class PipelineConcurrentLowerer < T::Struct
     workers = concurrent_option(conc_op, "workers")
     return self.visit_mir.call(workers) if workers
 
-    MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
+    MIR::RuntimeCall.new(MIR::RuntimeCalls.thread_count_spec, [])
   end
 
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Cast) }
@@ -518,7 +517,7 @@ class PipelineConcurrentLowerer < T::Struct
     size_node = concurrent_option(conc_op, "size")
     size_name = size_node.is_a?(AST::Identifier) ? size_node.name.downcase.to_sym : nil
     MIR::StructInit.new(nil, [
-      MIR.named_field("stack_size", MIR::Ident.new(".#{self.task_config_variant.call(size_name)}")),
+      MIR.named_field("stack_size", MIR::EnumTag.new(variant: self.task_config_variant.call(size_name))),
     ])
   end
 
@@ -527,9 +526,9 @@ class PipelineConcurrentLowerer < T::Struct
     id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
-    specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
-    capture_map = T.cast(caps.capture_map, T::Hash[String, String])
-    capture_symbols = T.cast(caps.capture_symbols, T::Hash[String, SymbolEntry])
+    specs = caps.specs
+    capture_map = caps.capture_map
+    capture_symbols = caps.capture_symbols
 
     fields = specs.map { |s| capture_field_def(s, capture_symbols) }
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)
@@ -577,6 +576,27 @@ class PipelineConcurrentLowerer < T::Struct
     ).marks
   end
 
+  sig do
+    params(
+      label: String,
+      result_var: String,
+      result_type: Type,
+      source: PipelineConcurrentSourcePointer,
+      call: MIR::Emittable,
+      source_move: T::Array[MIR::Emittable],
+    ).returns(T::Array[MIR::Emittable])
+  end
+  def bounded_result_break_stmts(label, result_var, result_type, source, call, source_move)
+    return [*source.setup, MIR::BreakStmt.new(label, call)] if source_move.empty?
+
+    [
+      *source.setup,
+      MIR::Let.new(result_var, call, false, result_type, nil),
+      *source_move,
+      MIR::BreakStmt.new(label, MIR::Ident.new(result_var)),
+    ]
+  end
+
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_bounded_select(lhs, conc_op, inner)
     item_t = T.must(lhs.full_type!.stream_element_type)
@@ -593,14 +613,12 @@ class PipelineConcurrentLowerer < T::Struct
     ])
 
     label = self.next_label.call
+    result_type = Type.from_node!(conc_op, context: "bounded concurrent SELECT result")
     self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::BreakStmt.new(label, call),
-      ],
-    ), Type.from_node!(conc_op, context: "bounded concurrent SELECT result"))
+      after_context: bounded_result_break_stmts(label, "__bounded_select_result_#{numeric_label_id(label)}",
+        result_type, source, call, source_move),
+    ), result_type)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::WhereOp).returns(MIR::BlockExpr) }
@@ -617,14 +635,12 @@ class PipelineConcurrentLowerer < T::Struct
     ])
 
     label = self.next_label.call
+    result_type = Type.from_node!(conc_op, context: "bounded concurrent WHERE result")
     self.typed_block_expr.call(label, invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::BreakStmt.new(label, call),
-      ],
-    ), Type.from_node!(conc_op, context: "bounded concurrent WHERE result"))
+      after_context: bounded_result_break_stmts(label, "__bounded_where_result_#{numeric_label_id(label)}",
+        result_type, source, call, source_move),
+    ), result_type)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, _inner: AST::EachOp).returns(MIR::ScopeBlock) }
@@ -642,13 +658,13 @@ class PipelineConcurrentLowerer < T::Struct
 
     MIR::ScopeBlock.new(invoke.scoped_body(
       before_context: [],
-      after_context: [
-        *source.setup,
-        *source_move,
-        MIR::ExprStmt.new(call, false),
-      ],
-    ))
-  end
+	      after_context: [
+	        *source.setup,
+	        MIR::ExprStmt.new(call, false),
+	        *source_move,
+	      ],
+	    ))
+	  end
 
   sig { params(plan: PipelineConcurrentPlan).returns(PipelineConcurrentResult) }
   def lower_bc_plan(plan)
@@ -809,10 +825,10 @@ class PipelineConcurrentLowerer < T::Struct
     PipelineConcurrentSourcePointer.new(setup: [], pointer: MIR::AddressOf.new(src))
   end
 
-  sig { params(conc_op: AST::ConcurrentOp, n_workers_zig: String).returns(MIR::Expr) }
-  def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+  sig { params(conc_op: AST::ConcurrentOp, worker_count: MIR::Emittable).returns(MIR::Expr) }
+  def stream_concurrent_capacity_mir(conc_op, worker_count)
     cap_node = concurrent_option(conc_op, "capacity")
-    return MIR::DefaultStreamCapacity.new(MIR::Ident.new(n_workers_zig)) unless cap_node
+    return MIR::DefaultStreamCapacity.new(worker_count) unless cap_node
 
     MIR::Cast.new(self.lower_mir.call(cap_node), nil, :intCast)
   end
@@ -825,8 +841,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamSelect, [
       MIR::Ident.new(item_t.zig_type),
@@ -856,8 +871,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_expr_invocation(conc_op, item_t, Type.new(:Bool))
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamWhere, [
       MIR::Ident.new(item_t.zig_type),
@@ -886,8 +900,7 @@ class PipelineConcurrentLowerer < T::Struct
     invoke = bounded_each_invocation(conc_op, item_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
-    n_workers_zig = self.emit_expr.call(n_workers_mir)
-    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
     call = self.emit_builtin.call(:concurrentStreamEach, [
       MIR::Ident.new(item_t.zig_type),
@@ -990,7 +1003,7 @@ class PipelineConcurrentLowerer < T::Struct
       MIR::Ident.new(result_zig),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
       initial,
-      MIR::Ident.new(".#{kind}"),
+      MIR::EnumTag.new(variant: kind.to_s),
     ])
 
     label = self.next_label.call
@@ -1039,9 +1052,9 @@ class PipelineConcurrentLowerer < T::Struct
     id = self.numeric_label_id(self.next_label.call)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
-    specs = T.cast(caps.specs, T::Array[FiberCtxBuilder::CaptureSpec])
-    capture_map = T.cast(caps.capture_map, T::Hash[String, String])
-    capture_symbols = T.cast(caps.capture_symbols, T::Hash[String, SymbolEntry])
+    specs = caps.specs
+    capture_map = caps.capture_map
+    capture_symbols = caps.capture_symbols
 
     fields = specs.map { |s| capture_field_def(s, capture_symbols) }
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)
@@ -1232,13 +1245,28 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(id: Integer, ctx_name: String, fields: T::Array[MIR::FieldDef], fn: MIR::FnDef, specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(PipelineConcurrentCallback) }
   def callback_record(id, ctx_name, fields, fn, specs)
+    callback_fields = fields + [MIR::FieldDef.new("alloc", "std.mem.Allocator", nil)]
     ctx_init = MIR::StructInit.new(ctx_name, specs.map { |s|
       MIR::StructInitField.new(name: s.name, value: s.init_value_mir)
-    })
+    } + [
+      MIR::StructInitField.new(
+        name: :alloc,
+        value: MIR::MethodCall.new(
+          MIR::Ident.new(self.do_rt_name.call),
+          "heapAlloc",
+          [],
+          false,
+          MIR::CallableContract.no_ownership(0),
+        ),
+      ),
+    ])
     ctx_var = "__bounded_conc_ctx_#{id}"
-    ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
+    ctx_def = MIR::StructDef.new(ctx_name, callback_fields, [fn], nil)
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
-    pre_ctx_stmts = specs.filter_map(&:setup_mir)
+    pre_ctx_stmts = specs.flat_map { |spec|
+      setup = spec.setup_mir
+      setup.is_a?(Array) ? setup : [setup].compact
+    }
     post_ctx_stmts = specs.filter_map { |s| s.cleanup_mir_for(ctx_var) }
     PipelineConcurrentCallback.new(
       id: id,
@@ -1248,7 +1276,7 @@ class PipelineConcurrentLowerer < T::Struct
       ctx_let: ctx_let,
       pre_ctx_stmts: pre_ctx_stmts,
       post_ctx_stmts: post_ctx_stmts,
-      apply_ident: MIR::Ident.new("#{ctx_name}.apply"),
+      apply_ident: MIR::FieldGet.new(MIR::Ident.new(ctx_name), "apply"),
       context_arg: MIR::AddressOf.new(MIR::Ident.new(ctx_var)),
       context_stmts: [
         ctx_def,

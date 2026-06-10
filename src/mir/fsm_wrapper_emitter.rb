@@ -23,13 +23,13 @@
 # template tweak.
 #
 # Body content that comes from the surrounding fiber-body lowering
-# (pre_stmts, post_stmts, post_result_line, ...) is still rendered
-# Zig text at this layer -- it lands in FsmStep.body_lines as
-# pre-joined strings. Migrating those to MIR is a Phase-4
-# transpiler concern; the wrapper itself is now structural.
+# is carried as MIR nodes and rendered here by MIREmitter. The wrapper
+# may emit fixed Zig templates, but it must not accept pre-rendered
+# body or field strings from MIR.
 
 require_relative "mir"
 require_relative "mir_emitter"
+require_relative "fsm_ops"
 
 module FsmWrapperEmitter
   extend T::Sig
@@ -38,7 +38,7 @@ module FsmWrapperEmitter
   # Entry point. Render an MIR::FsmIoBody and return the Zig text.
   # The MIREmitter is the standard Phase-4 transpiler that handles
   # every MIR statement / expression type. Each FsmStep's body_stmts
-  # is a list of MIR nodes (or transitional Strings); we feed each
+  # is a list of MIR nodes; we feed each
   # through `mir_emitter.emit` to produce Zig text, then concatenate
   # with indentation. NO renderer-specific knowledge of statement
   # types -- the emitter is the single source of truth.
@@ -93,13 +93,14 @@ module FsmWrapperEmitter
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
-    parts << "        #{s.captures_decl_zig}" unless empty?(s.captures_decl_zig)
+    capture_fields = render_context_field_decls(s.capture_fields, mir_emitter)
+    parts << indent_block(capture_fields, 8) unless empty?(capture_fields)
     parts << ""
     parts << render_run_body(s.run_body, mir_emitter)
     parts << ""
     parts << render_b1_resume_fn(s.run_body.ctx_id)
     parts << ""
-    parts << render_destroy_task(s.run_body.ctx_id)
+    parts << render_destroy_task(s.run_body.ctx_id, [], mir_emitter)
     parts << "    };"
     parts.join("\n")
   end
@@ -108,17 +109,13 @@ module FsmWrapperEmitter
   def render_run_body(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, step.bg_rt) do
-      (step.body_stmts || []).filter_map do |stmt|
-        out = mir_emitter.emit(stmt)
-        next nil if out.nil? || out.strip.empty?
-        out
-      end
+      render_body_items(step.body_stmts || [], mir_emitter)
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
     [
       "        fn runBody(__ctx_#{step.ctx_id}: *@This()) anyerror!void {",
       "            const #{step.bg_rt} = __ctx_#{step.ctx_id}.rt;",
-      ("            #{step.rt_suppress_zig}" unless empty?(step.rt_suppress_zig)),
+      ("            _ = &#{step.bg_rt};" if step.suppress_runtime_ref),
       (body unless body.empty?),
       "        }",
     ].compact.join("\n")
@@ -145,14 +142,14 @@ module FsmWrapperEmitter
   # embedded in it) lives long enough for the status write before
   # being freed here.
   #
-  # extra_zig is optional cleanup that runs BEFORE freeFsmCtx
-  # (e.g. WITH+suspend-in-CS releases any locks still held on the
-  # err path).
-  sig { params(ctx_id: T.untyped, extra_zig: T.nilable(String)).returns(String) }
-  def render_destroy_task(ctx_id, extra_zig = nil)
+  # destroy_actions are structural cleanup/release operations that run
+  # BEFORE freeFsmCtx (e.g. capture cleanup and WITH+suspend-in-CS locks).
+  sig { params(ctx_id: Integer, destroy_actions: T::Array[MIR::FsmDestroyAction], mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_task(ctx_id, destroy_actions, mir_emitter)
     T.bind(self, T.untyped) rescue nil
+    extra_zig = render_destroy_actions(ctx_id, destroy_actions, mir_emitter)
     extra =
-      if extra_zig && !empty?(extra_zig)
+      if !empty?(extra_zig)
         extra_zig.lines.map { |l| "    #{l.chomp}" }.join("\n") + "\n"
       else
         ""
@@ -188,9 +185,11 @@ module FsmWrapperEmitter
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
-    parts << "        #{s.captures_decl_zig}" unless empty?(s.captures_decl_zig)
+    capture_fields = render_context_field_decls(s.capture_fields, mir_emitter)
+    parts << indent_block(capture_fields, 8) unless empty?(capture_fields)
     parts << "        step: u8 = 0,"
-    s.state_decls.each { |d| parts << "        #{d.render}" }
+    state_fields = render_fsm_state_field_decls(s.state_decls || [], mir_emitter)
+    parts << indent_block(state_fields, 8) unless empty?(state_fields)
     s.promoted_field_decls.each { |line| parts << "        #{line}" }
     parts << ""
     parts << render_step(s.step0, mir_emitter)
@@ -199,35 +198,30 @@ module FsmWrapperEmitter
     parts << ""
     parts << indent_block(render_dispatch(s.resume_fn), 8)
     parts << ""
-    parts << render_destroy_task(s.resume_fn.ctx_id)
+    parts << render_destroy_task(s.resume_fn.ctx_id, [], mir_emitter)
     parts << "    };"
     parts.join("\n")
   end
 
   # ----- one runStepN function ----------------------------------------------
   #
-  # body_stmts is a list of MIR statement nodes (or Strings during
-  # the transition). Each is fed through MIREmitter.emit to produce
-  # the Zig fragment for that statement. We skip emissions that
-  # come back empty / nil so verification-only nodes (AllocMark,
-  # ReturnMark, ...) don't leave blank lines in the output.
+  # body_stmts is a list of MIR statement nodes. Each is fed through
+  # MIREmitter.emit to produce the Zig fragment for that statement.
+  # We skip emissions that come back empty / nil so verification-only
+  # nodes (AllocMark, ReturnMark, ...) don't leave blank lines.
 
   sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_step(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, step.bg_rt) do
-      (step.body_stmts || []).filter_map do |stmt|
-        out = mir_emitter.emit(stmt)
-        next nil if out.nil? || out.strip.empty?
-        out
-      end
+      render_body_items(step.body_stmts || [], mir_emitter)
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
 
     [
       "        fn runStep#{step.index}(__ctx_#{step.ctx_id}: *@This()) anyerror!void {",
       "            const #{step.bg_rt} = __ctx_#{step.ctx_id}.rt;",
-      ("            #{step.rt_suppress_zig}" unless empty?(step.rt_suppress_zig)),
+      ("            _ = &#{step.bg_rt};" if step.suppress_runtime_ref),
       (body unless body.empty?),
       "        }",
     ].compact.join("\n")
@@ -238,12 +232,11 @@ module FsmWrapperEmitter
   # Each entry is an MIR statement (typically MIR::ExprStmt(MIR::
   # MethodCall(...))); we route each through a fresh MIREmitter
   # so the same Phase-4 path renders these as renders the arm
-  # bodies. Accepts a String fallback for transitional callers.
-  sig { params(cleanups: T.untyped).returns(String) }
+  # bodies.
+  sig { params(cleanups: T.nilable(T::Array[MIR::Emittable])).returns(String) }
   def render_resume_fn_cleanups(cleanups)
     T.bind(self, T.untyped) rescue nil
     return "" if cleanups.nil?
-    return cleanups if cleanups.is_a?(String)  # transitional fallback
     return "" if cleanups.empty?
     emitter = MIREmitter.new
     cleanups.filter_map { |stmt|
@@ -277,27 +270,23 @@ module FsmWrapperEmitter
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
-    parts << "        #{s.captures_decl_zig}" unless empty?(s.captures_decl_zig)
-    (s.extra_field_decls || []).each do |line|
-      next if empty?(line)
-      parts << "        #{line}"
-    end
-    (s.promoted_field_decls || []).each do |line|
-      next if empty?(line)
-      parts << "        #{line}"
-    end
+    capture_fields = render_context_field_decls(s.capture_fields, mir_emitter)
+    parts << indent_block(capture_fields, 8) unless empty?(capture_fields)
+    extra_fields = render_context_field_decls(s.extra_field_decls || [], mir_emitter)
+    parts << indent_block(extra_fields, 8) unless empty?(extra_fields)
+    promoted_fields = render_context_field_decls(s.promoted_field_decls || [], mir_emitter)
+    parts << indent_block(promoted_fields, 8) unless empty?(promoted_fields)
     parts << ""
     (s.member_fns || []).each do |fn|
       parts << render_member_fn(fn, mir_emitter)
       parts << ""
     end
-    if s.resume_fn_zig.is_a?(MIR::FsmDispatch)
-      parts << indent_block(render_dispatch(s.resume_fn_zig), 8)
-      parts << ""
-      parts << render_destroy_task(s.resume_fn_zig.ctx_id, s.destroy_extra_zig)
-    elsif !empty?(s.resume_fn_zig)
-      parts << indent_block(s.resume_fn_zig, 8)
+    unless s.dispatch.is_a?(MIR::FsmDispatch)
+      raise ArgumentError, "generic FSM ctx requires MIR::FsmDispatch"
     end
+    parts << indent_block(render_dispatch(s.dispatch), 8)
+    parts << ""
+    parts << render_destroy_task(s.dispatch.ctx_id, s.destroy_actions || [], mir_emitter)
     parts << "    };"
     parts.join("\n")
   end
@@ -349,12 +338,13 @@ module FsmWrapperEmitter
     T.bind(self, T.untyped) rescue nil
     body_lines = []
     if arm.pre_body_skip
-      body_lines << "if (#{arm.pre_body_skip.cond_zig}) {"
+      body_lines << "if (#{render_fsm_expr(arm.pre_body_skip.condition)}) {"
       body_lines << "    __ctx_#{ctx_id}.step = #{arm.pre_body_skip.skip_step};"
       body_lines << "    continue :__sw;"
       body_lines << "}"
     end
-    body_lines << arm.pre_body_zig if arm.pre_body_zig && !empty?(arm.pre_body_zig)
+    pre_body = render_stmt_array(arm.pre_body_stmts || [], "rt")
+    body_lines << pre_body unless pre_body.empty?
     if arm.body_fn_name
       tail_kind = arm.tail.respond_to?(:kind) ? arm.tail.kind : nil
       arm_cleanups = render_resume_fn_cleanups(arm.err_cleanups)
@@ -430,7 +420,7 @@ module FsmWrapperEmitter
       ].join("\n")
     when MIR::FsmTailRegisterYield
       [
-        "if (#{t.register_zig}) {",
+        "if (#{render_fsm_expr(t.register_expr)}) {",
         "    __ctx_#{ctx_id}.step = #{t.next_step};",
         "    return .{ .#{t.yield_reason} = {} };",
         "}",
@@ -444,7 +434,7 @@ module FsmWrapperEmitter
       ].join("\n")
     when MIR::FsmTailCondJump
       [
-        "if (#{t.cond_zig}) {",
+        "if (#{render_fsm_expr(t.condition)}) {",
         "    __ctx_#{ctx_id}.step = #{t.then_step};",
         "    continue :__sw;",
         "}",
@@ -510,19 +500,18 @@ module FsmWrapperEmitter
   def render_member_fn(fn, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = with_rt_name(mir_emitter, fn.bg_rt) do
-      (fn.body_stmts || []).filter_map do |stmt|
-        out = mir_emitter.emit(stmt)
-        next nil if out.nil? || out.strip.empty?
-        out
-      end
+      render_body_items(fn.body_stmts || [], mir_emitter)
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
+    extra_prologue = with_rt_name(mir_emitter, fn.bg_rt) do
+      render_stmt_array(fn.extra_prologue_stmts || [], fn.bg_rt)
+    end
 
     [
       "        fn #{fn.fn_name}(__ctx_#{fn.ctx_id}: *@This()) anyerror!void {",
       "            const #{fn.bg_rt} = __ctx_#{fn.ctx_id}.rt;",
-      ("            #{fn.rt_suppress_zig}" unless empty?(fn.rt_suppress_zig)),
-      (indent_block(fn.extra_prologue_zig, 12) unless empty?(fn.extra_prologue_zig)),
+      ("            _ = &#{fn.bg_rt};" if fn.suppress_runtime_ref),
+      (indent_block(extra_prologue, 12) unless extra_prologue.empty?),
       (body unless body.empty?),
       "        }",
     ].compact.join("\n")
@@ -533,11 +522,19 @@ module FsmWrapperEmitter
   sig { params(s: MIR::FsmSpawnSetup, blk_label: T.untyped).returns(String) }
   def render_spawn_setup(s, blk_label)
     T.bind(self, T.untyped) rescue nil
+    mir_emitter = MIREmitter.new
     parts = []
-    parts << "    #{s.profile_site_comment}" if s.respond_to?(:profile_site_comment) && !empty?(s.profile_site_comment)
-    parts << "    const #{s.alloc_var} = #{s.alloc_expr_zig};"
+    parts << "    #{mir_emitter.emit_profile_task_site(s.profile_site)}" if s.respond_to?(:profile_site) && s.profile_site
+    alloc_expr = mir_emitter.emit(s.alloc_expr)
+    parts << "    const #{s.alloc_var} = #{alloc_expr};"
     parts << "    const #{s.promise_var} = try #{s.promise_zig}.spawn(#{s.alloc_var}, #{s.rt_name}.getSched());"
-    parts << indent_block(s.promoted_decls_zig, 4) unless empty?(s.promoted_decls_zig)
+    promoted_decls = (s.promoted_decls || []).filter_map do |stmt|
+      out = mir_emitter.emit(stmt)
+      next nil if out.nil? || out.strip.empty?
+
+      out
+    end.join("\n")
+    parts << indent_block(promoted_decls, 4) unless empty?(promoted_decls)
     # Allocate the FsmTask from the scheduler's fsm_task_slab so
     # detectCycleFsm can pin it during chain walks (mirrors stackful
     # Task slab + Option-(C) protocol). The task's `ctx` field is the
@@ -558,7 +555,7 @@ module FsmWrapperEmitter
       parts << "    #{s.ctx_var}_task.profile_dispatch = #{s.profile_dispatch_id};"
     end
     parts << "    #{s.ctx_var}.* = .{"
-    parts << indent_block(s.ctx_init_zig, 8)
+    parts << indent_block(render_struct_init_fields(s.ctx_init_fields, mir_emitter), 8)
     parts << "    };"
     parts << "    #{s.ctx_var}.task = #{s.ctx_var}_task;"
     # Allocate a per-task Runtime shell. EBR is resolved at dispatch time
@@ -566,7 +563,7 @@ module FsmWrapperEmitter
     # the active scheduler thread's registered EBR slot instead of the
     # spawning runtime's fallback slot.
     parts << "    #{s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(#{s.ctx_var}_task, #{s.rt_name});"
-    parts << "    #{s.spawn_call_zig}"
+    parts << "    #{render_fsm_spawn_call(s.spawn_call)}"
     parts << "    break :#{blk_label} #{s.promise_var};"
     parts.join("\n")
   end
@@ -577,6 +574,121 @@ module FsmWrapperEmitter
   def empty?(s)
     T.bind(self, T.untyped) rescue nil
     s.nil? || s.strip.empty?
+  end
+
+  sig { params(stmts: T::Array[MIR::Node], rt_name: String).returns(String) }
+  def render_stmt_array(stmts, rt_name)
+    return "" if stmts.empty?
+
+    emitter = MIREmitter.new
+    with_rt_name(emitter, rt_name) do
+      render_body_items(stmts, emitter).join("\n")
+    end.to_s
+  end
+
+  sig { params(stmts: T::Array[MIR::Emittable], mir_emitter: MIREmitter).returns(T::Array[String]) }
+  def render_body_items(stmts, mir_emitter)
+    stmts.filter_map do |stmt|
+      unless stmt.is_a?(MIR::Emittable)
+        Kernel.raise ArgumentError, "FSM body item must be structural MIR, got #{stmt.class}"
+      end
+
+      out = mir_emitter.emit(stmt)
+      next nil if out.nil? || out.strip.empty?
+
+      out
+    end
+  end
+
+  sig { params(expr: MIR::Emittable).returns(String) }
+  def render_fsm_expr(expr)
+    out = MIREmitter.new.emit(expr)
+    Kernel.raise ArgumentError, "FSM expression rendered empty" if out.nil? || out.strip.empty?
+
+    out
+  end
+
+  sig { params(fields: T::Array[MIR::ContextFieldDecl], mir_emitter: MIREmitter).returns(String) }
+  def render_context_field_decls(fields, mir_emitter)
+    fields.map do |field|
+      default = field.default_value ? " = #{mir_emitter.emit(T.must(field.default_value))}" : ""
+      "#{field.name}: #{field.type_zig}#{default},"
+    end.join("\n")
+  end
+
+  sig { params(fields: T::Array[FsmOps::StateFieldDecl], mir_emitter: MIREmitter).returns(String) }
+  def render_fsm_state_field_decls(fields, mir_emitter)
+    fields.map do |field|
+      default = mir_emitter.emit(field.default_value)
+      "#{field.name}: #{field.zig_type} = #{default},"
+    end.join("\n")
+  end
+
+  sig { params(fields: T::Array[MIR::StructInitField], mir_emitter: MIREmitter).returns(String) }
+  def render_struct_init_fields(fields, mir_emitter)
+    fields.map do |field|
+      ".#{field.name} = #{mir_emitter.emit(field.value)},"
+    end.join("\n")
+  end
+
+  sig { params(call: MIR::FsmSpawnCall).returns(String) }
+  def render_fsm_spawn_call(call)
+    case call.target
+    when :runtime_submit
+      runtime_name = call.runtime_name || Kernel.raise("FsmSpawnCall runtime_name required")
+      "try #{runtime_name}.getSched().submitFsmSpawn(#{call.ctx_var}.task);"
+    when :best
+      "try CheatHeader.spawnFsmBest(#{call.ctx_var}.task);"
+    else
+      Kernel.raise "unknown FsmSpawnCall target #{call.target.inspect}"
+    end
+  end
+
+  sig { params(ctx_id: Integer, destroy_actions: T::Array[MIR::FsmDestroyAction], mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_actions(ctx_id, destroy_actions, mir_emitter)
+    return "" if destroy_actions.empty?
+
+    T.cast(with_rt_name(mir_emitter, "__ctx_#{ctx_id}.rt") do
+      destroy_actions.map do |action|
+        case action
+        when MIR::FsmDestroyCleanup
+          render_destroy_cleanup_action(action, mir_emitter)
+        when MIR::FsmDestroyStmt
+          render_destroy_stmt_action(action, mir_emitter)
+        when MIR::FsmDestroyLockRelease
+          render_destroy_lock_action(ctx_id, action, mir_emitter)
+        end
+      end.compact.join("\n")
+    end, String)
+  end
+
+  sig { params(action: MIR::FsmDestroyCleanup, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_cleanup_action(action, mir_emitter)
+    allocator = action.allocator ? mir_emitter.emit(T.must(action.allocator)) : nil
+    cleanup = mir_emitter.emit_direct_cleanup(
+      T.must(mir_emitter.emit(action.target)),
+      action.cleanup_entry,
+      alloc_override: allocator,
+    )
+    guard = action.guard ? mir_emitter.emit(T.must(action.guard)) : nil
+    return cleanup if guard.nil? || guard.strip.empty?
+
+    if cleanup.include?("\n")
+      "if (#{guard}) {\n#{indent_block(cleanup, 4)}\n}"
+    else
+      "if (#{guard}) #{cleanup}"
+    end
+  end
+
+  sig { params(action: MIR::FsmDestroyStmt, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_stmt_action(action, mir_emitter)
+    stmt = T.must(mir_emitter.emit(action.stmt)).strip
+    stmt.end_with?(";", "}") ? stmt : "#{stmt};"
+  end
+
+  sig { params(ctx_id: Integer, action: MIR::FsmDestroyLockRelease, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_lock_action(ctx_id, action, mir_emitter)
+    "if (__ctx_#{ctx_id}.#{action.guard_field}) #{mir_emitter.emit(action.lock_ref)}.#{action.unlock_method}();"
   end
 
   sig { params(mir_emitter: MIREmitter, rt_name: String, blk: T.proc.returns(Object)).returns(Object) }

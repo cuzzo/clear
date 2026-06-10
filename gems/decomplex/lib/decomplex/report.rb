@@ -38,6 +38,7 @@ module Decomplex
         fuzzy: Integer(ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY))
       )
       @pressure = DecisionPressure.scan(@files).ranked
+      @redundant_nil = RedundantNilGuard.scan(@files)
       @fsimple = FalseSimplicity.scan(@files).findings
       @oversized_predicates = OversizedPredicate.scan(@files).findings
       @fatu = FatUnion.scan(@files).fat_unions
@@ -60,6 +61,7 @@ module Decomplex
     # frequency-ranked (support / scatter / confidence, descending).
     SECTIONS = [
       ["Decision Pressure",      :@pressure, 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)"],
+      ["Redundant Nil Guards",   :@redundant_nil, 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type"],
       ["State Heatmap",          :@state_heat, 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner"],
       ["State-Based Branch Density", :@state_branch, 1, "branch decisions over mutable/object state -- state + control-flow pressure"],
       ["Temporal Ordering Pressure", :@temporal_ordering, 1, "public mutable lifecycle surfaces that create implicit state-machine ordering"],
@@ -261,6 +263,10 @@ module Decomplex
                  "-> tighten contract / nil-kill: DELETE" \
                  "#{h[:essential].positive? ? "  (+#{h[:essential]} essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)" : ''}\n" \
                  "  - #{h[:sites].first(4).map { |s| nav(s) }.join(' ; ')}\n"
+               when "Redundant Nil Guards"
+                 "- #{nav(h[:at])} -- redundant nil guard on `#{h[:local]}`: " \
+                 "`#{h[:guard]}`\n" \
+                 "  - proof: #{h[:proof]}\n"
                when "Missing Abstractions"
                  "- **[#{h[:kind]}]** support=#{h[:support]} scatter=#{h[:scatter]} " \
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \

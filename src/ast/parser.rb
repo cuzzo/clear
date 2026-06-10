@@ -1905,14 +1905,9 @@ class Parser
     elsif match!(:KEYWORD, 'BREAK')
       rhs = AST::OrBreak.new(previous)
 
-    # Syntax: ... OR ELSE value
-    elsif match!(:KEYWORD, 'ELSE')
-      # Meaning: Replace the error with a default value
-      rhs = parse_primary # Parse the value (e.g., 0 or "default")
-
     else
-      # Syntax: ... OR expression
-      # Standard OR behavior
+      # Syntax: ... OR ELSE value, or standard `... OR expression`.
+      match!(:KEYWORD, 'ELSE')
       rhs = parse_primary
     end
   end

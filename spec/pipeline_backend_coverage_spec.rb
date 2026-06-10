@@ -22,13 +22,14 @@ PipelineMaterializerCoverageHarness = Struct.new(:host, :state, keyword_init: tr
 
 class PipelineConcurrentCoverageHost
   attr_reader :calls, :builtins
-  attr_accessor :bc_target, :mutates_each
+  attr_accessor :bc_target, :mutates_each, :guarded_cleanup_names
 
   def initialize
     @calls = []
     @builtins = []
     @bc_target = false
     @mutates_each = false
+    @guarded_cleanup_names = []
   end
 
   def services
@@ -69,7 +70,6 @@ class PipelineConcurrentCoverageHost
         mark(concurrent_builtin_mark(name, args))
         MIR::Call.new(name.to_s, [], false, false, MIR::CallableContract.no_ownership(0))
       },
-      emit_expr: ->(node) { MIREmitter.new.emit(node) },
       lower_mir: ->(node) { concurrent_visit_mir(node) },
       next_label: -> { "__label" },
       typed_block_expr: ->(label, body, result_type) {
@@ -78,7 +78,7 @@ class PipelineConcurrentCoverageHost
         block
       },
       task_config_variant: ->(size_name) { size_name ? size_name.to_s.capitalize : "Standard" },
-      guarded_cleanup_name: ->(_name) { false },
+      guarded_cleanup_name: ->(name) { @guarded_cleanup_names.include?(name.to_s) },
       do_rt_name: -> { "rt" },
       agg_min_sentinel_mir: ->(zig_type) { MIR::TypeSentinel.new(:max, zig_type) },
       agg_max_sentinel_mir: ->(zig_type, result_type) {
@@ -117,7 +117,12 @@ class PipelineConcurrentCoverageHost
     when :concurrentListEach then :list_each
     when :concurrentListEachInPlace then :list_each_in_place
     when :concurrentListReduce
-      suffix = args.last.name.delete_prefix(".").capitalize
+      last = args.last
+      suffix = if last.is_a?(MIR::EnumTag)
+        last.variant.capitalize
+      else
+        T.cast(last, MIR::Ident).name.delete_prefix(".").capitalize
+      end
       :"list_reduce_#{suffix == "Sum" ? "SumOp" : suffix == "Average" ? "AverageOp" : suffix == "Min" ? "MinOp" : "MaxOp"}"
     else name
     end
@@ -626,9 +631,17 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     it "builds pipeline blocks with source cleanup, item setup, and result body" do
-      inline = MIR::InlineZig.new("make()", "test", MIR::OwnershipContract.empty, nil,
-        MIR.inline_alloc_metadata(alloc: :heap), "pipe_src_list")
-      harness = materializer_coverage_harness(source_mir: inline)
+      source_sig = FunctionSignature.new(params: [], return_type: Type.new(:"Int64[]", collection: :list), intrinsic: true)
+      source_sig.emit = IntrinsicEmit.new(allocates: true)
+      source_call = MIR::RegistryCall.new(
+        entry: source_sig,
+        args: [],
+        reason: "test",
+        ownership_contract: MIR::OwnershipContract.empty,
+        allocs: MIR.inline_alloc_metadata(alloc: :heap),
+        target_var: "pipe_src_list",
+      )
+      harness = materializer_coverage_harness(source_mir: source_call)
       mat = described_class.new(host: harness.host)
       list = id("items", type: Type.new(:"Int64[]", collection: :list))
 
@@ -689,7 +702,7 @@ RSpec.describe "pipeline backend coverage" do
 
       nodes = [
         MIR::DeepCopy.new(MIR::Ident.new("x"), "Payload", nil, :full_value, :heap),
-        MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil),
+        MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil),
         MIR::StructInit.new("Box", []),
         MIR::TypeSentinel.new(:max, "i64"),
         MIR::Undef.new("i64"),
@@ -731,6 +744,12 @@ RSpec.describe "pipeline backend coverage" do
       typed(conc, Type.new(:Any))
       concurrent_lowerer.lower(concurrent_smooth(lhs, conc), conc)
       concurrent_host.calls.last
+    end
+
+    def ordered_mir_nodes(root)
+      nodes = []
+      MIR.each_node(root) { |node| nodes << node }
+      nodes
     end
 
     it "routes every concurrent source and terminal shape through the typed host boundary" do
@@ -787,6 +806,42 @@ RSpec.describe "pipeline backend coverage" do
       concurrent_call(bind, AST::WhereOp.new(tok, id("_")))
       expect(concurrent_host.calls[-2]).to eq([:bind, "$u", "__item"])
       expect(concurrent_host.calls[-1]).to eq(:list_where)
+    end
+
+    it "keeps bounded stream source transfers reachable after runtime calls" do
+      bounded = id("bounded", type: Type.new(:"~Int64[4]"))
+      concurrent_host.guarded_cleanup_names = ["bounded"]
+
+      select = AST::ConcurrentOp.new(tok, AST::SelectOp.new(tok, id("_")), {})
+      typed(select, Type.new(:"Int64[]"))
+      select_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, select), select))
+      select_call = select_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedSelect"
+      end
+      select_break = select_nodes.find_index { |node| node.is_a?(MIR::BreakStmt) }
+      select_transfer = select_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(select_transfer).to be > select_call
+      expect(select_transfer).to be < select_break
+
+      where = AST::ConcurrentOp.new(tok, AST::WhereOp.new(tok, id("_")), {})
+      typed(where, Type.new(:"Int64[]"))
+      where_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, where), where))
+      where_call = where_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedWhere"
+      end
+      where_break = where_nodes.find_index { |node| node.is_a?(MIR::BreakStmt) }
+      where_transfer = where_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(where_transfer).to be > where_call
+      expect(where_transfer).to be < where_break
+
+      each = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, []), {})
+      typed(each, Type.new(:Void))
+      each_nodes = ordered_mir_nodes(concurrent_lowerer.lower(concurrent_smooth(bounded, each), each))
+      each_call = each_nodes.find_index do |node|
+        node.is_a?(MIR::Call) && node.callee == "concurrentBoundedEach"
+      end
+      each_transfer = each_nodes.find_index { |node| node.is_a?(MIR::TransferMark) && node.name == "bounded" }
+      expect(each_transfer).to be > each_call
     end
 
     it "builds typed concurrent plans for source, terminal, and semantic facts" do
@@ -881,7 +936,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(concurrent_call(open_stream, AST::WhereOp.new(tok, id("_")))).to eq(:stream_where)
 
       sym = SymbolEntry.new(reg: "c", type: Type.new(:Int64), mutable: false, storage: :frame)
-      analysis = OpenStruct.new(
+      analysis = CapabilityHelper::CaptureAnalysis.new(
         has_local: false,
         has_rc: false,
         has_shared: false,
@@ -891,7 +946,7 @@ RSpec.describe "pipeline backend coverage" do
         has_non_escaping_capture: false,
         captures: { "c" => Type.new(:Int64) },
         capture_symbols: { "c" => sym },
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set.new,
@@ -908,6 +963,8 @@ RSpec.describe "pipeline backend coverage" do
       expr_callback = concurrent_lowerer.send(:build_bounded_concurrent_callback,
         conc, Type.new(:Int64), Type.new(:Int64), :expr)
       expect(expr_callback.ctx_def.methods.first.body).to include(an_object_having_attributes(name: "c"))
+      expect(expr_callback.ctx_def.fields.map(&:name)).to include("alloc")
+      expect(expr_callback.ctx_let.init.fields.map(&:name)).to include(:alloc)
 
       each_conc = typed(AST::ConcurrentOp.new(tok, each, {}), Type.new(:Void))
       each_conc.capture_analysis = analysis
@@ -961,7 +1018,7 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     def batch_init_timeout(block)
-      init_call = collect_mir_nodes(block, MIR::Call).find { |call| call.callee.include?("BatchWindow") }
+      init_call = collect_mir_nodes(block, MIR::RuntimeCall).find { |call| call.spec.callee.include?("BatchWindow") }
       init_call&.args&.[](2)&.value
     end
 
@@ -1408,12 +1465,8 @@ RSpec.describe "pipeline backend coverage" do
           insert
         end
 
-        def emit_expr(node)
-          node.respond_to?(:value) ? node.value.to_s : node.name.to_s
-        end
-
         def emit_builtin(name, args)
-          MIR::InlineZig.new("#{name}(#{args.map { |arg| emit_expr(arg) }.join(", ")})", "test_builtin")
+          MIR::Call.new(name.to_s, args, false, false, MIR::CallableContract.no_ownership(args.length))
         end
 
         def append_ownership_transfers_for_mir_body(body)
@@ -1422,10 +1475,6 @@ RSpec.describe "pipeline backend coverage" do
 
         def with_fiber_capture_map(_entries, capture_symbols: nil, rt_override: "__rt")
           yield
-        end
-
-        def task_config_zig(_stack_size, _computed_tier = nil)
-          ".{}"
         end
 
         def task_config_variant(_stack_size, _computed_tier = nil)
@@ -1449,7 +1498,6 @@ RSpec.describe "pipeline backend coverage" do
       expect(bridge.pipeline_result_alloc).to eq(:heap)
       expect(bridge.mir_schema_lookup.call(:Missing)).to be_nil
       expect(bridge.next_pipeline_observable_id).to eq(0)
-      expect(bridge.default_task_config_zig).to eq(".{}")
       expect(bridge.task_config_variant(:large)).to eq("Large")
       expect(bridge.guarded_cleanup_name?("__missing")).to be false
 
@@ -1457,8 +1505,10 @@ RSpec.describe "pipeline backend coverage" do
       expect(lowered).to eq(MIR::Ident.new("x"))
       expect(bridge.lower_body([id("x")])).to eq([MIR::Ident.new("x")])
       expect(bridge.emit_mir(MIR::Ident.new("x"))).to eq("x")
-      expect(bridge.emit_expr(MIR::Ident.new("x"))).to eq("x")
-      expect(bridge.emit_builtin(:testBuiltin, [MIR::Lit.new("1")])).to be_a(MIR::InlineZig)
+      builtin = bridge.emit_builtin(:testBuiltin, [MIR::Lit.new("1")])
+      expect(builtin).to be_a(MIR::Call)
+      expect(builtin.callee).to eq("testBuiltin")
+      expect(builtin.args).to eq([MIR::Lit.new("1")])
       expect(bridge.lower_head { MIR::Ident.new("head") }.value).to eq(MIR::Ident.new("head"))
       expect(bridge.append_ownership_transfers_for_mir_body([MIR::Suppress.new("x")])).to eq([MIR::Suppress.new("x")])
 
@@ -1485,8 +1535,6 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(bridge.with_runtime_binding_name("__rt2") { lowering.runtime_binding_name }).to eq("__rt2")
       expect(bridge.with_fiber_capture_map({}, capture_symbols: nil, rt_override: "__rt3") { :ok }).to eq(:ok)
-      bridge.emitter_rt_name = "__rt4"
-      expect(bridge.emitter_rt_name).to eq("__rt4")
     end
 
     it "normalizes observable type names and rewrites body identifiers on token boundaries" do
@@ -1919,7 +1967,7 @@ RSpec.describe "pipeline backend coverage" do
       join_block = lowerer.lower(where_site, join)
       expect(collect_mir_nodes(join_block, MIR::ErrCleanup)).not_to be_empty
       expect(collect_mir_nodes(join_block, MIR::TransferMark).map(&:name)).to include("__jl_owned", "__match")
-      expect(collect_mir_nodes(join_block, MIR::Call).map(&:callee)).to include("CheatLib.eql")
+      expect(collect_mir_nodes(join_block, MIR::RuntimeCall).map { |call| call.spec.callee }).to include("CheatLib.eql")
     end
 
     it "builds typed lazy range prefixes for finite stage chains" do
@@ -2102,7 +2150,7 @@ RSpec.describe "pipeline backend coverage" do
       block = pipeline_host.send(:lower_range_fold, stream, [], count, smooth)
 
       expect(block.body).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::ExprStmt), a_kind_of(MIR::BreakStmt))
-      expect(block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }).not_to be_nil
+      expect(block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }).not_to be_nil
     end
 
     it "rejects observable range folds without a terminal registry entry" do
@@ -2165,7 +2213,7 @@ RSpec.describe "pipeline backend coverage" do
       lowerer = pipeline_host.instance_variable_get(:@concurrent_lowerer)
       batch_mir = lowerer.send(:bounded_concurrent_batch_mir, conc)
       workers_mir = lowerer.send(:bounded_concurrent_worker_count_for_call_mir, conc)
-      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, "n_workers")
+      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, MIR::Ident.new("n_workers"))
       task_cfg_mir = lowerer.send(:bounded_concurrent_task_cfg_mir, conc)
 
       expect(batch_mir).to be_a(MIR::Cast)
@@ -2176,6 +2224,18 @@ RSpec.describe "pipeline backend coverage" do
       expect(MIREmitter.new.emit(capacity_mir)).to eq("@intCast(cap)")
       expect(task_cfg_mir).to be_a(MIR::StructInit)
       expect(MIREmitter.new.emit(task_cfg_mir)).to eq(".{ .stack_size = .Large }")
+    end
+
+    it "keeps default stream capacity worker count structural until emission" do
+      conc = AST::ConcurrentOp.new(tok, nil, {})
+      lowerer = pipeline_host.instance_variable_get(:@concurrent_lowerer)
+      worker_count = MIR::RuntimeCall.new(MIR::RuntimeCalls.thread_count_spec, [])
+
+      capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, worker_count)
+
+      expect(capacity_mir).to be_a(MIR::DefaultStreamCapacity)
+      expect(capacity_mir.worker_count).to eq(worker_count)
+      expect(MIREmitter.new.emit(capacity_mir)).to include("CheatLib.threadCount() * 4")
     end
 
     it "delegates PipelineHost concurrent lowering to the concurrent lowerer" do
@@ -2211,9 +2271,9 @@ RSpec.describe "pipeline backend coverage" do
 
       expect(result).to be_a(MIR::BlockExpr)
       expect(result.body).to include(a_kind_of(MIR::AllocMark), a_kind_of(MIR::Let), a_kind_of(MIR::BreakStmt))
-      spawn = result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }
+      spawn = result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
       expect(spawn).not_to be_nil
-      zig = spawn.expr.code
+      zig = T.must(MIREmitter.new.emit(T.must(spawn).expr))
       expect(zig).to include("ctx.acc.inner.view()")
       expect(zig).to include("ctx.acc.inner.tryCommit(__obs_reduce_curr_0, __obs_reduce_next_0)")
       expect(zig).to include("ctx.acc.inner.markSeen()")
@@ -2263,6 +2323,21 @@ RSpec.describe "pipeline backend coverage" do
       find_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, find), Type.optional_of(:String))
       find_result = pipeline_host.send(:lower_range_fold_observable_default,
         owned_prefix, find, find_smooth, "__obs_find", owned_source, terminal: :find)
+      find_spawn = find_result.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
+      find_loop = T.must(T.must(find_spawn).expr).body.first
+      find_loop_nodes = []
+      MIR.each_node(find_loop) { |node| find_loop_nodes << node }
+      find_item_alloc = find_loop_nodes.find { |node| node.is_a?(MIR::AllocMark) && node.name == "__name" }
+      expect(find_item_alloc).not_to be_nil
+      expect(T.must(find_item_alloc).type_info).to eq(Type.new(:String))
+      owned_distinct_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, distinct),
+        Type.new(:"~String[]", collection: :set, observable: true, observable_terminal: :distinct))
+      owned_distinct_result = pipeline_host.send(:lower_range_fold_observable_distinct,
+        owned_prefix, distinct, owned_distinct_smooth, "__obs_distinct_string", owned_source)
+      owned_distinct_nodes = []
+      MIR.each_node(owned_distinct_result) { |node| owned_distinct_nodes << node }
+      owned_submit = owned_distinct_nodes.find { |node| node.is_a?(MIR::MethodCall) && node.method == "submit" }
+      expect(T.must(owned_submit).callable_contract.ownership_contract.owned_operand_names).to eq(["__name"])
 
       bounded_distinct_smooth = typed(AST::BinaryOp.new(tok, source, :SMOOTH, distinct),
         Type.new(:"~Int64[4]", collection: :set, observable: true, observable_terminal: :distinct))
@@ -2276,10 +2351,11 @@ RSpec.describe "pipeline backend coverage" do
       expect(any_result).to be_a(MIR::BlockExpr)
       expect(find_result).to be_a(MIR::BlockExpr)
       expect(bounded_distinct_result).to be_a(MIR::BlockExpr)
-      [scaffold, default_result, distinct_result, avg_result, any_result, find_result, bounded_distinct_result].each do |block|
-        spawn = block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ZigTemplate) }
+      [scaffold, default_result, distinct_result, avg_result, any_result, find_result,
+       owned_distinct_result, bounded_distinct_result].each do |block|
+        spawn = block.body.find { |stmt| stmt.is_a?(MIR::ExprStmt) && stmt.expr.is_a?(MIR::ObservableConsumerSpawn) }
         expect(spawn).not_to be_nil
-        expect(spawn.expr.code).to include(".gen = ")
+        expect(T.must(MIREmitter.new.emit(T.must(spawn).expr))).to include(".gen = ")
       end
 
       stub_const("PipelineRangeLowerer::PUBLISH_SPEC", {
@@ -2333,16 +2409,18 @@ RSpec.describe "pipeline backend coverage" do
       lowerer.send(:lower_concurrent_list_reduce, lhs, unsigned_conc, max, unsigned_max_smooth)
 
       expect(captured_args[0][-2]).to eq(MIR::TypeSentinel.new(:max, "i64"))
-      expect(captured_args[0][-1]).to eq(MIR::Ident.new(".min"))
+      expect(captured_args[0][-1]).to be_a(MIR::EnumTag)
+      expect(captured_args[0][-1].variant).to eq("min")
       expect(captured_args[1][-2]).to eq(MIR::TypeSentinel.new(:min, "i64"))
-      expect(captured_args[1][-1]).to eq(MIR::Ident.new(".max"))
+      expect(captured_args[1][-1]).to be_a(MIR::EnumTag)
+      expect(captured_args[1][-1].variant).to eq("max")
       expect(captured_args[2][-2]).to eq(MIR::Lit.new("0"))
     end
 
     it "stamps boxed capture fields for pointer bounded callbacks" do
       counter_type = Type.new(:Counter, sync: :locked)
       sym = SymbolEntry.new(reg: "c", type: counter_type, mutable: true, storage: :heap, sync: :locked)
-      analysis = OpenStruct.new(
+      analysis = CapabilityHelper::CaptureAnalysis.new(
         has_local: false,
         has_rc: false,
         has_shared: false,
@@ -2352,7 +2430,7 @@ RSpec.describe "pipeline backend coverage" do
         has_non_escaping_capture: false,
         captures: { "c" => counter_type },
         capture_symbols: { "c" => sym },
-        close_patterns: {},
+        close_plans: {},
         pointer_captures: Set.new,
         string_captures: Set.new,
         resource_captures: Set["c"],
@@ -2374,6 +2452,7 @@ RSpec.describe "pipeline backend coverage" do
       field = callback.ctx_def.fields.first
       expect(field.name).to eq("c")
       expect(field.boxed_capture).to eq("Counter")
+      expect(callback.ctx_def.fields.map(&:name)).to include("alloc")
     end
 
     it "lowers bytecode identifier streams through for-loops for distinct and reduce terminals" do

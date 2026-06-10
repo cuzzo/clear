@@ -267,7 +267,11 @@ elsif phase == "mir_pass"
   CompilerFrontend.synthesize_test_body_wrappers!(ast, fn_nodes)
   PreMirTypeCheck.verify!(ast)
   timings["mir_pass"] = Benchmark.realtime do
-    MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
+    MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: annotator.semantic_index.body_summaries
+    ).transform!(ast)
   end
 elsif phase == "lower"
   frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)

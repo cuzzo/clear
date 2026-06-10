@@ -9,6 +9,8 @@ require_relative "register_pipeline"
 class RegisterBcEmitter
   class Unsupported < StandardError; end
 
+  MIR_INLINE_ZIG_CLASS = MIR.const_defined?(:InlineZig, false) ? MIR.const_get(:InlineZig) : nil
+
   MiniVM::Register::OpcodeSpec::OPCODES.each do |op|
     const_set(op.name, op.code)
   end
@@ -63,6 +65,49 @@ class RegisterBcEmitter
   # serialized to disk + read by the runner in --debug mode.
   Binding = Struct.new(:source_line, :source_column, :end_source_line, :kind, :virt, :name, :type_name, keyword_init: true)
   VarNamesByFunction = Struct.new(:entry_ip, :bindings, keyword_init: true)
+
+  def inline_zig_node?(node)
+    klass = MIR_INLINE_ZIG_CLASS
+    !klass.nil? && node.is_a?(klass)
+  end
+
+  def switch_arm_patterns(arm)
+    if arm.respond_to?(:patterns)
+      arm.patterns || []
+    elsif arm.respond_to?(:fetch)
+      Array(arm.fetch(:patterns, nil) || arm.fetch(:pattern, nil)).compact
+    else
+      []
+    end
+  end
+
+  def switch_arm_pattern(arm)
+    switch_arm_patterns(arm).first
+  end
+
+  def switch_arm_pattern_value(arm)
+    pattern = switch_arm_pattern(arm)
+    case pattern
+    when MIR::Lit
+      pattern.value
+    when MIR::Ident
+      pattern.name
+    when MIR::EnumSwitchPattern
+      pattern.variant
+    else
+      pattern
+    end
+  end
+
+  def switch_arm_body(arm)
+    if arm.respond_to?(:body)
+      arm.body || []
+    elsif arm.respond_to?(:fetch)
+      arm.fetch(:body, nil) || []
+    else
+      []
+    end
+  end
 
   def initialize(frontend_result, source: nil, importer: nil)
     @frontend_result = frontend_result
@@ -624,6 +669,7 @@ class RegisterBcEmitter
 
   def compile_stmt_inner(stmt)
     return nil if reentrant_guard_stmt?(stmt)
+    return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
 
     case stmt
     when MIR::Comment, MIR::Suppress, MIR::Noop
@@ -654,14 +700,14 @@ class RegisterBcEmitter
       compile_break(stmt)
     when MIR::SwitchStmt
       compile_switch(stmt)
+    when MIR::UnionMatchStmt
+      compile_union_match(stmt)
     when MIR::ReturnStmt
       compile_return(stmt)
     when MIR::InlineBc
       compile_inline_bc_stmt(stmt)
     when MIR::OrExitBcRewrite
       compile_or_exit(stmt)
-    when MIR::InlineZig
-      compile_inline_zig_stmt(stmt)
     when MIR::Call
       compile_call_stmt(stmt)
     when MIR::DeferStmt
@@ -715,6 +761,8 @@ class RegisterBcEmitter
       # `call() OR { ... };` at statement position -- run the catch
       # body if the call raised (ECLR first), else fall through.
       compile_try_catch_stmt(stmt)
+    when MIR::FallibleLockBinding
+      compile_fallible_lock_binding(stmt)
     when MIR::AssertStmt
       compile_assert_stmt(stmt)
     else
@@ -736,6 +784,9 @@ class RegisterBcEmitter
   def compile_defer_stmt(stmt)
     body = stmt.body
     return nil if body.is_a?(MIR::Call) && body.callee.to_s.match?(/\A(?:CheatLib\.)?(?:rcRelease|arcRelease|weakRcRelease|weakArcRelease)\z/)
+    return nil if body.is_a?(MIR::RcRelease)
+    return nil if body.is_a?(MIR::IfStmt) && capture_cleanup_defer?(body)
+    return nil if body.is_a?(MIR::MethodCall) && body.method.to_s == "release"
 
     # WITH EXCLUSIVE lock-release write-back: `defer { *_m_c = c }`.
     # In the bc field-decomposed cap-struct model the WITH body
@@ -747,6 +798,135 @@ class RegisterBcEmitter
     return nil if with_release_writeback?(body)
 
     raise Unsupported, "register emitter does not support MIR::DeferStmt yet"
+  end
+
+  def compile_lock_acquire_let(expr)
+    name = expr.name.to_s
+    expr = expr.init
+    source = lock_acquire_source(expr)
+    return unless source
+
+    record_shared_event(:acquire, source.fetch(:name), source.fetch(:kind), caps: source.fetch(:caps))
+    @lock_guard_sources ||= {}
+    @lock_guard_sources[name] = source
+    timeout = fresh_ireg
+    emit(ICONST, timeout, add_const(expr.fallible ? 100 : 30000))
+    emit(LOCKACQ, fresh_ireg, source.fetch(:cell), timeout)
+    @with_lock_releases ||= []
+    @with_lock_releases << source.fetch(:cell)
+  end
+
+  def compile_fallible_lock_binding(stmt)
+    source = lock_acquire_source(stmt.acquire_call)
+    raise Unsupported, "register emitter does not know fallible lock source" unless source
+
+    retries = stmt.retries
+    retry_reg = nil
+    retry_top = nil
+    if retries
+      retry_reg = fresh_ireg
+      emit(ICONST, retry_reg, add_const(0))
+      retry_top = @ops.length
+    end
+
+    record_shared_event(:acquire, source.fetch(:name), source.fetch(:kind), caps: source.fetch(:caps))
+    timeout = fresh_ireg
+    emit(ICONST, timeout, add_const(100))
+    acquired = fresh_ireg
+    emit(LOCKACQ, acquired, source.fetch(:cell), timeout)
+    emit(JF, acquired, 0)
+    fail_patch = @ops.length - 1
+    bind_lock_alias(stmt.alias_name.to_s, source)
+    @with_lock_releases ||= []
+    @with_lock_releases << source.fetch(:cell)
+    emit(JMP, 0)
+    success_patch = @ops.length - 1
+
+    @ops[fail_patch] = @ops.length
+    if retries
+      one = fresh_ireg
+      emit(ICONST, one, add_const(1))
+      nxt = fresh_ireg
+      emit(IADD, nxt, retry_reg, one)
+      lim = fresh_ireg
+      emit(ICONST, lim, add_const(retries.to_i))
+      lt = fresh_ireg
+      emit(ILT, lt, nxt, lim)
+      emit(JF, lt, 0)
+      giveup = @ops.length - 1
+      emit(IADD, retry_reg, retry_reg, one)
+      emit(JMP, retry_top)
+      @ops[giveup] = @ops.length
+    end
+    semantic_body(stmt.action.body || []).each { |child| compile_stmt(child) }
+    emit(JMP, 0)
+    @with_fallible_escapes ||= []
+    @with_fallible_escapes << (@ops.length - 1)
+    @ops[success_patch] = @ops.length
+  end
+
+  def bind_lock_guard_get_alias(stmt)
+    init = stmt.init
+    return false unless init.is_a?(MIR::MethodCall)
+    return false unless init.method.to_s == "get" && init.receiver.is_a?(MIR::Ident)
+
+    source = (@lock_guard_sources || {})[init.receiver.name.to_s]
+    return false unless source
+
+    bind_lock_alias(stmt.name.to_s, source)
+    true
+  end
+
+  def bind_lock_alias(alias_name, source)
+    @value_by_name[alias_name] = source.fetch(:value)
+    @cap_alias_source ||= {}
+    @cap_alias_source[alias_name] = {
+      name: source.fetch(:name),
+      kind: source.fetch(:kind),
+      caps: source.fetch(:caps),
+    }
+  end
+
+  def lock_acquire_source(expr)
+    source_expr = lock_source_expr(expr.lock_expr)
+    raw_src = source_expr.is_a?(MIR::Ident) ? @value_by_name[source_expr.name.to_s] : nil
+    src = value_for_field_get(source_expr) || compile_value_expr(source_expr)
+    src_caps = caps_for_value(raw_src) || caps_for_value(src)
+    return nil unless src && src_caps && %i[locked write_locked].include?(src_caps[:sync])
+
+    cell_reg = cell_backed_field_cell(src)
+    return nil unless cell_reg
+
+    {
+      name: lock_source_name(source_expr) || "lock",
+      kind: (raw_src && raw_src[:kind]) || src[:kind],
+      caps: src_caps,
+      value: struct_view_for_cap_source(src),
+      cell: cell_reg,
+    }
+  end
+
+  def lock_source_name(expr)
+    expr.name.to_s if expr.is_a?(MIR::Ident)
+  end
+
+  def lock_source_expr(expr)
+    expr.is_a?(MIR::CapabilityLockTarget) ? expr.source : expr
+  end
+
+  def struct_view_for_cap_source(src)
+    value = { kind: :struct, type: src[:type], fields: src[:fields] }
+    value[:lazy_struct_list] = src[:lazy_struct_list] if src[:lazy_struct_list]
+    value[:dirty_fields] = src[:dirty_fields] if src[:dirty_fields]
+    value
+  end
+
+  def capture_cleanup_defer?(body)
+    body.then_body.all? do |stmt|
+      stmt.is_a?(MIR::ExprStmt) &&
+        stmt.expr.is_a?(MIR::Call) &&
+        stmt.expr.callee.to_s == "CheatLib.cleanup"
+    end
   end
 
   def with_release_writeback?(body)
@@ -1064,7 +1244,7 @@ class RegisterBcEmitter
 
     # InlineBc / InlineZig as bare ExprStmt (e.g. `pool.remove(id);`,
     # `sleep(ms);`) -- delegate to the stmt-shaped dispatch.
-    if expr.is_a?(MIR::InlineBc) || expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::OrExitBcRewrite)
+    if expr.is_a?(MIR::InlineBc) || inline_zig_node?(expr) || expr.is_a?(MIR::OrExitBcRewrite)
       return compile_inline_bc_stmt(expr)
     end
 
@@ -1201,6 +1381,13 @@ class RegisterBcEmitter
   end
 
   def compile_let(stmt)
+    if stmt.init.is_a?(MIR::LockAcquire)
+      compile_lock_acquire_let(stmt)
+      return
+    end
+
+    return if bind_lock_guard_get_alias(stmt)
+
     if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(annotation_zig_type(stmt.annotation)))
       bind_value(stmt.name.to_s, compile_struct_list_map_init(struct_type))
       return
@@ -1653,10 +1840,10 @@ class RegisterBcEmitter
     end_patches = []
 
     stmt.branches.each do |branch|
-      cond = compile_bool_expr(branch.fetch(:cond))
+      cond = compile_bool_expr(branch.cond)
       emit(JF, cond, 0)
       next_target_idx = @ops.length - 1
-      semantic_body(branch.fetch(:body) || []).each { |child| compile_stmt(child) }
+      semantic_body(branch.body || []).each { |child| compile_stmt(child) }
       emit(JMP, 0)
       end_patches << (@ops.length - 1)
       @ops[next_target_idx] = @ops.length
@@ -1671,13 +1858,13 @@ class RegisterBcEmitter
     end_patches = []
 
     stmt.arms.each do |arm|
-      pattern = arm.fetch(:pattern).to_s.delete_prefix(".")
+      pattern = switch_arm_pattern_value(arm).to_s.delete_prefix(".")
       pattern_reg = tag_type ? compile_tag_const(tag_type, pattern) : compile_i64_expr(MIR::Lit.new(pattern))
       cond = fresh_ireg
       emit(IEQ, cond, subject_reg, pattern_reg)
       emit(JF, cond, 0)
       next_target_idx = @ops.length - 1
-      semantic_body(arm.fetch(:body) || []).each { |child| compile_stmt(child) }
+      semantic_body(switch_arm_body(arm)).each { |child| compile_stmt(child) }
       emit(JMP, 0)
       end_patches << (@ops.length - 1)
       @ops[next_target_idx] = @ops.length
@@ -1685,6 +1872,135 @@ class RegisterBcEmitter
 
     semantic_body(stmt.default_body || []).each { |child| compile_stmt(child) }
     end_patches.each { |idx| @ops[idx] = @ops.length }
+  end
+
+  def compile_union_match(stmt)
+    subject_value = union_match_subject_value(stmt.subject)
+    subject_reg, tag_type = compile_tag_subject(stmt.subject)
+    raise Unsupported, "register emitter expected a union MATCH subject" unless tag_type
+
+    end_patches = []
+    stmt.arms.each do |arm|
+      pattern_reg = compile_tag_const(tag_type, arm.variant.to_s)
+      cond = fresh_ireg
+      emit(IEQ, cond, subject_reg, pattern_reg)
+      emit(JF, cond, 0)
+      next_target_idx = @ops.length - 1
+      with_union_match_payload(subject_value, arm) do
+        semantic_body(arm.body || []).each { |child| compile_stmt(child) }
+      end
+      emit(JMP, 0)
+      end_patches << (@ops.length - 1)
+      @ops[next_target_idx] = @ops.length
+    end
+
+    semantic_body(stmt.default_body || []).each { |child| compile_stmt(child) }
+    end_patches.each { |idx| @ops[idx] = @ops.length }
+  end
+
+  def union_match_subject_value(subject)
+    if subject.is_a?(MIR::Ident)
+      value = @value_by_name[subject.name.to_s]
+      return value if value && value.fetch(:kind) == :union
+    end
+
+    value = compile_value_expr(subject)
+    return value if value && value.fetch(:kind) == :union
+
+    nil
+  end
+
+  def with_union_match_payload(subject_value, arm)
+    payload_name = arm.payload&.to_s
+    return yield unless payload_name && !payload_name.empty?
+    raise Unsupported, "register emitter expected union storage for payload MATCH" unless subject_value
+
+    payload_type = union_match_payload_type(subject_value, arm.variant.to_s)
+    payload_value = union_match_payload_value(subject_value, arm.variant.to_s, payload_type)
+    saved = save_payload_binding(payload_name)
+    bind_union_match_payload(payload_name, payload_value, payload_type)
+    yield
+  ensure
+    restore_payload_binding(payload_name, saved) if payload_name && saved
+  end
+
+  def union_match_payload_type(subject_value, variant_name)
+    variant = union_variant(subject_value.fetch(:type), variant_name)
+    raise Unsupported, "register emitter does not know union variant #{subject_value.fetch(:type)}.#{variant_name}" unless variant
+
+    value_type(union_variant_zig_type(variant))
+  end
+
+  def union_match_payload_value(subject_value, variant_name, payload_type)
+    payload = subject_value.fetch(:payloads)[variant_name]
+    return payload if payload
+
+    zero_union_payload_value(payload_type)
+  end
+
+  def zero_union_payload_value(payload_type)
+    case payload_type
+    when :i64
+      return fresh_ireg.tap { |reg| emit(ICONST, reg, add_const(0)) }
+    when :f64
+      return fresh_freg.tap { |reg| emit(FCONST, reg, add_const([:f64, 0.0])) }
+    when :string
+      return fresh_sreg.tap { |reg| emit(SCONST, reg, add_const("")) }
+    when Array
+      return zero_value_for_struct(payload_type.last) if payload_type.first == :struct
+    end
+
+    raise Unsupported, "register emitter only supports scalar/struct union MATCH payloads"
+  end
+
+  def bind_union_match_payload(name, payload_value, payload_type)
+    case payload_type
+    when :i64
+      @ireg_by_name[name] = payload_value
+      record_var_name(:i, payload_value, name)
+    when :f64
+      @freg_by_name[name] = payload_value
+      record_var_name(:f, payload_value, name)
+    when :string
+      @sreg_by_name[name] = payload_value
+      record_var_name(:s, payload_value, name)
+    when Array
+      if payload_type.first == :struct
+        @value_by_name[name] = payload_value
+      else
+        raise Unsupported, "register emitter only supports scalar/struct union MATCH payloads"
+      end
+    else
+      raise Unsupported, "register emitter only supports scalar/struct union MATCH payloads"
+    end
+  end
+
+  def save_payload_binding(name)
+    {
+      i: @ireg_by_name.key?(name) ? @ireg_by_name[name] : nil,
+      i_set: @ireg_by_name.key?(name),
+      f: @freg_by_name.key?(name) ? @freg_by_name[name] : nil,
+      f_set: @freg_by_name.key?(name),
+      s: @sreg_by_name.key?(name) ? @sreg_by_name[name] : nil,
+      s_set: @sreg_by_name.key?(name),
+      value: @value_by_name.key?(name) ? @value_by_name[name] : nil,
+      value_set: @value_by_name.key?(name),
+    }
+  end
+
+  def restore_payload_binding(name, saved)
+    restore_payload_map_binding(@ireg_by_name, name, saved.fetch(:i_set), saved[:i])
+    restore_payload_map_binding(@freg_by_name, name, saved.fetch(:f_set), saved[:f])
+    restore_payload_map_binding(@sreg_by_name, name, saved.fetch(:s_set), saved[:s])
+    restore_payload_map_binding(@value_by_name, name, saved.fetch(:value_set), saved[:value])
+  end
+
+  def restore_payload_map_binding(map, name, was_set, value)
+    if was_set
+      map[name] = value
+    else
+      map.delete(name)
+    end
   end
 
   def compile_inline_return(stmt)
@@ -1755,7 +2071,7 @@ class RegisterBcEmitter
   end
 
   def compile_inline_bc_stmt(stmt)
-    return compile_inline_zig_stmt(stmt) if stmt.is_a?(MIR::InlineZig)
+    return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
     return compile_or_exit(stmt) if stmt.is_a?(MIR::OrExitBcRewrite)
 
     case stmt.op
@@ -2092,13 +2408,13 @@ class RegisterBcEmitter
   # is single-threaded with no concurrent writers, so the snapshot
   # is just an alias to the underlying struct view.
   def compile_snapshot_read(stmt)
-    cell_name = extract_cell_name(stmt.cell_unwrap.to_s)
+    cell_name = cell_name_from_expr(stmt.cell_unwrap)
     raise Unsupported, "register emitter could not extract cell name from SnapshotRead" unless cell_name
     src = @value_by_name[cell_name]
     raise Unsupported, "register emitter does not know cell #{cell_name.inspect}" unless src
 
     record_shared_event(:snapshot, cell_name, src[:kind], caps: caps_for_value(src))
-    @value_by_name[stmt.alias_zig.to_s] = { kind: :struct, type: src[:type], fields: src[:fields] }
+    @value_by_name[stmt.alias_name.to_s] = { kind: :struct, type: src[:type], fields: src[:fields] }
   end
 
   # The SnapshotRead's `cell_unwrap` is a long Zig comptime ladder
@@ -2110,20 +2426,33 @@ class RegisterBcEmitter
     m && m[1]
   end
 
+  def cell_name_from_expr(expr)
+    case expr
+    when MIR::CapabilityUnwrap
+      cell_name_from_expr(expr.source)
+    when MIR::Ident
+      expr.name.to_s
+    when MIR::AddressOf, MIR::Deref
+      cell_name_from_expr(expr.expr)
+    else
+      extract_cell_name(expr.to_s)
+    end
+  end
+
   # `WITH SNAPSHOT cell AS MUTABLE alias { body }` on a @versioned
   # cell. The Zig backend wraps body in a closure that reruns on
   # MvccConflict; the bc VM is single-threaded with no concurrent
   # writers, so it always succeeds on the first try. Bind the alias
   # to the cell's underlying struct view and inline the body.
   def compile_snapshot_transaction(stmt)
-    cell_name = extract_cell_name(stmt.cell_unwrap.to_s)
+    cell_name = cell_name_from_expr(stmt.cell_unwrap)
     raise Unsupported, "register emitter could not extract cell name from SnapshotTransaction" unless cell_name
     src = @value_by_name[cell_name]
     raise Unsupported, "register emitter does not know cell #{cell_name.inspect}" unless src
 
     record_shared_event(:transaction, cell_name, src[:kind], caps: caps_for_value(src))
     saved = @value_by_name.dup
-    @value_by_name[stmt.alias_zig.to_s] = { kind: :struct, type: src[:type], fields: src[:fields] }
+    @value_by_name[stmt.alias_name.to_s] = { kind: :struct, type: src[:type], fields: src[:fields] }
     semantic_body(stmt.body || []).each { |s| compile_stmt(s) }
   ensure
     @value_by_name = saved if defined?(saved) && saved
@@ -2134,17 +2463,8 @@ class RegisterBcEmitter
   # each alias to its cell's underlying struct view and inline.
   def compile_snapshot_multi_txn(stmt)
     saved = @value_by_name.dup
-    # cells_tuple is `.{ <name1>, <name2>, ... }`; pull the bare
-    # cell names in order. alias_decls binds each as
-    # `const <alias> = views[<i>]; _ = &<alias>;` -- pair them up.
-    tuple = stmt.cells_tuple.to_s
-    inner = tuple[/\.\{([^}]*)\}/, 1] || ""
-    cells = inner.scan(/[A-Za-z_][A-Za-z0-9_]*/)
-    aliases = stmt.alias_decls.to_s
-                  .scan(/const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*views\[(\d+)\]/)
-                  .map { |name, idx| [idx.to_i, name] }
-                  .sort_by(&:first)
-                  .map(&:last)
+    cells = Array(stmt.cells || []).map { |cell| cell_name_from_expr(cell) }
+    aliases = Array(stmt.aliases || []).map(&:to_s)
     aliases.zip(cells).each do |alias_name, cell|
       next unless alias_name && cell && (src = @value_by_name[cell])
       @value_by_name[alias_name] = { kind: :struct, type: src[:type], fields: src[:fields] }
@@ -2160,7 +2480,7 @@ class RegisterBcEmitter
   # the arm whose family matches the cell's binding kind and inlines
   # that arm only.
   def compile_with_match_dispatch(stmt)
-    cell_name = extract_cell_name(stmt.cell_zig.to_s) || stmt.cell_zig.to_s.strip
+    cell_name = cell_name_from_expr(stmt.cell)
     src = @value_by_name[cell_name]
     raise Unsupported, "register emitter does not know WITH MATCH cell #{cell_name.inspect}" unless src
 
@@ -2173,18 +2493,13 @@ class RegisterBcEmitter
              when :local_struct     then :LOCAL
              else nil
              end
-    arm = stmt.arms.find { |a| a[:family].to_s.upcase == family.to_s.upcase } if family
-    arm ||= stmt.arms.find { |a| %w[LOCKED VERSIONED].include?(a[:family].to_s.upcase) }
+    arm = stmt.arms.find { |a| a.family.to_s.upcase == family.to_s.upcase } if family
+    arm ||= stmt.arms.find { |a| %w[LOCKED VERSIONED].include?(a.family.to_s.upcase) }
     raise Unsupported, "register emitter found no matching WITH MATCH arm for #{family.inspect}" unless arm
 
     saved = @value_by_name.dup
-    # The arm's prelude binds the user's alias from the cell. Reuse
-    # the cell's struct view directly (single-threaded equivalence).
-    alias_name = extract_with_match_alias(arm[:prelude_zig].to_s)
-    if alias_name
-      @value_by_name[alias_name] = { kind: :struct, type: src[:type], fields: src[:fields] }
-    end
-    semantic_body(arm[:body] || []).each { |s| compile_stmt(s) }
+    @value_by_name[stmt.alias_name.to_s] = { kind: :struct, type: src[:type], fields: src[:fields] }
+    semantic_body(arm.body || []).each { |s| compile_stmt(s) }
   ensure
     @value_by_name = saved if defined?(saved) && saved
   end
@@ -2192,18 +2507,16 @@ class RegisterBcEmitter
   # `WITH POLYMORPHIC c AS x [GUARD cond] { body } [ON GuardFail
   # gfail]`. Single-threaded bc VM: the lock/family wrapper is a
   # no-op; `x` is a view of cap-struct `c` (shared field regs). All
-  # control fields are structured MIR (body / guard_cond /
-  # guard_fail_body); only the simple `&c` / `x` identifiers come
-  # from the *_zig fields -- no Zig logic is parsed.
+  # control fields are structured MIR (cell / alias_name / body /
+  # guard_cond / guard_fail_body), so the adapter does no Zig parsing.
   def compile_polymorphic_mutate(stmt)
-    cell_name = extract_cell_name(stmt.cell_zig.to_s) ||
-                stmt.cell_zig.to_s.strip.delete_prefix("&").strip
+    cell_name = cell_name_from_expr(stmt.cell)
     src = @value_by_name[cell_name]
     unless src
       raise Unsupported, "register emitter does not know WITH POLYMORPHIC cell #{cell_name.inspect}"
     end
 
-    alias_name = stmt.alias_zig.to_s.strip
+    alias_name = stmt.alias_name.to_s
     saved = @value_by_name.dup
     @value_by_name[alias_name] = { kind: :struct, type: src[:type], fields: src[:fields] }
 
@@ -2316,12 +2629,19 @@ class RegisterBcEmitter
   end
 
   def compile_i64_expr(expr)
+    return compile_i64_inline_zig(expr) if inline_zig_node?(expr)
+
     case expr
     when MIR::Lit
       value = parse_i64_literal(expr.value)
       reg = fresh_ireg
       emit(ICONST, reg, add_const(value))
       reg
+    when MIR::EnumTag
+      unless @tag_context_type
+        raise Unsupported, "register emitter cannot compile enum tag #{expr.variant.inspect} without a tag context"
+      end
+      compile_tag_const(@tag_context_type, expr.variant)
     when MIR::Ident
       if expr.name.to_s.start_with?(".") && @tag_context_type
         return compile_tag_const(@tag_context_type, expr.name.to_s.delete_prefix("."))
@@ -2336,8 +2656,6 @@ class RegisterBcEmitter
       compile_i64_index_get(expr)
     when MIR::InlineBc
       compile_i64_inline_bc(expr)
-    when MIR::InlineZig
-      compile_i64_inline_zig(expr)
     when MIR::BinOp
       compile_i64_binop(expr)
     when MIR::UnaryOp
@@ -2439,6 +2757,8 @@ class RegisterBcEmitter
   end
 
   def compile_string_expr(expr)
+    return compile_string_inline_zig(expr) if inline_zig_node?(expr)
+
     case expr
     when MIR::Lit
       text = expr.value.to_s
@@ -2477,8 +2797,6 @@ class RegisterBcEmitter
       compile_string_expr(expr.expr)
     when MIR::InlineBc
       compile_string_inline_bc(expr)
-    when MIR::InlineZig
-      compile_string_inline_zig(expr)
     when MIR::TryExpr
       compile_try_expr(compile_string_expr(expr.expr))
     when MIR::TryCatch
@@ -2929,8 +3247,8 @@ class RegisterBcEmitter
     end_patches = []
 
     stmt.arms.each do |arm|
-      pattern = arm.fetch(:pattern)
-      body = arm.fetch(:body) || []
+      pattern = switch_arm_pattern_value(arm)
+      body = switch_arm_body(arm)
       unless body.length == 1 && body.first.is_a?(MIR::BreakStmt)
         raise Unsupported, "register emitter only supports MATCH expression arms with direct values"
       end
@@ -3203,8 +3521,16 @@ class RegisterBcEmitter
 
   def returns_cheat_error?(stmt)
     stmt.is_a?(MIR::ReturnStmt) &&
-      stmt.value.is_a?(MIR::Ident) &&
-      stmt.value.name.to_s == "error.CheatError"
+      cheat_error_value?(stmt.value)
+  end
+
+  def cheat_error_value?(node)
+    return true if node.is_a?(MIR::Ident) && node.name.to_s == "error.CheatError"
+
+    node.is_a?(MIR::FieldGet) &&
+      node.object.is_a?(MIR::Ident) &&
+      node.object.name.to_s == "error" &&
+      node.field.to_s == "CheatError"
   end
 
   # ErrorKind ids -- fixed enum, must match zig/runtime/runtime.zig
@@ -3215,11 +3541,16 @@ class RegisterBcEmitter
   }.freeze
 
   def error_kind_id(node)
+    return error_kind_id_for_name(node.variant) if node.is_a?(MIR::EnumTag)
+
     unless node.is_a?(MIR::Ident)
       raise Unsupported, "register emitter expected error-kind ident, got #{node.class.name}"
     end
 
-    name = node.name.to_s.sub(/\A\./, "")
+    error_kind_id_for_name(node.name.to_s.sub(/\A\./, ""))
+  end
+
+  def error_kind_id_for_name(name)
     ERROR_KIND_IDS.fetch(name) do
       raise Unsupported, "register emitter unknown error kind #{name.inspect}"
     end
@@ -3248,16 +3579,25 @@ class RegisterBcEmitter
     end
 
     kind_id = error_kind_id(args[0])
-    name_arg = args[1]
-    name_id =
-      if name_arg.is_a?(MIR::Ident) && name_arg.name.to_s =~ /ErrorName\.(\w+)/
-        error_name_id(Regexp.last_match(1))
-      else
-        0
-      end
+    name_id = error_name_id_arg(args[1])
     msg = args[2].is_a?(MIR::Lit) ? string_lit_text(args[2]) : ""
     line = args[3].is_a?(MIR::Lit) ? parse_i64_literal(args[3].value) : 0
     emit(ERAISE, add_const(kind_id), add_const(name_id), add_const(msg), add_const(line))
+  end
+
+  def error_name_id_arg(node)
+    if node.is_a?(MIR::EnumOrdinal) &&
+       node.value.is_a?(MIR::FieldGet) &&
+       node.value.object.is_a?(MIR::Ident) &&
+       node.value.object.name.to_s == "ErrorName"
+      return error_name_id(node.value.field)
+    end
+
+    if node.is_a?(MIR::Ident) && node.name.to_s =~ /ErrorName\.(\w+)/
+      return error_name_id(Regexp.last_match(1))
+    end
+
+    0
   end
 
   # Propagate the error one level out, context-aware:
@@ -4395,8 +4735,7 @@ class RegisterBcEmitter
   def translate_rv_tag_to_user_position(raw_tag, variant_map, union_name)
     variants = @union_variants[union_name] || []
     user_pos_for_variant = variants.each_with_index.to_h do |variant, idx|
-      vname = variant.is_a?(Hash) ? variant[:name].to_s : variant.to_s
-      [vname, idx]
+      [union_variant_name(variant), idx]
     end
 
     user_tag = fresh_ireg
@@ -6323,14 +6662,14 @@ class RegisterBcEmitter
       tag_reg = compile_tag_const(type_name, tag_name)
       payload_reg = nil
       payload_value = field.fetch(:value)
-      variant = variants.find { |entry| entry.fetch(:name).to_s == tag_name }
-      if variant && normalize_type(variant.fetch(:zig_type)) == :i64
+      variant = variants.find { |entry| union_variant_name(entry) == tag_name }
+      if variant && normalize_type(union_variant_zig_type(variant)) == :i64
         payload_reg = compile_i64_expr(payload_value)
-      elsif variant && normalize_type(variant.fetch(:zig_type)) == :f64
+      elsif variant && normalize_type(union_variant_zig_type(variant)) == :f64
         payload_reg = compile_f64_expr(payload_value)
-      elsif variant && normalize_type(variant.fetch(:zig_type)) == :string
+      elsif variant && normalize_type(union_variant_zig_type(variant)) == :string
         payload_reg = compile_string_expr(payload_value)
-      elsif variant && value_register_type?(value_type(variant.fetch(:zig_type)))
+      elsif variant && value_register_type?(value_type(union_variant_zig_type(variant)))
         payload_reg = compile_value_expr(payload_value)
       end
 
@@ -6391,25 +6730,25 @@ class RegisterBcEmitter
 
     payloads = {}
     (union_variants_for(type_name) || []).each do |variant|
-      payload_type = value_type(variant.fetch(:zig_type))
+      payload_type = value_type(union_variant_zig_type(variant))
       next if payload_type == :void || payload_type == :unsupported
 
-      payloads[variant.fetch(:name).to_s] = case payload_type
-                                            when :i64
-                                              fresh_ireg.tap { |reg| emit(ICONST, reg, add_const(0)) }
-                                            when :f64
-                                              fresh_freg.tap { |reg| emit(FCONST, reg, add_const([:f64, 0.0])) }
-                                            when :string
-                                              fresh_sreg.tap { |reg| emit(SCONST, reg, add_const("")) }
-                                            when Array
-                                              if payload_type.first == :struct
-                                                zero_value_for_struct(payload_type.last)
+      payloads[union_variant_name(variant)] = case payload_type
+                                              when :i64
+                                                fresh_ireg.tap { |reg| emit(ICONST, reg, add_const(0)) }
+                                              when :f64
+                                                fresh_freg.tap { |reg| emit(FCONST, reg, add_const([:f64, 0.0])) }
+                                              when :string
+                                                fresh_sreg.tap { |reg| emit(SCONST, reg, add_const("")) }
+                                              when Array
+                                                if payload_type.first == :struct
+                                                  zero_value_for_struct(payload_type.last)
+                                                else
+                                                  raise Unsupported, "register emitter only supports scalar/struct union helper returns in this tranche"
+                                                end
                                               else
                                                 raise Unsupported, "register emitter only supports scalar/struct union helper returns in this tranche"
                                               end
-                                            else
-                                              raise Unsupported, "register emitter only supports scalar/struct union helper returns in this tranche"
-                                            end
     end
 
     { kind: :union, type: type_name, tag: nil, tag_reg: tag_reg, payloads: payloads }
@@ -6427,7 +6766,7 @@ class RegisterBcEmitter
     end
 
     variant = union_variant(target.fetch(:type), tag_name)
-    payload_type = value_type(variant.fetch(:zig_type))
+    payload_type = value_type(union_variant_zig_type(variant))
     case payload_type
     when :i64
       emit(IMOV, dst_payload, src_payload) unless dst_payload == src_payload
@@ -6626,7 +6965,7 @@ class RegisterBcEmitter
       variant = union_variant(object.fetch(:type), expr.field.to_s)
       return nil unless variant
 
-      variant_type = value_type(variant.fetch(:zig_type))
+      variant_type = value_type(union_variant_zig_type(variant))
       return nil unless value_register_type?(variant_type)
 
       object.fetch(:payloads)[expr.field.to_s] || zero_value_for_struct(variant_type.last)
@@ -6784,7 +7123,7 @@ class RegisterBcEmitter
       reg = object.fetch(:payloads)[expr.field.to_s]
       unless reg
         variant = union_variant(object.fetch(:type), expr.field.to_s)
-        raise Unsupported, "register emitter does not know union payload #{expr.field.inspect}" unless variant && normalize_type(variant.fetch(:zig_type)) == :i64
+        raise Unsupported, "register emitter does not know union payload #{expr.field.inspect}" unless variant && normalize_type(union_variant_zig_type(variant)) == :i64
 
         reg = fresh_ireg
         emit(ICONST, reg, add_const(0))
@@ -6809,7 +7148,7 @@ class RegisterBcEmitter
       reg = object.fetch(:payloads)[expr.field.to_s]
       unless reg
         variant = union_variant(object.fetch(:type), expr.field.to_s)
-        raise Unsupported, "register emitter does not know union Float64 payload #{expr.field.inspect}" unless variant && normalize_type(variant.fetch(:zig_type)) == :f64
+        raise Unsupported, "register emitter does not know union Float64 payload #{expr.field.inspect}" unless variant && normalize_type(union_variant_zig_type(variant)) == :f64
 
         reg = fresh_freg
         emit(FCONST, reg, add_const([:f64, 0.0]))
@@ -6835,7 +7174,7 @@ class RegisterBcEmitter
       reg = object.fetch(:payloads)[expr.field.to_s]
       unless reg
         variant = union_variant(object.fetch(:type), expr.field.to_s)
-        raise Unsupported, "register emitter does not know union String payload #{expr.field.inspect}" unless variant && normalize_type(variant.fetch(:zig_type)) == :string
+        raise Unsupported, "register emitter does not know union String payload #{expr.field.inspect}" unless variant && normalize_type(union_variant_zig_type(variant)) == :string
 
         reg = fresh_sreg
         emit(SCONST, reg, add_const(""))
@@ -6868,7 +7207,33 @@ class RegisterBcEmitter
     variants = union_variants_for(type_name)
     return nil unless variants
 
-    variants.find { |entry| entry.fetch(:name).to_s == tag_name }
+    variants.find { |entry| union_variant_name(entry) == tag_name }
+  end
+
+  def union_variant_name(variant)
+    return variant.name.to_s if variant.respond_to?(:name)
+    return variant.fetch(:name).to_s if variant.respond_to?(:fetch)
+    return variant[:name].to_s if variant.respond_to?(:[])
+
+    variant.to_s
+  end
+
+  def union_variant_zig_type(variant)
+    return variant.zig_type.to_s if variant.respond_to?(:zig_type)
+    return variant.fetch(:zig_type).to_s if variant.respond_to?(:fetch)
+    return variant[:zig_type].to_s if variant.respond_to?(:[])
+
+    "void"
+  end
+
+  def with_union_variant_zig_type(variant, zig_type)
+    if variant.is_a?(MIR::UnionTypeVariant)
+      MIR::UnionTypeVariant.new(name: variant.name, zig_type: zig_type.to_s)
+    elsif variant.respond_to?(:merge)
+      variant.merge(zig_type: zig_type.to_s)
+    else
+      { name: union_variant_name(variant), zig_type: zig_type.to_s }
+    end
   end
 
   def active_tag_call?(expr)
@@ -6895,6 +7260,8 @@ class RegisterBcEmitter
       return value.fetch(:type) if value && value.fetch(:kind) == :union
     elsif expr.is_a?(MIR::Ident) && expr.name.to_s.start_with?(".")
       return @tag_context_type
+    elsif expr.is_a?(MIR::EnumTag)
+      return @tag_context_type
     end
 
     nil
@@ -6909,7 +7276,7 @@ class RegisterBcEmitter
   end
 
   def compile_tag_const(type_name, tag_name)
-    variants = @enum_variants[type_name] || union_variants_for(type_name)&.map { |entry| entry.fetch(:name).to_s }
+    variants = @enum_variants[type_name] || union_variants_for(type_name)&.map { |entry| union_variant_name(entry) }
     raise Unsupported, "register emitter does not know tag type #{type_name.inspect}" unless variants
 
     idx = variants.index(tag_name)
@@ -6942,7 +7309,7 @@ class RegisterBcEmitter
       field ? field.fetch(:type) : :unsupported
     when :union
       variant = union_variant(object.fetch(:type), expr.field.to_s)
-      variant ? normalize_type(variant.fetch(:zig_type)) : :unsupported
+      variant ? normalize_type(union_variant_zig_type(variant)) : :unsupported
     else
       :unsupported
     end
@@ -7473,7 +7840,7 @@ class RegisterBcEmitter
         end
       end
       return :i64
-    elsif expr.is_a?(MIR::InlineZig)
+    elsif inline_zig_node?(expr)
       return :i64 if expr.reason.to_s.start_with?("builtin_int")
     elsif expr.is_a?(MIR::Orelse)
       return inferred_expr_type(expr.fallback)
@@ -7656,7 +8023,7 @@ class RegisterBcEmitter
 
     arg_type = match[2]
     variants.map do |entry|
-      entry.fetch(:zig_type).to_s == "T" ? entry.merge(zig_type: arg_type) : entry
+      union_variant_zig_type(entry) == "T" ? with_union_variant_zig_type(entry, arg_type) : entry
     end
   end
 
@@ -7887,6 +8254,9 @@ class RegisterBcEmitter
     # six-char literal string (including the outer `"` chars).
     return nil unless fmt == '"{s}\\n"'
     tuple = args[1]
+    if tuple.is_a?(MIR::TupleLiteral) && tuple.items.length == 1
+      return compile_string_expr(tuple.items.first)
+    end
     return nil unless tuple.is_a?(MIR::Ident)
     text = tuple.name.to_s
     # Tuple shape: `.{<expr>}`. Strip the wrapper.

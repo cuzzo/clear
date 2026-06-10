@@ -1533,6 +1533,26 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
+    it "keeps nested POSSIBLE_DEADLOCK lock acquisition on the original owner" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        FN f() RETURNS !Void ->
+          c = C{ v: 0_i64 } @locked;
+          WITH EXCLUSIVE c AS outer {
+            IF outer.v == 999_i64 THEN
+              WITH POSSIBLE_DEADLOCK EXCLUSIVE c AS inner { inner.v = inner.v + 1_i64; }
+            END
+          }
+          RETURN;
+        END
+      FLUX
+
+      zig = ZigTranspiler.new.transpile(src)
+
+      expect(zig).to include(".acquire()")
+      expect(zig).not_to include("outer.acquire()")
+    end
+
     it "accepts nested WITH on distinct types" do
       src = <<~FLUX
         STRUCT C { v: Int64 }

@@ -32,7 +32,7 @@ module MethodAnalysis
   sig { params(matched_def: FunctionSignature, args: T::Array[T.untyped]).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless matched_def.emit&.narrows_collection && args.size >= 2
+    return unless matched_def.intrinsic_contract.behavior.narrows_collection && args.size >= 2
 
     list_arg = args[0]
     val_arg  = args[1]
@@ -88,66 +88,63 @@ module MethodAnalysis
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
     stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
-    em = T.must(defn.emit)
-    node.container_borrow = true if em.container_borrow
+    node.container_borrow = defn.intrinsic_container_borrow?
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
-    zig = if (obj_type.sharded? || obj_type.striped?) && em.sharded_zig
-      em.sharded_zig
-    elsif obj_type.plain_numeric_map? && em.numeric_zig
-      em.numeric_zig
+    sharded_pattern = defn.intrinsic_template(:sharded_zig)
+    numeric_pattern = defn.intrinsic_template(:numeric_zig)
+    zig = if (obj_type.sharded? || obj_type.striped?) && sharded_pattern
+      sharded_pattern
+    elsif obj_type.plain_numeric_map? && numeric_pattern
+      numeric_pattern
     else
-      em.zig
+      defn.intrinsic_pattern
     end
 
     # Resolve alloc variant for sharded types
-    alloc = if (obj_type.sharded? || obj_type.striped?) && em.sharded_alloc
-      em.sharded_alloc
+    alloc = if (obj_type.sharded? || obj_type.striped?) && defn.intrinsic_alloc(:sharded_alloc)
+      defn.intrinsic_alloc(:sharded_alloc)
     else
-      em.alloc
+      defn.intrinsic_alloc(:alloc)
     end
 
     # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles
-    # emission. Override the zig/alloc on a dup'd FS (+ its emit) so
-    # the shared registry FS is never mutated.
+    # emission. Override via FunctionSignature so the shared registry
+    # signature is never mutated.
     if zig
-      resolved_defn = defn.dup
-      resolved_defn.emit = T.must(resolved_defn.emit).dup
-      resolved_defn.emit.zig = zig
-      resolved_defn.emit.alloc = alloc if alloc
+      resolved_defn = defn.with_intrinsic_override(pattern: zig, alloc: alloc)
       node.zig_pattern = zig
       node.matched_stdlib_def = resolved_defn
       node.matched_signature = resolved_defn if node.respond_to?(:matched_signature=)
     end
 
-    node.stdlib_allocates = true if em.allocates
-    node.mutates_receiver = true if em.mutates_receiver
+    defn_allocates = defn.emits_allocating?
+    node.stdlib_allocates = defn_allocates
+    node.mutates_receiver = defn.mutates_receiver?
 
-    narrow_receiver_collection!(node, obj_type, em)
+    narrow_receiver_collection!(node, obj_type, defn)
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
-    if em.takes_args
-      em.takes_args.each do |arg_idx|
-        arg_node = node.args[arg_idx]
-        move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
-      end
+    defn.intrinsic_argument_takes_indices.each do |arg_idx|
+      arg_node = T.must(node.args[arg_idx])
+      move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.
-    current_fn_ctx&.record_heap_use! if em.allocates
-    node.can_fail = true if defn.can_fail || em.allocates
-    node.error_kind = em.error_kind
-    node.error_type = em.error_type
+    current_fn_ctx&.record_heap_use! if defn_allocates
+    node.can_fail = node.can_fail || defn.can_fail || defn_allocates
+    node.error_kind = defn.intrinsic_error_kind
+    node.error_type = defn.intrinsic_error_type
 
     true
   end
 
-  sig { params(node: AST::MethodCall, obj_type: Type, emit: IntrinsicEmit).void }
-  def narrow_receiver_collection!(node, obj_type, emit)
+  sig { params(node: AST::MethodCall, obj_type: Type, defn: FunctionSignature).void }
+  def narrow_receiver_collection!(node, obj_type, defn)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless emit.narrows_receiver_collection
+    return unless defn.intrinsic_receiver_collection_narrowing?
     return unless node.args.length == 1
     return unless obj_type.element_type&.resolved == :Any
 

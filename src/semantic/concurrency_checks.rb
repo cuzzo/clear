@@ -16,46 +16,51 @@
 #   FAST_PATH constraint          — author-written `! fast_path` is violated
 #                                   by any blocking effect
 #
-# The checks share a `walk_scope_no_nested_with` helper: descend into a
-# WithBlock body or arm, but skip nested WithBlocks (those bubble their
-# own diagnostics). Nodes inside lambdas / nested function defs are
-# similarly ignored — they're separate scopes.
+# The checks consume `FunctionBodySummary#with_scope_nodes`, recorded during
+# annotator body analysis. Those facts include each WITH body/arm scope, stop
+# at nested WITH bodies, and ignore lambda/function bodies as separate scopes.
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
+require_relative "../annotator/phases/body_analysis"
+require_relative "capability_plan"
 
 module ConcurrencyChecks
   extend T::Sig
   module_function
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
-  ErrorHandler = T.type_alias { T.proc.params(arg0: T.untyped, arg1: T.untyped).returns(T.untyped) }
-  SigLookup = T.type_alias { T.proc.params(arg0: String).returns(T.untyped) }
+  ErrorHandler = T.type_alias { T.proc.params(node: AST::Locatable, message: String).void }
+  SigLookup = T.type_alias { T.proc.params(name: String).returns(T.nilable(T.any(FunctionSignature, Type))) }
   LockRanks = T.type_alias { T::Hash[Symbol, Integer] }
+  BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
+  WithScopeNodes = T.type_alias { Annotator::Phases::WithScopeNodes }
+  WithScopeBlock = T.type_alias { T.proc.params(with_block: AST::WithBlock, scope: T::Array[AST::Locatable]).void }
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
   # type appears here participate in the rank-DAG protocol; the rank-cycle
   # analysis owns ordering for those bindings.
-  sig { params(fn_nodes: FnNodes, sig_lookup: SigLookup, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
-  def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
+  sig { params(fn_nodes: FnNodes, sig_lookup: SigLookup, error_handler: ErrorHandler, body_summaries: BodySummaries, lock_ranks: LockRanks).void }
+  def check_all!(fn_nodes, sig_lookup, error_handler, body_summaries:, lock_ranks: {})
     fn_nodes.each_value do |fn|
       next unless fn&.body
-      check_hold_across_yield!(fn, fn_nodes, error_handler)
-      check_naked_nested_with!(fn, error_handler, lock_ranks)
-      check_reentrant!(fn, sig_lookup, error_handler)
+      summary = body_summaries.fetch(fn.name)
+      with_blocks = summary.with_blocks
+      with_scope_nodes = summary.with_scope_nodes
+      check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
+      check_naked_nested_with!(with_blocks, with_scope_nodes, error_handler, lock_ranks)
+      check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
     end
   end
 
-  # A WITH body must not contain any node that yields. The walker
-  # is purely structural — it has to find nodes by their LOCATION inside
-  # this WITH body. The yield property itself is read from the existing
-  # annotator-stamped effect set (fn.effects, populated by record_effect
-  # at visit_BgBlock / visit_NextExpr and propagated by compute_effects!).
-  sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, error_handler: ErrorHandler).void }
-  def check_hold_across_yield!(fn, fn_nodes, error_handler)
-    walk_with_blocks(fn.body) do |with_block, scope|
-      walk_scope_no_nested_with(scope) do |node|
+  # A WITH body must not contain any node that yields. Scope membership comes
+  # from annotator body facts; the yield property itself is read from the
+  # annotator-stamped effect set.
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, fn_nodes: FnNodes, error_handler: ErrorHandler).void }
+  def check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
+    each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
+      scope.each do |node|
         offender_token = nil
         reason = nil
 
@@ -91,18 +96,18 @@ module ConcurrencyChecks
   # variants (BORROWED, RESTRICT) don't hold a lock; nesting them is
   # safe. Same-binding nesting is permitted (still useful for re-entry
   # checks; reentrant detection covers the dangerous case).
-  LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
-
-  sig { params(fn: AST::FunctionDef, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
-  def check_naked_nested_with!(fn, error_handler, lock_ranks = {})
-    walk_with_blocks(fn.body) do |outer, outer_scope|
+  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
+  def check_naked_nested_with!(with_blocks, with_scope_nodes, error_handler, lock_ranks = {})
+    each_with_scope(with_blocks, with_scope_nodes) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
       next if outer_lock_names.empty?
       # @locked(rank: N) bindings opt into the rank-DAG analysis, which is a
       # stronger ordering guarantee than this pattern check.
       next if any_lock_rank?(outer, lock_ranks)
 
-      walk_scope_for_nested_with(outer_scope) do |inner|
+      outer_scope.each do |node|
+        next unless node.is_a?(AST::WithBlock)
+        inner = node
         inner_lock_names = lock_holding_names(inner)
         next if inner_lock_names.empty?
         # Same opt-out applies if the inner block uses ranks.
@@ -129,38 +134,35 @@ module ConcurrencyChecks
   # @writeLocked(rank: N) annotation. The rank-DAG check owns ordering
   # correctness for ranked locks.
   # `lock_ranks` is the annotator-built type-rank registry.
-  sig { params(with_block: T.untyped, lock_ranks: LockRanks).returns(T::Boolean) }
+  sig { params(with_block: AST::WithBlock, lock_ranks: LockRanks).returns(T::Boolean) }
   def any_lock_rank?(with_block, lock_ranks)
     return false if lock_ranks.empty?
-    (with_block.capabilities || []).any? do |cap|
-      ti = cap[:resolved_type]
-      next false unless ti && ti.respond_to?(:base_type)
-      lock_ranks.key?(ti.base_type)
+    CapabilityPlan.require_for(with_block).locks.any? do |cap|
+      identity = cap.lock_identity
+      identity && lock_ranks.key?(identity)
     end
   end
 
   # Names of bindings that the WithBlock acquires a LOCK on (vs.
   # borrow-only captures).
-  sig { params(with_block: T.untyped).returns(T::Set[String]) }
+  sig { params(with_block: AST::WithBlock).returns(T::Set[String]) }
   def lock_holding_names(with_block)
     out = Set.new
-    (with_block.capabilities || []).each do |cap|
-      next unless LOCK_HOLDING_CAPABILITIES.include?(cap[:capability])
-      n = cap_var_name(cap[:var_node])
-      out << n if n
+    CapabilityPlan.require_for(with_block).locks.each do |cap|
+      out << cap.var_name
     end
     out
   end
 
   # For each WITH on parameter `p`, any call inside whose callee has REQUIRES
   # naming a parameter aliasing `p` reacquires `p`'s lock.
-  sig { params(fn: AST::FunctionDef, sig_lookup: SigLookup, error_handler: ErrorHandler).returns(T.untyped) }
-  def check_reentrant!(fn, sig_lookup, error_handler)
-    walk_with_blocks(fn.body) do |with_block, scope|
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, sig_lookup: SigLookup, error_handler: ErrorHandler).void }
+  def check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
+    each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
       held_params = collect_held_params(with_block, fn)
       next if held_params.empty?
 
-      walk_scope_no_nested_with(scope) do |node|
+      scope.each do |node|
         next unless node.is_a?(AST::FuncCall) && node.respond_to?(:name)
         sig = FunctionSignature.unwrap(sig_lookup.call(node.name.to_s))
         next unless sig && sig.requires && !sig.requires.empty?
@@ -186,51 +188,11 @@ module ConcurrencyChecks
 
   # ── Internal helpers ────────────────────────────────────────────────────
 
-  # Yield each WithBlock found in `body` along with the "scope" to scan
-  # for in-scope statements. The scope is:
-  #   - the WithBlock's body (legacy single-form), or
-  #   - each arm's body (MATCH form). For MATCH, yields one tuple per arm.
-  sig { params(body: T.untyped, blk: T.untyped).returns(T.untyped) }
-  def walk_with_blocks(body, &blk)
-    AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::WithBlock)
-      if node.arms
-        node.arms.each { |arm| yield(node, arm[:body]) }
-      else
-        yield(node, node.body)
-      end
-    end
-  end
-
-  # Walk a WithBlock's scope. Descend into IF/WHILE/FOR/ etc., but stop
-  # at nested WithBlocks (they own their own checks) and lambdas.
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
-  def walk_scope_no_nested_with(stmts, &blk)
-    stack = stmts.is_a?(Array) ? stmts.dup : [stmts]
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
-      yield(node)
-      next if node.is_a?(AST::WithBlock)        # let it bubble its own
-      next if node.is_a?(AST::LambdaLit)        # separate scope
-      next if node.is_a?(AST::FunctionDef)      # separate scope (rare)
-      node.class.members.each do |m|
-        v = node[m]
-        if v.is_a?(Array)
-          v.each { |c| stack.push(c) if c.is_a?(AST::Locatable) }
-        elsif v.is_a?(AST::Locatable)
-          stack.push(v)
-        end
-      end
-    end
-  end
-
-  # Find nested WithBlocks within a scope (no recursion into them; we
-  # only care about the topmost nested one per branch).
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
-  def walk_scope_for_nested_with(stmts, &blk)
-    walk_scope_no_nested_with(stmts) do |node|
-      yield(node) if node.is_a?(AST::WithBlock)
+  # Yield each known WithBlock along with the annotated in-scope nodes.
+  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, blk: WithScopeBlock).void }
+  def each_with_scope(with_blocks, with_scope_nodes, &blk)
+    with_blocks.each do |node|
+      yield(node, with_scope_nodes.fetch(node.object_id))
     end
   end
 
@@ -240,15 +202,11 @@ module ConcurrencyChecks
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p.name.to_s }.to_set
     out = Set.new
-    (with_block.capabilities || []).each do |cap|
-      n = cap_var_name(cap[:var_node])
-      out << n if n && param_names.include?(n)
+    CapabilityPlan.require_for(with_block).locks.each do |cap|
+      n = cap.var_name
+      out << n if param_names.include?(n)
     end
     out
   end
 
-  sig { params(var_node: T.untyped).returns(T.untyped) }
-  def cap_var_name(var_node)
-    var_node.is_a?(AST::Identifier) ? var_node.name : nil
-  end
 end

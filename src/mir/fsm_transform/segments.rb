@@ -107,8 +107,25 @@ module FsmTransform
     # splitter, may itself contain suspends) and a release segment
     # that explicitly unlocks every cap.
     LockSuspend  = Struct.new(:with_node, :cap, :prior_caps,
-                              :post_acquire_idx, :next_index) do
+                              :post_acquire_idx, :next_index,
+                              :lock_index, :prior_lock_indices) do
       extend T::Sig
+
+      sig do
+        params(
+          with_node: T.untyped,
+          cap: T.untyped,
+          prior_caps: T::Array[T.untyped],
+          post_acquire_idx: T.nilable(Integer),
+          next_index: T.nilable(Integer),
+          lock_index: T.nilable(Integer),
+          prior_lock_indices: T.nilable(T::Array[Integer]),
+        ).void
+      end
+      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = nil)
+        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices || [])
+      end
+
       sig { returns(Symbol) }
       def kind; :lock; end
     end
@@ -131,38 +148,7 @@ module FsmTransform
     # A segment is a list of AST::Stmt nodes followed by a Tail.
     Segment = Struct.new(:index, :stmts, :tail)
 
-    class CtxFieldRef < T::Struct
-      extend T::Sig
-
-      const :name, String
-
-      sig { params(ctx_name: String).returns(String) }
-      def render(ctx_name)
-        "#{ctx_name}.#{name}"
-      end
-    end
-
-    SyntheticZigPart = T.type_alias { T.any(String, CtxFieldRef) }
-
-    class SyntheticZig < T::Struct
-      extend T::Sig
-
-      const :parts, T::Array[SyntheticZigPart]
-
-      sig { params(ctx_name: String).returns(String) }
-      def render(ctx_name)
-        parts.map { |part|
-          part.is_a?(CtxFieldRef) ? part.render(ctx_name) : part
-        }.join
-      end
-    end
-
     module_function
-
-    sig { params(stmt: T.any(String, SyntheticZig), ctx_name: String).returns(String) }
-    def render_synthetic_zig(stmt, ctx_name)
-      stmt.is_a?(SyntheticZig) ? stmt.render(ctx_name) : stmt
-    end
 
     sig { params(tail: T.untyped).returns(T::Boolean) }
     def suspend_tail?(tail)
@@ -305,15 +291,15 @@ module FsmTransform
     def stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
-      when AST::WhileLoop      then contains_suspend_anywhere?(stmt.do_branch)
-      when AST::WhileBindLoop  then contains_suspend_anywhere?(stmt.do_branch)
-      when AST::ForRange       then contains_suspend_anywhere?(stmt.body)
-      when AST::ForEach        then contains_suspend_anywhere?(stmt.body)
-      when AST::WithBlock      then true   # always treat as Stage 3
+      when AST::WhileLoop, AST::WhileBindLoop
+        contains_suspend_anywhere?(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        contains_suspend_anywhere?(stmt.body)
+      when AST::WithBlock, AST::CatchBlock
+        true   # Stage 3/4 territory.
       when AST::IfStatement
         branches = [stmt.then_branch, stmt.else_branch].compact
         branches.any? { |b| contains_suspend_anywhere?(b) }
-      when AST::CatchBlock     then true   # Stage 4 territory
       else
         # Top-level linear stmt (assign, var decl, bare expr).
         # Top-level suspends are handled by the splitter; nested
@@ -337,13 +323,11 @@ module FsmTransform
           contains_suspend_anywhere?(stmt.do_branch)
         when AST::ForRange, AST::ForEach
           contains_suspend_anywhere?(stmt.body)
-        when AST::WithBlock
+        when AST::WithBlock, AST::CatchBlock
           true
         when AST::IfStatement
           contains_suspend_anywhere?(stmt.then_branch) ||
             contains_suspend_anywhere?(stmt.else_branch || [])
-        when AST::CatchBlock
-          true
         else
           !classify_suspend(stmt).nil?
         end
@@ -387,7 +371,7 @@ module FsmTransform
     def io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
-      !!(md && md.emit&.suspends && md.emit&.fsm_setup)
+      !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
     end
 
     sig { params(expr: T.untyped).returns(T::Boolean) }

@@ -6,6 +6,7 @@ require "sorbet-runtime"
 require "set"
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
+require_relative "../../../semantic/capability_plan"
 
 PipelinePlaceholderMap = T.type_alias { T::Hash[String, String] }
 PipelineSoaFieldSet = T.type_alias { T::Set[T.any(Symbol, String)] }
@@ -291,6 +292,14 @@ class PipelinePlaceholderRewriter
     return node if new_body == node.body
 
     new_with = AST::WithBlock.new(node.token, node.capabilities, new_body, node.deferred_drops)
+    new_with.lock_error_clause = node.lock_error_clause
+    new_with.deadlock_escape = node.deadlock_escape
+    new_with.arms = node.arms
+    new_with.view_kind = node.view_kind
+    new_with.snapshot_mode = node.snapshot_mode
+    new_with.polymorphic = node.polymorphic
+    new_with.universal_poly = node.universal_poly
+    new_with.capability_plan = CapabilityPlan.require_for(node) if node.capability_plan
     copy_type_info(node, new_with)
     new_with
   end

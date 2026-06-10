@@ -37,29 +37,29 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     annotator, = register(struct, enum, native, resource)
     scope = annotator.current_scope
 
-    box_schema = scope.types.fetch(:Box).fetch(:schema)
+    box_schema = scope.types.fetch(:Box).schema
     expect(box_schema).to be_a(Schemas::StructSchema)
     expect(box_schema.fields.fetch("value").default.full_type!.resolved).to eq(:Int64)
     expect(box_schema.type_params).to eq([:T])
     expect(box_schema.visibility).to eq(:pub)
     expect(struct.full_type!.resolved).to eq(:Void)
 
-    mode_schema = scope.types.fetch(:Mode).fetch(:schema)
+    mode_schema = scope.types.fetch(:Mode).schema
     expect(mode_schema).to be_a(Schemas::EnumSchema)
     expect(mode_schema.variants).to eq(Set["On", "Off"])
     expect(mode_schema.visibility).to eq(:private)
     expect(enum.full_type!.resolved).to eq(:Void)
 
-    native_schema = scope.types.fetch(:Native).fetch(:schema)
+    native_schema = scope.types.fetch(:Native).schema
     expect(native_schema).to be_a(Schemas::StructSchema)
     expect(native_schema.type_params).to eq([:T])
     expect(native_schema.extern_module).to eq("native")
     expect(native_schema.as_type).to eq("Native(T)")
     expect(native.full_type!.resolved).to eq(:Void)
 
-    resource_schema = scope.types.fetch(:Handle).fetch(:schema)
+    resource_schema = scope.types.fetch(:Handle).schema
     expect(resource_schema).to be_a(Schemas::ResourceSchema)
-    expect(resource_schema.close_zig).to eq("{0}.close()")
+    expect(resource_schema.close_plan.actions.map(&:name)).to eq(["close"])
     expect(resource.full_type!.resolved).to eq(:Void)
   end
 
@@ -75,10 +75,10 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     annotator, = register(union)
     scope = annotator.current_scope
 
-    union_schema = scope.types.fetch(:Value).fetch(:schema)
+    union_schema = scope.types.fetch(:Value).schema
     expect(union_schema).to be_a(Schemas::UnionSchema)
     expect(union_schema.variants.fetch(:Data)).to eq(inline)
-    expect(scope.types.fetch(:Value_Data).fetch(:schema)).to be_a(Schemas::StructSchema)
+    expect(scope.types.fetch(:Value_Data).schema).to be_a(Schemas::StructSchema)
     expect(union.full_type!.resolved).to eq(:Void)
 
     entries = inline.deinit_entries

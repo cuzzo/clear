@@ -412,11 +412,8 @@ module AST
 
       node.class.members.reverse_each do |member|
         value = node[member]
-        if value.is_a?(Array)
-          stack << value
-        elsif value.is_a?(Hash)
-          stack << value
-        elsif value.is_a?(Struct)
+        case value
+        when Array, Hash, Struct
           stack << value
         end
       end
@@ -439,6 +436,15 @@ module AST
     end
   end
 
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
+  def self.declaration_symbol(symbol)
+    return nil unless symbol
+    decl = symbol.reg
+    return nil unless decl.respond_to?(:symbol)
+
+    decl.symbol
+  end
+
   # Is this node a call expression (function or method)? The
   # `is_a?(AST::FuncCall) || is_a?(AST::MethodCall)` predicate-use was
   # recomputed inline across the MIR pipeline (decomplex
@@ -447,6 +453,30 @@ module AST
   sig { params(node: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
   def self.call?(node)
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.container_borrow?(node)
+    return false unless node
+    return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
+    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
+
+    container_borrow?(node.left)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.borrowed_ownership_view?(node)
+    return false unless node
+    return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+    return true if container_borrow?(node)
+    return true if node.is_a?(AST::GetIndex)
+    return false unless node.is_a?(AST::GetField)
+
+    root = root_identifier(node)
+    return false if root&.token&.type == :TYPE_ID
+
+    sym = root&.symbol
+    !!(sym && (sym.is_param || sym.reg))
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -652,7 +682,7 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
-    when MoveNode, ShareNode, CapabilityWrap, Cast
+    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr
       [node.value].compact
     when BinaryOp
       [node.left, node.right].compact
@@ -672,12 +702,8 @@ module AST
       node.items.compact
     when HashLit
       node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
-    when ReturnNode
-      [node.value].compact
     when Assert
       [node.condition].compact
-    when Assignment, VarDecl, BindExpr
-      [node.value].compact
     else
       []
     end
@@ -751,15 +777,13 @@ module AST
     case stmt
     when BgBlock, BgStreamBlock
       yield stmt
-    when VarDecl, BindExpr, Assignment
+    when VarDecl, BindExpr, Assignment, ReturnNode
       _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     when FuncCall
       stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     when MethodCall
       _expr_each_bg_block_shallow(stmt.object, &block)
       stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
-    when ReturnNode
-      _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     end
   end
 
@@ -821,9 +845,7 @@ module AST
       # contain ConcurrentOps in either side via nested expressions.)
       _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
       _expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
-    when VarDecl, BindExpr, Assignment
-      _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
-    when ReturnNode
+    when VarDecl, BindExpr, Assignment, ReturnNode
       _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
     when FuncCall
       node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
@@ -923,10 +945,10 @@ module AST
     sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
     def slot_size=(val); instance_variable_set(:@slot_size, val); end
 
-    sig { returns(T.nilable(String)) }
-    def resource_close_zig; T.cast(instance_variable_get(:@resource_close_zig), T.nilable(String)); end
-    sig { params(val: T.nilable(String)).returns(T.nilable(String)) }
-    def resource_close_zig=(val); instance_variable_set(:@resource_close_zig, val); end
+    sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+    def resource_close_plan; T.cast(instance_variable_get(:@resource_close_plan), T.nilable(Schemas::ResourceClosePlan)); end
+    sig { params(val: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
+    def resource_close_plan=(val); instance_variable_set(:@resource_close_plan, val); end
 
     sig { returns(T.nilable(T::Boolean)) }
     def can_fail; T.cast(instance_variable_get(:@can_fail), T.nilable(T::Boolean)); end
@@ -1452,10 +1474,10 @@ module AST
     attr_accessor :heap_carry_return_vars # Set of var names that are heap carry return vars (their cleanup is skipped inside __pr_body)
     # FSM Phase A: set by FsmClassifier. fsm_eligible=true means this function can be
     # compiled as an FsmTask (state-machine resume fn) rather than a stackful fiber.
-    # fsm_suspend_points is an Array of { id:, kind:, node: } enumerating the
-    # yield-relevant call sites inside the body.
+    # fsm_suspend_points is an Array of Semantic::SuspendPointFact enumerating
+    # the yield-relevant call sites inside the body.
     attr_accessor :fsm_eligible
-    attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends
+    attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends, :suspending_callee
     attr_accessor :fsm_suspend_points
     # PRE clauses: Array of expression AST nodes parsed from
     # `PRE: <expr>` between RETURNS and `->`. Each predicate is checked
@@ -1851,7 +1873,7 @@ module AST
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
-  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
+  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops, :capability_plan) do
     extend T::Sig
     include Locatable
     include HasBodies
@@ -1891,6 +1913,21 @@ module AST
     # Stamped when WITH POLYMORPHIC admits every sync family; lowering routes
     # the block to MIR::PolymorphicMutate for caller-family dispatch.
     attr_accessor :universal_poly
+  end
+
+  class FunctionDef
+    extend T::Sig
+
+    sig { returns(T::Array[AST::WithBlock]) }
+    def semantic_with_blocks
+      @semantic_with_blocks = T.let(@semantic_with_blocks, T.nilable(T::Array[AST::WithBlock]))
+      @semantic_with_blocks ||= []
+    end
+
+    sig { params(blocks: T::Array[AST::WithBlock]).void }
+    def semantic_with_blocks=(blocks)
+      @semantic_with_blocks = T.let(blocks, T.nilable(T::Array[AST::WithBlock]))
+    end
   end
 
   # Top-level SYNC POLICY handlers use the same clause shape as
@@ -2632,7 +2669,7 @@ module MIR
   #                    :takes_string, :takes_slice
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
-  # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
+  # resource_close_plan: structural close/deinit plan for :resource kind.
   # MIR::Drop carries a cleanup_entry that captures the full classifier
   # output (zig_type / alloc / has_moved_guard / kind side-channels). The
   # raw Struct fields (token, name) are the marker; everything cleanup-

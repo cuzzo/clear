@@ -51,7 +51,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       fn_sigs: fe.fn_sigs,
       moved_guard_info: fe.moved_guard_info,
       importer: importer,
-      source_dir: Dir.pwd # default Zig target; :bc skips InlineZig checks
+      source_dir: Dir.pwd # default Zig target; :bc skips structural allocator checks
     ))
     low.lower_program(fe.ast)
   end
@@ -68,26 +68,30 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       each_mir(node.items, seen, &blk)
       return
     end
-    return unless node.is_a?(Struct) && node.class.name.to_s.start_with?("MIR::")
+    return unless node.class.name.to_s.start_with?("MIR::")
     blk.call(node)
-    node.members.each { |m| each_mir(node[m], seen, &blk) }
+    if node.is_a?(Struct)
+      node.members.each { |m| each_mir(node[m], seen, &blk) }
+    elsif node.respond_to?(:each_pair)
+      node.each_pair { |_name, value| each_mir(value, seen, &blk) }
+    end
   end
 
   let(:program) { lower_program(NESTED_FIELD_SRC) }
 
   it "lowers a nested-field append using the root AllocMark placement" do
     alloc_marks = {}
-    inline_targeting_handles = []
+    ops_targeting_handles = []
     each_mir(program) do |n|
       alloc_marks[n.name] = n if n.is_a?(MIR::AllocMark)
-      if n.is_a?(MIR::InlineZig) && n.respond_to?(:target_var) && n.target_var == "handles"
-        inline_targeting_handles << n
+      if (n.is_a?(MIR::RegistryCall) || n.is_a?(MIR::IndexedStore)) && n.respond_to?(:target_var) && n.target_var == "handles"
+        ops_targeting_handles << n
       end
     end
     expect(alloc_marks["handles"]).not_to be_nil
     expect(alloc_marks["handles"].alloc).to eq(:heap),
       "root container placement must come from escape/storage, not loop rewinds"
-    expect(inline_targeting_handles.any? { |iz| iz.allocs&.key?(:alloc) }).to be(true)
+    expect(ops_targeting_handles.any? { |op| op.allocs&.key?(:alloc) }).to be(true)
   end
 
   it "resolves every handles-targeting op to the same allocator as the root AllocMark (the contract)" do
@@ -95,13 +99,13 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     ops = []
     each_mir(program) do |n|
       alloc_marks[n.name] = n if n.is_a?(MIR::AllocMark)
-      ops << n if n.is_a?(MIR::InlineZig) && n.respond_to?(:target_var) && n.target_var == "handles"
+      ops << n if (n.is_a?(MIR::RegistryCall) || n.is_a?(MIR::IndexedStore)) && n.respond_to?(:target_var) && n.target_var == "handles"
     end
     root_alloc = alloc_marks["handles"].alloc
-    ops.each do |iz|
-      next unless iz.allocs&.key?(:alloc)
-      expect(iz.allocs[:alloc]).to eq(root_alloc),
-        "op alloc :#{iz.allocs[:alloc]} disagrees with root 'handles' AllocMark :#{root_alloc} " \
+    ops.each do |op|
+      next unless op.allocs&.key?(:alloc)
+      expect(op.allocs[:alloc]).to eq(root_alloc),
+        "op alloc :#{op.allocs[:alloc]} disagrees with root 'handles' AllocMark :#{root_alloc} " \
         "(resolver/checker root divergence -> INLINE_ALLOC_MISMATCH / UAF)"
     end
   end

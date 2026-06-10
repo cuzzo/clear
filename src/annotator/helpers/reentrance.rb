@@ -95,8 +95,6 @@ module ReentranceBridge
       validate_not_logical_return!(fn_node)
       offer_legacy_reentrant_migration!(fn_node)
       offer_unconstrained_fn_param_fix!(fn_node)
-      offer_plain_reentrant_variant_fix!(fn_node)
-      route_thunk_to_tail_call_compat!(fn_node)
     end
   end
 
@@ -115,15 +113,15 @@ module ReentranceBridge
   #   variants `:NOT_LOGICAL` / `:MAX_DEPTH(N)` change the return
   #   type and need user judgment about gas budgets, so we don't
   #   force them via auto-fix).
-  sig { params(fn_node: AST::FunctionDef).returns(NilClass) }
-  def offer_plain_reentrant_variant_fix!(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(NilClass) }
+  def offer_plain_reentrant_variant_fix!(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
 
     suggestion = nil
-    if thunk_all_self_calls_in_tail_position?(fn_node)
+    if thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
       suggestion = "EFFECTS REENTRANT:TAIL_CALL"
       reason = "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"
     elsif ThunkTransform::RecursiveSplitter.split(fn_node.body, fn_node.name, self)
@@ -186,12 +184,188 @@ module ReentranceBridge
   # the existing emission path applies. The reentrance_kind stays
   # :reentrant_thunk for downstream effect-propagation rules (Phase
   # 5 will use this to keep :THUNK out of @service).
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Boolean)) }
-  def route_thunk_to_tail_call_compat!(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T.nilable(T::Boolean)) }
+  def route_thunk_to_tail_call_compat!(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant_thunk
-    return unless thunk_all_self_calls_in_tail_position?(fn_node)
+    return unless thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     fn_node.tail_call = true
+  end
+
+  # Tail-call lowering relies on recursion becoming a self-loop; any
+  # wrapped or nested self-call would still consume real stack.
+  sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).returns(T.nilable(T::Array[AST::FuncCall])) }
+  def validate_tail_call!(fn_node, body_scan)
+    T.bind(self, SemanticAnnotator) rescue nil
+    fn_name = fn_node.name
+    all_self_calls = body_scan.call_site_facts.filter_map { |fact|
+      fact.node if fact.callee_name == fn_name
+    }
+
+    blessed = body_scan.return_nodes.filter_map { |return_node|
+      value = return_node.value
+      value if value.is_a?(AST::FuncCall) && value.name == fn_name
+    }
+    blessed_ids = blessed.map(&:object_id).to_set
+
+    if blessed.empty?
+      error!(fn_node, :TAIL_CALL_NEEDS_RECURSIVE,
+        fn: fn_name)
+    end
+
+    all_self_calls.each do |call|
+      next if blessed_ids.include?(call.object_id)
+      error!(call, :TAIL_CALL_NOT_TAIL_POSITION,
+        fn: fn_name)
+    end
+  end
+
+  # Plain `EFFECTS REENTRANT` callees require explicit `@service` on the
+  # spawn site so OS-thread cost is an explicit user choice.
+  sig { params(node: EffectTracker::AsyncValidationNode, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).void }
+  def validate_fiber_stack!(node, call_names, user_size, can_smash)
+    T.bind(self, SemanticAnnotator) rescue nil
+    if can_smash
+      emit_can_smash_unsupported_error!(node)
+      return
+    end
+
+    plain_reentrant_callee = find_plain_reentrant_callee(call_names)
+    if plain_reentrant_callee && user_size != :service
+      emit_service_required_error!(node, plain_reentrant_callee, user_size)
+      return
+    end
+
+    raw = max_tier_for_calls(call_names)
+    # Bounded variants no longer hit :unbounded; only mutual-MAX_DEPTH falls
+    # back to :unbounded here, which requires explicit @service below.
+    computed = (raw == :unbounded) ? :service : raw
+
+    if raw == :unbounded && user_size != :service
+      mutual_md_callee = find_mutual_max_depth_callee(call_names)
+      if mutual_md_callee
+        error!(node, :STACK_SAFETY_MUTUAL_RECURSION,
+          callee: mutual_md_callee)
+        return
+      end
+    end
+
+    if user_size == :stack
+      warning!(node, T.must(DiagnosticRegistry.format(:STACK_SAFETY_STACK_ALIAS, computed: computed)))
+      return
+    end
+
+    if user_size && EffectTracker::TIER_ORDER.fetch(user_size, 0) < EffectTracker::TIER_ORDER.fetch(computed, 0)
+      error!(node, :STACK_SAFETY_USER_SIZE_TOO_SMALL,
+        size: user_size,
+        budget: EffectTracker::STACK_TIER_BUDGET[user_size],
+        computed: computed)
+    end
+  end
+
+  # Walk the call graph from the BG body and return the name of the first
+  # plain `EFFECTS REENTRANT` callee. Bounded variants do not force @service.
+  sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
+  def find_plain_reentrant_callee(call_names)
+    T.bind(self, SemanticAnnotator) rescue nil
+    visited = T.let(Set.new, T::Set[String])
+    queue = T.let(call_names.to_a.dup, T::Array[String])
+    until queue.empty?
+      name = T.must(queue.shift)
+      next if visited.include?(name)
+      visited << name
+      fn = function_node_for(name)
+      return name if fn && fn.reentrance_kind == :reentrant
+      (function_call_graph[name] || []).each { |callee| queue << callee }
+    end
+    nil
+  end
+
+  # Return the first `:MAX_DEPTH(N)` callee that is still mutually recursive;
+  # such functions force spawn sites to @service until SCC depth products exist.
+  sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
+  def find_mutual_max_depth_callee(call_names)
+    T.bind(self, SemanticAnnotator) rescue nil
+    visited = T.let(Set.new, T::Set[String])
+    queue = T.let(call_names.to_a.dup, T::Array[String])
+    until queue.empty?
+      name = T.must(queue.shift)
+      next if visited.include?(name)
+      visited << name
+      fn = function_node_for(name)
+      return name if fn && fn.reentrance_kind == :reentrant_max_depth && mutually_recursive_in_call_graph?(name)
+      (function_call_graph[name] || []).each { |callee| queue << callee }
+    end
+    nil
+  end
+
+  # Emit @service-required as a fixable when the spawn-site span is known;
+  # DO branches fall back to a plain error because their span is ambiguous.
+  sig { params(node: EffectTracker::AsyncValidationNode, reentrant_fn: String, user_size: T.nilable(Symbol)).void }
+  def emit_service_required_error!(node, reentrant_fn, user_size)
+    T.bind(self, SemanticAnnotator) rescue nil
+    message = T.must(DiagnosticRegistry.format(:STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn))
+
+    fix = service_required_fix(node, user_size)
+
+    return error!(node, :STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn) unless fix
+
+    fixable!(node, message: message, category: :reentrance, level: :error,
+             fixes: [fix], raise_in_collector: false)
+  end
+
+  sig { params(node: EffectTracker::AsyncValidationNode, user_size: T.nilable(Symbol)).returns(T.nilable(Fix)) }
+  def service_required_fix(node, user_size)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return nil unless node.is_a?(AST::BgBlock)
+
+    prefix_token = node.prefix_token
+    return replace_stack_sigil_with_service_fix(prefix_token, user_size) if prefix_token
+
+    open_brace_token = node.open_brace_token
+    return insert_service_after_open_brace_fix(open_brace_token) if open_brace_token
+
+    nil
+  end
+
+  sig { params(token: Lexer::Token, user_size: T.nilable(Symbol)).returns(Fix) }
+  def replace_stack_sigil_with_service_fix(token, user_size)
+    Fix.new(
+      description: "Replace `@#{user_size}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column, length: token.value.to_s.length),
+        replacement: "@service",
+      )],
+    )
+  end
+
+  sig { params(token: Lexer::Token).returns(Fix) }
+  def insert_service_after_open_brace_fix(token)
+    Fix.new(
+      description: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column + 1, length: 0),
+        replacement: " @service ->",
+      )],
+    )
+  end
+
+  # Find the first :unbounded callee in the call chain for diagnostics.
+  sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
+  def find_unbounded_callee(call_names)
+    T.bind(self, SemanticAnnotator) rescue nil
+    visited = T.let(Set.new, T::Set[String])
+    queue = T.let(call_names.to_a.dup, T::Array[String])
+    until queue.empty?
+      name = T.must(queue.shift)
+      next if visited.include?(name)
+      visited << name
+      return name if function_node_for(name)&.stack_tier == :unbounded
+      (function_call_graph[name] || []).each { |callee| queue << callee }
+    end
+    nil
   end
 
   # Thunk Phase 4f: validate that every `:reentrant_thunk` function
@@ -221,17 +395,15 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_not_logical_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
       # `function_call_graph[name]` strips self-calls (annotator.rb:599), so
-      # direct self-recursion shows up in `@fn_direct_effects[name]`
+      # direct self-recursion shows up in the direct-effect map
       # as the REENTRANT marker recorded at visit_FunctionDef. Mutual
       # cycles still go through `reachable_from_self?`.
-      direct = @fn_direct_effects[name]&.include?(EffectTracker::REENTRANT) || false
+      direct = effect_direct_effects_for(name).include?(EffectTracker::REENTRANT)
       mutual = !direct && reachable_from_self?(name)
       next unless direct || mutual
 
@@ -256,13 +428,11 @@ module ReentranceBridge
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
-    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
       # Direct-only is fine; counter handles it.
-      direct = @fn_direct_effects[name]&.include?(EffectTracker::REENTRANT) || false
+      direct = effect_direct_effects_for(name).include?(EffectTracker::REENTRANT)
       mutual = !direct && reachable_from_self?(name)
       next unless mutual
 
@@ -307,8 +477,7 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_thunk_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
@@ -350,8 +519,7 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def try_stamp_mutual_thunk_plan!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
     # Phase 4f.1 scope: every cycle member must be defined locally
@@ -378,7 +546,7 @@ module ReentranceBridge
     ret_types = concrete_cycle_fns.map(&:return_type).map { |t| t&.to_s }.uniq
     return false unless ret_types.size == 1
 
-    plans = {}
+    plans = T.let({}, T::Hash[String, ThunkTransform::RecursiveSplitter::MutualPlan])
     concrete_cycle_fns.each do |f|
       partners = cycle_names - [f.name]
       mp = ThunkTransform::RecursiveSplitter.split_mutual(f.body, f.name, partners, self)
@@ -388,8 +556,8 @@ module ReentranceBridge
 
     concrete_cycle_fns.each do |f|
       f.mutual_thunk_plan = ThunkTransform::RecursiveSplitter::MutualThunkPlan.new(
-        cycle_fns: cycle_fns,
-        own_plan:  plans[f.name],
+        cycle_fns: concrete_cycle_fns,
+        own_plan:  T.must(plans[f.name]),
       )
     end
     true
@@ -410,8 +578,7 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
   def emit_mutual_thunk_unsupported!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
     cycle_thunk_fns = cycle_names.filter_map { |n| fn_nodes[n] }
@@ -593,12 +760,14 @@ module ReentranceBridge
   #
   # Returns true iff the function is self-recursive AND every
   # recursive self-call is the direct value of a RETURN node.
-  sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
-  def thunk_all_self_calls_in_tail_position?(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T::Boolean) }
+  def thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
-    all = collect_self_calls(fn_node.body, fn_node.name)
+    all = body_facts.call_site_facts.filter_map { |fact|
+      fact.node if fact.callee_name == fn_node.name
+    }
     return false if all.empty?
-    blessed = collect_returns(fn_node.body).filter_map { |r|
+    blessed = body_facts.return_nodes.filter_map { |r|
       r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_node.name
     }
     return false if blessed.empty?

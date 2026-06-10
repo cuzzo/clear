@@ -110,12 +110,15 @@ AST::FunctionDef(
       ))])
 ```
 
-### 3. Pipeline Fusion & Desugaring (`src/backends/*_rewriter.rb`)
+### 3. AST Rewrites & Pipeline Preparation (`src/backends/*_rewriter.rb`, `src/mir/lower/pipeline/`)
 
-  * At this stage, pipelines are fused together for efficiency, and other
-    desugaring occurs, like string concatenation.
-  * See [`src/mir/README.md`](mir/README.md) for where these rewrites sit in
-    the MIR-preparation order.
+  * At this stage, AST-level pipeline syntax is fused or rewritten before MIR,
+    and other desugaring occurs, like string concatenation.
+  * Runtime pipeline planning and execution-shape lowering do not live in the
+    backend rewriter. They live under `src/mir/lower/pipeline/` as typed source,
+    terminal, semantic, and operation plans that MIR lowering consumes.
+  * See [`src/mir/README.md`](mir/README.md) for where these rewrites and typed
+    pipeline plans sit in the MIR-preparation order.
 
 ### 4. MIR Preparation / Hoisting / Ownership Analysis (`src/mir/*.rb`)
 
@@ -151,7 +154,7 @@ See [`src/mir/README.md`](mir/README.md) for the detailed MIR phase order,
 ownership dataflow, cleanup classification, async FSM/Thunk lowering, and MIR
 checker boundaries.
 
-### 5. MIR Lowering (`src/mir/*.rb`)
+### 5. MIR Lowering (`src/mir/mir_lowering.rb`, `src/mir/lowering/`, `src/mir/lower/`)
 
  * In this pass, we take the annotated AST plus ownership facts and transform
    them into MIR (a Mid-level Representation).

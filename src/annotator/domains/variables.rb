@@ -62,12 +62,9 @@ module Annotator
           # with the analyzer. Reject loudly instead of silently winning
           # one of the two via `||=` (H7).
           if target_t.observable_terminal && target_t.observable_terminal != pipe_terminal
-            raise CompilerError.new(
-              node.token,
-              "Observable terminal mismatch: LHS stamped #{target_t.observable_terminal.inspect}, " \
-              "pipe analyzer produced #{pipe_terminal.inspect}",
-              nil,
-            )
+            error!(node, :OBSERVABLE_TERMINAL_MISMATCH,
+              lhs: target_t.observable_terminal.inspect,
+              pipe: pipe_terminal.inspect)
           end
           target_t.stamp_observable_terminal!(pipe_terminal)
           node.type = target_t
@@ -175,7 +172,7 @@ module Annotator
         # the symbol -- that over-promotes (e.g. a union typed heap-capable
         # but never actually escaping).
         is_resource, resource_close = resolve_resource_close(node)
-        node.resource_close_zig = resource_close
+        node.resource_close_plan = resource_close
         node_type = node.full_type!(context: "var declaration")
         node_type.is_resource = true if is_resource && node_type.respond_to?(:is_resource=)
 
@@ -201,7 +198,7 @@ module Annotator
           sync: node_sync,
           layout: node_layout,
           resource: is_resource,
-          close_zig: resource_close
+          close_plan: resource_close
         )
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)
@@ -329,8 +326,8 @@ module Annotator
                  when :SUB then :fetchSub
                  when :MUL, :DIV
                    op_str = node.compound_op == :MUL ? "*=" : "/="
-                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND, op: op_str, hint: "Atomic ops are limited to load / store / fetch_add / fetch_sub. " \
-                          "For more complex updates, use compareAndSwap or switch to @shared:locked.")
+                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND,
+                     op: op_str)
                    nil
                  else
                    error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
@@ -351,7 +348,7 @@ module Annotator
         # Pipeline expressions (inside |>) are closures over the enclosing scope —
         # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
         # which restricts to local scope + function-as-value references.
-        scope = @smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)
+        scope = smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)
         unless scope
           # Check if it's a type name used as a comptime argument (e.g., parseFromSlice(MyDoc, ...))
           type_schema = lookup_type_schema(node.name.to_sym)
@@ -388,8 +385,8 @@ module Annotator
         end
 
         # 3. Liveness
-        if @og&.moved?(node.name)
-          emit_use_of_moved_error!(node, @og.nodes[node.name])
+        if ownership_graph.moved?(node.name)
+          emit_use_of_moved_error!(node, T.must(ownership_graph.nodes[node.name]))
         end
 
         # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.
@@ -423,12 +420,10 @@ module Annotator
           :sync
         elsif type_obj.collection?
           :collection
-        elsif entry.takes
-          # TAKES parameters own the data — always affine so cleanup is emitted.
-          :affine
-        elsif type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+        elsif !entry.takes && type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
           :value
         else
+          # TAKES parameters own the data — always affine so cleanup is emitted.
           :affine
         end
       end
@@ -471,17 +466,19 @@ module Annotator
         # Alias when: first arg is the SAME union type (extraction like jsonGet)
         # or first arg is a map (HashMap lookup returning union value)
         if arg_type == ret_type_obj.resolved || first_arg.full_type!(context: "union alias source").map?
-          @og.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
+          ownership_graph.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
         end
+        nil
       end
 
       sig { params(storage: Symbol, node: DeclarationNode).returns(T.nilable(Integer)) }
       def accumulate_stack_bytes(storage, node)
         T.bind(self, SemanticAnnotator)
 
-        return unless storage == :stack && current_fn_ctx
+        fn_ctx = current_fn_ctx
+        return unless storage == :stack && fn_ctx
         bytes = (node.slot_size || 1) * 8
-        current_fn_ctx&.record_stack_bytes!(bytes)
+        fn_ctx.record_stack_bytes!(bytes)
         bytes
       end
 
@@ -549,7 +546,8 @@ module Annotator
         # so visit_GetField's CAP_FIELD_NEEDS_WITH_EXCLUSIVE check skips
         # the in-RHS read of the same `@locked` binding (it's safe under
         # the auto-lock).
-        saved_auto_lock = @in_auto_locked_assign
+        previous_auto_lock = phase_receiver_state.auto_locked_assign_name
+        auto_lock_name = T.let(previous_auto_lock, T.nilable(String))
         target = node.name
         if target.is_a?(AST::GetField) && target.target.is_a?(AST::Identifier)
           # Symbol isn't stamped until visit_Identifier runs, so look up
@@ -558,12 +556,16 @@ module Annotator
           tscope = lookup_scope_for(tname)
           tsym = tscope&.resolve_entry(tname)
           if tsym&.locked? || tsym&.write_locked? || tsym&.atomic_ptr?
-            @in_auto_locked_assign = tname
+            auto_lock_name = tname
           end
         end
 
-        visit(node.value)
-        @in_auto_locked_assign = saved_auto_lock
+        phase_receiver_state.auto_locked_assign_name = auto_lock_name
+        begin
+          visit(node.value)
+        ensure
+          phase_receiver_state.auto_locked_assign_name = previous_auto_lock
+        end
 
         verify_unrestricted!(node)
         # Tied-lifetime values cannot be stored into destinations that outlive

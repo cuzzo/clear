@@ -365,9 +365,13 @@ class PipelineMaterializer
 
   sig { params(source_mir: MIR::Node).returns(T.nilable(Symbol)) }
   def inline_source_alloc(source_mir)
-    return nil unless source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
+    effect = MIR::OwnershipEffect.of(source_mir)
+    return effect.alloc if effect.produces_owned && effect.alloc
 
-    source_mir.allocs.any_heap? ? :heap : :frame
+    metadata = source_mir.respond_to?(:allocs) ? T.unsafe(source_mir).allocs : nil
+    return nil unless metadata.is_a?(MIR::InlineAllocMetadata) && !metadata.empty?
+
+    metadata.any_heap? ? :heap : :frame
   end
 
   sig { returns(T::Boolean) }
@@ -378,21 +382,8 @@ class PipelineMaterializer
   sig { params(value_expr: MIR::Node).returns(String) }
   def zig_type_for(value_expr)
     zig_type = case value_expr
-    when MIR::DeepCopy
-      value_expr.zig_type
-    when MIR::ContainerInit
-      value_expr.zig_type
-    when MIR::StructInit
-      value_expr.zig_type
-    when MIR::TypeSentinel
-      value_expr.zig_type
-    when MIR::Undef
-      value_expr.zig_type
-    when MIR::HeapCreate
-      value_expr.zig_type
-    when MIR::DiscardOwned
-      value_expr.zig_type
-    when MIR::UnionVariantGet
+    when MIR::DeepCopy, MIR::ContainerInit, MIR::StructInit, MIR::TypeSentinel,
+         MIR::Undef, MIR::HeapCreate, MIR::DiscardOwned, MIR::UnionVariantGet
       value_expr.zig_type
     end
     normalized_zig_type(zig_type)
@@ -409,7 +400,7 @@ class PipelineMaterializer
   def var_and_defer(elem_zig)
     var_decl = MIR::Let.new("pipe_mat",
       MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
-        :list_empty, result_alloc, nil),
+        :array_list_empty, result_alloc, nil),
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",

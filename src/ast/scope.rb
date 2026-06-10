@@ -14,7 +14,12 @@ class Scope
   ScopeTypeSchema = T.type_alias do
     T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
   end
-  ScopeTypeEntry = T.type_alias { T::Hash[Symbol, ScopeTypeSchema] }
+
+  class ScopeTypeEntry < T::Struct
+    extend T::Sig
+
+    const :schema, Scope::ScopeTypeSchema
+  end
 
   class ScopeBindings
     extend T::Sig
@@ -77,7 +82,7 @@ class Scope
 
     sig { params(name: Symbol, schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeEntry) }
     def declare(name, schema)
-      @entries[name] = { schema: schema }
+      @entries[name] = Scope::ScopeTypeEntry.new(schema: schema)
     end
 
     sig { params(name: Symbol).returns(T.nilable(Scope::ScopeTypeEntry)) }
@@ -91,7 +96,9 @@ class Scope
     end
   end
 
-  attr_accessor :dependencies, :owned_names
+  attr_accessor :owned_names
+  sig { returns(T::Hash[String, String]) }
+  attr_reader :dependencies
   attr_accessor :depth   # stack depth at scope creation; 0 for root
   attr_reader   :types, :parent
 
@@ -99,15 +106,15 @@ class Scope
   def initialize
     @parent = T.let(nil, T.nilable(Scope))
     @bindings = T.let(ScopeBindings.new, ScopeBindings)
-    @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
+    @dependencies = T.let({}, T::Hash[String, String])
     @type_store = T.let(ScopeTypes.new, ScopeTypes)
     @types = T.let(@type_store.entries, T::Hash[Symbol, Scope::ScopeTypeEntry])
     @owned_names = T.let(Set.new, T::Set[String])  # Variables declared in THIS scope (not inherited from parent)
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
+  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).returns(SymbolEntry) }
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_plan: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
       reg: reg,
@@ -120,7 +127,7 @@ class Scope
       size: size || 0,
       capabilities: capabilities,
       resource: resource,
-      close_zig: close_zig,
+      close_plan: close_plan,
     )
     entry.scope = self
     # Stamp declaring depth so escape checks can compare source and destination
@@ -179,14 +186,14 @@ class Scope
   end
 
   sig { params(name: Symbol, schema: ScopeTypeSchema).returns(ScopeTypeEntry) }
-  def declare_type(name, schema)
+  def install_type(name, schema)
     @type_store.declare(name, schema)
   end
+  alias_method :declare_type, :install_type
 
   sig { params(name: Symbol).returns(T.untyped) }
   def resolve_type_definition(name)
-    entry = @type_store[name] || @parent&.resolve_type_entry(name)
-    entry ? entry[:schema] : nil
+    resolve_type_entry(name)&.schema
   end
 
   sig { params(name: Symbol).returns(T.nilable(ScopeTypeEntry)) }
@@ -476,8 +483,7 @@ module ScopeHelper
   def all_known_type_names
     names = []
     scope_stack.each do |scope|
-      types = scope.instance_variable_get(:@types)
-      names.concat(types.keys.map(&:to_s)) if types
+      names.concat(scope.types.keys.map(&:to_s))
     end
     names.uniq
   end
@@ -490,6 +496,7 @@ module ScopeHelper
     new_scope.depth = scope_stack.size
     scope_stack.push(new_scope)
     blk.call
+  ensure
     scope_stack.pop
   end
 

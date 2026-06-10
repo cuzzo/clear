@@ -40,6 +40,75 @@ module Schemas
     def resource? = false
   end
 
+  class ResourceCloseCallKind < T::Enum
+    enums do
+      Method = new("method")
+      Function = new("function")
+    end
+  end
+
+  class ResourceCloseAction < T::Struct
+    extend T::Sig
+
+    const :call_kind, ResourceCloseCallKind
+    const :name, String
+    const :field_path, T::Array[String], default: []
+    const :runtime_heap_alloc_args, Integer, default: 0
+
+    sig { params(field: String).returns(ResourceCloseAction) }
+    def for_field(field)
+      ResourceCloseAction.new(
+        call_kind: call_kind,
+        name: name,
+        field_path: [field] + field_path,
+        runtime_heap_alloc_args: runtime_heap_alloc_args,
+      )
+    end
+  end
+
+  class ResourceClosePlan < T::Struct
+    extend T::Sig
+
+    const :actions, T::Array[ResourceCloseAction]
+
+    sig { params(name: String, runtime_heap_alloc_args: Integer).returns(ResourceClosePlan) }
+    def self.method(name, runtime_heap_alloc_args: 0)
+      new(actions: [
+        ResourceCloseAction.new(
+          call_kind: ResourceCloseCallKind::Method,
+          name: name,
+          runtime_heap_alloc_args: runtime_heap_alloc_args,
+        ),
+      ])
+    end
+
+    sig { params(name: String, runtime_heap_alloc_args: Integer).returns(ResourceClosePlan) }
+    def self.function(name, runtime_heap_alloc_args: 0)
+      new(actions: [
+        ResourceCloseAction.new(
+          call_kind: ResourceCloseCallKind::Function,
+          name: name,
+          runtime_heap_alloc_args: runtime_heap_alloc_args,
+        ),
+      ])
+    end
+
+    sig { params(actions: T::Array[ResourceCloseAction]).returns(ResourceClosePlan) }
+    def self.composite(actions)
+      new(actions: actions)
+    end
+
+    sig { params(field: String).returns(ResourceClosePlan) }
+    def for_field(field)
+      ResourceClosePlan.new(actions: actions.map { |action| action.for_field(field) })
+    end
+
+    sig { returns(T::Boolean) }
+    def empty?
+      actions.empty?
+    end
+  end
+
   # Resource type schema — types with RAII cleanup (CLOSE method).
   #
   # Used for the 3 hand-written runtime types (File, TCPServer, TCPClient)
@@ -47,17 +116,27 @@ module Schemas
   # an extern module name, and an AS alias.
   class ResourceSchema
     extend T::Sig
-    attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
-    sig { params(close_zig: T.untyped, static_methods: T.untyped, fields: T.untyped, type_params: T.untyped, extern_module: T.untyped, as_type: T.untyped, visibility: Symbol, methods: T.untyped).void }
-    def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
-      @close_zig       = T.let(close_zig, String)
-      @static_methods  = T.let(static_methods, T.untyped)
-      @fields          = T.let(fields, T.untyped)
-      @type_params     = T.let(type_params, T.untyped)
+
+    FieldMetadataValue = T.type_alias { T.nilable(T.any(Type::TypeInput, AST::Locatable, T::Boolean)) }
+    FieldMetadata = T.type_alias { T::Hash[T.any(Symbol, String), FieldMetadataValue] }
+    FieldInput = T.type_alias { T.any(Type::TypeInput, AST::StructField, FieldMetadata) }
+    FieldInputMap = T.type_alias { T::Hash[T.any(Symbol, String), FieldInput] }
+    StaticMethodValue = T.type_alias { T.any(T::Array[Symbol], Symbol, String, T::Boolean) }
+    StaticMethodSpec = T.type_alias { T::Hash[Symbol, StaticMethodValue] }
+    StaticMethodsMap = T.type_alias { T::Hash[String, StaticMethodSpec] }
+    MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
+
+    attr_reader :close_plan, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
+    sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T.nilable(T::Array[Symbol]), extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
+    def initialize(close_plan:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
+      @close_plan      = T.let(close_plan, Schemas::ResourceClosePlan)
+      @static_methods  = T.let(static_methods, Schemas::ResourceSchema::StaticMethodsMap)
+      @fields          = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
+      @type_params     = T.let(type_params, T.nilable(T::Array[Symbol]))
       @extern_module   = T.let(extern_module, T.nilable(String))
       @as_type         = T.let(as_type, T.nilable(String))
       @visibility      = T.let(visibility, Symbol)
-      @methods         = T.let(methods, T.untyped)
+      @methods         = T.let(methods, Schemas::ResourceSchema::MethodsMap)
       freeze
     end
 
@@ -71,6 +150,29 @@ module Schemas
     def enum? = false
     sig { returns(T::Boolean) }
     def struct? = false
+
+    sig { params(fields: FieldInputMap).returns(T::Hash[String, AST::StructField]) }
+    def normalize_fields(fields)
+      fields.each_with_object({}) do |(name, field), out|
+        out[name.to_s] = normalize_field(field)
+      end
+    end
+    private :normalize_fields
+
+    sig { params(field: FieldInput).returns(AST::StructField) }
+    def normalize_field(field)
+      return field if field.is_a?(AST::StructField)
+      if field.is_a?(Hash)
+        return AST::StructField.new(
+          type: field[:type] || field["type"],
+          default: field[:default] || field["default"],
+          borrowed: field[:borrowed] || field["borrowed"]
+        )
+      end
+
+      AST::StructField.new(type: field)
+    end
+    private :normalize_field
   end
 
   class InlineStructDeinitEntry < T::Struct

@@ -5,7 +5,7 @@ const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 // To avoid linker errors
 const fc = @import("fiber-core.zig");
 comptime {
-  _ = fc;
+    _ = fc;
 }
 
 const PAGE_SIZE = 4096;
@@ -68,6 +68,27 @@ test "alignment is respected" {
     slab.destroy(obj);
 }
 
+test "std.mem.Allocator shim allocates exactly one slab object" {
+    var slab = SlabAllocator(TestObj).init(
+        std.heap.page_allocator,
+        PAGE_SIZE,
+    );
+    defer slab.deinit();
+
+    const alloc = slab.allocator();
+    const obj = try alloc.create(TestObj);
+    obj.* = .{ .a = 11, .b = 22, .c = 33 };
+
+    try std.testing.expectEqual(@as(u64, 11), obj.a);
+    try std.testing.expectEqual(@as(u64, 22), obj.b);
+    try std.testing.expectEqual(@as(u64, 33), obj.c);
+
+    alloc.destroy(obj);
+    slab.flushThreadCache();
+
+    try std.testing.expectError(error.OutOfMemory, alloc.alloc(TestObj, 2));
+}
+
 const Slab = SlabAllocator(TestObj);
 
 fn stressWorker(slab: *Slab, loops: usize, allocs_per_loop: usize) !void {
@@ -91,7 +112,7 @@ fn stressWorker(slab: *Slab, loops: usize, allocs_per_loop: usize) !void {
             const obj = list.pop().?;
             // Verify our data wasn't corrupted by another thread
             if (obj.a != 0xDEADBEEF) @panic("Data Corruption detected!");
-            slab.destroy( obj);
+            slab.destroy(obj);
         }
     }
 }
@@ -279,7 +300,6 @@ test "Producer-Consumer contention" {
 // ========================================================================
 
 test "two slab instances on same thread do not corrupt each other" {
-
     var slab_a = Slab.init(std.heap.page_allocator, PAGE_SIZE);
     var slab_b = Slab.init(std.heap.page_allocator, PAGE_SIZE);
 
@@ -318,6 +338,28 @@ test "cross-thread slab: thread A allocs, thread B frees, no crash" {
         }
     }.run, .{ &slab, &objs });
     t.join();
+}
+
+test "remote frees use owner slab mailbox and reclaim for reuse" {
+    var counter = CountingAllocator{ .backing = std.heap.page_allocator };
+    const counted_alloc = counter.allocator();
+
+    var owner = Slab.init(counted_alloc, PAGE_SIZE);
+    defer owner.deinit();
+    var remote = Slab.init(std.heap.page_allocator, PAGE_SIZE);
+    defer remote.deinit();
+
+    var objs: [256]*TestObj = undefined;
+    for (&objs) |*slot| slot.* = try owner.create();
+    const peak = counter.bytes_in_use;
+    try std.testing.expect(peak >= PAGE_SIZE);
+
+    for (objs) |obj| remote.destroy(obj);
+
+    owner.flushThreadCache();
+    const freed = owner.shrinkEmpty(0);
+    try std.testing.expect(freed > 0);
+    try std.testing.expect(counter.bytes_in_use < PAGE_SIZE);
 }
 
 test "slab: thread creates/destroys instance, second thread reuses — no underflow" {

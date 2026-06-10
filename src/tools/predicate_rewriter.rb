@@ -236,12 +236,10 @@ module PredicateRewriter
   sig { params(op: Symbol, lit: Integer).returns(T.nilable(String)) }
   def pick_length_predicate(op, lit)
     case [op, lit]
-    when [:EQ,  0] then "empty?"
-    when [:LT,  1] then "empty?"
-    when [:LTE, 0] then "empty?"  # length <= 0 means == 0 for unsigned length
-    when [:NEQ, 0] then "any?"
-    when [:GT,  0] then "any?"
-    when [:GTE, 1] then "any?"
+    when [:EQ, 0], [:LT, 1], [:LTE, 0]
+      "empty?" # length <= 0 means == 0 for unsigned length
+    when [:NEQ, 0], [:GT, 0], [:GTE, 1]
+      "any?"
     end
   end
 

@@ -21,6 +21,7 @@ require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
 require_relative "../ast/type"
 require_relative "../semantic/pass_state"
+require_relative "cleanup_entry"
 
 module MIR
   extend T::Sig
@@ -77,19 +78,14 @@ module MIR
 
     sig do
       params(
-        consumes: T::Array[String],
         operands: T::Array[MIR::OwnershipOperandFact],
         produces: T::Array[String],
         borrows: T::Array[String],
         covers_consuming_params: T::Boolean,
       ).void
     end
-    def initialize(consumes: [], operands: [], produces: [], borrows: [], covers_consuming_params: false)
-      normalized_operands = operands.dup
-      consumes.map(&:to_s).reject(&:empty?).uniq.each do |name|
-        normalized_operands << OwnershipOperandFact.owned_binding(name, Type.new(:Any), "legacy ownership contract")
-      end
-      @operands = T.let(normalized_operands.freeze, T::Array[MIR::OwnershipOperandFact])
+    def initialize(operands: [], produces: [], borrows: [], covers_consuming_params: false)
+      @operands = T.let(operands.dup.freeze, T::Array[MIR::OwnershipOperandFact])
       @produces = T.let(normalize_names(produces).freeze, T::Array[String])
       @borrows = T.let(normalize_names(borrows).freeze, T::Array[String])
       @covers_consuming_params = T.let(covers_consuming_params, T::Boolean)
@@ -100,18 +96,13 @@ module MIR
       new
     end
 
-    sig { params(consumes: T::Array[String]).returns(OwnershipContract) }
-    def self.consumes(consumes)
-      new(consumes: consumes, covers_consuming_params: true)
-    end
-
     sig { params(operands: T::Array[MIR::OwnershipOperandFact]).returns(OwnershipContract) }
     def self.consume_operands(operands)
       new(operands: operands, covers_consuming_params: true)
     end
 
     sig { returns(T::Array[String]) }
-    def consumes
+    def owned_operand_names
       @operands.reject(&:borrowed).filter_map(&:name).map(&:to_s).reject(&:empty?).uniq.freeze
     end
 
@@ -484,7 +475,10 @@ module MIR
 
   Node = T.type_alias { Emittable }
   NodeRoot = T.type_alias { T.any(Node, T::Array[Node]) }
-  ZigTemplateArgs = T.type_alias { T.any(T::Array[Emittable], T::Hash[Symbol, Emittable]) }
+  DeferBody = T.type_alias { T.any(Emittable, T::Array[Emittable]) }
+  DeferBodyInput = T.type_alias { T.any(DeferBody, String) }
+  FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
+  BgBlockPlan = T.type_alias { T.any(MIR::BgStackfulPlan, MIR::BgStreamPlan, FsmBody) }
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
 
   class OwnershipEffect
@@ -767,13 +761,13 @@ module MIR
       return nil unless value
       return value if value.is_a?(InlineAllocMetadata)
       unless value.is_a?(Hash)
-        raise TypeError, "InlineZig allocs must be MIR::InlineAllocMetadata or Hash"
+        raise TypeError, "allocator metadata must be MIR::InlineAllocMetadata or Hash"
       end
 
       normalized = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
       value.each do |key, alloc|
         unless alloc.is_a?(Symbol)
-          raise TypeError, "InlineZig allocator metadata must map #{key.inspect} to a Symbol"
+          raise TypeError, "allocator metadata must map #{key.inspect} to a Symbol"
         end
         normalized[T.cast(key, T.any(Symbol, String))] = alloc
       end
@@ -868,12 +862,6 @@ module MIR
     def inspect
       @placeholders.inspect
     end
-  end
-
-  class InlineZigAuditMetadata < T::Struct
-    extend T::Sig
-
-    prop :opaque_ownership_operations, T::Boolean
   end
 
   sig do
@@ -1172,23 +1160,46 @@ module MIR
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
+  class EnumSwitchPattern < T::Struct
+    const :variant, String
+  end
+
+  SwitchPattern = T.type_alias { T.any(Emittable, EnumSwitchPattern) }
+
+  class SwitchArm < T::Struct
+    extend T::Sig
+
+    const :patterns, T::Array[SwitchPattern]
+    prop :body, T::Array[Emittable]
+  end
+
   # Switch statement (for int/enum MATCH).
   # Zig: switch (subject) { arms }
   SwitchStmt = Struct.new(:subject, :arms, :default_body) do
     extend T::Sig
     include Stmt
-    # arms: [{ pattern: String, body: [MIR stmt] }]
+    # arms: [SwitchArm]
     sig { returns(T::Array[Emittable]) }
-    def child_exprs = compact_child_exprs([subject])
+    def child_exprs
+      compact_child_exprs([subject, *(arms || []).flat_map(&:patterns)])
+    end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
       arms&.each_with_index do |arm, index|
-        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+        slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
       slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
+  end
+
+  class UnionMatchArm < T::Struct
+    extend T::Sig
+
+    const :variant, String
+    const :payload, T.nilable(String)
+    prop :body, T::Array[Emittable]
   end
 
   # Union match statement.
@@ -1198,14 +1209,14 @@ module MIR
   UnionMatchStmt = Struct.new(:subject, :arms, :default_body) do
     extend T::Sig
     include Stmt
-    # arms: [{ pattern: String, payload: String|nil, body: [MIR stmt] }]
+    # arms: [UnionMatchArm]
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([subject])
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
       arms&.each_with_index do |arm, index|
-        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+        slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
       slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
       slots
@@ -1385,7 +1396,12 @@ module MIR
   DeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
-    # body: single MIR stmt, or a plain string for transitional inline defer
+    sig { params(body: DeferBodyInput).void }
+    def initialize(body)
+      MIR.validate_defer_body!(body, "MIR::DeferStmt")
+      super(body)
+    end
+
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
@@ -1399,6 +1415,12 @@ module MIR
   ErrDeferStmt = Struct.new(:body) do
     extend T::Sig
     include Stmt
+    sig { params(body: DeferBodyInput).void }
+    def initialize(body)
+      MIR.validate_defer_body!(body, "MIR::ErrDeferStmt")
+      super(body)
+    end
+
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
@@ -1434,42 +1456,132 @@ module MIR
   # synchronous frame machine, but the MIR now exposes the frame layout,
   # base cases, recursive step, combine op, and yield policy instead of
   # hiding the entire function body in opaque Zig text.
-  ThunkTrampoline = Struct.new(
-    :fn_name,
-    :ret_zig,
-    :param_field_decls,
-    :param_init_fields,
-    :base_cases,
-    :recurse_arg_inits,
-    :combine_lhs_zig,
-    :op_zig,
-    :yield_line
-  ) do
+  class ThunkBaseCase < T::Struct
+    extend T::Sig
+
+    const :cond, Emittable
+    const :value, Emittable
+
+    sig { params(key: Symbol).returns(Emittable) }
+    def fetch(key)
+      case key
+      when :cond then cond
+      when :value then value
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class ThunkFrameInit < T::Struct
+    extend T::Sig
+
+    const :field_name, String
+    const :value, Emittable
+
+    sig { params(key: Symbol).returns(T.any(String, Emittable)) }
+    def fetch(key)
+      case key
+      when :field_name then field_name
+      when :value then value
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class ThunkFrameField < T::Struct
+    const :name, String
+    const :type_info, Type
+  end
+
+  class ThunkVariant < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :param_fields, T::Array[ThunkFrameField]
+
+    sig { params(key: Symbol).returns(T.any(String, T::Array[ThunkFrameField])) }
+    def fetch(key)
+      case key
+      when :name then name
+      when :param_fields then param_fields
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class MutualThunkArm < T::Struct
+    extend T::Sig
+
+    const :variant_name, String
+    const :base_cases, T::Array[ThunkBaseCase]
+    const :target_variant, String
+    const :target_arg_inits, T::Array[ThunkFrameInit]
+
+    sig { params(key: Symbol).returns(T.any(String, T::Array[ThunkBaseCase], T::Array[ThunkFrameInit])) }
+    def fetch(key)
+      case key
+      when :variant_name then variant_name
+      when :base_cases then base_cases
+      when :target_variant then target_variant
+      when :target_arg_inits then target_arg_inits
+      else
+        Kernel.raise KeyError, "key not found: #{key.inspect}"
+      end
+    end
+  end
+
+  class ThunkTrampoline < T::Struct
+    extend T::Sig
     include Stmt
+
+    const :fn_name, String
+    const :return_type, Type
+    const :param_fields, T::Array[ThunkFrameField]
+    const :param_init_fields, T::Array[ThunkFrameInit]
+    const :base_cases, T::Array[ThunkBaseCase]
+    const :recurse_arg_inits, T::Array[ThunkFrameInit]
+    const :combine_lhs, Emittable
+    const :combine_op, Symbol
+    const :yield_policy, Symbol
   end
 
   # Mutual THUNK trampoline body. This is the tagged-union sibling of
   # ThunkTrampoline: each mutually-recursive function is a union variant,
   # and each arm either returns a base-case value or overwrites current
   # with the next variant's payload.
-  MutualThunkTrampoline = Struct.new(
-    :fn_name,
-    :ret_zig,
-    :variants,
-    :initial_variant,
-    :initial_fields,
-    :arms,
-    :yield_line
-  ) do
+  class MutualThunkTrampoline < T::Struct
+    extend T::Sig
     include Stmt
+
+    const :fn_name, String
+    const :return_type, Type
+    const :variants, T::Array[ThunkVariant]
+    const :initial_variant, String
+    const :initial_fields, T::Array[ThunkFrameInit]
+    const :arms, T::Array[MutualThunkArm]
+    const :yield_policy, Symbol
   end
 
-  # Background block. Wraps raw Zig code for a fiber spawn but exposes
+  sig { params(body: DeferBodyInput, label: String).void }
+  def self.validate_defer_body!(body, label)
+    valid = if body.is_a?(Array)
+      body.all? { |stmt| stmt.is_a?(MIR::Emittable) }
+    else
+      body.is_a?(MIR::Emittable)
+    end
+    return if valid
+
+    raise TypeError, "#{label} body must be structural MIR, got #{body.class}"
+  end
+
+  # Background block. Wraps a typed execution-boundary emission plan and exposes
   # capture_analysis for ownership verification (BG_ESCAPE check).
   # captures: { name => Type-like object } from capture_analysis.captures
   # run_body: [MIR::Stmt] — lowered MIR for the fiber run function body.
   #   Carries the MIR so the checker can see allocations inside the fiber.
-  #   Emission still uses code (raw Zig). nil for legacy callers; checker skips.
   # fsm_structure: MIR::FsmStructure | nil. For BG bodies lowered to a
   #   stackless FSM, carries the structural metadata (captures, state
   #   fields, per-step bodies, cleanup placements) so the MIR checker
@@ -1479,6 +1591,21 @@ module MIR
   BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
     extend T::Sig
     include Stmt
+    sig do
+      params(
+        code: BgBlockPlan,
+        captures: T.nilable(T::Hash[String, Type]),
+        run_body: T.nilable(T::Array[Emittable]),
+        fsm_structure: Object,
+      ).void
+    end
+    def initialize(code, captures = nil, run_body = nil, fsm_structure = nil)
+      unless MIR.structural_bg_block_plan?(code)
+        raise TypeError, "MIR::BgBlock code must be a structural emission plan, got #{code.class}"
+      end
+      super(code, captures, run_body, fsm_structure)
+    end
+
     sig { returns(T.nilable(Type)) }
     def result_type
       @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
@@ -1553,19 +1680,14 @@ module MIR
   #     the cleanup inside that step's body — a UAF if any later
   #     step reads the capture.
   #
-  #   state_fields: [
-  #     { name: String, finalize_at: :finalize | Integer | nil,
-  #       error_handled_in_setup: Boolean }
-  #   ]
+  #   state_fields: [FsmStateFieldFact]
   #     Per-call state struct fields (e.g. rf_buf, rf_fd). Cleanup
   #     placement is template-driven via :fsm_state_finalize. The
   #     `error_handled_in_setup` flag indicates step-0 errdefer
   #     coverage so the checker can require it on heap-alloc'd
   #     state fields.
   #
-  #   steps: [
-  #     { index: Integer, reads: [String], cleanups: [String] }
-  #   ]
+  #   steps: [FsmStepFact]
   #     One entry per step. `reads` is the set of binding names
   #     (captures + state_fields + ctx fields) referenced in this
   #     step's emitted body, derived by scanning the rendered Zig
@@ -1574,8 +1696,12 @@ module MIR
   #     of this step.
   #
   #   finalize_cleanups: [String]
-  #     Names whose cleanup is placed at FSM finalize (start of the
-  #     last step, fires after post-stmts).
+  #     Names whose cleanup is placed at FSM finalize.
+  #
+  #   destroy_actions: [FsmDestroyAction]
+  #     Closed structural operations run by destroyTask before the ctx
+  #     is freed. The checker validates this list so finalization is
+  #     not an opaque rendered-Zig side channel.
   #
   #   ctx_id: Integer
   #     The numeric id used in `__ctx_<id>.<name>` references. The
@@ -1588,6 +1714,119 @@ module MIR
   #     rf_buf — which is finalized — through `content`). The
   #     checker rejects on any non-nil value: the slice would
   #     escape the FSM but its backing storage dies at finalize.
+  class FsmCaptureFact < T::Struct
+    const :name, String
+    const :cleanup_at, T.any(Symbol, Integer)
+  end
+
+  class FsmStateFieldFact < T::Struct
+    const :name, String
+    const :finalize_at, T.nilable(T.any(Symbol, Integer))
+    const :error_handled_in_setup, T::Boolean, default: false
+  end
+
+  class FsmStepFact < T::Struct
+    const :index, Integer
+    const :reads, T::Array[String], default: []
+    const :cleanups, T::Array[String], default: []
+  end
+
+  class FsmDestroyCleanup < T::Struct
+    extend T::Sig
+
+    SOURCE_DESTROY_ORDER = T.let({
+      capture: 1,
+      fresh_heap: 1,
+      body: 2,
+      owned_result: 2,
+    }.freeze, T::Hash[Symbol, Integer])
+
+    const :source_kind, Symbol
+    const :name, String
+    const :target, Emittable
+    const :cleanup_entry, CleanupEntry
+    const :guard, T.nilable(Emittable), default: nil
+    const :allocator, T.nilable(Emittable), default: nil
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = SOURCE_DESTROY_ORDER.fetch(source_kind, 2)
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = name
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_name
+      target_expr = target
+      return nil unless target_expr.is_a?(FieldGet)
+
+      object = target_expr.object
+      return nil unless object.is_a?(Ident)
+
+      "#{object.name}.#{target_expr.field}"
+    end
+  end
+
+  class FsmDestroyLockRelease < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :ctx_id, Integer
+    const :guard_index, Integer
+    const :lock_ref, Emittable
+    const :unlock_method, String
+
+    sig { returns(String) }
+    def guard_field = "__lock_held_#{guard_index}"
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = 0
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = -index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = nil
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_name = nil
+  end
+
+  class FsmDestroyStmt < T::Struct
+    extend T::Sig
+
+    const :source_kind, Symbol
+    const :name, String
+    const :stmt, Emittable
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = FsmDestroyCleanup::SOURCE_DESTROY_ORDER.fetch(source_kind, 2)
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = name
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_name
+      current_stmt = stmt
+      return nil unless current_stmt.is_a?(MIR::RcRelease)
+
+      source = current_stmt.source
+      return nil unless source.is_a?(FieldGet)
+
+      object = source.object
+      return nil unless object.is_a?(Ident)
+
+      "#{object.name}.#{source.field}"
+    end
+  end
+
+  FsmDestroyAction = T.type_alias { T.any(FsmDestroyCleanup, FsmDestroyStmt, FsmDestroyLockRelease) }
+
   FsmStructure = Struct.new(
     :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
     :result_aliases_finalized
@@ -1638,18 +1877,111 @@ module MIR
     def owned_result_required=(value)
       @owned_result_required = value
     end
+
+    sig { returns(T::Array[FsmDestroyAction]) }
+    def destroy_actions
+      @destroy_actions = T.let(@destroy_actions, T.nilable(T::Array[FsmDestroyAction]))
+      @destroy_actions ||= []
+    end
+
+    sig { params(value: T::Array[FsmDestroyAction]).returns(T::Array[FsmDestroyAction]) }
+    def destroy_actions=(value)
+      @destroy_actions = value
+    end
   end
 
-  class FsmLoweringResult < T::Struct
-    extend T::Sig
+  class ContextFieldDecl < T::Struct
+    const :name, String
+    const :type_zig, String
+    const :default_value, T.nilable(MIR::Emittable), default: nil
+  end
 
-    const :code, String
-    const :structure, FsmStructure
+  class CaptureCleanupAction < T::Struct
+    const :target, Emittable
+    const :cleanup_entry, CleanupEntry
+    const :allocator, T.nilable(Emittable), default: nil
+  end
 
-    sig { returns(String) }
-    def to_s
-      code
-    end
+  class TaskConfigPlan < T::Struct
+    const :stack_variant, String
+    const :profile_site_id, T.nilable(Integer), default: nil
+    const :profile_dispatch_id, T.nilable(Integer), default: nil
+  end
+
+  class ProfileTaskSite < T::Struct
+    const :site_id, Integer
+    const :line, Integer
+    const :column, Integer
+    const :dispatch, Symbol
+    const :form, Symbol
+  end
+
+  class FiberSpawnCall < T::Struct
+    const :target, Symbol
+    const :runtime_name, T.nilable(String), default: nil
+    const :wait_group_name, T.nilable(String), default: nil
+    const :ctx_type, String
+    const :ctx_var, String
+    const :task_config, TaskConfigPlan
+    const :pass_ctx_by_address, T::Boolean, default: false
+  end
+
+  class BgStackfulPlan < T::Struct
+    const :id, Integer
+    const :ctx_type, String
+    const :alloc_var, String
+    const :promise_var, String
+    const :ctx_var, String
+    const :blk_label, String
+    const :bg_rt, String
+    const :rt_name, String
+    const :promise_zig, String
+    const :is_void, T::Boolean
+    const :capture_fields, T::Array[ContextFieldDecl]
+    const :capture_inits, T::Array[StructInitField]
+    const :capture_frees, T::Array[CaptureCleanupAction]
+    const :promoted_decls, T::Array[MIR::Emittable]
+    const :profile_site, ProfileTaskSite
+    const :arena_init, T.nilable(MIR::Node)
+    const :spawn_call, FiberSpawnCall
+    const :alloc_expr, MIR::Emittable
+    const :run_body, T::Array[MIR::Node]
+  end
+
+  class BgStreamPlan < T::Struct
+    const :id, Integer
+    const :ctx_type, String
+    const :alloc_var, String
+    const :stream_var, String
+    const :ctx_var, String
+    const :blk_label, String
+    const :stream_zig, String
+    const :local_stream, String
+    const :capture_fields, T::Array[ContextFieldDecl]
+    const :capture_inits, T::Array[StructInitField]
+    const :promoted_decls, T::Array[MIR::Emittable]
+    const :capture_cleanups, T::Array[MIR::Emittable]
+    const :body, T::Array[MIR::Node]
+    const :spawn_call, FiberSpawnCall
+    const :rt_name, String
+  end
+
+  class DoBranchPlan < T::Struct
+    const :ctx_type, String
+    const :ctx_var, String
+    const :wg_var, String
+    const :raw_rt_name, String
+    const :raw_args_name, String
+    const :capture_fields, T::Array[ContextFieldDecl]
+    const :capture_inits, T::Array[StructInitField]
+    const :capture_pre_decls, T::Array[MIR::Emittable]
+    const :body, T::Array[MIR::Node]
+    const :spawn_call, FiberSpawnCall
+  end
+
+  class DoBlockPlan < T::Struct
+    const :wg_var, String
+    const :branches, T::Array[DoBranchPlan]
   end
 
   # ================================================================
@@ -1675,12 +2007,8 @@ module MIR
   # the rendered string.
   #
   # Body content that comes from the surrounding fiber-body lowering
-  # (pre_stmts, post_stmts, post_result_line, etc.) is still Zig
-  # text at this layer — that's a Phase 4 transpiler concern. The
-  # wrapper structure is fully MIR; the per-step body fragments are
-  # an array of pre-rendered lines the renderer joins with
-  # newlines + indentation. Once the fiber-body lowering itself
-  # emits MIR, those fragments become MIR nodes too.
+  # is now structural MIR. The wrapper structure is fully MIR; the
+  # per-step body nodes are rendered only by the final emitter.
 
   # Top-level FSM-IO body. Renders to:
   #   <blk_label>: {
@@ -1733,7 +2061,7 @@ module MIR
   FsmB1CtxStruct = Struct.new(
     :type_name,
     :promise_zig,
-    :captures_decl_zig,
+    :capture_fields,
     :run_body,            # MIR::FsmStep (re-using the same shape;
                           # index=0, but the renderer for B1 emits
                           # the fn name as `runBody` not
@@ -1745,13 +2073,8 @@ module MIR
   # forms whose dispatch is form-specific but whose member-fn
   # bodies are typed MIR going through MIREmitter.
   #
-  # The dispatch (`resume_fn_zig`) is the protocol contract for
-  # each form: a labeled-while-switch for NEXT-CHAIN, a __cs_block
-  # with retry loop for WITH, the `step` switch for LOOP. Those
-  # are fixed Zig per form and do not vary based on user code, so
-  # carrying them as raw Zig strings on the wrapper node is
-  # acceptable -- the variability is in the per-step bodies,
-  # which are MIR.
+  # The dispatch is a structured FSM state table. The wrapper
+  # emitter renders that table into the final resume function.
   FsmGenericBody = Struct.new(
     :blk_label,
     :ctx_struct,          # MIR::FsmGenericCtxStruct
@@ -1766,43 +2089,40 @@ module MIR
   # Ctx struct for the generic body. Holds:
   #   - the standard task / rt / inner / alloc fields (added by
   #     the renderer);
-  #   - a list of extra field decl lines (step counter, sp
+  #   - a list of typed extra field declarations (step counter, sp
   #     promise fields, retry counter, lock_waiter, etc.);
-  #   - promoted-local field decls;
+  #   - promoted-local field declarations;
   #   - a list of MIR::FsmStep entries with their fn name and
   #     signature (not just `runStepN`);
-  #   - the resume_fn_zig contributed by the form's emitter.
+  #   - the structured dispatch table.
   FsmGenericCtxStruct = Struct.new(
     :type_name,
     :promise_zig,
-    :captures_decl_zig,
-    :extra_field_decls,    # [String]
-    :promoted_field_decls, # [String]
+    :capture_fields,
+    :extra_field_decls,    # [MIR::ContextFieldDecl]
+    :promoted_field_decls, # [MIR::ContextFieldDecl]
     :member_fns,           # [MIR::FsmMemberFn]
-    :resume_fn_zig,        # String -- protocol-specific dispatch
-    :destroy_extra_zig,    # optional String -- extra Zig run inside
-                           # destroyTask BEFORE alloc.destroy(ctx).
-                           # Used for WITH+suspend-in-CS to release
-                           # locks held across runFn boundaries on
-                           # err paths (Zig defer can't span runFn
-                           # boundaries; the per-cap __lock_held_<i>
-                           # flag tells destroyTask which to release).
+    :dispatch,             # MIR::FsmDispatch
+    :destroy_actions,      # [MIR::FsmDestroyAction] -- structural
+                           # finalizer ops run by destroyTask BEFORE
+                           # alloc.destroy(ctx). Used for capture
+                           # cleanup, promoted ctx cleanup, owned
+                           # suspend results, and WITH+suspend lock
+                           # release across runFn boundaries.
   )
 
   # A named member fn on the FSM ctx struct. fn_name is used as
   # the Zig fn name (`runPre`, `runLoopPre`, `runStep0`, ...).
   # signature is the Zig signature minus the fn name (e.g.
   # `(__ctx_0: *@This()) anyerror!void`). body_stmts are typed
-  # MIR statements (or transitional Strings) rendered via
-  # MIREmitter.
+  # MIR statements rendered via MIREmitter.
   FsmMemberFn = Struct.new(
     :fn_name,
     :ctx_id,
     :bg_rt,                # "__rt_bg0"
-    :rt_suppress_zig,
-    :body_stmts,           # [MIR::Stmt | String]
-    :extra_prologue_zig,   # optional pre-body Zig (e.g. defer
-                           # unlock for runCsBody) -- appears
+    :suppress_runtime_ref,
+    :body_stmts,           # [MIR::Stmt]
+    :extra_prologue_stmts, # optional pre-body MIR stmts -- appear
                            # before body_stmts in the rendered fn
   )
 
@@ -1813,7 +2133,7 @@ module MIR
   FsmCtxStruct = Struct.new(
     :type_name,            # "__BgCtx0"
     :promise_zig,          # "CheatLib.Promise(i64)"
-    :captures_decl_zig,    # raw Zig field decls from fiber lowering
+    :capture_fields,       # [MIR::ContextFieldDecl]
     :state_decls,          # [FsmOps::StateFieldDecl]
     :promoted_field_decls, # [String] — raw lines
     :step0,                # MIR::FsmStep
@@ -1823,14 +2143,10 @@ module MIR
 
   # One `fn runStepN(__ctx_<id>: *@This()) anyerror!void` body.
   #
-  # `body_stmts` is a list of MIR statement nodes (or plain Strings
-  # as a transitional escape hatch). The wrapper renderer uses the
-  # standard MIREmitter to walk each one, so structural MIR statement
-  # types such as MIR::Let, MIR::Set, MIR::DeferStmt, and MIR::ExprStmt
-  # are valid here. Plain strings are
-  # accepted because MIREmitter.emit handles them as a base case;
-  # they exist so the lowering can pass through Zig text from the
-  # surrounding fiber-body lowering without a forced wrap.
+  # `body_stmts` is a list of MIR statement nodes. The wrapper
+  # renderer uses the standard MIREmitter to walk each one, so
+  # structural MIR statement types such as MIR::Let, MIR::Set,
+  # MIR::DeferStmt, and MIR::ExprStmt are valid here.
   #
   # The renderer concatenates each emitted statement with newlines
   # and the function body indentation. It does NOT insert ';'s or
@@ -1840,8 +2156,8 @@ module MIR
     :index,                # 0 or 1
     :ctx_id,               # int matching __ctx_<id>
     :bg_rt,                # "__rt_bg0"
-    :rt_suppress_zig,      # "_ = &__rt_bg0;" or ""
-    :body_stmts,           # [MIR::Stmt | String]
+    :suppress_runtime_ref, # whether to emit `_ = &<bg_rt>;`
+    :body_stmts,           # [MIR::Stmt]
   )
 
   # ================================================================
@@ -1884,8 +2200,8 @@ module MIR
   #     retry-loop) fan out into multiple segments at split-time
   #     instead of needing a richer tail.
   #
-  #   ctx_field_decls: [String]
-  #     Extra Zig field decl lines this suspend needs in the ctx
+  #   ctx_field_decls: [MIR::ContextFieldDecl]
+  #     Extra typed field declarations this suspend needs in the ctx
   #     struct (e.g. "sp_1: Promise(T) = undefined," or
   #     "rf_fd: i32 = -1,"). Liveness output covers user-visible
   #     locals that cross the boundary; these are
@@ -1913,7 +2229,7 @@ module MIR
   )
 
   # ================================================================
-  # FSM dispatch (structured replacement for `resume_fn_zig: String`)
+  # FSM dispatch table.
   # ================================================================
   #
   # Per-state dispatch table. The renderer walks `arms` and emits a
@@ -1948,7 +2264,7 @@ module MIR
   # One state-machine arm. Sequence of effects:
   #   1. If pre_body_skip is set and its cond holds, jump to skip_step
   #      (no body, no tail). Used by B2-LOOP arm 1 ("if !cond goto post").
-  #   2. Run pre_body_zig (free-form Zig injected before the body fn).
+  #   2. Run pre_body_stmts (structural MIR injected before the body fn).
   #      Used by B2-LOOP arm 2 to bind sp.result into a ctx field
   #      BEFORE runLoopPost reads it.
   #   3. Else call body_fn_name (skipped when nil); on error: emit
@@ -1959,7 +2275,7 @@ module MIR
   FsmStateArm = Struct.new(
     :index,                   # Integer state number
     :pre_body_skip,           # FsmTailCondSkip | nil
-    :pre_body_zig,            # String | nil
+    :pre_body_stmts,          # [MIR::Stmt]
     :body_fn_name,            # String | nil
     :err_cleanups,            # [MIR::Stmt] | nil -- direct cleanups
                               #   in the err handler of this arm,
@@ -1975,8 +2291,7 @@ module MIR
 
   # Conditional pre-body skip: used inside an arm to short-circuit
   # past the body and tail to a different state.
-  #   if (<cond_zig>) { step = <skip_step>; continue :__sw; }
-  FsmTailCondSkip = Struct.new(:cond_zig, :skip_step)
+  FsmTailCondSkip = Struct.new(:condition, :skip_step)
 
   # ================================================================
   # LOCK-fan-out tail variants (composable B2-WITH dispatch)
@@ -2075,7 +2390,7 @@ module MIR
   # took (we'll be woken later), yield; otherwise the source already
   # completed synchronously, so jump straight to next_step.
   #
-  #   if (<register_zig>) { step = next_step; return .{ .<reason> = {} }; }
+  #   if (<register_expr>) { step = next_step; return .{ .<reason> = {} }; }
   #   step = next_step;
   #   continue :__sw;
   #
@@ -2083,7 +2398,7 @@ module MIR
   # different shape (try-loop with retry); kept as template for now.
   FsmTailRegisterYield = Struct.new(
     :next_step,
-    :register_zig,
+    :register_expr,
     :yield_reason,
   ) do
     extend T::Sig
@@ -2092,9 +2407,9 @@ module MIR
   end
 
   # Conditional jump (cond ? then_step : else_step).
-  #   if (<cond_zig>) { step = then_step; continue; }
+  #   if (<condition>) { step = then_step; continue; }
   #   step = else_step; continue;
-  FsmTailCondJump = Struct.new(:cond_zig, :then_step, :else_step) do
+  FsmTailCondJump = Struct.new(:condition, :then_step, :else_step) do
     extend T::Sig
     sig { returns(Symbol) }
     def kind; :cond_jump; end
@@ -2107,22 +2422,32 @@ module MIR
   # renderer walks them.
   FsmSpawnSetup = Struct.new(
     :alloc_var,            # "__bg0_alloc"
-    :alloc_expr_zig,       # "rt.heapAlloc()" or "rt.getSched().allocator"
+    :alloc_expr,           # MIR expression for the allocator
     :promise_var,          # "__bg0_promise"
     :promise_zig,          # "CheatLib.Promise(i64)"
-    :promoted_decls_zig,   # raw
+    :promoted_decls,       # [MIR::Emittable]
     :ctx_var,              # "__bg0_ctx"
     :ctx_type,             # "__BgCtx0"
-    :ctx_init_zig,         # raw Zig for the .{ ... } body of the
-                           # ctx struct initializer (fixed prefix
-                           # for task / rt / inner / alloc plus
-                           # capture inits the lowering decided)
-    :spawn_call_zig,       # "try ...spawn(&ctx.task);"
+    :ctx_init_fields,      # [MIR::StructInitField]
+    :spawn_call,           # MIR::FsmSpawnCall
     :rt_name,              # "rt" (the surrounding fn's runtime)
     :profile_site_id,      # integer id used by runtime fiber profile
     :profile_dispatch_id,  # fiber-profile.DispatchKind enum value
-    :profile_site_comment, # CLEAR_PROFILE_TASK_SITE metadata comment
+    :profile_site,         # MIR::ProfileTaskSite metadata comment
   )
+
+  class FsmSpawnCall < T::Struct
+    const :target, Symbol
+    const :runtime_name, T.nilable(String), default: nil
+    const :ctx_var, String
+  end
+
+  class FsmLoweringResult < T::Struct
+    FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
+
+    const :body, FsmBody
+    const :structure, FsmStructure
+  end
 
   class CatchReassign < T::Struct
     const :name, String
@@ -2137,31 +2462,186 @@ module MIR
     const :filter_messages, T::Array[MIR::Node]
   end
 
-  # Catch wrapper. Wraps raw Zig code for try/catch but exposes
-  # typed error-path reassignment metadata for allocator consistency (INV-9).
-  # clause_bodies: Array<Array<MIR::Stmt>> — one per catch clause + default.
-  #   Carries the lowered MIR so the checker can see allocations inside each
-  #   catch body. Emission still uses code (raw Zig). nil for legacy callers.
-  CatchWrapper = Struct.new(:code, :error_reassigns, :clause_bodies, :clause_meta, :has_default) do
+  class CatchDefaultAction < T::Enum
+    enums do
+      Body = new("body")
+      Propagate = new("propagate")
+      Unreachable = new("unreachable")
+    end
+  end
+
+  class FailureActionKind < T::Enum
+    enums do
+      Raise = new("raise")
+      Exit = new("exit")
+      Pass = new("pass")
+      Return = new("return")
+      Block = new("block")
+    end
+  end
+
+  class FailureAction < T::Struct
+    extend T::Sig
+    include Emittable
+
+    const :kind, FailureActionKind
+    const :error_type, Symbol
+    const :error_kind, Symbol
+    const :default_message, String
+    const :line, String
+    const :rt_name, String
+    const :with_label, T.nilable(String), default: nil
+    const :message, T.nilable(Emittable), default: nil
+    const :return_value, T.nilable(Emittable), default: nil
+    prop :body, T::Array[Emittable], default: []
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([], T::Array[Object])
+      values << T.cast(message, Object) if message
+      values << T.cast(return_value, Object) if return_value
+      compact_child_exprs(values)
+    end
+
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      return [] unless kind == FailureActionKind::Block
+
+      [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+    end
+  end
+
+  CapabilityLockTarget = Struct.new(:source, :arc_wrapped, :comptime_arc_unwrap) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs([source])
+    end
+  end
+
+  CapabilityLockAddress = Struct.new(:source, :arc_wrapped) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs([source])
+    end
+  end
+
+  class SortedLockAcquireEntry < T::Struct
+    const :index, Integer
+    const :alias_name, String
+    const :guard_var, String
+    const :held_var, String
+    const :lock_expr, Emittable
+    const :address_expr, Emittable
+    const :method_name, String
+  end
+
+  SortedLockAcquire = Struct.new(:entries, :action, :matched_types, :bubble_types, :retries, :source_line, :loop_label, :rt_name, :fallible) do
     extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      entry_exprs = (entries || []).flat_map { |entry| [entry.lock_expr, entry.address_expr] }
+      compact_child_exprs([entry_exprs, action])
+    end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      action ? T.must(action).body_slots : []
+    end
+  end
+
+  FallibleLockBinding = Struct.new(:guard_var, :alias_name, :acquire_call, :action, :retries, :matched_types, :bubble_types, :source_line, :acquire_block, :rt_name) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([T.cast(acquire_call, Object), action], T::Array[Object])
+      compact_child_exprs(values)
+    end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      action.body_slots
+    end
+  end
+
+  class CatchClause < T::Struct
+    extend T::Sig
+
+    const :meta, CatchClauseMeta
+    prop :body, T::Array[Emittable]
+
+    sig { returns(T::Array[Emittable]) }
+    def filter_message_exprs
+      meta.filter_messages
+    end
+  end
+
+  # Function CATCH wrapper. It is structural MIR; MIREmitter owns the only
+  # conversion to Zig's `catch { ... }` syntax.
+  CatchWrapper = Struct.new(:inner_call, :error_reassigns, :clauses, :default_body, :default_action, :snapshot_type, :rt_name) do
+    extend T::Sig
+    include Stmt
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs([inner_call, *(clauses || []).flat_map(&:filter_message_exprs)])
+    end
+
+    sig { returns(T::Array[T::Array[Emittable]]) }
+    def clause_bodies
+      bodies = T.let((clauses || []).map(&:body), T::Array[T::Array[Emittable]])
+      bodies << default_body if has_default
+      bodies
+    end
+
+    sig { returns(T::Array[CatchClauseMeta]) }
+    def clause_meta
+      (clauses || []).map(&:meta)
+    end
+
+    sig { returns(T::Boolean) }
+    def has_default
+      default_action == CatchDefaultAction::Body
+    end
+
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
-      clause_bodies&.each_with_index do |body, index|
-        slots << body_slot(:"clause_bodies_#{index}", body, ->(new_body) { clause_bodies[index] = new_body })
+      clauses&.each_with_index do |clause, index|
+        slots << body_slot(:"clauses_#{index}", clause.body, ->(new_body) { clause.body = new_body })
       end
+      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if has_default
       slots
     end
   end
 
-  # DO block. Wraps raw Zig code for fork-join parallel branches.
+  sig { params(plan: Object).returns(T::Boolean) }
+  def self.structural_bg_block_plan?(plan)
+    plan.is_a?(MIR::BgStackfulPlan) ||
+      plan.is_a?(MIR::BgStreamPlan) ||
+      plan.is_a?(MIR::FsmIoBody) ||
+      plan.is_a?(MIR::FsmB1Body) ||
+      plan.is_a?(MIR::FsmGenericBody)
+  end
+
+  # DO block. Wraps a typed fork-join emission plan.
   # branch_bodies: Array<Array<MIR::Stmt>> — one per branch, lowered MIR.
   #   Carries the MIR so the checker can see allocations inside DO branches.
-  #   Emission still uses code (raw Zig).
   DoBlock = Struct.new(:code, :branch_bodies) do
     extend T::Sig
     include Stmt
+    sig { params(code: DoBlockPlan, branch_bodies: T::Array[T::Array[Emittable]]).void }
+    def initialize(code, branch_bodies)
+      super(code, branch_bodies)
+    end
+
     sig { returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
     def boundary_facts
       @boundary_facts = T.let(nil, T.nilable(T::Array[MIR::ExecutionBoundaryFact])) unless defined?(@boundary_facts)
@@ -2317,7 +2797,7 @@ module MIR
   # The emitter applies templates mechanically from the entry.
   #
   # cleanup_entry keys: :kind, :zig_type, :elem_zig_type, :alloc,
-  #   :has_moved_guard, :resource_close_zig, :is_fixed,
+  #   :has_moved_guard, :resource_close_plan, :is_fixed,
   #   :rc_variant, :rc_alloc, :rc_release_func, :base_zig,
   #   :needs_release_fields
   #
@@ -2356,13 +2836,36 @@ module MIR
   #                    dupeValue dispatch to the right deep-copy.)
   #   :passthrough  -> source (no copy needed, value type)
   # alloc: Symbol (:heap, :frame) resolved via rt; nil only for :passthrough.
+  DEEP_COPY_SHAPE_BY_PREFIX = T.let({
+    "" => :inferred,
+    "*" => :pointer,
+    "[]" => :slice
+  }.freeze, T::Hash[String, Symbol])
+
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
-                        :alloc) do
+                        :alloc, :copy_shape) do
     extend T::Sig
     include Expr
-    sig { params(source: T.untyped, zig_type: T.nilable(String), elem_type: T.nilable(String), strategy: Symbol, alloc: T.nilable(Symbol)).void }
-    def initialize(source, zig_type, elem_type, strategy, alloc)
-      super(source, zig_type, elem_type, strategy, alloc)
+    sig do
+      params(
+        source: T.untyped,
+        zig_type: T.nilable(String),
+        elem_type: T.nilable(String),
+        strategy: Symbol,
+        alloc: T.nilable(Symbol),
+        copy_shape: Symbol
+      ).void
+    end
+    def initialize(source, zig_type, elem_type, strategy, alloc, copy_shape = self.class.copy_shape_for_zig_type(zig_type))
+      super(source, zig_type, elem_type, strategy, alloc, copy_shape)
+    end
+
+    sig { params(zig_type: T.nilable(String)).returns(Symbol) }
+    def self.copy_shape_for_zig_type(zig_type)
+      text = zig_type.to_s
+      DEEP_COPY_SHAPE_BY_PREFIX.fetch(T.must(text[0, 2])) do
+        DEEP_COPY_SHAPE_BY_PREFIX.fetch(T.must(text[0, 1]), :value)
+      end
     end
 
     sig { returns(T::Array[Emittable]) }
@@ -2380,6 +2883,7 @@ module MIR
   # Strategy determines the Zig pattern:
   #   :pool           -> try T.initCapacity(alloc, cap)
   #   :list_capacity  -> try T.initCapacity(alloc, cap)
+  #   :array_list_empty -> @as(T, .empty)
   #   :list_empty     -> T{}
   #   :set_empty      -> T{}
   #   :map_bare       -> T{ .alloc = alloc }
@@ -2439,7 +2943,7 @@ module MIR
   SharePromote = Struct.new(:source, :zig_base, :alloc) do
     extend T::Sig
     include Expr
-    sig { params(source: T.untyped, zig_base: String, alloc: Symbol).void }
+    sig { params(source: Emittable, zig_base: String, alloc: Symbol).void }
     def initialize(source, zig_base, alloc)
       super(source, zig_base, alloc)
     end
@@ -2468,6 +2972,15 @@ module MIR
     end
   end
 
+  # Rc/Arc release (reference count decrement).
+  # Zig: CheatLib.arcRelease(T, alloc, name)  or  CheatLib.rcRelease(T, alloc, name)
+  RcRelease = Struct.new(:source, :zig_base, :func, :alloc) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source, alloc])
+  end
+
   # Rc/Arc downgrade to weak ref.
   # Zig: CheatLib.arcDowngrade(T, source) or CheatLib.rcDowngrade(T, source)
   RcDowngrade = Struct.new(:source, :zig_base, :func) do
@@ -2490,20 +3003,35 @@ module MIR
     end
   end
 
+  # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
+  # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
+  # these at call sites. kind: :heap | :frame | :cleanup.
+  AllocatorRef = Struct.new(:kind) do
+    include Expr
+  end
+
   # Compact an @multiowned tree into a single contiguous buffer.
   # Zig: try CheatLib.freeze(T, alloc, inner_ptr)
   # inner: MIR expr for the Rc data pointer (*const T)
   # zig_base: Zig type name for T
-  FreezeExpr = Struct.new(:inner, :zig_base) do
+  # alloc_ref: typed allocator operand -- resolved to Zig by emitter.
+  FreezeExpr = Struct.new(:inner, :zig_base, :alloc_ref) do
     extend T::Sig
     include Expr
+    sig { params(inner: Emittable, zig_base: String, alloc_ref: AllocatorRef).void }
+    def initialize(inner, zig_base, alloc_ref = AllocatorRef.new(:heap))
+      super(inner, zig_base, alloc_ref)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
     sig { returns(T::Array[Emittable]) }
     def ownership_source_exprs = child_exprs
+    sig { returns(Symbol) }
+    def alloc = alloc_ref.kind
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :frozen)
+      owned_effect_for_alloc(alloc, cleanup_kind: :frozen)
     end
   end
 
@@ -2513,7 +3041,7 @@ module MIR
   MakeList = Struct.new(:elem_type, :items, :alloc) do
     extend T::Sig
     include Expr
-    sig { params(elem_type: String, items: T::Array[T.untyped], alloc: Symbol).void }
+    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol).void }
     def initialize(elem_type, items, alloc)
       super(elem_type, items, alloc)
     end
@@ -2541,10 +3069,10 @@ module MIR
   end
 
   # ================================================================
-  # MVCC Snapshot Nodes (structured -- no InlineZig escape hatch)
+  # MVCC Snapshot Nodes (structured -- no raw Zig escape hatch)
   # ================================================================
   #
-  # These replace what used to be hand-emitted InlineZig blobs in
+  # These replace what used to be hand-emitted opaque blobs in
   # mir_lowering.rb's :SNAPSHOT branch + emit_snapshot_mutable_call +
   # lower_with_match_block. The emitter (mir_emitter.rb) maps each
   # structured node 1:1 to the same Zig text we used to generate, BUT
@@ -2554,7 +3082,7 @@ module MIR
   #   version) is now under structured MIR -- the checker can pair the
   #   AllocMark with the EBR-retire Cleanup that runs inside
   #   Versioned.update. Pre-migration this allocation lived inside an
-  #   InlineZig string and was invisible to the checker (INV-12 violation).
+  #   opaque string and was invisible to the checker (INV-12 violation).
   #
   # - SnapshotRead's Guard pin/release becomes a structured pair the
   #   checker can verify (matching defer-release on every exit path).
@@ -2571,15 +3099,24 @@ module MIR
   # followed by the body. The unwrap_expr handles the comptime
   # pointer + Arc shape dispatch (see L7.3 / L7.4).
   #
-  # cell_unwrap : Zig expression resolving to *Versioned(T)
+  CapabilityUnwrap = Struct.new(:source) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
+  end
+
+  # cell_unwrap : MIR expression resolving to *Versioned(T)
   # rt          : Zig expression for *Runtime
-  # alias_zig   : Zig identifier for the user's alias (e.g. "view")
+  # alias_name  : safe identifier for the user's alias (e.g. "view")
   # guard_var   : internal Zig name for the Guard local
-  SnapshotRead = Struct.new(:cell_unwrap, :rt, :alias_zig, :guard_var, :body) do
+  SnapshotRead = Struct.new(:cell_unwrap, :rt, :alias_name, :guard_var, :body) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cell_unwrap])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
@@ -2595,27 +3132,37 @@ module MIR
   # AtomicPtr.update loop at 256 the right handler will be
   # `ON AtomicConflict`.
   #
-  # cell_unwrap     : Zig expr resolving to *Versioned(T) or *AtomicPtr(T)
-  # rt              : Zig expr for *Runtime
-  # alloc           : Zig expr for the allocator (rt.heapAlloc())
-  # alias_zig       : Zig identifier for the user's MUTABLE alias
-  # bare_t_zig      : Zig type string for the inner T
+  # cell_unwrap     : MIR expr resolving to *Versioned(T) or *AtomicPtr(T)
+  # rt              : runtime binding name
+  # alloc           : allocator symbol (:heap or :frame)
+  # alias_name      : safe identifier for the user's MUTABLE alias
+  # bare_type       : Type for the inner T
   # body            : Array of MIR statements -- the user's transaction body
-  # conflict_action : Zig text for the ON MvccConflict handler body (nil for atomic-ptr)
+  # conflict_action : structural ON MvccConflict handler body (nil for atomic-ptr)
   # retries         : nil or integer N for RETRY(N) THEN <action> (nil for atomic-ptr)
   # with_label      : nil or string for the labeled block exit (PASS/block actions)
   # is_atomic_ptr   : true when the cell's sync is :atomic + layout :indirect.
   #                   Routes the emitter to the no-conflict-handler shape.
   SnapshotTransaction = Struct.new(
-    :cell_unwrap, :rt, :alloc, :alias_zig, :bare_t_zig,
+    :cell_unwrap, :rt, :alloc, :alias_name, :bare_type,
     :body, :conflict_action, :retries, :with_label, :is_atomic_ptr
   ) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([T.cast(cell_unwrap, Object)], T::Array[Object])
+      values << conflict_action if conflict_action
+      compact_child_exprs(values)
+    end
     sig { returns(T::Array[BodySlot]) }
-    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+    def body_slots
+      slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
+      slots.concat(T.must(conflict_action).body_slots) if conflict_action
+      slots
+    end
   end
 
   # SNAPSHOT-mutable multi-cell: `WITH SNAPSHOT a AS MUTABLE va, b AS
@@ -2625,21 +3172,31 @@ module MIR
   # locks, runs the body once, and publishes all new versions
   # atomically.
   #
-  # cells_tuple  : Zig text for `.{ unwrap1, unwrap2, ... }`
-  # rt, alloc    : as above
-  # alias_decls  : Zig text declaring per-arg aliases from `views[i]`
+  # cells        : MIR expressions for the cells in `.{ cell1, cell2, ... }`
+  # rt, alloc    : runtime binding name and allocator symbol
+  # aliases      : Alias identifiers declared from `views[i]`
   # body         : Array of MIR statements
   # conflict_action, retries, with_label : as above
   SnapshotMultiTxn = Struct.new(
-    :cells_tuple, :rt, :alloc, :alias_decls,
+    :cells, :rt, :alloc, :aliases,
     :body, :conflict_action, :retries, :with_label
   ) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([cells || []], T::Array[Object])
+      values << conflict_action if conflict_action
+      compact_child_exprs(values)
+    end
     sig { returns(T::Array[BodySlot]) }
-    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+    def body_slots
+      slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
+      slots.concat(T.must(conflict_action).body_slots) if conflict_action
+      slots
+    end
   end
 
   # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC c AS x { body }`
@@ -2654,30 +3211,34 @@ module MIR
   # The body is emitted as a no-capture `struct { fn run(x: *T) void
   # { ... } }.run` so it can ride the closure-style write paths.
   #
-  # cell_zig    : Zig expression for the bound binding (no Arc-unwrap;
+  # cell        : MIR expression for the bound binding (no Arc-unwrap;
   #               the helper does that comptime-internally).
   # rt          : runtime variable name in scope.
-  # alias_zig   : the user's alias inside the body (e.g. "x").
-  # bare_t_zig  : the Zig type of the success branch (e.g. "Counter").
+  # alias_name  : the user's safe alias inside the body (e.g. "x").
+  # bare_type   : the type of the success branch.
   # body        : Array of MIR statements forming the WITH body.
   PolymorphicMutate = Struct.new(
-    :cell_zig, :rt, :alias_zig, :bare_t_zig, :body
+    :cell, :rt, :alias_name, :bare_type, :body
   ) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cell])
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   PolymorphicMutateFlow = Struct.new(
-    :cell_zig, :rt, :alias_zig, :bare_t_zig, :ret_zig, :body, :guard_cond, :guard_fail_body
+    :cell, :rt, :alias_name, :bare_type, :return_type, :body, :guard_cond, :guard_fail_body
   ) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cell, guard_cond])
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
@@ -2695,23 +3256,33 @@ module MIR
     def child_exprs = compact_child_exprs([ret])
   end
 
+  class WithMatchArm < T::Struct
+    extend T::Sig
+
+    const :family, Symbol
+    const :guard_var, String
+    prop :body, T::Array[Emittable]
+  end
+
   # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
   # F2 -> {...} END`. Lowers to a comptime `if (@hasField/@hasDecl)`
   # chain, one branch per family, each branch containing the matching
   # arm's lowered body.
   #
-  # cell_zig : Zig expression for the bound variable (param shape preserved)
-  # arms     : Array of { family:, probe:, prelude_zig:, body: [MIR stmts] }
-  WithMatchDispatch = Struct.new(:cell_zig, :arms) do
+  # cell : MIR expression for the bound variable (param shape preserved)
+  # arms : Array of WithMatchArm
+  WithMatchDispatch = Struct.new(:cell, :alias_name, :snapshot_mode, :rt_name, :arms) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cell])
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])
       arms&.each_with_index do |arm, index|
-        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+        slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
       slots
     end
@@ -2950,6 +3521,94 @@ module MIR
     end
   end
 
+  class RuntimeCallSpec < T::Struct
+    extend T::Sig
+
+    const :callee, String
+    const :try_wrap, T::Boolean, default: false
+    const :owned_return, T::Boolean, default: false
+    const :callable_contract, CallableContract
+
+    sig { params(args: T::Array[Emittable]).returns(Call) }
+    def call(args)
+      Call.new(callee, args, try_wrap, owned_return, callable_contract)
+    end
+  end
+
+  RuntimeCall = Struct.new(:spec, :args) do
+    extend T::Sig
+    include Expr
+
+    sig { params(spec: RuntimeCallSpec, args: T::Array[Emittable]).void }
+    def initialize(spec, args)
+      super(spec, args)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([args])
+
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      spec.callable_contract.ownership_contract
+    end
+
+    sig { returns(T::Boolean) }
+    def owned_return? = spec.owned_return
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless owned_return?
+      alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
+      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+    end
+  end
+
+  module RuntimeCalls
+    extend T::Sig
+
+    EQL = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.eql",
+        callable_contract: CallableContract.no_ownership(2),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    THREAD_COUNT = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.threadCount",
+        callable_contract: CallableContract.no_ownership(0),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    sig { returns(RuntimeCallSpec) }
+    def self.eql_spec
+      EQL
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.thread_count_spec
+      THREAD_COUNT
+    end
+
+    sig { params(element_zig: String).returns(RuntimeCallSpec) }
+    def self.batch_window_init_spec(element_zig)
+      RuntimeCallSpec.new(
+        callee: "CheatLib.BatchWindow(#{element_zig}).init",
+        callable_contract: CallableContract.no_ownership(3),
+      )
+    end
+
+    sig { params(inner_zig: String).returns(RuntimeCallSpec) }
+    def self.atomic_reduce_init_spec(inner_zig)
+      RuntimeCallSpec.new(
+        callee: "CheatLib.obs.AtomicReduce(#{inner_zig}).init",
+        callable_contract: CallableContract.no_ownership(1),
+      )
+    end
+  end
+
   # Tail call (emits @call(.always_tail, callee, .{args})).
   TailCall = Struct.new(:callee, :args, :callable_contract) do
     extend T::Sig
@@ -3074,16 +3733,73 @@ module MIR
     include Expr
   end
 
+  # Void value.
+  # Zig: {}
+  VoidLiteral = Struct.new(nil) do
+    include Expr
+  end
+
+  class DefaultValue < T::Struct
+    include Expr
+
+    const :kind, Symbol
+    const :zig_type, T.nilable(String), default: nil
+  end
+
+  class EnumTag < T::Struct
+    include Expr
+
+    const :variant, String
+  end
+
+  EnumOrdinal = Struct.new(:value) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
+  end
+
   # Variable / name reference.
   # Zig: name
   Ident = Struct.new(:name) do
     include Expr
   end
 
+  # Anonymous tuple literal.
+  # Zig: .{ item1, item2, ... }
+  TupleLiteral = Struct.new(:items) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([], T::Array[Object])
+      items.each { |item| values << T.cast(item, Object) }
+      compact_child_exprs(values)
+    end
+  end
+
   # Function pointer reference.
   # Zig: &name
   FnRef = Struct.new(:name) do
     include Expr
+  end
+
+  LockAcquire = Struct.new(:lock_expr, :lock_sync, :fallible) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs([lock_expr])
+    end
+  end
+
+  TypeOf = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs([expr])
+    end
   end
 
   # Struct initialization.
@@ -3480,13 +4196,6 @@ module MIR
     end
   end
 
-  # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
-  # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
-  # these at call sites. kind: :heap | :frame | :cleanup.
-  AllocatorRef = Struct.new(:kind) do
-    include Expr
-  end
-
   # Uninitialized-memory sentinel. Zig: `undefined`. VM: nil (the slot is
   # about to be written before use).
   Undef = Struct.new(:zig_type) do
@@ -3631,149 +4340,54 @@ module MIR
     end
   end
 
-  # Inline Zig expression. Tracked escape hatch for expression-level Zig code.
-  #
-  # WARNING: InlineZig BYPASSES ownership verification unless stdlib_def is set.
-  # The MIR checker cannot see inside inline Zig expressions. Any function call
-  # that allocates, deallocates, or transfers ownership is INVISIBLE to the
-  # checker unless the stdlib_def field declares it.
-  #
-  # SAFETY RULES:
-  #   - NEVER call a function that allocates (append, getOrPut, dupe, concat)
-  #     without setting stdlib_def = { allocates: true }.
-  #   - NEVER call a function that frees memory without a corresponding
-  #     MIR::Cleanup marker outside the InlineZig.
-  #   - NEVER embed multi-statement code -- InlineZig is for expressions only.
-  #     Statement-level opaque Zig is not a valid MIR surface.
-  #   - All CheatLib.* calls MUST go through BUILTIN_OPS or STD_LIB registries,
-  #     not be emitted as raw InlineZig strings.
-  #   - Pure expressions (casts, ranges, field access, Zig builtins) are safe
-  #     without stdlib_def.
-  #
-  # stdlib_def: hash from BUILTIN_OPS/STD_LIB with ownership metadata
-  #   { allocates: true }  -- call allocates; checker uses for HPT_LEAK
-  #   { borrows: :all }    -- call borrows all args; no ownership transfer
-  #   nil = unaudited or pure expression (safe if no allocation/deallocation)
-  # ownership_contract: MIR::OwnershipContract. Empty means this node has no
-  # ownership effects; consuming stdlib calls must use a non-empty contract.
-  #
-  # allocs: resolved allocator symbols for placeholders left in code.
-  #   { key_alloc: :heap, val_alloc: :frame, alloc: :heap }
-  #   Emitter substitutes {key_alloc} -> "rt.heapAlloc()" etc.
-  #   Checker inspects symbols directly (same as DupeSlice.alloc, etc.)
-  #   nil = no allocator placeholders (pure expression).
-  #
-  # target_var: CLEAR variable name of the container being operated on.
-  #   Used by the checker to cross-reference with AllocMark for consistency.
-  #   nil = no target (intrinsic call, not a container operation).
-  InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def, :allocs, :target_var) do
+  class RegistryCallArg < T::Struct
+    const :expr, Emittable
+    const :coerce_type, T.nilable(Symbol), default: nil
+  end
+
+  class RegistryCall < T::Struct
     extend T::Sig
+
     include Expr
 
-    sig { returns(T.nilable(Type)) }
-    def result_type
-      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
-      @result_type
-    end
-    sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
-    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
-    sig { returns(T.nilable(T::Boolean)) }
-    def result_ownership_bearing
-      @result_ownership_bearing = T.let(nil, T.nilable(T::Boolean)) unless defined?(@result_ownership_bearing)
-      @result_ownership_bearing
-    end
-    sig { params(value: T::Boolean).returns(T::Boolean) }
-    def result_ownership_bearing=(value)
-      @result_ownership_bearing = T.let(value, T.nilable(T::Boolean))
-      value
-    end
-    sig { returns(T::Boolean) }
-    def opaque_ownership_operations
-      @audit_metadata.opaque_ownership_operations
-    end
-    sig { void }
-    def mark_opaque_ownership_operations!
-      @audit_metadata.opaque_ownership_operations = true
-      nil
-    end
-    sig { returns(T::Array[String]) }
-    def copied_consumed_bindings
-      @copied_consumed_bindings
-    end
-    sig { params(name: String).void }
-    def mark_copied_consumed_binding!(name)
-      normalized = name.to_s
-      copied_consumed_bindings << normalized unless normalized.empty? || copied_consumed_bindings.include?(normalized)
-      nil
+    const :entry, FunctionSignature
+    const :args, T::Array[RegistryCallArg]
+    const :reason, String
+    const :ownership_contract, OwnershipContract, default: OwnershipContract.empty
+    prop :allocs, T.nilable(InlineAllocMetadata), default: nil
+    prop :target_var, T.nilable(String), default: nil
+    const :result_type, T.nilable(Type), default: nil
+    const :result_ownership_bearing, T.nilable(T::Boolean), default: nil
+    const :key_type, T.nilable(Type), default: nil
+    const :value_type, T.nilable(Type), default: nil
+    const :suppress_try, T::Boolean, default: false
+
+    sig { returns(FunctionSignature) }
+    def stdlib_def
+      entry
     end
 
-    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(Object), allocs: T.nilable(Object), target_var: T.nilable(String)).void }
-    def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
-      super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
-      @audit_metadata = T.let(InlineZigAuditMetadata.new(opaque_ownership_operations: false), InlineZigAuditMetadata)
-      @copied_consumed_bindings = T.let([], T::Array[String])
-    end
-
-    sig { params(contract: OwnershipContract).returns(OwnershipContract) }
-    def ownership_contract=(contract)
-      self[:ownership_contract] = contract
-    end
-
-    sig { params(allocs: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
-    def allocs=(allocs)
-      normalized = InlineAllocMetadata.from(allocs)
-      self[:allocs] = normalized
-      normalized
-    end
-
-    sig { params(key: T.any(Symbol, Integer), value: Object).returns(Object) }
-    def []=(key, value)
-      validate_ownership_contract!(value) if key == :ownership_contract || key == 2
-      value = InlineAllocMetadata.from(value) if key == :allocs || key == 4
-      super
-    end
-
-    sig { returns(OwnershipEffect) }
-    def ownership_effect
-      return OwnershipEffect.none unless stdlib_def
-
-      result_owns = result_ownership_bearing
-      heap_return = stdlib_def.heap_return_alloc? == true
-      alloc = if heap_return
-        :heap
-      elsif allocs.is_a?(InlineAllocMetadata)
-        allocs.single_alloc
-      else
-        nil
-      end
-      fixed_void = !!(stdlib_def.fixed_return? == true &&
-                      stdlib_def.return_type.void? &&
-                      !has_alloc_metadata?)
-      OwnershipEffect.from_callable_facts(
-        emits_allocating: stdlib_def.emits_allocating? == true,
-        heap_return_alloc: heap_return,
-        fixed_void_without_alloc_metadata: fixed_void,
-        mutates_receiver_without_heap_return: stdlib_def.mutates_receiver? && !heap_return,
-        result_owns: result_owns,
-        result_type: result_type,
-        alloc: alloc,
-        target_var: target_var
-      )
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      children = T.let([], T::Array[Object])
+      args.each { |arg| children << T.cast(arg.expr, Object) }
+      compact_child_exprs(children)
     end
 
     sig { returns(T::Boolean) }
     def has_alloc_metadata?
-      allocs.is_a?(InlineAllocMetadata) && !allocs.empty?
+      metadata = allocs
+      metadata.is_a?(InlineAllocMetadata) && !metadata.empty?
     end
 
     sig { returns(T::Boolean) }
     def mutating_receiver_allocator_op?
-      has_alloc_metadata? && stdlib_def&.mutates_receiver?
+      has_alloc_metadata? && entry.mutates_receiver?
     end
 
     sig { returns(T::Boolean) }
     def assignable_allocating_result?
-      stdlib_def&.emits_allocating? && !stdlib_def&.mutates_receiver?
+      entry.emits_allocating? && !entry.mutates_receiver?
     end
 
     sig { returns(OwnershipContract) }
@@ -3781,68 +4395,190 @@ module MIR
       ownership_contract
     end
 
-    sig { returns(InlineZig) }
-    def without_try
-      out = T.cast(
-        T.unsafe(self.class).new(code.delete_prefix("try "), reason, ownership_contract, stdlib_def, allocs, target_var),
-        InlineZig,
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      heap_return = entry.heap_return_alloc? == true
+      metadata = allocs
+      alloc = if heap_return
+        :heap
+      elsif metadata.is_a?(InlineAllocMetadata)
+        metadata.single_alloc
+      else
+        nil
+      end
+      fixed_void = !!(entry.fixed_return? == true &&
+                      entry.return_type.void? &&
+                      !has_alloc_metadata?)
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: entry.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: fixed_void,
+        mutates_receiver_without_heap_return: entry.mutates_receiver? && !heap_return,
+        result_owns: result_ownership_bearing,
+        result_type: result_type,
+        alloc: alloc,
+        target_var: target_var
       )
-      owns = result_ownership_bearing
-      out.result_ownership_bearing = owns unless owns.nil?
-      out.result_type = Type.new(result_type) if result_type
-      out.mark_opaque_ownership_operations! if opaque_ownership_operations
-      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
-      out
     end
 
-    private
-
-    sig { params(value: Object).void }
-    def validate_ownership_contract!(value)
-      return if value.is_a?(OwnershipContract)
-
-      raise TypeError, "ownership_contract must be MIR::OwnershipContract"
+    sig { returns(RegistryCall) }
+    def without_try
+      RegistryCall.new(
+        entry: entry,
+        args: args,
+        reason: reason,
+        ownership_contract: ownership_contract,
+        allocs: allocs,
+        target_var: target_var,
+        result_type: result_type,
+        result_ownership_bearing: result_ownership_bearing,
+        key_type: key_type,
+        value_type: value_type,
+        suppress_try: true,
+      )
     end
   end
 
-  # Registry-backed Zig template with structured MIR children. This is the
-  # production replacement for creating ad hoc InlineZig nodes in lowerers:
-  # the Zig text comes from an audited template, while args remain traversable.
-  class ZigTemplate < InlineZig
+  class IndexedStore < T::Struct
     extend T::Sig
-    extend T::Generic
 
-    Elem = type_member { { fixed: Object } }
+    include Expr
 
-    sig { returns(ZigTemplateArgs) }
-    attr_reader :args
+    const :target, Emittable
+    const :index, Emittable
+    const :value, Emittable
+    const :entry, FunctionSignature
+    const :template_kind, Symbol
+    const :map_kind, Symbol
+    const :ownership_contract, OwnershipContract, default: OwnershipContract.empty
+    const :allocs, InlineAllocMetadata, default: InlineAllocMetadata.new
+    const :target_var, T.nilable(String), default: nil
+    const :key_type, T.nilable(Type), default: nil
+    const :value_type, T.nilable(Type), default: nil
 
-    sig { params(code: String, args: ZigTemplateArgs, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.nilable(FunctionSignature), allocs: T.nilable(InlineAllocMetadata), target_var: T.nilable(String)).void }
-    def initialize(code, args, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
-      @args = T.let(args, ZigTemplateArgs)
-      super(code, reason, ownership_contract, stdlib_def, allocs, target_var)
+    sig { returns(FunctionSignature) }
+    def stdlib_def
+      entry
     end
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs
-      template_args = args
-      values = template_args.is_a?(Hash) ? template_args.values : template_args
-      compact_child_exprs(T.cast(values, T::Array[Object]))
+      children = T.let([], T::Array[Object])
+      children << T.cast(target, Object)
+      children << T.cast(index, Object)
+      children << T.cast(value, Object)
+      compact_child_exprs(children)
     end
 
-    sig { returns(ZigTemplate) }
-    def without_try
-      out = ZigTemplate.new(code.delete_prefix("try "), args, reason, ownership_contract, stdlib_def, allocs, target_var)
-      owns = result_ownership_bearing
-      out.result_ownership_bearing = owns unless owns.nil?
-      out.result_type = Type.new(result_type) if result_type
-      out.mark_opaque_ownership_operations! if opaque_ownership_operations
-      copied_consumed_bindings.each { |name| out.mark_copied_consumed_binding!(name) }
-      out
+    sig { returns(T::Boolean) }
+    def has_alloc_metadata?
+      !allocs.empty?
+    end
+
+    sig { returns(T::Boolean) }
+    def mutating_receiver_allocator_op?
+      has_alloc_metadata? && entry.mutates_receiver?
+    end
+
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      ownership_contract
+    end
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      heap_return = entry.heap_return_alloc? == true
+      fixed_void = !!(entry.fixed_return? == true &&
+                      entry.return_type.void? &&
+                      !has_alloc_metadata?)
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: entry.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: fixed_void,
+        mutates_receiver_without_heap_return: entry.mutates_receiver? && !heap_return,
+        result_owns: nil,
+        result_type: entry.return_type,
+        alloc: heap_return ? :heap : allocs.single_alloc,
+        target_var: target_var
+      )
     end
   end
 
-  # Inline bytecode. Sibling to InlineZig, consumed only by bc_emitter (the
+  class ExternTrampolineArg < T::Struct
+    const :expr, Emittable
+    const :field_type, T.nilable(Type), default: nil
+  end
+
+  class ExternTrampoline < T::Struct
+    extend T::Sig
+
+    include Expr
+
+    const :id, Integer
+    const :callee_name, String
+    const :module_alias, T.nilable(String), default: nil
+    const :method_name, T.nilable(String), default: nil
+    const :receiver, T.nilable(Emittable), default: nil
+    const :comptime_args, T::Array[Emittable], factory: -> { [] }
+    const :runtime_args, T::Array[ExternTrampolineArg], factory: -> { [] }
+    const :alloc_kind, T.nilable(Symbol), default: nil
+    const :return_type, Type
+    const :stdlib_def, FunctionSignature
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      children = T.let([], T::Array[Object])
+      current_receiver = receiver
+      children << T.cast(current_receiver, Object) if current_receiver
+      comptime_args.each { |arg| children << T.cast(arg, Object) }
+      runtime_args.each { |arg| children << T.cast(arg.expr, Object) }
+      compact_child_exprs(children)
+    end
+
+	    sig { returns(OwnershipEffect) }
+	    def ownership_effect
+	      heap_return = stdlib_def.heap_return_alloc? == true
+	      actual_return = return_type.success_type || return_type
+	      OwnershipEffect.from_callable_facts(
+	        emits_allocating: stdlib_def.emits_allocating? == true,
+	        heap_return_alloc: heap_return,
+	        fixed_void_without_alloc_metadata: stdlib_def.fixed_return? && actual_return.void?,
+	        mutates_receiver_without_heap_return: stdlib_def.mutates_receiver? && !heap_return,
+	        result_owns: nil,
+	        result_type: return_type,
+        alloc: alloc_kind,
+        target_var: nil
+      )
+    end
+  end
+
+  class ObservableConsumerSpawn < T::Struct
+    extend T::Sig
+
+    include Expr
+
+    const :id, Integer
+    const :acc_name, String
+    const :source_name, String
+    const :acc_type, Type
+    const :runtime_name, String
+    const :task_config_variant, String
+    const :stdlib_def, FunctionSignature
+    const :ownership_contract, OwnershipContract
+    prop :body, T::Array[Emittable]
+
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      ownership_contract
+    end
+
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      [body_slot(:body, body, ->(new_body) { self.body = new_body })]
+    end
+  end
+
+  # Inline bytecode. Consumed only by bc_emitter (the
   # VM backend). Emitted by MIR lowering when target == :bc AND the stdlib
   # registry entry opts into bc (entry[:bc] == true). Carries the op symbol
   # (same key used in BUILTIN_OPS) + arg expressions.
@@ -3905,36 +4641,8 @@ module MIR
     def child_exprs = compact_child_exprs([message])
   end
 
-  # Raw bytecode. Bytecode-template carrier for the :bc target. Nothing in
-  # mir_lowering emits this yet — Phase 0 scaffolding only (see
-  # examples/minivm/MIR_MIGRATION.md).
-  #
-  # template: Array of Symbol | String | Array. bc_emitter walks the
-  #   template: a Symbol is an opcode name (emit_op(OPCODE)), a String
-  #   is a placeholder like "{0}" that substitutes with the compiled
-  #   value of args[0], an Array is [opcode_symbol, *inline_args] for
-  #   opcodes that take immediate args (e.g. [:NATIVE_CALL, :list_push, 2]).
-  # args:     Array<MIR::Expr> — the argument expressions (unlowered).
-  # stdlib_def: the registry hash the template came from (ownership
-  #   semantics so the checker can reason about it).
-  #
-  # The checker cannot see inside the template. When this is used, every
-  # template should come from a registry entry whose ownership effects are
-  # declared in stdlib_def, making INV-5 enforceable uniformly.
-  RawBc = Struct.new(:template, :args, :stdlib_def) do
-    extend T::Sig
-    include Stmt
-    sig { returns(T::Boolean) }
-    def expr?; true; end  # can appear in expression position too
-    sig { returns(T::Array[Emittable]) }
-    def child_exprs = compact_child_exprs(args)
-  end
-
   # Sharded HashMap put / get -- structural representation of a write/read
-  # against a (possibly sharded, possibly Arc-wrapped) HashMap. Replaces
-  # the InlineZig template substitution path so the checker has visibility
-  # into key allocation, value transfer, and shard-direct vs routed
-  # dispatch.
+  # against a (possibly sharded, possibly Arc-wrapped) HashMap.
   #
   # Fields:
   #   target:      MIR node for the container being read/written.
@@ -3953,9 +4661,9 @@ module MIR
   #                bc_op). The Zig emitter reads this to pick the
   #                template; the checker reads it to validate
   #                ownership effects.
-  #   key_zig:     Optional Zig type string for numeric_map key (for
-  #                CheatLib.numericMapGet template). Set when relevant.
-  #   val_zig:     Same, for value type.
+  #   key_type:    Optional numeric-map key Type. The emitter renders it into
+  #                CheatLib.numericMap* templates.
+  #   value_type:  Same, for value type.
   # resolved_allocs: InlineAllocMetadata of allocator placeholder name
   #   (:alloc, :key_alloc, :val_alloc, :shard_alloc) to a resolved allocator
   #   symbol (:heap | :frame). The lowering pre-resolves :receiver_storage /
@@ -3966,30 +4674,56 @@ module MIR
   #   pick the same template without re-running the lowering's
   #   shard-context inspection.
   ShardedMapPut = Struct.new(:target, :key, :value, :shard_idx, :shard_key,
-                              :map_kind, :stdlib_def, :key_zig, :val_zig,
-                              :resolved_allocs, :template_kind) do
+                              :map_kind, :stdlib_def, :key_type, :value_type,
+                              :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: T.untyped, key: T.untyped, value: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_zig: T.untyped, val_zig: T.untyped, resolved_allocs: T.untyped, template_kind: T.untyped).void }
-    def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_zig, val_zig, resolved_allocs, template_kind)
-      super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_zig, val_zig,
-        InlineAllocMetadata.from(resolved_allocs), template_kind)
+    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol, target_var: T.nilable(String)).void }
+    def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
+      super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
+        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind, target_var)
     end
     sig { returns(T::Boolean) }
     def expr?; true; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key, value])
+    sig { returns(T::Boolean) }
+    def has_alloc_metadata?
+      !resolved_allocs.empty?
+    end
+    sig { returns(T::Boolean) }
+    def mutating_receiver_allocator_op?
+      has_alloc_metadata?
+    end
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      OwnershipContract.empty
+    end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      heap_return = stdlib_def.heap_return_alloc? == true
+      OwnershipEffect.from_callable_facts(
+        emits_allocating: stdlib_def.emits_allocating? == true,
+        heap_return_alloc: heap_return,
+        fixed_void_without_alloc_metadata: !!(stdlib_def.fixed_return? && stdlib_def.return_type.void? && !has_alloc_metadata?),
+        mutates_receiver_without_heap_return: mutating_receiver_allocator_op? && !heap_return,
+        result_owns: nil,
+        result_type: stdlib_def.return_type,
+        alloc: heap_return ? :heap : resolved_allocs.single_alloc,
+        target_var: nil,
+      )
+    end
   end
 
   ShardedMapGet = Struct.new(:target, :key, :shard_idx, :shard_key,
-                              :map_kind, :stdlib_def, :key_zig, :val_zig,
+                              :map_kind, :stdlib_def, :key_type, :value_type,
                               :resolved_allocs, :template_kind) do
     extend T::Sig
     include Expr
-    sig { params(target: T.untyped, key: T.untyped, shard_idx: T.untyped, shard_key: T.untyped, map_kind: T.untyped, stdlib_def: T.untyped, key_zig: T.untyped, val_zig: T.untyped, resolved_allocs: T.untyped, template_kind: T.untyped).void }
-    def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_zig, val_zig, resolved_allocs, template_kind)
-      super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_zig, val_zig,
-        InlineAllocMetadata.from(resolved_allocs), template_kind)
+    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol).void }
+    def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
+      super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
+        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind)
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key])
@@ -4015,7 +4749,7 @@ module MIR
       T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
     end
   end
-  [InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
+  [InlineBc, ShardedMapPut, ShardedMapGet].each do |k|
     k.prepend(StdlibDefFsCoercion)
   end
 
@@ -4036,10 +4770,10 @@ module MIR
     AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
     ReassignMark, FieldCleanupMark, ReassignWithCleanup,
     *LEGACY_OWNERSHIP_NODE_TYPES,
-    ReturnMark, DiscardOwned, InlineZig, ZigTemplate,
+    ReturnMark, DiscardOwned, RegistryCall, IndexedStore, ExternTrampoline, ObservableConsumerSpawn,
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
-    DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
+    DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease,
     RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
     NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,

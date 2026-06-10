@@ -11,6 +11,12 @@ module Annotator
       T.any(AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef)
     end
 
+    class ErrorTypeRegistration < T::Struct
+      const :kind, Symbol
+      const :type_name, String
+      const :token, Lexer::Token
+    end
+
     class DeclarationIndex < T::Struct
       const :imports, T::Array[AST::RequireNode]
       const :type_declarations, T::Array[TypeDeclaration]
@@ -18,6 +24,7 @@ module Annotator
       const :extern_function_declarations, T::Array[AST::ExternFnDecl]
       const :union_method_declarations, T::Array[AST::UnionDef]
       const :body_statements, T::Array[AST::Locatable]
+      const :error_type_registrations, T::Array[ErrorTypeRegistration]
     end
 
     class DeclarationIndexer
@@ -31,6 +38,7 @@ module Annotator
         extern_function_declarations = T.let([], T::Array[AST::ExternFnDecl])
         union_method_declarations = T.let([], T::Array[AST::UnionDef])
         body_statements = T.let([], T::Array[AST::Locatable])
+        error_type_registrations = collect_error_type_registrations(program)
 
         program.statements.each do |stmt|
           case stmt
@@ -57,7 +65,8 @@ module Annotator
           function_declarations: function_declarations,
           extern_function_declarations: extern_function_declarations,
           union_method_declarations: union_method_declarations,
-          body_statements: body_statements
+          body_statements: body_statements,
+          error_type_registrations: error_type_registrations
         )
       end
 
@@ -67,6 +76,27 @@ module Annotator
         !methods.nil? && !methods.empty?
       end
       private_class_method :union_methods?
+
+      sig { params(program: AST::Program).returns(T::Array[ErrorTypeRegistration]) }
+      def self.collect_error_type_registrations(program)
+        registrations = T.let([], T::Array[ErrorTypeRegistration])
+        AST.each_locatable(program, descend_functions: true) do |node|
+          case node
+          when AST::Raise, AST::OrExit
+            kind = node.kind
+            type_name = node.error_name
+            next unless kind && type_name
+
+            registrations << ErrorTypeRegistration.new(
+              kind: kind,
+              type_name: type_name,
+              token: node.token
+            )
+          end
+        end
+        registrations
+      end
+      private_class_method :collect_error_type_registrations
     end
   end
 end

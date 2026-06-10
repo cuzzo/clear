@@ -19,10 +19,9 @@ module Annotator
         declarations.function_declarations.each { |node| register_function_signature(node) }
         declarations.extern_function_declarations.each { |node| register_extern_function_signature(node) }
 
-        synthetic_fns = synthetic_function_definitions
-        synthetic_fns.clear
+        clear_synthetic_function_definitions!
         declarations.union_method_declarations.each { |node| validate_union_methods!(node) }
-        synthetic_fns.each { |node| register_function_signature(node) }
+        synthetic_function_definitions.each { |node| register_function_signature(node) }
       end
 
       sig { params(node: AST::FunctionDef).returns(SymbolEntry) }

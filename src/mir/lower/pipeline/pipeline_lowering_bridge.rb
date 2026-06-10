@@ -61,11 +61,6 @@ class PipelineLoweringBridge
     @lowering.next_pipeline_observable_id
   end
 
-  sig { returns(String) }
-  def default_task_config_zig
-    @lowering.task_config_zig(nil, nil)
-  end
-
   sig { params(size_name: T.nilable(Symbol)).returns(String) }
   def task_config_variant(size_name)
     @lowering.task_config_variant(size_name, nil)
@@ -86,24 +81,9 @@ class PipelineLoweringBridge
     @lowering.lower_body(nodes)
   end
 
-  sig { params(node: MIR::Emittable).returns(T.nilable(String)) }
-  def emit_expr(node)
-    @lowering.emit_expr(node)
-  end
-
   sig { params(node: MIR::Node).returns(T.nilable(String)) }
   def emit_mir(node)
     @lowering.runtime_state.emitter!.emit(node)
-  end
-
-  sig { returns(String) }
-  def emitter_rt_name
-    @lowering.runtime_state.emitter!.rt_name
-  end
-
-  sig { params(rt_name: String).void }
-  def emitter_rt_name=(rt_name)
-    @lowering.runtime_state.emitter!.rt_name = rt_name
   end
 
   sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(MIR::Node) }

@@ -6,6 +6,7 @@ require_relative "../src/annotator"
 require_relative "../src/mir/cleanup_classifier"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
+require_relative "../src/mir/mir_pass"
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.
@@ -32,6 +33,19 @@ RSpec.describe CleanupClassifier do
     raise "Function '#{fn_name}' not found" unless fn_node
 
     CleanupClassifier.classify(
+      fn_node,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
+    )
+  end
+
+  def cleanup_plan_for(src, fn_name)
+    result = compile_mir_frontend(src)
+    ast = result.ast
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
+
+    CleanupClassifier.classify_plan(
       fn_node,
       schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
@@ -65,6 +79,144 @@ RSpec.describe CleanupClassifier do
     node = OpenStruct.new(value: value)
     node.define_singleton_method(:heap_storage?) { true }
     node
+  end
+
+  def var_decl(name:, type:, value:, mutable: false, storage: :heap)
+    node = AST::VarDecl.new(tok, name, type, value, mutable)
+    node.full_type = type
+    node.symbol = SymbolEntry.new(reg: name, type: type, mutable: mutable, storage: storage)
+    node
+  end
+
+  describe "binding cleanup facts" do
+    it "builds cleanup classification plans from legacy binding maps" do
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+
+      plan = CleanupClassifier::CleanupClassificationPlan.from_bindings("legacy", "item" => entry)
+      empty_plan = CleanupClassifier::CleanupClassificationPlan.from_bindings("empty", {})
+
+      expect(plan.function_name).to eq("legacy")
+      expect(plan.facts.entry_for("item")).to eq(entry)
+      expect(plan.empty?).to be(false)
+      expect(empty_plan.empty?).to be(true)
+    end
+
+    it "returns the non-nil cleanup sentinel for missing and inactive facts" do
+      inactive = CleanupEntry.no_cleanup(alloc: :frame, scope: :function)
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("inactive" => inactive)
+
+      expect(facts.entry_for("missing")).to equal(CleanupEntry::NONE)
+      expect(facts.live_entry_for("missing")).to equal(CleanupEntry::NONE)
+      expect(facts.entry_for(:inactive)).to eq(inactive)
+      expect(facts.live_entry_for(:inactive)).to equal(CleanupEntry::NONE)
+    end
+
+    it "falls back from binding-aware places to path facts without nil guards" do
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+      node = var_decl(name: "item", type: Type.new(:String), value: nil)
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("item" => entry)
+
+      expect(facts.entry_for_node("item", node)).to eq(entry)
+      expect(facts.live_entry_for_node("item", node)).to eq(entry)
+      expect(facts.live_entry_for_node("other", node)).to equal(CleanupEntry::NONE)
+    end
+
+    it "updates cleanup lifecycle through typed mutators" do
+      entry = CleanupEntry.no_cleanup(alloc: :frame, scope: :function)
+
+      entry.promote_to_cleanup!(kind: :uniform, alloc: :heap, has_moved_guard: false)
+      expect(entry.needs_cleanup?).to be(true)
+      expect(entry.kind).to eq(:uniform)
+      expect(entry.alloc).to eq(:heap)
+      expect(entry.scope).to eq(:heap)
+      expect(entry.has_moved_guard?).to be(false)
+
+      entry.mark_moved_guard!
+      expect(entry.has_moved_guard?).to be(true)
+
+      entry.set_alloc!(:frame)
+      entry.set_cleanup_scope!(:match_branch)
+      expect(entry.alloc).to eq(:frame)
+      expect(entry.scope).to eq(:match_branch)
+
+      entry.suppress_cleanup!
+      expect(entry.needs_cleanup?).to be(false)
+      expect(entry.has_moved_guard?).to be(false)
+    end
+
+    it "returns the non-nil cleanup sentinel for non-binding MIRPass lookup nodes" do
+      pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings({})
+      literal = AST::Literal.new(tok, :INT64, 1, :stack)
+
+      expect(pass.send(:cleanup_entry_for_binding_node, literal, facts)).to equal(CleanupEntry::NONE)
+    end
+
+    it "freezes cleanup facts under stable binding-aware places" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          RETURN;
+        END
+      CLEAR
+      yielded = []
+
+      plan.facts.each_entry { |place, entry| yielded << [place, entry] }
+
+      place, entry = yielded.first
+      expect(place.path).to eq("a")
+      expect(place.binding_identity).not_to be_nil
+      expect(entry).to eq(plan.facts.entry_for("a"))
+      expect(plan.bindings.keys).to include("a")
+    end
+
+    it "snapshots symbol and node provenance once for classification" do
+      node = var_decl(
+        name: "name",
+        type: Type.new(:String),
+        value: AST::Literal.new(tok, :STRING, "borrowed", :rodata),
+        storage: :borrow,
+      )
+      node.resource_close_plan = Schemas::ResourceClosePlan.method("close")
+
+      facts = CleanupClassifier.send(:binding_cleanup_facts, node)
+
+      expect(facts.borrow_provenance).to be(true)
+      expect(facts.rodata_provenance).to be(false)
+      expect(facts.heap_storage).to be(false)
+      expect(facts.empty_initializer).to be(false)
+      expect(facts.mutable_binding_mutated).to be(false)
+      expect(facts.resource_close_plan&.actions&.map(&:name)).to eq(["close"])
+    end
+
+    it "keeps mutated mutable optional nil bindings cleanup-eligible" do
+      node = var_decl(
+        name: "maybe",
+        type: Type.optional_of(:String),
+        value: AST::Literal.new(tok, :NIL, nil),
+        mutable: true,
+      )
+      node.var_mutated = true
+      facts = CleanupClassifier.send(:binding_cleanup_facts, node)
+
+      expect(facts.empty_initializer).to be(true)
+      expect(facts.mutable_binding_mutated).to be(true)
+      expect(CleanupClassifier.send(:classify_binding, Type.optional_of(:String), node, schema_lookup_for))
+        .to be_present
+    end
+
+    it "marks nested moved source identifiers without a late locatable walk" do
+      moved_arg = cleanup_identifier("owned", moved: true)
+      call = AST::FuncCall.new(tok, "consume", [moved_arg])
+      bindings = {
+        "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      }
+
+      CleanupClassifier.send(:walk_moved_source_guards, [call], bindings)
+
+      expect(bindings.fetch("owned").has_moved_guard?).to be(true)
+    end
   end
 
   # =========================================================================
@@ -292,7 +444,11 @@ RSpec.describe CleanupClassifier do
       auto_assign = AST::Assignment.new(tok, auto_field, AST::Literal.new(tok, :STRING, "next", :rodata))
       auto_assign.auto_lock = true
 
-      CleanupClassifier.stamp_field_pre_cleanups!([auto_assign], {}, schema_lookup: schema_lookup_for)
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [auto_assign],
+        CleanupClassifier::FrozenCleanupFacts.from_bindings({}),
+        schema_lookup: schema_lookup_for,
+      )
       expect(auto_assign.field_pre_cleanup).to eq(:heap)
 
       heap_field = AST::GetField.new(tok, cleanup_identifier("box", storage: :heap), "label")
@@ -302,7 +458,11 @@ RSpec.describe CleanupClassifier do
         "box" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
       }
 
-      CleanupClassifier.stamp_field_pre_cleanups!([heap_assign], bindings, schema_lookup: schema_lookup_for)
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [heap_assign],
+        CleanupClassifier::FrozenCleanupFacts.from_bindings(bindings),
+        schema_lookup: schema_lookup_for,
+      )
       expect(heap_assign.field_pre_cleanup).to eq(:heap)
     end
 
@@ -314,14 +474,90 @@ RSpec.describe CleanupClassifier do
       moved_string = CleanupClassifier.send(:transferred_payload_entry, Type.new(:String), schema_lookup_for)
       expect(moved_string[:kind]).to eq(:heap_string)
 
-      resource_schema = Schemas::ResourceSchema.new(close_zig: "{0}.close()")
+      resource_schema = Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close"))
       resource = CleanupClassifier.send(
         :takes_param_base_entry,
         Type.new(:Fileish),
         schema_lookup_for(Fileish: resource_schema),
       )
       expect(resource[:kind]).to eq(:resource)
-      expect(resource[:resource_close_zig]).to eq("{0}.close()")
+      expect(resource.resource_close_plan&.actions&.map(&:name)).to eq(["close"])
+    end
+
+    it "keeps resource close plans structural through field composition" do
+      function_plan = Schemas::ResourceClosePlan.function("closeHandle", runtime_heap_alloc_args: 2)
+      nested = function_plan.for_field("handle")
+
+      expect(function_plan.empty?).to eq(false)
+      expect(Schemas::ResourceClosePlan.composite([]).empty?).to eq(true)
+      expect(nested.actions.first.call_kind).to eq(Schemas::ResourceCloseCallKind::Function)
+      expect(nested.actions.first.field_path).to eq(["handle"])
+      expect(nested.actions.first.runtime_heap_alloc_args).to eq(2)
+
+      resource_schema = Schemas::ResourceSchema.new(
+        close_plan: function_plan,
+        fields: {
+          raw: :Int64,
+          existing: AST::StructField.new(type: Type.new(:Bool)),
+          meta: { type: :String, default: AST::Literal.new(tok, :STRING, "x", :rodata), borrowed: true },
+        },
+        type_params: [:T],
+        extern_module: "native",
+        as_type: "Native(T)",
+        static_methods: {
+          "open" => { args: [:String], return: :Handle, zig: "open({0})", can_fail: true },
+        },
+      )
+
+      expect(resource_schema.fields.fetch("raw").type.resolved).to eq(:Int64)
+      expect(resource_schema.fields.fetch("existing").type.resolved).to eq(:Bool)
+      expect(resource_schema.fields.fetch("meta").borrowed).to eq(true)
+      expect(resource_schema.type_params).to eq([:T])
+      expect(resource_schema.static_methods.fetch("open").fetch(:can_fail)).to eq(true)
+
+      direct = Type.new(:Handle).resolve_resource_close(schema_lookup_for(Handle: resource_schema))
+      expect(direct.first).to eq(true)
+      expect(direct.last&.actions&.first&.name).to eq("closeHandle")
+
+      box_schema = Schemas::StructSchema.new(fields: {
+        "handle" => AST::StructField.new(type: Type.new(:Handle)),
+      })
+      composed = Type.new(:Box).resolve_resource_close(schema_lookup_for(Box: box_schema, Handle: resource_schema))
+      expect(composed.first).to eq(true)
+      action = composed.last&.actions&.first
+      expect(action&.name).to eq("closeHandle")
+      expect(action&.field_path).to eq(["handle"])
+
+      resource_decl = var_decl(
+        name: "handle",
+        type: Type.new(:Handle),
+        value: nil,
+        storage: :heap,
+      )
+      resource_entry = CleanupClassifier.send(
+        :classify_binding,
+        Type.new(:Handle),
+        resource_decl,
+        schema_lookup_for(Handle: resource_schema),
+      )
+      expect(resource_entry.kind).to eq(:resource)
+      expect(resource_entry.resource_close_plan&.actions&.first&.name).to eq("closeHandle")
+
+      planned_decl = var_decl(
+        name: "late",
+        type: Type.new(:LateBound),
+        value: nil,
+        storage: :heap,
+      )
+      planned_decl.resource_close_plan = Schemas::ResourceClosePlan.method("closeLate")
+      planned_entry = CleanupClassifier.send(
+        :classify_binding,
+        Type.new(:LateBound),
+        planned_decl,
+        schema_lookup_for,
+      )
+      expect(planned_entry.kind).to eq(:resource)
+      expect(planned_entry.resource_close_plan&.actions&.first&.name).to eq("closeLate")
     end
 
     it "recognizes MATCH TAKES method-style variants as owned AS bindings" do

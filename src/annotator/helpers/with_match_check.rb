@@ -1,5 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../../semantic/capability_plan"
+require_relative "../../semantic/semantic_ids"
 # Validation of REQUIRES + WITH MATCH at the function level and call-site
 # family check.
 #
@@ -48,14 +50,12 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).void }
-  def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
-    return unless fn.respond_to?(:body) && fn.body
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[AST::ErrorClause])).void }
+  def self.check_function!(fn, with_blocks, error_handler, warn_handler: nil, policy_handlers: nil)
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
     param_names = fn.params.map { |p| p.name.to_s }.to_set
 
-    AST.walk_body(fn.body) do |node|
-      next unless node.is_a?(AST::WithBlock)
+    with_blocks.each do |node|
       # WITH VIEW / WITH MATERIALIZED VIEW are reads on an `@observable`
       # source, not lock acquisitions, so the LOCKED auto-shim must not fire.
       next if node.view_kind
@@ -81,7 +81,8 @@ module WithMatchCheck
       end
 
       # Rule 1: WITH-on-param ⇒ REQUIRES-on-param.
-      bound_params.each do |pname|
+      requires_bound_params = node.polymorphic ? bound_params : collect_sync_bound_param_names(node, param_names)
+      requires_bound_params.each do |pname|
         next if requires_map.key?(pname)
 
         # `WITH POLYMORPHIC` on a param without REQUIRES is universally
@@ -167,8 +168,19 @@ module WithMatchCheck
   sig { params(with_node: AST::WithBlock, param_names: T::Set[String]).returns(T::Set[String]) }
   def self.collect_bound_param_names(with_node, param_names)
     out = Set.new
-    (with_node.capabilities || []).each do |cap|
-      vn = cap[:var_node]
+    CapabilityPlan.require_for(with_node).all.each do |cap|
+      vn = cap.var_node
+      next unless vn.is_a?(AST::Identifier)
+      out << vn.name if param_names.include?(vn.name)
+    end
+    out
+  end
+
+  sig { params(with_node: AST::WithBlock, param_names: T::Set[String]).returns(T::Set[String]) }
+  def self.collect_sync_bound_param_names(with_node, param_names)
+    out = Set.new
+    CapabilityPlan.require_for(with_node).sync_constrained.each do |cap|
+      vn = cap.var_node
       next unless vn.is_a?(AST::Identifier)
       out << vn.name if param_names.include?(vn.name)
     end
@@ -225,22 +237,25 @@ module WithMatchCheck
     end
   end
 
-  # At every FuncCall in `fn`, verify each REQUIRES'd arg's binding belongs to
+  # At every call site, verify each REQUIRES'd arg's binding belongs to
   # one of the families in the callee's disjunction.
-  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).void }
-  def self.check_call_sites!(fn, sig_lookup, error_handler)
-    return unless fn.respond_to?(:body) && fn.body
+  sig { params(call_sites: T::Array[Semantic::CallSiteFact], sig_lookup: Proc, error_handler: Proc).void }
+  def self.check_call_sites!(call_sites, sig_lookup, error_handler)
+    call_sites.each do |call_site|
+      call_node = call_site.node
+      sig = FunctionSignature.unwrap(sig_lookup.call(call_site.callee_name))
+      next unless sig
 
-    # Plain-T args passed to universal-poly params must be lowered as Zig `var`
-    # so &c yields *T instead of *const T and polymorphicMutate can write back.
-    deep_funcalls(fn.body).each do |call_node|
-      sig = FunctionSignature.unwrap(sig_lookup.call(call_node.name.to_s))
-      next unless sig && sig.requires
+      requires_map = sig.requires
+
+      # Plain-T args passed to universal-poly params must be lowered as Zig
+      # `var` so &c yields *T instead of *const T and polymorphicMutate can
+      # write back.
       sig.params.each_with_index do |param, idx|
         pname = param.name.to_s
-        fams = sig.requires[pname]
+        fams = requires_map[pname]
         next unless fams && fams.empty?
-        arg = (call_node.args || [])[idx]
+        arg = call_site.args[idx]
         next unless arg.is_a?(AST::Identifier)
         sym = arg.symbol
         next unless sym
@@ -248,33 +263,26 @@ module WithMatchCheck
         next unless sym.respond_to?(:mutable) && sym.mutable
         sym.mark_poly_borrow_target!
       end
-    end
-
-    AST.walk_body(fn.body) do |node|
-      next unless node.is_a?(AST::FuncCall) && node.respond_to?(:name)
-      sig = FunctionSignature.unwrap(sig_lookup.call(node.name.to_s))
-      next unless sig
-      next unless sig.requires && !sig.requires.empty?
 
       sig.params.each_with_index do |param, idx|
         param_name = param.name.to_s
-        disjunction = sig.requires[param_name]
+        disjunction = requires_map[param_name]
         next unless disjunction && !disjunction.empty?
 
-        arg = node.args[idx]
+        arg = call_site.args[idx]
         next unless arg
 
         arg_family = family_of_arg(arg)
         if arg_family.nil?
-          error_handler.call(node,
-            "Call to '#{node.name}' requires parameter '#{param_name}' to be " \
+          error_handler.call(call_node,
+            "Call to '#{call_node.name}' requires parameter '#{param_name}' to be " \
             "bound under one of: #{disjunction.to_a.join(' | ')}. " \
             "The argument here is bound without sync, which belongs to no " \
             "family. Add a sync wrapper at the binding declaration " \
             "(e.g., '@locked' or '@shared:locked').")
         elsif !disjunction_admits?(disjunction, arg_family)
-          error_handler.call(node,
-            "Call to '#{node.name}' requires parameter '#{param_name}' to be " \
+          error_handler.call(call_node,
+            "Call to '#{call_node.name}' requires parameter '#{param_name}' to be " \
             "bound under one of: #{disjunction.to_a.join(' | ')}. " \
             "The argument here is in family #{arg_family}, which is not " \
             "accepted by this function.")
@@ -424,29 +432,4 @@ module WithMatchCheck
     handled
   end
 
-  # Iterative deep walk that returns every FuncCall in `body`, including
-  # those nested inside expressions (e.g. `tick!(c) OR EXIT`, where the
-  # FuncCall is the LHS of a BinaryOp). AST.walk_body only iterates
-  # statement-level nodes; we need the expression sub-tree too for
-  # the universal-poly auto-borrow stamp.
-  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def self.deep_funcalls(body)
-    out = []
-    stack = body.is_a?(Array) ? body.dup : [body]
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
-      out << node if node.is_a?(AST::FuncCall)
-      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
-      node.class.members.each do |m|
-        v = node[m]
-        if v.is_a?(Array)
-          v.each { |c| stack.push(c) if c.is_a?(AST::Locatable) }
-        elsif v.is_a?(AST::Locatable)
-          stack.push(v)
-        end
-      end
-    end
-    out
-  end
 end

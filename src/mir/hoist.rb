@@ -40,16 +40,44 @@ module Hoist
   extend T::Sig
   module_function
 
-  sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  class HoistCounter < T::Struct
+    extend T::Sig
+
+    prop :value, Integer, default: 0
+
+    sig { returns(String) }
+    def next_name
+      next_value = value + 1
+      self.value = next_value
+      "__hoist_#{next_value}"
+    end
+  end
+
+  class Result < T::Struct
+    extend T::Sig
+
+    const :bindings_by_function, T::Hash[String, T::Array[AST::VarDecl]]
+
+    sig { returns(T::Boolean) }
+    def empty?
+      bindings_by_function.empty?
+    end
+  end
+
+  sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).returns(Result) }
   def apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
-    ctr = T.let([0], T::Array[Integer])
+    counter = HoistCounter.new
+    bindings_by_function = T.let({}, T::Hash[String, T::Array[AST::VarDecl]])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       next if synthesized_body?(stmt)
-      hoist_body!(stmt.body, ctr, schema_lookup, return_type: stmt.return_type)
+      generated = T.let([], T::Array[AST::VarDecl])
+      hoist_body!(stmt.body, counter, schema_lookup, return_type: stmt.return_type, generated: generated)
+      bindings_by_function[stmt.name.to_s] = generated unless generated.empty?
     end
     MIRPassState.for!(ast).mark!(:hoisted)
+    Result.new(bindings_by_function: bindings_by_function)
   end
 
   # THUNK bodies are not lowered as normal statement lists. They are consumed
@@ -64,34 +92,35 @@ module Hoist
 
   # Walk a statement list. For each statement, lift the hoistable
   # sub-expressions into temp decls inserted immediately before it.
-  sig { params(body: T.untyped, ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
-  def hoist_body!(body, ctr, schema_lookup, return_type: nil)
+  sig { params(body: T::Array[AST::Node], counter: HoistCounter, schema_lookup: T.nilable(Proc), generated: T::Array[AST::VarDecl], return_type: T.nilable(Type::TypeInput)).void }
+  def hoist_body!(body, counter, schema_lookup, generated:, return_type: nil)
     return unless body.is_a?(Array)
     i = 0
     while i < body.length
-      stmt = body[i]
-      hoists = T.let([], T::Array[T.untyped])
-      collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup, return_type: return_type)
+      stmt = T.must(body[i])
+      hoists = T.let([], T::Array[AST::VarDecl])
+      collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: return_type)
       hoists.each_with_index { |decl, j| body.insert(i + j, decl) }
+      generated.concat(hoists)
       i += hoists.length
       # Recurse into nested statement bodies (control flow). Nested
       # functions / lambdas / BG blocks are separate frames -- each is
       # reached as its own AST::FunctionDef or handled separately.
-      child_bodies(stmt).each { |b| hoist_body!(b, ctr, schema_lookup, return_type: return_type) }
+      child_bodies(stmt).each { |b| hoist_body!(b, counter, schema_lookup, return_type: return_type, generated: generated) }
       i += 1
     end
+    nil
   end
 
   sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
   def child_bodies(stmt)
     case stmt
-    when AST::ForRange, AST::ForEach           then [stmt.body]
+    when AST::ForRange, AST::ForEach, AST::WithBlock, AST::BgBlock, AST::BgStreamBlock
+      [stmt.body]
     when AST::WhileLoop, AST::WhileBindLoop    then [stmt.do_branch]
     when AST::IfStatement                     then [stmt.then_branch, stmt.else_branch].compact
     when AST::MatchStatement                  then stmt.cases.map(&:body) + [stmt.default_case].compact
-    when AST::WithBlock                       then [stmt.body]
     when AST::DoBlock                         then stmt.branches.map(&:body)
-    when AST::BgBlock, AST::BgStreamBlock      then [stmt.body]
     else []
     end
   end
@@ -99,14 +128,14 @@ module Hoist
   # Find element-store method calls in this statement's expression tree.
   # Composite element stores are escaping positions; hoist allocating
   # argument fragments so the escape pass sees bindings.
-  sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), return_type: T.untyped).void }
-  def collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup, return_type: nil)
+  sig { params(stmt: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), return_type: T.nilable(Type::TypeInput)).void }
+  def collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: nil)
     each_call(stmt) do |call|
       next if call.is_a?(AST::MethodCall) && collection_value_store_call?(call)
       call.args.each_with_index do |arg, idx|
         next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
-        call.args[idx] = make_temp!(arg, hoists, ctr, moved: moved_arg?(arg), schema_lookup: schema_lookup)
+        call.args[idx] = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg), schema_lookup: schema_lookup)
       end
     end
 
@@ -115,9 +144,9 @@ module Hoist
       next unless composite_element_store?(call)
       call.args.each_with_index do |arg, idx|
         if concat?(arg)
-          call.args[idx] = make_temp!(arg, hoists, ctr)
+          call.args[idx] = make_temp!(arg, hoists, counter.next_name)
         else
-          hoist_concats_within!(arg, hoists, ctr)
+          hoist_concats_within!(arg, hoists, counter)
         end
       end
     end
@@ -134,24 +163,31 @@ module Hoist
         right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node!(stmt.value.right, context: "return OR right hoist")
         expected = right_type if right_type&.collection?
       end
-      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected)
+      stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup, expected_type: expected)
     when AST::YieldExpr
-      stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
+      if stmt.expr
+        stmt.expr = hoist_escape_value!(stmt.expr, hoists, counter, schema_lookup)
+      end
     when AST::Assignment
       if stmt.name.is_a?(AST::GetField)
-        stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup) if stmt.value
+        if stmt.value
+          stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup)
+        end
       end
     end
+    nil
   end
 
-  sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), expected_type: T.untyped).returns(T.untyped) }
-  def hoist_escape_value!(value, hoists, ctr, schema_lookup, expected_type: nil)
-    return value if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
-    return make_temp!(value, hoists, ctr, expected_type: expected_type) if allocating?(value, schema_lookup)
-    if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
-      hoist_concats_within!(value, hoists, ctr)
+  sig { params(value: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), expected_type: T.nilable(Type::TypeInput)).returns(AST::Node) }
+  def hoist_escape_value!(value, hoists, counter, schema_lookup, expected_type: nil)
+    return T.cast(value, AST::Node) if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
+    if allocating?(value, schema_lookup)
+      return make_temp!(value, hoists, counter.next_name, expected_type: expected_type)
     end
-    value
+    if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
+      hoist_concats_within!(value, hoists, counter)
+    end
+    T.cast(value, AST::Node)
   end
 
   # An anonymous expression that allocates a fresh heap-able value and so
@@ -220,38 +256,39 @@ module Hoist
   sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def non_body_exprs(node)
     case node
-    when AST::IfStatement                  then [node.condition]
+    when AST::IfStatement, AST::WhileLoop, AST::WhileBindLoop
+      [node.condition]
     when AST::ForRange                     then [node.start_expr, node.end_expr]
     when AST::ForEach                      then [node.collection]
-    when AST::WhileLoop, AST::WhileBindLoop then [node.condition]
     when AST::MatchStatement               then [node.expr]
     end
   end
 
   # Replace every string concat directly held by `node` (struct/union
   # field value, list element) with a hoisted temp; recurse otherwise.
-  sig { params(node: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).void }
-  def hoist_concats_within!(node, hoists, ctr)
+  sig { params(node: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter).void }
+  def hoist_concats_within!(node, hoists, counter)
     case node
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_key do |k|
         v = node.fields[k]
         if concat?(v)
-          node.fields[k] = make_temp!(v, hoists, ctr)
+          node.fields[k] = make_temp!(v, hoists, counter.next_name)
         else
-          hoist_concats_within!(v, hoists, ctr)
+          hoist_concats_within!(v, hoists, counter)
         end
       end
     when AST::ListLit
       node.items.each_index do |idx|
         v = node.items[idx]
         if concat?(v)
-          node.items[idx] = make_temp!(v, hoists, ctr)
+          node.items[idx] = make_temp!(v, hoists, counter.next_name)
         else
-          hoist_concats_within!(v, hoists, ctr)
+          hoist_concats_within!(v, hoists, counter)
         end
       end
     end
+    nil
   end
 
   # Composite element stores can own nested heap-bearing fields, so
@@ -270,11 +307,7 @@ module Hoist
   def collection_value_store_call?(call)
     sig = FunctionSignature.unwrap(call.matched_stdlib_def)
     sig ||= FunctionSignature.unwrap(call.matched_signature) if call.respond_to?(:matched_signature)
-    emit = sig&.emit
-    takes_args = emit&.takes_args
-    takes_value = (takes_args && !takes_args.empty?) ||
-      (sig ? sig.params.drop(1).any?(&:takes) : false)
-    return false unless (emit&.mutates_receiver && takes_value) ||
+    return false unless (sig&.mutates_receiver? && sig.takes_ownership?) ||
       IntrinsicRegistry.collection_value_store_method?(call.name, call.args.length)
 
     obj = call.object
@@ -291,11 +324,8 @@ module Hoist
 
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl
   # to `hoists`, and return the Identifier that replaces the concat.
-  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], moved: T::Boolean, expected_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
-  def make_temp!(concat, hoists, ctr, moved: true, expected_type: nil, schema_lookup: nil)
-    n = T.must(ctr[0]) + 1
-    ctr[0] = n
-    name = "__hoist_#{n}"
+  sig { params(concat: AST::Node, hoists: T::Array[AST::VarDecl], name: String, moved: T::Boolean, expected_type: T.nilable(Type::TypeInput), schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
+  def make_temp!(concat, hoists, name, moved: true, expected_type: nil, schema_lookup: nil)
     tok = concat.respond_to?(:token) ? concat.token : nil
     expected = Type.from_node(expected_type)
     ti = if expected && (concat.is_a?(AST::BgStreamBlock) ? expected.stream? : true)
@@ -421,7 +451,7 @@ module MIRHoistLowering
         next unless stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)
         next unless stmt.name.to_s == name
 
-        stmt.cleanup_entry[:has_moved_guard] = true
+        stmt.cleanup_entry.mark_moved_guard!
         function_state.guarded_cleanup_names[name] = true
         function_state.lowered_guarded_cleanup_names.add(name)
       end
@@ -526,9 +556,9 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mutating_receiver_allocator_op?(node)
-    return false unless node.is_a?(MIR::InlineZig)
+    return false unless node.respond_to?(:mutating_receiver_allocator_op?)
 
-    node.mutating_receiver_allocator_op? == true
+    T.unsafe(node).mutating_receiver_allocator_op? == true
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
@@ -593,9 +623,8 @@ module MIRHoistLowering
   sig { params(mir: T.untyped, ast_node: T.untyped, context: String).returns(Type) }
   def mir_alloc_mark_type_info(mir, ast_node = nil, context: "MIR allocation")
     return T.unsafe(self).alloc_mark_type_info(mir, ast_node, context) if ast_node
-    if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-      return Type.new(T.must(T.unsafe(mir).result_type))
-    end
+    explicit_type = mir_explicit_result_type(mir)
+    return explicit_type if explicit_type
 
     alloc = mir_owned_alloc(mir) || :heap
     case mir
@@ -623,15 +652,9 @@ module MIRHoistLowering
     when MIR::Cast, MIR::TryExpr
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
     when MIR::Call, MIR::MethodCall, MIR::TailCall
-      sig = mir.respond_to?(:callable_contract) ? mir.callable_contract&.signature : nil
-      raise "#{context}: allocating #{mir.class} has no callable return type" unless sig
-
-      Type.new(sig.return_type)
-    when MIR::InlineZig, MIR::InlineBc
-      sig = FunctionSignature.unwrap(mir.stdlib_def)
-      raise "#{context}: allocating #{mir.class} has no typed stdlib return" unless sig
-
-      Type.new(sig.return_type)
+      raise "#{context}: allocating #{mir.class} has no callable return type"
+    when MIR::InlineBc
+      raise "#{context}: allocating #{mir.class} has no typed stdlib return"
     when MIR::BgBlock
       raise "#{context}: allocating MIR::BgBlock has no result type"
     when MIR::Pipeline
@@ -655,6 +678,20 @@ module MIRHoistLowering
     else
       raise "#{context}: unhandled allocating MIR node #{mir.class}"
     end
+  end
+
+  sig { params(mir: MIR::Node).returns(T.nilable(Type)) }
+  def mir_explicit_result_type(mir)
+    raw_type = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
+      T.unsafe(mir).result_type
+    elsif mir.respond_to?(:return_type) && T.unsafe(mir).return_type
+      T.unsafe(mir).return_type
+    elsif mir.respond_to?(:callable_contract)
+      T.unsafe(mir).callable_contract&.signature&.return_type
+    elsif mir.is_a?(MIR::RegistryCall) || mir.is_a?(MIR::InlineBc)
+      FunctionSignature.unwrap(mir.stdlib_def)&.return_type
+    end
+    raw_type ? Type.new(raw_type) : nil
   end
 
   sig { params(mir: MIR::BlockExpr).returns(T.nilable(Type)) }
@@ -711,7 +748,7 @@ module MIRHoistLowering
     tmp_id = lowering_counters.next_tmp_id
     entry = cleanup_entry
     if entry
-      entry[:has_moved_guard] = transfer_on_success ? true : false
+      transfer_on_success ? entry.mark_moved_guard! : entry.clear_moved_guard!
     end
     MIR::BindingMaterialization.new(
       name: "__tmp_#{tmp_id}",
@@ -1004,12 +1041,7 @@ module MIRHoistLowering
         parent[member] = new_child
         refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
         return
-      elsif value.is_a?(Array)
-        if replace_mir_expr_in_value!(value, old_child, new_child)
-          refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
-          return
-        end
-      elsif value.is_a?(Hash)
+      elsif value.is_a?(Array) || value.is_a?(Hash)
         if replace_mir_expr_in_value!(value, old_child, new_child)
           refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
           return
@@ -1070,25 +1102,25 @@ module MIRHoistLowering
     return if name.empty?
 
     case expr
-    when MIR::InlineZig
-      return unless expr.has_alloc_metadata?
+    when MIR::RegistryCall
+      return unless expr.has_alloc_metadata? || MIR::OwnershipEffect.of(expr).produces_owned
       return if expr.mutating_receiver_allocator_op?
 
       expr.target_var = name
-      expr.allocs = expr.allocs.with_all(alloc) if alloc && expr.allocs
+      expr.allocs = expr.allocs&.with_all(alloc) if alloc
     else
       if alloc && MIR::OwnershipEffect.of(expr).produces_owned && expr.respond_to?(:alloc=)
         expr.alloc = alloc
       end
       expr.ownership_source_exprs.each do |child|
-        has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
+        has_alloc_metadata = child.respond_to?(:has_alloc_metadata?) && T.unsafe(child).has_alloc_metadata?
         stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)
       end
     end
     nil
   end
 
-  sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(expr: MIR::Emittable, ast_node: AST::Node).returns(MIR::Emittable) }
   def copy_container_borrow_if_needed(expr, ast_node)
     T.bind(self, MIRLowering) rescue nil
     return expr unless MIRHoistFacts.container_borrow_expr?(ast_node)
@@ -1159,7 +1191,8 @@ module MIRHoistLowering
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr, MIR::InlineZig, MIR::InlineBc, MIR::BgBlock
+    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
+         MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||
         typed_cleanup_entry_for_mir_result(mir, alloc: alloc) ||
         cleanup_entry_for_ownership_effect(mir, alloc: alloc)
@@ -1200,16 +1233,10 @@ module MIRHoistLowering
   sig { params(mir: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def typed_cleanup_entry_for_mir_result(mir, alloc: :heap)
     T.bind(self, MIRLowering) rescue nil
-    typed_result = if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-      T.unsafe(mir).result_type
-    elsif mir.respond_to?(:callable_contract)
-      T.unsafe(mir).callable_contract&.signature&.return_type
-    elsif mir.is_a?(MIR::InlineZig) || mir.is_a?(MIR::InlineBc)
-      FunctionSignature.unwrap(mir.stdlib_def)&.return_type
-    end
+    typed_result = mir_explicit_result_type(mir)
 
     if typed_result
-      ti = Type.new(T.must(typed_result))
+      ti = typed_result
       ti = ti.success_type || ti
       return heap_string_entry(alloc: alloc) if ti.string?
       return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection? ||
@@ -1240,8 +1267,8 @@ module MIRHoistLowering
     when :heap_string
       heap_string_entry(alloc: alloc)
     when :uniform
-      if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
-        typed = Type.new(T.must(T.unsafe(mir).result_type))
+      typed = mir_explicit_result_type(mir)
+      if typed
         return uniform_cleanup_entry(typed.zig_type, alloc: alloc)
       end
       typed = mir.is_a?(MIR::BlockExpr) ? block_expr_result_type(mir) : nil

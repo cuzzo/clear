@@ -138,8 +138,10 @@ module MIRLoweringFunctions
   end
 
   class CatchLoweringPlan < T::Struct
-    const :code, String
-    const :clause_bodies, T::Array[T::Array[MIR::Node]]
+    const :clauses, T::Array[MIR::CatchClause]
+    const :default_body, T::Array[MIR::Node]
+    const :default_action, MIR::CatchDefaultAction
+    const :snapshot_type, T.nilable(Type)
   end
 
   class FunctionLoweringContext < T::Struct
@@ -402,21 +404,26 @@ module MIRLoweringFunctions
 
       # Outer function: calls inner, catches errors
       call_args = fn_needs_rt ? ["rt"] + node.params.map { |p| p.name } : node.params.map { |p| p.name }
-      inner_call = "#{inner_name}(#{call_args.join(', ')})"
+      inner_call = MIR::Call.new(
+        inner_name,
+        call_args.map { |arg| MIR::Ident.new(arg) },
+        false,
+        false,
+        MIR::CallableContract.no_ownership(call_args.length),
+      )
 
       catch_plan = build_catch_clauses(node, fn_can_fail)
       error_reassigns = collect_catch_reassigns(node)
-      catch_meta = catch_clauses.map { |clause|
-        MIR::CatchClauseMeta.new(
-          kinds: clause.kinds.map(&:to_s),
-          types: clause.types.map(&:to_s),
-          filter_types: clause.filter_types.map(&:to_s),
-          filter_messages: clause.filter_messages.map { |m| T.cast(lower(m), MIR::Node) },
-        )
-      }
-      has_default = has_default_catch?(node)
       outer_body = [
-        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_plan.code}\n};", error_reassigns, catch_plan.clause_bodies, catch_meta, has_default)
+        MIR::CatchWrapper.new(
+          inner_call,
+          error_reassigns,
+          catch_plan.clauses,
+          catch_plan.default_body,
+          catch_plan.default_action,
+          catch_plan.snapshot_type,
+          runtime_binding_name,
+        )
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
@@ -853,85 +860,54 @@ module MIRLoweringFunctions
                    body, vis, false, comptime_params)
   end
 
-  # Returns the catch Zig plus checker-visible MIR bodies (one per clause,
-  # plus optional default). Using lower_body ensures flush_pending is called
-  # per statement so hoisted Lets stay in scope.
+  # Returns checker-visible CATCH clauses. Using lower_body ensures
+  # flush_pending is called per statement so hoisted Lets stay in scope.
   sig { params(node: AST::FunctionDef, fn_can_fail: T::Boolean).returns(CatchLoweringPlan) }
   def build_catch_clauses(node, fn_can_fail)
     T.bind(self, MIRLowering) rescue nil
-    rt_name = runtime_binding_name
-    clause_bodies = T.let([], T::Array[T::Array[MIR::Node]])
+    clauses = T.let([], T::Array[MIR::CatchClause])
 
     # Build snapshot declaration if function has exactly one snapshot type
     snap_types = node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
-    snapshot_decl = ""
-    if snap_types.size == 1
-      snap_zig = transpile_type(snap_types.first)
-      snapshot_decl = "const __snap_ptr = #{rt_name}.__error.snapshotAs(#{snap_zig});\n" \
-                      "            const snapshot = if (__snap_ptr) |p| p.* else undefined;\n" \
-                      "            const __has_snapshot = __snap_ptr != null;\n" \
-                      "            _ = &snapshot; _ = &__has_snapshot;\n            "
-    end
+    snapshot_type = T.let(snap_types.size == 1 ? Type.new(snap_types.first) : nil, T.nilable(Type))
 
-    parts = function_catch_clauses(node).map { |clause|
+    function_catch_clauses(node).each do |clause|
       # The annotator produces four lowering-ready fields:
       #   kinds, types, filter_types, filter_messages.
       # Match semantics:
       #   (any kind matches OR any type matches)
       #   AND
       #   (no filters OR any filter_type OR any filter_message matches)
-      kinds            = clause.kinds
-      types            = clause.types
-      filter_types     = clause.filter_types
-      filter_messages  = clause.filter_messages
-
       clause_mir = lower_body(clause.body)
       clause_body = T.let(clause_mir, T::Array[MIR::Node])
-      clause_bodies << clause_body
-      clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
-
-      # Item side — kinds ORed with types.
-      item_checks = []
-      kinds.each { |k| item_checks << "#{rt_name}.__error.matchesKind(.#{k})" }
-      types.each { |t| item_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{t}))" }
-      item_cond = if item_checks.empty?
-        "true"  # defensive; a malformed clause with no items would still short-circuit
-      elsif item_checks.size == 1
-        item_checks.first
-      else
-        "(#{item_checks.join(' or ')})"
-      end
-
-      # Filter side — types ORed with messages.
-      filter_checks = []
-      filter_types.each { |t| filter_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{t}))" }
-      filter_messages.each { |m_node| filter_checks << "#{rt_name}.__error.matchesMessage(#{emit_expr(lower(m_node))})" }
-
-      cond = if filter_checks.empty?
-        item_cond
-      elsif filter_checks.size == 1
-        "#{item_cond} and #{filter_checks.first}"
-      else
-        "#{item_cond} and (#{filter_checks.join(' or ')})"
-      end
-
-      "if (#{cond}) {\n            #{snapshot_decl}const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"
-    }.join(" else ")
-
-    default_code = if has_default_catch?(node)
-      # Use lower_body for the same reason as above.
-      default_mir = lower_body(default_catch_body(node))
-      default_body_mir = T.let(default_mir, T::Array[MIR::Node])
-      clause_bodies << default_body_mir
-      default_body = default_body_mir.map { |m| emit_expr(m) }.join("\n            ")
-      " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
-    elsif fn_can_fail
-      " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
-    else
-      " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
+      clauses << MIR::CatchClause.new(
+        meta: MIR::CatchClauseMeta.new(
+          kinds: clause.kinds.map(&:to_s),
+          types: clause.types.map(&:to_s),
+          filter_types: clause.filter_types.map(&:to_s),
+          filter_messages: clause.filter_messages.map { |m| T.cast(lower(m), MIR::Node) },
+        ),
+        body: clause_body,
+      )
     end
 
-    CatchLoweringPlan.new(code: "#{parts}#{default_code}", clause_bodies: clause_bodies)
+    default_body = T.let([], T::Array[MIR::Node])
+    default_action = T.let(MIR::CatchDefaultAction::Unreachable, MIR::CatchDefaultAction)
+    if has_default_catch?(node)
+      # Use lower_body for the same reason as above.
+      default_mir = lower_body(default_catch_body(node))
+      default_body = T.let(default_mir, T::Array[MIR::Node])
+      default_action = MIR::CatchDefaultAction::Body
+    elsif fn_can_fail
+      default_action = MIR::CatchDefaultAction::Propagate
+    end
+
+    CatchLoweringPlan.new(
+      clauses: clauses,
+      default_body: default_body,
+      default_action: default_action,
+      snapshot_type: snapshot_type,
+    )
   end
 
   # Extract error-path reassignment metadata from catch clauses (INV-9).
@@ -1168,16 +1144,12 @@ module MIRLoweringFunctions
   def borrowed_ownership_operand?(arg)
     return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
 
-    node = arg
-    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ||
-      !!(node.respond_to?(:container_borrow) && node.container_borrow)
+    AST.borrowed_ownership_view?(arg)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(StdlibCallFacts) }
   def stdlib_call_facts(node)
-    sig = if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
-      FunctionSignature.unwrap(node.matched_stdlib_def)
-    end
+    sig = intrinsic_signature_for(node)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return empty_stdlib_call_facts unless sig
 
@@ -1200,6 +1172,17 @@ module MIRLoweringFunctions
       )
     end
     StdlibCallFacts.new(args: facts, ownership: ownership)
+  end
+
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(FunctionSignature)) }
+  def intrinsic_signature_for(node)
+    matched = node.respond_to?(:matched_stdlib_def) ? node.matched_stdlib_def : nil
+    found = FunctionSignature.unwrap(matched)
+    return found if found
+
+    fallback = IntrinsicRegistry.sig(STD_LIB, T.unsafe(node).name.to_s)
+    fallback = T.unsafe(fallback).first if fallback.is_a?(Array)
+    FunctionSignature.unwrap(fallback)
   end
 
   sig { params(receiver_type: T.nilable(Type), index: Integer, takes: T::Boolean).returns(T.nilable(Type)) }
@@ -1616,14 +1599,15 @@ module MIRLoweringFunctions
       end
     end
 
-    # Template-based intrinsics: resolve destination allocator before lowering
+    # Registry-backed intrinsics: resolve destination allocator before lowering
     # TAKES args. COPY inside append/put/etc. must be constructed in the
     # receiver/container allocator so cleanup remains one-allocator-per-owner.
-    pattern = T.cast(node.zig_pattern, String).dup
     pre_resolved_alloc = nil
-    if pattern.include?("{alloc}")
-      alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
-      pre_resolved_alloc = resolve_alloc_sym(alloc_sym, nil, node)
+    entry = intrinsic_signature_for(node)
+    raise "lower_intrinsic: missing stdlib signature for #{node.name}" unless entry
+    entry_alloc = entry.intrinsic_alloc(:alloc)
+    if entry_alloc
+      pre_resolved_alloc = resolve_alloc_sym(entry_alloc, nil, node)
     end
     receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
@@ -1668,22 +1652,18 @@ module MIRLoweringFunctions
     # When the entry has an explicit :bc_op, prefer it over the AST name so
     # the BC dispatch key is decoupled from CLEAR's surface naming
     # (e.g. fileReadAll -> :file_read_all).
-    if bc_target? && node.matched_stdlib_def&.emit&.bc
-      stdlib_def = T.must(node.matched_stdlib_def)
-      op_name = stdlib_def.emit&.bc_op || node.name.to_s.to_sym
-      return MIR::InlineBc.new(op_name, mir_args, stdlib_def)
+    if bc_target? && entry.intrinsic_bc?
+      op_name = entry.intrinsic_bc_op_or(node.name.to_s.to_sym)
+      return MIR::InlineBc.new(op_name, mir_args, entry)
     end
 
-    # Resolve {alloc} to a symbol. The {alloc} PLACEHOLDER stays in the
-    # pattern -- the emitter substitutes it.
-    #
     # Stdlib TAKES metadata feeds the same owned-sink materialization used by
     # indexed/container stores. The stdlib registry decides whether ownership
     # transfers; this code only ensures a borrowed/rodata value becomes owned
     # in the allocator selected for that sink.
     alloc_placeholder = T.let(nil, T.nilable(Symbol))
     val_alloc_placeholder = T.let(nil, T.nilable(Symbol))
-    if pattern.include?("{alloc}")
+    if entry_alloc
       resolved = pre_resolved_alloc || :heap
       alloc_placeholder = resolved
     end
@@ -1704,70 +1684,42 @@ module MIRLoweringFunctions
       mir_allocates?(arg_mir) ? T.cast(hoist_alloc(arg_mir, ast_arg, err_cleanup: ownership_facts.takes?(index)), MIR::Node) : arg_mir
     end
 
-    # Emit all args to Zig strings
-    args_zig = mir_args.map { |a| emit_expr(a) }
-
-    # Coerce each arg to its declared type at the boundary. This makes the
-    # template rely on typed args instead of hoping Zig figures out a
-    # comptime_int / unknown-typed RHS. Bug 256 (`sleep(1)` -> `@bitCast(1)`
-    # rejected because comptime_int has no bit width) is the canonical
-    # example: with `@as(i64, 1)` wrapping the literal at the boundary,
-    # the existing `@bitCast` in the template just works.
-    #
-    # Coercion is a no-op when the arg is already the declared type, so
-    # non-literal args pay nothing. We skip it for `:Any` (anytype) and
-    # for arg specs without a concrete declared type (Hash forms whose
-    # `:type` is missing or :Any).
-    if stdlib_facts.args.any?
-      args_zig = args_zig.each_with_index.map do |arg_zig, i|
-        stdlib_facts.coerce_zig(T.must(arg_zig), i)
-      end
-    end
-
-    # Resolve {rt} to the in-scope runtime variable. Inside a BG / DO /
-    # CONCURRENT body the runtime is renamed (e.g. `__rt_bg0`) and the
-    # template's literal `rt` would refer to a different scope's binding
-    # that Zig rejects with "'rt' not accessible from inner function".
-    pattern = pattern.gsub("{rt}", runtime_binding_name) if pattern.include?("{rt}")
-
-    # Resolve {key_zig} and {val_zig} from receiver type (numeric/sharded maps)
-    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      pattern = pattern.gsub("{key_zig}", receiver_type&.key_type&.zig_type || "i64")
-      pattern = pattern.gsub("{val_zig}", receiver_type&.value_type&.zig_type || "f64")
-    end
-
-    # Resolve &{N} as address-of for positional args
-    args_zig.each_with_index { |val, i| pattern = pattern.gsub("&{#{i}}") { "&#{val}" } }
-
-    # Substitute positional args
-    args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}") { val } }
-
-    iz = MIR::ZigTemplate.new(pattern, [], "intrinsic")
     result_type = Type.from_node!(node, context: "intrinsic result")
-    iz.result_type = result_type
-    iz.result_ownership_bearing = intrinsic_result_ownership_bearing?(result_type)
-    # zig_pattern was set by the annotator together with matched_stdlib_def
-    # (src/annotator.rb). Both are always present together.
-    iz.stdlib_def = node.matched_stdlib_def
     alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
-    iz.allocs = alloc_metadata unless alloc_metadata.empty?
+    ownership_contract = MIR::OwnershipContract.empty
     if ownership_facts.takes_any?
       operands = consumed_operands.empty? ? consumed_names.map { |name|
         MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "stdlib ownership", val_alloc_placeholder || alloc_placeholder || pre_resolved_alloc || :heap)
       } : consumed_operands
-      iz.ownership_contract = MIR::OwnershipContract.consume_operands(operands)
+      ownership_contract = MIR::OwnershipContract.consume_operands(operands)
     end
-    # Store target variable name for checker cross-reference with AllocMark.
-    # Use extract_root_var_name so renamed variables (same-name collision fix)
-    # get the correct disambiguated Zig name.
-    receiver_mutates = node.mutates_receiver ||
-      (node.matched_stdlib_def && FunctionSignature.unwrap(node.matched_stdlib_def)&.mutates_receiver?)
+    receiver_mutates = node.mutates_receiver || entry.mutates_receiver?
+    target_var = T.let(nil, T.nilable(String))
     if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
-      iz.target_var = extract_root_var_name(node.object)
-    elsif receiver_mutates && node.args&.first&.respond_to?(:name)
-      iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
+      target_var = extract_root_var_name(node.object)
+    elsif receiver_mutates && node.args&.first.respond_to?(:name)
+      target_var = extract_root_var_name(node.args.first)
     end
-    iz
+    MIR::RegistryCall.new(
+      entry: entry,
+      args: registry_call_args(mir_args, stdlib_facts),
+      reason: "intrinsic",
+      ownership_contract: ownership_contract,
+      allocs: alloc_metadata.empty? ? nil : alloc_metadata,
+      target_var: target_var,
+      result_type: result_type,
+      result_ownership_bearing: intrinsic_result_ownership_bearing?(result_type),
+      key_type: receiver_type&.key_type,
+      value_type: receiver_type&.value_type,
+    )
+  end
+
+  sig { params(mir_args: T::Array[MIR::Node], stdlib_facts: StdlibCallFacts).returns(T::Array[MIR::RegistryCallArg]) }
+  def registry_call_args(mir_args, stdlib_facts)
+    mir_args.each_with_index.map do |arg_mir, index|
+      arg_fact = stdlib_facts.args.find { |fact| fact.index == index }
+      MIR::RegistryCallArg.new(expr: arg_mir, coerce_type: arg_fact&.coerce_type)
+    end
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall), stdlib_facts: StdlibCallFacts, index: Integer).returns(T.nilable(AST::Node)) }
@@ -1799,8 +1751,14 @@ module MIRLoweringFunctions
       index = arg_fact.index
       next unless ownership_facts.takes?(index)
 
-      materialized_args[index] = materialize_owned_sink_value(
+      placed_arg = place_value_for_destination(
         T.must(materialized_args[index]),
+        arg_fact.ast_arg,
+        sink_alloc,
+        arg_fact.sink_type,
+      )
+      materialized_args[index] = materialize_owned_sink_value(
+        placed_arg,
         arg_fact.ast_arg,
         sink_alloc,
         arg_fact.sink_type,
@@ -1875,7 +1833,7 @@ module MIRLoweringFunctions
     build_extern_trampoline_call(node)
   end
 
-  sig { params(node: AST::MethodCall).returns(T.any(MIR::ZigTemplate, MIR::MethodCall)) }
+  sig { params(node: AST::MethodCall).returns(MIR::Node) }
   def lower_extern_method(node)
     T.bind(self, MIRLowering) rescue nil
     return lower_extern_direct_method(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
@@ -1925,24 +1883,20 @@ module MIRLoweringFunctions
     end
   end
 
-  sig { params(node: AST::FuncCall).returns(MIR::ZigTemplate) }
+  sig { params(node: AST::FuncCall).returns(MIR::ExternTrampoline) }
   def build_extern_trampoline_call(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_extern_id
     alloc_kind = node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
-    mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
-    fn_zig = "#{mod_prefix}#{node.name}"
 
     # Separate comptime type args (full_type == :Type) from runtime args.
-    # Comptime args can't be struct fields (Zig type is `type`, comptime-only).
-    # They are baked directly into the call_zig string.
+    # Comptime args can't be struct fields; the emitter renders them directly
+    # at the call site after MIRChecker has seen the expression children.
     comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
-    comptime_codes = comptime_args.map { |a| T.must(emit_expr(lower_extern_arg(a))) }
+    comptime_mir = comptime_args.map { |a| T.cast(lower_extern_arg(a), MIR::Emittable) }
 
-    args = runtime_ast_args.map { |a| lower_extern_arg(a) }
-    arg_codes = args.map { |a| T.must(emit_expr(a)) }
-    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
+    args = runtime_ast_args.map { |a| T.cast(lower_extern_arg(a), MIR::Emittable) }
 
     # Use declared scalar param types for struct fields to avoid comptime_int
     # (e.g. @TypeOf(19876)). For module externs, keep non-scalars inferred:
@@ -1950,139 +1904,60 @@ module MIRLoweringFunctions
     # Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
     sig = fn_sig_for(node.name)
     sig_params = sig ? sig.params.reject { |p| p.comptime } : []
-    types = sig_params.each_with_index.map do |p, i|
-      next nil unless i < runtime_ast_args.length
-      pt = p.type
-      type_obj = pt.is_a?(Type) ? pt : Type.new(pt)
-      if sig&.module_alias
-        resolved = type_obj.resolved
-        next nil unless type_obj.numeric? || resolved == :Bool || resolved == :Boolean
+    args_with_types = args.each_with_index.map do |arg, i|
+      p = sig_params[i]
+      field_type = nil
+      if p
+        pt = p.type
+        type_obj = pt.is_a?(Type) ? pt : Type.new(pt)
+        if sig&.module_alias
+          resolved = type_obj.resolved
+          type_obj = nil unless type_obj.numeric? || resolved == :Bool || resolved == :Boolean
+        end
+        field_type = type_obj if type_obj
       end
-      type_obj.zig_type(is_param: true)
+      MIR::ExternTrampolineArg.new(expr: arg, field_type: field_type)
     end
-    arg_field_types = types.empty? || types.all?(&:nil?) ? nil : types
 
-    call_parts = comptime_codes + (alloc_kind ? ["_alloc_"] : []) + arg_codes.each_index.map { |i| "f.a#{i}" }
-    call_zig = "#{fn_zig}(#{call_parts.map { |p| p == "_alloc_" ? "f.alloc" : p }.join(', ')})"
-
-    build_extern_trampoline_common(
-      id: id,
-      prefix: "__Ext",
-      args_tuple_name: "__ext#{id}_args",
-      frame_name: "__ext#{id}_frame",
-      arg_codes: arg_codes,
-      arg_field_types: arg_field_types,
-      arg_tuple: arg_tuple,
+    MIR::ExternTrampoline.new(
+      id: id.value,
+      callee_name: node.name.to_s,
+      module_alias: mod_alias,
+      comptime_args: comptime_mir,
+      runtime_args: args_with_types,
       alloc_kind: alloc_kind,
       return_type: node.full_type!,
-      call_zig: call_zig,
-      receiver_field: nil,
-      ast_node: node
+      stdlib_def: extern_trampoline_stdlib_def(node.full_type!, alloc_kind, node),
     )
   end
 
-  sig { params(node: AST::MethodCall).returns(MIR::ZigTemplate) }
+  sig { params(node: AST::MethodCall).returns(MIR::ExternTrampoline) }
   def build_extern_trampoline_method(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_extern_id
-    obj = lower(node.object)
-    args = node.args.map { |a| lower_extern_arg(a) }
-    arg_codes = args.map { |a| T.must(emit_expr(a)) }
-    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
-    receiver_code = emit_expr(obj)
-    build_extern_trampoline_common(
-      id: id,
-      prefix: "__ExtM",
-      args_tuple_name: "__extm#{id}_args",
-      frame_name: "__extm#{id}_frame",
-      arg_codes: arg_codes,
-      arg_field_types: nil,
-      arg_tuple: arg_tuple,
+    obj = T.cast(lower(node.object), MIR::Emittable)
+    args = node.args.map { |a| MIR::ExternTrampolineArg.new(expr: T.cast(lower_extern_arg(a), MIR::Emittable)) }
+    MIR::ExternTrampoline.new(
+      id: id.value,
+      callee_name: node.name.to_s,
+      method_name: node.name.to_s,
+      receiver: obj,
+      runtime_args: args,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
       return_type: node.full_type!,
-      call_zig: "f.self_val.#{node.name}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
-      receiver_field: receiver_code,
-      ast_node: node
+      stdlib_def: extern_trampoline_stdlib_def(node.full_type!, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil, node),
     )
   end
 
-  sig { params(argc: Integer, alloc_kind: NilClass).returns(String) }
-  def extern_call_args_zig(argc, alloc_kind)
-    T.bind(self, MIRLowering) rescue nil
-    parts = []
-    parts << "f.alloc" if alloc_kind
-    argc.times { |i| parts << "f.a#{i}" }
-    parts.join(", ")
-  end
-
-  sig { params(id: MIRLoweringGeneratedId, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[String], arg_field_types: T.nilable(T::Array[T.nilable(String)]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.nilable(AST::Node)).returns(MIR::ZigTemplate) }
-  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
-    T.bind(self, MIRLowering) rescue nil
-    ret_t = return_type
-    can_fail = ret_t.error_union?
-    payload_t = can_fail ? T.must(ret_t.payload_type) : ret_t
-    returns_void = payload_t.void?
-
-    fields = []
-    fields << "self_val: @TypeOf(#{receiver_field})" if receiver_field
-    fields << "alloc: std.mem.Allocator" if alloc_kind
-    arg_codes.each_index do |i|
-      field_type = arg_field_types&.[](i)
-      fields << "a#{i}: #{field_type || "@TypeOf(#{args_tuple_name}[#{i}])"}"
-    end
-    fields << "err: ?anyerror = null" if can_fail
-    fields << "ret: #{payload_t.zig_type} = undefined" unless returns_void
-
-    call_stmt = if can_fail
-      if returns_void
-        "#{call_zig} catch |err| { f.err = err; return; };"
-      else
-        "f.ret = (#{call_zig} catch |err| { f.err = err; return; });"
-      end
-    else
-      returns_void ? "#{call_zig};" : "f.ret = #{call_zig};"
-    end
-
-    init_fields = []
-    init_fields << ".self_val = #{receiver_field}" if receiver_field
-    arg_codes.each_index { |i| init_fields << ".a#{i} = #{args_tuple_name}[#{i}]" }
-    if alloc_kind
-      alloc_expr = alloc_kind == :heap ? "#{runtime_binding_name}.heapAlloc()" : "#{runtime_binding_name}.frameAlloc()"
-      init_fields << ".alloc = #{alloc_expr}"
-    end
-
-    # f is referenced in call_stmt only when the struct has data fields.
-    f_needed = receiver_field || alloc_kind || arg_codes.any? || !returns_void || can_fail
-    f_binding = f_needed ? "const f: *@This() = @ptrCast(@alignCast(ptr));" : "_ = ptr;"
-
-    code = +""
-    if returns_void
-      code << "{ "
-    else
-      code << "blk_ext#{id}: { "
-    end
-    # Only emit the args tuple when there are arguments that reference it.
-    code << "const #{args_tuple_name} = #{arg_tuple}; " if arg_codes.any?
-    field_decls = fields.empty? ? "" : "#{fields.join(', ')}, "
-    code << "const #{prefix}#{id} = struct { #{field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { #{f_binding} #{call_stmt} } }; "
-    code << "var #{frame_name} = #{prefix}#{id}{ #{init_fields.join(', ')} }; "
-    code << "#{runtime_binding_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &#{prefix}#{id}.run), @ptrCast(&#{frame_name})); "
-    code << "if (#{frame_name}.err) |e| return e; " if can_fail
-    code << "break :blk_ext#{id} #{frame_name}.ret; " unless returns_void
-    code << "}"
-
-    iz = MIR::ZigTemplate.new(code, [], "extern_trampoline")
-    pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
+  sig { params(return_type: Type, alloc_kind: T.nilable(Symbol), ast_node: AST::Node).returns(FunctionSignature) }
+  def extern_trampoline_stdlib_def(return_type, alloc_kind, ast_node)
+    payload_t = return_type.error_union? ? T.must(return_type.payload_type) : return_type
     ast_symbol = ast_node.respond_to?(:symbol) ? ast_node.public_send(:symbol) : nil
     is_heap = alloc_kind == :heap ||
       (ast_symbol&.heap_storage? == true) ||
-      !!pt&.heap?
-    iz.stdlib_def = is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
-    iz.allocs = MIR.inline_alloc_metadata(alloc: alloc_kind) if is_heap && alloc_kind
-    iz
+      payload_t.heap?
+    is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
   end
-
-
   # ================================================================
   # Lambda
   # ================================================================
@@ -2104,8 +1979,8 @@ module MIRLoweringFunctions
       MIR::Param.new(p.name, type_str, pp)
     }, T::Array[MIR::Param])
 
-    ret_zig = sig.return_type.zig_type
-    ret_str = ZigType.new(ret_zig).anyerror_return_type
+    return_type_zig = sig.return_type.zig_type
+    ret_str = ZigType.new(return_type_zig).anyerror_return_type
 
     # Build body: suppressions + return expr
     body_mir = []

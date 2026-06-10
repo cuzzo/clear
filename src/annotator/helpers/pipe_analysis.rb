@@ -20,12 +20,39 @@ module PipeAnalysis
 
     sig { returns(T::Boolean) }
     def mismatch?
-      min_args < given_args || max_args > given_args
+      given_args < min_args || given_args > max_args
     end
 
     sig { returns(T::Boolean) }
     def exact?
       min_args == max_args
+    end
+  end
+
+  class PipelineSourceFact < T::Struct
+    extend T::Sig
+
+    const :kind, Symbol
+    const :item_type, Symbol
+
+    sig { returns(T::Boolean) }
+    def stream?
+      valid? && kind != :collection
+    end
+
+    sig { returns(T::Boolean) }
+    def finite_stream?
+      stream? && kind != :inf_stream
+    end
+
+    sig { returns(T::Boolean) }
+    def inf_stream?
+      kind == :inf_stream
+    end
+
+    sig { returns(T::Boolean) }
+    def valid?
+      kind != :invalid
     end
   end
 
@@ -35,34 +62,34 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def visit_Smooth(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @smooth_depth = T.let((@smooth_depth || 0) + 1, T.nilable(Integer))
-    # Logic: x |> f  -> f(x)
+    with_smooth_context do
+      # Logic: x |> f  -> f(x)
 
-    # 1. Visit the Left (Input) FIRST
-    visit(node.left)
+      # 1. Visit the Left (Input) FIRST
+      visit(node.left)
+      source_type = node.left.full_type!(context: "pipeline left")
+      record_body_fact_pipe_input_type!(source_type.resolved.to_s) if source_type.catch_snapshot_payload?
 
-    if higher_order_list_op?(node.right)
-      analyze_higher_order_op(node)
-    elsif node.right.is_a?(AST::FuncCall)
-      analyze_pipe_to_func_call(node)
-    elsif node.right.is_a?(AST::Identifier)
-      analyze_pipe_to_identifier(node)
-    else
-      # Case 3: Invalid RHS (e.g. 10 |> (expression))
-      error!(node, :PIPE_BAD_DESTINATION)
-      stamp_type!(node, :Any)
+      if pipe_complex_op?(node.right)
+        analyze_higher_order_op(node)
+      elsif node.right.is_a?(AST::FuncCall)
+        analyze_pipe_to_func_call(node)
+      elsif node.right.is_a?(AST::Identifier)
+        analyze_pipe_to_identifier(node)
+      else
+        # Case 3: Invalid RHS (e.g. 10 |> (expression))
+        error!(node, :PIPE_BAD_DESTINATION)
+        stamp_type!(node, :Any)
+      end
     end
-
-    @smooth_depth = T.let((@smooth_depth || 0) - 1, T.nilable(Integer))
+    smooth_depth
   end
 
   private
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def finite_stream_source?(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    node.is_a?(AST::RangeLit) || node.full_type!(context: "pipeline result").dynamic_stream? ||
-      node.full_type!(context: "pipeline result").bounded_stream? || node.full_type!(context: "pipeline result").open_stream?
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def pipe_complex_op?(node)
+    AST.pipeline_complex_op?(node) || node.is_a?(AST::RecoverOp) || node.is_a?(AST::CollectOp)
   end
 
   sig { params(options: T::Hash[String, T.untyped]).returns(T::Boolean) }
@@ -145,82 +172,40 @@ module PipeAnalysis
     node.full_type!(context: "pipeline result").bounded_stream?
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
-  def finite_stream_element_type(node)
+  sig { params(source: AST::Locatable, source_type: Type, include_inf_stream: T::Boolean).returns(PipelineSourceFact) }
+  def pipeline_source_fact(source, source_type, include_inf_stream: false)
     T.bind(self, SemanticAnnotator) rescue nil
-    return range_element_type(node).resolved if node.is_a?(AST::RangeLit)
-    return node.full_type!(context: "pipeline result").open_stream_element_type.resolved if node.full_type!(context: "pipeline result").open_stream?
-    node.full_type!(context: "pipeline result").tense_type.element_type.resolved
-  end
-
-  # Element type for an InfStream source (~T[INF]).
-  sig { params(node: T.untyped).returns(Symbol) }
-  def inf_stream_element_type(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    node.full_type!(context: "pipeline result").inf_stream_element_type.resolved
-  end
-
-  sig { params(source: AST::Locatable, source_type: Type, include_inf_stream: T::Boolean).returns(T::Boolean) }
-  def pipeline_iterable_source?(source, source_type, include_inf_stream: false)
-    finite_stream_source?(source) ||
-      (include_inf_stream && source_type.inf_stream?) ||
-      source_type.linear_collection?
-  end
-
-  sig { params(source: AST::Locatable, source_type: Type, include_inf_stream: T::Boolean).returns(Symbol) }
-  def pipeline_iterable_element_type(source, source_type, include_inf_stream: false)
     if include_inf_stream && source_type.inf_stream?
-      return inf_stream_element_type(source)
+      return PipelineSourceFact.new(kind: :inf_stream, item_type: T.must(source_type.inf_stream_element_type).resolved)
     end
 
-    return finite_stream_element_type(source) if finite_stream_source?(source)
+    return PipelineSourceFact.new(kind: :range, item_type: range_element_type(source).resolved) if source.is_a?(AST::RangeLit)
+
+    if source_type.open_stream?
+      return PipelineSourceFact.new(kind: :open_stream, item_type: T.must(source_type.open_stream_element_type).resolved)
+    end
+
+    if source_type.dynamic_stream?
+      return PipelineSourceFact.new(kind: :dynamic_stream, item_type: T.must(source_type.tense_type.element_type).resolved)
+    end
+
+    if source_type.bounded_stream?
+      return PipelineSourceFact.new(kind: :bounded_stream, item_type: T.must(source_type.tense_type.element_type).resolved)
+    end
 
     element_type = source_type.element_type
-    return element_type.resolved if element_type
+    return PipelineSourceFact.new(kind: :collection, item_type: element_type.resolved) if source_type.linear_collection? && element_type
 
-    :Any
+    PipelineSourceFact.new(kind: :invalid, item_type: :Any)
   end
 
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
     fn_name = current_fn_ctx&.name
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
-    fn_nodes = T.must(@fn_nodes)
+    fn_nodes = function_node_map
     fn = fn_name ? fn_nodes[fn_name] : nil
-    fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
-  end
-
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def higher_order_list_op?(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    node.is_a?(AST::SelectOp) ||
-    node.is_a?(AST::WhereOp) ||
-    node.is_a?(AST::IndexOp) ||
-    node.is_a?(AST::OrderByOp) ||
-    node.is_a?(AST::ReduceOp) ||
-    node.is_a?(AST::LimitOp) ||
-    node.is_a?(AST::UnnestOp) ||
-    node.is_a?(AST::DistinctOp) ||
-    node.is_a?(AST::EachOp) ||
-    node.is_a?(AST::FindOp) ||
-    node.is_a?(AST::AnyOp) ||
-    node.is_a?(AST::AllOp) ||
-    node.is_a?(AST::CountOp) ||
-    node.is_a?(AST::SumOp) ||
-    node.is_a?(AST::AverageOp) ||
-    node.is_a?(AST::MinOp) ||
-    node.is_a?(AST::MaxOp) ||
-    node.is_a?(AST::ConcurrentOp) ||
-    node.is_a?(AST::ShardOp) ||
-    node.is_a?(AST::SkipOp) ||
-    node.is_a?(AST::TapOp) ||
-    node.is_a?(AST::TakeWhileOp) ||
-    node.is_a?(AST::WindowOp) ||
-    node.is_a?(AST::BatchWindowOp) ||
-    node.is_a?(AST::JoinOp) ||
-    node.is_a?(AST::RecoverOp) ||
-    node.is_a?(AST::CollectOp)
+    fn ? function_has_catch_clauses?(fn) : false
   end
 
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
@@ -294,7 +279,7 @@ module PipeAnalysis
   def analyze_collect_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_t = node.left.full_type!(context: "pipeline left")
-    unless lhs_t&.future? && lhs_t&.observable?
+    unless lhs_t&.future? && lhs_t.observable?
       ty = lhs_t&.resolved || "<unknown>"
       error!(node, :COLLECT_NEEDS_OBSERVABLE, got: ty)
     end
@@ -323,17 +308,11 @@ module PipeAnalysis
   def analyze_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     is_filter = AST.pipeline_select_filter_op?(node.right)
-    is_inf    = node.left.full_type!(context: "pipeline left").inf_stream? && is_filter
-    is_stream = (finite_stream_source?(node.left) || is_inf) &&
-                (is_filter || node.right.is_a?(AST::IndexOp))
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type, include_inf_stream: is_filter)
+    is_stream = source.stream? && (is_filter || node.right.is_a?(AST::IndexOp))
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
-    item_type = if is_inf
-      inf_stream_element_type(node.left)
-    elsif is_stream
-      finite_stream_element_type(node.left)
-    else
-      node.left.full_type!(context: "pipeline left").element_type.resolved
-    end
+    item_type = source.item_type
 
     # Create a temporary Scope for the body
     with_new_scope do
@@ -356,9 +335,9 @@ module PipeAnalysis
     case node.right
     when AST::SelectOp
       result_base = node.right.expression.full_type!(context: "pipeline op expression")
-      stamp_type!(node, is_inf ? :"~#{result_base}[INF]" : :"#{result_base}[]")
+      stamp_type!(node, source.inf_stream? ? :"~#{result_base}[INF]" : :"#{result_base}[]")
     when AST::WhereOp
-      stamp_type!(node, is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]")
+      stamp_type!(node, source.inf_stream? ? :"~#{item_type}[INF]" : :"#{item_type}[]")
     when AST::IndexOp
       # INDEX returns HashMap<KeyType, ElementType[]>
       key_type = node.right.expression.resolved_type
@@ -375,23 +354,18 @@ module PipeAnalysis
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
     # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
     # only count frame allocation for finite (list-producing) results.
-    current_fn_ctx&.record_frame_use! unless is_inf
+    current_fn_ctx&.record_frame_use! unless source.inf_stream?
     nil
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_take_while_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.full_type!(context: "pipeline left").inf_stream?
-    is_stream = finite_stream_source?(node.left) || is_inf
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true)
+    is_stream = source.stream?
     require_array_input!(node, "TAKE_WHILE", allow_range: is_stream, allow_stream: is_stream)
-    item_type = if is_inf
-      inf_stream_element_type(node.left)
-    elsif is_stream
-      finite_stream_element_type(node.left)
-    else
-      node.left.full_type!(context: "pipeline left").element_type.resolved
-    end
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -402,9 +376,9 @@ module PipeAnalysis
       error!(node.right, :TAKE_WHILE_NEEDS_BOOL, got: node.right.expression.resolved_type)
     end
 
-    stamp_type!(node, is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]")
+    stamp_type!(node, source.inf_stream? ? :"~#{item_type}[INF]" : :"#{item_type}[]")
     node.storage = :frame
-    current_fn_ctx&.record_frame_use! unless is_inf
+    current_fn_ctx&.record_frame_use! unless source.inf_stream?
     nil
   end
 
@@ -596,9 +570,11 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # REDUCE: list |> REDUCE(initial) acc + _.value
     # Also accepts range/stream sources for the fused lazy path.
-    is_stream = finite_stream_source?(node.left)
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
     require_array_input!(node, "REDUCE", allow_range: is_stream, allow_stream: is_stream)
-    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    item_type = source.item_type
 
     # Analyze the initial value to get the accumulator type
     visit(node.right.initial_value)
@@ -656,20 +632,12 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # LIMIT: list |> LIMIT n
     # Also accepts range and stream sources (fused lazy path).
-    is_range  = node.left.is_a?(AST::RangeLit)
     lhs_ti    = node.left.full_type!(context: "pipeline left")
-    is_stream = lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? || lhs_ti.inf_stream?
-    require_array_input!(node, "LIMIT", allow_range: is_range || is_stream, allow_stream: is_stream)
+    source = pipeline_source_fact(node.left, lhs_ti, include_inf_stream: true)
+    is_stream = source.stream?
+    require_array_input!(node, "LIMIT", allow_range: is_stream, allow_stream: is_stream)
 
-    item_type = if is_range
-      range_element_type(node.left)
-    elsif lhs_ti.inf_stream?
-      lhs_ti.inf_stream_element_type.resolved
-    elsif is_stream
-      lhs_ti.tense_type.element_type.resolved
-    else
-      lhs_ti.element_type.resolved
-    end
+    item_type = source.item_type
 
     # Analyze the count expression
     visit(node.right.count)
@@ -731,18 +699,12 @@ module PipeAnalysis
     # DISTINCT: list |> DISTINCT _.field (or just DISTINCT _)
     # Returns a Set of unique key values (T[]@set or T[N]@set).
     lhs_type  = node.left.full_type!(context: "pipeline left")
-    is_inf    = lhs_type&.inf_stream?
-    is_stream = finite_stream_source?(node.left) || is_inf
+    source = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true)
+    is_stream = source.stream?
 
     require_array_input!(node, "DISTINCT", allow_range: is_stream, allow_stream: is_stream)
 
-    item_type = if is_inf
-      inf_stream_element_type(node.left)
-    elsif is_stream
-      finite_stream_element_type(node.left)
-    else
-      lhs_type.element_type.resolved
-    end
+    item_type = source.item_type
 
     # Analyze the expression with '_' in scope
     with_new_scope do
@@ -874,14 +836,15 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # EACH accepts arrays, collections, and finite streams.
     lhs_type  = node.left.full_type!(context: "pipeline left")
+    iterable = pipeline_source_fact(node.left, lhs_type)
 
-    unless pipeline_iterable_source?(node.left, lhs_type)
+    unless iterable.valid?
       error!(node.left, :EACH_NEEDS_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
-    item_type = pipeline_iterable_element_type(node.left, lhs_type)
+    item_type = iterable.item_type
 
     with_new_scope(current_scope) do
       # Mutable: EACH body may mutate the item via field assignment (_.field = value)
@@ -901,16 +864,11 @@ module PipeAnalysis
   def analyze_skip_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # SKIP: list |> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
-    is_inf   = node.left.full_type!(context: "pipeline left").inf_stream?
-    is_range = finite_stream_source?(node.left) || is_inf
-    require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
-    item_type = if is_inf
-      inf_stream_element_type(node.left)
-    elsif is_range
-      finite_stream_element_type(node.left)
-    else
-      node.left.full_type!(context: "pipeline left").element_type.resolved
-    end
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true)
+    is_stream = source.stream?
+    require_array_input!(node, "SKIP", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     visit(node.right.count)
     count_type = node.right.count.resolved_type
@@ -918,7 +876,7 @@ module PipeAnalysis
       error!(node.right.count, :SKIP_COUNT_NEEDS_NUMBER, got: count_type)
     end
 
-    stamp_type!(node, is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]")
+    stamp_type!(node, source.inf_stream? ? :"~#{item_type}[INF]" : :"#{item_type}[]")
     node.storage = :frame
   end
 
@@ -927,14 +885,15 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # TAP: list |> TAP { body } -> same list type (pass-through); also accepts range/stream source.
     lhs_type = node.left.full_type!(context: "pipeline left")
+    iterable = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true)
 
-    unless pipeline_iterable_source?(node.left, lhs_type, include_inf_stream: true)
+    unless iterable.valid?
       error!(node.left, :TAP_NEEDS_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
-    item_type = pipeline_iterable_element_type(node.left, lhs_type, include_inf_stream: true)
+    item_type = iterable.item_type
 
     with_new_scope do
       # Read-only: TAP is for observation, not mutation
@@ -943,7 +902,7 @@ module PipeAnalysis
     end
 
     # TAP returns the original collection (pass-through); range stays range
-    stamp_type!(node, node.left.full_type!(context: "pipeline left"))
+    stamp_type!(node, lhs_type)
     node.storage = node.left.storage
   end
 
@@ -955,9 +914,11 @@ module PipeAnalysis
   def analyze_find_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # FIND: list |> FIND predicate  → ?ElemType (first match or null; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "FIND", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "FIND", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -977,9 +938,11 @@ module PipeAnalysis
   def analyze_any_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # ANY: list |> ANY predicate  → Bool (short-circuits; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "ANY", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "ANY", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -999,9 +962,11 @@ module PipeAnalysis
   def analyze_all_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # ALL: list |> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "ALL", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "ALL", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1021,9 +986,11 @@ module PipeAnalysis
   def analyze_count_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # COUNT: list |> COUNT predicate  → Int64 (also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "COUNT", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "COUNT", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1050,9 +1017,11 @@ module PipeAnalysis
   def analyze_sum_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # SUM: list |> SUM expr  → upsized numeric type (int→Int64/UInt64, float→same float)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "SUM", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "SUM", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1073,9 +1042,11 @@ module PipeAnalysis
   def analyze_average_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # AVERAGE: list |> AVERAGE expr  → Float64 (0 for empty; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "AVERAGE", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "AVERAGE", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1096,9 +1067,11 @@ module PipeAnalysis
   def analyze_min_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # MIN: list |> MIN expr  → exact expression type (panics on empty; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "MIN", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "MIN", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1119,9 +1092,11 @@ module PipeAnalysis
   def analyze_max_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # MAX: list |> MAX expr  → exact expression type (panics on empty; also accepts range)
-    is_range = finite_stream_source?(node.left)
-    require_array_input!(node, "MAX", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type!(context: "pipeline left").element_type.resolved
+    lhs_type = node.left.full_type!(context: "pipeline left")
+    source = pipeline_source_fact(node.left, lhs_type)
+    is_stream = source.finite_stream?
+    require_array_input!(node, "MAX", allow_range: is_stream, allow_stream: is_stream)
+    item_type = source.item_type
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1222,12 +1197,13 @@ module PipeAnalysis
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.full_type!(context: "pipeline left")
+    iterable = pipeline_source_fact(smooth_node.left, lhs_type)
 
-    unless pipeline_iterable_source?(smooth_node.left, lhs_type)
+    unless iterable.valid?
       error!(smooth_node.left, :CONCURRENT_EACH_BAD_INPUT, got: smooth_node.left.resolved_type)
       item_type = :Any
     else
-      item_type = pipeline_iterable_element_type(smooth_node.left, lhs_type)
+      item_type = iterable.item_type
     end
 
     with_new_scope do
@@ -1375,16 +1351,16 @@ module PipeAnalysis
 
     # LHS must be iterable (range or array)
     lhs_type = node.left.full_type!(context: "pipeline left")
-    is_range = node.left.is_a?(AST::RangeLit)
+    iterable = pipeline_source_fact(node.left, lhs_type)
 
-    unless is_range || lhs_type.linear_collection?
+    unless iterable.valid?
       error!(node.left, :SHARD_NEEDS_RANGE_OR_COLLECTION, got: node.left.resolved_type)
       stamp_type!(node, :Void)
       return
     end
 
     # Determine element type for `_` binding
-    item_type = is_range ? :Int64 : pipeline_iterable_element_type(node.left, lhs_type)
+    item_type = iterable.item_type
 
     # Type-check key expression with `_` in scope
     with_new_scope do
@@ -1703,11 +1679,7 @@ module PipeAnalysis
   def analyze_concurrent_stream_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = if lhs_type&.inf_stream?
-      inf_stream_element_type(node.left)
-    else
-      finite_stream_element_type(node.left)
-    end
+    item_type = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true).item_type
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
@@ -1757,11 +1729,7 @@ module PipeAnalysis
   def analyze_concurrent_stream_each_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = if lhs_type&.inf_stream?
-      inf_stream_element_type(node.left)
-    else
-      finite_stream_element_type(node.left)
-    end
+    item_type = pipeline_source_fact(node.left, lhs_type, include_inf_stream: true).item_type
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
@@ -1837,9 +1805,8 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp, item_type: T.untyped).returns(T.nilable(T::Array[String])) }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    @pipeline_accessed_fields = T.let(@pipeline_accessed_fields, T.nilable(T::Set[String]))
-    return unless @pipeline_accessed_fields
-    accessed = @pipeline_accessed_fields
+    accessed = phase_receiver_state.pipeline_accessed_fields
+    return unless accessed
     return if accessed.empty?
 
     schema = lookup_type_schema(item_type)
@@ -1860,10 +1827,11 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.nilable(T::Array[String])) }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
-    @pipeline_accessed_fields = T.let(Set.new, T.nilable(T::Set[String]))
+    receiver_state = phase_receiver_state
+    receiver_state.pipeline_accessed_fields = Set.new
     yield
     check_soa_opportunity!(node, item_type)
   ensure
-    @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[String]))
+    receiver_state.pipeline_accessed_fields = nil if receiver_state
   end
 end

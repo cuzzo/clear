@@ -8,7 +8,7 @@ RSpec.describe "Stack Tier Recommendations" do
     ast = Parser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
-    fn_nodes = annotator.instance_variable_get(:@fn_nodes)
+    fn_nodes = annotator.semantic_function_nodes
     [ast, fn_nodes]
   end
 

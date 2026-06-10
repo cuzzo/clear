@@ -32,22 +32,29 @@ class MIREmitter
 
   attr_accessor :rt_name
 
+  THUNK_COMBINE_OPERATOR = T.let({
+    ADD: "+",
+    SUB: "-",
+    MUL: "*",
+    DIV: "/",
+  }.freeze, T::Hash[Symbol, String])
+
   sig { void }
   def initialize
     @indent = T.let(0, Integer)
     @rt_name = T.let("rt", String)
-    @flow_alias_zig = T.let(nil, T.nilable(String))
+    @flow_alias_name = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(nil, T.nilable(Integer))
     @discard_counter = T.let(0, Integer)
   end
 
-  # Emit Zig code from an MIR node. Returns a String.
-  # Accepts MIR nodes or raw Strings (pre-computed Zig fragments).
+  # Emit Zig code from a typed MIR node. Returns a String.
   sig { params(node: T.untyped).returns(T.nilable(String)) }
   def emit(node)
     case node
-    when String then node
     when nil    then ""
+    when String
+      raise "MIREmitter cannot emit raw Zig strings; use a structural MIR node"
 
     # --- Top-level ---
     when MIR::Program     then emit_program(node)
@@ -93,13 +100,12 @@ class MIREmitter
     when MIR::DiscardOwned     then emit_discard_owned(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
-    when MIR::BgBlock          then node.code
-    when MIR::DoBlock          then node.code
-    when MIR::CatchWrapper     then node.code
+    when MIR::BgBlock          then emit_bg_block(node)
+    when MIR::DoBlock          then emit_do_block(node)
+    when MIR::CatchWrapper     then emit_catch_wrapper(node)
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
-    when MIR::Noop             then nil
 
     # --- Memory operations ---
     when MIR::HeapCreate       then emit_heap_create(node)
@@ -115,6 +121,7 @@ class MIREmitter
     when MIR::CapWrap          then emit_cap_wrap(node)
     when MIR::SharePromote     then emit_share_promote(node)
     when MIR::RcRetain         then emit_rc_retain(node)
+    when MIR::RcRelease        then emit_rc_release(node)
     when MIR::RcDowngrade      then emit_rc_downgrade(node)
     when MIR::WeakUpgrade      then emit_weak_upgrade(node)
     when MIR::FreezeExpr       then emit_freeze(node)
@@ -128,13 +135,16 @@ class MIREmitter
     when MIR::PolymorphicMutate    then emit_polymorphic_mutate(node)
     when MIR::PolymorphicMutateFlow then emit_polymorphic_mutate_flow(node)
     when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
+    when MIR::SortedLockAcquire    then emit_sorted_lock_acquire(node)
+    when MIR::FallibleLockBinding  then emit_fallible_lock_binding(node)
     # --- Verification-only (no codegen) ---
-    when MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark,
+    when MIR::Noop, MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark,
          MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
       nil
 
     # --- Expressions ---
     when MIR::Call             then emit_call(node)
+    when MIR::RuntimeCall      then emit_runtime_call(node)
     when MIR::TailCall         then emit_tail_call(node)
     when MIR::MethodCall       then emit_method_call(node)
     when MIR::FieldGet         then emit_field_get(node)
@@ -143,8 +153,18 @@ class MIREmitter
     when MIR::BinOp            then emit_bin_op(node)
     when MIR::UnaryOp          then emit_unary_op(node)
     when MIR::Lit              then node.value
+    when MIR::VoidLiteral      then "{}"
+    when MIR::DefaultValue     then emit_default_value(node)
+    when MIR::EnumTag          then ".#{node.variant}"
+    when MIR::EnumOrdinal      then "@intFromEnum(#{emit(node.value)})"
     when MIR::Ident            then node.name
+    when MIR::TupleLiteral     then emit_tuple_literal(node)
+    when MIR::CapabilityUnwrap then emit_capability_unwrap(node)
+    when MIR::CapabilityLockTarget then emit_capability_lock_target(node)
+    when MIR::CapabilityLockAddress then emit_capability_lock_address(node)
     when MIR::FnRef            then "&#{node.name}"
+    when MIR::LockAcquire      then emit_lock_acquire(node)
+    when MIR::TypeOf           then "@TypeOf(#{emit(node.expr)})"
     when MIR::StructInit       then emit_struct_init(node)
     when MIR::ArrayInit        then emit_array_init(node)
     when MIR::ArrayDefaultInit then emit_array_default_init(node)
@@ -178,10 +198,11 @@ class MIREmitter
     when MIR::ItemsAccess      then emit_items_access(node)
     when MIR::OwnedSlice       then emit_owned_slice(node)
     when MIR::LambdaExpr       then emit_lambda(node)
-    when MIR::ZigTemplate      then emit_zig_template(node)
-    when MIR::InlineZig        then emit_inline_zig(node)
+    when MIR::RegistryCall     then emit_registry_call(node)
+    when MIR::IndexedStore     then emit_indexed_store(node)
+    when MIR::ExternTrampoline then emit_extern_trampoline(node)
+    when MIR::ObservableConsumerSpawn then emit_observable_consumer_spawn(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
-    when MIR::RawBc            then emit_raw_bc_as_zig(node)
     when MIR::ShardedMapPut    then emit_sharded_map_put(node)
     when MIR::ShardedMapGet    then emit_sharded_map_get(node)
 
@@ -190,15 +211,240 @@ class MIREmitter
     end
   end
 
-  # InlineBc nodes are the :bc-target sibling of InlineZig. In the Zig emitter
+  sig { params(node: MIR::BgBlock).returns(String) }
+  def emit_bg_block(node)
+    plan = node.code
+    return emit_bg_stackful_plan(plan) if plan.is_a?(MIR::BgStackfulPlan)
+    return emit_bg_stream_plan(plan) if plan.is_a?(MIR::BgStreamPlan)
+    return emit_fsm_bg_body(T.cast(plan, T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody))) if fsm_bg_body_plan?(plan)
+
+    raise "MIR::BgBlock must carry a structural emission plan, got #{plan.class}"
+  end
+
+  sig { params(plan: MIR::BgStackfulPlan).returns(String) }
+  def emit_bg_stackful_plan(plan)
+    run_body_raw = emit_body_with_runtime(plan.run_body, plan.bg_rt)
+    capture_frees_raw = emit_capture_cleanup_actions_with_runtime(plan.capture_frees, plan.bg_rt)
+    arena_init_raw = T.let(plan.arena_init ? emit_node_with_runtime(T.must(plan.arena_init), plan.bg_rt) : "", String)
+    run_body_code = run_body_raw.gsub("\n", "\n                  ")
+    promoted_decls = emit_body(plan.promoted_decls).gsub("\n", "\n          ")
+    capture_fields = emit_context_field_decls(plan.capture_fields).gsub("\n", "\n              ")
+    capture_inits = emit_struct_init_fields(plan.capture_inits)
+    capture_frees = capture_frees_raw.gsub("\n", "\n                  ")
+    arena_init = arena_init_raw
+    spawn_call = emit_fiber_spawn_call(plan.spawn_call).gsub("\n", "\n          ")
+    alloc_expr = T.must(emit(plan.alloc_expr))
+    profile_comment = emit_profile_task_site(plan.profile_site)
+    suppress_line = bg_stackful_runtime_suppress_line(plan, run_body_raw, capture_frees_raw, arena_init_raw)
+    <<~ZIG.chomp
+      #{plan.blk_label}: {
+          #{profile_comment}
+          const #{plan.ctx_type} = struct {
+              inner: *#{plan.promise_zig}.Inner,
+              alloc: std.mem.Allocator,
+              #{capture_fields}
+              fn run(__raw_rt_#{plan.id}: *anyopaque, __raw_args_#{plan.id}: ?*anyopaque) anyerror!void {
+                  const #{plan.bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_#{plan.id})));
+                  #{suppress_line}
+                  #{arena_init}
+                  const __ctx_#{plan.id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_#{plan.id}.?)));
+                  defer __ctx_#{plan.id}.alloc.destroy(__ctx_#{plan.id});
+                  defer __ctx_#{plan.id}.inner.wg.done();
+                  errdefer |fiber_err| __ctx_#{plan.id}.inner.result = fiber_err;
+                  #{capture_frees}
+                  #{run_body_code}
+                  #{plan.is_void ? "__ctx_#{plan.id}.inner.result = {};" : ""}
+              }
+          };
+          const #{plan.alloc_var} = #{alloc_expr};
+          const #{plan.promise_var} = try #{plan.promise_zig}.spawn(#{plan.alloc_var}, #{plan.rt_name}.getSched());
+          #{promoted_decls}
+          const #{plan.ctx_var} = try #{plan.alloc_var}.create(#{plan.ctx_type});
+          errdefer #{plan.alloc_var}.destroy(#{plan.ctx_var});
+          #{plan.ctx_var}.* = .{ #{capture_inits} };
+          #{spawn_call}
+          break :#{plan.blk_label} #{plan.promise_var};
+      }
+    ZIG
+  end
+
+  sig { params(plan: MIR::BgStackfulPlan, run_body_code: String, capture_frees: String, arena_init: String).returns(String) }
+  def bg_stackful_runtime_suppress_line(plan, run_body_code, capture_frees, arena_init)
+    text = run_body_code + capture_frees + arena_init
+    text.include?(plan.bg_rt) ? "" : "_ = &#{plan.bg_rt};"
+  end
+
+  sig { params(plan: Object).returns(T::Boolean) }
+  def fsm_bg_body_plan?(plan)
+    plan.is_a?(MIR::FsmIoBody) || plan.is_a?(MIR::FsmB1Body) || plan.is_a?(MIR::FsmGenericBody)
+  end
+
+  sig { params(plan: T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody)).returns(String) }
+  def emit_fsm_bg_body(plan)
+    require_relative "fsm_wrapper_emitter" unless defined?(FsmWrapperEmitter)
+    FsmWrapperEmitter.render(plan)
+  end
+
+  sig { params(plan: MIR::BgStreamPlan).returns(String) }
+  def emit_bg_stream_plan(plan)
+    body_code = emit_body_with_runtime(plan.body, "__rt").gsub("\n", "\n                  ")
+    promoted_decls = emit_body_with_runtime(plan.promoted_decls, "__rt").gsub("\n", "\n          ")
+    capture_cleanups = emit_body_with_runtime(plan.capture_cleanups, "__rt").gsub("\n", "\n                  ")
+    capture_fields = emit_context_field_decls(plan.capture_fields).gsub("\n", "\n              ")
+    capture_inits = emit_struct_init_fields(plan.capture_inits)
+    spawn_call = emit_fiber_spawn_call(plan.spawn_call).gsub("\n", "\n          ")
+    rt_suppress = body_code.include?("__rt") ? "" : "_ = &__rt;"
+    <<~ZIG.chomp
+      #{plan.blk_label}: {
+          const #{plan.ctx_type} = struct {
+              stream_inner: *#{plan.stream_zig}.Inner,
+              alloc: std.mem.Allocator,
+              #{capture_fields}
+              fn run(__raw_rt_sg#{plan.id}: *anyopaque, __raw_args_sg#{plan.id}: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_sg#{plan.id})));
+                  #{rt_suppress}
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{plan.id}.?)));
+                  defer ctx.alloc.destroy(ctx);
+                  #{capture_cleanups}
+                  var #{plan.local_stream} = #{plan.stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+                  defer #{plan.local_stream}.close();
+                  errdefer |gen_err| #{plan.local_stream}.inner.err = gen_err;
+                  #{body_code}
+              }
+          };
+          const #{plan.alloc_var} = #{plan.rt_name}.getSched().allocator;
+          const #{plan.stream_var} = try #{plan.stream_zig}.spawnNew(#{plan.alloc_var}, #{plan.rt_name}.getSched());
+          #{promoted_decls}
+          const #{plan.ctx_var} = try #{plan.alloc_var}.create(#{plan.ctx_type});
+          errdefer #{plan.alloc_var}.destroy(#{plan.ctx_var});
+          #{plan.ctx_var}.* = .{ #{capture_inits} };
+          #{spawn_call}
+          break :#{plan.blk_label} #{plan.stream_var};
+      }
+    ZIG
+  end
+
+  sig { params(node: MIR::DoBlock).returns(String) }
+  def emit_do_block(node)
+    plan = node.code
+    return emit_do_block_plan(plan) if plan.is_a?(MIR::DoBlockPlan)
+
+    raise "MIR::DoBlock must carry a structural emission plan, got #{plan.class}"
+  end
+
+  sig { params(plan: MIR::DoBlockPlan).returns(String) }
+  def emit_do_block_plan(plan)
+    branches = plan.branches.map { |branch| emit_do_branch_plan(branch) }.join("\n")
+    <<~ZIG.chomp
+      {
+          var #{plan.wg_var} = CheatHeader.WaitGroup.init(#{@rt_name}.getSched());
+          errdefer #{plan.wg_var}.wait();
+          #{branches}
+      #{plan.wg_var}.wait();
+      }
+    ZIG
+  end
+
+  sig { params(plan: MIR::DoBranchPlan).returns(String) }
+  def emit_do_branch_plan(plan)
+    body_code = emit_body_with_runtime(plan.body, "__rt").gsub("\n", "\n        ")
+    capture_pre_decls = emit_body_with_runtime(plan.capture_pre_decls, "__rt").gsub("\n", "\n        ")
+    capture_fields = emit_context_field_decls(plan.capture_fields).gsub("\n", "\n      ")
+    capture_inits = emit_struct_init_fields(plan.capture_inits)
+    spawn_call = emit_fiber_spawn_call(plan.spawn_call).gsub("\n", "\n    ")
+    rt_suppress = body_code.include?("__rt") ? "" : "_ = &__rt;"
+    <<~ZIG.chomp
+      const #{plan.ctx_type} = struct {
+          wg: *CheatHeader.WaitGroup,
+          #{capture_fields}
+          fn run(#{plan.raw_rt_name}: *anyopaque, #{plan.raw_args_name}: ?*anyopaque) anyerror!void {
+              const __rt = @as(*Runtime, @ptrCast(@alignCast(#{plan.raw_rt_name})));
+              #{rt_suppress}
+              const ctx = @as(*@This(), @ptrCast(@alignCast(#{plan.raw_args_name}.?)));
+              defer ctx.wg.done();
+              #{body_code}
+          }
+      };
+      #{capture_pre_decls}
+      var #{plan.ctx_var} = #{plan.ctx_type}{ #{capture_inits} };
+      #{spawn_call}
+      #{plan.wg_var}.add(1);
+    ZIG
+  end
+
+  sig { params(fields: T::Array[MIR::ContextFieldDecl]).returns(String) }
+  def emit_context_field_decls(fields)
+    fields.map do |field|
+      default = field.default_value ? " = #{emit(T.must(field.default_value))}" : ""
+      "#{field.name}: #{field.type_zig}#{default},"
+    end.join("\n")
+  end
+
+  sig { params(fields: T::Array[MIR::StructInitField]).returns(String) }
+  def emit_struct_init_fields(fields)
+    fields.map do |field|
+      ".#{field.name} = #{emit(field.value)}"
+    end.join(", ")
+  end
+
+  sig { params(actions: T::Array[MIR::CaptureCleanupAction]).returns(String) }
+  def emit_capture_cleanup_actions(actions)
+    actions.map do |action|
+      allocator = action.allocator ? emit(T.must(action.allocator)) : nil
+      "defer #{emit_direct_cleanup(T.must(emit(action.target)), action.cleanup_entry, alloc_override: allocator)}"
+    end.join("\n")
+  end
+
+  sig { params(site: MIR::ProfileTaskSite).returns(String) }
+  def emit_profile_task_site(site)
+    "// CLEAR_PROFILE_TASK_SITE id=#{site.site_id} kind=BG line=#{site.line} column=#{site.column} dispatch=#{site.dispatch} form=#{site.form}"
+  end
+
+  sig { params(plan: MIR::TaskConfigPlan).returns(String) }
+  def emit_task_config_plan(plan)
+    fields = [".stack_size = .#{plan.stack_variant}"]
+    fields << ".profile_site_id = #{plan.profile_site_id}" if plan.profile_site_id
+    fields << ".profile_dispatch = #{plan.profile_dispatch_id}" if plan.profile_dispatch_id
+    ".{ #{fields.join(', ')} }"
+  end
+
+  sig { params(call: MIR::FiberSpawnCall).returns(String) }
+  def emit_fiber_spawn_call(call)
+    callee = case call.target
+             when :runtime_submit
+               runtime_name = call.runtime_name || raise("FiberSpawnCall runtime_name required")
+               "try #{runtime_name}.getSched().submitSpawn"
+             when :pinned
+               "try CheatHeader.spawnPinned"
+             when :best
+               "try CheatHeader.spawnBest"
+             when :wait_group_submit
+               wait_group_name = call.wait_group_name || raise("FiberSpawnCall wait_group_name required")
+               "try #{wait_group_name}.sched.submitSpawn"
+             else
+               raise "unknown FiberSpawnCall target #{call.target.inspect}"
+             end
+    task_cfg = emit_task_config_plan(call.task_config)
+    ctx_arg = call.pass_ctx_by_address ? "&#{call.ctx_var}" : call.ctx_var
+    <<~ZIG.chomp
+      #{callee}(
+          @intFromPtr(&Runtime.entryWrapper),
+          @as(CheatHeader.TaskFn, @ptrCast(&#{call.ctx_type}.run)),
+          #{ctx_arg},
+          #{task_cfg}
+      );
+    ZIG
+  end
+
+  # InlineBc nodes are the :bc-target stdlib intrinsic carrier. In the Zig emitter
   # we only see them when a :bc-target lowering pipeline (e.g. bc_run.rb) still
   # routes through a Zig-producing lowering step that calls emit_expr. Fall
   # back to the Zig template from the registry so emission completes.
   sig { params(node: MIR::InlineBc).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry.emit&.zig
-    pattern = entry.emit.zig.to_s.dup
+    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
+    pattern = entry.required_intrinsic_template(:zig)
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -235,7 +481,7 @@ class MIREmitter
   def sharded_map_template(node)
     op = node.stdlib_def
     kind = node.template_kind || :zig
-    op.emit&.public_send(kind) or raise "ShardedMap: op has no :#{kind} template (emit=#{op.emit.inspect})"
+    op.intrinsic_template(kind) or raise "ShardedMap: op has no :#{kind} template (contract=#{op.intrinsic_contract.inspect})"
   end
 
   sig { params(pattern: String, node: T.untyped).returns(String) }
@@ -245,8 +491,8 @@ class MIREmitter
         .gsub("{shard_idx}", T.must(emit(node.shard_idx)))
         .gsub("{shard_key}", T.must(emit(node.shard_key)))
     end
-    pattern = pattern.gsub("{key_zig}", node.key_zig) if node.key_zig
-    pattern = pattern.gsub("{val_zig}", node.val_zig) if node.val_zig
+    pattern = pattern.gsub("{key_zig}", node.key_type.zig_type) if node.key_type
+    pattern = pattern.gsub("{val_zig}", node.value_type.zig_type) if node.value_type
     allocs = MIR::InlineAllocMetadata.from(node.resolved_allocs)
     allocs&.each do |alloc_key, sym|
       pattern = pattern.gsub("{#{alloc_key}}", alloc_zig(sym))
@@ -254,63 +500,224 @@ class MIREmitter
     pattern
   end
 
-  # RawBc is the :bc-target bytecode-template carrier. Nothing in current lowering
-  # emits it (Phase 0 scaffolding only). If a :bc lowering path ever feeds
-  # a RawBc into a Zig-producing step, fall back to the :zig field of the
-  # registry entry so emission completes. Registry entries that reach Zig
-  # without :zig set is a bug in the migration — raise loudly.
-  sig { params(node: T.untyped).returns(String) }
-  def emit_raw_bc_as_zig(node)
-    entry = node.stdlib_def
-    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry.emit&.zig
-    pattern = entry.emit.zig.to_s.dup
-    node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
-    pattern
-  end
-
   private
 
-  # Emit InlineZig, resolving allocator placeholders from the allocs field.
-  sig { params(node: MIR::InlineZig).returns(String) }
-  def emit_inline_zig(node)
-    code = node.code
-    if node.allocs
-      node.allocs.each do |key, sym|
-        code = code.gsub("{#{key}}", alloc_zig(sym))
-      end
+  sig { params(node: MIR::RegistryCall).returns(String) }
+  def emit_registry_call(node)
+    code = registry_template(node.entry, :zig)
+    code = substitute_registry_common(code, node.entry, node.allocs, node.key_type, node.value_type)
+    node.args.each_with_index do |arg, index|
+      rendered = coerce_registry_arg(T.must(emit(arg.expr)), arg.coerce_type)
+      code = code.gsub("&{#{index}}") { "&#{rendered}" }
+      code = code.gsub("{#{index}}") { rendered }
     end
-    code
+    node.suppress_try ? code.delete_prefix("try ") : code
   end
 
-  sig { params(node: MIR::ZigTemplate).returns(String) }
-  def emit_zig_template(node)
-    code = node.code.dup
-    args = node.args
-    if args.is_a?(Hash)
-      args.each do |key, value|
-        rendered = emit(value)
-        code = code.gsub("&{#{key}}") { "&#{rendered}" }
-        code = code.gsub("{#{key}}") { rendered }
-      end
-    else
-      Array(args).each_with_index do |value, index|
-        rendered = emit(value)
-        code = code.gsub("&{#{index}}") { "&#{rendered}" }
-        code = code.gsub("{#{index}}") { rendered }
-      end
-    end
-    if node.allocs
-      node.allocs.each do |key, sym|
-        code = code.gsub("{#{key}}", alloc_zig(sym))
-      end
-    end
+  sig { params(node: MIR::IndexedStore).returns(String) }
+  def emit_indexed_store(node)
+    code = registry_template(node.entry, node.template_kind)
+    code = substitute_registry_common(code, node.entry, node.allocs, node.key_type, node.value_type)
+    target = T.must(emit(node.target))
+    index = T.must(emit(node.index))
+    value = T.must(emit(node.value))
     code
+      .gsub("&{target}", "&#{target}")
+      .gsub("{target}", target)
+      .gsub("{index}", index)
+      .gsub("{value}", value)
+  end
+
+  sig { params(entry: FunctionSignature, template_kind: Symbol).returns(String) }
+  def registry_template(entry, template_kind)
+    entry.required_intrinsic_template(template_kind)
+  end
+
+  sig { params(code: String, entry: FunctionSignature, allocs: T.nilable(MIR::InlineAllocMetadata), key_type: T.nilable(Type), value_type: T.nilable(Type)).returns(String) }
+  def substitute_registry_common(code, entry, allocs, key_type, value_type)
+    out = code.gsub("{rt}", @rt_name)
+    out = out.gsub("{key_zig}", key_type.zig_type) if key_type
+    out = out.gsub("{val_zig}", value_type.zig_type) if value_type
+    allocs&.each do |key, sym|
+      out = out.gsub("{#{key}}", alloc_zig(sym))
+    end
+    out
+  end
+
+  sig { params(rendered_arg: String, coerce_type: T.nilable(Symbol)).returns(String) }
+  def coerce_registry_arg(rendered_arg, coerce_type)
+    return rendered_arg unless coerce_type
+
+    coercible = [:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8, :Bool]
+    return rendered_arg unless coercible.include?(coerce_type)
+
+    "@as(#{Type.new(coerce_type).zig_type}, #{rendered_arg})"
+  end
+
+  sig { params(node: MIR::ExternTrampoline).returns(String) }
+  def emit_extern_trampoline(node)
+    payload_t = node.return_type.error_union? ? T.must(node.return_type.payload_type) : node.return_type
+    returns_void = payload_t.void?
+    can_fail = node.return_type.error_union?
+    prefix = node.method_name ? "__ExtM" : "__Ext"
+    args_tuple_name = node.method_name ? "__extm#{node.id}_args" : "__ext#{node.id}_args"
+    frame_name = node.method_name ? "__extm#{node.id}_frame" : "__ext#{node.id}_frame"
+    runtime_arg_codes = node.runtime_args.map { |arg| T.must(emit(arg.expr)) }
+    comptime_codes = node.comptime_args.map { |arg| T.must(emit(arg)) }
+    arg_tuple = runtime_arg_codes.empty? ? ".{}" : ".{ #{runtime_arg_codes.join(', ')} }"
+    receiver_code = node.receiver ? emit(T.must(node.receiver)) : nil
+
+    fields = T.let([], T::Array[String])
+    fields << "self_val: @TypeOf(#{receiver_code})" if receiver_code
+    fields << "alloc: std.mem.Allocator" if node.alloc_kind
+    node.runtime_args.each_with_index do |arg, index|
+      field_type = arg.field_type&.zig_type(is_param: true)
+      fields << "a#{index}: #{field_type || "@TypeOf(#{args_tuple_name}[#{index}])"}"
+    end
+    fields << "err: ?anyerror = null" if can_fail
+    fields << "ret: #{payload_t.zig_type} = undefined" unless returns_void
+
+    call_zig = extern_trampoline_call(node, comptime_codes, runtime_arg_codes.length)
+    call_stmt = if can_fail
+      returns_void ? "#{call_zig} catch |err| { f.err = err; return; };" :
+        "f.ret = (#{call_zig} catch |err| { f.err = err; return; });"
+    else
+      returns_void ? "#{call_zig};" : "f.ret = #{call_zig};"
+    end
+
+    init_fields = T.let([], T::Array[String])
+    init_fields << ".self_val = #{receiver_code}" if receiver_code
+    runtime_arg_codes.each_index { |index| init_fields << ".a#{index} = #{args_tuple_name}[#{index}]" }
+    if node.alloc_kind
+      alloc_expr = node.alloc_kind == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
+      init_fields << ".alloc = #{alloc_expr}"
+    end
+
+    f_needed = !!(receiver_code || node.alloc_kind || runtime_arg_codes.any? || !returns_void || can_fail)
+    f_binding = f_needed ? "const f: *@This() = @ptrCast(@alignCast(ptr));" : "_ = ptr;"
+    label = "blk_ext#{node.id}"
+    code = returns_void ? "{ " : "#{label}: { "
+    code += "const #{args_tuple_name} = #{arg_tuple}; " if runtime_arg_codes.any?
+    field_decls = fields.empty? ? "" : "#{fields.join(', ')}, "
+    code += "const #{prefix}#{node.id} = struct { #{field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { #{f_binding} #{call_stmt} } }; "
+    code += "var #{frame_name} = #{prefix}#{node.id}{ #{init_fields.join(', ')} }; "
+    code += "#{@rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &#{prefix}#{node.id}.run), @ptrCast(&#{frame_name})); "
+    code += "if (#{frame_name}.err) |e| return e; " if can_fail
+    code += "break :#{label} #{frame_name}.ret; " unless returns_void
+    code + "}"
+  end
+
+  sig { params(node: MIR::ExternTrampoline, comptime_codes: T::Array[String], runtime_arg_count: Integer).returns(String) }
+  def extern_trampoline_call(node, comptime_codes, runtime_arg_count)
+    if node.method_name
+      args = []
+      args << "f.alloc" if node.alloc_kind
+      runtime_arg_count.times { |index| args << "f.a#{index}" }
+      return "f.self_val.#{T.must(node.method_name)}(#{args.join(', ')})"
+    end
+
+    mod_prefix = node.module_alias ? "#{T.must(node.module_alias).gsub('.', '_')}." : ""
+    parts = comptime_codes.dup
+    parts << "f.alloc" if node.alloc_kind
+    runtime_arg_count.times { |index| parts << "f.a#{index}" }
+    "#{mod_prefix}#{node.callee_name}(#{parts.join(', ')})"
+  end
+
+  sig { params(node: MIR::ObservableConsumerSpawn).returns(String) }
+  def emit_observable_consumer_spawn(node)
+    ctx_type = "__ObsConsumerCtx#{node.id}"
+    fiber_rt = "__rt_obs_#{node.id}"
+    body = emit_body_with_runtime(node.body, fiber_rt)
+    body = replace_emit_identifier(replace_emit_identifier(body, node.acc_name, "ctx.acc"), node.source_name, "ctx.gen")
+    rt_name = node.runtime_name
+
+    <<~ZIG.chomp
+      const #{ctx_type} = struct {
+              acc: #{node.acc_type.zig_type},
+              gen: @TypeOf(#{node.source_name}),
+              fn run(__raw_rt_obs_#{node.id}: *anyopaque, __raw_args_obs_#{node.id}: ?*anyopaque) anyerror!void {
+                  const #{fiber_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_obs_#{node.id})));
+                  #{body.include?(fiber_rt) ? "" : "_ = &#{fiber_rt};"}
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_obs_#{node.id}.?)));
+                  defer ctx.acc.finish();
+                  #{body}
+              }
+          };
+          try CheatHeader.spawnObservableConsumerCtx(
+              #{ctx_type},
+              #{rt_name},
+              .{ .acc = #{node.acc_name}, .gen = #{node.source_name} },
+              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+              .{ .stack_size = .#{node.task_config_variant} }
+          )
+    ZIG
+  end
+
+  sig { params(stmts: T::Array[MIR::Emittable], runtime_name: String).returns(String) }
+  def emit_body_with_runtime(stmts, runtime_name)
+    prior_rt_name = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    emit_body(stmts)
+  ensure
+    @rt_name = T.must(prior_rt_name)
+  end
+
+  sig { params(node: MIR::Emittable, runtime_name: String).returns(String) }
+  def emit_node_with_runtime(node, runtime_name)
+    prior_rt_name = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    T.must(emit(node))
+  ensure
+    @rt_name = T.must(prior_rt_name)
+  end
+
+  sig { params(actions: T::Array[MIR::CaptureCleanupAction], runtime_name: String).returns(String) }
+  def emit_capture_cleanup_actions_with_runtime(actions, runtime_name)
+    prior_rt_name = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    emit_capture_cleanup_actions(actions)
+  ensure
+    @rt_name = T.must(prior_rt_name)
+  end
+
+  sig { params(source: String, needle: String, replacement: String).returns(String) }
+  def replace_emit_identifier(source, needle, replacement)
+    return source if needle.empty?
+
+    idx = 0
+    needle_len = needle.bytesize
+    result = +""
+    while idx < source.bytesize
+      if source.byteslice(idx, needle_len) == needle &&
+          emit_identifier_boundary?(source, idx - 1) &&
+          emit_identifier_boundary?(source, idx + needle_len)
+        result << replacement
+        idx += needle_len
+      else
+        result << T.must(source.byteslice(idx, 1))
+        idx += 1
+      end
+    end
+    result
+  end
+
+  sig { params(source: String, index: Integer).returns(T::Boolean) }
+  def emit_identifier_boundary?(source, index)
+    return true if index < 0 || index >= source.bytesize
+
+    byte = source.getbyte(index)
+    return true unless byte
+
+    !((byte >= 48 && byte <= 57) ||
+      (byte >= 65 && byte <= 90) ||
+      (byte >= 97 && byte <= 122) ||
+      byte == 95)
   end
 
   # --- MVCC SNAPSHOT / WITH MATCH emitters ---
   #
   # These render structured nodes 1:1 to the same Zig text we used to
-  # emit via InlineZig blobs in mir_lowering, but the construct is now
+  # emit via opaque expression blobs in mir_lowering, but the construct is now
   # MIR-checker-visible. Pre-migration these were inline string blobs
   # that hid heap allocations from the checker (INV-12 violation).
 
@@ -323,14 +730,63 @@ class MIREmitter
   sig { params(node: MIR::SnapshotRead).returns(String) }
   def emit_snapshot_read(node)
     body = emit_body(node.body || [])
+    cell_unwrap = T.must(emit(node.cell_unwrap))
     parts = [
-      "var #{node.guard_var} = #{node.cell_unwrap}.*.read(#{node.rt});",
+      "var #{node.guard_var} = #{cell_unwrap}.*.read(#{node.rt});",
       "defer #{node.guard_var}.release();",
-      "const #{node.alias_zig} = #{node.guard_var}.get();",
-      "_ = &#{node.alias_zig};",
+      "const #{node.alias_name} = #{node.guard_var}.get();",
+      "_ = &#{node.alias_name};",
     ]
     parts << body unless body.empty?
     parts.join("\n")
+  end
+
+  sig { params(node: MIR::CapabilityUnwrap).returns(String) }
+  def emit_capability_unwrap(node)
+    source = T.must(emit(node.source))
+    is_ptr = "@typeInfo(@TypeOf(#{source})) == .pointer"
+    inner_t = "@typeInfo(@TypeOf(#{source})).pointer.child"
+    "(if (comptime #{is_ptr}) " \
+      "(if (comptime @typeInfo(#{inner_t}) == .@\"struct\") " \
+        "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{source}.ctrl.data else #{source}) " \
+       "else " \
+        "(if (comptime @typeInfo(#{inner_t}) == .pointer) " \
+          "(if (comptime @typeInfo(@typeInfo(#{inner_t}).pointer.child) == .@\"struct\") " \
+            "(if (comptime @hasField(@typeInfo(#{inner_t}).pointer.child, \"ctrl\")) #{source}.*.ctrl.data else #{source}.*) " \
+           "else #{source}.*) " \
+         "else #{source})) " \
+    "else " \
+      "(if (comptime @typeInfo(@TypeOf(#{source})) == .@\"struct\") " \
+        "(if (comptime @hasField(@TypeOf(#{source}), \"ctrl\")) #{source}.ctrl.data else &#{source}) " \
+       "else &#{source}))"
+  end
+
+  sig { params(node: MIR::CapabilityLockTarget).returns(String) }
+  def emit_capability_lock_target(node)
+    source = T.must(emit(node.source))
+    return comptime_arc_unwrap_expr(source) if node.comptime_arc_unwrap
+    return "#{source}.ctrl.data.*" if node.arc_wrapped
+
+    source
+  end
+
+  sig { params(node: MIR::CapabilityLockAddress).returns(String) }
+  def emit_capability_lock_address(node)
+    source = T.must(emit(node.source))
+    node.arc_wrapped ? "#{source}.ctrl.data" : "&#{source}"
+  end
+
+  sig { params(source: String).returns(String) }
+  def comptime_arc_unwrap_expr(source)
+    base_t = "@TypeOf(#{source})"
+    "(if (comptime @typeInfo(#{base_t}) == .pointer) " \
+      "(if (comptime @typeInfo(@typeInfo(#{base_t}).pointer.child) == .@\"struct\") " \
+        "(if (comptime @hasField(@typeInfo(#{base_t}).pointer.child, \"ctrl\")) #{source}.*.ctrl.data.* else #{source}.*) " \
+       "else #{source}.*) " \
+     "else " \
+      "(if (comptime @typeInfo(#{base_t}) == .@\"struct\") " \
+        "(if (comptime @hasField(#{base_t}, \"ctrl\")) #{source}.ctrl.data.* else #{source}) " \
+       "else #{source}))"
   end
 
   # `WITH SNAPSHOT cell AS MUTABLE va { body } [ON MvccConflict <action>]`:
@@ -351,10 +807,11 @@ class MIREmitter
   sig { params(node: MIR::PolymorphicMutate).returns(String) }
   def emit_polymorphic_mutate(node)
     body_zig = emit_body(node.body || [])
+    cell_zig = T.must(emit(node.cell))
     <<~ZIG.rstrip
-      try CheatLib.polymorphicMutate(#{node.cell_zig}, #{node.rt}, struct {
-          fn run(#{node.alias_zig}: *#{node.bare_t_zig}) void {
-              _ = &#{node.alias_zig};
+      try CheatLib.polymorphicMutate(#{cell_zig}, #{node.rt}, struct {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}) void {
+              _ = &#{node.alias_name};
               #{body_zig}
           }
       }.run, .{});
@@ -363,16 +820,17 @@ class MIREmitter
 
   sig { params(node: MIR::PolymorphicMutateFlow).returns(String) }
   def emit_polymorphic_mutate_flow(node)
-    old_flow_alias = @flow_alias_zig
-    @flow_alias_zig = node.alias_zig
+    old_flow_alias = @flow_alias_name
+    @flow_alias_name = node.alias_name
+    cell_zig = T.must(emit(node.cell))
     body_zig = emit_body_flow(node.body || [], :ret_commit)
-    guard_zig = ""
+    guard_block = ""
     if node.guard_cond
       fail_zig = emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
       unless flow_body_terminates?(node.guard_fail_body || [])
         fail_zig += "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;"
       end
-      guard_zig = <<~ZIG
+      guard_block = <<~ZIG
         if (!(#{emit(node.guard_cond)})) {
             #{indent_block(fail_zig, 12)}
         }
@@ -382,13 +840,13 @@ class MIREmitter
     result = <<~ZIG.rstrip
       const __PolyFlow = struct {
           kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },
-          ret: #{node.ret_zig} = undefined,
+          ret: #{node.return_type.zig_type} = undefined,
       };
       var __poly_flow = __PolyFlow{ .kind = .cont_commit };
-      try CheatLib.polymorphicMutateFlow(#{node.cell_zig}, #{node.rt}, struct {
-          fn run(#{node.alias_zig}: *#{node.bare_t_zig}, __flow: *__PolyFlow) void {
-              _ = &#{node.alias_zig};
-              #{guard_zig}
+      try CheatLib.polymorphicMutateFlow(#{cell_zig}, #{node.rt}, struct {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}, __flow: *__PolyFlow) void {
+              _ = &#{node.alias_name};
+              #{guard_block}
               #{body_zig}
               #{flow_body_terminates?(node.body || []) ? "" : "__flow.* = .{ .kind = .cont_commit };"}
           }
@@ -399,7 +857,7 @@ class MIREmitter
           .cont_commit, .skip_no_commit => #{fallthrough_arm},
       }
     ZIG
-    @flow_alias_zig = old_flow_alias
+    @flow_alias_name = old_flow_alias
     result
   end
 
@@ -414,7 +872,7 @@ class MIREmitter
     case stmt
     when MIR::ReturnStmt
       ret = stmt.value ? emit(stmt.value) : "{}"
-      ret = "#{ret}.*" if @flow_alias_zig && ret == @flow_alias_zig
+      ret = "#{ret}.*" if @flow_alias_name && ret == @flow_alias_name
       "__flow.* = .{ .kind = .#{return_kind}, .ret = #{ret} };\nreturn;"
     when MIR::ScopeBlock
       inner = emit_body_flow(stmt.body || [], return_kind)
@@ -446,9 +904,7 @@ class MIREmitter
     return false unless stmts && !stmts.empty?
     last = stmts.last
     case last
-    when MIR::ReturnStmt
-      true
-    when MIR::PolymorphicFlowSignal
+    when MIR::ReturnStmt, MIR::PolymorphicFlowSignal
       true
     when MIR::ScopeBlock
       flow_body_terminates?(last.body || [])
@@ -478,10 +934,12 @@ class MIREmitter
   sig { params(node: MIR::SnapshotTransaction).returns(String) }
   def emit_snapshot_transaction(node)
     body_zig = emit_body(node.body || [])
+    cell_unwrap = T.must(emit(node.cell_unwrap))
+    alloc = alloc_zig(node.alloc)
     core = <<~ZIG.rstrip
-      #{node.cell_unwrap}.*.update(#{node.rt}, #{node.alloc}, struct {
-          fn run(#{node.alias_zig}: *#{node.bare_t_zig}) void {
-              _ = &#{node.alias_zig};
+      #{cell_unwrap}.*.update(#{node.rt}, #{alloc}, struct {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}) void {
+              _ = &#{node.alias_name};
               #{body_zig}
           }
       }.run, .{})
@@ -497,10 +955,15 @@ class MIREmitter
   sig { params(node: MIR::SnapshotMultiTxn).returns(String) }
   def emit_snapshot_multi_txn(node)
     body_zig = emit_body(node.body || [])
+    cells_tuple = ".{ #{(node.cells || []).map { |cell| T.must(emit(cell)) }.join(", ")} }"
+    alloc = alloc_zig(node.alloc)
+    alias_decls = (node.aliases || []).each_with_index.map do |alias_name, index|
+      "const #{alias_name} = views[#{index}]; _ = &#{alias_name};"
+    end.join("\n            ")
     core = <<~ZIG.rstrip
-      CheatLib.versionedUpdateMulti(#{node.cells_tuple}, #{node.rt}, #{node.alloc}, struct {
+      CheatLib.versionedUpdateMulti(#{cells_tuple}, #{node.rt}, #{alloc}, struct {
           fn run(views: anytype) anyerror!void {
-              #{node.alias_decls}
+              #{alias_decls}
               #{body_zig}
           }
       }.run, .{})
@@ -514,15 +977,61 @@ class MIREmitter
   # exhaustiveness); we emit exactly what mir_lowering passed in.
   sig { params(node: MIR::WithMatchDispatch).returns(String) }
   def emit_with_match_dispatch(node)
+    cell_zig = T.must(emit(node.cell))
     arm_strs = node.arms.each_with_index.map { |arm, i|
-      head = i.zero? ? "if (comptime #{arm[:probe]})" : "else if (comptime #{arm[:probe]})"
-      body_zig = emit_body(arm[:body] || [])
-      prelude = arm[:prelude_zig].to_s
+      probe = emit_with_match_probe(arm.family, cell_zig, node.snapshot_mode)
+      head = i.zero? ? "if (comptime #{probe})" : "else if (comptime #{probe})"
+      body_zig = emit_body(arm.body || [])
+      prelude = emit_with_match_prelude(arm, cell_zig, node.alias_name, node.rt_name, node.snapshot_mode)
       inner = prelude.empty? ? body_zig : "#{prelude}\n#{body_zig}"
       "#{head} {\n    #{inner}\n}"
     }
     chain = arm_strs.join(" ") + " else { unreachable; }"
-    "#{chain}\n_ = &#{node.cell_zig};"
+    "#{chain}\n_ = &#{cell_zig};"
+  end
+
+  sig { params(family: Symbol, cell_zig: String, snapshot_mode: T::Boolean).returns(String) }
+  def emit_with_match_probe(family, cell_zig, snapshot_mode)
+    inner_t = "CheatLib.WithMatchInner(@TypeOf(#{cell_zig}))"
+    case family
+    when :VERSIONED
+      snapshot_mode ? "(@hasDecl(#{inner_t}, \"Inner\") and !@hasDecl(#{inner_t}, \"compareAndPublish\"))" :
+        "@hasDecl(#{inner_t}, \"Inner\")"
+    when :LOCKED
+      "@hasField(#{inner_t}, \"mutex\")"
+    when :ATOMIC
+      snapshot_mode ? "@hasDecl(#{inner_t}, \"compareAndPublish\")" :
+        "@hasDecl(#{inner_t}, \"cmpxchgStrong\")"
+    else
+      Kernel.raise "WITH MATCH: no probe for family #{family.inspect}"
+    end
+  end
+
+  sig { params(arm: MIR::WithMatchArm, cell_zig: String, alias_name: String, rt_name: String, snapshot_mode: T::Boolean).returns(String) }
+  def emit_with_match_prelude(arm, cell_zig, alias_name, rt_name, snapshot_mode)
+    unwrap = emit_capability_unwrap(MIR::CapabilityUnwrap.new(MIR::Ident.new(cell_zig)))
+    case arm.family
+    when :VERSIONED
+      emit_with_match_guard_prelude(unwrap, arm.guard_var, alias_name, rt_name, :read)
+    when :LOCKED
+      emit_with_match_guard_prelude(unwrap, arm.guard_var, alias_name, rt_name, :acquire)
+    when :ATOMIC
+      snapshot_mode ? emit_with_match_guard_prelude(unwrap, arm.guard_var, alias_name, rt_name, :read) :
+        "const #{alias_name} = #{unwrap};\n_ = &#{alias_name};"
+    else
+      ""
+    end
+  end
+
+  sig { params(unwrap: String, guard_var: String, alias_name: String, rt_name: String, mode: Symbol).returns(String) }
+  def emit_with_match_guard_prelude(unwrap, guard_var, alias_name, rt_name, mode)
+    call = mode == :read ? "read(#{rt_name})" : "acquire()"
+    [
+      "var #{guard_var} = #{unwrap}.*.#{call};",
+      "defer #{guard_var}.release();",
+      "const #{alias_name} = #{guard_var}.get();",
+      "_ = &#{alias_name};",
+    ].join("\n")
   end
 
   # Helper: wrap a Versioned.update[Multi] / AtomicPtr.update call
@@ -530,8 +1039,9 @@ class MIREmitter
   # outer-retry shape). Parameterize the Zig error name so the same wrapper works for both families:
   # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
   # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
-  sig { params(core_call: String, conflict_action: String, retries: T.nilable(Integer), zig_error_name: String).returns(String) }
+  sig { params(core_call: String, conflict_action: T.nilable(MIR::FailureAction), retries: T.nilable(Integer), zig_error_name: String).returns(String) }
   def wrap_conflict_handler(core_call, conflict_action, retries, zig_error_name = "UpdateRetriesExhausted")
+    action_zig = conflict_action ? emit_failure_action(conflict_action) : "return error.#{zig_error_name};"
     if retries
       <<~ZIG.rstrip
         {
@@ -542,7 +1052,7 @@ class MIREmitter
                 } else |__err| switch (__err) {
                     error.#{zig_error_name} => {
                         if (__retry + 1 < #{retries}) continue;
-                        #{conflict_action}
+                        #{action_zig}
                     },
                     else => return __err,
                 }
@@ -552,11 +1062,269 @@ class MIREmitter
     else
       <<~ZIG.rstrip
         #{core_call} catch |__err| switch (__err) {
-            error.#{zig_error_name} => { #{conflict_action} },
+            error.#{zig_error_name} => { #{action_zig} },
             else => return __err,
         };
       ZIG
     end
+  end
+
+  sig { params(action: MIR::FailureAction).returns(String) }
+  def emit_failure_action(action)
+    kind = action.kind
+    error_name = action.error_type.to_s
+    case kind
+    when MIR::FailureActionKind::Raise
+      "#{action.rt_name}.setError(.#{action.error_kind}, @intFromEnum(ErrorName.#{error_name}), #{zig_string_literal(action.default_message)}, #{action.line});\nreturn error.CheatError;"
+    when MIR::FailureActionKind::Exit
+      message = action.message ? T.must(emit(action.message)) : zig_string_literal(action.default_message)
+      "#{action.rt_name}.setError(.#{action.error_kind}, @intFromEnum(ErrorName.#{error_name}), #{message}, #{action.line});\nreturn error.CheatError;"
+    when MIR::FailureActionKind::Pass
+      "break :#{required_failure_label(action)};"
+    when MIR::FailureActionKind::Return
+      "return #{T.must(emit(T.must(action.return_value)))};"
+    when MIR::FailureActionKind::Block
+      "#{emit_body(action.body)}\nbreak :#{required_failure_label(action)};"
+    else
+      T.absurd(kind)
+    end
+  end
+
+  sig { params(action: MIR::FailureAction).returns(String) }
+  def required_failure_label(action)
+    label = action.with_label
+    Kernel.raise "failure action requires a WITH label" unless label
+
+    label
+  end
+
+  sig { params(text: String).returns(String) }
+  def zig_string_literal(text)
+    text.dump
+  end
+
+  sig { params(node: MIR::FallibleLockBinding).returns(String) }
+  def emit_fallible_lock_binding(node)
+    [
+      "var #{node.guard_var} = #{emit_fallible_lock_acquire_expr(node)};",
+      "defer #{node.guard_var}.release();",
+      "const #{node.alias_name} = #{node.guard_var}.get();",
+      "_ = &#{node.alias_name};",
+    ].join("\n")
+  end
+
+  sig { params(node: MIR::FallibleLockBinding).returns(String) }
+  def emit_fallible_lock_acquire_expr(node)
+    handler = emit_fallible_lock_error_handler(
+      node.action,
+      node.retries,
+      node.matched_types || [],
+      node.bubble_types || [],
+      node.rt_name,
+      node.source_line.to_s,
+    )
+    acquire_call = T.must(emit(node.acquire_call))
+    if node.retries
+      <<~ZIG.rstrip
+        #{node.acquire_block}: {
+          var __retry: usize = 0;
+          while (true) : (__retry += 1) {
+            if (#{acquire_call}) |__g| {
+              break :#{node.acquire_block} __g;
+            } else |__err| {
+              #{handler}
+            }
+          }
+        }
+      ZIG
+    else
+      <<~ZIG.rstrip
+        #{node.acquire_block}: {
+          if (#{acquire_call}) |__g| {
+            break :#{node.acquire_block} __g;
+          } else |__err| {
+            #{handler}
+          }
+        }
+      ZIG
+    end
+  end
+
+  sig do
+    params(
+      action: MIR::FailureAction,
+      retries: T.nilable(Integer),
+      matched_types: T::Array[Symbol],
+      bubble_types: T::Array[Symbol],
+      rt_name: String,
+      source_line: String,
+    ).returns(String)
+  end
+  def emit_fallible_lock_error_handler(action, retries, matched_types, bubble_types, rt_name, source_line)
+    action_zig = emit_failure_action(action)
+    matched_arms = matched_types.map do |type_name|
+      matched_errs = "error.#{AST.zig_name_of_type(type_name)}"
+      body = retries ? "if (__retry + 1 < #{retries}) continue;\n#{action_zig}" : action_zig
+      "#{matched_errs} => { #{body} }"
+    end
+    bubble_arms = bubble_types.map do |type_name|
+      zig = AST.zig_name_of_type(type_name)
+      kind = AST.kind_of_type(type_name)
+      %Q(error.#{zig} => { #{rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{source_line}); return error.CheatError; })
+    end
+    arms = matched_arms + bubble_arms
+    "switch (__err) {\n#{arms.join(",\n")}\n}"
+  end
+
+  sig { params(node: MIR::SortedLockAcquire).returns(String) }
+  def emit_sorted_lock_acquire(node)
+    node.fallible ? emit_sorted_lock_acquire_fallible(node) : emit_sorted_lock_acquire_panic(node)
+  end
+
+  sig { params(node: MIR::SortedLockAcquire).returns(String) }
+  def emit_sorted_lock_acquire_panic(node)
+    entries = node.entries || []
+    n = entries.length
+    guard_decls = entries.map { |entry|
+      "var #{entry.guard_var}: @TypeOf(#{emit(entry.lock_expr)}.#{entry.method_name}()) = undefined;"
+    }.join("\n")
+    ptr_init = entries.map { |entry| "@intFromPtr(#{emit(entry.address_expr)})" }.join(", ")
+    order_init = (0...n).to_a.join(", ")
+    switch_arms = entries.map { |entry|
+      "#{entry.index} => #{entry.guard_var} = #{emit(entry.lock_expr)}.#{entry.method_name}(),"
+    }.join("\n                ")
+    defer_releases = entries.map { |entry| "defer #{entry.guard_var}.release();" }.join("\n")
+    alias_decls = entries.map { |entry|
+      "const #{entry.alias_name} = #{entry.guard_var}.get();\n_ = &#{entry.alias_name};"
+    }.join("\n")
+
+    <<~ZIG.rstrip
+      #{guard_decls}
+      {
+          const __ptrs = [_]usize{ #{ptr_init} };
+          var __order = [_]u8{ #{order_init} };
+          var __i: usize = 0;
+          while (__i < #{n}) : (__i += 1) {
+              var __j: usize = 0;
+              while (__j + 1 < #{n}) : (__j += 1) {
+                  if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
+                      const __tmp = __order[__j];
+                      __order[__j] = __order[__j + 1];
+                      __order[__j + 1] = __tmp;
+                  }
+              }
+          }
+          for (__order) |__idx| {
+              switch (__idx) {
+                #{switch_arms}
+                else => unreachable,
+              }
+          }
+      }
+      #{defer_releases}
+      #{alias_decls}
+    ZIG
+  end
+
+  sig { params(node: MIR::SortedLockAcquire).returns(String) }
+  def emit_sorted_lock_acquire_fallible(node)
+    entries = node.entries || []
+    n = entries.length
+    action = T.cast(node.action, MIR::FailureAction)
+    guard_decls = entries.map { |entry|
+      "var #{entry.guard_var}: @TypeOf(try #{emit(entry.lock_expr)}.#{entry.method_name}()) = undefined;"
+    }.join("\n")
+    held_decls = entries.map { |entry| "var #{entry.held_var}: bool = false;" }.join("\n")
+    ptr_init = entries.map { |entry| "@intFromPtr(#{emit(entry.address_expr)})" }.join(", ")
+    order_init = (0...n).to_a.join(", ")
+    acquire_arms = entries.map { |entry|
+      lock_expr = emit(entry.lock_expr)
+      <<~ZIG.rstrip
+        #{entry.index} => {
+                                        if (#{lock_expr}.#{entry.method_name}()) |__g| {
+                                            #{entry.guard_var} = __g;
+                                            #{entry.held_var} = true;
+                                        } else |__err_inner| {
+                                            __err_caught = __err_inner;
+                                            __success = false;
+                                        }
+                                    },
+      ZIG
+    }.join("\n                                ")
+    release_arms = entries.map { |entry|
+      "#{entry.index} => if (#{entry.held_var}) { #{entry.guard_var}.release(); #{entry.held_var} = false; },"
+    }.join("\n                            ")
+    handler_switch = emit_sorted_lock_handler_switch(action, node.matched_types || [], node.bubble_types || [],
+      node.rt_name, node.source_line.to_s)
+    retry_branch = node.retries ? "if (__retry + 1 < #{node.retries}) continue;" : "// no retries configured"
+    defer_releases = entries.map { |entry| "defer if (#{entry.held_var}) #{entry.guard_var}.release();" }.join("\n")
+    alias_decls = entries.map { |entry|
+      "const #{entry.alias_name} = #{entry.guard_var}.get();\n_ = &#{entry.alias_name};"
+    }.join("\n")
+
+    <<~ZIG.rstrip
+      #{guard_decls}
+      #{held_decls}
+      #{node.loop_label}: {
+          var __retry: usize = 0;
+          while (true) : (__retry += 1) {
+              const __ptrs = [_]usize{ #{ptr_init} };
+              var __order = [_]u8{ #{order_init} };
+              var __i: usize = 0;
+              while (__i < #{n}) : (__i += 1) {
+                  var __j: usize = 0;
+                  while (__j + 1 < #{n}) : (__j += 1) {
+                      if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
+                          const __tmp = __order[__j];
+                          __order[__j] = __order[__j + 1];
+                          __order[__j + 1] = __tmp;
+                      }
+                  }
+              }
+              var __success = true;
+              var __err_caught: ?anyerror = null;
+              var __k: usize = 0;
+              while (__k < #{n}) : (__k += 1) {
+                  const __idx = __order[__k];
+                  switch (__idx) {
+                      #{acquire_arms}
+                      else => unreachable,
+                  }
+                  if (!__success) break;
+              }
+              if (__success) break :#{node.loop_label};
+              var __r: usize = __k;
+              while (__r > 0) {
+                  __r -= 1;
+                  switch (__order[__r]) {
+                      #{release_arms}
+                      else => unreachable,
+                  }
+              }
+              #{retry_branch}
+              #{handler_switch}
+              unreachable;
+          }
+      }
+      #{defer_releases}
+      #{alias_decls}
+    ZIG
+  end
+
+  sig { params(action: MIR::FailureAction, matched: T::Array[Symbol], bubble: T::Array[Symbol], rt_name: String, source_line: String).returns(String) }
+  def emit_sorted_lock_handler_switch(action, matched, bubble, rt_name, source_line)
+    handler_arms = T.let([], T::Array[String])
+    unless matched.empty?
+      matched_errs = matched.map { |type_name| "error.#{AST.zig_name_of_type(type_name)}" }.join(", ")
+      handler_arms << "#{matched_errs} => { #{emit_failure_action(action)} }"
+    end
+    bubble.each do |type_name|
+      zig = AST.zig_name_of_type(type_name)
+      kind = AST.kind_of_type(type_name)
+      handler_arms << %Q(error.#{zig} => { #{rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{source_line}); return error.CheatError; })
+    end
+    handler_arms << %Q(else => |__err_other| { #{rt_name}.setError(.System, 0, @errorName(__err_other), #{source_line}); return error.CheatError; })
+    "switch (__err_caught.?) {\n                    #{handler_arms.join(",\n                    ")},\n                }"
   end
 
   # --- Top-level emitters ---
@@ -788,8 +1556,8 @@ class MIREmitter
   def emit_switch(node)
     subject = emit(node.subject)
     arms = node.arms.map { |arm|
-      body = emit_body(arm[:body])
-      "#{arm[:pattern]} => {\n#{body}\n}"
+      body = emit_body(arm.body)
+      "#{emit_switch_patterns(arm.patterns)} => {\n#{body}\n}"
     }
     if node.default_body
       body = node.default_body.empty? ? "" : emit_body(node.default_body)
@@ -798,14 +1566,121 @@ class MIREmitter
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
   end
 
+  sig { params(patterns: T::Array[MIR::SwitchPattern]).returns(String) }
+  def emit_switch_patterns(patterns)
+    patterns.map { |pattern| emit_switch_pattern(pattern) }.join(", ")
+  end
+
+  sig { params(pattern: MIR::SwitchPattern).returns(String) }
+  def emit_switch_pattern(pattern)
+    case pattern
+    when MIR::EnumSwitchPattern
+      ".#{pattern.variant}"
+    else
+      T.must(emit(pattern))
+    end
+  end
+
+  sig { params(node: MIR::CatchWrapper).returns(String) }
+  def emit_catch_wrapper(node)
+    inner_call = T.must(emit(node.inner_call))
+    if node.clauses.empty?
+      return "return #{inner_call} catch {\n#{indent_block(emit_catch_default_body(node), 4)}\n};"
+    end
+
+    branch_parts = node.clauses.each_with_index.map do |clause, index|
+      emit_catch_clause(clause, node.rt_name, node.snapshot_type, index.zero?)
+    end
+    branch_parts << emit_catch_default(node)
+    branch_chain = branch_parts.join(" else ")
+    "return #{inner_call} catch {\n#{indent_block(branch_chain, 4)}\n};"
+  end
+
+  sig { params(clause: MIR::CatchClause, rt_name: String, snapshot_type: T.nilable(Type), first_clause: T::Boolean).returns(String) }
+  def emit_catch_clause(clause, rt_name, snapshot_type, first_clause)
+    body = emit_catch_body(rt_name, clause.body, snapshot_type)
+    "if (#{emit_catch_condition(clause.meta, rt_name)}) {\n#{indent_block(body, 8)}\n}"
+  end
+
+  sig { params(node: MIR::CatchWrapper).returns(String) }
+  def emit_catch_default(node)
+    "{\n#{indent_block(emit_catch_default_body(node), 8)}\n}"
+  end
+
+  sig { params(node: MIR::CatchWrapper).returns(String) }
+  def emit_catch_default_body(node)
+    action = T.cast(node.default_action, MIR::CatchDefaultAction)
+    case action
+    when MIR::CatchDefaultAction::Body
+      emit_catch_body(node.rt_name, node.default_body, nil)
+    when MIR::CatchDefaultAction::Propagate
+      "#{node.rt_name}.freeSnapshot();\nreturn error.CheatError;"
+    when MIR::CatchDefaultAction::Unreachable
+      "#{node.rt_name}.freeSnapshot();\nunreachable;"
+    else
+      T.absurd(action)
+    end
+  end
+
+  sig { params(rt_name: String, body: T::Array[MIR::Emittable], snapshot_type: T.nilable(Type)).returns(String) }
+  def emit_catch_body(rt_name, body, snapshot_type)
+    parts = T.let([], T::Array[String])
+    snapshot_decl = emit_catch_snapshot_decl(rt_name, snapshot_type)
+    parts << snapshot_decl unless snapshot_decl.empty?
+    parts << "const __error = #{rt_name}.__error;"
+    parts << "_ = &__error;"
+    parts << "defer #{rt_name}.freeSnapshot();"
+    emitted_body = emit_body(body)
+    parts << emitted_body unless emitted_body.empty?
+    parts.join("\n")
+  end
+
+  sig { params(rt_name: String, snapshot_type: T.nilable(Type)).returns(String) }
+  def emit_catch_snapshot_decl(rt_name, snapshot_type)
+    return "" unless snapshot_type
+
+    snap_zig = snapshot_type.zig_type
+    [
+      "const __snap_ptr = #{rt_name}.__error.snapshotAs(#{snap_zig});",
+      "const snapshot = if (__snap_ptr) |p| p.* else undefined;",
+      "const __has_snapshot = __snap_ptr != null;",
+      "_ = &snapshot; _ = &__has_snapshot;",
+    ].join("\n")
+  end
+
+  sig { params(meta: MIR::CatchClauseMeta, rt_name: String).returns(String) }
+  def emit_catch_condition(meta, rt_name)
+    item_checks = T.let([], T::Array[String])
+    meta.kinds.each { |kind| item_checks << "#{rt_name}.__error.matchesKind(.#{kind})" }
+    meta.types.each { |name| item_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{name}))" }
+
+    item_cond = emit_catch_condition_group(item_checks, default: "true")
+
+    filter_checks = T.let([], T::Array[String])
+    meta.filter_types.each { |name| filter_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{name}))" }
+    meta.filter_messages.each { |message| filter_checks << "#{rt_name}.__error.matchesMessage(#{T.must(emit(message))})" }
+    return item_cond if filter_checks.empty?
+
+    filter_cond = emit_catch_condition_group(filter_checks, default: "true")
+    "#{item_cond} and #{filter_cond}"
+  end
+
+  sig { params(checks: T::Array[String], default: String).returns(String) }
+  def emit_catch_condition_group(checks, default:)
+    return default if checks.empty?
+    return T.must(checks.first) if checks.length == 1
+
+    "(#{checks.join(' or ')})"
+  end
+
   sig { params(node: MIR::UnionMatchStmt).returns(String) }
   def emit_union_match(node)
     subject = emit(node.subject)
     arms = node.arms.map do |arm|
-      body = emit_body(arm[:body])
-      payload = arm[:payload]
+      body = emit_body(arm.body)
+      payload = arm.payload
       capture = payload ? " |#{payload}|" : ""
-      "#{arm[:pattern]} =>#{capture} {\n#{body}\n}"
+      ".#{arm.variant} =>#{capture} {\n#{body}\n}"
     end
     if node.default_body
       body = node.default_body.empty? ? "" : emit_body(node.default_body)
@@ -898,23 +1773,25 @@ class MIREmitter
 
   sig { params(node: MIR::ThunkTrampoline).returns(String) }
   def emit_thunk_trampoline(node)
-    param_field_decls = node.param_field_decls.join("\n            ")
-    param_init = node.param_init_fields.join(", ")
+    return_type_zig = node.return_type.zig_type
+    param_field_lines = emit_thunk_frame_field_decls(node.param_fields, indent: "            ")
+    param_init = emit_thunk_frame_inits(node.param_init_fields)
     base_case_branches = node.base_cases.map { |bc|
       <<~ZIG.chomp
-        if (#{bc.fetch(:cond_zig)}) {
-                            const result: #{node.ret_zig} = #{bc.fetch(:value_zig)};
+        if (#{emit(bc.cond)}) {
+                            const result: #{return_type_zig} = #{emit(bc.value)};
         #{emit_thunk_return_or_pop}
                         }
       ZIG
     }.join("\n                    ")
-    recurse_arg_inits = node.recurse_arg_inits.join(", ")
+    recurse_arg_inits = emit_thunk_frame_inits(node.recurse_arg_inits)
+    combine_op = emit_thunk_combine_op(node.combine_op)
 
     <<~ZIG
       const Frame = struct {
-              #{param_field_decls}
+              #{param_field_lines}
               step: u8 = 0,
-              child_result: #{node.ret_zig} = undefined,
+              child_result: #{return_type_zig} = undefined,
               parent: ?*@This() = null,
           };
           var initial: Frame = .{ #{param_init} };
@@ -926,19 +1803,19 @@ class MIREmitter
               // own yield budget). Strippable via :TIGHT:THUNK
               // for tight inner loops where the caller manages
               // scheduler hand-off externally.
-              #{node.yield_line}
+              #{emit_thunk_yield_statement(node.yield_policy)}
               switch (current.step) {
                   0 => {
                       #{base_case_branches}
                       // recursive call -- push child frame
-                      const child = rt.heapAlloc().create(Frame) catch unreachable;
+                      const child = #{@rt_name}.heapAlloc().create(Frame) catch unreachable;
                       child.* = .{ #{recurse_arg_inits}, .parent = current };
                       current.step = 1;
                       current = child;
                       continue;
                   },
                   1 => {
-                      const result: #{node.ret_zig} = #{node.combine_lhs_zig} #{node.op_zig} current.child_result;
+                      const result: #{return_type_zig} = #{emit(node.combine_lhs)} #{combine_op} current.child_result;
       #{emit_thunk_return_or_pop}
                   },
                   else => unreachable,
@@ -952,7 +1829,7 @@ class MIREmitter
     <<~ZIG.chomp
                           if (current.parent) |p| {
                               p.child_result = result;
-                              if (current != &initial) rt.heapAlloc().destroy(current);
+                              if (current != &initial) #{@rt_name}.heapAlloc().destroy(current);
                               current = p;
                               continue;
                           }
@@ -963,14 +1840,14 @@ class MIREmitter
   sig { params(node: MIR::MutualThunkTrampoline).returns(String) }
   def emit_mutual_thunk_trampoline(node)
     variant_decls = node.variants.map { |variant|
-      fields = variant.fetch(:param_field_decls).join("\n          ")
+      fields = emit_thunk_frame_field_decls(variant.param_fields, indent: "          ")
       <<~ZIG.chomp
-        #{variant.fetch(:name)}: struct {
+        #{variant.name}: struct {
                   #{fields}
               },
       ZIG
     }.join("\n      ")
-    initial_fields = node.initial_fields.join(", ")
+    initial_fields = emit_thunk_frame_inits(node.initial_fields)
     switch_arms = node.arms.map { |arm| emit_mutual_thunk_arm(arm) }.join("\n              ")
 
     <<~ZIG
@@ -979,7 +1856,7 @@ class MIREmitter
       };
       var current: Frame = .{ .#{node.initial_variant} = .{ #{initial_fields} } };
       while (true) {
-          #{node.yield_line}
+          #{emit_thunk_yield_statement(node.yield_policy)}
           switch (current) {
               #{switch_arms}
           }
@@ -987,27 +1864,54 @@ class MIREmitter
     ZIG
   end
 
-  sig { params(arm: T.untyped).returns(String) }
+  sig { params(arm: MIR::MutualThunkArm).returns(String) }
   def emit_mutual_thunk_arm(arm)
-    base_branches = arm.fetch(:base_cases).map { |bc|
+    base_branches = arm.base_cases.map { |bc|
       <<~ZIG.chomp
-        if (#{bc.fetch(:cond_zig)}) {
-                              return #{bc.fetch(:value_zig)};
+        if (#{emit(bc.cond)}) {
+                              return #{emit(bc.value)};
                           }
       ZIG
     }.join("\n                      ")
-    target_arg_inits = arm.fetch(:target_arg_inits).join(", ")
+    target_arg_inits = emit_thunk_frame_inits(arm.target_arg_inits)
 
     <<~ZIG.chomp
-      .#{arm.fetch(:variant_name)} => |f| {
+      .#{arm.variant_name} => |f| {
                       #{base_branches}
-                      current = .{ .#{arm.fetch(:target_variant)} = .{ #{target_arg_inits} } };
+                      current = .{ .#{arm.target_variant} = .{ #{target_arg_inits} } };
                       continue;
                   },
     ZIG
   end
 
-  sig { params(node: T.untyped, source: String).returns(String) }
+  sig { params(inits: T::Array[MIR::ThunkFrameInit]).returns(String) }
+  def emit_thunk_frame_inits(inits)
+    inits.map { |init| ".#{init.field_name} = #{emit(init.value)}" }.join(", ")
+  end
+
+  sig { params(fields: T::Array[MIR::ThunkFrameField], indent: String).returns(String) }
+  def emit_thunk_frame_field_decls(fields, indent:)
+    fields.map { |field| "#{field.name}: #{field.type_info.zig_type}," }.join("\n#{indent}")
+  end
+
+  sig { params(policy: Symbol).returns(String) }
+  def emit_thunk_yield_statement(policy)
+    case policy
+    when :check
+      "#{@rt_name}.checkYield();"
+    when :tight_skip
+      "// (TIGHT: scheduler yield-check skipped)"
+    else
+      Kernel.raise "unknown thunk yield policy: #{policy.inspect}"
+    end
+  end
+
+  sig { params(op: Symbol).returns(String) }
+  def emit_thunk_combine_op(op)
+    THUNK_COMBINE_OPERATOR.fetch(op) { Kernel.raise "unknown thunk combine op: #{op.inspect}" }
+  end
+
+  sig { params(node: T.any(MIR::BatchWindowPush, MIR::BatchWindowFlush), source: String).returns(String) }
   def emit_batch_window_emit(node, source)
     slice = "#{node.batch_var}_slice"
     val = "#{node.batch_var}_val"
@@ -1031,22 +1935,20 @@ class MIREmitter
 
   sig { params(node: MIR::DeferStmt).returns(String) }
   def emit_defer(node)
-    body = emit(node.body)
-    if T.must(body).include?("\n") || T.must(body).start_with?("{")
-      "defer #{body}"
-    else
-      "defer #{body};"
-    end
+    emit_defer_like("defer", emit(node.body))
   end
 
   sig { params(node: MIR::ErrDeferStmt).returns(String) }
   def emit_errdefer(node)
-    body = emit(node.body)
-    if T.must(body).include?("\n") || T.must(body).start_with?("{")
-      "errdefer #{body}"
-    else
-      "errdefer #{body};"
-    end
+    emit_defer_like("errdefer", emit(node.body))
+  end
+
+  sig { params(keyword: String, body: T.nilable(String)).returns(String) }
+  def emit_defer_like(keyword, body)
+    body = T.must(body)
+    return "#{keyword} #{body}" if body.start_with?("{")
+
+    "#{keyword} #{body};"
   end
 
   sig { params(node: MIR::ExprStmt).returns(String) }
@@ -1103,7 +2005,45 @@ class MIREmitter
   # errdefer: false -> emits `defer cleanup(name)` with optional moved guard
   #                    based on entry.has_moved_guard?.
   # The caller (emit dispatch) decides which; this method applies the template.
-  sig { params(node: T.untyped, errdefer: T::Boolean).returns(String) }
+  public
+
+  sig { params(stmts: T::Array[MIR::Node]).returns(String) }
+  def emit_stmt_list(stmts)
+    emit_body(stmts)
+  end
+
+  sig { params(name: String, entry: CleanupEntry, alloc_override: T.nilable(String)).returns(String) }
+  def emit_direct_cleanup(name, entry, alloc_override: nil)
+    alloc = alloc_override || alloc_from_entry(entry)
+    guarded = entry.has_moved_guard?
+    via_pointer = entry.via_pointer?
+
+    case entry.kind
+    when :resource
+      close = render_resource_close_plan(T.must(entry.resource_close_plan), name)
+      direct_cleanup_statement(name, close, guarded)
+    else
+      rc_alloc = entry.rc_alloc
+      use_alloc =
+        if entry.kind == :rc && rc_alloc && alloc_override.nil?
+          alloc_from_sym(rc_alloc)
+        else
+          alloc
+        end
+      use_name = entry.kind == :frozen ? "#{name}__buf" : name
+      use_type = via_pointer ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
+      result = direct_uniform_cleanup(use_name, use_type, use_alloc, guarded, via_pointer:)
+      if entry.rc_release_fields_cleanup?
+        guard = guarded ? "if (!#{name}_moved) " : ""
+        result += "\n#{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);"
+      end
+      result
+    end
+  end
+
+  private
+
+  sig { params(node: T.any(MIR::Cleanup, MIR::ErrCleanup), errdefer: T::Boolean).returns(String) }
   def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
@@ -1115,10 +2055,7 @@ class MIREmitter
 
     case entry.kind
     when :resource
-      # Schema-driven close hook: user-provided Zig snippet with `{0}` =
-      # the binding name. Future: lift into a deinit method on the type
-      # itself (requires wrapping raw-fd sockets as Zig structs).
-      close = entry.resource_close_zig.gsub("{0}", name)
+      close = render_resource_close_plan(entry.resource_close_plan, name)
       guarded_defer(name, close, g, errdefer:)
 
     else
@@ -1144,7 +2081,7 @@ class MIREmitter
       # so cleanup's T matches the pointee shape.
       use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
       result = guarded_cleanup(use_name, use_type, use_alloc, g, errdefer:, via_pointer: vp)
-      if entry.kind == :rc && entry.needs_release_fields?
+      if entry.rc_release_fields_cleanup?
         guard = g ? "if (!#{name}_moved) " : ""
         kw = errdefer ? "errdefer" : "defer"
         result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
@@ -1172,12 +2109,12 @@ class MIREmitter
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
-      type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
-      if type_arg.start_with?("[]")
+      type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
+      if node.copy_shape == :slice
         "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
       else
-        pointer_type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
-        pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
+        pointer_type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
+        pointer_value = node.copy_shape == :value ? "__copy_src.*" : "__copy_src"
         "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
       end
     else
@@ -1190,13 +2127,10 @@ class MIREmitter
     case node.strategy
     when :pool, :list_capacity
       "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
+    when :array_list_empty
+      "@as(#{node.zig_type}, .empty)"
     when :list_empty, :set_empty, :map_empty
-      if node.zig_type.start_with?("std.ArrayListUnmanaged(") ||
-         node.zig_type.start_with?("CheatLib.ArrayListUnmanaged(")
-        "@as(#{node.zig_type}, .empty)"
-      else
-        "#{node.zig_type}{}"
-      end
+      "#{node.zig_type}{}"
     when :map_bare
       "#{node.zig_type}{ .alloc = #{alloc_zig(node.alloc)} }"
     else
@@ -1253,6 +2187,11 @@ class MIREmitter
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
   end
 
+  sig { params(node: MIR::RcRelease).returns(String) }
+  def emit_rc_release(node)
+    "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.alloc)}, #{emit(node.source)})"
+  end
+
   sig { params(node: MIR::RcDowngrade).returns(String) }
   def emit_rc_downgrade(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
@@ -1265,7 +2204,7 @@ class MIREmitter
 
   sig { params(node: MIR::FreezeExpr).returns(String) }
   def emit_freeze(node)
-    "try CheatLib.freeze(#{node.zig_base}, rt.heapAlloc(), #{emit(node.inner)})"
+    "try CheatLib.freeze(#{node.zig_base}, #{emit(node.alloc_ref)}, #{emit(node.inner)})"
   end
 
   sig { params(node: MIR::MakeList).returns(String) }
@@ -1290,8 +2229,19 @@ class MIREmitter
   sig { params(node: MIR::Call).returns(String) }
   def emit_call(node)
     args = node.args.map { |a| emit(a) }.join(", ")
-    call = "#{node.callee}(#{args})"
+    call = "#{runtime_scoped_callee(node.callee)}(#{args})"
     node.try_wrap ? "try #{call}" : call
+  end
+
+  sig { params(node: MIR::RuntimeCall).returns(String) }
+  def emit_runtime_call(node)
+    emit_call(node.spec.call(node.args))
+  end
+
+  sig { params(callee: String).returns(String) }
+  def runtime_scoped_callee(callee)
+    text = callee.to_s
+    text.start_with?("rt.") ? "#{@rt_name}.#{text.delete_prefix("rt.")}" : text
   end
 
   sig { params(node: MIR::TailCall).returns(String) }
@@ -1428,6 +2378,27 @@ class MIREmitter
     else
       ".{ #{fields} }"
     end
+  end
+
+  sig { params(node: MIR::TupleLiteral).returns(String) }
+  def emit_tuple_literal(node)
+    ".{#{node.items.map { |item| emit(item) }.join(", ")}}"
+  end
+
+  sig { params(node: MIR::LockAcquire).returns(String) }
+  def emit_lock_acquire(node)
+    lock_expr = T.must(emit(node.lock_expr))
+    if node.lock_sync == :write_locked
+      return "#{lock_expr}.#{node.fallible ? "writeOrErr" : "write"}()"
+    end
+    if node.lock_sync == :locked
+      return "#{lock_expr}.#{node.fallible ? "acquireOrErr" : "acquire"}()"
+    end
+
+    write_method = node.fallible ? "writeOrErr" : "write"
+    acquire_method = node.fallible ? "acquireOrErr" : "acquire"
+    "(if (comptime @hasDecl(@TypeOf(#{lock_expr}), \"#{write_method}\")) " \
+      "#{lock_expr}.#{write_method}() else #{lock_expr}.#{acquire_method}())"
   end
 
   sig { params(node: MIR::ArrayInit).returns(String) }
@@ -1591,6 +2562,22 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::DefaultValue).returns(String) }
+  def emit_default_value(node)
+    case node.kind
+    when :aggregate_empty
+      ".{}"
+    when :string_empty
+      '@as([]const u8, "")'
+    when :collection_empty
+      "@as(#{T.must(node.zig_type)}, .empty)"
+    when :undefined
+      node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
+    else
+      raise "unknown MIR::DefaultValue kind #{node.kind.inspect}"
+    end
+  end
+
   sig { params(node: MIR::RangeLit).returns(String) }
   def emit_range_lit(node)
     s = emit(node.start)
@@ -1725,5 +2712,37 @@ class MIREmitter
     else
       "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
     end
+  end
+
+  sig { params(plan: Schemas::ResourceClosePlan, root_name: String).returns(String) }
+  def render_resource_close_plan(plan, root_name)
+    plan.actions.map { |action| render_resource_close_action(action, root_name) }.join("; ")
+  end
+
+  sig { params(action: Schemas::ResourceCloseAction, root_name: String).returns(String) }
+  def render_resource_close_action(action, root_name)
+    target = ([root_name] + action.field_path).join(".")
+    runtime_args = Array.new(action.runtime_heap_alloc_args) { "#{@rt_name}.heapAlloc()" }
+    case action.call_kind
+    when Schemas::ResourceCloseCallKind::Method
+      "#{target}.#{action.name}(#{runtime_args.join(", ")})"
+    when Schemas::ResourceCloseCallKind::Function
+      args = [target] + runtime_args
+      "#{action.name}(#{args.join(", ")})"
+    end
+  end
+
+  sig { params(name: String, body: String, guarded: T::Boolean).returns(String) }
+  def direct_cleanup_statement(name, body, guarded)
+    stripped = body.strip
+    statement = stripped.end_with?(";", "}") ? stripped : "#{stripped};"
+    guarded ? "if (!#{name}_moved) #{statement}" : statement
+  end
+
+  sig { params(name: String, zig_type: String, alloc: String, guarded: T::Boolean, via_pointer: T.nilable(T::Boolean)).returns(String) }
+  def direct_uniform_cleanup(name, zig_type, alloc, guarded, via_pointer: false)
+    arg = via_pointer ? name : "&#{name}"
+    storage_type = ZigType.new(zig_type).cleanup_storage_type
+    direct_cleanup_statement(name, "CheatLib.cleanup(#{storage_type}, #{alloc}, #{arg})", guarded)
   end
 end

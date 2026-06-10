@@ -92,8 +92,10 @@ pub fn build(b: *std.Build) void {
         "runtime/fiber-overflow-test.zig",
         "runtime/switch.S",
         "runtime/onRoot.S",
-        "--library", "c",
-        "-O", "ReleaseSafe",
+        "--library",
+        "c",
+        "-O",
+        "ReleaseSafe",
         b.fmt("-femit-llvm-bc={s}", .{raw_bc}),
         "-fno-emit-bin",
     });
@@ -104,7 +106,8 @@ pub fn build(b: *std.Build) void {
         b.fmt("-load-pass-plugin={s}", .{pass_lib}),
         "-passes=fiber-stack-check",
         raw_bc,
-        "-o", instr_bc,
+        "-o",
+        instr_bc,
     });
     instrument_bc.step.dependOn(&cmake_build.step);
     instrument_bc.step.dependOn(&emit_bc.step);
@@ -116,9 +119,12 @@ pub fn build(b: *std.Build) void {
         instr_bc,
         "runtime/switch.S",
         "runtime/onRoot.S",
-        "--library", "c",
-        "-O", "ReleaseSafe",
-        "--name", runner_exe,
+        "--library",
+        "c",
+        "-O",
+        "ReleaseSafe",
+        "--name",
+        runner_exe,
     });
     build_exe.step.dependOn(&instrument_bc.step);
 
@@ -237,6 +243,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "shared-nothing-test.zig", .tsan = true },
         .{ .path = "shared-promise-test.zig", .tsan = true },
         .{ .path = "slab-alloc-test.zig", .tsan = true },
+        .{ .path = "slab-alloc-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "spsc-ring-test.zig", .tsan = true },
         .{ .path = "spsc-scheduler-test.zig", .tsan = true },
         .{ .path = "spsc-hammer-test.zig", .tsan = true, .hammer = true },

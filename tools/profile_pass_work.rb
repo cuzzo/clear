@@ -403,22 +403,22 @@ module PassWorkProfilerTool
   module WithMatchInstrumentation
     extend T::Sig
 
-    sig { params(fn: T.untyped, error_handler: T.untyped, warn_handler: T.untyped, policy_handlers: T.untyped).returns(T.untyped) }
-    def check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
-      PassWorkProfiler.current&.measure("annotator.with_match.functions", ast_root: fn) { super }
+    sig { params(fn: T.untyped, with_blocks: T.untyped, error_handler: T.untyped, warn_handler: T.untyped, policy_handlers: T.untyped).returns(T.untyped) }
+    def check_function!(fn, with_blocks, error_handler, warn_handler: nil, policy_handlers: nil)
+      PassWorkProfiler.current&.measure("annotator.with_match.functions", ast_root: with_blocks) { super }
     end
 
-    sig { params(fn: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
-    def check_call_sites!(fn, sig_lookup, error_handler)
-      PassWorkProfiler.current&.measure("annotator.with_match.call_sites", ast_root: fn) { super }
+    sig { params(call_sites: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
+    def check_call_sites!(call_sites, sig_lookup, error_handler)
+      PassWorkProfiler.current&.measure("annotator.with_match.call_sites", ast_root: call_sites) { super }
     end
   end
 
   module ConcurrencyInstrumentation
     extend T::Sig
 
-    sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
-    def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
+    sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, body_summaries: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
+    def check_all!(fn_nodes, sig_lookup, error_handler, body_summaries:, lock_ranks: {})
       PassWorkProfiler.current&.measure("annotator.concurrency_checks", ast_root: fn_nodes) { super }
     end
   end
@@ -696,7 +696,11 @@ module PassWorkProfilerTool
 
       @profiler.measure("mir.pre_mir_type_check", ast_root: ast) { PreMirTypeCheck.verify!(ast) }
 
-      mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir_pass = MIRPass.new(
+        fn_nodes: fn_nodes,
+        schema_lookup: schema_lookup,
+        body_summaries: T.must(annotator.semantic_index).body_summaries
+      )
       @profiler.measure("mir.pass", ast_root: ast) { mir_pass.transform!(ast) }
 
       struct_schemas = T.let({}, T::Hash[Symbol, T.untyped])

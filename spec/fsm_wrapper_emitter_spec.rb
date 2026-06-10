@@ -19,7 +19,7 @@ RSpec.describe FsmWrapperEmitter do
   # Helper builders so each spec can construct a minimal valid body
   # without rebuilding the whole state-machine fixture every time.
   def step(idx, ctx_id, body_lines = [])
-    MIR::FsmStep.new(idx, ctx_id, "__rt_bg0", "_ = &__rt_bg0;", body_lines)
+    MIR::FsmStep.new(idx, ctx_id, "__rt_bg0", true, body_lines)
   end
 
   def resume_fn(ctx_id, err_cleanup = nil)
@@ -35,11 +35,32 @@ RSpec.describe FsmWrapperEmitter do
     )
   end
 
+  def ctx_field(ctx, field)
+    MIR::FieldGet.new(MIR::Ident.new(ctx), field)
+  end
+
+  def heap_alloc_expr
+    MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false)
+  end
+
+  def ctx_init_fields(promise_var, alloc_var, extra = [])
+    [
+      MIR::StructInitField.new(name: :task, value: MIR::Ident.new("undefined")),
+      MIR::StructInitField.new(name: :rt, value: MIR::Ident.new("rt")),
+      MIR::StructInitField.new(name: :inner, value: ctx_field(promise_var, "inner")),
+      MIR::StructInitField.new(name: :alloc, value: MIR::Ident.new(alloc_var)),
+    ] + extra
+  end
+
+  def best_spawn(ctx_var)
+    MIR::FsmSpawnCall.new(target: :best, ctx_var: ctx_var)
+  end
+
   def ctx_struct(state_decls: [], step0_body: [], step1_body: [])
     MIR::FsmCtxStruct.new(
       "__BgCtx0",
       "CheatLib.Promise(i64)",
-      "needle: []const u8,",
+      [MIR::ContextFieldDecl.new(name: "needle", type_zig: "[]const u8")],
       state_decls,
       [],
       step(0, 0, step0_body),
@@ -51,14 +72,14 @@ RSpec.describe FsmWrapperEmitter do
   def spawn_setup
     MIR::FsmSpawnSetup.new(
       "__bg0_alloc",
-      "rt.heapAlloc()",
+      heap_alloc_expr,
       "__bg0_promise",
       "CheatLib.Promise(i64)",
-      "",  # promoted_decls_zig
+      [],
       "__bg0_ctx",
       "__BgCtx0",
-      ".task = undefined,\n.rt = rt,\n.inner = __bg0_promise.inner,\n.alloc = __bg0_alloc,",
-      "try CheatHeader.spawnFsmBest(__bg0_ctx.task);",
+      ctx_init_fields("__bg0_promise", "__bg0_alloc"),
+      best_spawn("__bg0_ctx"),
       "rt",
     )
   end
@@ -73,21 +94,29 @@ RSpec.describe FsmWrapperEmitter do
       MIR::FsmB1CtxStruct.new(
         "__BgB1Ctx",
         "CheatLib.Promise(i64)",
-        "value: i64,",
-        MIR::FsmStep.new(0, 0, "__rt_b1", "_ = &__rt_b1;", [
-          "__ctx_0.inner.result = __ctx_0.value;",
+        [MIR::ContextFieldDecl.new(name: "value", type_zig: "i64")],
+        MIR::FsmStep.new(0, 0, "__rt_b1", true, [
+          MIR::Set.new(
+            MIR::FieldGet.new(ctx_field("__ctx_0", "inner"), "result"),
+            ctx_field("__ctx_0", "value"),
+            false,
+          ),
         ]),
       ),
       MIR::FsmSpawnSetup.new(
         "__bg_b1_alloc",
-        "rt.heapAlloc()",
+        heap_alloc_expr,
         "__bg_b1_promise",
         "CheatLib.Promise(i64)",
-        "",
+        [],
         "__bg_b1_ctx",
         "__BgB1Ctx",
-        ".task = undefined,\n.rt = rt,\n.inner = __bg_b1_promise.inner,\n.alloc = __bg_b1_alloc,\n.value = 42,",
-        "try CheatHeader.spawnFsmBest(__bg_b1_ctx.task);",
+        ctx_init_fields(
+          "__bg_b1_promise",
+          "__bg_b1_alloc",
+          [MIR::StructInitField.new(name: :value, value: MIR::Lit.new("42"))],
+        ),
+        best_spawn("__bg_b1_ctx"),
         "rt",
       ),
     )
@@ -132,14 +161,14 @@ RSpec.describe FsmWrapperEmitter do
       expect(FsmWrapperEmitter.render(body)).to include("step: u8 = 0,")
     end
 
-    it "renders state decls via FsmOps::StateFieldDecl#render" do
+    it "renders state decls from structural default MIR" do
       decls = [
-        FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
-        FsmOps::StateFieldDecl.new("rf_buf", "[]u8", "&[_]u8{}"),
+        FsmOps::StateFieldDecl.new(name: "rf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+        FsmOps::StateFieldDecl.new(name: "rf_buf", zig_type: "[]u8", default_value: MIR::AddressOf.new(MIR::ArrayInit.new("u8", "_", []))),
       ]
       out = FsmWrapperEmitter.render(body(state_decls: decls))
       expect(out).to include("rf_fd: i32 = -1,")
-      expect(out).to include("rf_buf: []u8 = &[_]u8{},")
+      expect(out).to match(/rf_buf: \[\]u8 = &\[_\]u8\{\s*\},/)
     end
 
     it "emits captures field block" do
@@ -157,20 +186,26 @@ RSpec.describe FsmWrapperEmitter do
     end
 
     it "interleaves body lines into the step function" do
-      lines = [
-        "__ctx_0.rf_fd = try open(__ctx_0.path);",
-        "errdefer close(__ctx_0.rf_fd);",
+      stmts = [
+        MIR::Set.new(
+          ctx_field("__ctx_0", "rf_fd"),
+          MIR::Call.new("open", [ctx_field("__ctx_0", "path")], true),
+          false,
+        ),
+        MIR::ExprStmt.new(MIR::Call.new("close", [ctx_field("__ctx_0", "rf_fd")], false), false),
       ]
-      out = FsmWrapperEmitter.render(body(step0_body: lines))
+      out = FsmWrapperEmitter.render(body(step0_body: stmts))
       expect(out).to include("__ctx_0.rf_fd = try open(__ctx_0.path);")
-      expect(out).to include("errdefer close(__ctx_0.rf_fd);")
+      expect(out).to include("close(__ctx_0.rf_fd);")
     end
 
-    it "skips empty body lines without leaving stray blanks" do
-      lines = ["", "real_stmt();", ""]
-      out = FsmWrapperEmitter.render(body(step0_body: lines))
+    it "skips verification-only body nodes without leaving stray blanks" do
+      stmts = [
+        MIR::AllocMark.new("tmp", :heap, Type.new(:String), :function),
+        MIR::ExprStmt.new(MIR::Call.new("real_stmt", [], false), false),
+      ]
+      out = FsmWrapperEmitter.render(body(step0_body: stmts))
       expect(out).to include("real_stmt();")
-      # No two adjacent blank lines from the skipped entries.
       expect(out).not_to match(/\n\s*\n\s*\n/)
     end
   end
@@ -195,7 +230,17 @@ RSpec.describe FsmWrapperEmitter do
     it "interpolates step-0 error cleanup into the catch arm" do
       ctx = ctx_struct
       ctx.resume_fn = resume_fn(0,
-        ["__ctx_0.alloc.free(__ctx_0.needle);"])
+        [
+          MIR::ExprStmt.new(
+            MIR::MethodCall.new(
+              MIR::FieldGet.new(MIR::Ident.new("__ctx_0"), "alloc"),
+              "free",
+              [MIR::FieldGet.new(MIR::Ident.new("__ctx_0"), "needle")],
+              false,
+            ),
+            false,
+          ),
+        ])
       bod = MIR::FsmIoBody.new("__bg0", ctx, spawn_setup)
       out = FsmWrapperEmitter.render(bod)
       expect(out).to match(/if \((?:@This\(\)\.)?runStep0.+\) \|_\| \{\} else \|err\| \{[\s\S]*?__ctx_0\.alloc\.free\(__ctx_0\.needle\);[\s\S]*?return \.\{ \.Done = \{\} \};/)
@@ -207,7 +252,7 @@ RSpec.describe FsmWrapperEmitter do
         [
           MIR::FsmStateArm.new(
             0,
-            MIR::FsmTailCondSkip.new("__ctx_4.skip", 2),
+            MIR::FsmTailCondSkip.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_4"), "skip"), 2),
             nil,
             nil,
             nil,
@@ -231,11 +276,11 @@ RSpec.describe FsmWrapperEmitter do
   end
 
   describe "generic FSM body" do
-    it "passes through legacy raw resume function text" do
+    it "rejects legacy raw resume function text" do
       generic_ctx = MIR::FsmGenericCtxStruct.new(
         "__BgRawCtx",
         "CheatLib.Promise(i64)",
-        "",
+        [],
         [],
         [],
         [],
@@ -244,10 +289,92 @@ RSpec.describe FsmWrapperEmitter do
       )
       generic_body = MIR::FsmGenericBody.new("__bg_raw", generic_ctx, spawn_setup)
 
+      expect { FsmWrapperEmitter.render(generic_body) }
+        .to raise_error(ArgumentError, /requires MIR::FsmDispatch/)
+    end
+
+    it "renders generic destroyTask actions from structural records" do
+      cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      actions = [
+        MIR::FsmDestroyLockRelease.new(
+          name: "__ctx_2.lock",
+          ctx_id: 2,
+          guard_index: 0,
+          lock_ref: ctx_field("__ctx_2", "lock"),
+          unlock_method: "unlock",
+        ),
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :fresh_heap,
+          name: "owned",
+          target: ctx_field("__ctx_2", "owned"),
+          cleanup_entry: cleanup_entry,
+          allocator: MIR::Call.new("rt.heapAlloc", [], false),
+        ),
+      ]
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgGenericCtx",
+        "CheatLib.Promise(i64)",
+        [],
+        [],
+        [],
+        [],
+        resume_fn(2),
+        actions,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_generic", generic_ctx, spawn_setup)
+
       out = FsmWrapperEmitter.render(generic_body)
 
-      expect(out).to include("fn resumeFn(_: *CheatHeader.FsmTask)")
-      expect(out).to include("return .{ .Done = {} };")
+      expect(out).to include("if (__ctx_2.__lock_held_0) __ctx_2.lock.unlock();")
+      expect(out).to include(
+        "if (!__ctx_2.owned_moved) CheatLib.cleanup(@TypeOf(__ctx_2.owned), __ctx_2.rt.heapAlloc(), &__ctx_2.owned);"
+      )
+    end
+
+    it "wraps guarded destroy cleanup actions, including multi-line cleanups" do
+      rc_entry = CleanupEntry.build(
+        :rc,
+        alloc: :heap,
+        has_moved_guard: false,
+        rc_alloc: :heap,
+        base_zig: "User",
+        needs_release_fields: true,
+      )
+      actions = [
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :owned_result,
+          name: "single",
+          target: ctx_field("__ctx_3", "single"),
+          cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+          guard: ctx_field("__ctx_3", "single_ready"),
+        ),
+        MIR::FsmDestroyCleanup.new(
+          source_kind: :owned_result,
+          name: "owner",
+          target: ctx_field("__ctx_3", "owner"),
+          cleanup_entry: rc_entry,
+          guard: ctx_field("__ctx_3", "owner_ready"),
+        ),
+      ]
+      generic_ctx = MIR::FsmGenericCtxStruct.new(
+        "__BgGuardCtx",
+        "CheatLib.Promise(i64)",
+        [],
+        [],
+        [],
+        [],
+        resume_fn(3),
+        actions,
+      )
+      generic_body = MIR::FsmGenericBody.new("__bg_guard", generic_ctx, spawn_setup)
+
+      out = FsmWrapperEmitter.render(generic_body)
+
+      expect(out).to include(
+        "if (__ctx_3.single_ready) CheatLib.cleanup(@TypeOf(__ctx_3.single), __ctx_3.rt.heapAlloc(), &__ctx_3.single);"
+      )
+      expect(out).to include("if (__ctx_3.owner_ready) {\n")
+      expect(out).to include("CheatLib.releaseFields(User, __ctx_3.rt.heapAlloc(), __ctx_3.owner.ctrl.data.*);")
     end
   end
 
@@ -255,32 +382,38 @@ RSpec.describe FsmWrapperEmitter do
     it "renders MIR::Let in body_stmts via the standard MIR emitter" do
       bind = MIR::Let.new(
         "content",
-        MIR::InlineZig.new("__ctx_0.rf_buf[0..10]", "fsm_bound_expr"),
+        MIR::FieldGet.new(MIR::Ident.new("__ctx_0"), "rf_buf"),
         false, nil, nil,
       )
       out = FsmWrapperEmitter.render(body(step1_body: [bind]))
-      expect(out).to include("const content = __ctx_0.rf_buf[0..10];")
+      expect(out).to include("const content = __ctx_0.rf_buf;")
     end
 
-    it "renders plain string body_stmts" do
-      out = FsmWrapperEmitter.render(body(step0_body: ["foo();"]))
-      expect(out).to include("foo();")
+    it "rejects plain string body_stmts" do
+      expect { FsmWrapperEmitter.render(body(step0_body: ["foo();"])) }
+        .to raise_error(ArgumentError, /structural MIR/)
     end
 
-    it "accepts plain strings as a transitional escape hatch" do
-      out = FsmWrapperEmitter.render(body(step0_body: ["plain_zig();"]))
-      expect(out).to include("plain_zig();")
-    end
-
-    it "skips empty / nil emissions without leaving stray blanks" do
+    it "skips verification-only MIR emissions without leaving stray blanks" do
       stmts = [
-        "",
-        "real();",
-        nil,
+        MIR::AllocMark.new("tmp", :heap, Type.new(:String), :function),
+        MIR::ExprStmt.new(MIR::Call.new("real", [], false), false),
       ]
       out = FsmWrapperEmitter.render(body(step0_body: stmts))
       expect(out).to include("real();")
       expect(out).not_to match(/\n\s*\n\s*\n/)
+    end
+
+    it "preserves destroy statements already terminated by the MIR emitter" do
+      action = MIR::FsmDestroyStmt.new(
+        source_kind: :body,
+        name: "shared",
+        stmt: MIR::ExprStmt.new(MIR::Call.new("releaseShared", [], false), false),
+      )
+
+      out = FsmWrapperEmitter.render_destroy_stmt_action(action, MIREmitter.new)
+
+      expect(out).to eq("releaseShared();")
     end
   end
 

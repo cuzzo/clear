@@ -397,7 +397,7 @@ class PipelineListLowerer < T::Struct
         MIR::ItemsAccess.new(MIR::Ident.new("__jr_src"), true), false, nil, nil),
       MIR::Let.new("res_list",
         MIR::ContainerInit.new("std.ArrayListUnmanaged(#{result_zig})",
-          :list_empty, alloc, nil), true, nil, nil),
+          :array_list_empty, alloc, nil), true, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
         MIR::Let.new("__match", MIR::Lit.new("null"), true, Type.new("?#{right_zig}"), nil),
         *right_cleanup_stmts(right_owns, alloc, right_zig),
@@ -458,7 +458,7 @@ class PipelineListLowerer < T::Struct
 
     left_key_mir = self.visit_expr.call(list_node, key_expr, "__jl")
     right_key_mir = self.visit_expr.call(list_node, key_expr, "__jr")
-    MIR::Call.new("CheatLib.eql", [left_key_mir, right_key_mir], false)
+    MIR::RuntimeCall.new(MIR::RuntimeCalls.eql_spec, [left_key_mir, right_key_mir])
   end
 
   sig { params(left_owns: T::Boolean, right_owns: T::Boolean).returns(T::Array[MIR::Emittable]) }

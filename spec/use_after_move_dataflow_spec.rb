@@ -26,6 +26,21 @@ RSpec.describe UseAfterMoveChecker do
     UseAfterMoveChecker.check(fn_node, schema_lookup: schema_lookup)
   end
 
+  def borrow_errors(src, fn_name = "main")
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    PipelineRewriter.new.rewrite!(ast)
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    StringConcatRewriter.new.rewrite!(ast)
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
+
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    BorrowChecker.check(fn_node, schema_lookup: schema_lookup)
+  end
+
   def expect_no_error(src, fn_name = "main")
     errors = check_errors(src, fn_name)
     expect(errors).to be_empty, "Expected no errors but got: #{errors.inspect}"
@@ -360,13 +375,39 @@ RSpec.describe UseAfterMoveChecker do
       share = AST::ShareNode.new(token, ident)
       fn_node = empty_function_node
       checker = UseAfterMoveChecker.new(fn_node, OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node))
-      state = {
+      state = OwnershipDataflow.state_from_names(
         "shared" => OwnershipDataflow::OwnerEntry.new(state: :moved, allocator: :heap, needs_cleanup: true)
-      }
+      )
 
       checker.send(:check_share_reads, share, state)
       expect(checker.errors.first).to include("USE_AFTER_MOVE")
       expect(checker.errors.first).to include("shared")
+    end
+  end
+
+  describe "borrow checking explicit moves" do
+    it "reports no active borrow kind for unborrowed names" do
+      state = BorrowChecker::BorrowState.empty
+
+      expect(state.kind_for("missing")).to be_nil
+      expect(state.conflicts_with?("missing", :immutable)).to be(false)
+    end
+
+    it "reports GIVE of a borrowed heap value inside the borrow scope" do
+      errors = borrow_errors(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          a: User @indirect = User{ id: 1 };
+          WITH BORROWED a AS ref {
+            consume!(GIVE a);
+          }
+          RETURN;
+        END
+      CLEAR
+
+      expect(errors).to include(a_string_matching("MOVE_WHILE_BORROWED"))
+      expect(errors.first).to include("main::a")
     end
   end
 
@@ -393,7 +434,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items;
         END
       CLEAR
-      # Direct return of identifier: marked as moved by collect_binding_moves
+      # Direct return of identifier: marked as moved by collect_binding_move_places.
       expect(df.exit_states["items"]).to eq(:moved)
     end
 

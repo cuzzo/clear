@@ -2,6 +2,8 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
+require_relative "../ast/schemas"
+require_relative "placement"
 
 # CleanupEntry -- one binding's cleanup recipe, produced by
 # CleanupClassifier and consumed by MIRLowering / MIREmitter.
@@ -17,8 +19,11 @@ require "sorbet-runtime"
 # Field universe (all optional except kind/alloc/scope/needs_cleanup/
 # has_moved_guard, which `build` always sets):
 #   needs_cleanup alloc scope kind has_moved_guard match_as
-#   resource_close_zig rc_alloc base_zig needs_release_fields
+#   resource_close_plan rc_alloc base_zig needs_release_fields
 #   elem_needs_cleanup sync inner via_pointer source_kind
+# `resource_close_plan` is a structural list of close actions, so FSM
+# finalizers can bind cleanup to `__ctx_N.rt` structurally instead of
+# scanning emitted Zig text.
 class CleanupEntry < Hash
   extend T::Sig
   extend T::Generic
@@ -36,7 +41,7 @@ class CleanupEntry < Hash
     e = new
     e[:needs_cleanup] = true
     e[:alloc] = alloc
-    e[:scope] = alloc == :heap ? :heap : :function
+    e[:scope] = cleanup_scope_for_alloc(alloc, frame_scope: :function)
     e[:kind] = kind
     e[:has_moved_guard] = has_moved_guard
     extra.each { |k, v| e[k] = v }
@@ -61,6 +66,11 @@ class CleanupEntry < Hash
     e = new
     h.each { |k, v| e[k] = v }
     e
+  end
+
+  sig { params(alloc: Symbol, frame_scope: Symbol).returns(Symbol) }
+  def self.cleanup_scope_for_alloc(alloc, frame_scope:)
+    MIR::Placement.heap?(alloc) ? :heap : frame_scope
   end
 
   sig { returns(Symbol) }
@@ -102,18 +112,61 @@ class CleanupEntry < Hash
   sig { returns(T::Boolean) }
   def needs_release_fields? = self[:needs_release_fields] == true
 
+  sig { returns(T::Boolean) }
+  def rc_release_fields_cleanup? = kind == :rc && needs_release_fields?
+
+  sig { returns(CleanupEntry) }
+  def mark_moved_guard!
+    self[:has_moved_guard] = true
+    self
+  end
+
+  sig { returns(CleanupEntry) }
+  def clear_moved_guard!
+    self[:has_moved_guard] = false
+    self
+  end
+
+  sig { returns(CleanupEntry) }
+  def suppress_cleanup!
+    self[:needs_cleanup] = false
+    clear_moved_guard!
+  end
+
+  sig { params(scope: Symbol).returns(CleanupEntry) }
+  def set_cleanup_scope!(scope)
+    self[:scope] = scope
+    self
+  end
+
+  sig { params(alloc: Symbol).returns(CleanupEntry) }
+  def set_alloc!(alloc)
+    self[:alloc] = alloc
+    self[:scope] = self.class.cleanup_scope_for_alloc(alloc, frame_scope: scope)
+    self
+  end
+
+  sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean).returns(CleanupEntry) }
+  def promote_to_cleanup!(kind:, alloc:, has_moved_guard:)
+    self[:needs_cleanup] = true
+    self[:kind] = kind
+    self[:alloc] = alloc
+    self[:scope] = self.class.cleanup_scope_for_alloc(alloc, frame_scope: :function)
+    self[:has_moved_guard] = has_moved_guard
+    self
+  end
+
   sig { params(alloc: Symbol).returns(CleanupEntry) }
   def with_alloc(alloc)
     updated = dup
-    updated[:alloc] = alloc
-    updated[:scope] = alloc == :heap ? :heap : updated.scope
+    updated.set_alloc!(alloc)
     updated
   end
 
   sig { returns(CleanupEntry) }
   def with_moved_guard
     updated = dup
-    updated[:has_moved_guard] = true
+    updated.mark_moved_guard!
     updated
   end
 
@@ -123,8 +176,8 @@ class CleanupEntry < Hash
   sig { returns(T.nilable(String)) }
   def base_zig = self[:base_zig]
 
-  sig { returns(T.nilable(String)) }
-  def resource_close_zig = self[:resource_close_zig]
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def resource_close_plan = self[:resource_close_plan]
 
   # The non-nil sentinel for "this binding needs no cleanup".
   # Replaces the old `nil` returned by an absent cleanup_bindings lookup.

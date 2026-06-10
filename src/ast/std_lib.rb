@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "type"
 require_relative "../mir/fsm_ops"
 
 STRING_TYPE = :String
@@ -309,9 +310,9 @@ STD_LIB = T.let({
     # lowering must teach MIR/promotion-plan that the FSM-lowered BG
     # result owns heap data so the consumer auto-cleans.
     fsm_state_decls: [
-      FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
-      FsmOps::StateFieldDecl.new("rf_buf", "[]u8", "&[_]u8{}"),
-      FsmOps::StateFieldDecl.new("rf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+      FsmOps::StateFieldDecl.new(name: "rf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+      FsmOps::StateFieldDecl.new(name: "rf_buf", zig_type: "[]u8", default_value: MIR::AddressOf.new(MIR::ArrayInit.new("u8", "_", []))),
+      FsmOps::StateFieldDecl.new(name: "rf_waiter", zig_type: "CheatHeader.FsmIoWaiter", default_value: MIR::Undef.new(nil)),
     ],
     fsm_setup: [
       # ctx.rf_fd = try fsmOpenForRead(path)
@@ -373,8 +374,8 @@ STD_LIB = T.let({
     # returns less than full length is truncated. Force stackful via
     # @xl when partial-write robustness is required.
     fsm_state_decls: [
-      FsmOps::StateFieldDecl.new("wf_fd", "i32", "-1"),
-      FsmOps::StateFieldDecl.new("wf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+      FsmOps::StateFieldDecl.new(name: "wf_fd", zig_type: "i32", default_value: MIR::Lit.new("-1")),
+      FsmOps::StateFieldDecl.new(name: "wf_waiter", zig_type: "CheatHeader.FsmIoWaiter", default_value: MIR::Undef.new(nil)),
     ],
     fsm_setup: [
       FO.assign_field("wf_fd",
@@ -1087,6 +1088,79 @@ POOL_METHODS = T.let({
   },
 }.freeze, T::Hash[String, T.untyped])
 
+class StdLibGlobalBinding < T::Struct
+  const :name, String
+  const :type, Type::TypeInput
+  const :storage, Symbol
+end
+
+class StdLibTypeBinding < T::Struct
+  const :name, Symbol
+  const :schema_factory, T.proc.returns(T.untyped)
+end
+
+BUILTIN_GLOBAL_BINDINGS = T.let([
+  StdLibGlobalBinding.new(name: "argv", type: Type::STRING_TYPE, storage: :heap),
+].freeze, T::Array[StdLibGlobalBinding])
+
+BUILTIN_TYPE_BINDINGS = T.let([
+  StdLibTypeBinding.new(
+    name: :Range,
+    schema_factory: -> {
+      Schemas::StructSchema.new(fields: {
+        "start" => AST::StructField.new(type: :Float64),
+        "end"   => AST::StructField.new(type: :Float64),
+      })
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :File,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.method("close"),
+        static_methods: {
+          "open" => {
+            args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})",
+            bc: true, bc_op: :file_open, can_fail: true
+          },
+          "create" => {
+            args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})",
+            bc: true, bc_op: :file_create, can_fail: true
+          }
+        }
+      )
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :TCPServer,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
+        static_methods: {
+          "listen" => {
+            args: [:Int64], return: :TCPServer,
+            zig: "try CheatLib.socketListen(@intCast({0}))", can_fail: true
+          }
+        }
+      )
+    }
+  ),
+  StdLibTypeBinding.new(
+    name: :TCPClient,
+    schema_factory: -> {
+      Schemas::ResourceSchema.new(
+        close_plan: Schemas::ResourceClosePlan.function("CheatLib.socketClose"),
+        static_methods: {
+          "connect" => {
+            args: [:String, :Int64], return: :TCPClient,
+            zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true
+          }
+        }
+      )
+    }
+  ),
+].freeze, T::Array[StdLibTypeBinding])
+
 SET_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
@@ -1433,8 +1507,8 @@ COLLECTION_METHOD_CONFIGS = T.let({
 # ============================================================================
 # Builtin Operations Registry -- CheatLib runtime functions used by operators,
 # indexing, assertions, and deep copy. NOT user-callable -- emitted by the
-# lowering for operators/expressions. Each entry gets attached as stdlib_def
-# on the MIR::InlineZig node so the MIR checker can verify ownership.
+# lowering for operators/expressions. Each entry gets attached to structural
+# registry MIR nodes so the MIR checker can verify ownership.
 # ============================================================================
 # Pattern placeholders: {0}, {1}, {2} = positional args
 # All entries implicitly borrow their args unless noted otherwise.

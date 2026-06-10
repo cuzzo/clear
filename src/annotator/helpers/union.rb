@@ -41,8 +41,7 @@ module UnionAnalysis
             req.token, req.name, fn_params, [], req.return_type,
             nil, T.must(req.body), nil, nil, req_vis, nil, nil
           )
-          synthetic_fns = T.cast(T.unsafe(self).instance_variable_get(:@synthetic_fns), T::Array[AST::FunctionDef])
-          synthetic_fns << fn_node
+          queue_synthetic_function!(fn_node)
           next
         else
           error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
@@ -127,14 +126,22 @@ module UnionAnalysis
         )
       end
       var_data = schema.variants[node.field]
-      @match_pattern_context = T.let(@match_pattern_context, T.untyped)
-      if Schemas.inline_struct?(var_data) && !@match_pattern_context
+      if Schemas.inline_struct?(var_data) && !inside_match_pattern_context?
         error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
       stamp_type!(node.target, type_name)
       stamp_type!(node, type_name)
       return true
     end
+  end
+
+  sig { params(node: AST::UnionVariantLit).returns(T.nilable(Symbol)) }
+  def visit_UnionVariantLit(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    schema = lookup_type_schema(node.union_name.to_sym)
+    var_data = validate_union_schema!(node, schema)
+    validate_union_fields!(node, T.must(var_data).typed_fields)
+    stamp_type!(node, node.union_name.to_sym)
   end
 
   # Validate that a union type and variant exist, and that the variant

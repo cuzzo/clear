@@ -28,6 +28,10 @@ RSpec.describe "P1.4 caller-sync propagation" do
     fn_nodes
   end
 
+  def body_summaries_from(annotator)
+    annotator.send(:function_body_summaries)
+  end
+
   it "stamps entry.sync on a callee param when one caller passes a @shared:locked binding" do
     src = <<~CHT
       STRUCT Counter { value: Int64 }
@@ -42,12 +46,47 @@ RSpec.describe "P1.4 caller-sync propagation" do
       END
     CHT
 
-    ast, _ = annotate(src)
+    ast, annotator = annotate(src)
     fn_nodes = fn_nodes_from(ast)
-    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries_from(annotator))
 
     bump_param = fn_nodes["bumpIt"].params.first
     expect(bump_param[:symbol]).not_to be_nil
+    expect(bump_param[:symbol].sync).to eq(:locked)
+  end
+
+  it "uses typed call-site facts for caller sync" do
+    src = <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN bumpIt(c: Counter) ->
+        x = c.value;
+      END
+
+      FN main() ->
+        c = Counter{ value: 0 } @shared:locked;
+        bumpIt(c);
+      END
+    CHT
+
+    ast, annotator = annotate(src)
+    fn_nodes = fn_nodes_from(ast)
+    summaries = body_summaries_from(annotator).dup
+    main_summary = summaries.fetch("main")
+    summaries["main"] = Annotator::Phases::FunctionBodySummary.new(
+      name: "main",
+      definition_id: main_summary.definition_id,
+      body_id: main_summary.body_id,
+      callees: main_summary.callees,
+      propagating_callees: main_summary.propagating_callees,
+      has_fnptr_call: main_summary.has_fnptr_call,
+      raises_directly: main_summary.raises_directly,
+      call_site_facts: main_summary.call_site_facts
+    )
+
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, summaries)
+
+    bump_param = fn_nodes["bumpIt"].params.first
     expect(bump_param[:symbol].sync).to eq(:locked)
   end
 
@@ -70,9 +109,9 @@ RSpec.describe "P1.4 caller-sync propagation" do
       END
     CHT
 
-    ast, _ = annotate(src)
+    ast, annotator = annotate(src)
     fn_nodes = fn_nodes_from(ast)
-    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries_from(annotator))
 
     bump_param = fn_nodes["bumpIt"].params.first
     # One caller passes :locked; the other passes nil. Mixed → leave nil.
@@ -93,9 +132,9 @@ RSpec.describe "P1.4 caller-sync propagation" do
       END
     CHT
 
-    ast, _ = annotate(src)
+    ast, annotator = annotate(src)
     fn_nodes = fn_nodes_from(ast)
-    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries_from(annotator))
 
     expect(fn_nodes["bumpIt"].params.first[:symbol].sync).to be_nil
   end
@@ -119,12 +158,12 @@ RSpec.describe "P1.4 caller-sync propagation" do
       END
     CHT
 
-    ast, _ = annotate(src)
+    ast, annotator = annotate(src)
     fn_nodes = fn_nodes_from(ast)
     # Pre-stamp the param's entry.sync as if it had been declared :locked.
     fn_nodes["bumpIt"].params.first[:symbol].sync = :locked
 
-    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries_from(annotator))
 
     # Caller passes nil (bare binding), so unify produces no override.
     expect(fn_nodes["bumpIt"].params.first[:symbol].sync).to eq(:locked)
@@ -150,9 +189,9 @@ RSpec.describe "P1.4 caller-sync propagation" do
       END
     CHT
 
-    ast, _ = annotate(src)
+    ast, annotator = annotate(src)
     fn_nodes = fn_nodes_from(ast)
-    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries_from(annotator))
 
     expect(fn_nodes["outer"].params.first[:symbol].sync).to eq(:locked)
     expect(fn_nodes["inner"].params.first[:symbol].sync).to eq(:locked)
@@ -183,7 +222,7 @@ RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
     CHT
 
     ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("bumpIt").type)
+    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
     expect(sig).to be_a(FunctionSignature)
     # The field is present on the Param struct (defaulting to nil).
     expect(sig.params.first).to be_a(AST::Param)
@@ -200,7 +239,7 @@ RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
     CHT
 
     ast, annotator = annotate(src)
-    sig = FunctionSignature.unwrap(annotator.scope_stack.first.resolve_entry!("bumpIt").type)
+    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("bumpIt").type)
     expect(sig.params.first[:sync]).to be_nil
   end
 end

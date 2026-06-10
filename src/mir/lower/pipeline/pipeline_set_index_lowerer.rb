@@ -49,8 +49,6 @@ class PipelineSetIndexLowerer < T::Struct
   const :pipeline_index_insert_with_ownership, T.proc.params(insert: MIR::IndexInsert, value: MIR::Node, value_owns: T::Boolean, target_alloc: Symbol).returns(MIR::IndexInsert)
   const :index_temp_name, T.proc.returns(String)
 
-  HEAP_ALLOC = "rt.heapAlloc()"
-
   sig { params(list_node: AST::Node, smooth_node: AST::BinaryOp, distinct_node: AST::DistinctOp).returns(MIR::BlockExpr) }
   def lower_distinct(list_node, smooth_node, distinct_node)
     if smooth_node.observable_dest
@@ -199,7 +197,7 @@ class PipelineSetIndexLowerer < T::Struct
       [MIR::ExprStmt.new(
         MIR::Call.new("CheatLib.cleanup", [
           MIR::Ident.new(elem_zig),
-          MIR::Ident.new(HEAP_ALLOC),
+          MIR::AllocatorRef.new(:heap),
           MIR::AddressOf.new(MIR::Ident.new(var)),
         ], false, false, MIR::CallableContract.no_ownership(3)), nil)]
     end, PipelineRangeSkipHook)

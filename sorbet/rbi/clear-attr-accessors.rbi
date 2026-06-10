@@ -873,14 +873,14 @@ class BodySlot
 end
 
 class BorrowChecker
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def errors; end
 end
 
 class Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
@@ -1031,14 +1031,14 @@ end
 class FsmTransform::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
@@ -1311,10 +1311,6 @@ class FunctionDef
 end
 
 class FunctionReturn
-  sig { returns(T.nilable(Type)) }
-  def fixed; end
-  sig { returns(T.nilable(Symbol)) }
-  def infer; end
   sig { returns(Kind) }
   def kind; end
 end
@@ -1346,8 +1342,6 @@ class FunctionSignature
   def effects=(value); end
   sig { returns(T.nilable(IntrinsicEmit)) }
   def emit; end
-  sig { params(value: T.nilable(IntrinsicEmit)).returns(T.nilable(IntrinsicEmit)) }
-  def emit=(value); end
   sig { returns(T.nilable(T::Boolean)) }
   def error_fallible; end
   sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
@@ -1479,6 +1473,23 @@ class InlineStructVariant
   def fields; end
 end
 
+class LinearOwnershipSnapshot
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def err_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def maybe_released; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def released; end
+end
+
 class LinearOwnershipState
   sig { returns(T::Hash[String, Symbol]) }
   def alloc_kinds; end
@@ -1566,14 +1577,26 @@ class MIR::Program
   def items; end
 end
 
-class MIR::ZigTemplate
-  sig { returns(MIR::ZigTemplateArgs) }
-  def args; end
-end
-
 class MIRChecker
   sig { returns(T::Array[T.untyped]) }
   def errors; end
+end
+
+class MIRChecker::LinearOwnershipSnapshot
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def err_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def maybe_released; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[MIRChecker::PlaceId]) }
+  def released; end
 end
 
 class MIRChecker::LinearOwnershipState
@@ -1624,6 +1647,8 @@ end
 class MIRPass
   sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   def cleanup_bindings; end
+  sig { returns(T::Hash[String, CleanupClassifier::CleanupClassificationPlan]) }
+  def cleanup_plans; end
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   def escape_placement_facts; end
 end
@@ -1711,9 +1736,9 @@ class OwnershipContract
 end
 
 class OwnershipDataflow
-  sig { returns(T::Hash[Integer, T::Hash[String, OwnerEntry]]) }
+  sig { returns(T::Hash[Integer, OwnershipState]) }
   def block_in; end
-  sig { returns(T::Hash[Integer, T.nilable(T::Hash[String, OwnerEntry])]) }
+  sig { returns(T::Hash[Integer, T.nilable(OwnershipState)]) }
   def block_out; end
 end
 
@@ -1749,10 +1774,6 @@ class Program
   sig { returns(T.untyped) }
   def items; end
   sig { returns(T.untyped) }
-  def mir_pass_state; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def mir_pass_state=(value); end
-  sig { returns(T.untyped) }
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_policy=(value); end
@@ -1761,24 +1782,24 @@ end
 class RecursiveSplitter::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
-  sig { returns(T::Array[String]) }
+  sig { returns(T::Array[MIR::ContextFieldDecl]) }
   def synthetic_fields; end
 end
 
 class ResourceSchema
   sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(String) }
-  def close_zig; end
+  sig { returns(Schemas::ResourceClosePlan) }
+  def close_plan; end
   sig { returns(T.nilable(String)) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::MethodsMap) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
   sig { returns(Symbol) }
   def visibility; end
@@ -1803,17 +1824,17 @@ end
 class Schemas::ResourceSchema
   sig { returns(T.nilable(String)) }
   def as_type; end
-  sig { returns(String) }
-  def close_zig; end
+  sig { returns(Schemas::ResourceClosePlan) }
+  def close_plan; end
   sig { returns(T.nilable(String)) }
   def extern_module; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::MethodsMap) }
   def methods; end
-  sig { returns(T.untyped) }
+  sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
   sig { returns(Symbol) }
   def visibility; end
@@ -1844,10 +1865,8 @@ class Schemas::UnionSchema
 end
 
 class Scope
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, String]) }
   def dependencies; end
-  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
-  def dependencies=(value); end
   sig { returns(Integer) }
   def depth; end
   sig { params(value: Integer).returns(Integer) }
@@ -1883,8 +1902,8 @@ class ScopeTypes
 end
 
 class SemanticAnnotator
-  sig { returns(T::Array[T.untyped]) }
-  def scope_stack; end
+  sig { returns(T.nilable(SemanticIndex)) }
+  def semantic_index; end
   sig { returns(T.untyped) }
   def source_code; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1951,14 +1970,20 @@ class SymbolEntry
   def async_result_shape=(value); end
   sig { returns(Integer) }
   def binding_id; end
+  sig { returns(T::Boolean) }
+  def borrowed_alias; end
   sig { returns(T::Set[Symbol]) }
   def capabilities; end
   sig { params(value: T::Set[Symbol]).returns(T::Set[Symbol]) }
   def capabilities=(value); end
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def close_plan; end
+  sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def close_plan=(value); end
+  sig { returns(T::Boolean) }
+  def init_contents_heap; end
   sig { returns(T.nilable(String)) }
-  def close_zig; end
-  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
-  def close_zig=(value); end
+  def invalid_reason; end
   sig { returns(T::Boolean) }
   def is_param; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -1967,6 +1992,8 @@ class SymbolEntry
   def layout; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value); end
+  sig { returns(BindingLifecycleFacts) }
+  def lifecycle; end
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
   sig { returns(T.nilable(Symbol)) }
@@ -1977,6 +2004,12 @@ class SymbolEntry
   def mutable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutable=(value); end
+  sig { returns(T::Boolean) }
+  def mutable_ref_target; end
+  sig { returns(T::Boolean) }
+  def mutated; end
+  sig { returns(T::Boolean) }
+  def non_escaping; end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1985,6 +2018,10 @@ class SymbolEntry
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
+  sig { returns(T::Boolean) }
+  def poly_borrow_target; end
+  sig { returns(T::Boolean) }
+  def read; end
   sig { returns(T::Boolean) }
   def rebindable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -2027,6 +2064,8 @@ class SymbolEntry
   def takes=(value); end
   sig { returns(Type) }
   def type; end
+  sig { returns(T::Boolean) }
+  def valid; end
 end
 
 class TestBlock
@@ -2216,11 +2255,6 @@ class WithBlock
   def view_kind=(value); end
 end
 
-class ZigTemplate
-  sig { returns(MIR::ZigTemplateArgs) }
-  def args; end
-end
-
 class ZigTranspiler
   sig { returns(T.untyped) }
   def enum_schemas; end
@@ -2236,4 +2270,3 @@ class ZigType
   sig { returns(String) }
   def source; end
 end
-

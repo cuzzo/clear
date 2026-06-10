@@ -514,20 +514,14 @@ class Type
     t_right = right_type.resolved
 
     case op
-    when :AND, :OR
+    when :AND, :OR, *BOOL_RESULT_OPS
       BinaryOpResult.new(type: Type.new(:Bool))
 
-    when *BOOL_RESULT_OPS
-      BinaryOpResult.new(type: Type.new(:Bool))
-
-    when *NUMBER_RESULT_OPS
+    when *NUMBER_RESULT_OPS, :WRAP_ADD, :CHECK_ADD
       resolve_numeric_op(left_type, right_type)
 
     when :ADD
       resolve_add_op(t_left, t_right, left_type, right_type)
-
-    when :WRAP_ADD, :CHECK_ADD
-      resolve_numeric_op(left_type, right_type)
 
     else
       BinaryOpResult.new(error: "Unknown operator: #{op}")
@@ -745,8 +739,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(ownership: value)
+    apply_capabilities!(ownership: value)
     value
   end
 
@@ -757,8 +750,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def sync=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(sync: value)
+    apply_capabilities!(sync: value)
     value
   end
 
@@ -769,8 +761,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(layout: value)
+    apply_capabilities!(layout: value)
     value
   end
 
@@ -781,7 +772,7 @@ class Type
 
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def lock_rank=(value)
-    @capabilities = @capabilities.with(lock_rank: value)
+    apply_capabilities!(lock_rank: value)
     value
   end
 
@@ -792,8 +783,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def collection=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(collection: value)
+    apply_capabilities!(collection: value)
     value
   end
 
@@ -804,8 +794,7 @@ class Type
 
   sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def shard_count=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(shard_count: value)
+    apply_capabilities!(shard_count: value)
     value
   end
 
@@ -816,8 +805,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def soa=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(soa: value)
+    apply_capabilities!(soa: value)
     value
   end
 
@@ -828,8 +816,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def elem_ownership=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(elem_ownership: value)
+    apply_capabilities!(elem_ownership: value)
     value
   end
 
@@ -840,8 +827,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def elem_sync=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(elem_sync: value)
+    apply_capabilities!(elem_sync: value)
     value
   end
 
@@ -852,8 +838,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def link_source=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(link_source: value)
+    apply_capabilities!(link_source: value)
     value
   end
 
@@ -864,8 +849,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def is_observable=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(observable: value)
+    apply_capabilities!(observable: value)
     value
   end
 
@@ -876,8 +860,7 @@ class Type
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def observable_terminal=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(observable_terminal: value)
+    apply_capabilities!(observable_terminal: value)
     value
   end
 
@@ -888,7 +871,7 @@ class Type
 
   sig { params(value: T.nilable(Object)).returns(T.nilable(Object)) }
   def observable_token=(value)
-    @capabilities = @capabilities.with(observable_token: value)
+    apply_capabilities!(observable_token: value)
     value
   end
 
@@ -899,8 +882,7 @@ class Type
 
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def polymorphic_shared=(value)
-    @zig_type_cache = nil
-    @capabilities = @capabilities.with(polymorphic_shared: value)
+    apply_capabilities!(polymorphic_shared: value)
     value
   end
 
@@ -1213,7 +1195,7 @@ class Type
   sig { params(final_type: Type, value_type: T.nilable(Type)).returns(TypeCapabilities) }
   def apply_finalized_value_shape!(final_type:, value_type:)
     final_shard_count = final_type.shard_count || value_type&.shard_count
-    final_soa = final_type.soa || (value_type&.respond_to?(:soa) && value_type.soa)
+    final_soa = final_type.soa || (value_type && value_type.respond_to?(:soa) && value_type.soa)
     observable = final_type.observable? ||
                  (!value_type.nil? && value_type.respond_to?(:observable?) && value_type.observable?)
     observable_terminal = if final_type.observable_terminal
@@ -1222,9 +1204,9 @@ class Type
       value_type.observable_terminal
     end
     elem_ownership = final_type.elem_ownership ||
-                     (value_type&.respond_to?(:elem_ownership) ? value_type.elem_ownership : nil)
+                     (value_type && value_type.respond_to?(:elem_ownership) ? value_type.elem_ownership : nil)
     elem_sync = final_type.elem_sync ||
-                (value_type&.respond_to?(:elem_sync) ? value_type.elem_sync : nil)
+                (value_type && value_type.respond_to?(:elem_sync) ? value_type.elem_sync : nil)
     link_src = value_type&.link? ? value_type.link_source : nil
     apply_capabilities!(
       shard_count: final_shard_count || TypeCapabilities::UNSET,
@@ -1244,9 +1226,9 @@ class Type
   def merge_capabilities_from!(source, preserve_existing: true, include_affine_ownership: false)
     source_ownership = source.ownership
     existing_concrete_ownership = ownership && ownership != :affine
-    next_ownership = if preserve_existing && existing_concrete_ownership
-      TypeCapabilities::UNSET
-    elsif source_ownership && (include_affine_ownership || source_ownership != :affine)
+    next_ownership = if source_ownership &&
+                        !(preserve_existing && existing_concrete_ownership) &&
+                        (include_affine_ownership || source_ownership != :affine)
       source_ownership
     else
       TypeCapabilities::UNSET
@@ -1467,6 +1449,11 @@ class Type
   sig { returns(T::Boolean) }
   def void?
     resolved == :Void
+  end
+
+  sig { returns(T::Boolean) }
+  def catch_snapshot_payload?
+    !void? && !error_union?
   end
 
   # The :Untyped sentinel: a generic evaluatable node whose full_type
@@ -1854,14 +1841,11 @@ class Type
       # the element type (after deref).
       TypeFsmForEachDescriptor.new(kind: :iterator, init_method: "keyIterator", advance_method: "next",
         deref: true, var_zig_type: element_type&.zig_type || "anyopaque")
-    elsif list_collection?
+    elsif list_collection? || (array? && dynamic?)
       TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
         var_zig_type: element_type&.zig_type || "anyopaque")
     elsif array? && !dynamic?
       TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: "",
-        var_zig_type: element_type&.zig_type || "anyopaque")
-    elsif array? && dynamic?
-      TypeFsmForEachDescriptor.new(kind: :indexed_slice, slice_suffix: ".items",
         var_zig_type: element_type&.zig_type || "anyopaque")
     else nil
     end
@@ -1983,40 +1967,40 @@ class Type
     @is_resource || RESOURCE_TYPES.include?(resolved)
   end
 
-  # Resolve the Zig close/deinit statement for resource types.
-  # Returns [is_resource, close_zig_template] where close_zig_template uses
-  # {0} as placeholder for the variable name. Returns [false, nil] for non-resources.
+  # Resolve the close/deinit plan for resource types.
+  # Returns [is_resource, close_plan]. Returns
+  # [false, nil] for non-resources.
   #
   # Group 1 / Group 2 separation: when a Group-2 shape (pool/set/...) is
   # wrapped with Group-1 ownership (Arc/Rc), the bare-shape `.deinit()`
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
-  ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(String)] }
+  ResourceCloseResult = T.type_alias { [T::Boolean, T.nilable(Schemas::ResourceClosePlan)] }
 
   sig { params(schema_lookup: T.nilable(T.proc.params(name: Symbol).returns(T.nilable(Object)))).returns(ResourceCloseResult) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
-    return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
+    return [true, Schemas::ResourceClosePlan.method("deinit")] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
     schema = T.let((schema_lookup.call(resolved) rescue nil), T.nilable(Object))
 
     if schema.is_a?(Schemas::ResourceSchema)
-      return [true, schema.close_zig]
+      return [true, schema.close_plan]
     end
 
     # Struct with resource fields: compose close statements from fields.
     if schema.is_a?(Schemas::StructSchema)
-      closes = T.let([], T::Array[String])
+      actions = T.let([], T::Array[Schemas::ResourceCloseAction])
       schema.fields.each do |fname, fdef|
         f_resolved = fdef.type.resolved
         f_schema = T.let((schema_lookup.call(f_resolved) rescue nil), T.nilable(Object))
         if f_schema.is_a?(Schemas::ResourceSchema)
-          closes << f_schema.close_zig.gsub("{0}", "{0}.#{fname}")
+          actions.concat(f_schema.close_plan.for_field(fname).actions)
         end
       end
-      return [true, closes.join("; ")] if closes.any?
+      return [true, Schemas::ResourceClosePlan.composite(actions)] if actions.any?
     end
 
     [false, nil]

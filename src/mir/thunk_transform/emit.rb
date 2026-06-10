@@ -81,93 +81,89 @@ module ThunkTransform
         MIR::FieldGet.new(MIR::Ident.new(receiver_name), name)
       end
 
-      sig { returns(T::Hash[String, String]) }
-      def capture_map
-        param_names.each_with_object({}) do |name, map|
-          map[name] = "#{receiver_name}.#{name}"
-        end
+    end
+
+    class ThunkParamFact < T::Struct
+      extend T::Sig
+
+      const :name, String
+      const :type_info, Type
+
+      sig { params(param: AST::Param).returns(ThunkParamFact) }
+      def self.from_param(param)
+        new(
+          name: param.name.to_s,
+          type_info: Type.new(param.type),
+        )
       end
     end
 
-    # Map normalized op codes (from AST::OP_TO_OP_CODE) to Zig
-    # operators. Phase 4c restricts to these four; Phase 4f-g may
-    # widen if user demand emerges.
-    OP_TO_ZIG = T.let({
-      ADD: "+",
-      SUB: "-",
-      MUL: "*",
-      DIV: "/",
-    }.freeze, T::Hash[Symbol, String])
+    SUPPORTED_COMBINE_OPS = T.let(Set[:ADD, :SUB, :MUL, :DIV].freeze, T::Set[Symbol])
 
     # Synthesize a structural MIR trampoline body for a function whose
     # AST::FunctionDef has a thunk_plan (set by Phase 4c detection).
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(MIR::ThunkTrampoline) }
+    sig { params(fn_node: AST::FunctionDef, lowering: Object).returns(MIR::ThunkTrampoline) }
     def build_trampoline(fn_node, lowering)
-      T.bind(self, T.untyped) rescue nil
-      plan = fn_node.thunk_plan
-      raise ArgumentError, "fn '#{fn_node.name}' has no thunk_plan" if plan.nil?
-      ret_zig = ret_zig_type(fn_node, lowering)
-      assert_non_fallible_ret!(fn_node, ret_zig)
+      plan = thunk_plan!(fn_node)
+      return_type = return_type_info(fn_node, lowering)
+      assert_non_fallible_ret!(fn_node, return_type)
 
-      param_field_decls = fn_node.params.map { |p|
-        "#{p[:name]}: #{param_zig_type(p, lowering)},"
-      }
+      params = function_params(fn_node)
+      param_fields = params.map { |param| frame_field(param.name, param.type_info) }
 
-      param_init_fields = fn_node.params.map { |p|
-        ".#{p[:name]} = #{p[:name]}"
+      param_init_fields = params.map { |param|
+        frame_init(param.name, MIR::Ident.new(param.name))
       }
 
       context = current_frame_context(fn_node)
 
       base_cases = plan.base_cases.map { |bc|
-        cond  = render_expr(bc[:cond_ast], lowering, context)
-        value = render_expr(bc[:value_ast], lowering, context)
-        {
-          cond_zig: cond,
-          value_zig: value,
-        }
+        MIR::ThunkBaseCase.new(
+          cond: lower_frame_expr(bc.cond_ast, lowering, context),
+          value: lower_frame_expr(bc.value_ast, lowering, context),
+        )
       }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
-        param = fn_node.params[i]
-        raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
-        rendered = render_expr(arg, lowering, context)
-        ".#{param[:name]} = #{rendered}"
+        param = params[i]
+        Kernel.raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
+        frame_init(param.name, lower_frame_expr(arg, lowering, context))
       }
 
-      combine_lhs_zig = render_expr(plan.combine_lhs, lowering, context)
-      op_zig = OP_TO_ZIG.fetch(plan.combine_op) {
-        raise "thunk: unsupported op #{plan.combine_op}"
-      }
-      yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
+      combine_lhs = lower_frame_expr(plan.combine_lhs, lowering, context)
+      validate_combine_op!(plan.combine_op)
 
       MIR::ThunkTrampoline.new(
-        fn_node.name,
-        ret_zig,
-        param_field_decls,
-        param_init_fields,
-        base_cases,
-        recurse_arg_inits,
-        combine_lhs_zig,
-        op_zig,
-        yield_line
+        fn_name: fn_node.name,
+        return_type: return_type,
+        param_fields: param_fields,
+        param_init_fields: param_init_fields,
+        base_cases: base_cases,
+        recurse_arg_inits: recurse_arg_inits,
+        combine_lhs: combine_lhs,
+        combine_op: plan.combine_op,
+        yield_policy: fn_node.tight_reentrance ? :tight_skip : :check,
       )
     end
 
     # Lower an AST expression through the surrounding MIRLowering, rewrite
-    # frame-bound param references structurally, then emit Zig from MIR.
-    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(String) }
-    def render_expr(ast_expr, lowering, context)
+    # frame-bound param references structurally, and leave rendering to
+    # MIREmitter.
+    sig { params(ast_expr: AST::Node, lowering: Object, context: FrameBindingContext).returns(MIR::Node) }
+    def lower_frame_expr(ast_expr, lowering, context)
       lowering_api = T.unsafe(lowering)
-      mir =
-        if lowering_api.respond_to?(:with_fiber_capture_map)
-          lowering_api.with_fiber_capture_map(context.capture_map) do
-            lowering_api.lower(ast_expr)
-          end
-        else
-          lowering_api.lower(ast_expr)
-        end
-      lowering_api.send(:emit_expr, bind_frame_refs(mir, context)).to_s
+      mir = lowering_api.lower(ast_expr)
+      bind_frame_refs(T.cast(mir, MIR::Node), context)
+    end
+
+    sig { params(field_name: String, value: MIR::Node).returns(MIR::ThunkFrameInit) }
+    def frame_init(field_name, value)
+      MIR::ThunkFrameInit.new(field_name: field_name, value: value)
+    end
+
+    sig { params(field_name: String, type_info: Type).returns(MIR::ThunkFrameField) }
+    def frame_field(field_name, type_info)
+      MIR::ThunkFrameField.new(name: field_name, type_info: type_info)
     end
 
     sig { params(fn_node: AST::FunctionDef).returns(FrameBindingContext) }
@@ -183,7 +179,7 @@ module ThunkTransform
     sig { params(fn_node: AST::FunctionDef).returns(T::Set[String]) }
     def param_names(fn_node)
       names = T.let(Set.new, T::Set[String])
-      fn_node.params.each { |p| names << p[:name].to_s }
+      function_params(fn_node).each { |param| names << param.name }
       names
     end
 
@@ -218,6 +214,20 @@ module ThunkTransform
           mir.owned_return?,
           mir.callable_contract,
         )
+      when MIR::RegistryCall
+        MIR::RegistryCall.new(
+          entry: mir.entry,
+          args: mir.args.map { |arg| MIR::RegistryCallArg.new(expr: bind_frame_refs(arg.expr, context), coerce_type: arg.coerce_type) },
+          reason: mir.reason,
+          ownership_contract: mir.ownership_contract,
+          allocs: mir.allocs,
+          target_var: mir.target_var,
+          result_type: mir.result_type,
+          result_ownership_bearing: mir.result_ownership_bearing,
+          key_type: mir.key_type,
+          value_type: mir.value_type,
+          suppress_try: mir.suppress_try,
+        )
       when MIR::Cast
         MIR::Cast.new(bind_frame_refs(mir.expr, context), mir.target_type, mir.method)
       when MIR::TryExpr
@@ -239,19 +249,17 @@ module ThunkTransform
       end
     end
 
-    sig { params(param: T.untyped, _lowering: T.untyped).returns(String) }
-    def param_zig_type(param, _lowering)
-      T.bind(self, T.untyped) rescue nil
-      type = param[:type]
-      type.respond_to?(:zig_type) ? type.zig_type : type.to_s
+    sig { params(fn_node: AST::FunctionDef, _lowering: Object).returns(Type) }
+    def return_type_info(fn_node, _lowering)
+      rt = fn_node.return_type
+      return Type.new(:Void) if rt.nil?
+      rt.is_a?(Type) ? rt : Type.new(rt)
     end
 
-    sig { params(fn_node: T.untyped, _lowering: T.untyped).returns(String) }
-    def ret_zig_type(fn_node, _lowering)
-      T.bind(self, T.untyped) rescue nil
-      rt = fn_node.return_type
-      return "void" if rt.nil?
-      rt.respond_to?(:zig_type) ? rt.zig_type : rt.to_s
+    sig { params(op: Symbol).returns(NilClass) }
+    def validate_combine_op!(op)
+      return if SUPPORTED_COMBINE_OPS.include?(op)
+      Kernel.raise "thunk: unsupported op #{op}"
     end
 
     # Today's THUNK trampolines free heap-allocated child Frames only
@@ -267,12 +275,12 @@ module ThunkTransform
     # an `errdefer` chain-walk in the emitted body is the surgical
     # fix; this guard fails loudly so the extension can't ship the
     # leak silently.
-    sig { params(fn_node: T.untyped, ret_zig: T.untyped).returns(NilClass) }
-    def assert_non_fallible_ret!(fn_node, ret_zig)
-      T.bind(self, T.untyped) rescue nil
-      return unless ZigType.new(ret_zig).inferred_error_union?
-      raise "INTERNAL: THUNK trampoline for '#{fn_node.name}' has fallible " \
-            "return type (#{ret_zig.inspect}). The current codegen frees " \
+    sig { params(fn_node: AST::FunctionDef, return_type: Type).returns(NilClass) }
+    def assert_non_fallible_ret!(fn_node, return_type)
+      return_type_zig = return_type.zig_type
+      return unless ZigType.new(return_type_zig).inferred_error_union?
+      Kernel.raise "INTERNAL: THUNK trampoline for '#{fn_node.name}' has fallible " \
+            "return type (#{return_type_zig.inspect}). The current codegen frees " \
             "heap-allocated child Frames only on the normal return path; an " \
             "error return would leak the in-flight chain. Before lifting the " \
             "non-fallible invariant, extend `build_trampoline` and " \
@@ -306,88 +314,95 @@ module ThunkTransform
     # Each cycle member emits its own trampoline (same union layout,
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(MIR::MutualThunkTrampoline) }
+    sig { params(fn_node: AST::FunctionDef, lowering: Object).returns(MIR::MutualThunkTrampoline) }
     def build_mutual_trampoline(fn_node, lowering)
-      T.bind(self, T.untyped) rescue nil
-      mtp = fn_node.mutual_thunk_plan
-      raise ArgumentError, "fn '#{fn_node.name}' has no mutual_thunk_plan" if mtp.nil?
+      mtp = mutual_thunk_plan!(fn_node)
 
-      ret_zig = ret_zig_type(fn_node, lowering)
-      assert_non_fallible_ret!(fn_node, ret_zig)
+      return_type = return_type_info(fn_node, lowering)
+      assert_non_fallible_ret!(fn_node, return_type)
       cycle_fns = mtp.cycle_fns
 
       variants = cycle_fns.map { |cf|
-        {
+        MIR::ThunkVariant.new(
           name: cf.name,
-          param_field_decls: cf.params.map { |p|
-            "#{p[:name]}: #{param_zig_type(p, lowering)},"
-          },
-        }
+          param_fields: function_params(cf).map { |param| frame_field(param.name, param.type_info) },
+        )
       }
 
-      initial_fields = fn_node.params.map { |p|
-        ".#{p[:name]} = #{p[:name]}"
+      initial_fields = function_params(fn_node).map { |param|
+        frame_init(param.name, MIR::Ident.new(param.name))
       }
 
       arms = cycle_fns.map { |cf|
-        build_mutual_arm(cf, mtp, ret_zig, lowering)
+        build_mutual_arm(cf, mtp, lowering)
       }
 
-      yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
-
       MIR::MutualThunkTrampoline.new(
-        fn_node.name,
-        ret_zig,
-        variants,
-        fn_node.name,
-        initial_fields,
-        arms,
-        yield_line
+        fn_name: fn_node.name,
+        return_type: return_type,
+        variants: variants,
+        initial_variant: fn_node.name,
+        initial_fields: initial_fields,
+        arms: arms,
+        yield_policy: fn_node.tight_reentrance ? :tight_skip : :check,
       )
     end
 
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
-    sig { params(cf: T.untyped, _mtp: T.untyped, ret_zig: String, lowering: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
-    def build_mutual_arm(cf, _mtp, ret_zig, lowering)
-      T.bind(self, T.untyped) rescue nil
-      own_plan = cf.mutual_thunk_plan.own_plan
+    sig { params(cf: AST::FunctionDef, _mtp: ThunkTransform::RecursiveSplitter::MutualThunkPlan, lowering: Object).returns(MIR::MutualThunkArm) }
+    def build_mutual_arm(cf, _mtp, lowering)
+      own_plan = mutual_thunk_plan!(cf).own_plan
       context = mutual_frame_context(cf)
 
       base_cases = own_plan.base_cases.map { |bc|
-        cond = render_expr(bc[:cond_ast], lowering, context)
-        value = render_expr(bc[:value_ast], lowering, context)
-        {
-          cond_zig: cond,
-          value_zig: value,
-        }
+        MIR::ThunkBaseCase.new(
+          cond: lower_frame_expr(bc.cond_ast, lowering, context),
+          value: lower_frame_expr(bc.value_ast, lowering, context),
+        )
       }
 
       target_fn = own_plan.target_fn
       target_args = own_plan.target_args
-      target_params = find_cycle_member(cf, target_fn).params
-      raise "thunk: target arg/param count mismatch for '#{cf.name}' -> '#{target_fn}'" \
+      target_params = function_params(find_cycle_member(cf, target_fn))
+      Kernel.raise "thunk: target arg/param count mismatch for '#{cf.name}' -> '#{target_fn}'" \
         if target_args.length != target_params.length
       arg_inits = target_args.each_with_index.map { |arg, i|
-        rendered = render_expr(arg, lowering, context)
-        ".#{target_params[i][:name]} = #{rendered}"
+        target_param = target_params.fetch(i)
+        frame_init(target_param.name, lower_frame_expr(arg, lowering, context))
       }
-      _ = ret_zig
-
-      {
+      MIR::MutualThunkArm.new(
         variant_name: cf.name,
         base_cases: base_cases,
         target_variant: target_fn,
         target_arg_inits: arg_inits,
-      }
+      )
     end
 
-    sig { params(cf: T.untyped, name: T.untyped).returns(T.noreturn) }
+    sig { params(cf: AST::FunctionDef, name: String).returns(AST::FunctionDef) }
     def find_cycle_member(cf, name)
-      T.bind(self, T.untyped) rescue nil
-      cf.mutual_thunk_plan.cycle_fns.find { |x| x.name == name } or
-        raise "thunk: cycle member '#{name}' not found for '#{cf.name}'"
+      mutual_thunk_plan!(cf).cycle_fns.find { |x| x.name == name } or
+        Kernel.raise "thunk: cycle member '#{name}' not found for '#{cf.name}'"
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(ThunkTransform::RecursiveSplitter::Plan) }
+    def thunk_plan!(fn_node)
+      plan = T.cast(fn_node.thunk_plan, T.nilable(ThunkTransform::RecursiveSplitter::Plan))
+      Kernel.raise ArgumentError, "fn '#{fn_node.name}' has no thunk_plan" if plan.nil?
+      plan
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(ThunkTransform::RecursiveSplitter::MutualThunkPlan) }
+    def mutual_thunk_plan!(fn_node)
+      plan = T.cast(fn_node.mutual_thunk_plan, T.nilable(ThunkTransform::RecursiveSplitter::MutualThunkPlan))
+      Kernel.raise ArgumentError, "fn '#{fn_node.name}' has no mutual_thunk_plan" if plan.nil?
+      plan
+    end
+
+    sig { params(fn_node: AST::FunctionDef).returns(T::Array[ThunkParamFact]) }
+    def function_params(fn_node)
+      fn_node.params.map { |param| ThunkParamFact.from_param(param) }
     end
 
   end

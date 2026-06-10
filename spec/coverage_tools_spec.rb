@@ -6,6 +6,7 @@ require_relative "../tools/loom_atomic_coverage"
 require_relative "../tools/vopr_coverage"
 require_relative "../tools/wait_loop_coverage"
 require_relative "../tools/diff_bucket_summary"
+require_relative "../tools/src_ast_walk_guardrail"
 require_relative "../tools/zig_coverage_support"
 require_relative "../tools/zig_coverage_sanitize"
 require_relative "../tools/zig_coverage_visibility"
@@ -94,6 +95,65 @@ RSpec.describe "coverage gap tools" do
 
     begin
       expect(ruby_added_coverage({ rel_path => Set[1, 2, 3, 4, 5] }, [rel_path])).to eq(["50.0%", "N/A"])
+    ensure
+      old_paths ? ENV["RUBY_COVERAGE_PATHS"] = old_paths : ENV.delete("RUBY_COVERAGE_PATHS")
+    end
+  end
+
+  it "ignores Sorbet-generated branch artifacts in Ruby diff branch coverage" do
+    expect(ruby_synthetic_branch_line?("sig { returns(String) }")).to be(true)
+    expect(ruby_synthetic_branch_line?("sig do")).to be(true)
+    expect(ruby_synthetic_branch_line?("def helper(value)")).to be(true)
+    expect(ruby_synthetic_branch_line?("T.bind(self, SemanticAnnotator)")).to be(true)
+    expect(ruby_synthetic_branch_line?("T.let(nil, T.nilable(Symbol))")).to be(true)
+    expect(ruby_synthetic_branch_line?("@source_code = T.let(@source_code, T.untyped)")).to be(true)
+    expect(ruby_synthetic_branch_line?("value = T.cast(raw, String)")).to be(true)
+    expect(ruby_synthetic_branch_line?("return value if present")).to be(false)
+  end
+
+  it "does not turn non-executable SimpleCov lines into misses when subprocesses report zero" do
+    source_path = File.join(@tmp, "ruby_merge_probe.rb")
+    File.write(source_path, <<~RUBY)
+      sig do
+        params(value: String)
+      end
+      covered_call
+    RUBY
+    rel_path = Pathname.new(source_path).relative_path_from(Pathname.new(ROOT)).to_s
+    coverage_path = File.join(@tmp, "ruby-merge-resultset.json")
+    File.write(coverage_path, JSON.generate(
+      "rspec" => {
+        "coverage" => {
+          File.join(ROOT, rel_path) => {
+            "lines" => [nil, nil, nil, 1],
+            "branches" => {
+              "[:if, 0, 2, 0, 4, 12]" => {
+                "[:then, 1, 2, 0, 2, 24]" => 0,
+                "[:else, 2, 4, 0, 4, 14]" => 1,
+              },
+            },
+          },
+        },
+      },
+      "subprocess" => {
+        "coverage" => {
+          File.join(ROOT, rel_path) => {
+            "lines" => [0, 0, 0, 0],
+            "branches" => {
+              "[:if, 0, 2, 0, 4, 12]" => {
+                "[:then, 1, 2, 0, 2, 24]" => 0,
+                "[:else, 2, 4, 0, 4, 14]" => 0,
+              },
+            },
+          },
+        },
+      },
+    ))
+    old_paths = ENV["RUBY_COVERAGE_PATHS"]
+    ENV["RUBY_COVERAGE_PATHS"] = coverage_path
+
+    begin
+      expect(ruby_added_coverage({ rel_path => Set[1, 2, 3, 4] }, [rel_path])).to eq(["100.0%", "100.0%"])
     ensure
       old_paths ? ENV["RUBY_COVERAGE_PATHS"] = old_paths : ENV.delete("RUBY_COVERAGE_PATHS")
     end
@@ -202,6 +262,214 @@ RSpec.describe "coverage gap tools" do
     )
 
     expect(alerts).to be_empty
+  end
+
+  it "filters src RuboCop guardrail offenses to added lines and target cops" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), <<~RUBY)
+      def x(value)
+        value&.to_s
+        case value
+        when 1 then :same
+        when 2 then :same
+        end
+        value&.upcase
+      end
+    RUBY
+    payload = {
+      "files" => [
+        {
+          "path" => File.join(@tmp, "src/probe.rb"),
+          "offenses" => [
+            {
+              "cop_name" => "Lint/RedundantSafeNavigation",
+              "message" => "Redundant safe navigation detected.",
+              "location" => { "line" => 2, "column" => 10 },
+            },
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 4, "column" => 9 },
+            },
+            {
+              "cop_name" => "Lint/SafeNavigationConsistency",
+              "message" => "Safe navigation is inconsistent.",
+              "location" => { "line" => 7, "column" => 10 },
+            },
+            {
+              "cop_name" => "Style/RedundantCondition",
+              "message" => "Non-guardrail cop.",
+              "location" => { "line" => 4, "column" => 9 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      { "src/probe.rb" => Set[2, 4] },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq([
+      "rubocop_redundant_safe_navigation",
+      "rubocop_duplicate_branch",
+    ])
+    expect(findings.map(&:line)).to eq([2, 4])
+    expect(findings.map(&:code)).to eq(["value&.to_s", "when 1 then :same"])
+    expect(findings.map(&:message)).to all(start_with("added src line trips Lint/"))
+  end
+
+  it "reports RuboCop guardrail offenses whose span intersects an added line" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/span_probe.rb"), <<~RUBY)
+      def y(value)
+        case value
+        when 1
+          :same
+        when 2
+          :same
+        end
+      end
+    RUBY
+    payload = {
+      "files" => [
+        {
+          "path" => "src/span_probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 3, "last_line" => 6, "column" => 9 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      { "src/span_probe.rb" => Set[5] },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq(["rubocop_duplicate_branch"])
+    expect(findings.first.line).to eq(3)
+  end
+
+  it "ignores RuboCop guardrail offenses outside src Ruby additions" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), "value&.to_s\n")
+    payload = {
+      "files" => [
+        {
+          "path" => "src/probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/RedundantSafeNavigation",
+              "message" => "Redundant safe navigation detected.",
+              "location" => { "line" => 1, "column" => 6 },
+            },
+          ],
+        },
+        {
+          "path" => "tools/probe.rb",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 1, "column" => 1 },
+            },
+          ],
+        },
+        {
+          "path" => "src/probe.txt",
+          "offenses" => [
+            {
+              "cop_name" => "Lint/DuplicateBranch",
+              "message" => "Duplicate branch body detected.",
+              "location" => { "line" => 1, "column" => 1 },
+            },
+          ],
+        },
+      ],
+    }
+
+    findings = rubocop_guardrail_findings_from_json(
+      {
+        "src/probe.rb" => Set[2],
+        "tools/probe.rb" => Set[1],
+        "src/probe.txt" => Set[1],
+      },
+      JSON.generate(payload),
+      root: @tmp,
+    )
+
+    expect(findings).to be_empty
+  end
+
+  it "selects only existing added src Ruby paths for RuboCop guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src/probe.rb"), "value&.to_s\n")
+
+    paths = src_ruby_added_paths(
+      {
+        "src/probe.rb" => Set[1],
+        "src/missing.rb" => Set[1],
+        "src/probe.txt" => Set[1],
+        "tools/probe.rb" => Set[1],
+      },
+      root: @tmp,
+    )
+
+    expect(paths).to eq(["src/probe.rb"])
+  end
+
+  it "returns an unavailable RuboCop guardrail finding for invalid JSON" do
+    findings = rubocop_guardrail_findings_from_json({}, "not-json", root: @tmp)
+
+    expect(findings.map(&:kind)).to eq(["rubocop_guardrail_unavailable"])
+    expect(findings.first.detail).to include("could not parse RuboCop JSON")
+  end
+
+  it "classifies late source AST walkers by architectural phase" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/semantic"))
+    FileUtils.mkdir_p(File.join(@tmp, "src/annotator/helpers"))
+    FileUtils.mkdir_p(File.join(@tmp, "src/mir"))
+    semantic = File.join(@tmp, "src/semantic/escape_analysis.rb")
+    annotator = File.join(@tmp, "src/annotator/helpers/with_match_check.rb")
+    mir = File.join(@tmp, "src/mir/mir_pass.rb")
+    File.write(semantic, "AST.each_locatable(body) { |node| node }\n")
+    File.write(annotator, "AST.walk_body(fn.body) { |node| node }\n")
+    File.write(mir, "walk_body(fn.body) { |node| node }\n")
+
+    findings = SrcAstWalkGuardrail.scan(root: @tmp, paths: [semantic, annotator, mir])
+
+    expect(findings.map { |finding| [finding.path, finding.classification, finding.allowed] }).to eq([
+      ["src/semantic/escape_analysis.rb", :forbidden_semantic_rediscovery, false],
+      ["src/annotator/helpers/with_match_check.rb", :body_typing_or_diagnostic, true],
+      ["src/mir/mir_pass.rb", :forbidden_post_hoist_rediscovery, false],
+    ])
+    expect(findings.map(&:reason)).to include(a_string_matching(/SemanticIndex/))
+  end
+
+  it "reports added forbidden source AST walkers in src type guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/semantic"))
+    File.write(File.join(@tmp, "src/semantic/facts.rb"), <<~RUBY)
+      def scan(body)
+        AST.each_locatable(body) { |node| node }
+      end
+    RUBY
+
+    findings = src_ast_walk_guardrail_findings(
+      { "src/semantic/facts.rb" => Set[2] },
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq(["late_ast_walk"])
+    expect(findings.first.message).to include("forbidden source AST walk")
+    expect(findings.first.detail).to include("SemanticIndex")
   end
 
   it "sanitizes Zig coverage suite and run names for kcov directories" do
@@ -373,6 +641,163 @@ RSpec.describe "coverage gap tools" do
     sanitized = REXML::Document.new(File.read(coverage_xml))
     remaining = REXML::XPath.match(sanitized, "//class[@filename='runtime/runtime-header.zig']/lines/line")
     expect(remaining).to be_empty
+  end
+
+  it "removes audit-only runtime-header hits when DWARF ownership proves the orphan" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    source_path = File.join(@tmp, "zig/runtime/runtime-header.zig")
+    File.write(source_path, <<~ZIG)
+      pub const CheatLib = struct {
+          pub fn intAdd(a: i64, b: i64) i64 {
+              return a + b;
+          }
+
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = File.readlines(source_path).index { |line| line.include?("parts[0] =") } + 1
+    coverage_xml = File.join(@tmp, "cobertura.xml")
+    File.write(coverage_xml, <<~XML)
+      <?xml version="1.0"?>
+      <coverage>
+        <packages>
+          <package name="runtime">
+            <classes>
+              <class name="runtime-header" filename="runtime/runtime-header.zig">
+                <lines>
+                  <line number="#{hit_line}" hits="1"/>
+                </lines>
+              </class>
+            </classes>
+          </package>
+        </packages>
+      </coverage>
+    XML
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    allow(ZigCoverageSanitizer).to receive(:symbol_names_for).and_return(["runtime.runtime-header.CheatLib.intAdd"])
+    allow(ZigCoverageSanitizer).to receive(:dwarf_orphan_removal_keys).and_return(
+      ZigCoverageSanitizer.removal_key("runtime/runtime-header.zig", "parseIpv4Addr", hit_line) => true,
+    )
+
+    removals = ZigCoverageSanitizer.sanitize_file!(coverage_xml, root: @tmp, binary: binary)
+
+    expect(removals.map { |r| [r.function, r.line, r.hits] }).to eq([["parseIpv4Addr", hit_line, 1]])
+    sanitized = REXML::Document.new(File.read(coverage_xml))
+    remaining = REXML::XPath.match(sanitized, "//class[@filename='runtime/runtime-header.zig']/lines/line")
+    expect(remaining).to be_empty
+  end
+
+  it "keeps audit-only runtime-header hits without a matching DWARF ownership proof" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    source_path = File.join(@tmp, "zig/runtime/runtime-header.zig")
+    File.write(source_path, <<~ZIG)
+      pub const CheatLib = struct {
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = File.readlines(source_path).index { |line| line.include?("parts[0] =") } + 1
+    coverage_xml = File.join(@tmp, "cobertura.xml")
+    File.write(coverage_xml, <<~XML)
+      <?xml version="1.0"?>
+      <coverage>
+        <packages>
+          <package name="runtime">
+            <classes>
+              <class name="runtime-header" filename="runtime/runtime-header.zig">
+                <lines>
+                  <line number="#{hit_line}" hits="1"/>
+                </lines>
+              </class>
+            </classes>
+          </package>
+        </packages>
+      </coverage>
+    XML
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    allow(ZigCoverageSanitizer).to receive(:symbol_names_for).and_return(["runtime.runtime-header.CheatLib.intAdd"])
+    allow(ZigCoverageSanitizer).to receive(:dwarf_orphan_removal_keys).and_return({})
+
+    removals = ZigCoverageSanitizer.sanitize_file!(coverage_xml, root: @tmp, binary: binary)
+
+    expect(removals).to be_empty
+    expect {
+      ZigCoverageSanitizer.assert_no_orphan_hits!(coverage_xml, root: @tmp)
+    }.to raise_error(ZigCoverageSanitizer::Error, /parseIpv4Addr:#{hit_line}/)
+  end
+
+  it "builds sanitizer proof keys from cross-file DWARF ownership contradictions" do
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    symbols = [ZigDwarfLineAudit::Symbol.new(addr: 1, size: 10, name: "all-fuzz.clearMain")]
+    rows = [ZigDwarfLineAudit::LineRow.new(file: "zig/runtime/runtime-header.zig", line: 2290, pc: 5, flags: "x")]
+    issue = ZigDwarfLineAudit::Issue.new(
+      row: rows.fetch(0),
+      symbol: symbols.fetch(0),
+      owner_file: "zig/all-fuzz.zig",
+      owner_function: "clearMain",
+      source_function: ZigDwarfLineAudit::FunctionRange.new(
+        name: "parseIpv4Addr",
+        start_line: 2275,
+        end_line: 2305,
+        inline_fn: false,
+      ),
+    )
+    allow(ZigDwarfLineAudit).to receive(:run_command!).and_return("stub")
+    allow(ZigDwarfLineAudit).to receive(:parse_nm).and_return(symbols)
+    allow(ZigDwarfLineAudit).to receive(:parse_decoded_line).and_return(rows)
+    expect(ZigDwarfLineAudit).to receive(:audit_rows)
+      .with(rows, symbols, root: @tmp, same_file_only: false)
+      .and_return([[issue], { checked: 1 }])
+
+    keys = ZigCoverageSanitizer.dwarf_orphan_removal_keys(binary, root: @tmp)
+
+    expect(keys).to eq(
+      ZigCoverageSanitizer.removal_key("zig/runtime/runtime-header.zig", "parseIpv4Addr", 2290) => true,
+    )
+  end
+
+  it "builds sanitizer proof keys for runtime-header rows owned by generated symbols" do
+    FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
+    File.write(File.join(@tmp, "zig/runtime/runtime-header.zig"), <<~ZIG)
+      pub const CheatLib = struct {
+          fn parseIpv4Addr(host: []const u8) !u32 {
+              var parts: [4]u8 = .{0} ** 4;
+              parts[0] = @intCast(host.len);
+              return parts[0];
+          }
+      };
+    ZIG
+    hit_line = 4
+    binary = File.join(@tmp, "zig-test-bin")
+    File.write(binary, "")
+    symbols = [
+      ZigDwarfLineAudit::Symbol.new(
+        addr: 0x100,
+        size: 0x20,
+        name: "all-fuzz.test.generated_case.cht.S.clearMain.__SgCtx0.run",
+      ),
+    ]
+    rows = [ZigDwarfLineAudit::LineRow.new(file: "zig/runtime/runtime-header.zig", line: hit_line, pc: 0x110, flags: "x")]
+    allow(ZigDwarfLineAudit).to receive(:run_command!).and_return("stub")
+    allow(ZigDwarfLineAudit).to receive(:parse_nm).and_return(symbols)
+    allow(ZigDwarfLineAudit).to receive(:parse_decoded_line).and_return(rows)
+    allow(ZigDwarfLineAudit).to receive(:audit_rows).and_return([[], { checked: 0 }])
+
+    keys = ZigCoverageSanitizer.dwarf_orphan_removal_keys(binary, root: @tmp)
+
+    expect(keys).to eq(
+      ZigCoverageSanitizer.removal_key("zig/runtime/runtime-header.zig", "parseIpv4Addr", hit_line) => true,
+    )
   end
 
   it "removes merged orphan runtime-header hits only when an input run already proved them false" do

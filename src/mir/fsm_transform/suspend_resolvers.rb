@@ -12,6 +12,7 @@
 # that's the splitter's responsibility.
 
 require_relative "../mir"
+require_relative "context"
 
 module FsmTransform
   module SuspendResolvers
@@ -21,11 +22,10 @@ module FsmTransform
     # Public entry. `seg` is a Segments::Segment whose tail is one of
     # the *Suspend variants. Returns MIR::SuspendDescriptor.
     #
-    # `ctx` is a hash with at least: :id (numeric ctx id), :bg_rt
-    # (e.g. "__rt_bg0").
+    # `ctx` carries the typed FSM emit context, including id and bg runtime.
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
-    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(seg: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: T.nilable(Integer)).returns(MIR::SuspendDescriptor) }
     def resolve(seg, ctx, lowering, susp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       case seg.tail
@@ -49,17 +49,17 @@ module FsmTransform
     #                bound result) MIR::Set against the resumed local
     #                from fsm_finish_value
     #   tail:        FsmTailYield(next, "WaitForLock")
-    #   ctx_field_decls: rendered fsm_state_decls
+    #   ctx_field_decls: typed FSM ctx field declarations
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
-    sig { params(io_tail: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(io_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
     def resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
       raise ArgumentError, "IoSuspend missing stdlib_def" unless stdlib_def
 
-      id = ctx[:id]
-      bg_rt = ctx[:bg_rt]
+      id = ctx.id
+      bg_rt = ctx.bg_rt
 
       em             = stdlib_def.emit
       setup_ops      = em&.fsm_setup || []
@@ -84,14 +84,14 @@ module FsmTransform
       result_var = io_tail.result_var
       result_zig_type = nil
       result_needs_cleanup = false
-      ctx_field_decls = state_decls.map(&:render)
+      ctx_field_decls = state_decls.map { |decl| state_field_decl(decl) }
       if finish_value_mir && result_var && result_var != "_"
         ft = Type.from_node!(io_tail.call_node, context: "FSM IO tail result")
         result_zig_type = ft ? Type.new(ft).zig_type : nil
         raise ArgumentError, "FSM IO result #{result_var} missing Zig type" unless result_zig_type
 
         ctx_ident = MIR::Ident.new("__ctx_#{id}")
-        ctx_field_decls << "#{result_var}: #{result_zig_type} = undefined,"
+        ctx_field_decls << ctx_field_decl(result_var, result_zig_type, MIR::Undef.new(nil))
         bind_stmts << MIR::Set.new(
           MIR::FieldGet.new(ctx_ident, result_var),
           finish_value_mir,
@@ -152,10 +152,10 @@ module FsmTransform
     # The dispatch arm already registered/yielded or observed count==0,
     # so finishFsmNext consumes the settled result and destroys Inner
     # without blocking the scheduler thread.
-    sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
+    sig { params(next_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: Integer).returns(MIR::SuspendDescriptor) }
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
-      id = ctx[:id]
+      id = ctx.id
       sp_field = "sp_#{susp_idx}"
       promise_expr_mir = lowering.lower(next_tail.promise_ast)
       ctx_ident = MIR::Ident.new("__ctx_#{id}")
@@ -164,7 +164,7 @@ module FsmTransform
         MIR::Set.new(MIR::FieldGet.new(ctx_ident, sp_field), promise_expr_mir, false),
       ]
       captured_promise_guard_name = T.let(nil, T.nilable(String))
-      captured_names = (ctx[:captured] || {}).keys.map(&:to_s)
+      captured_names = ctx.captured.keys.map(&:to_s)
       promise_root = AST.root_identifier(next_tail.promise_ast) rescue nil
       if promise_root && captured_names.include?(promise_root.name.to_s)
         captured_promise_guard_name = "#{promise_root.name}_moved"
@@ -177,9 +177,19 @@ module FsmTransform
 
       # `task` is a `*FsmTask` (slab-allocated by allocFsmTask; ctx
       # holds the pointer), so pass directly — no `&` wrapper.
-      register_zig =
-        "__ctx_#{id}.#{sp_field}.inner.wg.registerFsmWaiter(__ctx_#{id}.task)"
-      tail = MIR::FsmTailRegisterYield.new(nil, register_zig, "WaitForLock")
+      register_expr = MIR::MethodCall.new(
+        MIR::FieldGet.new(
+          MIR::FieldGet.new(
+            MIR::FieldGet.new(ctx_ident, sp_field),
+            "inner",
+          ),
+          "wg",
+        ),
+        "registerFsmWaiter",
+        [MIR::FieldGet.new(ctx_ident, "task")],
+        false,
+      )
+      tail = MIR::FsmTailRegisterYield.new(nil, register_expr, "WaitForLock")
 
       result_var = next_tail.result_var
       promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
@@ -227,10 +237,12 @@ module FsmTransform
           [MIR::ExprStmt.new(finish_expr, true)]
         end
 
-      ctx_field_decls = ["#{sp_field}: #{sp_zig} = undefined,"]
-      ctx_field_decls << "#{captured_promise_guard_name}: bool = false," if captured_promise_guard_name
+      ctx_field_decls = [ctx_field_decl(sp_field, sp_zig, MIR::Undef.new(nil))]
+      if captured_promise_guard_name
+        ctx_field_decls << ctx_field_decl(captured_promise_guard_name, "bool", MIR::Lit.new("false"))
+      end
       if result_var && inner_zig
-        ctx_field_decls << "#{result_var}: #{inner_zig} = undefined,"
+        ctx_field_decls << ctx_field_decl(result_var, inner_zig, MIR::Undef.new(nil))
         ctx_field_decls << fsm_owned_guard_decl(result_var) if result_needs_cleanup
       end
 
@@ -250,9 +262,23 @@ module FsmTransform
       "__owned_#{name}_init"
     end
 
-    sig { params(name: String).returns(String) }
+    sig { params(name: String).returns(MIR::ContextFieldDecl) }
     def fsm_owned_guard_decl(name)
-      "#{fsm_owned_guard_name(name)}: bool = false,"
+      ctx_field_decl(fsm_owned_guard_name(name), "bool", MIR::Lit.new("false"))
+    end
+
+    sig { params(name: String, type_zig: String, default_value: T.nilable(MIR::Emittable)).returns(MIR::ContextFieldDecl) }
+    def ctx_field_decl(name, type_zig, default_value)
+      MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
+    end
+
+    sig { params(decl: FsmOps::StateFieldDecl).returns(MIR::ContextFieldDecl) }
+    def state_field_decl(decl)
+      ctx_field_decl(
+        decl.name.to_s,
+        decl.zig_type.to_s,
+        decl.default_value,
+      )
     end
 
     sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }

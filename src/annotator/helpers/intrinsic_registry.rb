@@ -25,9 +25,8 @@ module IntrinsicRegistry
   # Passthrough (no coercion): borrows (:all|Array), fallible_clauses
   # (internal), fsm_* (FsmOps op-object arrays/expressions, not strings).
   EMIT_PASS   = %i[borrows fallible_clauses fsm_setup fsm_state_decls
-                   fsm_finish_block fsm_state_finalize fsm_finish_value].freeze
+                   fsm_finish_block fsm_state_finalize fsm_finish_value label].freeze
   EMIT_INTARR = %i[takes_args].freeze
-  EMIT_PROC   = %i[label].freeze
   EMIT_NESTED = %i[eql strcmp cleanup assert array list pool set get
                    string_raw string_symbol string_map numeric_map
                    set_collection].freeze
@@ -42,13 +41,11 @@ module IntrinsicRegistry
       next if v.nil?
       case k
       when *EMIT_BOOL   then e.public_send("#{k}=", !!v)
-      when *EMIT_STRSYM then e.public_send("#{k}=", v)
+      when *EMIT_STRSYM, *EMIT_PASS then e.public_send("#{k}=", v)
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
       when :lifetime    then e.lifetime = normalize_lifetime(v).map(&:to_s)
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
-      when *EMIT_PASS   then e.public_send("#{k}=", v)
       when *EMIT_INTARR then e.public_send("#{k}=", Array(v).map(&:to_i))
-      when *EMIT_PROC   then e.public_send("#{k}=", v)
       when *EMIT_NESTED
         e.public_send("#{k}=", nested_emit(v, registries))
       else
@@ -240,9 +237,8 @@ module IntrinsicRegistry
     method_name = name.to_s
     [STD_LIB, POOL_METHODS, SET_METHODS].any? do |registry|
       fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
-      emit = fs&.emit
-      !!(emit&.is_method &&
-        (emit.narrows_collection || emit.narrows_receiver_collection))
+      !!(fs&.intrinsic_contract&.behavior&.is_method &&
+        fs.intrinsic_collection_narrowing?)
     end
   end
 
@@ -251,9 +247,8 @@ module IntrinsicRegistry
     return false unless arity == 2
 
     fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(MAP_METHODS, name.to_s))
-    emit = fs&.emit
-    takes_args = emit&.takes_args
-    !!(emit&.is_method && emit.mutates_receiver && takes_args && !takes_args.empty?)
+    !!(fs&.intrinsic_contract&.behavior&.is_method &&
+      fs.mutates_receiver? && fs.takes_ownership?)
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
@@ -262,13 +257,9 @@ module IntrinsicRegistry
     [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
       fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
       next false unless fs
-      emit = fs&.emit
-      takes_args = emit&.takes_args
       method_arity = fs.arity || [fs.params.length - 1, 0].max
-      takes_value = (takes_args && !takes_args.empty?) ||
-        fs.params.drop(1).any?(&:takes)
-      !!(method_arity == arity && emit&.is_method && emit.mutates_receiver &&
-        takes_value)
+      !!(method_arity == arity && fs.intrinsic_contract.behavior.is_method &&
+        fs.mutates_receiver? && fs.takes_ownership?)
     end
   end
 

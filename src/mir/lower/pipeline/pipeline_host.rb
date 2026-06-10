@@ -269,8 +269,7 @@ class PipelineHost
       next_observable_id: -> {
         @lowering_bridge.next_pipeline_observable_id
       },
-      emit_observable_body: ->(body_mir, fiber_rt) { emit_observable_body_with_rt(body_mir, fiber_rt) },
-      task_config_zig: -> { @lowering_bridge.default_task_config_zig },
+      task_config_variant: -> { @lowering_bridge.task_config_variant(nil) },
     )
   end
 
@@ -337,9 +336,6 @@ class PipelineHost
       emit_builtin: ->(name, args) {
         @lowering_bridge.emit_builtin(name, args)
       },
-      emit_expr: ->(node) {
-        T.must(@lowering_bridge.emit_expr(node))
-      },
       lower_mir: ->(node) {
         @lowering_bridge.lower_node(node)
       },
@@ -384,21 +380,6 @@ class PipelineHost
         T.cast(with_optional_named_binding(clear_name, zig_var) { blk.call }, PipelineConcurrentResult)
       },
     )
-  end
-
-  sig { params(body_mir: T::Array[MIR::Emittable], fiber_rt: String).returns(String) }
-  def emit_observable_body_with_rt(body_mir, fiber_rt)
-    saved_emit_rt = @lowering_bridge.emitter_rt_name
-    @lowering_bridge.emitter_rt_name = fiber_rt
-    @lowering_bridge.with_runtime_binding_name(fiber_rt) do
-      body_mir.filter_map { |stmt|
-        code = @lowering_bridge.emit_expr(stmt)
-        next nil if code.nil? || code.empty?
-        code.strip.end_with?("}", ";") ? code : "#{code};"
-      }.join("\n            ")
-    end
-  ensure
-    @lowering_bridge.emitter_rt_name = T.must(saved_emit_rt)
   end
 
   sig { returns(PipelineMaterializer::RuntimeHost) }
@@ -669,7 +650,6 @@ class PipelineHost
 
   private
 
-  HEAP_ALLOC = "rt.heapAlloc()"
   ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)
 
   sig { params(list_node: AST::Node, blk: T.proc.params(items_ident: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr) }
@@ -1028,7 +1008,7 @@ class PipelineHost
   # accumulator is a float type. SUM/AVERAGE/MIN/MAX accumulators may
   # be f64 (always for AVERAGE); integer items in those folds need
   # `@floatFromInt`. Integer-into-integer and float-into-float folds
-  # pass through unchanged. Returns a proper MIR node -- no InlineZig
+  # pass through unchanged. Returns a proper MIR node -- no raw Zig
   # string embedding.
   sig { params(expr_ast: AST::Node, item_var: String, acc_zig: String).returns(MIR::Node) }
   def numeric_fold_expr_typed(expr_ast, item_var, acc_zig)
@@ -1085,7 +1065,7 @@ class PipelineHost
   # Per-terminal differences are isolated to TWO inputs:
   #
   #   - `acc_alloc_expr`: the MIR expression that constructs the wrapper
-  #     (typically `WrapperT.new(rt.heapAlloc()) catch unreachable`,
+  #     (typically `WrapperT.new(<allocator>) catch unreachable`,
   #     but seeded variants like REDUCE pass `WrapperT.newWith(...)`).
   #   - `publish_stmts`: the MIR statements that publish one item to
   #     the accumulator. Each terminal builds its own (e.g. SUM emits
@@ -1176,8 +1156,8 @@ class PipelineHost
     @range_lowerer.lower_range_reduce(range_lit, stages, reduce_op, smooth_node)
   end
 
-  # CONCURRENT pipeline: supported shapes lower through structural MIR or
-  # runtime-backed InlineZig calls. Falling through here is now a migration bug.
+  # CONCURRENT pipeline: supported shapes lower through structural MIR.
+  # Falling through here is now a migration bug.
   sig { params(site: PipelineHost::PipelineSite, conc_op: AST::ConcurrentOp).returns(PipelineConcurrentResult) }
   def lower_concurrent(site, conc_op)
     @concurrent_lowerer.lower(site.options, conc_op)
