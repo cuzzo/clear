@@ -1915,6 +1915,21 @@ module AST
     attr_accessor :universal_poly
   end
 
+  class FunctionDef
+    extend T::Sig
+
+    sig { returns(T::Array[AST::WithBlock]) }
+    def semantic_with_blocks
+      @semantic_with_blocks = T.let(@semantic_with_blocks, T.nilable(T::Array[AST::WithBlock]))
+      @semantic_with_blocks ||= []
+    end
+
+    sig { params(blocks: T::Array[AST::WithBlock]).void }
+    def semantic_with_blocks=(blocks)
+      @semantic_with_blocks = T.let(blocks, T.nilable(T::Array[AST::WithBlock]))
+    end
+  end
+
   # Top-level SYNC POLICY handlers use the same clause shape as
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }

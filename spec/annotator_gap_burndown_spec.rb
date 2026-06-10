@@ -144,7 +144,7 @@ RSpec.describe "annotator branch gap burndown" do
     fn = function_def("refresh_without_plan", params: [param])
     fn.body = [with_without_plan]
 
-    expect { CapabilityPlan.refresh_function_plans!(fn) }.not_to raise_error
+    expect { CapabilityPlan.refresh_function_plans!(fn, []) }.not_to raise_error
   end
 
   it "annotates default fixed-array literals with their target type" do
@@ -3190,7 +3190,7 @@ RSpec.describe "annotator branch gap burndown" do
     fn = function_def("needs_requires", params: [param])
     fn.body = [with_node]
 
-    WithMatchCheck.check_function!(fn, ->(_node, message) { errors << message })
+    WithMatchCheck.check_function!(fn, [with_node], ->(_node, message) { errors << message })
 
     expect(errors.join).to include("not constrained by REQUIRES")
 
@@ -3202,9 +3202,26 @@ RSpec.describe "annotator branch gap burndown" do
     caller.body = [call]
     call_errors = []
 
-    WithMatchCheck.check_call_sites!(caller, ->(_name) { sig }, ->(_node, message) { call_errors << message })
+    WithMatchCheck.check_call_sites!([call], ->(_name) { sig }, ->(_node, message) { call_errors << message })
 
     expect(call_errors.join).to include("belongs to no family")
+
+    no_requires = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+    plain_sym = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
+    plain_arg = AST::Identifier.new(token(:IDENTIFIER, "plain_mut"), "plain_mut")
+    plain_arg.symbol = plain_sym
+    universal_sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+    universal_sig.requires = { "c" => Set.new }
+    WithMatchCheck.check_call_sites!(
+      [
+        AST::FuncCall.new(token(:VAR_ID, "none"), "none", [plain_arg]),
+        AST::FuncCall.new(token(:VAR_ID, "poly"), "poly", [plain_arg])
+      ],
+      ->(name) { name == "poly" ? universal_sig : no_requires },
+      ->(_node, message) { call_errors << message }
+    )
+
+    expect(plain_sym.poly_borrow_target).to be(true)
 
     warnings = []
     poly_node = AST::WithBlock.new(token(:WITH, "WITH"), [cap], [])
@@ -3422,6 +3439,18 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:function_body_summaries)).to include("body_fn" => summary)
     expect(ann.send(:function_body_summary_for, "body_fn")).to eq(summary)
     expect(ann.send(:function_body_summary_for, "missing")).to be_nil
+  end
+
+  it "keeps lambda-contained calls out of function call-site facts" do
+    ann = SemanticAnnotator.new(source_code: "")
+    outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
+
+    called_names, _has_fnptr, _unabsorbed_calls, call_sites = ann.send(:scan_for_calls, [outer_call, lambda_node])
+
+    expect(called_names).to include("outer", "lambda_inner")
+    expect(call_sites).to eq([outer_call])
   end
 
   it "covers deferred WITH validation replay diagnostics directly" do

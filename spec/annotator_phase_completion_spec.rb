@@ -46,6 +46,23 @@ RSpec.describe "annotator completion phases" do
     expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
   end
 
+  it "publishes a frozen semantic index after annotation completes" do
+    annotator = SemanticAnnotator.new
+    program = parse(<<~CLEAR)
+      FN main() RETURNS Int64 ->
+        RETURN 1;
+      END
+    CLEAR
+
+    annotator.annotate!(program)
+    index = T.must(annotator.semantic_index)
+
+    expect(index.program).to eq(program)
+    expect(index.root_scope).to eq(annotator.semantic_root_scope)
+    expect(index.function_node("main")).to eq(annotator.function_node_for("main"))
+    expect(index.function_nodes.keys).to include("main")
+  end
+
   it "appends synthesized functions during body analysis" do
     annotator = SemanticAnnotator.new
     program = AST::Program.new(tok, [])

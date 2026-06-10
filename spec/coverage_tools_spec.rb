@@ -6,6 +6,7 @@ require_relative "../tools/loom_atomic_coverage"
 require_relative "../tools/vopr_coverage"
 require_relative "../tools/wait_loop_coverage"
 require_relative "../tools/diff_bucket_summary"
+require_relative "../tools/src_ast_walk_guardrail"
 require_relative "../tools/zig_coverage_support"
 require_relative "../tools/zig_coverage_sanitize"
 require_relative "../tools/zig_coverage_visibility"
@@ -371,6 +372,45 @@ RSpec.describe "coverage gap tools" do
 
     expect(findings.map(&:kind)).to eq(["rubocop_guardrail_unavailable"])
     expect(findings.first.detail).to include("could not parse RuboCop JSON")
+  end
+
+  it "classifies late source AST walkers by architectural phase" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/semantic"))
+    FileUtils.mkdir_p(File.join(@tmp, "src/annotator/helpers"))
+    FileUtils.mkdir_p(File.join(@tmp, "src/mir"))
+    semantic = File.join(@tmp, "src/semantic/escape_analysis.rb")
+    annotator = File.join(@tmp, "src/annotator/helpers/with_match_check.rb")
+    mir = File.join(@tmp, "src/mir/mir_pass.rb")
+    File.write(semantic, "AST.each_locatable(body) { |node| node }\n")
+    File.write(annotator, "AST.walk_body(fn.body) { |node| node }\n")
+    File.write(mir, "walk_body(fn.body) { |node| node }\n")
+
+    findings = SrcAstWalkGuardrail.scan(root: @tmp, paths: [semantic, annotator, mir])
+
+    expect(findings.map { |finding| [finding.path, finding.classification, finding.allowed] }).to eq([
+      ["src/semantic/escape_analysis.rb", :forbidden_semantic_rediscovery, false],
+      ["src/annotator/helpers/with_match_check.rb", :body_typing_or_diagnostic, true],
+      ["src/mir/mir_pass.rb", :forbidden_post_hoist_rediscovery, false],
+    ])
+    expect(findings.map(&:reason)).to include(a_string_matching(/SemanticIndex/))
+  end
+
+  it "reports added forbidden source AST walkers in src type guardrails" do
+    FileUtils.mkdir_p(File.join(@tmp, "src/semantic"))
+    File.write(File.join(@tmp, "src/semantic/facts.rb"), <<~RUBY)
+      def scan(body)
+        AST.each_locatable(body) { |node| node }
+      end
+    RUBY
+
+    findings = src_ast_walk_guardrail_findings(
+      { "src/semantic/facts.rb" => Set[2] },
+      root: @tmp,
+    )
+
+    expect(findings.map(&:kind)).to eq(["late_ast_walk"])
+    expect(findings.first.message).to include("forbidden source AST walk")
+    expect(findings.first.detail).to include("SemanticIndex")
   end
 
   it "sanitizes Zig coverage suite and run names for kcov directories" do

@@ -306,13 +306,12 @@ module CapabilityPlan
     )
   end
 
-  sig { params(fn: AST::FunctionDef).void }
-  def self.refresh_function_plans!(fn)
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock]).void }
+  def self.refresh_function_plans!(fn, with_blocks)
     live_symbols = Scope.live_param_syms(fn)
     return if live_symbols.empty?
 
-    AST.walk_body(fn.body) do |node|
-      next unless node.is_a?(AST::WithBlock)
+    with_blocks.each do |node|
       plan = node.capability_plan
       next unless plan
 

@@ -9,6 +9,7 @@ require "set"
 ROOT = File.expand_path("..", __dir__)
 require_relative "../gems/nil-kill/lib/nil_kill"
 require_relative "loom_atomic_coverage"
+require_relative "src_ast_walk_guardrail"
 require_relative "vopr_coverage"
 require_relative "wait_loop_coverage"
 
@@ -468,7 +469,8 @@ end
 
 def type_guardrail_findings(adds_by_path)
   NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
-    rubocop_guardrail_findings(adds_by_path)
+    rubocop_guardrail_findings(adds_by_path) +
+    src_ast_walk_guardrail_findings(adds_by_path)
 end
 
 RUBOCOP_GUARDRAIL_COPS = [
@@ -558,6 +560,26 @@ def rubocop_guardrail_unavailable_finding(message)
     detail: message.to_s,
     code: "",
   )
+end
+
+def src_ast_walk_guardrail_findings(adds_by_path, root: ROOT)
+  paths = src_ruby_added_paths(adds_by_path, root: root)
+  return [] if paths.empty?
+
+  absolute_paths = paths.map { |path| File.join(root, path) }
+  SrcAstWalkGuardrail.scan(root: root, paths: absolute_paths).filter_map do |finding|
+    next if finding.allowed
+    next unless adds_by_path.fetch(finding.path, Set.new).include?(finding.line)
+
+    NilKill::StaticDiffAudit::Finding.new(
+      kind: "late_ast_walk",
+      path: finding.path,
+      line: finding.line,
+      message: "added src line introduces forbidden source AST walk",
+      detail: "#{finding.reason}; call=#{finding.call}",
+      code: finding.source,
+    )
+  end.sort_by { |finding| [finding.path, finding.line, finding.kind] }
 end
 
 def print_type_guardrails_text(findings)

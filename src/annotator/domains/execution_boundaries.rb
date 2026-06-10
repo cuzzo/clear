@@ -12,6 +12,11 @@ module Annotator
       def visit_WithBlock(node)
         T.bind(self, SemanticAnnotator)
 
+        fn_ctx = current_fn_ctx
+        if fn_ctx
+          fn_node = function_node_for(fn_ctx.name)
+          fn_node.semantic_with_blocks << node if fn_node
+        end
         @with_block_depth = (@with_block_depth || 0) + 1
         capability_expansion = CapabilityHelper::WithCapabilityExpansion.new
         node.capabilities.each do |cap|

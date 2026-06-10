@@ -527,10 +527,10 @@ module CapabilityHelper
   def visit_pre_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    pre_clauses = fn_node.respond_to?(:pre_clauses) ? (fn_node.pre_clauses || []) : []
+    pre_clauses = fn_node.pre_clauses || []
     return if pre_clauses.empty?
 
-    unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
+    unless fn_node.explicit_return_type
       message = "Function '#{fn_node.name}' has PRE clauses but no explicit return type. " \
                 "PRE clauses can fail at runtime, so the function must declare an error-union " \
                 "return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) " \
@@ -602,8 +602,8 @@ module CapabilityHelper
     # POST + CATCH on the same function is not yet supported. Reject at
     # annotation time with a clean CLEAR diagnostic rather than letting
     # MIR lowering hit an internal raise.
-    has_catch = fn_node.respond_to?(:catch_clauses) && fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
-    has_default_catch = fn_node.respond_to?(:default_catch) && fn_node.default_catch.is_a?(Array) && fn_node.default_catch.any?
+    has_catch = function_has_catch_clauses?(fn_node)
+    has_default_catch = function_has_default_catch?(fn_node)
     if has_catch || has_default_catch
       error!(fn_node, :DEBUG_POST_NOT_WITH_CATCH)
     end

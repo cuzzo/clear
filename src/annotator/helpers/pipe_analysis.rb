@@ -181,13 +181,13 @@ module PipeAnalysis
     :Any
   end
 
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
     fn_name = current_fn_ctx&.name
     fn_nodes = function_node_map
     fn = fn_name ? fn_nodes[fn_name] : nil
-    fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+    fn ? function_has_catch_clauses?(fn) : false
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

@@ -417,7 +417,7 @@ module EffectTracker
         is_pure_copy = ti.primitive? || ti.id_handle?
         !is_pure_copy
       }
-      has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
+      has_catch = function_has_catch_clauses?(fn_node)
       has_raise = function_raises_directly?(name)
       # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
       # recognized get a synthesized trampoline that allocates child
@@ -661,15 +661,13 @@ module EffectTracker
       # The codegen will reject any propagation that escapes an
       # incomplete CATCH, so an over-permissive skip here only loses
       # the early diagnostic, not a safety guarantee.
-      has_catch = fn_node.respond_to?(:catch_clauses) &&
-                  fn_node.catch_clauses.is_a?(Array) &&
-                  fn_node.catch_clauses.any?
-      has_default = fn_node.respond_to?(:default_catch) && fn_node.default_catch
+      has_catch = function_has_catch_clauses?(fn_node)
+      has_default = function_has_default_catch?(fn_node)
       next if has_catch || has_default
 
       # Only explicit RETURNS clauses are enforced; omitted RETURNS did not
       # author a non-error surface type.
-      next unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
+      next unless fn_node.explicit_return_type
 
       ret = fn_node.return_type
       next unless ret
@@ -1218,6 +1216,7 @@ module EffectTracker
                            # `calls` keeps every callee (shared function_call_graph
                            # users need that); `unabsorbed` is the authority
                            # for can_fail propagation.
+    call_sites = T.let([], T::Array[AST::FuncCall])
     has_fnptr  = T.let([false], T::Array[T::Boolean])
 
     # `expr OR <rhs>` terminates the error channel UNLESS rhs itself
@@ -1228,16 +1227,18 @@ module EffectTracker
     propagating_or_rhs = [AST::OrRaise, AST::OrExit, AST::ThrowNode, AST::ReturnNode]
 
     traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n, absorbed|
+    traverse = lambda do |n, absorbed, record_site|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
         # terminals
       when Array
-        n.each { |item| traverse.call(item, absorbed) }
+        n.each { |item| traverse.call(item, absorbed, record_site) }
       when Hash
-        n.each_value { |v| traverse.call(v, absorbed) }
+        n.each_value { |v| traverse.call(v, absorbed, record_site) }
       when AST::FunctionDef
         # Don't descend into nested function definitions (own scope).
+      when AST::LambdaLit
+        n.each_pair { |_, v| traverse.call(v, absorbed, false) }
       when AST::BinaryOp
         if n.op == :OR_RESCUE
           rhs_propagates = propagating_or_rhs.any? { |k| n.right.is_a?(k) }
@@ -1245,29 +1246,30 @@ module EffectTracker
           # it. Right side (the fallback expr) keeps the ambient context
           # -- if the fallback itself calls something fallible, that DOES
           # propagate.
-          traverse.call(n.left, absorbed || !rhs_propagates)
-          traverse.call(n.right, absorbed)
+          traverse.call(n.left, absorbed || !rhs_propagates, record_site)
+          traverse.call(n.right, absorbed, record_site)
         else
-          traverse.call(n.left, absorbed)
-          traverse.call(n.right, absorbed)
+          traverse.call(n.left, absorbed, record_site)
+          traverse.call(n.right, absorbed, record_site)
         end
       when AST::FuncCall
+        call_sites << n if record_site
         if n.fn_var_call
           has_fnptr[0] = true
         else
           calls.add(n.name)
           unabsorbed.add(n.name) unless absorbed
         end
-        traverse.call(n.args, absorbed)
+        traverse.call(n.args, absorbed, record_site)
       else
         if n.respond_to?(:each_pair)
-          n.each_pair { |_, v| traverse.call(v, absorbed) }
+          n.each_pair { |_, v| traverse.call(v, absorbed, record_site) }
         end
       end
     end
 
-    traverse.call(node, false)
-    [calls, has_fnptr[0], unabsorbed]
+    traverse.call(node, false, true)
+    [calls, has_fnptr[0], unabsorbed, call_sites]
   end
 
   # Post-pass: detect indirect mutual recursion in the call graph.

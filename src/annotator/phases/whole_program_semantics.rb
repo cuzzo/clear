@@ -24,9 +24,12 @@ module Annotator
         # the body walk and before replaying deferred WITH validations.
         fn_nodes = whole_program_fn_nodes
         root_scope = whole_program_root_scope
+        body_summaries = function_body_summaries
 
         EscapeAnalysis.propagate_caller_sync!(fn_nodes)
-        fn_nodes.each_value { |fn| CapabilityPlan.refresh_function_plans!(fn) }
+        fn_nodes.each_value do |fn|
+          CapabilityPlan.refresh_function_plans!(fn, body_summaries.fetch(fn.name).with_blocks)
+        end
 
         # Single authority for BG capture-strategy facts. This runs after caller
         # sync propagation so SymbolEntry stamps are final, and before downstream
@@ -51,6 +54,7 @@ module Annotator
         fn_nodes.each_value do |fn|
           WithMatchCheck.check_function!(
             fn,
+            body_summaries.fetch(fn.name).with_blocks,
             error_handler,
             warn_handler: warning_handler,
             policy_handlers: policy_handlers
@@ -58,7 +62,13 @@ module Annotator
         end
 
         restamp_requires_on_signatures!
-        fn_nodes.each_value { |fn| WithMatchCheck.check_call_sites!(fn, signature_lookup, error_handler) }
+        fn_nodes.each_value do |fn|
+          WithMatchCheck.check_call_sites!(
+            body_summaries.fetch(fn.name).func_calls,
+            signature_lookup,
+            error_handler
+          )
+        end
 
         # Rank-annotated locks are checked by the rank-DAG analysis, not the
         # pattern-based naked-nested-WITH check.
@@ -66,6 +76,7 @@ module Annotator
           fn_nodes,
           signature_lookup,
           error_handler,
+          body_summaries: body_summaries,
           lock_ranks: whole_program_lock_type_ranks
         )
       end

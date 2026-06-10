@@ -12,6 +12,8 @@ module Annotator
       const :propagating_callees, T::Set[String]
       const :has_fnptr_call, T::Boolean
       const :raises_directly, T::Boolean
+      const :func_calls, T::Array[AST::FuncCall], factory: -> { [] }
+      const :with_blocks, T::Array[AST::WithBlock], factory: -> { [] }
     end
 
     module BodyAnalysis

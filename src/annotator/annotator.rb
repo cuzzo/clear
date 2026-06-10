@@ -33,6 +33,7 @@ require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
 require_relative "helpers/pipe_analysis"
 require_relative "../semantic/escape_analysis"
+require_relative "../semantic/semantic_index"
 require_relative "../semantic/pass_state"
 require_relative "../semantic/bg_capture_classifier"
 require_relative "../semantic/effect_inference"
@@ -132,6 +133,9 @@ class SemanticAnnotator
   def semantic_program
     @program
   end
+
+  sig { returns(T.nilable(SemanticIndex)) }
+  attr_reader :semantic_index
 
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
@@ -336,6 +340,7 @@ class SemanticAnnotator
     @held_locks = T.let({}, T.nilable(HeldLockMap))
     @held_lock_types = T.let([], T.nilable(T::Array[HeldLockTypeEntry]))
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
+    @semantic_index = T.let(nil, T.nilable(SemanticIndex))
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
@@ -378,6 +383,11 @@ class SemanticAnnotator
     finalize_auto_types!(node)
     run_whole_program_semantics!
     run_deferred_validations!
+    @semantic_index = T.let(SemanticIndex.new(
+      program: node,
+      root_scope: semantic_root_scope,
+      function_registry: semantic_function_registry,
+    ), T.nilable(SemanticIndex))
     mark_annotation_complete!(node)
     nil
   end
@@ -385,10 +395,25 @@ class SemanticAnnotator
 private
 
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_pre_clauses?(node)
+    node.pre_clauses.is_a?(Array) && node.pre_clauses.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_catch_clauses?(node)
+    node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_default_catch?(node)
+    node.default_catch.is_a?(Array) && node.default_catch.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
   def runtime_error_clause?(node)
-    (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
-      (node.catch_clauses.is_a?(Array) && node.catch_clauses.any?) ||
-      (node.default_catch.is_a?(Array) && node.default_catch.any?)
+    function_has_pre_clauses?(node) ||
+      function_has_catch_clauses?(node) ||
+      function_has_default_catch?(node)
   end
 
   # Auto inference runs after the body walk has populated type_info on
@@ -711,12 +736,13 @@ private
 
     # Register function node before body analysis so recursive references can resolve it.
     register_function_node!(node)
+    node.semantic_with_blocks = []
 
     # 4. Routine Analysis
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
 
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
-    called_names, has_fnptr, unabsorbed_calls = scan_for_calls(node.body)
+    called_names, has_fnptr, unabsorbed_calls, func_calls = scan_for_calls(node.body)
     directly_recursive = called_names.include?(node.name)
     fn_ctx.mark_runtime_used! if has_fnptr
 
@@ -807,19 +833,21 @@ private
     raises_directly =
       has_fnptr ||
       (node.reentrant == :non_reentrant) ||
-      (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
+      function_has_pre_clauses?(node) ||
       scan_for_raises(node.body) == true
     record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
       name: node.name,
       callees: called_names - [node.name],
       propagating_callees: (unabsorbed_calls || called_names) - [node.name],
       has_fnptr_call: has_fnptr,
-      raises_directly: raises_directly
+      raises_directly: raises_directly,
+      func_calls: func_calls,
+      with_blocks: node.semantic_with_blocks
     ))
     fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
-    if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+    if function_has_catch_clauses?(node)
       # Resolve each parsed clause to a { kind, error_names } pair the
       # lowering can emit directly. Validates every type against the
       # registry and rejects kind mismatches.
@@ -827,7 +855,7 @@ private
 
       snap_types = Set.new
       all_catch_bodies = node.catch_clauses.map { |c| c.body }
-      all_catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
+      all_catch_bodies << node.default_catch if function_has_default_catch?(node)
       # Snapshot capture is only meaningful when a CATCH body reads
       # `snapshot`. Otherwise every successful pipeline call in a catchable
       # function allocates dead snapshot state that no handler can observe.
