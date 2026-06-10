@@ -153,6 +153,9 @@ class MIREmitter
     when MIR::UnaryOp          then emit_unary_op(node)
     when MIR::Lit              then node.value
     when MIR::VoidLiteral      then "{}"
+    when MIR::DefaultValue     then emit_default_value(node)
+    when MIR::EnumTag          then ".#{node.variant}"
+    when MIR::EnumOrdinal      then "@intFromEnum(#{emit(node.value)})"
     when MIR::Ident            then node.name
     when MIR::TupleLiteral     then emit_tuple_literal(node)
     when MIR::CapabilityUnwrap then emit_capability_unwrap(node)
@@ -2553,6 +2556,22 @@ class MIREmitter
       elsif ZigType.integer_identifier?(t) then "std.math.minInt(#{t})"
       else "-std.math.floatMax(f64)"
       end
+    end
+  end
+
+  sig { params(node: MIR::DefaultValue).returns(String) }
+  def emit_default_value(node)
+    case node.kind
+    when :aggregate_empty
+      ".{}"
+    when :string_empty
+      '@as([]const u8, "")'
+    when :collection_empty
+      "@as(#{T.must(node.zig_type)}, .empty)"
+    when :undefined
+      node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
+    else
+      raise "unknown MIR::DefaultValue kind #{node.kind.inspect}"
     end
   end
 

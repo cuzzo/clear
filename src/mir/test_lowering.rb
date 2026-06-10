@@ -117,7 +117,7 @@ module TestLowering
     if test_that.pending
       return MIR::TestDef.new(full_name, [
         env.ctx.fresh_preamble,
-        MIR::ReturnStmt.new(MIR::Ident.new("error.SkipZigTest")),
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "SkipZigTest")),
       ])
     end
 

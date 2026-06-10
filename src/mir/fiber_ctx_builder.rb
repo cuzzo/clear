@@ -179,7 +179,7 @@ module FiberCtxBuilder
         captured_field,
         payload_type_zig,
         rc_kind.release_func,
-        MIR::Ident.new("std.heap.page_allocator"),
+        MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("std"), "heap"), "page_allocator"),
       ))
     end
 
@@ -196,7 +196,7 @@ module FiberCtxBuilder
         captured_field,
         payload_type_zig,
         rc_kind.release_func,
-        MIR::Ident.new("std.heap.page_allocator"),
+        MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("std"), "heap"), "page_allocator"),
       )
     end
 
@@ -251,7 +251,7 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: CapabilityHelper::CaptureAnalysis, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: T.nilable(CapabilityHelper::CaptureAnalysis), body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
                  fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {}, schema_lookup: nil)
     captured = analysis&.captures || {}

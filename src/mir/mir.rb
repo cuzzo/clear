@@ -2013,12 +2013,8 @@ module MIR
   # the rendered string.
   #
   # Body content that comes from the surrounding fiber-body lowering
-  # (pre_stmts, post_stmts, post_result_line, etc.) is still Zig
-  # text at this layer — that's a Phase 4 transpiler concern. The
-  # wrapper structure is fully MIR; the per-step body fragments are
-  # an array of pre-rendered lines the renderer joins with
-  # newlines + indentation. Once the fiber-body lowering itself
-  # emits MIR, those fragments become MIR nodes too.
+  # is now structural MIR. The wrapper structure is fully MIR; the
+  # per-step body nodes are rendered only by the final emitter.
 
   # Top-level FSM-IO body. Renders to:
   #   <blk_label>: {
@@ -3620,6 +3616,26 @@ module MIR
   # Zig: {}
   VoidLiteral = Struct.new(nil) do
     include Expr
+  end
+
+  class DefaultValue < T::Struct
+    include Expr
+
+    const :kind, Symbol
+    const :zig_type, T.nilable(String), default: nil
+  end
+
+  class EnumTag < T::Struct
+    include Expr
+
+    const :variant, String
+  end
+
+  EnumOrdinal = Struct.new(:value) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
   end
 
   # Variable / name reference.

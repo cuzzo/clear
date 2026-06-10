@@ -792,21 +792,21 @@ module MIRLoweringCapabilities
     when :return
       result << MIR::ReturnStmt.new(lower(T.must(clause.value)))
     when :raise
-      result << MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
-        MIR::Ident.new(".Transient"),
-        no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.GuardFail")]),
+      result << MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
+        MIR::EnumTag.new(variant: "Transient"),
+        MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "GuardFail")),
         MIR::Lit.new(zig_string_lit("WITH GUARD predicate failed")),
         MIR::Lit.new(line),
-      ]), false)
+      ], false, MIR::CallableContract.no_ownership(4)), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :exit
       msg_mir = lower(T.must(clause.message))
-      result << MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
-        MIR::Ident.new(".Transient"),
-        no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.GuardFail")]),
+      result << MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
+        MIR::EnumTag.new(variant: "Transient"),
+        MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "GuardFail")),
         msg_mir,
         MIR::Lit.new(line),
-      ]), false)
+      ], false, MIR::CallableContract.no_ownership(4)), false)
       result << MIR::PolymorphicFlowSignal.new(:raise_no_commit, nil)
     when :block
       result.concat(lower_body(T.must(clause.body)))
@@ -846,13 +846,13 @@ module MIRLoweringCapabilities
       msg_zig = zig_string_lit(msg_text)
 
       MIR::IfStmt.new(MIR::UnaryOp.new("!", cond), [
-        MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
-          MIR::Ident.new(".Input"),
-          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.PreconditionFail")]),
+        MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
+          MIR::EnumTag.new(variant: "Input"),
+          MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "PreconditionFail")),
           MIR::Lit.new(msg_zig),
           MIR::Lit.new(line),
-        ]), false),
-        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+        ], false, MIR::CallableContract.no_ownership(4)), false),
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError")),
       ], nil)
     end
   end
@@ -923,24 +923,24 @@ module MIRLoweringCapabilities
     case clause.action
     when :raise
       [
-        MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
-          MIR::Ident.new(".#{kind}"),
-          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.#{err_name}")]),
+        MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
+          MIR::EnumTag.new(variant: kind.to_s),
+          MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), err_name)),
           MIR::Lit.new(zig_string_lit(default_msg)),
           MIR::Lit.new(line),
-        ]), false),
-        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+        ], false, MIR::CallableContract.no_ownership(4)), false),
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError")),
       ]
     when :exit
       msg_mir = lower(T.must(clause.message))
       [
-        MIR::ExprStmt.new(no_ownership_call("#{runtime_binding_name}.setError", [
-          MIR::Ident.new(".#{kind}"),
-          no_ownership_call("@intFromEnum", [MIR::Ident.new("ErrorName.#{err_name}")]),
+        MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(runtime_binding_name), "setError", [
+          MIR::EnumTag.new(variant: kind.to_s),
+          MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), err_name)),
           msg_mir,
           MIR::Lit.new(line),
-        ]), false),
-        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError")),
+        ], false, MIR::CallableContract.no_ownership(4)), false),
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError")),
       ]
     when :pass
       [MIR::BreakStmt.new(T.must(with_label), nil)]

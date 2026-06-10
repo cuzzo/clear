@@ -551,7 +551,7 @@ module MIRLoweringExpressions
     MIR::BinOp.new(
       T.must(plan.op_str),
       active_tag_call(tag_target),
-      MIR::Lit.new(".#{T.must(plan.variant).variant_name}"),
+      MIR::EnumTag.new(variant: T.must(plan.variant).variant_name),
     )
   end
 
@@ -835,7 +835,7 @@ module MIRLoweringExpressions
         msg_mir = ex.message ? lower(ex.message) : nil
         catch_block = MIR::ScopeBlock.new([
           MIR::ExprStmt.new(or_exit_bc_reassign(exit_facts, msg_mir), false),
-          MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+          MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
         ])
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
@@ -858,7 +858,7 @@ module MIRLoweringExpressions
 
     # OR BREAK: error-to-break (Zig's catch break)
     if node.right.is_a?(AST::OrBreak)
-      return try_catch_with_provenance(left, MIR::Ident.new("break"), nil) if facts.left_is_error
+      return try_catch_with_provenance(left, MIR::BreakExpr.new(nil, nil), nil) if facts.left_is_error
       return left
     end
 
@@ -954,9 +954,9 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")
     ti = ti.success_type || ti
-    return MIR::Lit.new('@as([]const u8, "")') if ti.string?
-    return MIR::Lit.new("@as(#{ti.zig_type}, .empty)") if ti.list_collection?
-    MIR::Ident.new("undefined")
+    return MIR::DefaultValue.new(kind: :string_empty) if ti.string?
+    return MIR::DefaultValue.new(kind: :collection_empty, zig_type: ti.zig_type) if ti.list_collection?
+    MIR::DefaultValue.new(kind: :undefined)
   end
 
   sig { params(node: AST::GetField).returns(T.untyped) }
@@ -997,7 +997,7 @@ module MIRLoweringExpressions
     var_data = schema.variants[field_key]
     return nil if Schemas.inline_struct?(var_data)
 
-    MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
+    MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::VoidLiteral.new }])
   end
 
   sig { params(node: AST::GetField, target: MIR::Node).returns(FieldAccessPlan) }
@@ -1093,11 +1093,11 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     stmts = T.let([], T::Array[T.untyped])
     if facts.kind
-      stmts << MIR::Set.new(runtime_error_field("kind"), MIR::Ident.new(".#{facts.kind}"))
+      stmts << MIR::Set.new(runtime_error_field("kind"), MIR::EnumTag.new(variant: T.must(facts.kind)))
       if facts.error_name
-        name_id = MIR::Call.new("@intFromEnum", [
+        name_id = MIR::EnumOrdinal.new(
           MIR::FieldGet.new(MIR::Ident.new("ErrorName"), facts.error_name),
-        ], false, false, MIR::CallableContract.no_ownership(1))
+        )
         stmts << MIR::Set.new(runtime_error_field("error_name"), name_id)
       elsif facts.clear_type
         stmts << MIR::Set.new(runtime_error_field("error_name"), MIR::Lit.new("0"))
@@ -1892,26 +1892,24 @@ module MIRLoweringExpressions
   def lower_raise(node)
     T.bind(self, MIRLowering) rescue nil
     rt = MIR::Ident.new(runtime_binding_name)
-    kind = ".#{node.kind || :Unknown}"
-    # error_name is a u32 id into the per-program ErrorName enum. Emit
-    # `@intFromEnum(ErrorName.Foo)` when a specific type is named; use
-    # `0` (the None sentinel) when it's a kind-only RAISE.
+    kind = (node.kind || :Unknown).to_s
+    # error_name is a u32 id into the per-program ErrorName enum.
     name_expr = if node.error_name && !node.error_name.empty?
-      "@intFromEnum(ErrorName.#{node.error_name})"
+      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), node.error_name))
     else
-      "0"
+      MIR::Lit.new("0")
     end
     msg_expr = node.message_expr ? lower(node.message_expr) : MIR::Lit.new('""')
     line = node.token.line.to_s
 
     set_error = MIR::MethodCall.new(rt, "setError", [
-      MIR::Ident.new(kind),
-      MIR::Ident.new(name_expr),
+      MIR::EnumTag.new(variant: kind),
+      name_expr,
       msg_expr,
       MIR::Lit.new(line)
     ], false, MIR::CallableContract.no_ownership(4))
 
-    ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    ret = MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
     MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
   end
 

@@ -72,6 +72,8 @@ RSpec.describe "MIR gap-burn characterization" do
         ["raw BgBlock code", text.match?(/MIR::BgBlock\.new\(\s*["']/)],
         ["raw DoBlock code", text.match?(/MIR::DoBlock\.new\(\s*["']/)],
         ["rendered FsmLoweringResult code", text.include?("FsmLoweringResult.new(code:")],
+        ["compound Zig MIR literal", text.match?(/MIR::Lit\.new\(\s*["'](?:@|\.?\{|\.empty|undefined|error\.|std\.|CheatLib\.|CheatHeader\.|Runtime\.)/)],
+        ["compound Zig MIR identifier", text.match?(/MIR::Ident\.new\(\s*["'](?:@|\.|error\.|std\.|CheatLib\.|CheatHeader\.|Runtime\.)/)],
       ].filter_map { |label, present| "#{path}: #{label}" if present }
     end
 
@@ -233,7 +235,7 @@ RSpec.describe "MIR gap-burn characterization" do
       capture_frees: [],
       promoted_decls: [],
     )
-    body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+    body = MIRLoweringConcurrency::BgBodyMaterialization.new(run_body: [])
     task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
     scheduler = MIRLoweringConcurrency::BgSchedulerPlan.new(
       pin_mode: false,
@@ -268,7 +270,7 @@ RSpec.describe "MIR gap-burn characterization" do
   it "captures pointer parameters by value in fiber contexts" do
     sym = SymbolEntry.new(reg: "pool", type: Type.new(:Pool), mutable: false, storage: :heap)
     sym.is_param = true
-    analysis = double(
+    analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "pool" => Type.new(:Pool) },
       strategies: {},
       pointer_captures: Set["pool"],
@@ -1551,7 +1553,7 @@ RSpec.describe "MIR gap-burn characterization" do
   it "covers simple MIR lowering dispatch arms and formatting facts" do
     low = lowering
 
-    expect(low.lower(AST::DefaultLit.new(tok))).to be_a(MIR::Lit)
+    expect(low.lower(AST::DefaultLit.new(tok))).to be_a(MIR::DefaultValue)
     expect(low.lower(AST::Copy.new(tok, lit(7, type: :Int64)))).to be_a(MIR::Lit)
     expect(low.lower(MIR::Return.new(tok, ["escaped"]))).to be_a(MIR::ReturnMark)
     expect(low.lower(AST::ThrowNode.new(tok, nil))).to be_a(MIR::ReturnStmt)
@@ -1559,10 +1561,10 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.lower(AST::ShareNode.new(tok, id("shared", storage: :heap)))).to be_a(MIR::CapWrap)
     expect(low.lower(AST::FreezeNode.new(tok, id("frozen", type: :String, storage: :heap)))).to be_a(MIR::FreezeExpr)
     expect(low.lower(AST::Slice.new(tok, id("items", type: :"Int64[]"), lit(0, type: :Int64), lit(1, type: :Int64)))).to be_a(MIR::SliceExpr)
-    expect(low.lower(AST::OrRaise.new(tok))).to be_a(MIR::Ident)
+    expect(low.lower(AST::OrRaise.new(tok))).to be_a(MIR::FieldGet)
     expect(low.lower(AST::OrBreak.new(tok))).to be_a(MIR::BreakStmt)
-    expect(low.lower(AST::OrPass.new(tok))).to be_a(MIR::Ident)
-    expect(low.lower(AST::OrPrune.new(tok))).to be_a(MIR::Ident)
+    expect(low.lower(AST::OrPass.new(tok))).to be_a(MIR::DefaultValue)
+    expect(low.lower(AST::OrPrune.new(tok))).to be_a(MIR::DefaultValue)
     expect(low.lower(AST::OrExit.new(tok, :Runtime, nil, nil))).to be_a(MIR::ScopeBlock)
     expect(low.lower(AST::AssertRaises.new(tok, :Runtime, nil, lit(1, type: :Int64)))).to be_a(MIR::AssertRaisesCheck)
     expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
@@ -1879,7 +1881,9 @@ RSpec.describe "MIR gap-burn characterization" do
     generic_union = AST::UnionDef.new(tok, "Choice", { Item: inline_variant }, :pub)
     generic_union.type_params = ["T"]
     expect(low.lower(generic_union)).to all(satisfy { |node| node.is_a?(MIR::StructDef) || node.is_a?(MIR::FnDef) })
-    expect(low.send(:lower_field_default, AST::DefaultLit.new(tok)).value).to eq(".{}")
+    default = low.send(:lower_field_default, AST::DefaultLit.new(tok))
+    expect(default).to be_a(MIR::DefaultValue)
+    expect(T.cast(default, MIR::DefaultValue).kind).to eq(:aggregate_empty)
 
     expect(low.send(:lower_direct_length, AST::FuncCall.new(tok, "len", []))).to be_nil
     missing_ast_mod = ModuleImporter::CompiledModule.new(
@@ -2312,10 +2316,11 @@ RSpec.describe "MIR gap-burn characterization" do
     pre_fn.pre_clauses = [{ expr: id("ok", type: :Bool), source: "" }]
     pre_lowered = low.send(:lower_pre_clauses, pre_fn)
     pre_body = pre_lowered.first.then_body
-    expect(pre_body.first.expr).to be_a(MIR::Call)
-    expect(pre_body.first.expr.callee).to eq("rt.setError")
+    expect(pre_body.first.expr).to be_a(MIR::MethodCall)
+    expect(pre_body.first.expr.receiver).to eq(MIR::Ident.new("rt"))
+    expect(pre_body.first.expr.method).to eq("setError")
     expect(pre_body.first.expr.args[2].value).to include("precondition failed")
-    expect(pre_body.last.value.name).to eq("error.CheatError")
+    expect(pre_body.last.value).to eq(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
 
     unknown_clause = AST::ErrorClause.new(selectors: [], action: :unknown, retries: nil, token: tok)
     expect { low.send(:lock_failure_action, unknown_clause, "__with", with_node) }.to raise_error(/unknown lock action/)
@@ -2886,7 +2891,8 @@ RSpec.describe "MIR gap-burn characterization" do
     fallback_match = AST::MatchStatement.new(tok, union_subject, [fallback_case, fallback_guard], nil, nil, nil, false, nil)
     fallback_match.full_type = :Void
     fallback_result = union_low.lower(fallback_match)
-    expect(fallback_result.branches.first.cond.right.name).to eq(".Fallback")
+    expect(fallback_result.branches.first.cond.right).to be_a(MIR::EnumTag)
+    expect(fallback_result.branches.first.cond.right.variant).to eq("Fallback")
 
     method_variant = AST::MethodCall.new(tok, id("Result"), "Ok", [])
     variant_case = AST::MatchCase.new(kind: :eq, value: method_variant, body: [])
@@ -2990,7 +2996,9 @@ RSpec.describe "MIR gap-burn characterization" do
     unit.full_type = Type.new(:Result)
     result_value = id("result", type: :Result)
     unit_eq = AST::BinaryOp.new(tok, unit, :EQ, result_value)
-    expect(low.send(:lower_binary_op, unit_eq).right.value).to eq(".Done")
+    lowered_unit_eq = low.send(:lower_binary_op, unit_eq)
+    expect(lowered_unit_eq.right).to be_a(MIR::EnumTag)
+    expect(lowered_unit_eq.right.variant).to eq("Done")
     expect(low.send(:binary_operation_plan, unit_eq).kind).to eq(:unit_variant_comparison)
     rhs_unit_eq = AST::BinaryOp.new(tok, result_value, :EQ, unit)
     rhs_plan = low.send(:binary_operation_plan, rhs_unit_eq)

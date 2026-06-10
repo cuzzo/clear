@@ -53,8 +53,6 @@ module MIRLoweringConcurrency
   end
 
   class BgBodyMaterialization < T::Struct
-    const :stmt_code, String
-    const :result_line, String
     const :run_body, T::Array[MIR::Node]
     const :emit_body, T::Array[MIR::Node], default: []
   end
@@ -113,8 +111,6 @@ module MIRLoweringConcurrency
       result[:captured] = captured
       result[:capture_close_plans] = capture_close_plans
       result[:pointer_captures] = pointer_captures
-      result[:stmt_code] = body.stmt_code
-      result[:result_line] = body.result_line
       result[:capture_frees] = capture.capture_frees
       result[:capture_finalizers] = capture.capture_finalizers
       result[:fresh_heap_cleanup_names] = capture.fresh_heap_cleanup_names
@@ -786,7 +782,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     run_body = T.let([], T::Array[MIR::Node])
     emit_body = T.let([], T::Array[MIR::Node])
-    stmt_code, result_line = with_bg_fiber_body_context(pointer_captures) do
+    with_bg_fiber_body_context(pointer_captures) do
       with_fiber_capture_map(caps.capture_map,
                              capture_symbols: caps.capture_symbols,
                              rt_override: bg_rt) do
@@ -797,10 +793,9 @@ module MIRLoweringConcurrency
             lowered.run_body
         )
         emit_body = run_body.reject { |mir| capture_ownership_mirror_node?(mir, "__ctx_#{id}") }
-        [lowered.stmt_code, lowered.result_line]
       end
     end
-    BgBodyMaterialization.new(stmt_code: stmt_code, result_line: result_line, run_body: run_body, emit_body: emit_body)
+    BgBodyMaterialization.new(run_body: run_body, emit_body: emit_body)
   end
 
   sig { params(node: AST::BgBlock).returns(T::Array[BgBodyStep]) }
@@ -823,7 +818,7 @@ module MIRLoweringConcurrency
     body_mir = T.let([], T::Array[MIR::Node])
     steps.each { |step| lower_bg_pre_step(step, body_mir) }
     lower_bg_result_step(last_step, body_mir, id, is_void, inner_t)
-    BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: body_mir, emit_body: body_mir)
+    BgBodyMaterialization.new(run_body: body_mir, emit_body: body_mir)
   end
 
   sig { params(step: BgBodyStep, body_mir: T::Array[MIR::Node]).void }

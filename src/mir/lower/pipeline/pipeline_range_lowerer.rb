@@ -726,9 +726,9 @@ class PipelineRangeLowerer
     )
     set_completion = MIR::MethodCall.new(MIR::Ident.new("__obs_acc"), "setCompletion", [
       obs_wg_anyopaque,
-      MIR::Ident.new("CheatHeader.obsWgDone"),
-      MIR::Ident.new("CheatHeader.obsWgWait"),
-      MIR::Ident.new("CheatHeader.obsWgDestroy"),
+      MIR::FieldGet.new(MIR::Ident.new("CheatHeader"), "obsWgDone"),
+      MIR::FieldGet.new(MIR::Ident.new("CheatHeader"), "obsWgWait"),
+      MIR::FieldGet.new(MIR::Ident.new("CheatHeader"), "obsWgDestroy"),
     ], false, set_completion_contract)
     acc_init_stmts = [
       *p.setup_stmts,
@@ -879,7 +879,7 @@ class PipelineRangeLowerer
     )
     [MIR::ExprStmt.new(
       MIR::Call.new("CheatLib.cleanup", [
-        MIR::Ident.new("@TypeOf(#{item_var})"),
+        MIR::TypeOf.new(MIR::Ident.new(item_var)),
         MIR::AllocatorRef.new(:heap),
         MIR::AddressOf.new(MIR::Ident.new(item_var)),
       ], false, false, contract),

@@ -117,7 +117,12 @@ class PipelineConcurrentCoverageHost
     when :concurrentListEach then :list_each
     when :concurrentListEachInPlace then :list_each_in_place
     when :concurrentListReduce
-      suffix = args.last.name.delete_prefix(".").capitalize
+      last = args.last
+      suffix = if last.is_a?(MIR::EnumTag)
+        last.variant.capitalize
+      else
+        T.cast(last, MIR::Ident).name.delete_prefix(".").capitalize
+      end
       :"list_reduce_#{suffix == "Sum" ? "SumOp" : suffix == "Average" ? "AverageOp" : suffix == "Min" ? "MinOp" : "MaxOp"}"
     else name
     end
@@ -931,7 +936,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(concurrent_call(open_stream, AST::WhereOp.new(tok, id("_")))).to eq(:stream_where)
 
       sym = SymbolEntry.new(reg: "c", type: Type.new(:Int64), mutable: false, storage: :frame)
-      analysis = OpenStruct.new(
+      analysis = CapabilityHelper::CaptureAnalysis.new(
         has_local: false,
         has_rc: false,
         has_shared: false,
@@ -2402,16 +2407,18 @@ RSpec.describe "pipeline backend coverage" do
       lowerer.send(:lower_concurrent_list_reduce, lhs, unsigned_conc, max, unsigned_max_smooth)
 
       expect(captured_args[0][-2]).to eq(MIR::TypeSentinel.new(:max, "i64"))
-      expect(captured_args[0][-1]).to eq(MIR::Ident.new(".min"))
+      expect(captured_args[0][-1]).to be_a(MIR::EnumTag)
+      expect(captured_args[0][-1].variant).to eq("min")
       expect(captured_args[1][-2]).to eq(MIR::TypeSentinel.new(:min, "i64"))
-      expect(captured_args[1][-1]).to eq(MIR::Ident.new(".max"))
+      expect(captured_args[1][-1]).to be_a(MIR::EnumTag)
+      expect(captured_args[1][-1].variant).to eq("max")
       expect(captured_args[2][-2]).to eq(MIR::Lit.new("0"))
     end
 
     it "stamps boxed capture fields for pointer bounded callbacks" do
       counter_type = Type.new(:Counter, sync: :locked)
       sym = SymbolEntry.new(reg: "c", type: counter_type, mutable: true, storage: :heap, sync: :locked)
-      analysis = OpenStruct.new(
+      analysis = CapabilityHelper::CaptureAnalysis.new(
         has_local: false,
         has_rc: false,
         has_shared: false,

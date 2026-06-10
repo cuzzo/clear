@@ -74,7 +74,7 @@ class PipelineConcurrentCallback < T::Struct
   const :ctx_let, MIR::Let
   const :pre_ctx_stmts, T::Array[MIR::Emittable]
   const :post_ctx_stmts, T::Array[MIR::Emittable]
-  const :apply_ident, MIR::Ident
+  const :apply_ident, MIR::Emittable
   const :context_arg, MIR::AddressOf
   const :context_stmts, T::Array[MIR::Emittable]
 end
@@ -83,7 +83,7 @@ class PipelineConcurrentInvocation < T::Struct
   extend T::Sig
 
   const :id, Integer
-  const :apply_ident, MIR::Ident
+  const :apply_ident, MIR::Emittable
   const :context_arg, MIR::AddressOf
   const :context_stmts, T::Array[MIR::Emittable]
   const :worker_count, MIR::Emittable
@@ -517,7 +517,7 @@ class PipelineConcurrentLowerer < T::Struct
     size_node = concurrent_option(conc_op, "size")
     size_name = size_node.is_a?(AST::Identifier) ? size_node.name.downcase.to_sym : nil
     MIR::StructInit.new(nil, [
-      MIR.named_field("stack_size", MIR::Ident.new(".#{self.task_config_variant.call(size_name)}")),
+      MIR.named_field("stack_size", MIR::EnumTag.new(variant: self.task_config_variant.call(size_name))),
     ])
   end
 
@@ -1003,7 +1003,7 @@ class PipelineConcurrentLowerer < T::Struct
       MIR::Ident.new(result_zig),
       *invoke.bounded_each_args(MIR::Ident.new("pipe_items")),
       initial,
-      MIR::Ident.new(".#{kind}"),
+      MIR::EnumTag.new(variant: kind.to_s),
     ])
 
     label = self.next_label.call
@@ -1264,7 +1264,7 @@ class PipelineConcurrentLowerer < T::Struct
       ctx_let: ctx_let,
       pre_ctx_stmts: pre_ctx_stmts,
       post_ctx_stmts: post_ctx_stmts,
-      apply_ident: MIR::Ident.new("#{ctx_name}.apply"),
+      apply_ident: MIR::FieldGet.new(MIR::Ident.new(ctx_name), "apply"),
       context_arg: MIR::AddressOf.new(MIR::Ident.new(ctx_var)),
       context_stmts: [
         ctx_def,

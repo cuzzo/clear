@@ -1483,9 +1483,8 @@ class MIRChecker
   # INV-FSM-RESULT-NO-FINALIZED-ALIAS
   #   The BG body's terminal result expression must not alias a
   #   state field that is freed at FSM finalize. Aliasing happens
-  #   when (a) bind_line declares a local whose RHS references a
-  #   finalized field, AND (b) post_result_line assigns that local
-  #   directly into inner.result. The slice escapes the FSM but its
+  #   when a terminal result local aliases a finalized field and is
+  #   then assigned directly into inner.result. The slice escapes the FSM but its
   #   backing memory dies when the finalize defer fires — the
   #   consumer reads a dangling pointer. Detected by the lowering
   #   (see emit_fsm_io_bg_code) and recorded as

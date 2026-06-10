@@ -18,6 +18,17 @@ RSpec.describe MIREmitter do
     expect(e.emit(MIR::Ident.new("foo"))).to eq("foo")
   end
 
+  it "emits structural defaults and enum pseudo-literals only at the emitter edge" do
+    expect(e.emit(MIR::DefaultValue.new(kind: :aggregate_empty))).to eq(".{}")
+    expect(e.emit(MIR::DefaultValue.new(kind: :string_empty))).to eq('@as([]const u8, "")')
+    expect(e.emit(MIR::DefaultValue.new(kind: :collection_empty, zig_type: "CheatLib.ArrayListUnmanaged(i64)")))
+      .to eq("@as(CheatLib.ArrayListUnmanaged(i64), .empty)")
+    expect(e.emit(MIR::DefaultValue.new(kind: :undefined, zig_type: "i64"))).to eq("@as(i64, undefined)")
+    expect(e.emit(MIR::EnumTag.new(variant: "Transient"))).to eq(".Transient")
+    expect(e.emit(MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "Timeout"))))
+      .to eq("@intFromEnum(ErrorName.Timeout)")
+  end
+
   it "emits an anonymous tuple literal from structural children" do
     node = MIR::TupleLiteral.new([MIR::Ident.new("x"), MIR::Lit.new("42")])
 

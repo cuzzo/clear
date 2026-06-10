@@ -535,8 +535,8 @@ module FsmLowering
         MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "rt"),
         "setError",
         [
-          MIR::Lit.new(".Transient"),
-          MIR::Lit.new("@intFromEnum(ErrorName.LockTimeout)"),
+          MIR::EnumTag.new(variant: "Transient"),
+          MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), "LockTimeout")),
           message,
           MIR::Lit.new(line),
         ],
@@ -548,12 +548,13 @@ module FsmLowering
 
   sig { params(ctx_id: Integer, result_zig: String).returns(MIR::Set) }
   def lock_error_result_set(ctx_id, result_zig)
+    result_name = result_zig.delete_prefix("error.")
     MIR::Set.new(
       MIR::FieldGet.new(
         MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "inner"),
         "result",
       ),
-      MIR::Lit.new(result_zig),
+      MIR::FieldGet.new(MIR::Ident.new("error"), result_name),
       false,
     )
   end

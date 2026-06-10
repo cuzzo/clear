@@ -280,7 +280,7 @@ RSpec.describe MIRLowering do
       types = low.send(:bg_type_plan, node)
       capture = low.send(:bg_capture_materialization, names, nil, {}, {}, Set.new)
       scheduler = low.send(:bg_scheduler_plan, node, names, "rt")
-      body = MIRLoweringConcurrency::BgBodyMaterialization.new(stmt_code: "", result_line: "", run_body: [])
+      body = MIRLoweringConcurrency::BgBodyMaterialization.new(run_body: [])
       ctx = MIRLoweringConcurrency::BgFsmTransformContext.new(
         node: node,
         names: names,
@@ -3380,10 +3380,10 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "Or* error chain lowering" do
-    it "lowers OrRaise to Ident" do
+    it "lowers OrRaise to a structural error value" do
       node = AST::OrRaise.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::FieldGet)
       expect(emit(result)).to eq("error.OrRaise")
     end
 
@@ -3394,17 +3394,17 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("break;")
     end
 
-    it "lowers OrPass to Ident undefined" do
+    it "lowers OrPass to a structural undefined default" do
       node = AST::OrPass.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrPrune to Ident undefined" do
+    it "lowers OrPrune to a structural undefined default" do
       node = AST::OrPrune.new(tok)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Ident)
+      expect(result).to be_a(MIR::DefaultValue)
       expect(emit(result)).to eq("undefined")
     end
 
@@ -3499,6 +3499,43 @@ RSpec.describe MIRLowering do
 
       expect(lowering.lower(error_node)).to be_a(MIR::TryCatch)
       expect(lowering.lower(optional_node)).to be_a(MIR::Orelse)
+    end
+
+    it "uses structural OR PASS defaults instead of Zig-spelled literals" do
+      string_call = AST::FuncCall.new(tok, "fallible_string", [])
+      string_call.full_type = Type.new(:"!String")
+      string_default = lowering.send(:or_pass_fallback, string_call)
+
+      list_call = AST::FuncCall.new(tok, "fallible_list", [])
+      list_call.full_type = Type.new(:"!Int64[]", collection: :list)
+      list_default = lowering.send(:or_pass_fallback, list_call)
+
+      int_call = AST::FuncCall.new(tok, "fallible_int", [])
+      int_call.full_type = Type.new(:"!Int64")
+      int_default = lowering.send(:or_pass_fallback, int_call)
+
+      expect(string_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(string_default, MIR::DefaultValue).kind).to eq(:string_empty)
+      expect(list_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(list_default, MIR::DefaultValue).kind).to eq(:collection_empty)
+      expect(int_default).to be_a(MIR::DefaultValue)
+      expect(T.cast(int_default, MIR::DefaultValue).kind).to eq(:undefined)
+      expect([string_default, list_default, int_default].any? { |node| node.is_a?(MIR::Lit) }).to be(false)
+    end
+
+    it "lowers OR BREAK catch fallback as a structural break expression" do
+      fallible = AST::FuncCall.new(tok, "fallible", [])
+      fallible.full_type = :Int64
+      fallible.error_union_type = Type.new(:"!Int64")
+      fallible.can_fail = true
+      node = AST::BinaryOp.new(tok, fallible, :OR_RESCUE, AST::OrBreak.new(tok))
+      node.full_type = :Int64
+
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::TryCatch)
+      expect(result.catch_body).to be_a(MIR::BreakExpr)
+      expect(emit(result)).to eq("(fallible(rt) catch break)")
     end
   end
 

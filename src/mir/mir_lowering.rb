@@ -937,7 +937,7 @@ class MIRLowering
 
     # --- Expressions ---
     when AST::Literal           then lower_literal(node)
-    when AST::DefaultLit        then MIR::Lit.new(".{}")
+    when AST::DefaultLit        then MIR::DefaultValue.new(kind: :aggregate_empty)
     when AST::Identifier        then lower_identifier(node)
     when AST::BinaryOp          then lower_binary_op(node)
     when AST::UnaryOp           then lower_unary_op(node)
@@ -952,7 +952,7 @@ class MIRLowering
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
-    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
     when AST::DieNode           then MIR::ExprStmt.new(MIR::Call.new("std.process.exit", [MIR::Lit.new((node.status || 1).to_s)], false), false)
 
     # --- Memory / capability expressions ---
@@ -979,8 +979,8 @@ class MIRLowering
     when AST::YieldExpr        then lower_yield(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
-    when AST::OrRaise          then MIR::Ident.new("error.OrRaise")
-    when AST::OrPass, AST::OrPrune then MIR::Ident.new("undefined")
+    when AST::OrRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrRaise")
+    when AST::OrPass, AST::OrPrune then MIR::DefaultValue.new(kind: :undefined)
     when AST::OrExit           then lower_or_exit(node)
     when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
     when AST::AssertRaises     then lower_assert_raises(node)
@@ -2747,11 +2747,11 @@ class MIRLowering
     MIR::EnumDef.new(node.name, node.variants.map(&:to_s), nil)
   end
 
-  sig { params(node: T.untyped).returns(MIR::Lit) }
+  sig { params(node: T.untyped).returns(MIR::Emittable) }
   def lower_field_default(node)
     case node
-    when AST::DefaultLit then MIR::Lit.new(".{}")
-    else lower(node)
+    when AST::DefaultLit then MIR::DefaultValue.new(kind: :aggregate_empty)
+    else T.cast(lower(node), MIR::Emittable)
     end
   end
 
@@ -2979,12 +2979,12 @@ class MIRLowering
       msg_mir = node.message ? lower(node.message) : nil
       return MIR::ScopeBlock.new([
         MIR::ExprStmt.new(or_exit_bc_reassign(facts, msg_mir), false),
-        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
       ])
     end
 
     msg_mir = node.message ? lower(node.message) : nil
-    or_exit_scope(facts, msg_mir, MIR::Ident.new("error.CheatError"))
+    or_exit_scope(facts, msg_mir, MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
   end
 
   # Test-framework MIR lowering (lower_test_block, lower_assert_raises,

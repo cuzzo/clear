@@ -631,7 +631,7 @@ module MIRLoweringControlFlow
   sig { params(subject: MIR::Emittable, variant: String).returns(MIR::BinOp) }
   def union_tag_condition(subject, variant)
     T.bind(self, MIRLowering) rescue nil
-    MIR::BinOp.new("==", active_tag_call(subject), MIR::Ident.new(".#{variant}"))
+    MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: variant))
   end
 
   sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, subject: MIR::Emittable, body: MatchBody).returns(T::Array[MIR::IfChainBranch]) }

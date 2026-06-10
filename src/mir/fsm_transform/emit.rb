@@ -466,7 +466,7 @@ module FsmTransform
     def prior_lock_release_stmts(ctx_id, lock_index, lock_ref, unlock_method)
       [
         MIR::Set.new(
-          MIR::Ident.new("__ctx_#{ctx_id}.__lock_held_#{lock_index}"),
+          MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "__lock_held_#{lock_index}"),
           MIR::Lit.new("false"),
           false,
         ),
