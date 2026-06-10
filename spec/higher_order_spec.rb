@@ -593,7 +593,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.ShardedList(Score, 2){}")
+        expect(out).to include("@as(CheatLib.ShardedList(Score, 2), .empty)")
       end
 
       it "raises for @list:sharded(1) — shard count must be >= 2" do

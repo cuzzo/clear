@@ -216,7 +216,7 @@ imports
   -> type declarations
   -> function and extern signatures
   -> union default method validation / synthesis
-  -> reentrance bridge and error-type seeding
+  -> legacy reentrance bridge and error-type seeding
   -> sync policy resolution
   -> executable statements and function bodies
   -> whole-program metadata finalization
@@ -525,6 +525,12 @@ and `stack_tier` so later callers and MIR passes consume the typed
 `FunctionRegistry` / `SemanticIndex` boundary instead of inspecting annotator
 receiver state directly.
 
+`compute_needs_rt!` records annotation-visible runtime pressure from the
+call graph and source-level effects. It is not the final allocator/runtime
+threading decision. `MIRPass#finalize_needs_rt!` remains the final authority
+after escape analysis, cleanup classification, and placement facts reveal which
+functions actually need runtime allocator plumbing.
+
 Fallibility is resolved late because it depends on the transitive call graph
 and on whether error channels are absorbed locally. Error-union return
 declarations are enforced after this propagation.
@@ -635,6 +641,10 @@ wide for v0.1 comfort:
   actions, while `SymbolEntry` owns declared sync-contract facts. A future
   validator/executor split would mainly package the remaining visitor work; it
   is no longer a hidden phase-state dependency.
+* The legacy `@reentrant` bridge is compatibility debt. Parser, fix, and
+  annotation code still accept old annotation forms and normalize them to
+  `EFFECTS REENTRANT` metadata. Downstream MIR, thunk, and FSM consumers should
+  rely only on the normalized effect/reentrance facts, not on legacy syntax.
 * Some MIR-facing facts are stamped directly on AST nodes from scattered helper
   code. The desired shape is a small number of authoritative outputs from
   `src/semantic` that lowering reads.

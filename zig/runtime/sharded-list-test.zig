@@ -114,6 +114,19 @@ test "ShardedList.deinit on an empty list is safe" {
     sl.deinit(std.testing.allocator);
 }
 
+test "ShardedList.empty initializes empty shards" {
+    var sl = CheatLib.ShardedList(f64, 2).empty;
+    defer sl.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), sl.len());
+    try std.testing.expectEqual(@as(usize, 0), sl.shards[0].items.len);
+    try std.testing.expectEqual(@as(usize, 0), sl.shards[1].items.len);
+
+    try sl.append(std.testing.allocator, 4.0);
+    try std.testing.expectEqual(@as(usize, 1), sl.len());
+    try std.testing.expectApproxEqAbs(4.0, sl.shards[0].items[0], 1e-9);
+}
+
 // ---------------------------------------------------------------------------
 // large N: ShardedList with N=8
 // ---------------------------------------------------------------------------

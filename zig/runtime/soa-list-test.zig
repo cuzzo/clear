@@ -69,3 +69,13 @@ test "SoaList: empty list" {
     try std.testing.expectEqual(@as(i64, 0), list.length());
     try std.testing.expectEqual(@as(i64, 0), list.count());
 }
+
+test "SoaList.empty initializes an empty list" {
+    var list = CheatLib.SoaList(Entity).empty;
+    defer list.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(i64, 0), list.length());
+    try list.append(std.testing.allocator, .{ .x = 5, .y = 6, .vx = 0, .vy = 0, .health = 7 });
+    try std.testing.expectEqual(@as(i64, 1), list.count());
+    try std.testing.expectApproxEqAbs(@as(f64, 7), list.get(0).health, 1e-9);
+}

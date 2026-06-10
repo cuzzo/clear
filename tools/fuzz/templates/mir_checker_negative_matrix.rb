@@ -161,7 +161,9 @@ def mir_checker_negative_case(case_name)
     RUBY
   when :aggregate_child_alloc_mismatch_call_contract
     <<~RUBY
-      contract = MIR::OwnershipContract.consumes(["child"])
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("child", Type.new(:String), "fuzz"),
+      ])
       call = registry_call(
         :frame,
         "items",
