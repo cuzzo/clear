@@ -495,6 +495,7 @@ module ScopeHelper
     new_scope.depth = scope_stack.size
     scope_stack.push(new_scope)
     blk.call
+  ensure
     scope_stack.pop
   end
 

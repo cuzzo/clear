@@ -109,7 +109,7 @@ class CompilerFrontend
 
     # Include module-imported function signatures so MIRLowering can
     # determine needs_rt/can_fail for cross-module calls.
-    annotator.scope_stack.first.visible_entries.each do |name, entry|
+    annotator.semantic_root_scope.visible_entries.each do |name, entry|
       next if fn_sigs.key?(name)
       sig = entry.fn_signature
       next unless sig && sig.module_alias

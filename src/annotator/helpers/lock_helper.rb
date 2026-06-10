@@ -3,9 +3,9 @@ require "sorbet-runtime"
 require "set"
 require_relative "../../semantic/capability_plan"
 
-# All lock-safety analysis lives here. Two layers in one module so they
-# share state (@held_lock_types, @held_locks, the lock-edge accumulator)
-# without cross-file surgery:
+# All lock-safety analysis lives here. Two layers in one module so they share
+# typed held-lock state and the lock-edge accumulator without cross-file
+# surgery:
 #
 #   Phase 1 — lexical same-name nested-WITH check
 #     Catches `WITH EXCLUSIVE c { WITH EXCLUSIVE c { ... } }` (and the
@@ -128,9 +128,7 @@ module LockHelper
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
   def check_nested_lock_reacquire!(node, lock_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
-    @held_locks = T.let(@held_locks, T.nilable(SemanticAnnotator::HeldLockMap))
-    held_locks = @held_locks
-    return unless held_locks
+    held_locks = current_held_locks
     lock_capabilities.each do |cap|
       vn = cap.var_name
       next unless held_locks.key?(vn)
@@ -157,9 +155,8 @@ module LockHelper
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
   def check_lock_rank_ordering!(node, lock_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
-    @held_lock_types = T.let(@held_lock_types, T.nilable(T::Array[SemanticAnnotator::HeldLockTypeEntry]))
-    held_lock_types = @held_lock_types
-    return unless held_lock_types && !held_lock_types.empty?
+    held_lock_types = current_held_lock_types
+    return if held_lock_types.empty?
     lock_type_ranks = @lock_type_ranks
     return unless lock_type_ranks && !lock_type_ranks.empty?
     escape = node.deadlock_escape

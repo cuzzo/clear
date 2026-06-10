@@ -338,8 +338,7 @@ module CapabilityHelper
   sig { params(node: AST::Identifier).returns(NilClass) }
   def predicate_identifier_allowed!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    ctx = @current_predicate_context
+    ctx = current_predicate_context
     return unless ctx
     return if %w[TRUE FALSE].include?(node.name)
 
@@ -387,13 +386,13 @@ module CapabilityHelper
         error!(node, :DEBUG_POST_NEEDS_UNSYNC_PARAM, name: node.name)
       end
     end
+    nil
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).void }
   def record_predicate_call_site!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
-    ctx = @current_predicate_context
+    ctx = current_predicate_context
     return unless ctx
     predicate_call_sites_store << PredicateCallSite.new(
       kind: ctx.kind,
@@ -432,7 +431,7 @@ module CapabilityHelper
   sig { returns(T::Array[PredicateCallSite]) }
   def predicate_call_sites_store
     T.bind(self, SemanticAnnotator) rescue nil
-    T.cast(instance_variable_get(:@predicate_call_sites), T::Array[PredicateCallSite])
+    predicate_call_sites
   end
   private :predicate_call_sites_store
 
@@ -462,7 +461,6 @@ module CapabilityHelper
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     capability_plan = CapabilityPlan.require_for(node)
     caps = capability_plan.all
     guarded = capability_plan.guarded
@@ -482,13 +480,12 @@ module CapabilityHelper
     end
 
     aliases = caps.map(&:alias_name)
-    prev_guard = @current_predicate_context
-    begin
-      guarded.each do |gcap|
-        own = gcap.alias_name
-        siblings = aliases - [own]
-        guard_expr = T.must(gcap.guard_expr)
-        @current_predicate_context = T.let(PredicateContext.new(
+    guarded.each do |gcap|
+      own = gcap.alias_name
+      siblings = aliases - [own]
+      guard_expr = T.must(gcap.guard_expr)
+      with_predicate_context(
+        PredicateContext.new(
           kind: :guard,
           with_node: node,
           fn_node: nil,
@@ -499,7 +496,8 @@ module CapabilityHelper
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: nil,
-        ), T.nilable(PredicateContext))
+        )
+      ) do
         visit(guard_expr)
 
         guard_type = guard_expr.full_type!(context: "WITH guard expression")
@@ -507,8 +505,6 @@ module CapabilityHelper
           error!(guard_expr, :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
       end
-    ensure
-      @current_predicate_context = prev_guard
     end
   end
 
@@ -526,7 +522,6 @@ module CapabilityHelper
   sig { params(fn_node: AST::FunctionDef).void }
   def visit_pre_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     pre_clauses = fn_node.pre_clauses || []
     return if pre_clauses.empty?
 
@@ -556,11 +551,10 @@ module CapabilityHelper
     end
 
     param_names = fn_node.params.map { |p| p.name.to_s }
-    prev_ctx = @current_predicate_context
-    begin
-      pre_clauses.each do |entry|
-        expr = entry[:expr]
-        @current_predicate_context = T.let(PredicateContext.new(
+    pre_clauses.each do |entry|
+      expr = entry[:expr]
+      with_predicate_context(
+        PredicateContext.new(
           kind: :pre,
           with_node: nil,
           fn_node: fn_node,
@@ -571,7 +565,8 @@ module CapabilityHelper
           allowed_names: [],
           rejected_param_names: Set.new,
           fn_name: fn_node.name,
-        ), T.nilable(PredicateContext))
+        )
+      ) do
         visit(expr)
 
         pred_type = expr.full_type!(context: "PRE expression")
@@ -579,8 +574,6 @@ module CapabilityHelper
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
       end
-    ensure
-      @current_predicate_context = prev_ctx
     end
   end
 
@@ -595,7 +588,6 @@ module CapabilityHelper
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Scope)) }
   def visit_post_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @current_predicate_context = T.let(@current_predicate_context, T.nilable(PredicateContext))
     post_clauses = fn_node.respond_to?(:post_clauses) ? (fn_node.post_clauses || []) : []
     return if post_clauses.empty?
 
@@ -628,11 +620,10 @@ module CapabilityHelper
       end
 
       allowed_names = param_names + ["result"]
-      prev_ctx = @current_predicate_context
-      begin
-        post_clauses.each do |entry|
-          expr = entry[:expr]
-          @current_predicate_context = T.let(PredicateContext.new(
+      post_clauses.each do |entry|
+        expr = entry[:expr]
+        with_predicate_context(
+          PredicateContext.new(
             kind: :post,
             with_node: nil,
             fn_node: fn_node,
@@ -643,7 +634,8 @@ module CapabilityHelper
             allowed_names: allowed_names,
             rejected_param_names: rejected,
             fn_name: fn_node.name,
-          ), T.nilable(PredicateContext))
+          )
+        ) do
           visit(expr)
 
           pred_type = expr.full_type!(context: "DEBUG_POST expression")
@@ -651,10 +643,9 @@ module CapabilityHelper
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
         end
-      ensure
-        @current_predicate_context = prev_ctx
       end
     end
+    nil
   end
 
   # Post-body check: a MUTABLE GUARD alias is fine as long as the body
@@ -1349,7 +1340,7 @@ module CapabilityAudit
   sig { returns(BindingAuditStore) }
   def capability_audit_store
     T.bind(self, SemanticAnnotator) rescue nil
-    T.cast(instance_variable_get(:@capability_audit), BindingAuditStore)
+    capability_audit
   end
   private :capability_audit_store
 

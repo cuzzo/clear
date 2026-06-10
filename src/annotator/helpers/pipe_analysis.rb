@@ -35,25 +35,25 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def visit_Smooth(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @smooth_depth = T.let((@smooth_depth || 0) + 1, T.nilable(Integer))
-    # Logic: x |> f  -> f(x)
+    with_smooth_context do
+      # Logic: x |> f  -> f(x)
 
-    # 1. Visit the Left (Input) FIRST
-    visit(node.left)
+      # 1. Visit the Left (Input) FIRST
+      visit(node.left)
 
-    if higher_order_list_op?(node.right)
-      analyze_higher_order_op(node)
-    elsif node.right.is_a?(AST::FuncCall)
-      analyze_pipe_to_func_call(node)
-    elsif node.right.is_a?(AST::Identifier)
-      analyze_pipe_to_identifier(node)
-    else
-      # Case 3: Invalid RHS (e.g. 10 |> (expression))
-      error!(node, :PIPE_BAD_DESTINATION)
-      stamp_type!(node, :Any)
+      if higher_order_list_op?(node.right)
+        analyze_higher_order_op(node)
+      elsif node.right.is_a?(AST::FuncCall)
+        analyze_pipe_to_func_call(node)
+      elsif node.right.is_a?(AST::Identifier)
+        analyze_pipe_to_identifier(node)
+      else
+        # Case 3: Invalid RHS (e.g. 10 |> (expression))
+        error!(node, :PIPE_BAD_DESTINATION)
+        stamp_type!(node, :Any)
+      end
     end
-
-    @smooth_depth = T.let((@smooth_depth || 0) - 1, T.nilable(Integer))
+    smooth_depth
   end
 
   private

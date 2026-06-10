@@ -37,7 +37,7 @@ module Annotator
         # conservative at the outer level because any LOCKED-eligible call may
         # acquire a lock.
         fn_name_for_lock = current_fn_ctx&.name || "<top>"
-        held_entries_now = @held_lock_types || []
+        held_entries_now = current_held_lock_types
         is_match_form = !node.arms.nil?
         lock_capabilities.each do |cap|
           record_with_acquire!(fn_name_for_lock, cap, held_entries_now, node.deadlock_escape)

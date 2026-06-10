@@ -569,8 +569,7 @@ RSpec.describe "annotator branch gap burndown" do
     break_right = AST::OrBreak.new(token(:OR, "OR"))
     break_right.full_type = Type.new(:NoReturn)
     break_expr = AST::BinaryOp.new(token(:OR, "OR"), left, :OR_RESCUE, break_right)
-    ann.instance_variable_set(:@loop_depth, 1)
-    ann.send(:visit_OrRescue, break_expr)
+    ann.send(:with_loop_context) { ann.send(:visit_OrRescue, break_expr) }
     expect(break_expr.full_type!.resolved).to eq(:Int64)
 
     optional_left = AST::Identifier.new(token, "maybe")
@@ -1406,7 +1405,6 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers direct capability and parameter validation branch clusters" do
     cap_ann = quiet_annotator
-    cap_ann.instance_variable_set(:@deferred_with_validations, [])
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [], [])
 
     mk_var = lambda do |name, type, storage: nil, sync: nil, layout: nil, is_param: false|
@@ -1480,7 +1478,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
     expect(atomic_cap[:capability]).to eq(:ATOMIC)
     expect(unknown_cap[:capability]).to eq(:unknown)
-    expect(cap_ann.instance_variable_get(:@deferred_with_validations)).not_to be_empty
+    expect(cap_ann.pending_deferred_validation_count).to be > 0
 
     bad_param_ann = SemanticAnnotator.new(source_code: "")
     bad_fn = AST::FunctionDef.new(token, "bad_default", [
@@ -1890,10 +1888,11 @@ RSpec.describe "annotator branch gap burndown" do
     tied_ann.semantic_function_nodes.replace({
       "tied" => AST::FunctionDef.new(token, "tied", [], [], Type.new(:String), nil, [], [], nil, :package)
     })
-    tied_ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "tied", return_type: Type.new(:String), lifetime: [], type_params: [])
-    returned = AST::Identifier.new(token, "returned")
-    returned.symbol = returned_sym
-    tied_ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), returned))
+    with_function_context(tied_ann, return_type: Type.new(:String)) do
+      returned = AST::Identifier.new(token, "returned")
+      returned.symbol = returned_sym
+      tied_ann.send(:verify_tied_return!, AST::ReturnNode.new(token(:RETURN, "RETURN"), returned))
+    end
 
     fix_ann = quiet_annotator
     moved_ident = AST::Identifier.new(token, "moved")
@@ -2158,7 +2157,7 @@ RSpec.describe "annotator branch gap burndown" do
                  end
       node.full_type = inferred
     end
-    ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "pipe", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    ann.send(:push_function_context!, FunctionContext.new(name: "pipe", return_type: Type.new(:Void), lifetime: [], type_params: []))
 
     left = AST::Identifier.new(token, "xs")
     left.full_type = Type.new(:"Int64[]")
@@ -2188,7 +2187,7 @@ RSpec.describe "annotator branch gap burndown" do
       observed_terminals << kwargs
       nil
     end
-    distinct_ann.instance_variable_get(:@function_context_stack) << FunctionContext.new(name: "distinct", return_type: Type.new(:Void), lifetime: [], type_params: [])
+    distinct_ann.send(:push_function_context!, FunctionContext.new(name: "distinct", return_type: Type.new(:Void), lifetime: [], type_params: []))
     bounded_left = AST::Identifier.new(token, "stream")
     bounded_left.full_type = Type.new(:"~Int64[3]")
     key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
@@ -2955,7 +2954,7 @@ RSpec.describe "annotator branch gap burndown" do
   it "covers with-block arm effect and snapshot violation branches directly" do
     ann = quiet_annotator
     fn_ctx = FunctionContext.new(name: "with_fn", return_type: Type.new(:Void), lifetime: [], type_params: [])
-    ann.instance_variable_get(:@function_context_stack) << fn_ctx
+    ann.send(:push_function_context!, fn_ctx)
     ann.send(:effect_direct_effects).replace({ "with_fn" => Set.new })
 
     fact_builder = method(:with_capability_fact)

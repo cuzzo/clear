@@ -599,7 +599,7 @@ module Annotator
 
         # Handle OR BREAK: error-to-break coercion (valid only inside loops)
         if node.right.is_a?(AST::OrBreak)
-          if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
+          if current_loop_depth <= 0
             error!(node, :OR_BREAK_OUTSIDE_WHILE)
           end
           if t_left_type.error_union?

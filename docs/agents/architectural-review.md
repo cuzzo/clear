@@ -1,6 +1,7 @@
 # Architectural Review
 
 Branch basis: `architectural-review` from `origin/master` at `7d13c7743`.
+Latest refresh: `568da7c7d` (`Fix CI gates after annotator fact split`).
 
 Scratch evidence generated during this review, not checked in:
 
@@ -28,23 +29,30 @@ after the current `architectural-review` work.
    metadata. The current path is contract-backed and no longer travels through
    opaque MIR text carriers, but the next architectural step is typed
    emitter-owned emit specs and typed std-lib records.
-2. Annotation still has more shared receiver state than ideal. The phase split
-   is real, but `SemanticAnnotator`, capability validation, control-flow
-   analysis, and pipe analysis still rely on broad mutable phase context.
-3. MIR ownership/control-flow facts are much better centralized, but a few
+2. Annotation shared receiver state is materially lower after the body-summary,
+   semantic-index, and `ReceiverState` passes, but capability validation,
+   control-flow analysis, and pipe analysis still carry broad mutable phase
+   context and dense correctness decisions.
+3. `src/mir/lowering/expressions.rb` still creates target-language default
+   values with Zig-spelled `MIR::Lit` values for `OR PASS` fallback defaults.
+   This does not hide cleanup or ownership behavior, so it is not a release
+   red flag, but it should become a structural `MIR::DefaultValue` /
+   `MIR::TypedEmpty` node rendered only by the emitter.
+4. MIR ownership/control-flow facts are much better centralized, but a few
    compatibility readers still expose string-name identity. Continue moving
    callers to stable typed binding/place IDs and frozen fact snapshots.
-4. Hoist, cleanup classification, and `MIRPass` remain high-correctness
+5. Hoist, cleanup classification, and `MIRPass` remain high-correctness
    surfaces. They now use more explicit facts, but regressions there still map
    directly to leaks, double cleanup, stale move guards, or missed ownership
    transfer checks.
-5. Emission is now the correct boundary for Zig source text. Keep it that way:
+6. Emission is now the correct boundary for Zig source text. Keep it that way:
    new lowerers should add structural MIR/facts, not new pre-emission rendered
    fragments or helper-side Zig synthesis.
-6. FSM/thunk recursive splitting and liveness still have some loose walker
-   shape. The critical cleanup/string relocation risk is closed, but follow-up
-   work should keep moving splitter/liveness records toward typed segment-plan
-   data.
+7. FSM/thunk recursive splitting and liveness still have some loose walker
+   shape. The critical cleanup/string relocation risk is closed, but
+   `src/mir/fsm_transform/context.rb` still carries emitter-context string
+   fields and follow-up work should keep moving splitter/liveness records
+   toward typed segment-plan data.
 
 Parser slop is intentionally not listed here. The parser is large and mutable,
 but it has not been the source of the memory-safety/correctness problems this
@@ -68,8 +76,25 @@ review is trying to prevent.
   across too many implicit hashes/slots.~~ The major memory-safety paths now
   use stronger typed records, stable ownership identities, and explicit fact
   handoffs, with the yellow-flag cleanup above left for the next pass.
+- ~~Annotator consumers repeatedly re-walked function bodies to rediscover
+  calls, returns, raise/fallibility, suspend points, escape candidates, and
+  scope/capture facts.~~ `BodyScanSummary`, `FunctionBodySummary`,
+  `FunctionRegistry`, and `SemanticIndex` now provide typed summaries to the
+  annotator, escape analysis, concurrency checks, the compiler frontend,
+  importer, and MIR pass preparation.
+- ~~Hoist, escape, and MIR pass preparation re-derived too many facts through
+  mutable pass internals.~~ Hoist bindings and function body summaries now flow
+  through explicit typed inputs, reducing repeated AST walks and hidden pass
+  ordering.
 - ~~Current PR `Src Type Guardrails` findings for added/changed `src/**/*.rb`
   lines.~~ The changed source now has no added guardrail findings.
+- ~~`src/annotator/README.md` and `src/mir/README.md` lagged the current
+  architecture.~~ They now describe `FunctionRegistry`, `SemanticIndex`,
+  `ReceiverState`, and structural checker-visible MIR metadata.
+- ~~Annotator scope/context/control-flow/lock/capability scratch state lived as
+  separate receiver fields.~~ The remaining receiver scratch state now has one
+  typed owner, `SemanticAnnotator::ReceiverState`, with compatibility accessors
+  for existing consumers.
 
 ## Overall Component Ratings
 
@@ -77,25 +102,26 @@ review is trying to prevent.
 | --- | --- | --- |
 | Lexer | `A-` | Small and direct, but token rules are regex-order-sensitive and should keep maximal-munch tests for every new token family. |
 | Parser | `C+` | Large mutable recursive-descent owner, rule tables use untyped/dynamic construction, and `Parser.gradual_mode` is process-global. |
-| Annotation | `B` | The phase/domain split and capability cleanup are real progress, but `SemanticAnnotator`, control-flow state, and pipe analysis still have broad lifecycle and state-based branch pressure. |
+| Annotation | `B+` | Body summaries, `SemanticIndex`, and `ReceiverState` removed several repeated AST walks and scattered receiver fields; capability validation, control-flow analysis, and pipe analysis still have broad lifecycle and state-based branch pressure. |
 | Pipeline Fusion and Desugaring | `B+` | MIR pipeline lowering now has typed plans and lowerers; the AST rewriter still has branchy recursive special cases and pipeline semantic decisions are split between annotator analysis, rewriter, and MIR plan builder. |
-| MIR Preparation / Hoisting / Ownership Analysis | `B` | Cleanup, CFG, and ownership facts are explicit and more strongly typed, but hoist and MIR pass remain high-churn correctness surfaces. |
+| MIR Preparation / Hoisting / Ownership Analysis | `B+` | Cleanup, CFG, hoist bindings, body summaries, and ownership facts are explicit and more strongly typed, but hoist and MIR pass remain high-churn correctness surfaces. |
 | MIR Lowering | `B+` | The mega-owner work paid off; `MIRLowering` is now mostly a typed coordinator, though several lowering modules still encode large decision tables as branch hubs. |
 | MIR Emission / Zig Transpilation | `B+` | Production pre-emission Zig carriers are gone and FSM cleanup no longer derives semantic facts from strings; the emitter remains broad and must stay a final rendering boundary only. |
 
-Overall architecture/design: `B+`. Overall implementation: `B`.
+Overall architecture/design: `B+`. Overall implementation: `B+`.
 
 ## Cross-Cutting Outstanding Issues
 
 - `SemanticAnnotator`, `Type`, `SymbolEntry`, `Scope`, `MIRLowering`,
   `MIRChecker`, and `FunctionSignature` remain implicit lifecycle owners with
-  many public state-dependent operations.
+  many public state-dependent operations, though function/body facts now have a
+  better registry/index owner.
 - `src/ast/std_lib.rb` and intrinsic registries are still large contract
   tables. They need typed emitter-owned contract records if they keep carrying
   allocation, ownership, fallibility, and backend emission metadata.
 - The top current fix-risk files are `src/annotator/domains/control_flow.rb`,
-  `src/annotator/helpers/pipe_analysis.rb`, `src/mir/hoist.rb`,
-  `src/mir/mir_pass.rb`, and `src/mir/control_flow.rb`.
+  `src/annotator/helpers/pipe_analysis.rb`, `src/mir/lowering/expressions.rb`,
+  `src/mir/hoist.rb`, `src/mir/mir_pass.rb`, and `src/mir/control_flow.rb`.
 - The highest current state-based branch hotspots include `AST` construction,
   cleanup classification, intrinsic lowering, return handling, parser function
   parsing, and formatter spacing/expansion.
@@ -116,8 +142,9 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
-| `src/annotator/README.md` | `B+` | Needs to keep reflecting the fact/work-product split as phase objects continue moving out of `SemanticAnnotator`. |
-| `src/annotator/annotator.rb` | `B-` | `SemanticAnnotator` remains a temporal-ordering owner with many shared fields and public lifecycle methods. |
+| `src/annotator/README.md` | `B` | Now stale in a few places: it still describes old `@fn_nodes` / `@call_graph` receiver fields instead of `FunctionRegistry`, `SemanticIndex`, and body summaries. |
+| `src/annotator/annotator.rb` | `B` | Body facts and several repeated body walks have moved out, but `SemanticAnnotator` remains a temporal-ordering owner with many shared fields and public lifecycle methods. |
+| `src/annotator/function_registry.rb` | `A-` | Good typed owner for function nodes, synthetic definitions, body summaries, call graph facts, and fallibility summaries; keep new function-body facts here instead of re-adding annotator ivars. |
 
 ### `src/annotator/domains/`
 
@@ -137,22 +164,23 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 | --- | --- | --- |
 | `auto_inference.rb` | `B` | Good internal objects, but evidence collection still uses callback/walk patterns and broad nil/type guard pressure. |
 | `capabilities.rb` | `C+` | Capability validation, alias construction, predicate purity, audit, and lock facts still share a dense helper surface. |
-| `effects.rb` | `B-` | Effect/fallibility/stack metadata are useful facts, but `EffectTracker` keeps mutable call graph/function maps as lifecycle state. |
+| `effects.rb` | `B` | Body-summary reuse removed several repeated scans, but `EffectTracker` still keeps mutable call graph/function maps as lifecycle state. |
 | `fixable_helpers.rb` | `B` | Diagnostics are separated, but source-code state and fix generation are mixed into annotator behavior through a broad helper. |
 | `function_analysis.rb` | `C+` | `resolve_call` and signature verification remain branch hubs across externs, methods, generics, storage, and capabilities. |
 | `function_context.rb` | `A-` | Small context object; no major issue beyond continuing to keep fields typed and immutable where possible. |
 | `function_return.rb` | `B+` | Compact return resolver; remaining nil/type guards should drop as return facts become stricter. |
 | `function_signature.rb` | `B-` | Important typed representation, but still a temporal-ordering owner with many mutable metadata fields. |
 | `generic_analysis.rb` | `B-` | Generic validation branches across type shape/capability/storage; typed request/result records would reduce repeated guard tuples. |
+| `intrinsic_contract.rb` | `B+` | Stronger typed intrinsic contract records are a clear improvement; template fields still carry Zig-pattern values that should become emitter-owned specs. |
 | `intrinsic_emit.rb` | `B` | Thin contract holder, but registry values feeding it are still loose. |
-| `intrinsic_registry.rb` | `B-` | Converts loose stdlib hashes into signatures; should be replaced by typed intrinsic contract records at the source. |
+| `intrinsic_registry.rb` | `B` | Converts loose stdlib hashes into signatures and typed contracts; the remaining issue is the loose source table and emitter-facing template contract shape. |
 | `lock_helper.rb` | `B` | Lock graph concepts are good, but held-lock/capability transition state still spans helpers and annotator fields. |
 | `method_analysis.rb` | `B-` | Method resolution is compact but remains a state-based branch hotspot over registry contracts and receiver type shape. |
 | `pipe_analysis.rb` | `C+` | Pipeline typing remains large and high-gap; `analyze_concurrent_op` is one of the strongest current convergence signals. |
-| `reentrance.rb` | `B` | Recursion facts are separated, but some logic still depends on structural AST walks and cross-function metadata timing. |
+| `reentrance.rb` | `B+` | Recursion facts now reuse body summaries rather than rediscovering calls through local walks; cross-function metadata timing remains the main constraint. |
 | `test_annotation.rb` | `B+` | Test DSL validation is bounded; hooks create cross-parser/annotator/MIR state scatter but not a core architecture risk. |
 | `union.rb` | `B` | Union access is isolated; remaining issue is loose schema/variant metadata rather than file-local shape. |
-| `with_match_check.rb` | `B` | Requirement checking is bounded; capability predicates still depend on broader capability state finalization. |
+| `with_match_check.rb` | `B+` | Requirement checking is bounded and the sync-bound path is more explicit; capability predicates still depend on broader capability state finalization. |
 
 ### `src/annotator/phases/`
 
@@ -160,7 +188,7 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 | --- | --- | --- |
 | `annotation_boundary.rb` | `A-` | Good small phase boundary; keep pass-state writes centralized. |
 | `auto_finalization.rb` | `A-` | Small phase object; no file-local issue beyond dependency on broad auto inference helper. |
-| `body_analysis.rb` | `B+` | Useful phase shell; still delegates into the large annotator state object. |
+| `body_analysis.rb` | `A-` | Good typed source of function body facts for calls, returns, bindings, assignments, escapes, scopes, pipes, and concurrency; `suspend_points` still uses hash-shaped records and should become a typed record. |
 | `builtin_environment.rb` | `A-` | Thin phase wrapper; no issue identified. |
 | `declaration_index.rb` | `B+` | Good indexing phase; dependency on broad AST declaration variants remains. |
 | `deferred_validation.rb` | `B+` | Good phase concept; deferred validation records should stay typed and avoid hash growth. |
@@ -196,8 +224,8 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
-| `compiler_frontend.rb` | `B` | Frontend orchestration is compact; type declaration variant handling is still a fat-union candidate. |
-| `importer.rb` | `B-` | Path/import resolution is bounded but relies on string/path heuristics and loose dependency maps. |
+| `compiler_frontend.rb` | `B+` | Frontend orchestration is compact and now carries typed body/hoist facts forward; type declaration variant handling is still a fat-union candidate. |
+| `importer.rb` | `B` | Path/import resolution is bounded but relies on string/path heuristics and loose dependency maps; cached Zig bodies are emitted-output caches and must stay after `MIREmitter`. |
 | `pipeline_rewriter.rb` | `C+` | Recursive pipeline rewrite is still a branch hub with structural clone/condition pressure. |
 | `string_concat_rewriter.rb` | `B+` | Focused desugaring pass; no major issue identified. |
 | `transpiler.rb` | `B-` | CLI/frontend/module orchestration, output, and test mode state are mixed in one object. |
@@ -223,7 +251,7 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
-| `README.md` | `B+` | Must keep tracking explicit fact/plan boundaries as lowering internals move. |
+| `README.md` | `B` | Must keep tracking explicit fact/plan boundaries as lowering internals move; the legacy inline/raw Zig audit metadata wording is now stale. |
 | `alloc.rb` | `B` | Small mixin, but annotation-side storage helpers living under MIR are a boundary smell. |
 | `cleanup_classifier.rb` | `B` | Cleanup facts are explicit and snapshot-backed, but classification still branches over many symbol/type/storage facts. |
 | `cleanup_entry.rb` | `A-` | Strong cleanup recipe object; keep new lifecycle metadata here rather than in hashes. |
@@ -233,13 +261,13 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 | `fsm_ops.rb` | `A-` | Typed FSM op DSL; production `ZigLit`/pre-emission Zig escape paths are gone. |
 | `fsm_transform.rb` | `B` | Good facade; no major local issue. |
 | `fsm_wrapper_emitter.rb` | `B+` | Mostly mechanical wrapper emission; keep semantic decisions out and maintain typed wrapper body inputs. |
-| `hoist.rb` | `B-` | Anonymous allocation hoisting and cleanup target stamping are more typed, but this remains a complex ownership/cleanup branch surface. |
+| `hoist.rb` | `B` | Anonymous allocation hoisting and cleanup target stamping now expose stronger typed hoist bindings, but this remains a complex ownership/cleanup branch surface. |
 | `materialization.rb` | `A-` | Good packet abstraction for allocation/binding/cleanup emission. |
-| `mir.rb` | `B-` | Large IR/fact definition file; typed aliases and structural nodes improved the safety surface, but the node/fact inventory is still broad. |
+| `mir.rb` | `B-` | Large IR/fact definition file; typed aliases and structural nodes improved the safety surface, but the node/fact inventory is still broad and `MIR::Lit` remains too permissive for target-spelled defaults. |
 | `mir_checker.rb` | `B` | Critical safety gate with explicit typed facts and closed ownership surfaces, but `check_fn!` and `@errors` lifecycle remain broad. |
 | `mir_emitter.rb` | `B+` | Mostly mechanical final rendering edge; must not absorb semantic decisions from lowering. |
 | `mir_lowering.rb` | `B+` | Much less stateful than before and mostly delegates through typed phase state; still the broadest coordinator. |
-| `mir_pass.rb` | `B` | Useful phase coordinator with stronger ownership preparation facts; return allocator, BG resource capture, and consumed-walk logic still need branch discipline. |
+| `mir_pass.rb` | `B+` | Useful phase coordinator with explicit body-summary and hoist-binding inputs; return allocator, BG resource capture, and consumed-walk logic still need branch discipline. |
 | `placement.rb` | `A-` | Small typed placement helper; no major issue identified. |
 | `pre_mir_type_check.rb` | `B+` | Good invariant boundary; coverage should stay high for new AST node kinds. |
 | `test_lowering.rb` | `B` | Test DSL lowering is bounded; active stub state creates some state scatter. |
@@ -249,6 +277,7 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
+| `context.rb` | `B+` | Typed FSM emission context is a good boundary; fields like `promise_zig`, runtime names, and context type strings must remain emitter-context spelling and not become semantic facts. |
 | `emit.rb` | `B+` | Former major red flag closed: cleanup/finalization is structural and checker-visible; remaining work is keeping recursive emission/liveness inputs typed. |
 | `liveness.rb` | `B` | Liveness facts are isolated; fat-union candidate around assignment/bind/var-decl common fields. |
 | `recursive_splitter.rb` | `B-` | Splitter is no longer part of an opaque cleanup/string path, but some loose walker and context shapes remain. |
@@ -283,7 +312,7 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 | `concurrency.rb` | `B` | BG/DO/NEXT lowering is explicit, but stream and capture paths still branch over many async/runtime facts. |
 | `control_flow.rb` | `B-` | Loop/match plans help, but `for_each_loop_stmt` remains a high conditional-delegation hub. |
 | `counters.rb` | `A` | Small typed counter state; no issue identified. |
-| `expressions.rb` | `B-` | Copy, cast, index, smooth, and OR/error lowering still carry dense type/state decisions. |
+| `expressions.rb` | `B-` | Copy, cast, index, smooth, and OR/error lowering still carry dense type/state decisions; `or_pass_fallback` also creates Zig-spelled default `MIR::Lit` values that should become structural default-value MIR. |
 | `functions.rb` | `B-` | Function and intrinsic lowering are broad branch hubs over stdlib contracts, ownership, alloc metadata, and runtime needs. |
 | `literals.rb` | `B` | Literal plans are useful; list/hash ownership and collection shape branches still need coverage. |
 | `ownership_scanner.rb` | `B+` | Good focused scanner; no major issue identified. |
@@ -303,15 +332,18 @@ Overall architecture/design: `B+`. Overall implementation: `B`.
 | File | Rating | Outstanding issues |
 | --- | --- | --- |
 | `bg_capture_classifier.rb` | `B+` | Good shared semantic classifier; no major issue identified. |
+| `capability_plan.rb` | `B+` | Good typed capability-transition plan boundary; `from_ast` still reads loose AST capability hashes and should stay the only adapter for that shape. |
 | `capture_strategy.rb` | `B+` | Typed capture strategy objects are a good boundary. |
-| `concurrency_checks.rb` | `B` | Useful semantic checks; some inputs remain loose AST/function metadata. |
+| `concurrency_checks.rb` | `B+` | Useful semantic checks now consume body summaries instead of rewalking functions; some inputs remain loose AST/function metadata. |
 | `effect_inference.rb` | `B+` | Small inference helper; no major issue identified. |
 | `effect_set.rb` | `B+` | Small effect value; branch coverage is low because it is tiny and should be easy to close. |
-| `escape_analysis.rb` | `B` | Important shared phase with stronger typed ownership identities; caller sync, placement, and lambda capture logic remain broad. |
+| `escape_analysis.rb` | `B+` | Important shared phase now consumes body summaries and hoist bindings with stronger typed ownership identities; caller sync, placement, and lambda capture logic remain broad. |
 | `local_binding_facts.rb` | `B+` | Good local fact object; no major issue identified. |
+| `ownership_identity.rb` | `A-` | Good stable binding/place identity value objects; continue migrating callers away from string-name identity. |
 | `ownership_graph.rb` | `B` | Centralizing move/borrow facts is right and stable place IDs help; graph/node lifecycle is still a temporal-ordering surface. |
 | `pass_state.rb` | `A-` | Good explicit pass-state contract; keep new phases registered here rather than inferred. |
 | `pass_work_profiler.rb` | `B` | Useful instrumentation; no core compiler risk, but profiling state is mutable and broad. |
+| `semantic_index.rb` | `A-` | Good typed index over program/root scope/function registry/body summaries; it should grow as the shared fact handoff instead of adding new annotator ivars. |
 
 ### `src/tools/`
 

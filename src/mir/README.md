@@ -106,11 +106,11 @@ capture, or type decisions.
 | `moved_guard_info` | `MIRPass` from ownership dataflow and cleanup entries | `MIRLowering` | Preserves branch-sensitive move state so cleanup can be guarded instead of unconditional. |
 | `MIR::OwnershipEffect` | MIR node classes and lowering helpers | Hoist/lowering ownership finalization | States whether an expression produces an owned result, which allocator owns it, whether it needs hoisting, and what target binding carries it. |
 | `MIR::OwnershipOperandFact` and `MIR::OwnershipConsumptionFact` | Lowering at the consuming edge | `MIRLowering` ownership finalization and `MIRChecker` | Describes exactly which operands are owned, borrowed, or non-owning at a consuming operation. This avoids later tree/name inference. |
-| `MIR::OwnershipContract` and `MIR::CallableContract` | Function/intrinsic lowering and raw/inline escape hatches | `MIRChecker` and ownership finalization | Makes calls and template escape hatches declare their consuming parameters and checked arity. |
+| `MIR::OwnershipContract` and `MIR::CallableContract` | Function/intrinsic lowering and callable MIR nodes | `MIRChecker` and ownership finalization | Makes calls declare their consuming parameters and checked arity without hiding ownership behavior in rendered Zig. |
 | `MIR::AllocMark`, `Cleanup`, `ErrCleanup`, `TransferMark`, `MoveMark` | MIR lowering and ownership finalization | `MIRChecker`, then `MIREmitter` | Turns abstract ownership decisions into a visible lifecycle surface that can be checked for leaks, double frees, and use-after-move. |
 | `MIR::BoundaryCaptureFact` and `MIR::ExecutionBoundaryFact` | Concurrency/BG lowering from capture analysis | `MIRChecker` and audit tooling | Records what crosses BG/DO/stream boundaries and whether dispatch is local, pinned, or parallel. |
 | `MIR::FsmOwnershipFact` and `MIR::FsmResultTransferFact` | FSM lowering and transform helpers | FSM finalization/emission and checker paths | Carries ownership transfer evidence across suspend/resume segmentation. |
-| `InlineAllocMetadata` and inline/raw Zig audit metadata | Intrinsic/template lowering | `MIRChecker` | Keeps legacy Zig escape hatches accountable for allocator and opaque ownership behavior until they are fully structural. |
+| `InlineAllocMetadata` and structural inline-bytecode metadata | Intrinsic/std-lib lowering | `MIRChecker` | Keeps allocator and opaque ownership behavior checker-visible for intrinsic calls while preserving the invariant that Zig text is produced only by the emitter. |
 
 ### Short-Lived Plans
 

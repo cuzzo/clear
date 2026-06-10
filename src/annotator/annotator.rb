@@ -96,8 +96,34 @@ class SemanticAnnotator
     const :fn, String
   end
 
-  sig { returns(T.untyped) }
-  attr_reader :scope_stack
+  class HeldLockEntry < T::Struct
+    const :token, T.nilable(Lexer::Token)
+  end
+
+  HeldLockMap = T.type_alias { T::Hash[String, HeldLockEntry] }
+
+  class HeldLockTypeEntry < T::Struct
+    const :type, Symbol
+    const :opted_out, T::Boolean
+  end
+
+  DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
+
+  class ReceiverState < T::Struct
+    prop :scopes, T::Array[Scope], factory: -> { [Scope.new] }
+    prop :function_contexts, T::Array[FunctionContext], factory: -> { [] }
+    prop :loop_depth, Integer, default: 0
+    prop :conditional_depth, Integer, default: 0
+    prop :smooth_depth, Integer, default: 0
+    prop :held_locks, HeldLockMap, factory: -> { {} }
+    prop :held_lock_types, T::Array[HeldLockTypeEntry], factory: -> { [] }
+    prop :current_predicate_context, T.nilable(CapabilityHelper::PredicateContext), default: nil
+    prop :deferred_with_validations,
+      T::Array[Annotator::Phases::DeferredWithValidation],
+      factory: -> { [] }
+    prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
+    prop :capability_audit, CapabilityAudit::BindingAuditStore, factory: -> { {} }
+  end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
   def semantic_function_nodes
@@ -124,9 +150,14 @@ class SemanticAnnotator
     semantic_function_registry.register!(node)
   end
 
+  sig { returns(T::Array[Scope]) }
+  def scope_stack
+    @receiver_state.scopes
+  end
+
   sig { returns(Scope) }
   def semantic_root_scope
-    T.cast(@scope_stack.first, Scope)
+    T.must(@receiver_state.scopes.first)
   end
 
   sig { returns(T.nilable(AST::Program)) }
@@ -144,22 +175,22 @@ class SemanticAnnotator
 
   sig { returns(T::Array[HeldLockTypeEntry]) }
   def semantic_held_lock_types
-    @held_lock_types || []
+    current_held_lock_types
   end
 
   sig { returns(Integer) }
   def pending_deferred_validation_count
-    @deferred_with_validations.length
+    @receiver_state.deferred_with_validations.length
   end
 
   sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
   def deferred_with_validations
-    @deferred_with_validations
+    @receiver_state.deferred_with_validations
   end
 
   sig { returns(T.nilable(FunctionContext)) }
   def current_fn_ctx
-    @function_context_stack.last
+    @receiver_state.function_contexts.last
   end
 
   sig { returns(FunctionContext) }
@@ -169,14 +200,14 @@ class SemanticAnnotator
 
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
-    @function_context_stack << ctx
+    @receiver_state.function_contexts << ctx
     ctx
   end
   private :push_function_context!
 
   sig { returns(T.nilable(FunctionContext)) }
   def pop_function_context!
-    @function_context_stack.pop
+    @receiver_state.function_contexts.pop
   end
   private :pop_function_context!
 
@@ -210,19 +241,116 @@ class SemanticAnnotator
     fn_ctx = current_fn_ctx
     if fn_ctx
       fn_ctx.enter_conditional!
-      begin
-        blk.call
-      ensure
-        fn_ctx.exit_conditional!
-      end
     else
-      @conditional_depth += 1
-      begin
-        blk.call
-      ensure
-        @conditional_depth -= 1
-      end
+      @receiver_state.conditional_depth += 1
     end
+    blk.call
+  ensure
+    if fn_ctx
+      fn_ctx.exit_conditional!
+    else
+      @receiver_state.conditional_depth -= 1
+    end
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_loop_context(&blk)
+    fn_ctx = current_fn_ctx
+    if fn_ctx
+      fn_ctx.enter_loop!
+    else
+      @receiver_state.loop_depth += 1
+    end
+    blk.call
+  ensure
+    if fn_ctx
+      fn_ctx.exit_loop!
+    else
+      @receiver_state.loop_depth -= 1
+    end
+  end
+
+  sig do
+    params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean)
+      .returns(T::Array[BasicObject])
+  end
+  def analyze_loop_control_flow_branches(branches, merge_to_parent:)
+    with_loop_context do
+      analyze_control_flow_branches(branches, merge_to_parent: merge_to_parent)
+    end
+  end
+  private :analyze_loop_control_flow_branches
+
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
+  def with_smooth_context(&blk)
+    @receiver_state.smooth_depth += 1
+    blk.call
+  ensure
+    @receiver_state.smooth_depth -= 1
+  end
+
+  sig { returns(Integer) }
+  def smooth_depth
+    @receiver_state.smooth_depth
+  end
+
+  sig { returns(Integer) }
+  def current_loop_depth
+    current_fn_ctx&.loop_depth || @receiver_state.loop_depth
+  end
+
+  sig { returns(Integer) }
+  def current_conditional_depth
+    current_fn_ctx&.conditional_depth || @receiver_state.conditional_depth
+  end
+
+  sig { returns(HeldLockMap) }
+  def current_held_locks
+    @receiver_state.held_locks
+  end
+
+  sig { returns(T::Array[HeldLockTypeEntry]) }
+  def current_held_lock_types
+    @receiver_state.held_lock_types
+  end
+
+  sig { returns(T.nilable(CapabilityHelper::PredicateContext)) }
+  def current_predicate_context
+    @receiver_state.current_predicate_context
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        ctx: CapabilityHelper::PredicateContext,
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_predicate_context(ctx, &blk)
+    previous = @receiver_state.current_predicate_context
+    @receiver_state.current_predicate_context = ctx
+    blk.call
+  ensure
+    @receiver_state.current_predicate_context = previous
+  end
+
+  sig { returns(T::Array[CapabilityHelper::PredicateCallSite]) }
+  def predicate_call_sites
+    @receiver_state.predicate_call_sites
+  end
+
+  sig { returns(CapabilityAudit::BindingAuditStore) }
+  def capability_audit
+    @receiver_state.capability_audit
   end
 
   sig do
@@ -237,19 +365,6 @@ class SemanticAnnotator
   ensure
     @match_pattern_context = T.let(previous == true, T.nilable(T::Boolean))
   end
-
-  class HeldLockEntry < T::Struct
-    const :token, T.nilable(Lexer::Token)
-  end
-
-  HeldLockMap = T.type_alias { T::Hash[String, HeldLockEntry] }
-
-  class HeldLockTypeEntry < T::Struct
-    const :type, Symbol
-    const :opted_out, T::Boolean
-  end
-
-  DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
   sig { params(family: Symbol).returns(T::Array[Symbol]) }
   def with_match_family_effects(family)
@@ -273,26 +388,24 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_held_locks(node, lock_capabilities, &blk)
-    previous_locks = T.let(@held_locks || {}, HeldLockMap)
-    previous_types = T.let(@held_lock_types || [], T::Array[HeldLockTypeEntry])
-    current_locks = T.let(previous_locks.dup, HeldLockMap)
-    current_types = T.let(previous_types.dup, T::Array[HeldLockTypeEntry])
-    @held_locks = T.let(current_locks, T.nilable(HeldLockMap))
-    @held_lock_types = T.let(current_types, T.nilable(T::Array[HeldLockTypeEntry]))
+    previous_locks = @receiver_state.held_locks
+    previous_types = @receiver_state.held_lock_types
+    @receiver_state.held_locks = previous_locks.dup
+    @receiver_state.held_lock_types = previous_types.dup
     opted_out = !node.deadlock_escape.nil?
 
     lock_capabilities.each do |capability|
       variable_name = capability.var_name
       token = capability.var_node.respond_to?(:token) ? capability.var_node.token : node.token
-      current_locks[variable_name] ||= HeldLockEntry.new(token: token)
+      @receiver_state.held_locks[variable_name] ||= HeldLockEntry.new(token: token)
       lock_type = capability.lock_identity
-      current_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
+      @receiver_state.held_lock_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
     end
 
     blk.call
   ensure
-    @held_locks = T.let(previous_locks, T.nilable(HeldLockMap))
-    @held_lock_types = T.let(previous_types, T.nilable(T::Array[HeldLockTypeEntry]))
+    @receiver_state.held_locks = T.must(previous_locks)
+    @receiver_state.held_lock_types = T.must(previous_types)
   end
 
   sig do
@@ -330,23 +443,14 @@ class SemanticAnnotator
     @source_dir = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
     @strict_test = strict_test
     @source_code = source_code
-    # We start with a global scope
-    @scope_stack = T.let([Scope.new], T::Array[T.untyped])
-    @function_context_stack = T.let([], T::Array[FunctionContext])
-    @loop_depth = T.let(0, Integer) # Track if we are inside a loop
-    @conditional_depth = T.let(0, Integer) # Track if we are inside an IF branch or MATCH arm
-    @smooth_depth = T.let(0, Integer)
+    @receiver_state = T.let(ReceiverState.new, ReceiverState)
     @match_pattern_context = T.let(false, T.nilable(T::Boolean)) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
-    @held_locks = T.let({}, T.nilable(HeldLockMap))
-    @held_lock_types = T.let([], T.nilable(T::Array[HeldLockTypeEntry]))
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_predicate_context = T.let(nil, T.nilable(CapabilityHelper::PredicateContext))
-    @capability_audit = T.let({}, CapabilityAudit::BindingAuditStore)
     @effect_state = T.let(nil, T.nilable(EffectTracker::EffectState))
     @in_auto_locked_assign = T.let(nil, T.nilable(String))
     @with_block_depth = T.let(0, Integer)
@@ -356,8 +460,6 @@ class SemanticAnnotator
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
-    @deferred_with_validations = T.let([], T::Array[Annotator::Phases::DeferredWithValidation])
-    @predicate_call_sites = T.let([], T::Array[CapabilityHelper::PredicateCallSite])
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -567,7 +669,7 @@ private
   # Outer scope variable set.
   sig { returns(T::Set[String]) }
   def outer_scope_vars
-    @scope_stack.flat_map(&:visible_names).to_set
+    @receiver_state.scopes.flat_map(&:visible_names).to_set
   end
 
   sig { params(node: AST::Program).returns(T.untyped) }

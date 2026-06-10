@@ -760,3 +760,68 @@ Remaining major work:
   preserves stable places and synthetic provenance.
 - The guardrail is report-only. It should become fail-on-new-violation after
   the remaining legitimate migration exceptions are explicitly classified.
+
+### 2026-06-10 Receiver-State Completion Pass
+
+Current status:
+
+- Complete: function/body facts no longer live in `@fn_nodes`,
+  `@body_summaries`, or repeated late source-body scans. `FunctionRegistry`,
+  `FunctionBodySummary`, and `SemanticIndex` are the current fact boundary.
+- Complete: whole-program consumers covered by the earlier plan consume body
+  summaries for calls, returns, raises, suspend points, escape seeds, and
+  `WITH` scopes.
+- Complete in this pass: scope/context stacks, loop/conditional/smooth depths,
+  held-lock state, capability predicate context, deferred validations,
+  predicate call sites, and capability audit storage now sit behind the typed
+  `SemanticAnnotator::ReceiverState` owner. Compatibility accessors remain for
+  existing callers, but direct readers/writers no longer reach separate
+  untyped receiver ivars.
+- Still open but deferred from this pass: ownership graph extraction. Direct
+  `@og` use is memory-safety-critical and spread through lifetime/control-flow
+  logic; it needs a dedicated typed ownership-domain facade, not a generic
+  state bag.
+
+Implementation notes for this pass:
+
+1. `ReceiverState` is a typed record rather than five separate lifecycle helper
+   classes. The first implementation used separate state wrappers, but
+   Decomplex correctly treated those as extra public protocol/state-machine
+   surface. Collapsing them kept the single-owner invariant while avoiding a
+   new cloud of wrapper methods.
+2. Scope, function context, control-flow depth, held-lock, predicate context,
+   deferred-validation, predicate-call-site, and audit access now route through
+   the receiver-state owner.
+3. `ScopeHelper#with_new_scope` now restores scopes in `ensure`; this fixes a
+   real exceptional-exit protocol hole.
+4. Focused tests cover scope restoration, function/loop/conditional/smooth
+   restoration, held-lock restoration, and predicate-context restoration with
+   predicate call-site persistence.
+5. Ownership graph extraction remains intentionally outside this pass because
+   it controls memory-safety facts and should become a dedicated ownership
+   facade with stable place IDs rather than another state bag.
+
+Exit criteria:
+
+- New/changed source code is strongly typed.
+- Changed lines are fully covered and changed branches are above 80%.
+- Decomplex moves down overall, especially state heatmap / broken protocols /
+  temporal ordering pressure, or any exception is documented with a concrete
+  reason and rejected follow-up.
+- `src/annotator/README.md` and this document match the implemented state
+  boundary.
+
+Final metric note for this pass:
+
+- Decomplex total stayed flat at `5794`.
+- State heatmap improved `572 -> 567` (`-5`).
+- State-based branch density improved `1600 -> 1598` (`-2`).
+- Broken protocols improved `410 -> 406` (`-4`).
+- Temporal ordering pressure stayed flat at `14`.
+- Exact predicate aliases stayed flat at `16`.
+- False simplicity increased `1026 -> 1032` (`+6`). The added findings are the
+  explicit scoped state APIs (`with_predicate_context`, `with_smooth_context`,
+  `with_loop_context`, and receiver-state field access), not new business-rule
+  branches. The first implementation with five helper state classes made this
+  worse; the final `ReceiverState` record keeps one owner while avoiding most
+  wrapper-method noise.

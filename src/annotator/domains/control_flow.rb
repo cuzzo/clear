@@ -698,9 +698,7 @@ module Annotator
         error!(node, :FOR_RANGE_END_NEEDS_INT64, got: end_type) unless end_type == :Int64
 
         # 2. Analyze body in new scope with loop variable declared as immutable Int64
-        fn_ctx = current_fn_ctx
-        if fn_ctx then fn_ctx.enter_loop! else @loop_depth += 1 end
-        analyze_control_flow_branches([
+        analyze_loop_control_flow_branches([
           proc {
             current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
@@ -711,7 +709,6 @@ module Annotator
             node.deferred_drops
           }
         ], merge_to_parent: false)
-        if fn_ctx then fn_ctx.exit_loop! else @loop_depth -= 1 end
 
         # 4. TIGHT validation (same as WhileLoop).
         if node.tight
@@ -747,8 +744,7 @@ module Annotator
         elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
 
         # 2. Analyze body with loop variable
-        current_fn_ctx&.enter_loop!
-        analyze_control_flow_branches([
+        analyze_loop_control_flow_branches([
           proc {
             current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
             record_capture_local!(node.var_name.to_s)
@@ -759,7 +755,6 @@ module Annotator
             node.deferred_drops
           }
         ], merge_to_parent: false)
-        current_fn_ctx&.exit_loop!
 
         stamp_type!(node, :Void)
       end
@@ -782,14 +777,11 @@ module Annotator
         end
 
         # 2. Analyze Body in a New Scope AND increment loop depth
-        fn_ctx = current_fn_ctx
-        if fn_ctx then fn_ctx.enter_loop! else @loop_depth += 1 end
-
         # We use analyze_control_flow_branches to handle state merging and drops.
         # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
         pre_loop_states = @og&.fork_lightweight
 
-        analyze_control_flow_branches([
+        analyze_loop_control_flow_branches([
           proc {
             if node.do_branch.is_a?(Array)
               visit_stmts(node.do_branch)
@@ -824,8 +816,6 @@ module Annotator
           }
         ], merge_to_parent: false)
 
-        if fn_ctx then fn_ctx.exit_loop! else @loop_depth -= 1 end
-
         # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
         # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
         # Does NOT recurse into bodies of called CLEAR functions — those are separate
@@ -856,8 +846,6 @@ module Annotator
           unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
         end
 
-        current_fn_ctx&.enter_loop!
-
         pre_loop_states = @og&.fork_lightweight
 
         # Footgun guard: a MethodCall on an immutable receiver cannot advance the
@@ -871,7 +859,7 @@ module Annotator
           end
         end
 
-        analyze_control_flow_branches([
+        analyze_loop_control_flow_branches([
           proc {
             current_scope.declare(node.binding_name, nil, unwrapped, false, false, nil, :stack)
             record_capture_local!(node.binding_name.to_s)
@@ -905,8 +893,6 @@ module Annotator
           }
         ], merge_to_parent: false)
 
-        current_fn_ctx&.exit_loop!
-
         node.mark_per_iter = false
         stamp_type!(node, :Void)
       end
@@ -920,7 +906,7 @@ module Annotator
       def visit_BreakNode(node)
         T.bind(self, SemanticAnnotator)
 
-        if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
+        if current_loop_depth <= 0
           error!(node, :BREAK_OUTSIDE_LOOP)
         end
         stamp_type!(node, :Void)
@@ -930,7 +916,7 @@ module Annotator
       def visit_ContinueNode(node)
         T.bind(self, SemanticAnnotator)
 
-        if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
+        if current_loop_depth <= 0
           error!(node, :CONTINUE_OUTSIDE_LOOP)
         end
         stamp_type!(node, :Void)

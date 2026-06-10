@@ -89,7 +89,7 @@ leaked.
 | `full_type` stamps on AST nodes | Visitor/domain methods through `stamp_type!` | Every annotator post-pass, `PreMirTypeCheck`, MIR lowering, diagnostics | Gives every expression-like node one authoritative type and rejects `:Untyped` before MIR. |
 | `Scope` and `SymbolEntry` | Builtin setup, declaration visitors, parameter/capture registration | Name resolution, ownership/lifetime checks, escape analysis, MIR cleanup/storage decisions | Records binding identity, type, mutability, storage, sync, ownership, lifetime, and flow facts. |
 | Type/schema registries | Type declaration and builtin phases | Expression visitors, generic validation, union/member access, MIR lowering | Makes structs, unions, resources, aliases, and extern/native shapes available before bodies are analyzed. |
-| `FunctionSignature` and `@fn_nodes` | Signature registration and function body analysis | Call resolution, Auto inference, effects/fallibility, reentrance checks, MIR call lowering | Lets calls resolve before bodies run and carries final return/effect/capability metadata. |
+| `FunctionSignature`, `FunctionRegistry`, and `SemanticIndex` | Signature registration and function body analysis | Call resolution, Auto inference, effects/fallibility, reentrance checks, MIR call lowering, MIR pass preparation | Lets calls resolve before bodies run and carries final return/effect/capability metadata through a typed registry/index instead of loose annotator receiver fields. |
 | `FunctionContext` | Routine analysis | Return checking, loop/control-flow validation, stack/runtime metadata | Keeps per-routine state out of global variables while a body is being visited. |
 | `AST::ReturnFact` | Return visitors | Function return finalization, fallibility checks, diagnostics | Preserves return type/value evidence for later declared/inferred return validation. |
 | Auto slot/evidence maps | `AutoConstraintCollector`, shape/operator collectors, `AutoUnifier` | Auto finalization and fix generation | Defers `Auto` decisions until enough initializer, call, shape, return, and operator evidence exists. |
@@ -143,11 +143,9 @@ Files:
 the pass:
 
 ```ruby
-@scope_stack = [Scope.new]
-@function_context_stack = []
-@fn_nodes = {}
-@call_graph = {}
-@deferred_with_validations = []
+@receiver_state = ReceiverState.new
+@function_registry = Annotator::FunctionRegistry.new
+@semantic_index = nil
 @og = OwnershipGraph.new
 ```
 
@@ -156,11 +154,15 @@ types, resources, and schemas into the root scope.
 
 The current implementation is organized into phase, domain, and helper modules
 included into `SemanticAnnotator`. That is materially easier to navigate than a
-single large visitor, but it is still one object with shared mutable state.
-The long-term A-tier shape is smaller phase objects with explicit context and
-result types, especially for call graph, effects, capabilities, and lock
-analysis. Shared analyses that are consumed by both annotation and MIR live in
-[`../semantic`](../semantic) rather than under MIR.
+single large visitor, and the highest-pressure receiver fields now sit behind
+a typed `ReceiverState` owner for scope, function context, control-flow depth,
+held locks, and capability predicate/deferred-validation/audit state. Function
+registry and semantic index are separate typed objects because they are exported
+phase products. The remaining long-term A-tier shape is smaller phase objects
+with explicit context and result types, especially for ownership graph,
+capability validation, and pipe analysis. Shared analyses that are consumed by
+both annotation and MIR live in [`../semantic`](../semantic) rather than under
+MIR.
 
 ### 1. Entry Point
 
@@ -280,9 +282,9 @@ Function signatures are registered before function bodies are visited. During
 ```text
 validates declared type annotations
   -> registers a FunctionSignature in the root scope
-  -> records the FunctionDef in @fn_nodes
+  -> records the FunctionDef in FunctionRegistry
   -> analyzes params, captures, body, and returns
-  -> records call graph and fallibility edges
+  -> records typed body summaries, call graph, and fallibility edges
 ```
 
 For the example:
@@ -512,8 +514,9 @@ finalize_async_execution_shapes!
 ```
 
 The final `FunctionSignature` objects are updated with `can_fail`, `effects`,
-and `stack_tier` so later callers and MIR passes do not need to inspect
-`@fn_nodes` directly.
+and `stack_tier` so later callers and MIR passes consume the typed
+`FunctionRegistry` / `SemanticIndex` boundary instead of inspecting annotator
+receiver state directly.
 
 Fallibility is resolved late because it depends on the transitive call graph
 and on whether error channels are absorbed locally. Error-union return

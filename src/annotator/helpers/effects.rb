@@ -198,20 +198,6 @@ module EffectTracker
     end
   end
 
-  sig { returns(Integer) }
-  def current_loop_depth
-    T.bind(self, SemanticAnnotator) rescue nil
-    @loop_depth = T.let(@loop_depth, T.untyped)
-    current_fn_ctx&.loop_depth || @loop_depth || 0
-  end
-
-  sig { returns(Integer) }
-  def current_conditional_depth
-    T.bind(self, SemanticAnnotator) rescue nil
-    @conditional_depth = T.let(@conditional_depth, T.untyped)
-    current_fn_ctx&.conditional_depth || @conditional_depth || 0
-  end
-
   # Record a call site's context so transitive propagation can promote the
   # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
   sig { params(callee_name: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
