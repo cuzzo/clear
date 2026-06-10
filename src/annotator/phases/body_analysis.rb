@@ -9,7 +9,7 @@ module Annotator
   module Phases
     BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
     AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
-    WithScopeNodes = T.type_alias { T::Hash[AST::WithBlock, T::Array[AST::Locatable]] }
+    WithScopeNodes = T.type_alias { T::Hash[Integer, T::Array[AST::Locatable]] }
 
     class BodyScanSummary < T::Struct
       const :callees, T::Set[String]
@@ -22,6 +22,7 @@ module Annotator
       const :assignment_nodes, T::Array[AssignmentNode], factory: -> { [] }
       const :escape_nodes, T::Array[AST::Locatable], factory: -> { [] }
       const :with_scope_nodes, WithScopeNodes, factory: -> { {} }
+      const :with_blocks, T::Array[AST::WithBlock], factory: -> { [] }
       const :suspend_points, T::Array[T::Hash[Symbol, T.untyped]], factory: -> { [] }
       const :pipe_input_types, T::Set[String], factory: -> { Set.new }
       const :references_snapshot, T::Boolean, default: false

@@ -80,7 +80,8 @@ module WithMatchCheck
       end
 
       # Rule 1: WITH-on-param ⇒ REQUIRES-on-param.
-      bound_params.each do |pname|
+      requires_bound_params = node.polymorphic ? bound_params : collect_sync_bound_param_names(node, param_names)
+      requires_bound_params.each do |pname|
         next if requires_map.key?(pname)
 
         # `WITH POLYMORPHIC` on a param without REQUIRES is universally
@@ -167,6 +168,17 @@ module WithMatchCheck
   def self.collect_bound_param_names(with_node, param_names)
     out = Set.new
     CapabilityPlan.require_for(with_node).all.each do |cap|
+      vn = cap.var_node
+      next unless vn.is_a?(AST::Identifier)
+      out << vn.name if param_names.include?(vn.name)
+    end
+    out
+  end
+
+  sig { params(with_node: AST::WithBlock, param_names: T::Set[String]).returns(T::Set[String]) }
+  def self.collect_sync_bound_param_names(with_node, param_names)
+    out = Set.new
+    CapabilityPlan.require_for(with_node).sync_constrained.each do |cap|
       vn = cap.var_node
       next unless vn.is_a?(AST::Identifier)
       out << vn.name if param_names.include?(vn.name)

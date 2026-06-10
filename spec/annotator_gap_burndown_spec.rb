@@ -3240,6 +3240,26 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(errors.join).to include("not constrained by REQUIRES")
 
+    borrowed_param = AST::Param.new(name: "data", type: Type.new(:"Int64[]"), default: nil, mutable: false, takes: false)
+    borrowed_id = AST::Identifier.new(token(:IDENTIFIER, "data"), "data")
+    borrowed_id.symbol = SymbolEntry.new(reg: nil, type: Type.new(:"Int64[]"), mutable: false, storage: :stack)
+    borrowed_cap = AST::Capability.new(capability: :BORROWED, var_node: borrowed_id)
+    borrowed_with = AST::WithBlock.new(token(:WITH, "WITH"), [borrowed_cap], [])
+    attach_capability_plan!(borrowed_with)
+    borrowed_fn = function_def("borrow_only", params: [borrowed_param])
+    borrowed_errors = []
+
+    WithMatchCheck.check_function!(
+      borrowed_fn,
+      [borrowed_with],
+      ->(_node, message) { borrowed_errors << message },
+      warn_handler: ->(_node, message) { borrowed_errors << message },
+      policy_handlers: []
+    )
+
+    expect(borrowed_errors).to be_empty
+    expect(borrowed_fn.requires).to be_nil
+
     sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
     sig.requires = { "c" => Set[:LOCKED] }
     call_arg = AST::Identifier.new(token(:IDENTIFIER, "plain"), "plain")
@@ -3543,18 +3563,32 @@ RSpec.describe "annotator branch gap burndown" do
     outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
     inner_call = AST::FuncCall.new(token(:VAR_ID, "inner"), "inner", [])
     lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    bg_call = AST::FuncCall.new(token(:VAR_ID, "bg_inner"), "bg_inner", [])
+    concurrent_call = AST::FuncCall.new(token(:VAR_ID, "concurrent_inner"), "concurrent_inner", [])
     lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
     inner_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [inner_call], nil, nil)
-    outer_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [outer_call, lambda_node, inner_with], nil, nil)
+    bg_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [bg_call], nil, nil)
+    bg_node = AST::BgBlock.new(token(:BG, "BG"), [bg_with], nil, nil, false, false, nil, false)
+    concurrent_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [concurrent_call], nil, nil)
+    concurrent_node = AST::ConcurrentOp.new(
+      token(:CONCURRENT, "CONCURRENT"),
+      AST::EachOp.new(token(:EACH, "EACH"), [concurrent_with]),
+      {}
+    )
+    outer_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [outer_call, lambda_node, inner_with, bg_node, concurrent_node], nil, nil)
     allow(CapabilityPlan).to receive(:require_for).and_call_original
     allow(CapabilityPlan).to receive(:require_for).with(outer_with).and_return(double(locks: []))
     allow(CapabilityPlan).to receive(:require_for).with(inner_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(bg_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(concurrent_with).and_return(double(locks: []))
 
     summary = ann.send(:scan_for_calls, [outer_with])
 
-    expect(summary.with_scope_nodes.fetch(outer_with)).to include(outer_call, lambda_node, inner_with)
-    expect(summary.with_scope_nodes.fetch(outer_with)).not_to include(inner_call, lambda_call)
-    expect(summary.with_scope_nodes.fetch(inner_with)).to include(inner_call)
+    expect(summary.with_blocks).to eq([outer_with, inner_with])
+    expect(summary.with_scope_nodes.fetch(outer_with.object_id)).to include(outer_call, lambda_node, inner_with, bg_node, concurrent_node)
+    expect(summary.with_scope_nodes.fetch(outer_with.object_id)).not_to include(inner_call, lambda_call, bg_call, bg_with, concurrent_call, concurrent_with)
+    expect(summary.with_scope_nodes.fetch(inner_with.object_id)).to include(inner_call)
+    expect(summary.callees).to include("concurrent_inner")
   end
 
   it "keeps lambda calls out of call-site facts while preserving lambda failure facts" do

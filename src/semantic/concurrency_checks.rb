@@ -191,7 +191,7 @@ module ConcurrencyChecks
   sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, blk: T.untyped).returns(T.untyped) }
   def each_with_scope(with_blocks, with_scope_nodes, &blk)
     with_blocks.each do |node|
-      yield(node, with_scope_nodes.fetch(node))
+      yield(node, with_scope_nodes.fetch(node.object_id))
     end
   end
 

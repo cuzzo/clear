@@ -53,16 +53,31 @@ module Hoist
     end
   end
 
-  sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  class Result < T::Struct
+    extend T::Sig
+
+    const :bindings_by_function, T::Hash[String, T::Array[AST::VarDecl]]
+
+    sig { returns(T::Boolean) }
+    def empty?
+      bindings_by_function.empty?
+    end
+  end
+
+  sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).returns(Result) }
   def apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
     counter = HoistCounter.new
+    bindings_by_function = T.let({}, T::Hash[String, T::Array[AST::VarDecl]])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       next if synthesized_body?(stmt)
-      hoist_body!(stmt.body, counter, schema_lookup, return_type: stmt.return_type)
+      generated = T.let([], T::Array[AST::VarDecl])
+      hoist_body!(stmt.body, counter, schema_lookup, return_type: stmt.return_type, generated: generated)
+      bindings_by_function[stmt.name.to_s] = generated unless generated.empty?
     end
     MIRPassState.for!(ast).mark!(:hoisted)
+    Result.new(bindings_by_function: bindings_by_function)
   end
 
   # THUNK bodies are not lowered as normal statement lists. They are consumed
@@ -77,8 +92,8 @@ module Hoist
 
   # Walk a statement list. For each statement, lift the hoistable
   # sub-expressions into temp decls inserted immediately before it.
-  sig { params(body: T::Array[AST::Node], counter: HoistCounter, schema_lookup: T.nilable(Proc), return_type: T.nilable(Type::TypeInput)).void }
-  def hoist_body!(body, counter, schema_lookup, return_type: nil)
+  sig { params(body: T::Array[AST::Node], counter: HoistCounter, schema_lookup: T.nilable(Proc), generated: T::Array[AST::VarDecl], return_type: T.nilable(Type::TypeInput)).void }
+  def hoist_body!(body, counter, schema_lookup, generated:, return_type: nil)
     return unless body.is_a?(Array)
     i = 0
     while i < body.length
@@ -86,11 +101,12 @@ module Hoist
       hoists = T.let([], T::Array[AST::VarDecl])
       collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: return_type)
       hoists.each_with_index { |decl, j| body.insert(i + j, decl) }
+      generated.concat(hoists)
       i += hoists.length
       # Recurse into nested statement bodies (control flow). Nested
       # functions / lambdas / BG blocks are separate frames -- each is
       # reached as its own AST::FunctionDef or handled separately.
-      child_bodies(stmt).each { |b| hoist_body!(b, counter, schema_lookup, return_type: return_type) }
+      child_bodies(stmt).each { |b| hoist_body!(b, counter, schema_lookup, return_type: return_type, generated: generated) }
       i += 1
     end
     nil

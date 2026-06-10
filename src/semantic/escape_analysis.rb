@@ -20,6 +20,7 @@ module EscapeAnalysis
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
+  HoistBindings = T.type_alias { T::Hash[String, T::Array[AST::VarDecl]] }
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
@@ -165,8 +166,8 @@ module EscapeAnalysis
     [result.heap_fns, result.bg_heap]
   end
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: T.nilable(BodySummaries)).returns(Result) }
-  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: T.nilable(BodySummaries), hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
+  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = nil, hoist_bindings = nil)
     validate_escape_sink_handlers!
     validate_derived_placement_handlers!
     validate_escape_sinks!
@@ -176,7 +177,7 @@ module EscapeAnalysis
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
 
     fn_nodes.each do |name, fn|
-      facts_by_name[name] = function_facts(fn, body_summaries&.[](name)) if fn.body
+      facts_by_name[name] = function_facts(fn, body_summaries&.[](name), hoist_bindings&.[](name)) if fn.body
     end
 
     facts_by_name.each_value do |facts|
@@ -858,8 +859,8 @@ module EscapeAnalysis
     facts.symbols[name]
   end
 
-  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary)).returns(FunctionFacts) }
-  private_class_method def self.function_facts(fn, summary = nil)
+  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary), hoist_bindings: T.nilable(T::Array[AST::VarDecl])).returns(FunctionFacts) }
+  private_class_method def self.function_facts(fn, summary = nil, hoist_bindings = nil)
     symbols = T.let({}, T::Hash[String, SymbolEntry])
     binding_values = T.let({}, T::Hash[String, T::Array[AST::Locatable]])
     return_values = T.let([], T::Array[AST::Node])
@@ -875,8 +876,10 @@ module EscapeAnalysis
         record_symbol_fact!(node, symbols) if node.is_a?(AST::BindExpr)
         assignment_nodes << node
       end
+      hoist_bindings&.each { |node| record_binding_fact!(node, symbols, binding_values) }
       summary.return_nodes.each { |node| return_values << node.value if node.value }
       escape_nodes.concat(summary.escape_nodes)
+      escape_nodes.concat(hoist_bindings) if hoist_bindings
       return FunctionFacts.new(
         fn: fn,
         symbols: symbols,

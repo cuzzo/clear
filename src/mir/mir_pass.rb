@@ -22,6 +22,7 @@ class MIRPass
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
   AstCall = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
+  HoistBindings = T.type_alias { T::Hash[String, T::Array[AST::VarDecl]] }
 
   # Read-only context threaded through transform_body / recurse_branches!.
   class WalkCtx < T::Struct
@@ -64,11 +65,12 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary])).void }
-  def initialize(fn_nodes:, schema_lookup:, body_summaries: nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]), hoist_bindings: T.nilable(HoistBindings)).void }
+  def initialize(fn_nodes:, schema_lookup:, body_summaries: nil, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
     @body_summaries = T.let(body_summaries, T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]))
+    @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
     @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
@@ -104,7 +106,7 @@ class MIRPass
 
     # Escape analysis writes final SymbolEntry#storage and now also returns the
     # typed placement table explaining which phase forced each heap placement.
-    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries)
+    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries, @hoist_bindings)
     @escape_placement_facts = escape_result.placements
     @bg_heap_upgraded = T.let(escape_result.bg_heap, T.untyped)
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)

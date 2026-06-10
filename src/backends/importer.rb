@@ -184,7 +184,7 @@ class ModuleImporter
     StringConcatRewriter.new.rewrite!(ast)
     MIRPassState.for!(ast).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    Hoist.apply!(ast, schema_lookup: schema_lookup)
+    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
 
     # Run MIRPass on the module AST (needed for cleanup stamps in function bodies).
     PreMirTypeCheck.verify!(ast)
@@ -193,7 +193,8 @@ class ModuleImporter
     mir_pass = MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
-      body_summaries: T.must(annotator.semantic_index).body_summaries
+      body_summaries: T.must(annotator.semantic_index).body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
     )
     mir_pass.transform!(ast)
     sync_global_scope_function_signatures!(ast, annotator)

@@ -854,7 +854,7 @@ private
       assignment_nodes: body_scan.assignment_nodes,
       escape_nodes: body_scan.escape_nodes,
       with_scope_nodes: body_scan.with_scope_nodes,
-      with_blocks: node.semantic_with_blocks
+      with_blocks: body_scan.with_blocks
     ))
     fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
 

@@ -1276,6 +1276,45 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(fact.binding.to_s).to eq("local##{entry.binding_id}")
   end
 
+  it "uses hoist binding facts to propagate returned aggregate ownership to sources" do
+    local_type = Type.new(:String)
+    source_decl = AST::VarDecl.new(tok, "source", local_type, lit("owned", type: :String), false)
+    source_entry = SymbolEntry.new(reg: source_decl, type: local_type, mutable: false, storage: :frame)
+    source_decl.symbol = source_entry
+    source_decl.full_type = local_type
+
+    source_ref = id("source", type: local_type, storage: :frame)
+    source_ref.symbol = source_entry
+    aggregate = AST::StructLit.new(tok, "Box", { "field" => source_ref }, :stack, nil)
+    aggregate.full_type = local_type
+
+    hoist_decl = AST::VarDecl.new(tok, "__hoist_1", local_type, aggregate, false)
+    hoist_entry = SymbolEntry.new(reg: hoist_decl, type: local_type, mutable: false, storage: :frame)
+    hoist_decl.symbol = hoist_entry
+    hoist_decl.full_type = local_type
+
+    returned = id("__hoist_1", type: local_type, storage: :frame)
+    returned.symbol = hoist_entry
+    ret = AST::ReturnNode.new(tok, returned)
+    analyzed_fn = fn([source_decl, hoist_decl, ret], return_type: local_type)
+    summaries = {
+      "main" => Annotator::Phases::FunctionBodySummary.new(
+        name: "main",
+        callees: Set.new,
+        propagating_callees: Set.new,
+        has_fnptr_call: false,
+        raises_directly: false,
+        return_nodes: [ret],
+        binding_nodes: [source_decl],
+      )
+    }
+
+    EscapeAnalysis.apply_with_facts!({ "main" => analyzed_fn }, nil, summaries, { "main" => [hoist_decl] })
+
+    expect(hoist_entry.storage).to eq(:heap)
+    expect(source_entry.storage).to eq(:heap)
+  end
+
   it "uses recorded body escape nodes for binding-result heap placement" do
     local_type = Type.new(:String)
     callee = fn([], return_type: local_type)
@@ -3873,7 +3912,7 @@ RSpec.describe "MIR gap-burn characterization" do
     ConcurrencyChecks.check_reentrant!(
       fn_node,
       [with_block],
-      { with_block => [call] },
+      { with_block.object_id => [call] },
       ->(name) { name == "touch" ? callee_sig : nil },
       ->(_node, msg) { errors << msg }
     )

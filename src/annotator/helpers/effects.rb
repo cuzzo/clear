@@ -1208,6 +1208,7 @@ module EffectTracker
     assignment_nodes = T.let([], T::Array[Annotator::Phases::AssignmentNode])
     escape_nodes = T.let([], T::Array[AST::Locatable])
     with_scope_nodes = T.let({}, Annotator::Phases::WithScopeNodes)
+    with_blocks = T.let([], T::Array[AST::WithBlock])
     suspend_points = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
     pipe_input_types = T.let(Set.new, T::Set[String])
     references_snapshot = T.let([false], T::Array[T::Boolean])
@@ -1223,64 +1224,74 @@ module EffectTracker
     return_nodes = T.let([], T::Array[AST::ReturnNode])
 
     traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n, absorbed, record_site, scope_stack|
+    traverse = lambda do |n, absorbed, record_site, scope_stack, record_with_scope|
       scopes = T.cast(scope_stack, T::Array[AST::WithBlock])
       if n.is_a?(AST::Locatable) && !n.is_a?(AST::FunctionDef)
         escape_nodes << n
-        scopes.each { |scope| (with_scope_nodes[scope] ||= []) << n }
+        scopes.each { |scope| (with_scope_nodes[scope.object_id] ||= []) << n }
       end
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
         # terminals
       when Array
-        n.each { |item| traverse.call(item, absorbed, record_site, scopes) }
+        n.each { |item| traverse.call(item, absorbed, record_site, scopes, record_with_scope) }
       when Hash
-        n.each_value { |v| traverse.call(v, absorbed, record_site, scopes) }
+        n.each_value { |v| traverse.call(v, absorbed, record_site, scopes, record_with_scope) }
       when AST::FunctionDef
         # Don't descend into nested function definitions (own scope).
       when AST::LambdaLit
-        n.each_pair { |_, v| traverse.call(v, absorbed, false, []) }
+        n.each_pair { |_, v| traverse.call(v, absorbed, false, [], false) }
       when AST::NextExpr
         suspend_points << { id: suspend_points.size, kind: :next, node: n }
-        traverse.call(n.expr, absorbed, record_site, scopes)
+        traverse.call(n.expr, absorbed, record_site, scopes, record_with_scope)
       when AST::YieldExpr
         suspend_points << { id: suspend_points.size, kind: :yield, node: n }
-        traverse.call(n.expr, absorbed, record_site, scopes)
+        traverse.call(n.expr, absorbed, record_site, scopes, record_with_scope)
       when AST::ReturnNode
         return_nodes << n
-        traverse.call(n.value, absorbed, record_site, scopes) if n.value
+        traverse.call(n.value, absorbed, record_site, scopes, record_with_scope) if n.value
       when AST::VarDecl
         binding_nodes << n
-        traverse.call(n.value, absorbed, record_site, scopes)
+        traverse.call(n.value, absorbed, record_site, scopes, record_with_scope)
       when AST::BindExpr
         if n.mode == :assign
           assignment_nodes << n
         else
           binding_nodes << n
         end
-        traverse.call(n.value, absorbed, record_site, scopes)
+        traverse.call(n.value, absorbed, record_site, scopes, record_with_scope)
       when AST::Assignment
         assignment_nodes << n
-        traverse.call(n.name, absorbed, record_site, scopes)
-        traverse.call(n.value, absorbed, record_site, scopes)
+        traverse.call(n.name, absorbed, record_site, scopes, record_with_scope)
+        traverse.call(n.value, absorbed, record_site, scopes, record_with_scope)
       when AST::Identifier
         references_snapshot[0] = true if n.name == "snapshot"
-      when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock
+      when AST::Raise, AST::OrRaise
         raises_directly[0] = true
-        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) } if n.respond_to?(:each_pair)
+        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes, record_with_scope) } if n.respond_to?(:each_pair)
+      when AST::BgBlock, AST::BgStreamBlock
+        raises_directly[0] = true
+        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, [], false) } if n.respond_to?(:each_pair)
+      when AST::ConcurrentOp
+        traverse.call(n.options, absorbed, record_site, scopes, record_with_scope)
+        traverse.call(n.op, absorbed, record_site, [], false)
       when AST::WithBlock
-        suspend_points << { id: suspend_points.size, kind: :lock, node: n } if with_block_suspends?(n)
+        if record_with_scope
+          with_blocks << n
+          suspend_points << { id: suspend_points.size, kind: :lock, node: n } if with_block_suspends?(n)
+          with_scope_nodes[n.object_id] ||= []
+        end
         raises_directly[0] = true if n.snapshot_mode == :transaction
         if (clause = n.lock_error_clause)
           action_raises = %i[raise exit].include?(clause.action)
           has_bubble = !clause.bubble_types.empty?
           raises_directly[0] = true if action_raises || has_bubble
-          traverse.call(clause, absorbed, record_site, [])
+          traverse.call(clause, absorbed, record_site, [], record_with_scope)
         end
-        with_scope_nodes[n] ||= []
-        traverse.call(n.capabilities, absorbed, record_site, [])
-        traverse.call(n.body, absorbed, record_site, [n])
-        n.arms&.each { |arm| traverse.call(arm, absorbed, record_site, [n]) }
+        traverse.call(n.capabilities, absorbed, record_site, [], record_with_scope)
+        body_scope = record_with_scope ? [n] : []
+        traverse.call(n.body, absorbed, record_site, body_scope, record_with_scope)
+        n.arms&.each { |arm| traverse.call(arm, absorbed, record_site, body_scope, record_with_scope) }
       when AST::BinaryOp
         if n.smooth? && n.left.respond_to?(:typed?) && n.left.typed?
           type = n.left.full_type!(context: "pipe input type")
@@ -1292,18 +1303,18 @@ module EffectTracker
           # it. Right side (the fallback expr) keeps the ambient context
           # -- if the fallback itself calls something fallible, that DOES
           # propagate.
-          traverse.call(n.left, absorbed || !rhs_propagates, record_site, scopes)
-          traverse.call(n.right, absorbed, record_site, scopes)
+          traverse.call(n.left, absorbed || !rhs_propagates, record_site, scopes, record_with_scope)
+          traverse.call(n.right, absorbed, record_site, scopes, record_with_scope)
         else
-          traverse.call(n.left, absorbed, record_site, scopes)
-          traverse.call(n.right, absorbed, record_site, scopes)
+          traverse.call(n.left, absorbed, record_site, scopes, record_with_scope)
+          traverse.call(n.right, absorbed, record_site, scopes, record_with_scope)
         end
       when AST::MethodCall
         if func_call_suspends?(n)
           kind = n.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
           suspend_points << { id: suspend_points.size, kind: kind, node: n }
         end
-        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) }
+        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes, record_with_scope) }
       when AST::FuncCall
         if func_call_suspends?(n)
           kind = n.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
@@ -1316,15 +1327,15 @@ module EffectTracker
           calls.add(n.name)
           unabsorbed.add(n.name) unless absorbed
         end
-        traverse.call(n.args, absorbed, record_site, scopes)
+        traverse.call(n.args, absorbed, record_site, scopes, record_with_scope)
       else
         if n.respond_to?(:each_pair)
-          n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) }
+          n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes, record_with_scope) }
         end
       end
     end
 
-    traverse.call(node, false, true, [])
+    traverse.call(node, false, true, [], true)
     Annotator::Phases::BodyScanSummary.new(
       callees: calls,
       propagating_callees: unabsorbed,
@@ -1336,6 +1347,7 @@ module EffectTracker
       assignment_nodes: assignment_nodes,
       escape_nodes: escape_nodes,
       with_scope_nodes: with_scope_nodes,
+      with_blocks: with_blocks,
       suspend_points: suspend_points,
       pipe_input_types: pipe_input_types,
       references_snapshot: T.must(references_snapshot[0])

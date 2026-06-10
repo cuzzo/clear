@@ -56,7 +56,7 @@ class CompilerFrontend
     # Hoist after all annotation-preserving rewrites so escape analysis
     # only ever sees symbol-bearing declarations, including synthetic
     # allocation expressions introduced by those rewrites.
-    Hoist.apply!(ast, schema_lookup: schema_lookup)
+    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
 
     fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
@@ -81,7 +81,8 @@ class CompilerFrontend
     mir_pass = MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
-      body_summaries: T.must(annotator.semantic_index).body_summaries
+      body_summaries: T.must(annotator.semantic_index).body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
     )
     mir_pass.transform!(ast)
 

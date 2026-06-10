@@ -1311,10 +1311,6 @@ class FunctionDef
 end
 
 class FunctionReturn
-  sig { returns(T.nilable(Type)) }
-  def fixed; end
-  sig { returns(T.nilable(Symbol)) }
-  def infer; end
   sig { returns(Kind) }
   def kind; end
 end
@@ -1778,10 +1774,6 @@ class Program
   sig { returns(T.untyped) }
   def items; end
   sig { returns(T.untyped) }
-  def mir_pass_state; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def mir_pass_state=(value); end
-  sig { returns(T.untyped) }
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_policy=(value); end
@@ -1873,10 +1865,8 @@ class Schemas::UnionSchema
 end
 
 class Scope
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, String]) }
   def dependencies; end
-  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
-  def dependencies=(value); end
   sig { returns(Integer) }
   def depth; end
   sig { params(value: Integer).returns(Integer) }
@@ -1914,6 +1904,8 @@ end
 class SemanticAnnotator
   sig { returns(T::Array[T.untyped]) }
   def scope_stack; end
+  sig { returns(T.nilable(SemanticIndex)) }
+  def semantic_index; end
   sig { returns(T.untyped) }
   def source_code; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -2002,6 +1994,8 @@ class SymbolEntry
   def layout; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value); end
+  sig { returns(BindingLifecycleFacts) }
+  def lifecycle; end
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
   sig { returns(T.nilable(Symbol)) }
