@@ -190,7 +190,11 @@ class ModuleImporter
     PreMirTypeCheck.verify!(ast)
     fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+    mir_pass = MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: T.must(annotator.semantic_index).body_summaries
+    )
     mir_pass.transform!(ast)
     sync_global_scope_function_signatures!(ast, annotator)
 

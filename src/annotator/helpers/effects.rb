@@ -15,8 +15,8 @@ require_relative "../../semantic/capability_plan"
 #
 # The result is stored on each FunctionDef node as `node.effects` (a frozen Set).
 #
-# Also includes reentrancy analysis helpers (scan_for_calls,
-# check_indirect_reentrancy!, scan_for_raises) since reentrancy is
+  # Also includes reentrancy analysis helpers (scan_for_calls,
+  # check_indirect_reentrancy!) since reentrancy is
 # both an effect and a call-graph property.
 module EffectTracker
     extend T::Sig
@@ -831,41 +831,7 @@ module EffectTracker
     fn_nodes = function_node_map
     fn_nodes.each do |_name, fn_node|
       next unless fn_node.fsm_eligible
-      points = []
-      scan_suspend_points(fn_node.body, fn_node, points)
-      fn_node.fsm_suspend_points = points
-    end
-  end
-
-  sig { params(node: T.untyped, fn_node: T.untyped, points: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.untyped) }
-  def scan_suspend_points(node, fn_node, points)
-    T.bind(self, SemanticAnnotator) rescue nil
-    case node
-    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      # terminal
-    when Array
-      node.each { |n| scan_suspend_points(n, fn_node, points) }
-    when AST::FunctionDef
-      # don't descend into nested defs
-    when AST::NextExpr
-      points << { id: points.size, kind: :next, node: node }
-      scan_suspend_points(node.expr, fn_node, points)
-    when AST::YieldExpr
-      points << { id: points.size, kind: :yield, node: node }
-      scan_suspend_points(node.expr, fn_node, points)
-    when AST::WithBlock
-      if with_block_suspends?(node)
-        points << { id: points.size, kind: :lock, node: node }
-      end
-      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
-    when AST::FuncCall, AST::MethodCall
-      if func_call_suspends?(node)
-        kind = node.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
-        points << { id: points.size, kind: kind, node: node }
-      end
-      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
-    else
-      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) } if node.respond_to?(:each_pair)
+      fn_node.fsm_suspend_points = scan_for_calls(fn_node.body).suspend_points
     end
   end
 
@@ -888,22 +854,15 @@ module EffectTracker
     callee = fn_nodes[node.name]
     return false unless callee
     effs = callee.effects
-    effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) }
+    !!(effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) })
   end
 
-  # --- BG spawn-form classifier (Phase A) ---
+  # --- Async execution-shape finalization ---
   #
-  # For each BgBlock / BgStreamBlock, decide whether it could be spawned as
-  # an FsmTask (:fsm) or must use the existing stackful fiber path
-  # (:stackful). A BG is :fsm iff every named function transitively reachable
-  # from the body is itself fsm_eligible. Pure-compute bodies (no SUSPENDS
-  # in the reachable set) are still :fsm — they collapse to a trivial
-  # 1-state machine that runs in a single dispatch.
-  #
-  # A BG is :stackful iff any transitive callee is REENTRANT or EXTERN, or
-  # the body directly calls a fn-variable / fn-pointer (opaque call graph).
-  sig { params(program_node: AST::Program).returns(T::Array[T.untyped]) }
-  def classify_bg_spawn_form!(program_node)
+  # One post-effect traversal finalizes all call-graph-derived async facts:
+  # BG spawn form, BG suspend points, and BG/DO stack tier requirements.
+  sig { params(program_node: AST::Program).void }
+  def finalize_async_execution_shapes!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
     traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
@@ -913,19 +872,22 @@ module EffectTracker
         n.each { |item| traverse.call(item) }
       when Hash
         n.each_value { |v| traverse.call(v) }
-      when AST::BgBlock, AST::BgStreamBlock
-        calls, has_fnptr = scan_for_calls(n.body)
-        # Explicit stack-size prefix (@micro / @large / @xl) is a user
-        # directive that the body needs a real stack — keep it stackful.
-        explicit_stack = n.respond_to?(:stack_size) && n.stack_size
-        if explicit_stack
-          n.spawn_form = :stackful
-          n.fsm_ineligible_reason = :explicit_stack_size
-        else
-          n.spawn_form, n.fsm_ineligible_reason = bg_spawn_form_for(calls, has_fnptr)
-        end
-        n.fsm_suspend_points = n.spawn_form == :fsm ? collect_bg_suspend_points(n) : nil
+      when AST::BgBlock
+        body_scan = scan_for_calls(n.body)
+        assign_bg_spawn_shape!(n, body_scan)
+        assign_async_stack_tier!(n, body_scan.callees, n.stack_size, n.can_smash, n)
         n.body.each { |s| traverse.call(s) }
+      when AST::BgStreamBlock
+        stream_body_scan = scan_for_calls(n.body)
+        assign_bg_spawn_shape!(n, stream_body_scan)
+        assign_async_stack_tier!(n, stream_body_scan.callees, n.stack_size, false, n)
+        n.body.each { |s| traverse.call(s) }
+      when AST::DoBlock
+        n.branches.each do |branch|
+          branch_body_scan = scan_for_calls(branch.body)
+          assign_async_stack_tier!(branch, branch_body_scan.callees, branch.stack_size, branch.can_smash, n)
+          branch.body.each { |s| traverse.call(s) }
+        end
       else
         n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
       end
@@ -933,12 +895,45 @@ module EffectTracker
     traverse.call(program_node.statements)
   end
 
-  # Returns [spawn_form, reason]. reason is non-nil only for :stackful.
-  sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(T::Array[T.nilable(Symbol)]) }
+  sig { params(node: T.untyped, body_scan: Annotator::Phases::BodyScanSummary).void }
+  def assign_bg_spawn_shape!(node, body_scan)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    if node.respond_to?(:stack_size) && node.stack_size
+      node.spawn_form = :stackful
+      node.fsm_ineligible_reason = :explicit_stack_size
+    else
+      decision = bg_spawn_form_for(body_scan.callees, body_scan.has_fnptr_call)
+      node.spawn_form = decision.spawn_form
+      node.fsm_ineligible_reason = decision.reason
+    end
+
+    node.fsm_suspend_points = node.spawn_form == :fsm ? body_scan.suspend_points : nil
+  end
+
+  sig do
+    params(
+      target: T.untyped,
+      calls: T::Set[String],
+      user_size: T.nilable(Symbol),
+      can_smash: T::Boolean,
+      validation_node: T.untyped,
+    ).void
+  end
+  def assign_async_stack_tier!(target, calls, user_size, can_smash, validation_node)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    raw = T.let(max_tier_for_calls(calls), Symbol)
+    target.computed_stack_tier = (raw == :unbounded) ? :service : raw
+    validate_fiber_stack!(validation_node, calls, user_size, can_smash)
+  end
+
+  # Returns a typed decision; reason is non-nil only for :stackful.
+  sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(Annotator::Phases::BgSpawnDecision) }
   def bg_spawn_form_for(callee_names, has_fnptr)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
-    return [:stackful, :fn_pointer] if has_fnptr
+    return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :fn_pointer) if has_fnptr
     visited = Set.new
     queue = callee_names.to_a.dup
     until queue.empty?
@@ -950,21 +945,13 @@ module EffectTracker
       # unless the callee is explicitly EXTERN at the scope level.
       next unless fn
       effs = fn.effects || Set.new
-      return [:stackful, :reentrant] if effs.include?(REENTRANT) || fn.reentrant == :reentrant
-      return [:stackful, :extern]    if effs.include?(EXTERN)
+      if effs.include?(REENTRANT) || fn.reentrant == :reentrant
+        return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :reentrant)
+      end
+      return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :extern) if effs.include?(EXTERN)
       (function_call_graph[T.must(name)] || []).each { |c| queue << c }
     end
-    [:fsm, nil]
-  end
-
-  # Walk a BG body and collect its suspend points using the same rules as
-  # enumerate_fsm_suspend_points!, but anchored to the BgBlock scope.
-  sig { params(bg_node: T.untyped).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
-  def collect_bg_suspend_points(bg_node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    points = []
-    scan_suspend_points(bg_node.body, bg_node, points)
-    points
+    Annotator::Phases::BgSpawnDecision.new(spawn_form: :fsm, reason: nil)
   end
 
   # --- Stack tier recommendation ---
@@ -1207,17 +1194,25 @@ module EffectTracker
   #
   # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
   # all functions are top-level — but guarded for safety).
-  sig { params(node: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(node: T::Array[T.untyped]).returns(Annotator::Phases::BodyScanSummary) }
   def scan_for_calls(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    calls      = Set.new
-    unabsorbed = Set.new   # callees whose error CHANNEL does not terminate
-                           # locally (i.e. can propagate failure to this fn).
-                           # `calls` keeps every callee (shared function_call_graph
-                           # users need that); `unabsorbed` is the authority
-                           # for can_fail propagation.
+    calls      = T.let(Set.new, T::Set[String])
+    unabsorbed = T.let(Set.new, T::Set[String])
+    # `unabsorbed` is callees whose error CHANNEL does not terminate
+    # locally (i.e. can propagate failure to this fn). `calls` keeps
+    # every callee (shared function_call_graph users need that);
+    # `unabsorbed` is the authority for can_fail propagation.
     call_sites = T.let([], T::Array[AST::FuncCall])
+    binding_nodes = T.let([], T::Array[Annotator::Phases::BindingNode])
+    assignment_nodes = T.let([], T::Array[Annotator::Phases::AssignmentNode])
+    escape_nodes = T.let([], T::Array[AST::Locatable])
+    with_scope_nodes = T.let({}, Annotator::Phases::WithScopeNodes)
+    suspend_points = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    pipe_input_types = T.let(Set.new, T::Set[String])
+    references_snapshot = T.let([false], T::Array[T::Boolean])
     has_fnptr  = T.let([false], T::Array[T::Boolean])
+    raises_directly = T.let([false], T::Array[T::Boolean])
 
     # `expr OR <rhs>` terminates the error channel UNLESS rhs itself
     # re-propagates it. OrRaise / OrExit / OR RETURN / OR EXIT-expr all
@@ -1225,34 +1220,95 @@ module EffectTracker
     # / OrPrune / OrBreak consumes it. Conservative: anything not in this
     # propagating set counts as absorbing only for the OR-RESCUE *left*.
     propagating_or_rhs = [AST::OrRaise, AST::OrExit, AST::ThrowNode, AST::ReturnNode]
+    return_nodes = T.let([], T::Array[AST::ReturnNode])
 
     traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n, absorbed, record_site|
+    traverse = lambda do |n, absorbed, record_site, scope_stack|
+      scopes = T.cast(scope_stack, T::Array[AST::WithBlock])
+      if n.is_a?(AST::Locatable) && !n.is_a?(AST::FunctionDef)
+        escape_nodes << n
+        scopes.each { |scope| (with_scope_nodes[scope] ||= []) << n }
+      end
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
         # terminals
       when Array
-        n.each { |item| traverse.call(item, absorbed, record_site) }
+        n.each { |item| traverse.call(item, absorbed, record_site, scopes) }
       when Hash
-        n.each_value { |v| traverse.call(v, absorbed, record_site) }
+        n.each_value { |v| traverse.call(v, absorbed, record_site, scopes) }
       when AST::FunctionDef
         # Don't descend into nested function definitions (own scope).
       when AST::LambdaLit
-        n.each_pair { |_, v| traverse.call(v, absorbed, false) }
+        n.each_pair { |_, v| traverse.call(v, absorbed, false, []) }
+      when AST::NextExpr
+        suspend_points << { id: suspend_points.size, kind: :next, node: n }
+        traverse.call(n.expr, absorbed, record_site, scopes)
+      when AST::YieldExpr
+        suspend_points << { id: suspend_points.size, kind: :yield, node: n }
+        traverse.call(n.expr, absorbed, record_site, scopes)
+      when AST::ReturnNode
+        return_nodes << n
+        traverse.call(n.value, absorbed, record_site, scopes) if n.value
+      when AST::VarDecl
+        binding_nodes << n
+        traverse.call(n.value, absorbed, record_site, scopes)
+      when AST::BindExpr
+        if n.mode == :assign
+          assignment_nodes << n
+        else
+          binding_nodes << n
+        end
+        traverse.call(n.value, absorbed, record_site, scopes)
+      when AST::Assignment
+        assignment_nodes << n
+        traverse.call(n.name, absorbed, record_site, scopes)
+        traverse.call(n.value, absorbed, record_site, scopes)
+      when AST::Identifier
+        references_snapshot[0] = true if n.name == "snapshot"
+      when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock
+        raises_directly[0] = true
+        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) } if n.respond_to?(:each_pair)
+      when AST::WithBlock
+        suspend_points << { id: suspend_points.size, kind: :lock, node: n } if with_block_suspends?(n)
+        raises_directly[0] = true if n.snapshot_mode == :transaction
+        if (clause = n.lock_error_clause)
+          action_raises = %i[raise exit].include?(clause.action)
+          has_bubble = !clause.bubble_types.empty?
+          raises_directly[0] = true if action_raises || has_bubble
+          traverse.call(clause, absorbed, record_site, [])
+        end
+        with_scope_nodes[n] ||= []
+        traverse.call(n.capabilities, absorbed, record_site, [])
+        traverse.call(n.body, absorbed, record_site, [n])
+        n.arms&.each { |arm| traverse.call(arm, absorbed, record_site, [n]) }
       when AST::BinaryOp
+        if n.smooth? && n.left.respond_to?(:typed?) && n.left.typed?
+          type = n.left.full_type!(context: "pipe input type")
+          pipe_input_types << type.resolved.to_s if type.catch_snapshot_payload?
+        end
         if n.op == :OR_RESCUE
           rhs_propagates = propagating_or_rhs.any? { |k| n.right.is_a?(k) }
           # Left side: its error is consumed here unless the rhs forwards
           # it. Right side (the fallback expr) keeps the ambient context
           # -- if the fallback itself calls something fallible, that DOES
           # propagate.
-          traverse.call(n.left, absorbed || !rhs_propagates, record_site)
-          traverse.call(n.right, absorbed, record_site)
+          traverse.call(n.left, absorbed || !rhs_propagates, record_site, scopes)
+          traverse.call(n.right, absorbed, record_site, scopes)
         else
-          traverse.call(n.left, absorbed, record_site)
-          traverse.call(n.right, absorbed, record_site)
+          traverse.call(n.left, absorbed, record_site, scopes)
+          traverse.call(n.right, absorbed, record_site, scopes)
         end
+      when AST::MethodCall
+        if func_call_suspends?(n)
+          kind = n.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
+          suspend_points << { id: suspend_points.size, kind: kind, node: n }
+        end
+        n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) }
       when AST::FuncCall
+        if func_call_suspends?(n)
+          kind = n.matched_stdlib_def&.intrinsic_suspends? ? :io : :call
+          suspend_points << { id: suspend_points.size, kind: kind, node: n }
+        end
         call_sites << n if record_site
         if n.fn_var_call
           has_fnptr[0] = true
@@ -1260,16 +1316,30 @@ module EffectTracker
           calls.add(n.name)
           unabsorbed.add(n.name) unless absorbed
         end
-        traverse.call(n.args, absorbed, record_site)
+        traverse.call(n.args, absorbed, record_site, scopes)
       else
         if n.respond_to?(:each_pair)
-          n.each_pair { |_, v| traverse.call(v, absorbed, record_site) }
+          n.each_pair { |_, v| traverse.call(v, absorbed, record_site, scopes) }
         end
       end
     end
 
-    traverse.call(node, false, true)
-    [calls, has_fnptr[0], unabsorbed, call_sites]
+    traverse.call(node, false, true, [])
+    Annotator::Phases::BodyScanSummary.new(
+      callees: calls,
+      propagating_callees: unabsorbed,
+      has_fnptr_call: T.must(has_fnptr[0]),
+      raises_directly: T.must(raises_directly[0]),
+      call_sites: call_sites,
+      return_nodes: return_nodes,
+      binding_nodes: binding_nodes,
+      assignment_nodes: assignment_nodes,
+      escape_nodes: escape_nodes,
+      with_scope_nodes: with_scope_nodes,
+      suspend_points: suspend_points,
+      pipe_input_types: pipe_input_types,
+      references_snapshot: T.must(references_snapshot[0])
+    )
   end
 
   # Post-pass: detect indirect mutual recursion in the call graph.
@@ -1321,57 +1391,4 @@ module EffectTracker
     end
   end
 
-  # Scan a function body for direct failure sources (Raise/OrRaise nodes).
-  # Does not descend into nested FunctionDef nodes.
-  sig { params(body: T::Array[T.untyped]).returns(T.nilable(T::Boolean)) }
-  def scan_for_raises(body)
-    T.bind(self, SemanticAnnotator) rescue nil
-    found = T.let([false], T::Array[T::Boolean])
-    traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n|
-      return if found[0]
-      case n
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        n.each { |item| traverse.call(item) }
-      when Hash
-        n.each_value { |v| traverse.call(v) }
-      when AST::FunctionDef
-        # Don't descend into nested function definitions.
-      when AST::Raise, AST::OrRaise, AST::BgBlock, AST::BgStreamBlock
-        # BG / BG STREAM spawning is genuinely fallible like RAISE/OR RAISE:
-        # scheduler spawn can fail, so the enclosing function is fallible.
-        found[0] = true
-      when AST::WithBlock
-        # MVCC: SNAPSHOT-transactions emit `Versioned.update[Multi](...)
-        # catch |__err| switch (__err) { ..., else => return __err }`,
-        # so the fn body has a raise path regardless of the user's
-        # ON MvccConflict action. Detect structurally rather than via
-        # heap_count proxy (T1 cleanup).
-        found[0] = true if n.snapshot_mode == :transaction
-        # WITH with a fallible lock-error clause raises whenever a path
-        # through the lowering can hit `rt.setError(...); return
-        # error.CheatError;`. Two cases:
-        #   1. The user's matched-selector action is :raise or :exit —
-        #      the matched arm emits the raise directly.
-        #   2. The clause has bubble_types — unselected error variants
-        #      (typically LockCycle / Deadlock) auto-emit rt.setError +
-        #      return error.CheatError regardless of the user's action.
-        # When neither holds (user matched all selectors AND used a
-        # non-raising action like :pass / :return / :block), no path
-        # raises, so we don't flag the enclosing fn.
-        if (clause = n.lock_error_clause)
-          action_raises  = %i[raise exit].include?(clause.action)
-          has_bubble     = !clause.bubble_types.empty?
-          found[0] = true if action_raises || has_bubble
-        end
-        n.body.each { |stmt| traverse.call(stmt) } unless found[0]
-        n.arms&.each { |arm| arm[:body]&.each { |stmt| traverse.call(stmt) } } unless found[0]
-      else
-        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
-      end
-    end
-    traverse.call(body)
-    found[0]
-  end
 end

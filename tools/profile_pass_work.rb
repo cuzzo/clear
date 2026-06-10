@@ -696,7 +696,11 @@ module PassWorkProfilerTool
 
       @profiler.measure("mir.pre_mir_type_check", ast_root: ast) { PreMirTypeCheck.verify!(ast) }
 
-      mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
+      mir_pass = MIRPass.new(
+        fn_nodes: fn_nodes,
+        schema_lookup: schema_lookup,
+        body_summaries: T.must(annotator.semantic_index).body_summaries
+      )
       @profiler.measure("mir.pass", ast_root: ast) { mir_pass.transform!(ast) }
 
       struct_schemas = T.let({}, T::Hash[Symbol, T.untyped])

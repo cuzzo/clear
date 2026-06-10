@@ -817,6 +817,16 @@ RSpec.describe "MIR gap-burn characterization" do
     EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [mutating_call])
 
     expect(T.must(receiver.symbol).heap_storage?).to be(true)
+
+    param_receiver = id("param_items", type: receiver_type, storage: :frame)
+    T.must(param_receiver.symbol).is_param = true
+    param_call = AST::MethodCall.new(tok, param_receiver, "append", [])
+    param_call.full_type = Type.new(:Void)
+    param_call.matched_signature = mutating_sig
+
+    EscapeAnalysis.send(:mark_param_receiver_allocations_heap!, [param_call])
+
+    expect(T.must(param_receiver.symbol).heap_storage?).to be(true)
   end
 
   it "fails missing intrinsic metadata before lowering registry calls" do
@@ -1238,9 +1248,21 @@ RSpec.describe "MIR gap-burn characterization" do
 
     returned = id("local", type: local_type, storage: :frame)
     returned.symbol = entry
-    analyzed_fn = fn([decl, AST::ReturnNode.new(tok, returned)], return_type: local_type)
+    ret = AST::ReturnNode.new(tok, returned)
+    analyzed_fn = fn([decl, ret], return_type: local_type)
+    summaries = {
+      "main" => Annotator::Phases::FunctionBodySummary.new(
+        name: "main",
+        callees: Set.new,
+        propagating_callees: Set.new,
+        has_fnptr_call: false,
+        raises_directly: false,
+        return_nodes: [ret],
+        binding_nodes: [decl],
+      )
+    }
 
-    result = EscapeAnalysis.apply_with_facts!({ "main" => analyzed_fn }, nil)
+    result = EscapeAnalysis.apply_with_facts!({ "main" => analyzed_fn }, nil, summaries)
 
     expect(entry.storage).to eq(:heap)
     expect(result.heap_fns).to include("main")
@@ -1252,6 +1274,43 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(fact.binding).to have_attributes(name: "local", binding_id: entry.binding_id)
     expect(fact.binding.to_s).to eq("local##{entry.binding_id}")
+  end
+
+  it "uses recorded body escape nodes for binding-result heap placement" do
+    local_type = Type.new(:String)
+    callee = fn([], return_type: local_type)
+    callee.heap_carry_return = true
+    call = AST::FuncCall.new(tok, "callee", [])
+    decl = AST::VarDecl.new(tok, "made", local_type, call, false)
+    entry = SymbolEntry.new(reg: decl, type: local_type, mutable: false, storage: :frame)
+    decl.symbol = entry
+    decl.full_type = local_type
+    main = fn([decl], return_type: :Void)
+    summaries = {
+      "main" => Annotator::Phases::FunctionBodySummary.new(
+        name: "main",
+        callees: Set["callee"],
+        propagating_callees: Set["callee"],
+        has_fnptr_call: false,
+        raises_directly: false,
+        func_calls: [call],
+        binding_nodes: [decl],
+        escape_nodes: [decl, call],
+      ),
+      "callee" => Annotator::Phases::FunctionBodySummary.new(
+        name: "callee",
+        callees: Set.new,
+        propagating_callees: Set.new,
+        has_fnptr_call: false,
+        raises_directly: false,
+      )
+    }
+
+    result = EscapeAnalysis.apply_with_facts!({ "main" => main, "callee" => callee }, nil, summaries)
+
+    expect(entry.storage).to eq(:heap)
+    fact = result.placements.placements.find { |placement| placement.symbol_name == "made" }
+    expect(fact).to have_attributes(fn_name: "main", reason: :escape_sink)
   end
 
   it "retains escape placement facts on MIRPass as a phase artifact" do
@@ -2552,14 +2611,32 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(EscapeAnalysis.send(:heap_return_from_args?, [lit(1, type: :Int64)], [int_param], Set["n"], Type.new(:Int64), nil)).to eq(false)
     expect(EscapeAnalysis.send(:heap_return_from_args?, [], [], nil, Type.new(:String), nil)).to be_nil
 
-    callee = fn([AST::ReturnNode.new(tok, id("made", type: :String, storage: :heap))], return_type: :String)
-    expect(EscapeAnalysis.send(:function_has_owned_return_value?, callee, nil)).to eq(true)
+    callee_return = AST::ReturnNode.new(tok, id("made", type: :String, storage: :heap))
+    callee = fn([callee_return], return_type: :String)
+    callee_summary = Annotator::Phases::FunctionBodySummary.new(
+      name: "callee",
+      callees: Set.new,
+      propagating_callees: Set.new,
+      has_fnptr_call: false,
+      raises_directly: false,
+      return_nodes: [callee_return],
+    )
+    callee_facts = EscapeAnalysis.send(:function_facts, callee, callee_summary)
+    expect(EscapeAnalysis.send(:function_facts_have_owned_return_value?, callee_facts, nil)).to eq(true)
     return_value = id("returned", type: :String, storage: :heap)
     ret = AST::ReturnNode.new(tok, return_value)
-    facts = EscapeAnalysis.send(:function_facts_for_body, [ret])
-    expect(facts.fn.name).to eq("__escape_return_probe")
+    probe = fn([ret], return_type: :String)
+    facts = EscapeAnalysis.send(:function_facts, probe, Annotator::Phases::FunctionBodySummary.new(
+      name: probe.name,
+      callees: Set.new,
+      propagating_callees: Set.new,
+      has_fnptr_call: false,
+      raises_directly: false,
+      return_nodes: [ret],
+    ))
+    expect(facts.fn.name).to eq(probe.name)
     expect(facts.return_values).to eq([return_value])
-    expect(EscapeAnalysis.send(:body_has_heap_return_binding?, [ret])).to eq(true)
+    expect(EscapeAnalysis.send(:function_facts_have_heap_return_binding?, facts)).to eq(true)
 
     borrowed = fn([], params: [p], return_type: :String)
     borrowed.return_lifetime = :wildcard
@@ -3793,7 +3870,13 @@ RSpec.describe "MIR gap-burn characterization" do
     callee_sig.requires = { "x" => Set[:LOCKED] }
     errors = []
 
-    ConcurrencyChecks.check_reentrant!(fn_node, ->(name) { name == "touch" ? callee_sig : nil }, ->(_node, msg) { errors << msg })
+    ConcurrencyChecks.check_reentrant!(
+      fn_node,
+      [with_block],
+      { with_block => [call] },
+      ->(name) { name == "touch" ? callee_sig : nil },
+      ->(_node, msg) { errors << msg }
+    )
 
     expect(errors.join).to include("Reentrant lock acquisition")
     expect(errors.join).to include("already held")

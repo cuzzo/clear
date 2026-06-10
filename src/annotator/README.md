@@ -506,10 +506,9 @@ enforce_fallible_returns!
 compute_effects!
 validate_predicate_purity!
 compute_fsm_eligibility!
-classify_bg_spawn_form!
 check_lock_cycles!
 compute_stack_tiers!
-assign_fiber_stack_tiers!
+finalize_async_execution_shapes!
 ```
 
 The final `FunctionSignature` objects are updated with `can_fail`, `effects`,

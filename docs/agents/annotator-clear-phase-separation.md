@@ -302,6 +302,42 @@ Implemented:
   execution-boundary analysis, reentrance analysis, lifetimes, capabilities,
   pipe analysis, function analysis, and tests.
 
+## 2026-06-10 Completion Update
+
+Implemented after the initial state-extraction pass:
+
+- Promoted the remaining call/return/raise/suspend/snapshot scans into the
+  existing typed body-analysis product.
+- Added typed binding, assignment, escape-node, and per-`WITH` scope facts to
+  `BodyScanSummary` / `FunctionBodySummary`.
+- Rewired caller-sync propagation, reentrance/tail-call validation, catch
+  snapshot setup, async execution-shape finalization, escape placement, and
+  concurrency checks to consume recorded body facts.
+- Removed the old helper walkers for raises, suspend points, recursive
+  call/return detection, catch snapshot payloads, caller-sync callsites, return
+  probes, and concurrency `WITH` scopes.
+- Threaded body summaries through `SemanticIndex` and into `MIRPass` on normal
+  compile/import/profile paths.
+
+Final comparable metrics versus the start of this completion loop:
+
+| Tool | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Decomplex net debt | 5783 | 5771 | -12 |
+| SlopCop dark arms | 2453 | 2417 | -36 |
+| SlopCop genuine gaps | 1007 | 1000 | -7 |
+| Boobytrap state-based branch hotspots | 1609 | 1599 | -10 |
+
+Assessment:
+
+- Annotator phase separation for whole-program consumers is now complete for
+  the fact families covered by this plan: calls, returns, direct failure,
+  suspend points, catch snapshot inputs, body escape seeds, and `WITH` scopes.
+- Remaining source-body walkers in `EscapeAnalysis` are post-hoist
+  memory-safety placement work. They should move with the stable
+  place-ID/hoisted-IR effort rather than by pushing more memory-safety
+  decisions into annotation.
+
 Deferred:
 
 - Ownership graph extraction remains open. It is a real architectural target,

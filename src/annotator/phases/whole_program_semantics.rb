@@ -26,7 +26,7 @@ module Annotator
         root_scope = whole_program_root_scope
         body_summaries = function_body_summaries
 
-        EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+        EscapeAnalysis.propagate_caller_sync!(fn_nodes, body_summaries)
         fn_nodes.each_value do |fn|
           CapabilityPlan.refresh_function_plans!(fn, body_summaries.fetch(fn.name).with_blocks)
         end

@@ -742,9 +742,16 @@ private
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
 
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
-    called_names, has_fnptr, unabsorbed_calls, func_calls = scan_for_calls(node.body)
+    body_scan = scan_for_calls(node.body)
+    called_names = body_scan.callees
+    has_fnptr = body_scan.has_fnptr_call
+    unabsorbed_calls = body_scan.propagating_callees
+    func_calls = body_scan.call_sites
+    raises_in_body = body_scan.raises_directly
     directly_recursive = called_names.include?(node.name)
     fn_ctx.mark_runtime_used! if has_fnptr
+    offer_plain_reentrant_variant_fix!(node, body_scan)
+    route_thunk_to_tail_call_compat!(node, body_scan)
 
     if directly_recursive
       record_effect(EffectTracker::REENTRANT)
@@ -769,7 +776,7 @@ private
       end
 
       if node.tail_call
-        validate_tail_call!(node)
+        validate_tail_call!(node, body_scan)
       end
 
       # Tail-recursive :THUNK uses the existing tail-call lowering; non-tail
@@ -819,7 +826,7 @@ private
     node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: GENUINE failure sources only.
     # A function is fallible iff a failure can propagate to its caller:
-    #   - scan_for_raises  : RAISE / OrRaise / RAISE-bubbling WithBlock
+    #   - body summary scan: RAISE / OrRaise / RAISE-bubbling WithBlock
     #   - PRE clauses       : a failed PRE emits `return error.CheatError`
     #   - @nonReentrant     : StackGuard/enterDepth emit `try ...` (raise)
     #   - fn-pointer call   : conservatively fallible (target may raise)
@@ -834,7 +841,7 @@ private
       has_fnptr ||
       (node.reentrant == :non_reentrant) ||
       function_has_pre_clauses?(node) ||
-      scan_for_raises(node.body) == true
+      raises_in_body == true
     record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
       name: node.name,
       callees: called_names - [node.name],
@@ -842,6 +849,11 @@ private
       has_fnptr_call: has_fnptr,
       raises_directly: raises_directly,
       func_calls: func_calls,
+      return_nodes: body_scan.return_nodes,
+      binding_nodes: body_scan.binding_nodes,
+      assignment_nodes: body_scan.assignment_nodes,
+      escape_nodes: body_scan.escape_nodes,
+      with_scope_nodes: body_scan.with_scope_nodes,
       with_blocks: node.semantic_with_blocks
     ))
     fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
@@ -859,7 +871,8 @@ private
       # Snapshot capture is only meaningful when a CATCH body reads
       # `snapshot`. Otherwise every successful pipeline call in a catchable
       # function allocates dead snapshot state that no handler can observe.
-      collect_pipe_input_types(node.body, snap_types) if catch_bodies_reference_snapshot?(all_catch_bodies)
+      catch_body_scan = scan_for_calls(all_catch_bodies.compact)
+      snap_types.merge(body_scan.pipe_input_types) if catch_body_scan.references_snapshot
       node.snapshot_types = snap_types
 
       all_catch_bodies.compact.each do |clause_body|
@@ -952,12 +965,12 @@ private
 
   # Tail-call lowering relies on recursion becoming a self-loop; any
   # wrapped or nested self-call would still consume real stack.
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[AST::FuncCall])) }
-  def validate_tail_call!(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).returns(T.nilable(T::Array[AST::FuncCall])) }
+  def validate_tail_call!(fn_node, body_scan)
     fn_name = fn_node.name
-    all_self_calls = collect_self_calls(fn_node.body, fn_name)
+    all_self_calls = body_scan.call_sites.select { |call| call.name == fn_name }
 
-    blessed = collect_returns(fn_node.body).filter_map { |r|
+    blessed = body_scan.return_nodes.filter_map { |r|
       r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_name
     }
     blessed_ids = blessed.map(&:object_id).to_set
@@ -975,91 +988,6 @@ private
              "stack on every invocation. If recursion is genuinely non-tail, declare " \
              "':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.")
     end
-  end
-
-  # Recursively walk an AST subtree collecting every AST::FuncCall whose
-  # name matches `fn_name`. Args are also visited (so nested self-calls
-  # inside outer-call arguments are found and flagged).
-  sig { params(node: T.untyped, fn_name: String, out: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def collect_self_calls(node, fn_name, out = [])
-    return out if node.nil?
-    case node
-    when Array
-      node.each { |n| collect_self_calls(n, fn_name, out) }
-    when AST::FuncCall
-      out << node if node.name == fn_name
-      node.args.each { |a| collect_self_calls(a, fn_name, out) }
-    else
-      node.each_pair { |_, v| collect_self_calls(v, fn_name, out) } if node.respond_to?(:each_pair)
-    end
-    out
-  end
-
-  # Recursively walk an AST subtree collecting every AST::ReturnNode.
-  sig { params(node: T.untyped, out: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def collect_returns(node, out = [])
-    return out if node.nil?
-    case node
-    when Array
-      node.each { |n| collect_returns(n, out) }
-    when AST::ReturnNode
-      out << node
-      collect_returns(node.value, out) if node.value
-    else
-      node.each_pair { |_, v| collect_returns(v, out) } if node.respond_to?(:each_pair)
-    end
-    out
-  end
-
-  sig { params(node: T.untyped, fn_name: T.untyped).returns(T::Boolean) }
-  def contains_self_call?(node, fn_name)
-    return false unless node
-    return true if node.is_a?(AST::FuncCall) && node.name == fn_name
-    if node.respond_to?(:each_pair)
-      node.each_pair { |_, v| return true if contains_self_call?(v, fn_name) }
-    end
-    false
-  end
-
-  # ── Fiber Stack Auto-Sizing ──────────────────────────────────────
-  # Walk the AST to find BG/DO blocks and assign computed stack tiers
-  # based on the functions they call (transitively via call graph).
-
-  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
-  def assign_fiber_stack_tiers!(program_node)
-    traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n|
-      case n
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        n.each { |item| traverse.call(item) }
-      when Hash
-        n.each_value { |v| traverse.call(v) }
-      when AST::BgBlock
-        calls = T.let(scan_for_calls(n.body).first, T::Set[T.untyped])
-        raw = T.let(max_tier_for_calls(calls), Symbol)
-        n.computed_stack_tier = (raw == :unbounded) ? :service : raw
-        validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
-        n.body.each { |s| traverse.call(s) }
-      when AST::BgStreamBlock
-        calls = scan_for_calls(n.body).first
-        raw = T.let(max_tier_for_calls(calls), Symbol)
-        n.computed_stack_tier = (raw == :unbounded) ? :service : raw
-        validate_fiber_stack!(n, calls, n.stack_size, false)
-        n.body.each { |s| traverse.call(s) }
-      when AST::DoBlock
-        n.branches.each do |branch|
-          calls = scan_for_calls(branch.body).first
-          raw = T.let(max_tier_for_calls(calls), Symbol)
-          branch.computed_stack_tier = (raw == :unbounded) ? :service : raw
-          validate_fiber_stack!(n, calls, branch.stack_size, branch.can_smash)
-          branch.body.each { |s| traverse.call(s) }
-        end
-      else
-        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
-      end
-    end
-    traverse.call(program_node.statements)
   end
 
   # Plain `EFFECTS REENTRANT` callees require explicit `@service` on the

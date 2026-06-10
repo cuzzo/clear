@@ -28,11 +28,10 @@ module Annotator
 
         compute_fsm_eligibility!
         enumerate_fsm_suspend_points!
-        classify_bg_spawn_form!(program)
 
         check_lock_cycles!
         compute_stack_tiers!
-        assign_fiber_stack_tiers!(program)
+        finalize_async_execution_shapes!(program)
 
         restamp_function_metadata!
         stamp_program_result_type!(program)

@@ -4,6 +4,7 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../ast/scope"
 require_relative "../annotator/function_registry"
+require_relative "../annotator/phases/body_analysis"
 
 class SemanticIndex < T::Struct
   extend T::Sig
@@ -20,5 +21,10 @@ class SemanticIndex < T::Struct
   sig { params(name: String).returns(T.nilable(AST::FunctionDef)) }
   def function_node(name)
     function_registry.fetch(name)
+  end
+
+  sig { returns(T::Hash[String, Annotator::Phases::FunctionBodySummary]) }
+  def body_summaries
+    function_registry.body_summaries
   end
 end

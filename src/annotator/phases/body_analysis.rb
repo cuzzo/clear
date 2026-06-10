@@ -1,11 +1,37 @@
 # typed: strict
 require "sorbet-runtime"
+require "set"
 
 require_relative "../../ast/ast"
 require_relative "declaration_index"
 
 module Annotator
   module Phases
+    BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+    AssignmentNode = T.type_alias { T.any(AST::Assignment, AST::BindExpr) }
+    WithScopeNodes = T.type_alias { T::Hash[AST::WithBlock, T::Array[AST::Locatable]] }
+
+    class BodyScanSummary < T::Struct
+      const :callees, T::Set[String]
+      const :propagating_callees, T::Set[String]
+      const :has_fnptr_call, T::Boolean
+      const :raises_directly, T::Boolean
+      const :call_sites, T::Array[AST::FuncCall], factory: -> { [] }
+      const :return_nodes, T::Array[AST::ReturnNode], factory: -> { [] }
+      const :binding_nodes, T::Array[BindingNode], factory: -> { [] }
+      const :assignment_nodes, T::Array[AssignmentNode], factory: -> { [] }
+      const :escape_nodes, T::Array[AST::Locatable], factory: -> { [] }
+      const :with_scope_nodes, WithScopeNodes, factory: -> { {} }
+      const :suspend_points, T::Array[T::Hash[Symbol, T.untyped]], factory: -> { [] }
+      const :pipe_input_types, T::Set[String], factory: -> { Set.new }
+      const :references_snapshot, T::Boolean, default: false
+    end
+
+    class BgSpawnDecision < T::Struct
+      const :spawn_form, Symbol
+      const :reason, T.nilable(Symbol)
+    end
+
     class FunctionBodySummary < T::Struct
       const :name, String
       const :callees, T::Set[String]
@@ -13,6 +39,11 @@ module Annotator
       const :has_fnptr_call, T::Boolean
       const :raises_directly, T::Boolean
       const :func_calls, T::Array[AST::FuncCall], factory: -> { [] }
+      const :return_nodes, T::Array[AST::ReturnNode], factory: -> { [] }
+      const :binding_nodes, T::Array[BindingNode], factory: -> { [] }
+      const :assignment_nodes, T::Array[AssignmentNode], factory: -> { [] }
+      const :escape_nodes, T::Array[AST::Locatable], factory: -> { [] }
+      const :with_scope_nodes, WithScopeNodes, factory: -> { {} }
       const :with_blocks, T::Array[AST::WithBlock], factory: -> { [] }
     end
 

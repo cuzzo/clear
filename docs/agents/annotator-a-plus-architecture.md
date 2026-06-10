@@ -701,7 +701,47 @@ Implemented:
 - Centralized `FunctionDef` pre/catch/default-catch predicates so multiple
   annotator helpers stop repeating defensive field-shape checks.
 
-Rejected during this milestone:
+### 2026-06-10 Completion Milestone
+
+Implemented:
+
+- Expanded the body-analysis product from call/return facts into a broader
+  typed `BodyScanSummary` / `FunctionBodySummary` contract:
+  binding nodes, assignment nodes, escape nodes, pipe snapshot payload types,
+  suspend points, and per-`WITH` scope nodes.
+- Rewired caller-sync propagation, reentrance/tail-call validation, catch
+  snapshot detection, async spawn/stack finalization, escape placement, and
+  concurrency checks to consume those recorded body facts instead of
+  rediscovering calls, returns, raises, suspend points, or `WITH` scopes with
+  late source-body walkers.
+- Threaded function body summaries through `SemanticIndex` and into `MIRPass`
+  so post-annotation escape placement can consume the annotator boundary
+  product on normal compile/import/profile paths.
+- Removed the old source rediscovery helpers:
+  `scan_for_raises`, `scan_suspend_points`, `collect_bg_suspend_points`,
+  `collect_self_calls`, `collect_returns`, `contains_self_call?`,
+  `collect_pipe_input_types`, `catch_bodies_reference_snapshot?`,
+  `collect_callsites_deep`, `function_facts_for_body`, and the concurrency
+  `walk_scope_*` helpers.
+- Added typed fact tests for the new body summaries, `WITH` scope boundaries,
+  escape placement via recorded body facts, caller-sync propagation, and the
+  total boolean contract for call suspension.
+
+Metric result versus the 2026-06-10 loop baseline:
+
+| Tool | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Decomplex net debt | 5783 | 5771 | -12 |
+| SlopCop dark arms | 2453 | 2417 | -36 |
+| SlopCop genuine gaps | 1007 | 1000 | -7 |
+| Boobytrap state-based branch hotspots | 1609 | 1599 | -10 |
+
+Remaining work is no longer annotator phase separation proper. The remaining
+source-body walkers in `EscapeAnalysis` are post-hoist ownership/escape
+placement surfaces and should be handled by the hoisted-IR/stable-place-ID
+work, not by adding more source facts to annotation.
+
+Rejected during the 2026-06-09 milestone:
 
 - A broader standalone call-site fact adapter was attempted and backed out
   because it added fact scaffolding without deleting enough old control flow.
@@ -715,7 +755,8 @@ Remaining major work:
   yet the full immutable sub-index store described above.
 - Several source walkers remain in pre-registration, Auto inference, escape
   analysis, cleanup classification, MIR lowering, and MIR/control-flow passes.
-  Some are currently allowed migration surfaces; memory-safety walkers should
-  move only after hoist preserves stable places and synthetic provenance.
+  The annotator whole-program consumers covered by this plan now consume body
+  facts; the remaining memory-safety walkers should move only after hoist
+  preserves stable places and synthetic provenance.
 - The guardrail is report-only. It should become fail-on-new-violation after
   the remaining legitimate migration exceptions are explicitly classified.

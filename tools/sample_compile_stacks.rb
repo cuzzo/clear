@@ -176,7 +176,13 @@ begin
   ast.statements.each { |stmt| fn_nodes[stmt.name] = stmt if stmt.is_a?(AST::FunctionDef) }
   timed_phase("synthesize_tests", sampler, timings) { CompilerFrontend.synthesize_test_body_wrappers!(ast, fn_nodes) }
   timed_phase("pre_mir_type_check", sampler, timings) { PreMirTypeCheck.verify!(ast) }
-  timed_phase("mir_pass", sampler, timings) { MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast) }
+  timed_phase("mir_pass", sampler, timings) do
+    MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: annotator.semantic_index.body_summaries
+    ).transform!(ast)
+  end
 
   struct_schemas = {}
   enum_schemas = {}

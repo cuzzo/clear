@@ -16,10 +16,9 @@
 #   FAST_PATH constraint          — author-written `! fast_path` is violated
 #                                   by any blocking effect
 #
-# The checks share a `walk_scope_no_nested_with` helper: descend into a
-# WithBlock body or arm, but skip nested WithBlocks (those bubble their
-# own diagnostics). Nodes inside lambdas / nested function defs are
-# similarly ignored — they're separate scopes.
+# The checks consume `FunctionBodySummary#with_scope_nodes`, recorded during
+# annotator body analysis. Those facts include each WITH body/arm scope, stop
+# at nested WITH bodies, and ignore lambda/function bodies as separate scopes.
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
@@ -35,6 +34,7 @@ module ConcurrencyChecks
   SigLookup = T.type_alias { T.proc.params(arg0: String).returns(T.untyped) }
   LockRanks = T.type_alias { T::Hash[Symbol, Integer] }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
+  WithScopeNodes = T.type_alias { Annotator::Phases::WithScopeNodes }
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
@@ -44,22 +44,22 @@ module ConcurrencyChecks
   def check_all!(fn_nodes, sig_lookup, error_handler, body_summaries:, lock_ranks: {})
     fn_nodes.each_value do |fn|
       next unless fn&.body
-      with_blocks = body_summaries.fetch(fn.name).with_blocks
-      check_hold_across_yield!(fn, with_blocks, fn_nodes, error_handler)
-      check_naked_nested_with!(with_blocks, error_handler, lock_ranks)
-      check_reentrant!(fn, with_blocks, sig_lookup, error_handler)
+      summary = body_summaries.fetch(fn.name)
+      with_blocks = summary.with_blocks
+      with_scope_nodes = summary.with_scope_nodes
+      check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
+      check_naked_nested_with!(with_blocks, with_scope_nodes, error_handler, lock_ranks)
+      check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
     end
   end
 
-  # A WITH body must not contain any node that yields. The walker
-  # is purely structural — it has to find nodes by their LOCATION inside
-  # this WITH body. The yield property itself is read from the existing
-  # annotator-stamped effect set (fn.effects, populated by record_effect
-  # at visit_BgBlock / visit_NextExpr and propagated by compute_effects!).
-  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], fn_nodes: FnNodes, error_handler: ErrorHandler).void }
-  def check_hold_across_yield!(fn, with_blocks, fn_nodes, error_handler)
-    each_with_scope(with_blocks) do |with_block, scope|
-      walk_scope_no_nested_with(scope) do |node|
+  # A WITH body must not contain any node that yields. Scope membership comes
+  # from annotator body facts; the yield property itself is read from the
+  # annotator-stamped effect set.
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, fn_nodes: FnNodes, error_handler: ErrorHandler).void }
+  def check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
+    each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
+      scope.each do |node|
         offender_token = nil
         reason = nil
 
@@ -95,16 +95,18 @@ module ConcurrencyChecks
   # variants (BORROWED, RESTRICT) don't hold a lock; nesting them is
   # safe. Same-binding nesting is permitted (still useful for re-entry
   # checks; reentrant detection covers the dangerous case).
-  sig { params(with_blocks: T::Array[AST::WithBlock], error_handler: ErrorHandler, lock_ranks: LockRanks).void }
-  def check_naked_nested_with!(with_blocks, error_handler, lock_ranks = {})
-    each_with_scope(with_blocks) do |outer, outer_scope|
+  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
+  def check_naked_nested_with!(with_blocks, with_scope_nodes, error_handler, lock_ranks = {})
+    each_with_scope(with_blocks, with_scope_nodes) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
       next if outer_lock_names.empty?
       # @locked(rank: N) bindings opt into the rank-DAG analysis, which is a
       # stronger ordering guarantee than this pattern check.
       next if any_lock_rank?(outer, lock_ranks)
 
-      walk_scope_for_nested_with(outer_scope) do |inner|
+      outer_scope.each do |node|
+        next unless node.is_a?(AST::WithBlock)
+        inner = node
         inner_lock_names = lock_holding_names(inner)
         next if inner_lock_names.empty?
         # Same opt-out applies if the inner block uses ranks.
@@ -153,13 +155,13 @@ module ConcurrencyChecks
 
   # For each WITH on parameter `p`, any call inside whose callee has REQUIRES
   # naming a parameter aliasing `p` reacquires `p`'s lock.
-  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], sig_lookup: SigLookup, error_handler: ErrorHandler).returns(T.untyped) }
-  def check_reentrant!(fn, with_blocks, sig_lookup, error_handler)
-    each_with_scope(with_blocks) do |with_block, scope|
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, sig_lookup: SigLookup, error_handler: ErrorHandler).returns(T.untyped) }
+  def check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
+    each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
       held_params = collect_held_params(with_block, fn)
       next if held_params.empty?
 
-      walk_scope_no_nested_with(scope) do |node|
+      scope.each do |node|
         next unless node.is_a?(AST::FuncCall) && node.respond_to?(:name)
         sig = FunctionSignature.unwrap(sig_lookup.call(node.name.to_s))
         next unless sig && sig.requires && !sig.requires.empty?
@@ -185,50 +187,11 @@ module ConcurrencyChecks
 
   # ── Internal helpers ────────────────────────────────────────────────────
 
-  # Yield each known WithBlock along with the "scope" to scan
-  # for in-scope statements. The scope is:
-  #   - the WithBlock's body (legacy single-form), or
-  #   - each arm's body (MATCH form). For MATCH, yields one tuple per arm.
-  sig { params(with_blocks: T::Array[AST::WithBlock], blk: T.untyped).returns(T.untyped) }
-  def each_with_scope(with_blocks, &blk)
+  # Yield each known WithBlock along with the annotated in-scope nodes.
+  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, blk: T.untyped).returns(T.untyped) }
+  def each_with_scope(with_blocks, with_scope_nodes, &blk)
     with_blocks.each do |node|
-      if node.arms
-        node.arms.each { |arm| yield(node, arm[:body]) }
-      else
-        yield(node, node.body)
-      end
-    end
-  end
-
-  # Walk a WithBlock's scope. Descend into IF/WHILE/FOR/ etc., but stop
-  # at nested WithBlocks (they own their own checks) and lambdas.
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
-  def walk_scope_no_nested_with(stmts, &blk)
-    stack = stmts.is_a?(Array) ? stmts.dup : [stmts]
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
-      yield(node)
-      next if node.is_a?(AST::WithBlock)        # let it bubble its own
-      next if node.is_a?(AST::LambdaLit)        # separate scope
-      next if node.is_a?(AST::FunctionDef)      # separate scope (rare)
-      node.class.members.each do |m|
-        v = node[m]
-        if v.is_a?(Array)
-          v.each { |c| stack.push(c) if c.is_a?(AST::Locatable) }
-        elsif v.is_a?(AST::Locatable)
-          stack.push(v)
-        end
-      end
-    end
-  end
-
-  # Find nested WithBlocks within a scope (no recursion into them; we
-  # only care about the topmost nested one per branch).
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
-  def walk_scope_for_nested_with(stmts, &blk)
-    walk_scope_no_nested_with(stmts) do |node|
-      yield(node) if node.is_a?(AST::WithBlock)
+      yield(node, with_scope_nodes.fetch(node))
     end
   end
 

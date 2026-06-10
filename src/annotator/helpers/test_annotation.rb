@@ -162,12 +162,12 @@ module TestAnnotation
   sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[T.untyped]).returns(NilClass) }
   def validate_strict_io!(test_that, stubbed_fns)
     T.bind(self, SemanticAnnotator) rescue nil
-    calls = scan_for_calls(test_that.body).first
+    calls = scan_for_calls(test_that.body).callees
     visited = Set.new
     queue = calls.to_a.dup
 
     until queue.empty?
-      name = queue.shift
+      name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
       next if stubbed_fns.include?(name)
@@ -179,7 +179,7 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
-    fn_nodes = function_node_map
+      fn_nodes = function_node_map
       fn = fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)

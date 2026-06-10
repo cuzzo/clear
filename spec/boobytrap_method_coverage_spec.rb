@@ -223,8 +223,10 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a = annotator
     call = AST::FuncCall.new(tok, "recur", [])
     nested = AST::StructLit.new(tok, "Box", { "call" => call }, :stack, [])
-    expect(a.send(:contains_self_call?, nested, "recur")).to be(true)
-    expect(a.send(:contains_self_call?, nil, "recur")).to be(false)
+    ret = AST::ReturnNode.new(tok, call)
+    body_scan = a.send(:scan_for_calls, [nested, ret])
+    expect(body_scan.call_sites).to include(call)
+    expect(body_scan.return_nodes).to eq([ret])
 
     {
       "start" => Set["mid"],

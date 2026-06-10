@@ -255,35 +255,6 @@ module Annotator
         clause.filter_messages = filter_messages
       end
 
-      # Collect input types from pipeline |> steps that can fail.
-      sig { params(body: T::Array[AST::Node], types: T::Set[String]).void }
-      def collect_pipe_input_types(body, types)
-        T.bind(self, SemanticAnnotator)
-
-        body.each do |stmt|
-          AST.each_locatable(stmt) do |node|
-            if node.is_a?(AST::BinaryOp) && node.smooth?
-              t = node.left.full_type!(context: "pipe input type")
-              types << t.resolved.to_s unless t.void? || t.error_union?
-            end
-          end
-        end
-      end
-
-      sig { params(bodies: T::Array[T.nilable(T::Array[AST::Node])]).returns(T::Boolean) }
-      def catch_bodies_reference_snapshot?(bodies)
-        T.bind(self, SemanticAnnotator)
-
-        bodies.compact.any? do |body|
-          found = T.let(false, T::Boolean)
-          AST.each_locatable(body) do |node|
-            found = true if node.is_a?(AST::Identifier) && node.name == "snapshot"
-          end
-          found
-        end
-      end
-
-
       # ==========================================
       # CONTROL FLOW
       # ==========================================

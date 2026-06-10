@@ -1524,9 +1524,13 @@ RSpec.describe "annotator branch gap burndown" do
       AST::BinaryOp.new(token(:PIPE, "|>"), err_lit, :SMOOTH, AST::Identifier.new(token, "f")),
       AST::BinaryOp.new(token(:PIPE, "|>"), int_lit, :SMOOTH, AST::Identifier.new(token, "f"))
     ]
-    types = Set.new
-    pipe_ann.send(:collect_pipe_input_types, body, types)
-    expect(types).to eq(Set["Int64"])
+    pipe_summary = pipe_ann.send(:scan_for_calls, body)
+    snapshot_summary = pipe_ann.send(:scan_for_calls, [[AST::Identifier.new(token(:IDENTIFIER, "snapshot"), "snapshot")]])
+    expect(void_lit.full_type.catch_snapshot_payload?).to be(false)
+    expect(err_lit.full_type.catch_snapshot_payload?).to be(false)
+    expect(int_lit.full_type.catch_snapshot_payload?).to be(true)
+    expect(pipe_summary.pipe_input_types).to eq(Set["Int64"])
+    expect(snapshot_summary.references_snapshot).to be(true)
   end
 
   it "covers function analysis call, capture, TAKES, and return lifetime branches directly" do
@@ -2887,6 +2891,48 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:find_mutual_max_depth_callee, Set["caller"])).to eq("a")
   end
 
+  it "returns typed BG spawn decisions for opaque and unsafe call graphs" do
+    ann = quiet_annotator
+    reentrant = function_def("reentrant_callee")
+    reentrant.effects = Set[EffectTracker::REENTRANT]
+    native = function_def("native_callee")
+    native.effects = Set[EffectTracker::EXTERN]
+    ann.semantic_function_nodes.replace({
+      "reentrant_callee" => reentrant,
+      "native_callee" => native,
+    })
+
+    fnptr_decision = ann.send(:bg_spawn_form_for, Set.new, true)
+    reentrant_decision = ann.send(:bg_spawn_form_for, Set["reentrant_callee"], false)
+    extern_decision = ann.send(:bg_spawn_form_for, Set["native_callee"], false)
+    fsm_decision = ann.send(:bg_spawn_form_for, Set.new, false)
+
+    expect(fnptr_decision).to be_a(Annotator::Phases::BgSpawnDecision)
+    expect(fnptr_decision.spawn_form).to eq(:stackful)
+    expect(fnptr_decision.reason).to eq(:fn_pointer)
+    expect(reentrant_decision.reason).to eq(:reentrant)
+    expect(extern_decision.reason).to eq(:extern)
+    expect(fsm_decision.spawn_form).to eq(:fsm)
+    expect(fsm_decision.reason).to be_nil
+  end
+
+  it "finalizes BG, BG STREAM, and DO execution shapes in one async pass" do
+    ann = quiet_annotator
+    bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
+    stream = AST::BgStreamBlock.new(token(:BG_STREAM, "BG STREAM"), [], [], nil)
+    branch = AST::DoBranch.new(body: [], stack_size: nil, can_smash: false)
+    do_block = AST::DoBlock.new(token(:DO, "DO"), [branch])
+    program = AST::Program.new(token(:PROGRAM, "PROGRAM"), [bg, stream, do_block])
+
+    ann.send(:finalize_async_execution_shapes!, program)
+
+    expect(bg.spawn_form).to eq(:fsm)
+    expect(bg.computed_stack_tier).to eq(:micro)
+    expect(stream.spawn_form).to eq(:fsm)
+    expect(stream.computed_stack_tier).to eq(:micro)
+    expect(branch.computed_stack_tier).to eq(:micro)
+  end
+
   it "reports extern and reentrant method calls inside TIGHT loops" do
     ann = quiet_annotator
     dangerous = function_def("danger")
@@ -3447,10 +3493,94 @@ RSpec.describe "annotator branch gap burndown" do
     lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
     lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
 
-    called_names, _has_fnptr, _unabsorbed_calls, call_sites = ann.send(:scan_for_calls, [outer_call, lambda_node])
+    summary = ann.send(:scan_for_calls, [outer_call, lambda_node])
 
-    expect(called_names).to include("outer", "lambda_inner")
-    expect(call_sites).to eq([outer_call])
+    expect(summary.callees).to include("outer", "lambda_inner")
+    expect(summary.call_sites).to eq([outer_call])
+    expect(summary.raises_directly).to be(false)
+  end
+
+  it "records direct failure sources in the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    call = AST::FuncCall.new(token(:VAR_ID, "callee"), "callee", [])
+    direct_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
+    bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
+
+    summary = ann.send(:scan_for_calls, [call, direct_raise, bg])
+
+    expect(summary.callees).to include("callee")
+    expect(summary.call_sites).to eq([call])
+    expect(summary.raises_directly).to be(true)
+  end
+
+  it "records binding and assignment body facts during the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    value = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    decl = AST::VarDecl.new(token(:VAR, "VAR"), "created", Type.new(:Int64), value, false)
+    bind = AST::BindExpr.new(token(:IDENTIFIER, "created"), "created", nil, value)
+    bind.mode = :assign
+    assign = AST::Assignment.new(token(:IDENTIFIER, "created"), "created", value)
+
+    summary = ann.send(:scan_for_calls, [decl, bind, assign])
+
+    expect(summary.binding_nodes).to eq([decl])
+    expect(summary.assignment_nodes).to eq([bind, assign])
+    expect(summary.escape_nodes).to include(decl, bind, assign)
+  end
+
+  it "treats callees without effect sets as non-suspending body-scan calls" do
+    ann = SemanticAnnotator.new(source_code: "")
+    callee = AST::FunctionDef.new(token(:FN, "FN"), "plain", [], [], Type.new(:Void), nil, [], [], nil, :private, [], false)
+    ann.send(:register_function_node!, callee)
+    call = AST::FuncCall.new(token(:VAR_ID, "plain"), "plain", [])
+
+    expect(ann.send(:func_call_suspends?, call)).to be(false)
+    expect(ann.send(:scan_for_calls, [call]).suspend_points).to eq([])
+  end
+
+  it "records WITH scope nodes without leaking nested WITH or lambda bodies into the outer scope" do
+    ann = SemanticAnnotator.new(source_code: "")
+    outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
+    inner_call = AST::FuncCall.new(token(:VAR_ID, "inner"), "inner", [])
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
+    inner_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [inner_call], nil, nil)
+    outer_with = AST::WithBlock.new(token(:WITH, "WITH"), [], [outer_call, lambda_node, inner_with], nil, nil)
+    allow(CapabilityPlan).to receive(:require_for).and_call_original
+    allow(CapabilityPlan).to receive(:require_for).with(outer_with).and_return(double(locks: []))
+    allow(CapabilityPlan).to receive(:require_for).with(inner_with).and_return(double(locks: []))
+
+    summary = ann.send(:scan_for_calls, [outer_with])
+
+    expect(summary.with_scope_nodes.fetch(outer_with)).to include(outer_call, lambda_node, inner_with)
+    expect(summary.with_scope_nodes.fetch(outer_with)).not_to include(inner_call, lambda_call)
+    expect(summary.with_scope_nodes.fetch(inner_with)).to include(inner_call)
+  end
+
+  it "keeps lambda calls out of call-site facts while preserving lambda failure facts" do
+    ann = SemanticAnnotator.new(source_code: "")
+    lambda_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
+    lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
+    lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call, lambda_raise], :stack, nil)
+
+    summary = ann.send(:scan_for_calls, [lambda_node])
+
+    expect(summary.callees).to include("lambda_inner")
+    expect(summary.call_sites).to be_empty
+    expect(summary.raises_directly).to be(true)
+  end
+
+  it "records suspension points in the function body summary scan" do
+    ann = SemanticAnnotator.new(source_code: "")
+    promise = AST::Identifier.new(token(:IDENTIFIER, "promise"), "promise")
+    next_expr = AST::NextExpr.new(token(:NEXT, "NEXT"), promise)
+    yielded = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
+    yield_expr = AST::YieldExpr.new(token(:YIELD, "YIELD"), yielded)
+
+    summary = ann.send(:scan_for_calls, [next_expr, yield_expr])
+
+    expect(summary.suspend_points.map { |point| point[:kind] }).to eq([:next, :yield])
+    expect(summary.suspend_points.map { |point| point[:id] }).to eq([0, 1])
   end
 
   it "covers deferred WITH validation replay diagnostics directly" do

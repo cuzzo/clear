@@ -95,8 +95,6 @@ module ReentranceBridge
       validate_not_logical_return!(fn_node)
       offer_legacy_reentrant_migration!(fn_node)
       offer_unconstrained_fn_param_fix!(fn_node)
-      offer_plain_reentrant_variant_fix!(fn_node)
-      route_thunk_to_tail_call_compat!(fn_node)
     end
   end
 
@@ -115,15 +113,15 @@ module ReentranceBridge
   #   variants `:NOT_LOGICAL` / `:MAX_DEPTH(N)` change the return
   #   type and need user judgment about gas budgets, so we don't
   #   force them via auto-fix).
-  sig { params(fn_node: AST::FunctionDef).returns(NilClass) }
-  def offer_plain_reentrant_variant_fix!(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(NilClass) }
+  def offer_plain_reentrant_variant_fix!(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
 
     suggestion = nil
-    if thunk_all_self_calls_in_tail_position?(fn_node)
+    if thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
       suggestion = "EFFECTS REENTRANT:TAIL_CALL"
       reason = "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"
     elsif ThunkTransform::RecursiveSplitter.split(fn_node.body, fn_node.name, self)
@@ -186,11 +184,11 @@ module ReentranceBridge
   # the existing emission path applies. The reentrance_kind stays
   # :reentrant_thunk for downstream effect-propagation rules (Phase
   # 5 will use this to keep :THUNK out of @service).
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Boolean)) }
-  def route_thunk_to_tail_call_compat!(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T.nilable(T::Boolean)) }
+  def route_thunk_to_tail_call_compat!(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant_thunk
-    return unless thunk_all_self_calls_in_tail_position?(fn_node)
+    return unless thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     fn_node.tail_call = true
   end
 
@@ -586,12 +584,13 @@ module ReentranceBridge
   #
   # Returns true iff the function is self-recursive AND every
   # recursive self-call is the direct value of a RETURN node.
-  sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
-  def thunk_all_self_calls_in_tail_position?(fn_node)
+  sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T::Boolean) }
+  def thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
-    all = collect_self_calls(fn_node.body, fn_node.name)
+    calls = body_facts.is_a?(Annotator::Phases::FunctionBodySummary) ? body_facts.func_calls : body_facts.call_sites
+    all = calls.select { |call| call.name == fn_node.name }
     return false if all.empty?
-    blessed = collect_returns(fn_node.body).filter_map { |r|
+    blessed = body_facts.return_nodes.filter_map { |r|
       r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_node.name
     }
     return false if blessed.empty?

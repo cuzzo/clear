@@ -1451,6 +1451,11 @@ class Type
     resolved == :Void
   end
 
+  sig { returns(T::Boolean) }
+  def catch_snapshot_payload?
+    !void? && !error_union?
+  end
+
   # The :Untyped sentinel: a generic evaluatable node whose full_type
   # was never stamped by the annotator. full_type defaults to this
   # instead of nil so the contract is non-nilable; PreMirTypeCheck

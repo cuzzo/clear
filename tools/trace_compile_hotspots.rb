@@ -79,7 +79,11 @@ def run_phase(phase, source, source_dir, importer)
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     CompilerFrontend.synthesize_test_body_wrappers!(ast, fn_nodes)
     PreMirTypeCheck.verify!(ast)
-    MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
+    MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      body_summaries: annotator.semantic_index.body_summaries
+    ).transform!(ast)
   when "lower"
     frontend = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
     lowering = MIRLowering.new(input: MIRLoweringInput.new(

@@ -753,7 +753,7 @@ module MIRLoweringExpressions
     return nil unless current_function_has_catch? && current_function_snapshot_types.size == 1
 
     t = Type.new(node.left.full_type!)
-    return nil if t.void? || t.error_union?
+    return nil unless t.catch_snapshot_payload?
 
     snap_zig_type = transpile_type(t)
     [
