@@ -208,6 +208,16 @@ class SymbolEntry
   end
 
   sig { returns(T::Boolean) }
+  def declared_sync_contract?
+    return true unless sync.nil?
+
+    families = sync_families
+    return false unless families.is_a?(Set)
+
+    !families.empty?
+  end
+
+  sig { returns(T::Boolean) }
   def lock_sync?
     locked? || write_locked?
   end

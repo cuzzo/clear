@@ -64,7 +64,7 @@ module Annotator
         restamp_requires_on_signatures!
         fn_nodes.each_value do |fn|
           WithMatchCheck.check_call_sites!(
-            body_summaries.fetch(fn.name).func_calls,
+            body_summaries.fetch(fn.name).call_site_facts,
             signature_lookup,
             error_handler
           )

@@ -75,6 +75,21 @@ So the answer is: six annotator passes, followed by hoist, hoisted-fact
 analysis, and MIR. If a current "annotator" responsibility only becomes
 correct after hoisting, it should not remain an annotator pass.
 
+Current assessment after the receiver-state cleanup:
+
+- The target pass count is still right. Adding more named passes is unlikely to
+  help by itself.
+- The current problem is that several pass boundaries are procedural rather
+  than data-product boundaries. A phase may run at the right time but still
+  leave later code without the facts it needs, forcing source-body scans or
+  ambient receiver-state reads.
+- The useful split is collect first, decide later:
+  body typing should collect local facts once; constraint/finalization passes
+  should make decisions after function-wide and program-wide facts exist.
+- Decisions that depend on normalized temporaries, evaluation order, branch
+  ownership, or cleanup regions should move after hoist, not become more
+  source-AST annotation logic.
+
 ## Comparison To Rust
 
 Rust's compiler separates syntax, high-level semantic IR, typed high-level IR,
@@ -153,6 +168,112 @@ Current examples:
 
 That means the phase boundary is named, but not fully real. The facts needed by
 later phases are not always stored as typed, stable, frozen products.
+
+## Annotator Completion Status
+
+The A+ annotator work in this branch is now implemented for annotation proper.
+The remaining architectural work is no longer "make annotation phases real";
+it belongs to hoist, MIR ownership/control-flow facts, escape analysis, or
+pipeline lowering.
+
+Implemented in this branch:
+
+- Typed semantic IDs now exist for definitions, bodies, scopes, locals, places,
+  call sites, predicates, capabilities, suspend points, and synthetic locals.
+- `FunctionBodySummary` and `BodyScanSummary` carry `DefId`, `BodyId`,
+  `CallSiteFact`, `LocalFact`, and `SuspendPointFact` records.
+- `SemanticIndex` publishes an immutable `SemanticIdIndex` for definition/body
+  lookup at the annotation boundary.
+- Caller-sync propagation, reentrance checks, tail-call validation,
+  `WithMatchCheck`, FSM suspend enumeration, and strict-test IO checks consume
+  typed body facts instead of raw call/suspend arrays.
+- Body facts are recorded during the visitor traversal that stamps types.
+  The old `scan_for_calls` post-body pass is gone.
+- CATCH type resolution now runs after body traversal has registered raised
+  error types. Declaration indexing no longer walks function bodies to seed
+  error registrations.
+- Async body summaries are stored as one typed `AsyncBodyFact` per async body
+  instead of three parallel receiver arrays.
+- Stream yields use a scoped `StreamYieldFrame`; WITH nesting, BG pinned state,
+  snapshot transaction purity state, fiber capture state, and capture-move
+  suppression state now have explicit scoped lifecycles.
+- Pipeline SOA field tracking, auto-lock assignment context, effect state, and
+  lock-analysis state now live behind the typed receiver-state owner rather
+  than separate annotator ivars.
+- `OwnershipGraph` is owned by receiver state, and graph scope depth now lives
+  inside `OwnershipGraph` so pruning depth and declaration depth cannot drift.
+- Transitive lock acquires are a local lock-cycle phase product, not receiver
+  state.
+- Loop move validation now reads a typed `OwnershipGraph::Node` once and emits
+  diagnostics from that node instead of mixing hidden graph lookups through the
+  validation body.
+- Auto-lock assignment context now restores on exception and is receiver-owned.
+
+Rejected during the loop:
+
+- Moving branch termination into receiver state made Decomplex worse and did
+  not reduce risk, so `@branch_terminated` remains a narrow control-flow
+  visitor flag.
+- Extracting CATCH body analysis into another helper increased state-based
+  density and broken protocols. The final design keeps CATCH body typing in
+  the function visitor, but moves CATCH type resolution after body traversal.
+- A wrapper-method API for auto-lock assignment and pipeline field tracking
+  fixed the protocol but increased root clusters and false simplicity. The
+  final design uses direct receiver-state fields with explicit `ensure`
+  restoration instead of adding public lifecycle methods.
+
+Current remaining work, deliberately outside this annotator phase-state
+completion pass:
+
+1. Capability validation can still become a standalone validator over frozen
+   fact tables. That should be a dedicated capability-validator rewrite, not a
+   cosmetic move of `WITH` helper code.
+2. Ownership, escape, cleanup, and branch-local memory-safety dataflow should
+   continue moving after hoist/MIR, where evaluation order and synthetic
+   temporaries are explicit.
+3. Pipeline annotation and MIR lowering already share typed plan objects in the
+   MIR pipeline path, but pipeline source typing is still a large helper. Any
+   further work should reduce duplicated assumptions between annotation and
+   MIR without creating a second planner.
+4. Guardrails for new forbidden AST semantic walkers should become CI-enforced
+   once the remaining hoist/MIR migration exceptions are classified.
+
+Completion-pass metric result versus the starting snapshot for this loop:
+
+| Decomplex metric | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-Detector Convergence | 1754 | 1753 | -1 |
+| Root-Cause Clusters | 481 | 478 | -3 |
+| Decision Pressure | 274 | 271 | -3 |
+| State Heatmap | 567 | 564 | -3 |
+| State-Based Branch Density | 1598 | 1599 | +1 |
+| Temporal Ordering Pressure | 14 | 14 | 0 |
+| Missing Abstractions | 175 | 173 | -2 |
+| Neglected Path Conditions | 1378 | 1359 | -19 |
+| Broken Protocols | 401 | 399 | -2 |
+| False Simplicity | 1049 | 1053 | +4 |
+| Fat Unions | 10 | 10 | 0 |
+
+Final receiver/ownership-state cleanup delta from the continuation snapshot:
+
+| Decomplex metric | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-Detector Convergence | 1753 | 1753 | 0 |
+| Root-Cause Clusters | 478 | 478 | 0 |
+| Decision Pressure | 271 | 270 | -1 |
+| State Heatmap | 564 | 556 | -8 |
+| State-Based Branch Density | 1599 | 1599 | 0 |
+| Temporal Ordering Pressure | 14 | 14 | 0 |
+| Missing Abstractions | 173 | 173 | 0 |
+| Neglected Path Conditions | 1359 | 1359 | 0 |
+| Broken Protocols | 401 | 399 | -2 |
+| False Simplicity | 1049 | 1053 | +4 |
+| Fat Unions | 10 | 10 | 0 |
+
+The remaining `False Simplicity` increase is explicit typed state surface:
+`LockAnalysisState` top-level struct/fact ownership and graph-owned scope
+depth. The attempted receiver-state move for `branch_terminated` was rejected
+because it added three more false-simplicity findings with no correctness win.
 
 ## Walk Policy
 
@@ -368,6 +489,44 @@ The migration should be measured after every step with Decomplex and targeted
 coverage. The expected local signal is fewer AST walkers, fewer state-heavy
 annotator ivars, fewer source-shape branches in semantic/MIR boundary files,
 and fewer broken protocols around pass ordering.
+
+### Order Of Operations To Avoid Rework
+
+The efficient order is:
+
+1. Inventory and classify every remaining source-AST semantic walker.
+2. Add the stable ID spine (`BodyId`, `LocalId`, `PlaceId`, `CallSiteId`,
+   `PredicateId`, plus provenance for synthetic IDs). Do this before rewriting
+   capability, control-flow, ownership, or pipe logic; otherwise those rewrites
+   will key their facts by names or AST object identity and need to be rewritten
+   again.
+3. Build the `SemanticIndex` skeleton around existing registries and the new
+   IDs. It can begin as a typed boundary over current data, but it must become
+   the only downstream semantic product.
+4. Extend the single body typing traversal to emit complete `BodyFacts` keyed
+   by those IDs. This removes second-pass body scans without creating a second
+   identity scheme.
+5. Rewrite whole-program semantic consumers to fact tables: effects,
+   fallibility, caller sync, WITH/call requirements, lock checks, and
+   concurrency checks.
+6. Extract capability validation into an explicit validator over fact tables.
+   This should happen after IDs and `BodyFacts`, because capability correctness
+   is place/region/predicate-sensitive.
+7. Upgrade hoist to preserve IDs, create synthetic IDs, and publish provenance.
+   Hoist should become the last source-shaped consumer.
+8. Move ownership, escape, cleanup, and control-flow dataflow to hoisted bodies
+   or MIR facts. This is the largest memory-safety win, but it should wait
+   until hoist exposes stable places and evaluation order.
+9. Convert pipe analysis into a typed `PipelinePlan` consumed by annotation,
+   rewriting, and MIR lowering. This can run after the ID/index foundation so
+   pipeline facts do not need another migration.
+10. Turn the AST-walk guardrail from report-only to fail-on-new-violation.
+11. Collapse remaining `SemanticAnnotator` mutable state into phase-local
+    inputs/results once consumers no longer depend on receiver internals.
+
+The critical dependency is stable identity before validator/planner rewrites.
+Without that, each cleanup can look locally better while still baking in the
+wrong identity model.
 
 ### Stage 0. Inventory And Guardrail In Report-Only Mode
 
@@ -629,24 +788,33 @@ Exit criteria:
 
 The highest-impact path is:
 
-1. `BodyFacts` from the current body visitor.
-2. `SemanticIndex` as the downstream boundary.
-3. Whole-program semantic consumers rewritten to fact tables.
-4. Hoist output upgraded to carry stable synthetic IDs and provenance.
-5. Escape/cleanup/ownership moved from source AST to hoisted IR/MIR.
-6. CI guardrail enforced.
-7. Annotator receiver state collapsed.
+1. Stable ID spine.
+2. `SemanticIndex` boundary.
+3. Complete `BodyFacts` from the existing body typing traversal.
+4. Whole-program semantic consumers rewritten to fact tables.
+5. Capability validator over fact tables.
+6. Hoist output upgraded to carry stable synthetic IDs and provenance.
+7. Escape/control-flow/cleanup/ownership moved from source AST to hoisted IR/MIR.
+8. Typed `PipelinePlan` shared by annotation, rewriting, and MIR lowering.
+9. CI guardrail enforced.
+10. Remaining annotator receiver state collapsed into phase-local inputs/results.
 
-The reason to start with `BodyFacts` is pragmatic: most forbidden late AST
-walks exist because body typing did not publish enough information. Stable IDs
-and `SemanticIndex` are necessary, but they pay off only once body facts replace
-consumer-side rediscovery.
+The reason to start with stable IDs is pragmatic: capability, ownership,
+control-flow, escape, and pipeline facts are all facts about definitions,
+bodies, locals, places, calls, predicates, and regions. If those rewrites land
+before stable IDs, they will key their new facts by strings or AST object
+identity and need a second migration later.
 
-The largest correctness win is Stage 6, but it should not be first. Ownership,
-escape, and cleanup need explicit hoisted places and synthetic IDs. Starting
-there would force another weak adapter layer. The better sequence is to make
-source facts complete, make hoist preserve identity, then move memory-safety
-facts to the normalized representation.
+`BodyFacts` should be early, but not first. Most forbidden late AST walks exist
+because body typing did not publish enough information, but those facts should
+be keyed by the final identity model from the start.
+
+The largest correctness win is moving ownership, escape, cleanup, and
+control-flow dataflow off source AST. It should not be first. Those analyses
+need explicit hoisted places, synthetic IDs, and evaluation order. Starting
+there would force another weak adapter layer. The better sequence is to build
+stable identity, make source facts complete, make hoist preserve identity, then
+move memory-safety facts to the normalized representation.
 
 ## Success Criteria
 
@@ -710,10 +878,10 @@ Implemented:
   binding nodes, assignment nodes, escape nodes, pipe snapshot payload types,
   suspend points, and per-`WITH` scope nodes.
 - Rewired caller-sync propagation, reentrance/tail-call validation, catch
-  snapshot detection, async spawn/stack finalization, escape placement, and
-  concurrency checks to consume those recorded body facts instead of
+  snapshot detection, function-level FSM suspend enumeration, escape placement,
+  and concurrency checks to consume recorded body facts instead of
   rediscovering calls, returns, raises, suspend points, or `WITH` scopes with
-  late source-body walkers.
+  late source-body walkers where those consumers have been migrated.
 - Threaded function body summaries through `SemanticIndex` and into `MIRPass`
   so post-annotation escape placement can consume the annotator boundary
   product on normal compile/import/profile paths.
@@ -747,12 +915,11 @@ Rejected during the 2026-06-09 milestone:
   because it added fact scaffolding without deleting enough old control flow.
   The retained implementation reuses the existing body scan instead.
 
-Remaining major work:
+Remaining major work after this milestone:
 
-- Stable IDs (`BodyId`, `LocalId`, `PlaceId`, `CallSiteId`, `PredicateId`) are
-  still design work, not implemented in this milestone.
-- `SemanticIndex` is a boundary wrapper over the current typed registries, not
-  yet the full immutable sub-index store described above.
+- `SemanticIndex` is a boundary wrapper over the current typed registries and
+  semantic ID index, not yet the full immutable sub-index store described
+  above.
 - Several source walkers remain in pre-registration, Auto inference, escape
   analysis, cleanup classification, MIR lowering, and MIR/control-flow passes.
   The annotator whole-program consumers covered by this plan now consume body
@@ -825,3 +992,108 @@ Final metric note for this pass:
   branches. The first implementation with five helper state classes made this
   worse; the final `ReceiverState` record keeps one owner while avoiding most
   wrapper-method noise.
+
+### 2026-06-10 Stable ID And Typed Fact Completion Pass
+
+Implemented:
+
+- Added `Semantic::DefId`, `BodyId`, `ScopeId`, `LocalId`, `PlaceId`,
+  `CallSiteId`, `SuspendPointId`, `PredicateId`, `CapabilityId`, and
+  `SyntheticLocalId`.
+- Added deterministic `Semantic::BodyIdentity` assignment from function
+  registry order. A mutable ID allocator was rejected because the intermediate
+  implementation increased Decomplex state pressure.
+- Added `Semantic::SemanticIdIndex` and published it through `SemanticIndex`.
+- Added typed `CallSiteFact`, `LocalFact`, and `SuspendPointFact` records to
+  `BodyScanSummary` and `FunctionBodySummary`.
+- Removed `FunctionBodySummary#func_calls` and `BodyScanSummary#call_sites`.
+  Reentrance, tail-call validation, caller-sync propagation, and
+  `WithMatchCheck` now consume `CallSiteFact`.
+- Removed raw suspend-point hashes from body summaries. FSM phase A now stores
+  `SuspendPointFact` records and tests assert `.kind` / `.id.value`.
+- Replaced the broad reflective Auto search with a typed source-AST traversal
+  that only checks nodes that can carry Auto annotations.
+- Replaced a test-only untyped `OpenStruct` symbol slot with the real
+  `SymbolEntry`/node-storage path so the coverage spec matches the typed
+  cleanup-classifier contract.
+- Removed one cleanup-classifier second source walk by carrying place-indexed
+  cleanup entries out of the existing binding classification traversal.
+- Replaced cleanup-classifier moved-source guard discovery with a typed
+  structural child walk and tightened the added cleanup-classifier signatures
+  that still tripped the source type guardrails.
+- Replaced the thunk mutual-recursion helper's broad `AST.each_locatable`
+  search with local structural recursion for the small expression shape it
+  actually needs.
+
+Metric result versus the stable-fact pass baseline:
+
+| Decomplex metric | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-Detector Convergence | 1756 | 1753 | -3 |
+| Root-Cause Clusters | 482 | 481 | -1 |
+| Decision Pressure | 274 | 274 | 0 |
+| State Heatmap | 567 | 567 | 0 |
+| State-Based Branch Density | 1598 | 1597 | -1 |
+| Temporal Ordering Pressure | 14 | 14 | 0 |
+| Missing Abstractions | 177 | 175 | -2 |
+| Broken Protocols | 406 | 401 | -5 |
+| False Simplicity | 1032 | 1032 | 0 |
+| Fat Unions | 11 | 10 | -1 |
+
+Follow-up after this pass:
+
+- Body fact collection has moved into the type-stamping visitor path; no
+  post-body `scan_for_calls` pass remains.
+- Capability validation now consumes typed `CapabilityTransition` actions
+  for sync-family and deferred-param decisions instead of reopening
+  `source_entry`/`sync` state in the visitor helper. `SymbolEntry` owns the
+  declared sync-contract predicate because it owns `sync`/`sync_families`.
+  A future
+  `CapabilityValidationInput`/`CapabilityValidationResult` object would be a
+  packaging cleanup, not missing annotator phase separation.
+- Ownership graph, escape placement, cleanup classification, and control-flow
+  memory-safety facts still need the hoisted-place/CFG boundary described in
+  the MIR/ownership architecture work.
+- Pipeline source typing now resolves collection/range/stream/inf-stream
+  source facts through one typed `PipelineSourceFact` contract. The MIR
+  pipeline path already has typed plan records; any further cleanup should
+  delete duplicated assumptions between annotation and MIR, not add a second
+  planning path.
+- The AST-walk guardrail remains report-only for classified migration
+  exceptions.
+
+### 2026-06-10 Annotator-Local Final Cleanup
+
+Implemented:
+
+- Replaced the split pipeline protocol of `finite_stream_source?`,
+  `finite_stream_element_type`, `inf_stream_element_type`, and nullable
+  iterable facts with one typed `PipelineSourceFact`.
+- Converted SELECT/WHERE/INDEX, TAKE_WHILE, REDUCE, LIMIT, DISTINCT, EACH,
+  SKIP, TAP, FIND/ANY/ALL/COUNT, SUM/AVERAGE/MIN/MAX, SHARD, and concurrent
+  stream EACH/SELECT-family typing to consume that source fact.
+- Removed compatibility test stubs for the deleted pipeline helpers so tests
+  exercise the real source-fact contract.
+- Moved EXCLUSIVE/write-locked/atomic deferred-param sync decisions onto
+  `CapabilityPlan::CapabilityTransition` with `exclusive_validation_action`,
+  `exclusive_sync?`, and `deferred_sync_param?`; the WITH validator now
+  consumes the typed action instead of branching over raw sync state.
+- Kept `PipelineSourceFact` and capability fix candidates as `T::Struct`
+  records because that was the best Decomplex profile in this codebase:
+  state heatmap stayed flat while broken protocols dropped.
+
+Metric result versus the final cleanup baseline:
+
+| Decomplex metric | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-Detector Convergence | 1753 | 1749 | -4 |
+| Root-Cause Clusters | 478 | 478 | 0 |
+| Decision Pressure | 270 | 270 | 0 |
+| State Heatmap | 556 | 556 | 0 |
+| State-Based Branch Density | 1599 | 1596 | -3 |
+| Temporal Ordering Pressure | 14 | 14 | 0 |
+| Missing Abstractions | 173 | 172 | -1 |
+| Neglected Path Conditions | 1359 | 1359 | 0 |
+| Broken Protocols | 399 | 377 | -22 |
+| False Simplicity | 1053 | 1053 | 0 |
+| Fat Unions | 10 | 10 | 0 |

@@ -587,8 +587,9 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T::Boolean) }
   def thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     T.bind(self, SemanticAnnotator) rescue nil
-    calls = body_facts.is_a?(Annotator::Phases::FunctionBodySummary) ? body_facts.func_calls : body_facts.call_sites
-    all = calls.select { |call| call.name == fn_node.name }
+    all = body_facts.call_site_facts.filter_map { |fact|
+      fact.node if fact.callee_name == fn_node.name
+    }
     return false if all.empty?
     blessed = body_facts.return_nodes.filter_map { |r|
       r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_node.name

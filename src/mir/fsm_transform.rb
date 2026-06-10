@@ -145,6 +145,7 @@ module FsmTransform
       extra_ctx_fields: ext_ctx,
       recursive_promoted_names: promoted_names,
       fresh_heap_cleanup_names: T.cast(raw_ctx[:fresh_heap_cleanup_names] || [], T::Array[String]),
+      capture_finalizers: T.cast(raw_ctx[:capture_finalizers] || [], T::Array[MIR::Emittable]),
       arena_init_flag: raw_ctx[:arena_init_flag] == true,
       is_void: raw_ctx[:is_void] == true,
       pin_mode: T.cast(raw_ctx[:pin_mode], T.nilable(T.any(T::Boolean, Symbol))),

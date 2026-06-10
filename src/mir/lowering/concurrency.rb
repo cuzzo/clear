@@ -70,6 +70,7 @@ module MIRLoweringConcurrency
     const :capture_inits, T::Array[MIR::StructInitField]
     const :fresh_heap_cleanup_names, T::Array[String]
     const :capture_frees, T::Array[MIR::CaptureCleanupAction]
+    const :capture_finalizers, T::Array[MIR::Emittable], factory: -> { [] }
     const :promoted_decls, T::Array[MIR::Emittable]
   end
 
@@ -115,6 +116,7 @@ module MIRLoweringConcurrency
       result[:stmt_code] = body.stmt_code
       result[:result_line] = body.result_line
       result[:capture_frees] = capture.capture_frees
+      result[:capture_finalizers] = capture.capture_finalizers
       result[:fresh_heap_cleanup_names] = capture.fresh_heap_cleanup_names
       result[:is_void] = types.is_void
       result[:alloc_var] = names.alloc_var
@@ -540,7 +542,11 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     promoted_names = T.let({}, T::Hash[String, String])
     outer_capture_map = fiber_capture_source_overrides(analysis, capture_state.do_capture_map || {})
-    caps = FiberCtxBuilder.build(analysis,
+    capture_analysis = analysis || CapabilityHelper::CaptureAnalysis.new(
+      captures: captured,
+      pointer_captures: pointer_captures,
+    )
+    caps = FiberCtxBuilder.build(capture_analysis,
                                  body_access_prefix: "__ctx_#{names.id}",
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: names.alloc_var,
@@ -583,6 +589,7 @@ module MIRLoweringConcurrency
     }
     setup_stmts = capture_setup_stmts(caps.specs)
     fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.needs_moved_guard? ? spec.name : nil }
+    capture_finalizers = caps.specs.filter_map { |spec| spec.finalizer_mir_for("__ctx_#{names.id}") }
     capture_frees = captured.filter_map { |name, _|
       close_plan = capture_close_plans[name]
       if close_plan
@@ -604,6 +611,7 @@ module MIRLoweringConcurrency
       capture_inits: capture_inits,
       fresh_heap_cleanup_names: fresh_heap_cleanup_names,
       capture_frees: capture_frees,
+      capture_finalizers: capture_finalizers,
       promoted_decls: setup_stmts,
     )
   end

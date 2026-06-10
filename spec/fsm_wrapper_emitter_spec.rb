@@ -402,6 +402,18 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("real();")
       expect(out).not_to match(/\n\s*\n\s*\n/)
     end
+
+    it "preserves destroy statements already terminated by the MIR emitter" do
+      action = MIR::FsmDestroyStmt.new(
+        source_kind: :body,
+        name: "shared",
+        stmt: MIR::ExprStmt.new(MIR::Call.new("releaseShared", [], false), false),
+      )
+
+      out = FsmWrapperEmitter.render_destroy_stmt_action(action, MIREmitter.new)
+
+      expect(out).to eq("releaseShared();")
+    end
   end
 
   describe "spawn setup" do

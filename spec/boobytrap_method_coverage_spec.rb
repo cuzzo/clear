@@ -45,7 +45,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     frame_decl = OpenStruct.new(symbol: SymbolEntry.new(reg: "frame_decl", type: Type.new(:String), mutable: false, storage: :frame))
     sym = SymbolEntry.new(reg: frame_decl, type: Type.new(:String), mutable: false, storage: :heap)
     expect(CleanupClassifier.send(:container_alloc_from, sym, OpenStruct.new(storage: :heap))).to eq(:frame)
-    expect(CleanupClassifier.send(:container_alloc_from, OpenStruct.new(storage: :stack), Object.new)).to eq(:frame)
+    expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :stack))).to eq(:frame)
     expect(CleanupClassifier.send(:container_alloc_from, nil, OpenStruct.new(storage: :heap))).to eq(:heap)
 
     schema_lookup = ->(_) { nil }
@@ -219,13 +219,15 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(l.send(:build_field_path_zig, Object.new)).to be_a(String)
   end
 
-  it "covers annotator recursive scans and stack/lifetime helpers" do
+  it "covers annotator body facts and stack/lifetime helpers" do
     a = annotator
     call = AST::FuncCall.new(tok, "recur", [])
     nested = AST::StructLit.new(tok, "Box", { "call" => call }, :stack, [])
     ret = AST::ReturnNode.new(tok, call)
-    body_scan = a.send(:scan_for_calls, [nested, ret])
-    expect(body_scan.call_sites).to include(call)
+    body_scan = a.send(:with_body_fact_frame, Semantic::BodyIdentity.unassigned) do
+      [nested, call, ret].each { |node| a.send(:record_body_fact_node!, node) }
+    end
+    expect(body_scan.call_site_facts.map(&:node)).to include(call)
     expect(body_scan.return_nodes).to eq([ret])
 
     {

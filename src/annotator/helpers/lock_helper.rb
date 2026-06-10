@@ -67,22 +67,12 @@ module LockHelper
   HeldCallSites = T.type_alias { T::Hash[String, T::Array[LockHeldCallSite]] }
   TransitiveAcquires = T.type_alias { T::Hash[String, T::Set[Symbol]] }
 
-  # Called once from SemanticAnnotator#initialize.
-  sig { returns(DirectEdges) }
-  def init_lock_analysis!
-    T.bind(self, SemanticAnnotator) rescue nil
-    @lock_direct_edges    = T.let(Hash.new { |h, k| h[k] = [] }, T.nilable(DirectEdges))
-    @lock_direct_acquires = T.let(Hash.new { |h, k| h[k] = Set.new }, T.nilable(DirectAcquires))
-    @lock_held_calls      = T.let(Hash.new { |h, k| h[k] = [] }, T.nilable(HeldCallSites))
-    # WITH-with-clause sites are post-pass verified for reachable-handler
-    # correctness: ON :X where :X cannot actually fire is a dead handler.
-    @lock_clause_sites    = T.let([], T.nilable(T::Array[LockClauseSite]))
-    # Phase 3: per-type lock rank. First declaration of a type with
-    # @locked(rank: N) / @writeLocked(rank: N) establishes the rank;
-    # every subsequent declaration of that type must agree.
-    @lock_type_ranks      = T.let({}, T.nilable(T::Hash[Symbol, Integer]))
-    @lock_transitive_acquires = T.let({}, T.nilable(TransitiveAcquires))
-    T.must(@lock_direct_edges)
+  class LockAnalysisState < T::Struct
+    prop :direct_edges, DirectEdges, factory: -> { Hash.new { |h, k| h[k] = [] } }
+    prop :direct_acquires, DirectAcquires, factory: -> { Hash.new { |h, k| h[k] = Set.new } }
+    prop :held_calls, HeldCallSites, factory: -> { Hash.new { |h, k| h[k] = [] } }
+    prop :clause_sites, T::Array[LockClauseSite], factory: -> { [] }
+    prop :type_ranks, T::Hash[Symbol, Integer], factory: -> { {} }
   end
 
   # First declaration of T with a rank wins; subsequent mismatches error.
@@ -90,7 +80,7 @@ module LockHelper
   def record_lock_type_rank!(type_sym, rank, node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless type_sym && rank
-    lock_type_ranks = T.must(@lock_type_ranks)
+    lock_type_ranks = phase_receiver_state.lock_analysis.type_ranks
     existing = lock_type_ranks[type_sym]
     if existing.nil?
       lock_type_ranks[type_sym] = rank
@@ -106,7 +96,7 @@ module LockHelper
     T.bind(self, SemanticAnnotator) rescue nil
     t = cap.lock_identity
     return nil unless t
-    T.must(@lock_type_ranks)[t]
+    phase_receiver_state.lock_analysis.type_ranks[t]
   end
 
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).void }
@@ -114,7 +104,7 @@ module LockHelper
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
     cap_types = lock_capabilities.filter_map(&:lock_identity)
-    T.must(@lock_clause_sites) << LockClauseSite.new(node: node, cap_types: cap_types)
+    phase_receiver_state.lock_analysis.clause_sites << LockClauseSite.new(node: node, cap_types: cap_types)
     nil
   end
 
@@ -157,8 +147,8 @@ module LockHelper
     T.bind(self, SemanticAnnotator) rescue nil
     held_lock_types = current_held_lock_types
     return if held_lock_types.empty?
-    lock_type_ranks = @lock_type_ranks
-    return unless lock_type_ranks && !lock_type_ranks.empty?
+    lock_type_ranks = phase_receiver_state.lock_analysis.type_ranks
+    return if lock_type_ranks.empty?
     escape = node.deadlock_escape
     lock_capabilities.each do |cap|
       cap_rank = rank_of_cap(cap)
@@ -194,11 +184,12 @@ module LockHelper
     T.bind(self, SemanticAnnotator) rescue {}
     t = cap.lock_identity
     return unless t
-    T.must(T.must(@lock_direct_acquires)[fn_name]) << t
+    state = phase_receiver_state.lock_analysis
+    T.must(state.direct_acquires[fn_name]) << t
     site_tok = cap.var_node.token
     acquirer_opt = !escape.nil?
     held_stack.each do |held|
-      T.must(T.must(@lock_direct_edges)[fn_name]) << LockEdge.new(
+      T.must(state.direct_edges[fn_name]) << LockEdge.new(
         held: held.type, acquired: t,
         site_token: site_tok, fn_name: fn_name,
         opted_out: acquirer_opt || held.opted_out,
@@ -209,8 +200,9 @@ module LockHelper
   sig { params(fn_name: String, callee_name: String, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], site_token: Lexer::Token).void }
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
     T.bind(self, SemanticAnnotator) rescue nil
+    state = phase_receiver_state.lock_analysis
     held_stack.each do |held|
-      T.must(T.must(@lock_held_calls)[fn_name]) << LockHeldCallSite.new(
+      T.must(state.held_calls[fn_name]) << LockHeldCallSite.new(
         held: held.type,
         callee: callee_name,
         site_token: site_token,
@@ -227,7 +219,7 @@ module LockHelper
   def propagate_lock_acquires!
     T.bind(self, SemanticAnnotator) rescue nil
     transitive = T.let({}, TransitiveAcquires)
-    T.must(@lock_direct_acquires).each { |fn, set| transitive[fn] = set.dup }
+    phase_receiver_state.lock_analysis.direct_acquires.each { |fn, set| transitive[fn] = set.dup }
     function_call_graph.each_key { |fn| transitive[fn] ||= Set.new }
 
     loop do
@@ -246,17 +238,17 @@ module LockHelper
       break unless changed
     end
 
-    @lock_transitive_acquires = transitive
     transitive
   end
 
-  sig { void }
-  def resolve_held_calls!
+  sig { params(transitive_acquires: TransitiveAcquires).void }
+  def resolve_held_calls!(transitive_acquires)
     T.bind(self, SemanticAnnotator) rescue nil
-    T.must(@lock_held_calls).each do |fn, sites|
+    state = phase_receiver_state.lock_analysis
+    state.held_calls.each do |fn, sites|
       sites.each do |site|
-        (T.must(@lock_transitive_acquires)[site.callee] || Set.new).each do |t|
-          T.must(T.must(@lock_direct_edges)[fn]) << LockEdge.new(
+        (transitive_acquires[site.callee] || Set.new).each do |t|
+          T.must(state.direct_edges[fn]) << LockEdge.new(
             held: site.held, acquired: t,
             site_token: site.site_token, fn_name: fn,
             opted_out: site.opted_out,
@@ -278,7 +270,7 @@ module LockHelper
     adj = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[Symbol, T::Set[Symbol]])
     nodes = T.let(Set.new, T::Set[Symbol])
     live = T.let([], T::Array[LockEdge])
-    T.must(@lock_direct_edges).each do |_fn, edges|
+    phase_receiver_state.lock_analysis.direct_edges.each do |_fn, edges|
       edges.each do |e|
         next if e.opted_out && !include_opted_out
         T.must(adj[e.held]) << e.acquired
@@ -347,8 +339,8 @@ module LockHelper
   sig { void }
   def check_lock_cycles!
     T.bind(self, SemanticAnnotator) rescue nil
-    propagate_lock_acquires!
-    resolve_held_calls!
+    transitive_acquires = propagate_lock_acquires!
+    resolve_held_calls!(transitive_acquires)
 
     non_opted = build_lock_graph(include_opted_out: false)
     tarjan_scc(non_opted.nodes, non_opted.adj).each do |scc|
@@ -367,7 +359,8 @@ module LockHelper
   sig { void }
   def check_lock_handler_reachability!
     T.bind(self, SemanticAnnotator) rescue nil
-    return if @lock_clause_sites.nil? || @lock_clause_sites.empty?
+    clause_sites = phase_receiver_state.lock_analysis.clause_sites
+    return if clause_sites.empty?
 
     full = build_lock_graph(include_opted_out: true)
     types_in_cycle     = Set.new
@@ -384,7 +377,7 @@ module LockHelper
       end
     end
 
-    @lock_clause_sites.each do |site|
+    clause_sites.each do |site|
       verify_handler_reachability!(site, types_in_cycle, types_with_self)
     end
     nil

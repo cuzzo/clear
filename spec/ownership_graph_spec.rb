@@ -360,7 +360,7 @@ RSpec.describe "OwnershipGraph integration" do
 
   def graph_for(source)
     _, annotator = annotate(source)
-    annotator.instance_variable_get(:@og)
+    annotator.send(:ownership_graph)
   end
 
   it "declares variables in the graph" do

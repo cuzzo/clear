@@ -20,11 +20,11 @@ module Annotator
 
         compute_needs_rt!
         compute_can_fail!
-        enforce_fallible_returns!
-        mark_fn_value_references!(program)
+        mark_fn_value_references!
 
         compute_effects!
         validate_predicate_purity!
+        enforce_fallible_returns!
 
         compute_fsm_eligibility!
         enumerate_fsm_suspend_points!

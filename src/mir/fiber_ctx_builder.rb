@@ -110,12 +110,17 @@ module FiberCtxBuilder
 
     sig { returns(T::Boolean) }
     def guarded?
-      !none?
+      captured_value? || uniform_value?
     end
 
     sig { returns(T::Boolean) }
     def captured_value?
       kind == CaptureCleanupKind::CapturedValue
+    end
+
+    sig { returns(T::Boolean) }
+    def uniform_value?
+      kind == CaptureCleanupKind::UniformValue
     end
 
     sig { returns(T::Boolean) }
@@ -178,6 +183,23 @@ module FiberCtxBuilder
       ))
     end
 
+    sig { params(receiver: String).returns(T.nilable(MIR::Emittable)) }
+    def finalizer_mir_for(receiver)
+      return nil unless cleanup_plan.rc_release?
+
+      receiver_expr = MIR::Ident.new(receiver)
+      captured_field = MIR::FieldGet.new(receiver_expr, name)
+      rc_kind = T.must(cleanup_plan.rc_kind)
+      payload_type_zig = T.must(cleanup_plan.rc_payload_type_zig)
+
+      MIR::RcRelease.new(
+        captured_field,
+        payload_type_zig,
+        rc_kind.release_func,
+        MIR::Ident.new("std.heap.page_allocator"),
+      )
+    end
+
     sig { returns(T::Boolean) }
     def requires_setup?
       !setup_mir.empty?
@@ -229,7 +251,7 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: CapabilityHelper::CaptureAnalysis, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
                  fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {}, schema_lookup: nil)
     captured = analysis&.captures || {}

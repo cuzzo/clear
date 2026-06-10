@@ -699,6 +699,7 @@ module FsmTransform
       recursive_promoted_names = ctx.recursive_promoted_names
       extra_ctx_fields = ctx.extra_ctx_fields
       fresh_heap_cleanup_names = ctx.fresh_heap_cleanup_names
+      capture_finalizers = ctx.capture_finalizers
       is_void = ctx.is_void
       lowering_api = T.unsafe(lowering)
 
@@ -791,6 +792,16 @@ module FsmTransform
           target: fsm_ctx_field(id, name),
           cleanup_entry: CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true),
           allocator: fsm_ctx_field(id, "alloc"),
+        )
+      end
+      capture_finalizers.each do |finalizer|
+        name = fsm_destroy_finalizer_name(finalizer)
+        next unless name
+
+        fsm_destroy_actions(ctx) << MIR::FsmDestroyStmt.new(
+          source_kind: :capture,
+          name: name,
+          stmt: finalizer,
         )
       end
 
@@ -1041,6 +1052,16 @@ module FsmTransform
     sig { params(id: Integer, name: String).returns(MIR::FieldGet) }
     def fsm_ctx_field(id, name)
       MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), name)
+    end
+
+    sig { params(finalizer: MIR::Emittable).returns(T.nilable(String)) }
+    def fsm_destroy_finalizer_name(finalizer)
+      return nil unless finalizer.is_a?(MIR::RcRelease)
+
+      source = finalizer.source
+      return nil unless source.is_a?(MIR::FieldGet)
+
+      source.field.to_s
     end
 
     sig { params(name: String, promoted_names: T::Array[String]).returns(T.nilable(String)) }

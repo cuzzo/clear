@@ -157,8 +157,7 @@ def merge_simplecov_file!(coverage, path)
       existing["lines"] ||= []
       max = [existing["lines"].length, lines.length].max
       existing["lines"] = Array.new(max) do |i|
-        vals = [existing["lines"][i], lines[i]].compact
-        vals.empty? ? nil : vals.max
+        merge_simplecov_line_hit(existing["lines"][i], lines[i])
       end
       existing["branches"] ||= {}
       (cov["branches"] || {}).each do |parent, children|
@@ -173,12 +172,30 @@ def merge_simplecov_file!(coverage, path)
   coverage
 end
 
+def merge_simplecov_line_hit(existing, incoming)
+  vals = [existing, incoming]
+  positive = vals.compact.select { |hit| hit.to_i.positive? }
+  return positive.max unless positive.empty?
+  return nil if vals.any?(&:nil?)
+
+  vals.compact.max
+end
+
 def parse_simplecov(paths)
   paths.each_with_object({}) { |path, coverage| merge_simplecov_file!(coverage, path) if File.exist?(path) }
 end
 
 def tuple_line(tuple)
   tuple.to_s.split(",")[2].to_i
+end
+
+def ruby_synthetic_branch_line?(stripped)
+  stripped.start_with?("sig ") ||
+    stripped == "sig do" ||
+    stripped.start_with?("def ") ||
+    stripped.start_with?("T.bind(") ||
+    stripped.include?("T.let(") ||
+    stripped.include?("T.cast(")
 end
 
 def ruby_added_coverage(adds, paths)
@@ -211,7 +228,16 @@ def ruby_added_coverage(adds, paths)
     end
     (cov["branches"] || {}).each_value do |children|
       children.each do |tuple, hits|
-        next unless adds[path].include?(tuple_line(tuple))
+        line = tuple_line(tuple)
+        next unless adds[path].include?(line)
+        next if lines[line - 1].nil?
+        source_lines = source_lines_by_path[path] ||= begin
+          full = File.join(ROOT, path)
+          File.exist?(full) ? File.readlines(full) : []
+        end
+        stripped = source_lines[line - 1].to_s.strip
+        next if stripped.empty? || stripped.start_with?("#") || stripped == "end"
+        next if ruby_synthetic_branch_line?(stripped)
 
         branch_total += 1
         branch_hit += 1 if hits.to_i.positive?

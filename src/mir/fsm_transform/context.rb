@@ -27,6 +27,7 @@ module FsmTransform
       const :extra_ctx_fields, T::Array[MIR::ContextFieldDecl]
       const :recursive_promoted_names, T::Array[String]
       const :fresh_heap_cleanup_names, T::Array[String]
+      const :capture_finalizers, T::Array[MIR::Emittable], factory: -> { [] }
       const :arena_init_flag, T::Boolean
       const :is_void, T::Boolean
       const :pin_mode, T.nilable(T.any(T::Boolean, Symbol))
@@ -57,6 +58,7 @@ module FsmTransform
           extra_ctx_fields: fields,
           recursive_promoted_names: recursive_promoted_names,
           fresh_heap_cleanup_names: fresh_heap_cleanup_names,
+          capture_finalizers: capture_finalizers,
           arena_init_flag: arena_init_flag,
           is_void: is_void,
           pin_mode: pin_mode,

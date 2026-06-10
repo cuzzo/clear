@@ -653,6 +653,8 @@ module FsmWrapperEmitter
         case action
         when MIR::FsmDestroyCleanup
           render_destroy_cleanup_action(action, mir_emitter)
+        when MIR::FsmDestroyStmt
+          render_destroy_stmt_action(action, mir_emitter)
         when MIR::FsmDestroyLockRelease
           render_destroy_lock_action(ctx_id, action, mir_emitter)
         end
@@ -676,6 +678,12 @@ module FsmWrapperEmitter
     else
       "if (#{guard}) #{cleanup}"
     end
+  end
+
+  sig { params(action: MIR::FsmDestroyStmt, mir_emitter: MIREmitter).returns(String) }
+  def render_destroy_stmt_action(action, mir_emitter)
+    stmt = T.must(mir_emitter.emit(action.stmt)).strip
+    stmt.end_with?(";", "}") ? stmt : "#{stmt};"
   end
 
   sig { params(ctx_id: Integer, action: MIR::FsmDestroyLockRelease, mir_emitter: MIREmitter).returns(String) }

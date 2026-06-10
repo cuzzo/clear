@@ -107,6 +107,15 @@ class SemanticAnnotator
     const :opted_out, T::Boolean
   end
 
+  class StreamYieldFrame < T::Struct
+    const :node, AST::BgStreamBlock
+    const :yield_types, T::Array[Type], factory: -> { [] }
+  end
+
+  class SnapshotTxnFrame < T::Struct
+    const :violations, T::Array[SnapshotTxnViolation], factory: -> { [] }
+  end
+
   DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
   class ReceiverState < T::Struct
@@ -123,6 +132,20 @@ class SemanticAnnotator
       factory: -> { [] }
     prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
     prop :capability_audit, CapabilityAudit::BindingAuditStore, factory: -> { {} }
+    prop :body_fact_frames, T::Array[Annotator::Phases::BodyFactFrame], factory: -> { [] }
+    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
+    prop :stream_yield_frames, T::Array[StreamYieldFrame], factory: -> { [] }
+    prop :with_block_depth, Integer, default: 0
+    prop :match_pattern_depth, Integer, default: 0
+    prop :current_bg_pinned, T::Boolean, default: false
+    prop :capture_stack, T::Array[CapabilityHelper::CaptureContext], factory: -> { [] }
+    prop :capture_move_suppression_depth, Integer, default: 0
+    prop :snapshot_txn_frames, T::Array[SnapshotTxnFrame], factory: -> { [] }
+    prop :pipeline_accessed_fields, T.nilable(T::Set[String]), default: nil
+    prop :auto_locked_assign_name, T.nilable(String), default: nil
+    prop :effect_state, T.nilable(EffectTracker::EffectState), default: nil
+    prop :lock_analysis, LockHelper::LockAnalysisState, factory: -> { LockHelper::LockAnalysisState.new }
+    prop :ownership_graph, OwnershipGraph, factory: -> { OwnershipGraph.new }
   end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
@@ -139,6 +162,18 @@ class SemanticAnnotator
   def function_node_map
     semantic_function_registry.nodes
   end
+
+  sig { returns(ReceiverState) }
+  def phase_receiver_state
+    @receiver_state
+  end
+  private :phase_receiver_state
+
+  sig { returns(OwnershipGraph) }
+  def ownership_graph
+    @receiver_state.ownership_graph
+  end
+  private :ownership_graph
 
   sig { params(name: T.nilable(String)).returns(T.nilable(AST::FunctionDef)) }
   def function_node_for(name)
@@ -170,7 +205,7 @@ class SemanticAnnotator
 
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
-    @lock_type_ranks || {}
+    @receiver_state.lock_analysis.type_ranks
   end
 
   sig { returns(T::Array[HeldLockTypeEntry]) }
@@ -229,14 +264,27 @@ class SemanticAnnotator
 
   sig { params(effect: Symbol, fn_name: String).void }
   def record_snapshot_txn_violation!(effect, fn_name)
-    T.must(@snapshot_txn_violations) << SnapshotTxnViolation.new(effect: effect, fn: fn_name)
+    frame = @receiver_state.snapshot_txn_frames.last
+    return unless frame
+
+    frame.violations << SnapshotTxnViolation.new(effect: effect, fn: fn_name)
   end
+
+  sig { returns(T::Boolean) }
+  def inside_snapshot_transaction_body?
+    !@receiver_state.snapshot_txn_frames.empty?
+  end
+  private :inside_snapshot_transaction_body?
 
   # Run the given block with conditional_depth incremented on the current
   # function context (or the global fallback when outside a function).
   # Used to tag SUSPENDS effects recorded inside IF branches / MATCH arms
   # as SUSPENDS:CONDITIONAL.
-  sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
   def with_conditional_context(&blk)
     fn_ctx = current_fn_ctx
     if fn_ctx
@@ -312,6 +360,16 @@ class SemanticAnnotator
     current_fn_ctx&.conditional_depth || @receiver_state.conditional_depth
   end
 
+  sig { returns(T::Boolean) }
+  def inside_with_block?
+    @receiver_state.with_block_depth.positive?
+  end
+
+  sig { returns(T::Boolean) }
+  def inside_match_pattern_context?
+    @receiver_state.match_pattern_depth.positive?
+  end
+
   sig { returns(HeldLockMap) }
   def current_held_locks
     @receiver_state.held_locks
@@ -353,17 +411,41 @@ class SemanticAnnotator
     @receiver_state.capability_audit
   end
 
+  sig { returns(T.nilable(StreamYieldFrame)) }
+  def current_stream_yield_frame
+    @receiver_state.stream_yield_frames.last
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        node: AST::BgStreamBlock,
+        blk: T.proc.returns(T.type_parameter(:Result))
+      )
+      .returns(T::Array[Type])
+  end
+  def with_stream_yield_frame(node, &blk)
+    frame = StreamYieldFrame.new(node: node)
+    @receiver_state.stream_yield_frames << frame
+    begin
+      blk.call
+      frame.yield_types
+    ensure
+      popped = @receiver_state.stream_yield_frames.pop
+      raise "BUG: stream yield frame mismatch" unless popped.equal?(frame)
+    end
+  end
+
   sig do
     type_parameters(:Result)
       .params(blk: T.proc.returns(T.type_parameter(:Result)))
       .returns(T.type_parameter(:Result))
   end
   def with_match_pattern_context(&blk)
-    previous = @match_pattern_context
-    @match_pattern_context = T.let(true, T.nilable(T::Boolean))
+    @receiver_state.match_pattern_depth += 1
     blk.call
   ensure
-    @match_pattern_context = T.let(previous == true, T.nilable(T::Boolean))
+    @receiver_state.match_pattern_depth -= 1
   end
 
   sig { params(family: Symbol).returns(T::Array[Symbol]) }
@@ -414,20 +496,18 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_snapshot_transaction_body(node, &blk)
-    previous_depth = T.let(@inside_snapshot_txn || 0, Integer)
-    previous_violations = @snapshot_txn_violations
-    @inside_snapshot_txn = T.let(previous_depth + 1, T.nilable(Integer))
-    @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
+    frame = SnapshotTxnFrame.new
+    @receiver_state.snapshot_txn_frames << frame
     result = blk.call
-    txn_violations = T.must(@snapshot_txn_violations)
+    txn_violations = frame.violations
     unless txn_violations.empty?
       kinds = txn_violations.map { |violation| EffectTracker.display(violation.effect) }.uniq.join(", ")
       error!(node, :WITH_SNAPSHOT_BODY_NOT_PURE, kinds: kinds)
     end
     result
   ensure
-    @inside_snapshot_txn = T.let(previous_depth, T.nilable(Integer))
-    @snapshot_txn_violations = T.let(previous_violations || [], T.nilable(T::Array[SnapshotTxnViolation]))
+    popped = @receiver_state.snapshot_txn_frames.pop
+    Kernel.raise "BUG: snapshot transaction frame mismatch" if popped && !popped.equal?(frame)
   end
 
   # `source_code` is optional — used ONLY by fixable-error helpers to
@@ -444,37 +524,16 @@ class SemanticAnnotator
     @strict_test = strict_test
     @source_code = source_code
     @receiver_state = T.let(ReceiverState.new, ReceiverState)
-    @match_pattern_context = T.let(false, T.nilable(T::Boolean)) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
-    # Capability audit — tracks declarations and usage to detect over-engineering.
-    # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
-    # nil = not inside a pipeline; Set = collecting field names.
-    @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @effect_state = T.let(nil, T.nilable(EffectTracker::EffectState))
-    @in_auto_locked_assign = T.let(nil, T.nilable(String))
-    @with_block_depth = T.let(0, Integer)
-
-    # Lock analysis is cycle-checked after function_call_graph is complete.
-    init_lock_analysis!
-    # @pinned escape safety: true when inside a @pinned BG block.
-    @current_bg_pinned = T.let(false, T::Boolean)
     # WITH validations on parameter bindings need caller-sync propagation first.
-    # Tracks remaining statements in current body for forward reference analysis
-    @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
-    # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
-    @og = T.let(OwnershipGraph.new, OwnershipGraph)
-    @og_scope_depth = T.let(0, Integer)
     @branch_terminated = T.let(false, T::Boolean)
-    @snapshot_txn_violations = T.let([], T.nilable(T::Array[SnapshotTxnViolation]))
-    @inside_snapshot_txn = T.let(0, T.nilable(Integer))
-    @stream_yield_types = T.let([], T::Array[Type])
     effects_init!
     capability_audit_init!
     initialize_builtin_environment!
   end
 
-  sig { params(node: AST::Program).returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
+  sig { params(node: AST::Program).returns(NilClass) }
   def annotate!(node)
     # Reset user-registered error types so state from prior runs (rspec
     # parallel, multi-program test harness) doesn't leak in. Stdlib
@@ -489,12 +548,28 @@ class SemanticAnnotator
       program: node,
       root_scope: semantic_root_scope,
       function_registry: semantic_function_registry,
+      id_index: semantic_id_index_from_body_summaries,
     ), T.nilable(SemanticIndex))
     mark_annotation_complete!(node)
     nil
   end
 
 private
+
+  sig { returns(Semantic::SemanticIdIndex) }
+  def semantic_id_index_from_body_summaries
+    summaries = function_body_summaries
+    Semantic::SemanticIdIndex.new(
+      definitions: summaries.transform_values(&:definition_id),
+      bodies: summaries.transform_values(&:body_id)
+    )
+  end
+
+  sig { params(name: String).returns(Semantic::BodyIdentity) }
+  def body_identity_for_function(name)
+    ordinal = T.must(semantic_function_registry.names.index(name)) + 1
+    Semantic::BodyIdentity.for_ordinal(ordinal)
+  end
 
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
   def function_has_pre_clauses?(node)
@@ -569,33 +644,6 @@ private
     end
   end
 
-  # Quick walk to detect whether the program has any Auto Types.
-  # Skips the inference pipeline entirely when there are none —
-  # avoids the cost on regular (non-gradual) programs.
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def program_has_auto?(node)
-    return false if node.nil?
-    case node
-    when Type
-      return node.auto?
-    when Symbol, String, Numeric, TrueClass, FalseClass
-      return false
-    when Array
-      return node.any? { |c| program_has_auto?(c) }
-    when Hash
-      return node.each_value.any? { |v| program_has_auto?(v) }
-    end
-    return true if node.respond_to?(:type) && node.type.is_a?(Type) && node.type.auto?
-    return true if node.respond_to?(:return_type) && node.return_type.is_a?(Type) && node.return_type.auto?
-    if node.respond_to?(:params) && node.params.is_a?(Array)
-      return true if node.params.any? { |p| p.type.auto? }
-    end
-    if node.respond_to?(:each_pair)
-      return node.each_pair.any? { |_, v| program_has_auto?(v) }
-    end
-    false
-  end
-
   sig { void }
   def setup_builtins
     STD_LIB.each do |name, config|
@@ -663,7 +711,9 @@ private
 
     # Dynamic Dispatch
     method_name = "visit_#{node.class.name.split('::').last}"
-    send(method_name, node)
+    result = send(method_name, node)
+    record_body_fact_node!(node)
+    result
   end
 
   # Outer scope variable set.
@@ -690,15 +740,12 @@ private
     # @fn_nodes is populated and before function bodies are checked.
     bridge_reentrance!(node)
 
-    # Seed before body analysis so CATCH Type clauses can reference error
-    # types registered by later-in-source RAISE sites.
-    seed_error_types_from_raises!(node)
-
     # Stamps the resolved SYNC POLICY, user-written or default, so later
     # passes read a single source of truth.
     validate_and_resolve_sync_policy!(node)
 
     analyze_program_bodies!(declarations, node)
+    resolve_catch_clauses_from_declarations!(declarations)
     finalize_program_semantics!(node)
   end
 
@@ -717,7 +764,7 @@ private
     semantic_function_registry.add_synthetic_definition!(node)
   end
 
-  sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
+  sig { params(node: AST::RequireNode).returns(NilClass) }
   def visit_RequireNode(node)
     unless @importer
       error!(node, :REQUIRE_NEEDS_IMPORTER, hint: "Pass importer: and source_dir: to SemanticAnnotator.new.")
@@ -768,6 +815,7 @@ private
       next unless (vis == :pub) || (vis == :package && same_dir)
       current_scope.declare_type(type_name, schema)
     end
+    nil
   end
 
   # Unifies analysis for callables (Functions and Lambdas).
@@ -783,11 +831,13 @@ private
   sig { params(node: AST::LambdaLit).returns(T.nilable(FunctionSignature)) }
   def visit_LambdaLit(node)
     # Lambdas are always implicit return unless we add syntax for it later
-    return_type = analyze_routine(node, node.body, :Any, true)
+    return_type = with_body_fact_nested_body do
+      analyze_routine(node, node.body, :Any, true)
+    end
 
     # Build standard signature (same format as user-defined functions)
     # This enables verify_function_signature! to validate lambda calls
-    stamp_type!(node, build_lambda_signature(node.params, T.must(return_type)))
+    stamp_type!(node, build_lambda_signature(node.params, T.cast(return_type, Symbol)))
   end
 
   sig { params(node: AST::FunctionDef).returns(T.nilable(FunctionContext)) }
@@ -838,17 +888,18 @@ private
 
     # Register function node before body analysis so recursive references can resolve it.
     register_function_node!(node)
+    body_identity = body_identity_for_function(node.name)
     node.semantic_with_blocks = []
 
-    # 4. Routine Analysis
-    final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
-
-    # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
-    body_scan = scan_for_calls(node.body)
+    # 4. Routine Analysis. Body facts are collected during this traversal; no
+    # second source-body scan is needed after type stamping.
+    final_return_type = T.let(nil, T.nilable(Symbol))
+    body_scan = with_body_fact_frame(body_identity) do
+      final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
+    end
     called_names = body_scan.callees
     has_fnptr = body_scan.has_fnptr_call
     unabsorbed_calls = body_scan.propagating_callees
-    func_calls = body_scan.call_sites
     raises_in_body = body_scan.raises_directly
     directly_recursive = called_names.include?(node.name)
     fn_ctx.mark_runtime_used! if has_fnptr
@@ -913,9 +964,10 @@ private
     # errors for implicit mutual/direct recursion.
 
     # 5. Finalize Signature
+    resolved_return_type = T.must(final_return_type)
     if (is_implicit_return || declared_return == :Any)
-      node.return_type = final_return_type
-      signature.return_type = final_return_type
+      node.return_type = resolved_return_type
+      signature.return_type = resolved_return_type
     end
 
     signature.return_strategy = get_return_strategy(signature.return_type)
@@ -946,48 +998,46 @@ private
       raises_in_body == true
     record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
       name: node.name,
+      definition_id: body_identity.definition_id,
+      body_id: body_identity.body_id,
       callees: called_names - [node.name],
       propagating_callees: (unabsorbed_calls || called_names) - [node.name],
       has_fnptr_call: has_fnptr,
       raises_directly: raises_directly,
-      func_calls: func_calls,
+      call_site_facts: body_scan.call_site_facts,
+      local_facts: body_scan.local_facts,
       return_nodes: body_scan.return_nodes,
       binding_nodes: body_scan.binding_nodes,
       assignment_nodes: body_scan.assignment_nodes,
       escape_nodes: body_scan.escape_nodes,
       with_scope_nodes: body_scan.with_scope_nodes,
-      with_blocks: body_scan.with_blocks
+      with_blocks: body_scan.with_blocks,
+      suspend_points: body_scan.suspend_points
     ))
     fn_ctx.mark_runtime_used! if runtime_error_clause?(node)
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
     if function_has_catch_clauses?(node)
-      # Resolve each parsed clause to a { kind, error_names } pair the
-      # lowering can emit directly. Validates every type against the
-      # registry and rejects kind mismatches.
-      node.catch_clauses.each { |c| resolve_catch_clause!(c) }
-
-      snap_types = Set.new
+      candidate_snap_types = body_scan.pipe_input_types
+      snap_types = T.let(Set.new, T::Set[String])
       all_catch_bodies = node.catch_clauses.map { |c| c.body }
       all_catch_bodies << node.default_catch if function_has_default_catch?(node)
-      # Snapshot capture is only meaningful when a CATCH body reads
-      # `snapshot`. Otherwise every successful pipeline call in a catchable
-      # function allocates dead snapshot state that no handler can observe.
-      catch_body_scan = scan_for_calls(all_catch_bodies.compact)
-      snap_types.merge(body_scan.pipe_input_types) if catch_body_scan.references_snapshot
-      node.snapshot_types = snap_types
-
-      all_catch_bodies.compact.each do |clause_body|
-        with_new_scope do
-          # Declare __error as a struct-like type accessible in CATCH
-          current_scope.declare("__error", nil, :ErrorContext, false, false, nil, :stack)
-          # Declare snapshot if unambiguous
-          if snap_types.size == 1
-            current_scope.declare("snapshot", nil, snap_types.first.to_sym, false, false, nil, :stack)
+      catch_body_scan = with_body_fact_frame(Semantic::BodyIdentity.unassigned) do
+        all_catch_bodies.compact.each do |clause_body|
+          with_new_scope do
+            # Declare __error as a struct-like type accessible in CATCH
+            current_scope.declare("__error", nil, :ErrorContext, false, false, nil, :stack)
+            # Declare snapshot if unambiguous. The final `snapshot_types` field
+            # is still cleared below when no CATCH body actually reads it.
+            if candidate_snap_types.size == 1
+              current_scope.declare("snapshot", nil, T.must(candidate_snap_types.first).to_sym, false, false, nil, :stack)
+            end
+            visit_stmts(clause_body)
           end
-          visit_stmts(clause_body)
         end
       end
+      snap_types.merge(candidate_snap_types) if catch_body_scan.references_snapshot
+      node.snapshot_types = snap_types
 
     end
     nil
@@ -1000,12 +1050,9 @@ private
   sig { params(stmts: T.nilable(T::Array[AST::Node])).void }
   def visit_stmts(stmts)
     return unless stmts
-    saved = @stmts_after
-    @stmts_after = nil
     stmts.each do |stmt|
       visit(stmt)
     end
-    @stmts_after = saved
   end
 
   # Called after Pass 2 (all function signatures registered).
@@ -1070,7 +1117,9 @@ private
   sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).returns(T.nilable(T::Array[AST::FuncCall])) }
   def validate_tail_call!(fn_node, body_scan)
     fn_name = fn_node.name
-    all_self_calls = body_scan.call_sites.select { |call| call.name == fn_name }
+    all_self_calls = body_scan.call_site_facts.filter_map { |fact|
+      fact.node if fact.callee_name == fn_name
+    }
 
     blessed = body_scan.return_nodes.filter_map { |r|
       r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_name
@@ -1237,22 +1286,20 @@ private
   end
 
   sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[String])) }
-  def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
+  def og_move(from, to, at_token: nil, action: :move) = ownership_graph.transfer(from, to, at_token: at_token, action: action)
   sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: OwnershipGraph::MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
-  def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
+  def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = ownership_graph.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
   sig { params(name: String).returns(T.nilable(Symbol)) }
-  def og_set_live(name)  = (@og[name]&.state = :live)
+  def og_set_live(name)  = (ownership_graph[name]&.state = :live)
   sig { params(name: String).returns(T::Array[String]) }
-  def og_drop(name)      = @og.drop(name)
+  def og_drop(name)      = ownership_graph.drop(name)
   sig { returns(Integer) }
   def og_push_scope
-    @og.clear_completed_snapshot! if @og_scope_depth.zero?
-    @og_scope_depth += 1
+    ownership_graph.push_scope!
   end
   sig { params(archive: T::Boolean).returns(Integer) }
   def og_pop_scope(archive: false)
-    @og.prune_scope!(@og_scope_depth, archive: archive)
-    @og_scope_depth -= 1
+    ownership_graph.pop_scope!(archive: archive)
   end
 
 end

@@ -41,19 +41,19 @@ module Annotator
       def analyze_control_flow_branches(branches, merge_to_parent: true)
         T.bind(self, SemanticAnnotator)
 
-        og_snapshot = @og&.fork_lightweight
+        og_snapshot = ownership_graph.fork_lightweight
         branch_results = T.let([], T::Array[BranchAnalysisResult])
 
         branches.each do |branch_logic|
           # Restore graph to pre-branch state before analyzing each branch
-          @og&.restore_lightweight(og_snapshot) if og_snapshot
+          ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
           prev_terminated = @branch_terminated
           @branch_terminated = false
           with_new_scope(current_scope) do
             og_push_scope
             branch_results << BranchAnalysisResult.new(
               drops: branch_logic.call,
-              snapshot: @og&.fork_lightweight,
+              snapshot: ownership_graph.fork_lightweight,
               terminated: @branch_terminated,
             )
             og_pop_scope
@@ -65,14 +65,14 @@ module Annotator
           # Restore to base, then merge only non-terminating branch results.
           # A terminating branch (RETURN/RAISE) cannot reach the merge point, so
           # its moved states must not poison the post-branch scope.
-          @og&.restore_lightweight(og_snapshot) if og_snapshot
+          ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
           branch_results.each do |branch_result|
             next if branch_result.terminated
             snap = branch_result.snapshot
             next unless snap
             # Lightweight merge: just apply moved states
             snap.each_state do |path, state|
-              node = @og.nodes[path]
+              node = ownership_graph.nodes[path]
               next unless node
               if node.state != state
                 if state == :moved
@@ -85,7 +85,7 @@ module Annotator
             end
           end
         else
-          @og&.restore_lightweight(og_snapshot) if og_snapshot
+          ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
         end
 
         branch_results.map(&:drops)
@@ -389,7 +389,7 @@ module Annotator
         return unless node.takes && plan.union? && node.expr.is_a?(AST::Identifier)
 
         source_name = node.expr.name
-        graph_node = @og[source_name]
+        graph_node = ownership_graph[source_name]
         return unless graph_node && graph_node.kind != :borrowed
 
         node.expr.was_moved = true
@@ -539,7 +539,7 @@ module Annotator
       sig { params(binding: String).void }
       def borrow_match_payload_binding!(binding)
         T.bind(self, SemanticAnnotator)
-        @og[binding].kind = :borrowed
+        T.must(ownership_graph[binding]).kind = :borrowed
         current_scope.entry_for_write!(binding).storage = :borrow
       end
 
@@ -779,7 +779,7 @@ module Annotator
         # 2. Analyze Body in a New Scope AND increment loop depth
         # We use analyze_control_flow_branches to handle state merging and drops.
         # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
-        pre_loop_states = @og&.fork_lightweight
+        pre_loop_states = ownership_graph.fork_lightweight
 
         analyze_loop_control_flow_branches([
           proc {
@@ -790,28 +790,12 @@ module Annotator
             end
             finalize_scope(node)
 
-            # Post-analysis check for loop-specific errors (use of moved value in next iteration)
-            # Copyable types (primitives, strings, slices, unions) are exempt — they're copied implicitly.
-            # Variables not referenced in the loop body are also exempt — they were moved before the
-            # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
-            loop_body_names = collect_body_identifier_names(node.do_branch)
-            loop_body_names.each do |name|
-              was_live = pre_loop_states&.state_for(name) == :live
-              is_moved = @og&.moved?(name)
-              if was_live && is_moved
-                if @og&.[](name)&.move_action == :capture &&
-                   current_capture_context&.analysis&.captures&.key?(name)
-                  next
-                end
-                next unless loop_body_names.include?(name)
-                var_type = current_scope.resolve_entry(name)&.type
-                type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
-                is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
-                unless is_copy
-                  emit_use_of_moved_in_loop_error!(node, name, @og&.[](name), code: :USE_OF_MOVED_IN_LOOP)
-                end
-              end
-            end
+            validate_moved_values_not_reused_by_loop!(
+              node,
+              node.do_branch,
+              pre_loop_states,
+              code: :USE_OF_MOVED_IN_LOOP
+            )
             node.deferred_drops
           }
         ], merge_to_parent: false)
@@ -837,7 +821,7 @@ module Annotator
 
         visit(node.condition)
         ti = node.condition.full_type!(context: "WHILE AS condition")
-        unless ti&.optional?
+        unless ti.optional?
           error!(node.condition, :WHILE_AS_NEEDS_OPTIONAL, got: node.condition.resolved_type)
         end
 
@@ -846,7 +830,7 @@ module Annotator
           unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
         end
 
-        pre_loop_states = @og&.fork_lightweight
+        pre_loop_states = ownership_graph.fork_lightweight
 
         # Footgun guard: a MethodCall on an immutable receiver cannot advance the
         # loop condition and will loop forever.  RESOLVE is a ResolveNode (not a
@@ -870,31 +854,62 @@ module Annotator
             visit_stmts(node.do_branch)
             finalize_scope(node)
 
-            loop_body_names = collect_body_identifier_names(node.do_branch)
-            loop_body_names.each do |name|
-              next if name == node.binding_name
-              was_live = pre_loop_states&.state_for(name) == :live
-              is_moved = @og&.moved?(name)
-              if was_live && is_moved
-                if @og&.[](name)&.move_action == :capture &&
-                   current_capture_context&.analysis&.captures&.key?(name)
-                  next
-                end
-                next unless loop_body_names.include?(name)
-                var_type = current_scope.resolve_entry(name)&.type
-                type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
-                is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
-                unless is_copy
-                  emit_use_of_moved_in_loop_error!(node, name, @og&.[](name), code: :USE_OF_MOVED_IN_LOOP_SHORT)
-                end
-              end
-            end
+            validate_moved_values_not_reused_by_loop!(
+              node,
+              node.do_branch,
+              pre_loop_states,
+              code: :USE_OF_MOVED_IN_LOOP_SHORT,
+              ignored_name: node.binding_name.to_s
+            )
             node.deferred_drops
           }
         ], merge_to_parent: false)
 
         node.mark_per_iter = false
         stamp_type!(node, :Void)
+      end
+
+      sig do
+        params(
+          node: T.any(AST::WhileLoop, AST::WhileBindLoop),
+          body: T.any(AST::Node, T::Array[AST::Node]),
+          pre_loop_states: OwnershipGraph::LightweightSnapshot,
+          code: Symbol,
+          ignored_name: T.nilable(String)
+        ).void
+      end
+      def validate_moved_values_not_reused_by_loop!(node, body, pre_loop_states, code:, ignored_name: nil)
+        T.bind(self, SemanticAnnotator)
+
+        collect_body_identifier_names(body).each do |name|
+          next if name == ignored_name
+          next unless pre_loop_states.state_for(name) == :live
+          graph_node = ownership_graph[name]
+          next unless graph_node&.state == :moved
+          next if captured_move_consumed_by_loop?(name)
+          next if loop_value_copyable?(name)
+
+          emit_use_of_moved_in_loop_error!(node, name, graph_node, code: code)
+        end
+      end
+
+      sig { params(name: String).returns(T::Boolean) }
+      def captured_move_consumed_by_loop?(name)
+        T.bind(self, SemanticAnnotator)
+
+        (
+          ownership_graph[name]&.move_action == :capture &&
+          current_capture_context&.analysis&.captures&.key?(name)
+        ) == true
+      end
+
+      sig { params(name: String).returns(T::Boolean) }
+      def loop_value_copyable?(name)
+        T.bind(self, SemanticAnnotator)
+
+        var_type = current_scope.resolve_entry(name)&.type
+        type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
+        type_obj.implicitly_copyable? { |type_name| lookup_type_schema(type_name) }
       end
 
       # Deep validation for TIGHT loops.

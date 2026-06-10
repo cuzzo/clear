@@ -17,6 +17,17 @@ require_relative "../src/mir/fiber_ctx_builder"
 RSpec.describe "MIR gap-burn characterization" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }
 
+  def call_site_fact(call, id: 1)
+    Semantic::CallSiteFact.new(
+      id: Semantic::CallSiteId.new(value: id),
+      node: call,
+      callee_name: call.name,
+      args: call.args,
+      fn_var_call: call.fn_var_call == true,
+      propagates_failure: true,
+    )
+  end
+
   def registry_call(reason, sig, allocs: nil, target_var: nil, ownership_contract: MIR::OwnershipContract.empty)
     MIR::RegistryCall.new(
       entry: sig,
@@ -75,7 +86,7 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "builds promoted and fresh-copy fiber capture specs" do
-    promoted_analysis = double(
+    promoted_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "name" => Type.new(:String) },
       strategies: {},
       pointer_captures: Set.new,
@@ -91,7 +102,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(promoted.specs.first.init_value_mir).to eq(MIR::Ident.new("__promoted_name"))
     expect(promoted.specs.first.cleanup_plan.none?).to eq(true)
 
-    fresh_analysis = double(
+    fresh_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "owned" => Type.new(:String) },
       strategies: {
         "owned" => CaptureStrategy::FreshHeapCopy.new(
@@ -123,7 +134,7 @@ RSpec.describe "MIR gap-burn characterization" do
     shared_type = Type.new(:Widget)
     shared_type.apply_reference_ownership!(:shared)
     shared_sym = SymbolEntry.new(reg: "shared", type: shared_type, mutable: false, storage: :shared)
-    rc_analysis = double(
+    rc_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "shared" => shared_type },
       strategies: {
         "shared" => CaptureStrategy::RcClone.new(zig_type: "Widget", ctx_init_name: "shared"),
@@ -135,7 +146,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(rc.specs.first.setup_mir.first.init.callee).to eq("CheatLib.arcRetain")
     expect(rc.specs.first.cleanup_mir_for("ctx").body.func).to eq("arcRelease")
 
-    moved_analysis = double(
+    moved_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "owned" => Type.new(:String), "count" => Type.new(:Int64) },
       strategies: {
         "owned" => CaptureStrategy::MoveInto.new(zig_type: "[]const u8", ctx_init_name: "owned", source_name: "owned"),
@@ -152,7 +163,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(count_spec.cleanup_plan.none?).to eq(true)
     expect(count_spec.cleanup_mir_for("ctx")).to be_nil
 
-    local_pointer_analysis = double(
+    local_pointer_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "pool" => Type.new(:Pool) },
       strategies: {},
       pointer_captures: Set["pool"],
@@ -162,7 +173,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(pointer.specs.first.field_type_zig).to eq("@TypeOf(&pool)")
     expect(pointer.specs.first.init_value_mir).to eq(MIR::AddressOf.new(MIR::Ident.new("pool")))
 
-    default_analysis = double(
+    default_analysis = CapabilityHelper::CaptureAnalysis.new(
       captures: { "plain" => Type.new(:Int64) },
       strategies: {},
       pointer_captures: Set.new,
@@ -1332,7 +1343,7 @@ RSpec.describe "MIR gap-burn characterization" do
         propagating_callees: Set["callee"],
         has_fnptr_call: false,
         raises_directly: false,
-        func_calls: [call],
+        call_site_facts: [call_site_fact(call)],
         binding_nodes: [decl],
         escape_nodes: [decl, call],
       ),

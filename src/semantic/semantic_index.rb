@@ -5,6 +5,7 @@ require_relative "../ast/ast"
 require_relative "../ast/scope"
 require_relative "../annotator/function_registry"
 require_relative "../annotator/phases/body_analysis"
+require_relative "semantic_ids"
 
 class SemanticIndex < T::Struct
   extend T::Sig
@@ -12,6 +13,7 @@ class SemanticIndex < T::Struct
   const :program, AST::Program
   const :root_scope, Scope
   const :function_registry, Annotator::FunctionRegistry
+  const :id_index, Semantic::SemanticIdIndex
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
   def function_nodes

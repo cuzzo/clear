@@ -17,7 +17,8 @@ module Annotator
           fn_node = function_node_for(fn_ctx.name)
           fn_node.semantic_with_blocks << node if fn_node
         end
-        @with_block_depth = (@with_block_depth || 0) + 1
+        phase_receiver_state.with_block_depth += 1
+        begin
         capability_expansion = CapabilityHelper::WithCapabilityExpansion.new
         node.capabilities.each do |cap|
           acquire_capability!(node, cap, capability_expansion)
@@ -53,12 +54,15 @@ module Annotator
         # effect tracking so retryable bodies cannot suspend after mutation starts.
         is_snapshot_txn_body = (node.snapshot_mode == :transaction)
         with_body = proc do
+          record_body_fact_with_block!(node)
           with_new_scope(current_scope) do
             expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
             validate_and_visit_with_guards!(node)
-            visit_stmts(node.body)
+            with_body_fact_scope(node) do
+              visit_stmts(node.body)
+            end
             validate_with_guard_no_body_mutation!(node)
-            fallible_sources = retryable_with_fallible_sources(node.body)
+            fallible_sources = retryable_with_fallible_sources(node)
             if is_snapshot_txn_body && !T.must(fallible_sources).empty?
               retryable_with_fallible_body_error!(
                 node,
@@ -90,7 +94,9 @@ module Annotator
                 # no BLOCKING — atomics never park).
                 with_match_family_effects(arm[:family]).each { |effect| record_effect(effect) }
                 with_new_scope(current_scope) do
-                  visit_stmts(arm[:body])
+                  with_body_fact_scope(node) do
+                    visit_stmts(arm[:body])
+                  end
                   finalize_scope(node)
                 end
                 if fn_ctx_name
@@ -130,9 +136,9 @@ module Annotator
         expanded_capabilities.each do |cap|
           vname = cap.var_name
           if cap.restrict?
-            @og.release_borrow("__restrict_#{vname}")
+            ownership_graph.release_borrow("__restrict_#{vname}")
           elsif cap.borrowed?
-            @og.release_borrow("__borrowed_#{vname}")
+            ownership_graph.release_borrow("__borrowed_#{vname}")
           end
         end
 
@@ -153,8 +159,10 @@ module Annotator
         # known until compute_lock_cycles! has propagated through function_call_graph.
         record_lock_clause_site!(node, lock_capabilities)
 
-        @with_block_depth -= 1
         stamp_type!(node, :Void)
+        ensure
+          phase_receiver_state.with_block_depth -= 1
+        end
       end
 
       # Reject WITH MATCH shapes that would silently miscompile.
@@ -262,44 +270,27 @@ module Annotator
       # check.
       SNAPSHOT_POSSIBLE_TYPES = %i[MvccConflict AtomicConflict].freeze
 
-      sig { params(nodes: T::Array[AST::Node]).returns(T.nilable(T::Array[String])) }
-      def retryable_with_fallible_sources(nodes)
+      sig { params(node: AST::WithBlock).returns(T::Array[String]) }
+      def retryable_with_fallible_sources(node)
         T.bind(self, SemanticAnnotator)
 
-        sources = []
-        visit_fallible = T.let(nil, T.untyped)
-        visit_fallible = lambda do |n|
-          case n
-          when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef
-            return
-          when Array
-            n.each { |item| visit_fallible.call(item) }
-            return
-          when Hash
-            n.each_value { |v| visit_fallible.call(v) }
-            return
+        sources = T.let([], T::Array[String])
+        current_body_fact_scope_nodes(node).each do |source_node|
+          case source_node
           when AST::Raise
             sources << "RAISE"
           when AST::OrRaise
             sources << "OR RAISE"
           when AST::FuncCall
-            sources << n.name.to_s if retryable_with_call_fallible?(n)
-            n.args.each { |arg| visit_fallible.call(arg) }
+            sources << source_node.name.to_s if retryable_with_call_fallible?(source_node)
           when AST::MethodCall
-            sources << "#{n.name}()" if retryable_with_call_fallible?(n)
-            visit_fallible.call(n.object)
-            n.args.each { |arg| visit_fallible.call(arg) }
+            sources << "#{source_node.name}()" if retryable_with_call_fallible?(source_node)
           when AST::StaticCall
-            sources << n.method_name.to_s if retryable_with_call_fallible?(n)
-            n.args.each { |arg| visit_fallible.call(arg) }
+            sources << source_node.method_name.to_s if retryable_with_call_fallible?(source_node)
           when AST::FreezeNode
             sources << "FREEZE"
-            visit_fallible.call(n.value)
-          else
-            n.each_pair { |_, v| visit_fallible.call(v) } if n.respond_to?(:each_pair)
           end
         end
-        visit_fallible.call(nodes)
         sources.uniq
       end
 
@@ -630,22 +621,26 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         node.branches.each do |branch|
-          full_analysis = with_fiber_capture_analysis(is_parallel: branch.parallel) do
-            visit_stmts(branch.body)
+          full_analysis = T.let(nil, T.nilable(CapabilityHelper::CaptureAnalysis))
+          with_async_body_fact_frame(branch, node) do
+            full_analysis = with_fiber_capture_analysis(is_parallel: branch.parallel) do
+              visit_stmts(branch.body)
+            end
           end
-          branch.capture_analysis = full_analysis
+          analysis_result = T.must(full_analysis)
+          branch.capture_analysis = analysis_result
 
           if branch.parallel
-            error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if full_analysis.has_local
-            error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if full_analysis.has_rc
+            error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
+            error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
           end
 
-          if full_analysis.has_non_escaping_capture
+          if analysis_result.has_non_escaping_capture
             error!(node, :DO_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
                    "Move the DO block outside the WITH block, or use COPY to get an owned value.")
           end
 
-          analysis = (!branch.pinned && !branch.parallel && full_analysis.has_shared) ? full_analysis : nil
+          analysis = (!branch.pinned && !branch.parallel && analysis_result.has_shared) ? analysis_result : nil
 
           if analysis && !branch.pinned
             branch.pinned = true
@@ -662,20 +657,15 @@ module Annotator
         # Effect tracking: generators are inherently unbounded (run until exhausted or cancelled).
         record_effect(EffectTracker::LOOP_UNBOUND)
 
-        # Body runs in a separate generator fiber. YIELD expressions push values into the stream.
-        # The stream element type T is inferred from YIELD expression types.
-        prev_stream_ctx  = @current_stream_context
-        prev_yield_types = @stream_yield_types
-        @current_stream_context = T.let(node, T.nilable(AST::BgStreamBlock))
-        @stream_yield_types = []
-
-        stream_analysis = with_fiber_capture_analysis do
-          visit_stmts(node.body)
+        stream_analysis = T.let(nil, T.nilable(CapabilityHelper::CaptureAnalysis))
+        yield_types = with_stream_yield_frame(node) do
+          with_async_body_fact_frame(node, node) do
+            stream_analysis = with_fiber_capture_analysis do
+              visit_stmts(node.body)
+            end
+          end
         end
-
-        yield_types = @stream_yield_types
-        @current_stream_context = prev_stream_ctx
-        @stream_yield_types     = prev_yield_types
+        stream_analysis_result = T.must(stream_analysis)
 
         if yield_types.empty?
           error!(node, :BG_STREAM_NO_YIELD)
@@ -688,9 +678,9 @@ module Annotator
 
         stamp_type!(node, Type.new(:"~?#{elem_syms.first}[]"))
 
-        node.capture_analysis = stream_analysis
+        node.capture_analysis = stream_analysis_result
 
-        if stream_analysis.has_non_escaping_capture
+        if stream_analysis_result.has_non_escaping_capture
           error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
                  "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
         end
@@ -700,12 +690,14 @@ module Annotator
       def visit_YieldExpr(node)
         T.bind(self, SemanticAnnotator)
 
-        unless @current_stream_context
+        frame = current_stream_yield_frame
+        unless frame
           error!(node, :YIELD_OUTSIDE_BG_STREAM)
+          return
         end
         visit(node.expr)
         stamp_type!(node, node.expr.full_type!(context: "yield expression"))
-        @stream_yield_types << Type.new(node.full_type!(context: "yield result"))
+        frame.yield_types << Type.new(node.full_type!(context: "yield result"))
         record_effect(EffectTracker::SUSPENDS)
       end
 
@@ -716,16 +708,21 @@ module Annotator
         # Body runs in a separate fiber. The last expression's type determines T in ~T.
         # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
         record_effect(EffectTracker::YIELD)
-        prev_bg_pinned = @current_bg_pinned
-        @current_bg_pinned = node.pinned
+        prev_bg_pinned = phase_receiver_state.current_bg_pinned
+        phase_receiver_state.current_bg_pinned = !!node.pinned
+        begin
 
         last_type = T.let(Type.new(:Void), Type)
-        full_analysis = with_fiber_capture_analysis(is_parallel: node.parallel, mark_moves: true) do
-          node.body.each do |expr|
-            visit(expr)
-            last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
+        full_analysis = T.let(nil, T.nilable(CapabilityHelper::CaptureAnalysis))
+        with_async_body_fact_frame(node, node) do
+          full_analysis = with_fiber_capture_analysis(is_parallel: node.parallel, mark_moves: true) do
+            node.body.each do |expr|
+              visit(expr)
+              last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
+            end
           end
         end
+        analysis_result = T.must(full_analysis)
         # Strip leading `!` from the body's last-expression type: a BG fiber
         # catches its body's errors internally and surfaces them via the
         # Promise's join boundary, not via the surface success type. So
@@ -748,26 +745,26 @@ module Annotator
           end
         end
 
-        node.capture_analysis = full_analysis
+        node.capture_analysis = analysis_result
 
         # Validate: @local in @parallel, @rc in @parallel
         if node.parallel
-          error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if full_analysis.has_local
-          error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if full_analysis.has_rc
+          error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
+          error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
         end
 
         # WITH-scoped (BORROWED/RESTRICT) bindings cannot escape into fibers.
         # The fiber may outlive the WITH block, turning the alias into a dangling pointer.
-        if full_analysis.has_non_escaping_capture
+        if analysis_result.has_non_escaping_capture
           error!(node, :BG_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
                  "Move the BG block outside the WITH block, or use COPY to get an owned value.")
         end
 
         # Auto-pin detection
-        analysis = (!node.pinned && !node.parallel && full_analysis.has_shared) ? full_analysis : nil
+        analysis = (!node.pinned && !node.parallel && analysis_result.has_shared) ? analysis_result : nil
 
         # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
-        if prev_bg_pinned && !node.pinned && full_analysis.has_outer_ref
+        if prev_bg_pinned && !node.pinned && analysis_result.has_outer_ref
           error!(node, :BG_PINNED_CAPTURE_MISMATCH, hint: "Thread-local memory cannot escape to a stealable fiber. " \
                  "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
         end
@@ -789,7 +786,10 @@ module Annotator
             end
           end
         end
-        @current_bg_pinned = prev_bg_pinned
+        true
+        ensure
+          phase_receiver_state.current_bg_pinned = prev_bg_pinned
+        end
       end
 
       sig { params(node: AST::ThenChain).void }

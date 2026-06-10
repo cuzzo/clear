@@ -117,4 +117,43 @@ RSpec.describe "annotator receiver state boundaries" do
     expect(ann.predicate_call_sites.map(&:callee)).to eq(["check"])
     expect(ann.capability_audit).to be_empty
   end
+
+  it "restores auto-locked assignment context when RHS analysis raises" do
+    ann = SemanticAnnotator.new(source_code: "")
+    ann.current_scope.declare("cell", nil, Type.new(:Counter), true, false, nil, :heap, Set.new, [], sync: :locked)
+    locked_target = AST::GetField.new(tok(:DOT, "."), AST::Identifier.new(tok(:VAR_ID, "cell"), "cell"), "value")
+    value = AST::Literal.new(tok(:INT64, "1"), :INT64, 1, :stack)
+    assignment = AST::Assignment.new(tok(:EQUAL, "="), locked_target, value)
+    ann.send(:phase_receiver_state).auto_locked_assign_name = "outer"
+    ann.define_singleton_method(:visit) do |node|
+      raise "force unwind" if node.equal?(value)
+    end
+
+    expect { ann.send(:visit_Assignment, assignment) }.to raise_error("force unwind")
+
+    expect(ann.send(:phase_receiver_state).auto_locked_assign_name).to eq("outer")
+  end
+
+  it "restores pipeline SOA tracking around pipeline body analysis" do
+    ann = SemanticAnnotator.new(source_code: "")
+    node = AST::BinaryOp.new(tok(:PIPE, "|>"), AST::Identifier.new(tok(:VAR_ID, "xs"), "xs"), :PIPE, AST::Identifier.new(tok(:VAR_ID, "ys"), "ys"))
+
+    expect do
+      ann.send(:phase_receiver_state).pipeline_accessed_fields = Set.new
+      begin
+        T.must(ann.send(:phase_receiver_state).pipeline_accessed_fields).add("name")
+        expect(ann.send(:phase_receiver_state).pipeline_accessed_fields&.to_a).to eq(["name"])
+        raise "force unwind"
+      ensure
+        ann.send(:phase_receiver_state).pipeline_accessed_fields = nil
+      end
+    end.to raise_error("force unwind")
+
+    expect(ann.send(:phase_receiver_state).pipeline_accessed_fields).to be_nil
+
+    ann.send(:with_soa_tracking, node, :Unknown) do
+      T.must(ann.send(:phase_receiver_state).pipeline_accessed_fields).add("id")
+      expect(ann.send(:check_soa_opportunity!, node, :Unknown)).to be_nil
+    end
+  end
 end

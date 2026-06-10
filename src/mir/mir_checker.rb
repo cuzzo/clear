@@ -1663,6 +1663,8 @@ class MIRChecker
       case action
       when MIR::FsmDestroyCleanup
         check_fsm_destroy_cleanup_action!(action, finalize_cleanups, ctx_id, source)
+      when MIR::FsmDestroyStmt
+        check_fsm_destroy_stmt_action!(action, finalize_cleanups, ctx_id, source)
       when MIR::FsmDestroyLockRelease
         check_fsm_destroy_lock_action!(action, ctx_id, source)
       end
@@ -1735,6 +1737,42 @@ class MIRChecker
 
     check_fsm_destroy_optional_expr!("guard", action.name, action.guard, source)
     check_fsm_destroy_optional_expr!("allocator", action.name, action.allocator, source)
+  end
+
+  sig do
+    params(
+      action: MIR::FsmDestroyStmt,
+      finalize_cleanups: T::Array[String],
+      ctx_id: Integer,
+      source: T.nilable(AST::Node),
+    ).void
+  end
+  def self.check_fsm_destroy_stmt_action!(action, finalize_cleanups, ctx_id, source)
+    unless VALID_FSM_DESTROY_SOURCES.include?(action.source_kind)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-SOURCE",
+        "destroy statement '#{action.name}' has unknown source #{action.source_kind.inspect}.",
+        source,
+      )
+    end
+
+    expected_target = "__ctx_#{ctx_id}.#{action.name}"
+    unless action.ctx_cleanup_target_name == expected_target
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-TARGET",
+        "destroy statement '#{action.name}' targets #{action.ctx_cleanup_target_name.inspect}; " \
+        "expected #{expected_target.inspect}.",
+        source,
+      )
+    end
+
+    unless finalize_cleanups.include?(action.name)
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-FINALIZE-LIST",
+        "destroy statement '#{action.name}' is not listed in finalize_cleanups.",
+        source,
+      )
+    end
   end
 
   sig { params(action: MIR::FsmDestroyLockRelease, ctx_id: Integer, source: T.nilable(AST::Node)).void }
@@ -1937,13 +1975,13 @@ class MIRChecker
   end
 
   # Tree walker -- yields every node in the MIR tree.
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: MIR::Node).void).void }
+  sig { params(stmts: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir(stmts, &block)
     MIR.each_node(stmts, &block)
     nil
   end
 
-  sig { params(node: T.nilable(Object), block: T.proc.params(arg0: MIR::Node).void).void }
+  sig { params(node: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir_node(node, &block)
     return unless node.is_a?(MIR::Emittable) || node.is_a?(Array)
 
@@ -1951,7 +1989,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(expr: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
+  sig { params(expr: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir_expr(expr, &block)
     walk_mir_node(expr, &block)
     nil
@@ -2591,12 +2629,12 @@ class MIRChecker
   # Does this statement list contain iteration-scoped frame allocations,
   # recursing into branch/block nodes but stopping at nested loop and
   # fiber/lambda boundaries.
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  sig { params(stmts: T.nilable(MIR::NodeRoot)).returns(T::Boolean) }
   def body_has_iteration_frame_alloc?(stmts)
     body_has_frame_alloc_scope?(stmts) { |scope| scope == :iteration }
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  sig { params(stmts: T.nilable(MIR::NodeRoot)).returns(T::Boolean) }
   def body_has_non_iteration_frame_alloc?(stmts)
     body_has_frame_alloc_scope?(stmts) { |scope| scope != :iteration }
   end
@@ -2607,7 +2645,7 @@ class MIRChecker
   # but stopping at nested loop and fiber/lambda boundaries.
   # Mirrors the same traversal used by check_loop_rewind! so both methods
   # see the same nodes -- no special-cased paths.
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
+  sig { params(stmts: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
   def body_has_frame_alloc_scope?(stmts, &block)
     found = T.let(false, T::Boolean)
     each_loop_local_node(stmts) do |node|

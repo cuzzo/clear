@@ -205,6 +205,18 @@ RSpec.describe CleanupClassifier do
       expect(CleanupClassifier.send(:classify_binding, Type.optional_of(:String), node, schema_lookup_for))
         .to be_present
     end
+
+    it "marks nested moved source identifiers without a late locatable walk" do
+      moved_arg = cleanup_identifier("owned", moved: true)
+      call = AST::FuncCall.new(tok, "consume", [moved_arg])
+      bindings = {
+        "owned" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      }
+
+      CleanupClassifier.send(:walk_moved_source_guards, [call], bindings)
+
+      expect(bindings.fetch("owned").has_moved_guard?).to be(true)
+    end
   end
 
   # =========================================================================

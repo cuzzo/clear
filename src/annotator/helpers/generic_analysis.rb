@@ -595,8 +595,7 @@ module GenericAnalysis
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-    @og = T.let(@og, T.untyped)
-    @og[var_name]&.kind = :borrowed
+    ownership_graph[var_name]&.kind = :borrowed
     node.symbol.mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
     node.storage = :borrow if node.respond_to?(:storage=)

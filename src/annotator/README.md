@@ -91,6 +91,7 @@ leaked.
 | Type/schema registries | Type declaration and builtin phases | Expression visitors, generic validation, union/member access, MIR lowering | Makes structs, unions, resources, aliases, and extern/native shapes available before bodies are analyzed. |
 | `FunctionSignature`, `FunctionRegistry`, and `SemanticIndex` | Signature registration and function body analysis | Call resolution, Auto inference, effects/fallibility, reentrance checks, MIR call lowering, MIR pass preparation | Lets calls resolve before bodies run and carries final return/effect/capability metadata through a typed registry/index instead of loose annotator receiver fields. |
 | `FunctionContext` | Routine analysis | Return checking, loop/control-flow validation, stack/runtime metadata | Keeps per-routine state out of global variables while a body is being visited. |
+| `BodyScanSummary` / `FunctionBodySummary` | Body visitor fact frame | Reentrance, caller sync, strict-test IO, effects/fallibility, FSM suspend setup, MIR preparation | Records calls, locals, returns, bindings, assignments, WITH scopes, snapshot reads, and suspend points during the same traversal that stamps types. |
 | `AST::ReturnFact` | Return visitors | Function return finalization, fallibility checks, diagnostics | Preserves return type/value evidence for later declared/inferred return validation. |
 | Auto slot/evidence maps | `AutoConstraintCollector`, shape/operator collectors, `AutoUnifier` | Auto finalization and fix generation | Defers `Auto` decisions until enough initializer, call, shape, return, and operator evidence exists. |
 | Capability and held-lock facts | `WITH`/capability visitors, lock helpers, deferred validation | Whole-program lock checks, call-site requirement checks, MIR capability lowering | Separates source-level permission validation from runtime lock/snapshot emission. |
@@ -109,6 +110,7 @@ leaked.
 | `DeferredWithValidation` | `WITH` visitors | Deferred validation phase | Delays parameter/caller-sensitive capability checks until sync propagation is complete. |
 | Lock graph records (`LockEdge`, `LockHeldCallSite`, `LockClauseSite`) | Lock helper | Whole-program deadlock checks | Builds a structural lock-order graph instead of inferring lock hazards from nested syntax later. |
 | Capability request/audit records | Capability helpers | Immediate validation and final audit | Keeps `WITH`, `REQUIRES`, predicate, snapshot, and alias decisions explicit while stamping types. |
+| Scoped execution frames (`AsyncBodyFact`, `StreamYieldFrame`, snapshot transaction frame) | Execution-boundary visitors | Async finalization, yield typing, snapshot purity validation | Keeps async body facts and temporary execution context paired with the visitor scope that created them. |
 | Pipeline aggregation descriptors and source/terminal typing facts | Pipeline helper | Pipeline expression visitors and MIR `PipelinePlanBuilder` | Centralizes aggregate typing and pipeline-specific validation before MIR turns a pipeline into a typed operation plan. |
 | Intrinsic registry entries | Intrinsic registry setup | Call validation and intrinsic emission helpers | Gives intrinsic calls one typed contract for argument checks, return type, and lowering metadata. |
 | Reentrance/thunk candidates | Reentrance helper | Whole-program reentrance validation and MIR thunk transform | Records recognized recursion shapes without making MIR rediscover them from source syntax. |
@@ -146,7 +148,6 @@ the pass:
 @receiver_state = ReceiverState.new
 @function_registry = Annotator::FunctionRegistry.new
 @semantic_index = nil
-@og = OwnershipGraph.new
 ```
 
 It also calls `setup_builtins`, which registers stdlib functions, built-in
@@ -156,13 +157,17 @@ The current implementation is organized into phase, domain, and helper modules
 included into `SemanticAnnotator`. That is materially easier to navigate than a
 single large visitor, and the highest-pressure receiver fields now sit behind
 a typed `ReceiverState` owner for scope, function context, control-flow depth,
-held locks, and capability predicate/deferred-validation/audit state. Function
-registry and semantic index are separate typed objects because they are exported
-phase products. The remaining long-term A-tier shape is smaller phase objects
-with explicit context and result types, especially for ownership graph,
-capability validation, and pipe analysis. Shared analyses that are consumed by
-both annotation and MIR live in [`../semantic`](../semantic) rather than under
-MIR.
+held locks, body fact frames, async facts, stream yield frames, snapshot
+transaction frames, pipeline field tracking, lock-analysis state, effect state,
+the ownership graph, and capability predicate/deferred-validation/audit state.
+`OwnershipGraph` owns its own lexical graph scope depth so graph pruning and
+declaration depth cannot diverge.
+Function registry and semantic index are separate typed objects because they
+are exported phase products. `@branch_terminated` remains a narrow
+control-flow visitor flag because it is not a cross-phase fact and moving it
+behind the receiver state worsened complexity metrics without improving the
+memory-safety boundary. Shared analyses that are consumed by both annotation
+and MIR live in [`../semantic`](../semantic) rather than under MIR.
 
 ### 1. Entry Point
 
@@ -377,7 +382,7 @@ File: [`helpers/auto_inference.rb`](helpers/auto_inference.rb)
 while registering signatures.
 
 ```text
-program_has_auto?
+typed Auto-bearing node scan
   -> AutoConstraintCollector
   -> ShapeEvidenceCollector
   -> OperatorEvidenceCollector
@@ -423,7 +428,7 @@ Schematic `WITH` flow:
 ```text
 visit_WithBlock
   -> acquire_capability! for each requested capability
-  -> validate target shape and sync/storage requirements
+  -> validate typed transition actions and sync/storage requirements
   -> declare aliases in a child scope
   -> visit guard predicates and body
   -> validate no guarded mutation invalidates predicates
@@ -596,8 +601,9 @@ lives in the large main file:
 * [`helpers/reentrance.rb`](helpers/reentrance.rb): recursion and reentrancy
   validation.
 * [`helpers/pipe_analysis.rb`](helpers/pipe_analysis.rb): pipeline expression
-  typing, source/terminal validation, concurrent operation checks, and
-  aggregate facts that MIR pipeline plans consume.
+  typing, one-pass source fact classification, terminal validation,
+  concurrent operation checks, and aggregate facts that MIR pipeline plans
+  consume.
 * [`helpers/method_analysis.rb`](helpers/method_analysis.rb): collection,
   stdlib, extern, and receiver method resolution.
 * [`helpers/union.rb`](helpers/union.rb): union schema validation and variant
@@ -615,13 +621,17 @@ lives in the large main file:
 The annotator is doing real compiler work, but several boundaries remain too
 wide for v0.1 comfort:
 
-* `SemanticAnnotator` owns too much mutable cross-pass state. Phase-specific
-  state should move into typed context/result objects.
+* `SemanticAnnotator` still exposes a large include surface. Most mutable
+  phase state now has typed owners, but explicit phase objects would make the
+  ownership of visitor methods clearer.
 * Scopes deep-copy `SymbolEntry` objects, while later passes mutate canonical
   function parameter entries. This works only because some consumers refresh
   through helper APIs.
-* Capability handling still mixes validation, alias construction, effect
-  recording, audit, and lock graph updates in the same visitor path.
+* Capability handling now stores predicate/deferred/audit state explicitly.
+  Sync-family/deferred-param decisions live on typed `CapabilityTransition`
+  actions, while `SymbolEntry` owns declared sync-contract facts. A future
+  validator/executor split would mainly package the remaining visitor work; it
+  is no longer a hidden phase-state dependency.
 * Some MIR-facing facts are stamped directly on AST nodes from scattered helper
   code. The desired shape is a small number of authoritative outputs from
   `src/semantic` that lowering reads.
@@ -634,12 +644,14 @@ wide for v0.1 comfort:
 The highest-value cleanup is not a new grammar or a second type system. It is
 to keep making existing phase boundaries explicit:
 
-1. Split annotation state into typed phase contexts.
+1. Keep annotation state behind typed owners and introduce explicit phase
+   objects only where they delete real protocol surface.
 2. Replace remaining record-shaped hashes with typed structs.
-3. Make capability transitions named operations on `Type` / `SymbolEntry`
-   rather than open-coded field updates.
-4. Centralize branch ownership state in `OwnershipGraph` and reduce direct
-   symbol flag mutation.
+3. Keep capability transition decisions on `CapabilityTransition` actions and
+   `Type` / `SymbolEntry` facts rather than open-coded field checks in visitor
+   helpers.
+4. Keep branch ownership and graph scope state centralized in
+   `OwnershipGraph`, and reduce direct symbol flag mutation.
 5. Keep MIR-facing stamps small, documented, and produced by one authority.
 
 The target architecture is simple: visitors resolve local syntax and stamp

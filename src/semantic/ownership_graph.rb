@@ -135,6 +135,24 @@ class OwnershipGraph
     @edges_by_source = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[OwnershipGraph::Edge]) }, T::Hash[PlaceId, T::Array[OwnershipGraph::Edge]])  # source_place => [Edge]
     @children = T.let(Hash.new { |h, k| h[k] = T.let(Set.new, T::Set[PlaceId]) }, T::Hash[PlaceId, T::Set[PlaceId]])    # parent_place => Set of child places
     @completed_nodes = T.let({}, T::Hash[PlaceId, OwnershipGraph::Node])
+    @scope_depth = T.let(0, Integer)
+  end
+
+  sig { returns(Integer) }
+  def scope_depth
+    @scope_depth
+  end
+
+  sig { returns(Integer) }
+  def push_scope!
+    clear_completed_snapshot! if @scope_depth.zero?
+    @scope_depth = @scope_depth + 1
+  end
+
+  sig { params(archive: T::Boolean).returns(Integer) }
+  def pop_scope!(archive: false)
+    prune_scope!(@scope_depth, archive: archive)
+    @scope_depth = @scope_depth - 1
   end
 
   sig { returns(T::Hash[String, OwnershipGraph::Node]) }

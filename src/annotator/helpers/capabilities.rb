@@ -157,31 +157,33 @@ module CapabilityHelper
 
     case fact.capability
     when :EXCLUSIVE
-      syn = fact.sync
-      unless syn
-        # Function parameters may not have propagated sync yet; locals error
-        # eagerly because no later propagation can fix them.
-        if fact.source_entry&.is_param
-          record_deferred_with_validation!(node, fact)
-        else
-          storage = fact.storage
-          name = fact.target_label
-          emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
-            [
-              { sigil: '@locked',
-                description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)." },
-              { sigil: '@writeLocked',
-                description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)." },
-            ],
-            confidence: :interactive,
-            got: storage || 'unknown')
-        end
+      case fact.exclusive_validation_action
+      when :valid, :declared_contract
+        # REQUIRES-family parameters are checked after the body walk, once
+        # the whole function's polymorphic contract is available.
+      when :defer
+        record_deferred_with_validation!(node, fact)
+      else
+        storage = fact.storage
+        name = fact.target_label
+        emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@locked",
+              description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)."
+            ),
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@writeLocked",
+              description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)."
+            ),
+          ],
+          confidence: :interactive,
+          got: storage || fact.sync || 'unknown')
       end
 
     when :write_locked_read
-      syn = fact.sync
-      unless syn == :write_locked
-        if fact.source_entry&.is_param && syn.nil?
+      unless fact.write_locked_sync?
+        if fact.deferred_sync_param?
           record_deferred_with_validation!(node, fact)
         else
           name = fact.target_label
@@ -240,10 +242,14 @@ module CapabilityHelper
         end
         emit_with_cap_mismatch!(node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC,
           [
-            { sigil: '@versioned',
-              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)." },
-            { sigil: '@indirect:atomic',
-              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)." },
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@versioned",
+              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)."
+            ),
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@indirect:atomic",
+              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)."
+            ),
           ],
           confidence: :interactive,
           name: name, actual: actual)
@@ -253,8 +259,12 @@ module CapabilityHelper
       unless fact.storage == :multiowned
         name = fact.target_label
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_MULTIOWNED,
-          [{ sigil: '@multiowned',
-             description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)." }],
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@multiowned",
+              description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)."
+            ),
+          ],
           confidence: :auto,
           name: name)
       end
@@ -263,8 +273,12 @@ module CapabilityHelper
       unless fact.storage == :shared
         name = fact.target_label
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_SHARED,
-          [{ sigil: '@shared',
-             description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)." }],
+          [
+            FixableHelper::CapabilityFixCandidate.new(
+              sigil: "@shared",
+              description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)."
+            ),
+          ],
           confidence: :auto,
           name: name)
       end
@@ -273,15 +287,19 @@ module CapabilityHelper
       # Polymorphic params may not have sync propagated yet; defer those checks.
       syn = fact.sync
       unless syn == :atomic
-        if fact.source_entry&.is_param && syn.nil?
+        if fact.deferred_sync_param?
           record_deferred_with_validation!(node, fact)
         else
           name = fact.target_label
           storage = fact.storage
           actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
           emit_with_cap_mismatch!(node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC,
-            [{ sigil: '@shared:atomic',
-               description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)." }],
+            [
+              FixableHelper::CapabilityFixCandidate.new(
+                sigil: "@shared:atomic",
+                description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)."
+              ),
+            ],
             confidence: :auto,
             name: name, actual: actual)
         end
@@ -438,9 +456,10 @@ module CapabilityHelper
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
-    return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
-    return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
-    return "can fail" if call.respond_to?(:can_fail) && call.can_fail
+    return "is an extern call" if call.extern_call
+    extern_effects = call.extern_effects
+    return "has extern effects" if extern_effects && !extern_effects.empty?
+    return "can fail" if call.can_fail
     if call.matched_stdlib_def
       md = T.must(call.matched_stdlib_def)
       return "allocates" if md.emits_allocating?
@@ -850,7 +869,6 @@ module CapabilityHelper
 	  sig { params(fact: WithCapabilityFact).returns(T.nilable(String)) }
 	  def declare_capability_scope!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    @og = T.let(@og, T.any(OwnershipGraph, T.untyped))
     declare_unwrapped_capability_alias!(fact) if fact.unwraps_sync_alias?
     declare_capability_binding_or_error!(fact)
     declare_capability_projection!(fact)
@@ -904,7 +922,7 @@ module CapabilityHelper
   sig { params(fact: WithCapabilityFact).void }
   def declare_restrict_capability!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    @og.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
+    ownership_graph.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
     mark_var_mutated(fact.var_name) if fact.alias_mutable
     declare_restrict_alias!(fact) if fact.declares_plain_restrict_alias?
   end
@@ -968,7 +986,7 @@ module CapabilityHelper
     sym.mark_non_escaping!
     sym.mark_borrowed_alias!
     og_declare(alias_name, nil, resolved_type)
-    @og.borrow("__borrowed_#{fact.var_name}", fact.var_name, mutable: false)
+    ownership_graph.borrow("__borrowed_#{fact.var_name}", fact.var_name, mutable: false)
   end
 
   sig { params(fact: WithCapabilityFact, qualifier: String).void }
@@ -1052,8 +1070,9 @@ module CapabilityHelper
 
   sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
   def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
-    T.bind(self, SemanticAnnotator) rescue nil
-    @capture_stack = T.let(@capture_stack, T.untyped)
+    T.bind(self, SemanticAnnotator)
+    ctx = T.let(nil, T.nilable(CaptureContext))
+    state = T.let(phase_receiver_state, SemanticAnnotator::ReceiverState)
     ctx = CaptureContext.new(
       analysis: new_capture_analysis,
       outer_scope: current_scope,
@@ -1061,17 +1080,18 @@ module CapabilityHelper
       is_parallel: !!is_parallel,
       mark_moves: mark_moves
     )
-    (@capture_stack ||= []) << ctx
+    state.capture_stack << ctx
     blk.call
     ctx.analysis
   ensure
-    @capture_stack.pop if @capture_stack
+    popped = T.must(state).capture_stack.pop
+    Kernel.raise "BUG: capture context mismatch" if popped && !popped.equal?(ctx)
   end
 
   sig { returns(T.nilable(CapabilityHelper::CaptureContext)) }
   def current_capture_context
-    @capture_stack = T.let(@capture_stack, T.untyped)
-    @capture_stack&.last
+    T.bind(self, SemanticAnnotator)
+    phase_receiver_state.capture_stack.last
   end
 
   sig { params(name: T.nilable(String)).void }
@@ -1172,22 +1192,21 @@ module CapabilityHelper
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_move!(ctx, name, info, node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
-    return unless ctx.mark_moves && (@capture_move_suppressed || 0).zero?
+    return unless ctx.mark_moves && phase_receiver_state.capture_move_suppression_depth.zero?
     return unless ctx.outer_scope.owned_names.include?(name)
     classify_ownership!(info) unless info.ownership_kind
-    if info.capture_move_required?(@og.live?(name))
+    if info.capture_move_required?(ownership_graph.live?(name))
       og_set_moved(name, at_token: node.token, action: :capture)
     end
   end
 
   sig { params(blk: T.untyped).returns(T.untyped) }
   def without_capture_moves(&blk)
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
-    @capture_move_suppressed = (@capture_move_suppressed || 0) + 1
+    T.bind(self, SemanticAnnotator)
+    phase_receiver_state.capture_move_suppression_depth += 1
     blk.call
   ensure
-    @capture_move_suppressed = T.must(@capture_move_suppressed) - 1
+    phase_receiver_state.capture_move_suppression_depth -= 1
   end
 
   sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }

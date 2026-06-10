@@ -312,7 +312,7 @@ module Annotator
       end
 
       # ── Ownership: move, escape, borrow, drop ────────────────────────
-      # All ownership state lives in @og (OwnershipGraph). The scope is
+      # All ownership state lives in the receiver-owned OwnershipGraph. The scope is
       # The scope handles type resolution, variable declarations, mutability,
       # and capability tracking. All ownership state is in the OwnershipGraph.
 
@@ -361,7 +361,7 @@ module Annotator
         return unless value_type.requires_move?
 
         graph_path = path.map(&:to_s).join(".")
-        declare_assignment_graph_path!(graph_path, value_type) unless @og[graph_path]
+        declare_assignment_graph_path!(graph_path, value_type) unless ownership_graph[graph_path]
         og_set_moved(graph_path, at_token: node.value.token, action: :move)
       end
 
@@ -369,7 +369,7 @@ module Annotator
       def declare_assignment_graph_path!(graph_path, value_type)
         T.bind(self, SemanticAnnotator)
 
-        @og.declare(graph_path, kind: :affine, type_info: value_type, scope_depth: @og_scope_depth)
+        ownership_graph.declare(graph_path, kind: :affine, type_info: value_type, scope_depth: ownership_graph.scope_depth)
       end
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
@@ -387,7 +387,7 @@ module Annotator
         return unless find_container_source(node.value)
 
         source_name = root_variable_name(node.value)
-        if source_name && @og[source_name]&.kind == :borrowed
+        if source_name && ownership_graph[source_name]&.kind == :borrowed
           error!(node, :MOVE_BORROWED_INDEX, source: source_name)
         end
       end
@@ -413,7 +413,7 @@ module Annotator
         is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) } && !type_obj.string?
         if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
           # Cannot move a borrowed value (non-TAKES parameter).
-          if @og[rhs_name]&.kind == :borrowed
+          if ownership_graph[rhs_name]&.kind == :borrowed
             error!(node, :MOVE_BORROWED_PARAM, name: rhs_name)
           end
           lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
@@ -447,7 +447,7 @@ module Annotator
 
         lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
         mutable = node.is_a?(AST::VarDecl) && node.mutable
-        err = @og.borrow(lhs_name, root_var, mutable: mutable)
+        err = ownership_graph.borrow(lhs_name, root_var, mutable: mutable)
         error!(node, :LIFETIME_ALREADY_BORROWED, name: root_var) if err
       end
 
@@ -510,7 +510,7 @@ module Annotator
         path = get_path_to_root(node.name)
         return if path.nil?
         root_name = path.first.to_s
-        unless @og.can_write?(root_name)
+        unless ownership_graph.can_write?(root_name)
           error!(node, :ASSIGN_WHILE_BORROWED, name: root_name)
         end
       end
@@ -526,7 +526,7 @@ module Annotator
           # TAKES params always need cleanup guards even if moved (the _moved
           # flag controls whether cleanup runs at runtime).
           is_takes = info.respond_to?(:takes) && info.takes
-          next unless @og.live?(name) || (is_takes && @og[name]&.moved?)
+          next unless ownership_graph.live?(name) || (is_takes && ownership_graph[name]&.moved?)
           classify_ownership!(info) unless info.ownership_kind
 
           case info.ownership_kind
@@ -598,7 +598,7 @@ module Annotator
 
         drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.owned_entries.each do |name, info|
-          next unless @og.live?(name)
+          next unless ownership_graph.live?(name)
           classify_ownership!(info) unless info.ownership_kind
           case info.ownership_kind
           when :resource
@@ -1140,8 +1140,8 @@ module Annotator
         entry = current_scope.resolve_entry(name) rescue nil
         kind = classify_og_kind(type_info, sync: entry&.sync)
         ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
-        @og.declare(name, kind: kind, type_info: ti,
-                    scope_depth: @og_scope_depth, line: node && node.respond_to?(:line) ? node.line : 0)
+        ownership_graph.declare(name, kind: kind, type_info: ti,
+                    scope_depth: ownership_graph.scope_depth, line: node && node.respond_to?(:line) ? node.line : 0)
       end
 
       sig { params(node: AST::Node).returns(T::Boolean) }
@@ -1176,7 +1176,7 @@ module Annotator
         vt = node.full_type!(context: "move candidate")
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
         return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
-        existing = @og&.nodes&.[](node.name)
+        existing = ownership_graph.nodes[node.name]
         if existing&.specific_move_action?
           # An earlier visitor (typically visit_GiveNode) already stamped
           # the move site with a more-specific action like `:give`. Don't
@@ -1203,7 +1203,7 @@ module Annotator
         return if current_fn_ctx&.type_params&.include?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 
-        existing = @og&.nodes&.[](node.name)
+        existing = ownership_graph.nodes[node.name]
         if existing&.specific_move_action?
           existing.move_consumer_param_type = consumer_param_type if consumer_param_type && existing.move_consumer_param_type.nil?
           node.was_moved = true
@@ -1222,7 +1222,7 @@ module Annotator
         borrowed_name = nil
         if val_node.is_a?(AST::GetIndex)
           borrowed_name = "#{root_variable_name(val_node)}[index]"
-        elsif val_node.is_a?(AST::Identifier) && @og&.[](val_node.name)&.kind == :borrowed
+        elsif val_node.is_a?(AST::Identifier) && ownership_graph[val_node.name]&.kind == :borrowed
           borrowed_name = val_node.name
         end
         return unless borrowed_name

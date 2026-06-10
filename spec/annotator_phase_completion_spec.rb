@@ -61,6 +61,36 @@ RSpec.describe "annotator completion phases" do
     expect(index.root_scope).to eq(annotator.semantic_root_scope)
     expect(index.function_node("main")).to eq(annotator.function_node_for("main"))
     expect(index.function_nodes.keys).to include("main")
+    expect(index.id_index.definition_id_for("main")&.value).to be > 0
+    expect(index.id_index.body_id_for("main")&.value).to be > 0
+    expect(index.body_summaries.fetch("main").definition_id).to eq(index.id_index.definition_id_for("main"))
+    expect(index.body_summaries.fetch("main").body_id).to eq(index.id_index.body_id_for("main"))
+  end
+
+  it "publishes typed local and call-site facts in function body summaries" do
+    annotator = SemanticAnnotator.new
+    program = parse(<<~CLEAR)
+      FN callee() RETURNS Int64 ->
+        RETURN 1;
+      END
+
+      FN main() RETURNS Int64 ->
+        value = callee();
+        RETURN value;
+      END
+    CLEAR
+
+    annotator.annotate!(program)
+    summary = T.must(annotator.function_body_summary_for("main"))
+
+    expect(summary.definition_id.value).to be > 0
+    expect(summary.body_id.value).to be > 0
+    expect(summary.local_facts.map(&:name)).to include("value")
+    expect(summary.local_facts.map { |fact| fact.id.value }).to all(be > 0)
+    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(be > 0)
+    expect(summary.call_site_facts.map(&:callee_name)).to include("callee")
+    expect(summary.call_site_facts.map(&:fn_var_call)).to eq([false])
+    expect(summary.call_site_facts.map(&:propagates_failure)).to eq([true])
   end
 
   it "appends synthesized functions during body analysis" do

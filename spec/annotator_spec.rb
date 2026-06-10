@@ -2437,9 +2437,8 @@ RSpec.describe SemanticAnnotator do
           sym = find_symbol_in_mir_ast(@_escape_check)
           expect(sym&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap after MIRPass"
         else
-          og = @annotator.send(:instance_variable_get, :@og)
-          node = og[@_escape_check]
-          expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
+          node = @annotator.send(:ownership_graph)[@_escape_check]
+          expect(node&.full_type&.location).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
         end
       end
       if @_no_escape_check && @_no_escape_check != :any && @_mir_ast

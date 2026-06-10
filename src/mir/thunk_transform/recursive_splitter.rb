@@ -195,14 +195,17 @@ module ThunkTransform
     sig { params(node: T.nilable(Object), names_set: T::Set[String]).returns(T::Boolean) }
     def contains_any_call?(node, names_set)
       return false if node.nil?
-      found = T.let(false, T::Boolean)
-      AST.each_locatable(node) do |child|
-        if child.is_a?(AST::FuncCall) && names_set.include?(child.name.to_s)
-          found = true
-          break
-        end
+      case node
+      when Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef, AST::LambdaLit
+        false
+      when Array
+        node.any? { |child| contains_any_call?(child, names_set) }
+      when AST::FuncCall
+        names_set.include?(node.name.to_s) || node.args.any? { |arg| contains_any_call?(arg, names_set) }
+      else
+        return false unless node.respond_to?(:each_pair)
+        T.unsafe(node).each_pair.any? { |_name, value| contains_any_call?(value, names_set) }
       end
-      found
     end
 
     # An IF base case: `IF <cond> -> RETURN <expr>;` where neither

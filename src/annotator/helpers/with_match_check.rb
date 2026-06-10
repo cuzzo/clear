@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../semantic/capability_plan"
+require_relative "../../semantic/semantic_ids"
 # Validation of REQUIRES + WITH MATCH at the function level and call-site
 # family check.
 #
@@ -238,10 +239,11 @@ module WithMatchCheck
 
   # At every call site, verify each REQUIRES'd arg's binding belongs to
   # one of the families in the callee's disjunction.
-  sig { params(call_sites: T::Array[AST::FuncCall], sig_lookup: Proc, error_handler: Proc).void }
+  sig { params(call_sites: T::Array[Semantic::CallSiteFact], sig_lookup: Proc, error_handler: Proc).void }
   def self.check_call_sites!(call_sites, sig_lookup, error_handler)
-    call_sites.each do |call_node|
-      sig = FunctionSignature.unwrap(sig_lookup.call(call_node.name.to_s))
+    call_sites.each do |call_site|
+      call_node = call_site.node
+      sig = FunctionSignature.unwrap(sig_lookup.call(call_site.callee_name))
       next unless sig
 
       requires_map = sig.requires
@@ -253,7 +255,7 @@ module WithMatchCheck
         pname = param.name.to_s
         fams = requires_map[pname]
         next unless fams && fams.empty?
-        arg = call_node.args[idx]
+        arg = call_site.args[idx]
         next unless arg.is_a?(AST::Identifier)
         sym = arg.symbol
         next unless sym
@@ -267,7 +269,7 @@ module WithMatchCheck
         disjunction = requires_map[param_name]
         next unless disjunction && !disjunction.empty?
 
-        arg = call_node.args[idx]
+        arg = call_site.args[idx]
         next unless arg
 
         arg_family = family_of_arg(arg)

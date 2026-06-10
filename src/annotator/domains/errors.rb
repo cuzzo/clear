@@ -6,31 +6,19 @@ module Annotator
     module Errors
       extend T::Sig
 
-
-      # Pre-pass: walk every RAISE and OR EXIT site that provides both a
-      # kind and a type, and seed the registry with (kind, type). Lets
-      # CATCH Type clauses resolve regardless of source order. OR EXIT
-      # counts too because it can introduce new types that only the
-      # CATCH for a particular call needs to see.
-      sig { params(program_node: AST::Program).void }
-      def seed_error_types_from_raises!(program_node)
+      # Resolve CATCH clauses after body typing. RAISE/OR EXIT type
+      # registrations happen during the normal body traversal, so source-order
+      # independent CATCH Type clauses do not require a declaration-index body
+      # walk.
+      sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
+      def resolve_catch_clauses_from_declarations!(declarations)
         T.bind(self, SemanticAnnotator)
 
-        seed_body = lambda do |stmts|
-          AST.walk_body(stmts) do |n|
-            case n
-            when AST::Raise, AST::OrExit
-              next unless n.kind && n.error_name
-              resolve_error_registration!(n, n.kind, n.error_name, n.token)
-            end
-          end
-        end
-        program_node.statements.each do |stmt|
-          next unless stmt.is_a?(AST::FunctionDef)
-          seed_body.call(stmt.body)
-          seed_body.call(stmt.catch_clauses&.map { |c| c.body }&.flatten || [])
+        declarations.function_declarations.each do |fn|
+          fn.catch_clauses.each { |clause| resolve_catch_clause!(clause) }
         end
       end
+
       SYNC_POLICY_REQUIRED_ERRORS = %i[LockTimeout MvccConflict AtomicConflict].freeze
       # Errors that may NEVER appear in a SYNC POLICY block.
       SYNC_POLICY_INLINE_ONLY_ERRORS = %i[Deadlock LockCycle].freeze
@@ -394,7 +382,7 @@ module Annotator
         # SymbolEntry#non_escaping flag is set on every WITH alias by
         # declare_capability_scope!; it's the same flag ensure_owned_value!
         # already uses to prevent storing WITH-scoped values in containers.
-        if (@with_block_depth || 0) > 0
+        if inside_with_block?
           val = node.value
           if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
             error!(node, :RETURN_FROM_WITH_SCOPED, name: val.name, hint: "WITH aliases are borrows of locked data and cannot escape their scope.")
@@ -547,7 +535,14 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         # Logic: val OR default
-        visit(node.left)
+        rhs_propagates =
+          node.right.is_a?(AST::OrRaise) ||
+          node.right.is_a?(AST::OrExit) ||
+          node.right.is_a?(AST::ThrowNode) ||
+          node.right.is_a?(AST::ReturnNode)
+        with_body_fact_failure_absorbed(!rhs_propagates) do
+          visit(node.left)
+        end
         visit(node.right)
 
 

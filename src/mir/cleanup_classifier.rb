@@ -35,6 +35,11 @@ module CleanupClassifier
     extend T::Sig
 
   PlaceId = OwnershipIdentity::PlaceId
+  AstBodyNode = T.type_alias { T.any(AST::Node, Struct) }
+  BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+  CleanupExtraValue = T.type_alias do
+    T.nilable(T.any(String, Symbol, T::Boolean, Type, Schemas::ResourceClosePlan))
+  end
 
   class BindingCleanupFacts < T::Struct
     extend T::Sig
@@ -63,22 +68,11 @@ module CleanupClassifier
       build(entries)
     end
 
-    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(FrozenCleanupFacts) }
-    def self.from_function(fn_node, bindings)
-      entries = T.let({}, T::Hash[PlaceId, CleanupEntry])
-      body = fn_node.body
-      if body
-        AST.each_locatable(body) do |node|
-          name = MIR::LocalBindingAnalysis.binding_decl_name(node)
-          next unless name
-          entry = MIR::LocalBindingAnalysis.binding_entry(node)
-          next unless entry
-
-          entries[CleanupClassifier.place_for_binding_node(name, node)] = entry
-        end
-      end
+    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry], entries: T::Hash[PlaceId, CleanupEntry]).returns(FrozenCleanupFacts) }
+    def self.from_function(fn_node, bindings, entries)
+      _ = fn_node
       bindings.each do |name, entry|
-        entries[PlaceId.from_path(name)] = entry
+        entries[PlaceId.from_path(name)] ||= entry
       end
       build(entries)
     end
@@ -170,11 +164,11 @@ module CleanupClassifier
       )
     end
 
-    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(CleanupClassificationPlan) }
-    def self.from_function(fn_node, bindings)
+    sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry], entries: T::Hash[PlaceId, CleanupEntry]).returns(CleanupClassificationPlan) }
+    def self.from_function(fn_node, bindings, entries)
       new(
         function_name: fn_node.name.to_s,
-        facts: FrozenCleanupFacts.from_function(fn_node, bindings),
+        facts: FrozenCleanupFacts.from_function(fn_node, bindings, entries),
       )
     end
 
@@ -203,10 +197,11 @@ module CleanupClassifier
   def self.classify_plan(fn_node, schema_lookup:)
     return CleanupClassificationPlan.from_bindings(fn_node.name.to_s, {}) unless fn_node.body
 
-    bindings = {}
+    bindings = T.let({}, T::Hash[String, CleanupEntry])
+    entries_by_place = T.let({}, T::Hash[PlaceId, CleanupEntry])
 
     # 1. Walk all VarDecl/BindExpr in the function body.
-    walk_bindings(fn_node.body, schema_lookup, bindings)
+    walk_bindings(fn_node.body, schema_lookup, bindings, entries_by_place)
 
     # 2. TAKES parameters from fn_node.params.
     walk_takes_params(fn_node, schema_lookup, bindings)
@@ -221,10 +216,9 @@ module CleanupClassifier
     # 4. WHILE-bind / IF-bind captures from ownership-transferring call results.
     walk_capture_bindings(fn_node.body, schema_lookup, bindings)
 
-    prune_container_borrow_bindings(fn_node.body, bindings)
     stamp_cleanup_scopes!(fn_node.body, bindings)
 
-    CleanupClassificationPlan.from_function(fn_node, bindings)
+    CleanupClassificationPlan.from_function(fn_node, bindings, entries_by_place)
   end
 
   sig { params(name: String, node: AST::Node).returns(PlaceId) }
@@ -234,34 +228,28 @@ module CleanupClassifier
     PlaceId.from_symbol(name, symbol)
   end
 
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
-  private_class_method def self.prune_container_borrow_bindings(body, bindings)
-    AST.each_locatable(body) do |node|
-      next unless (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && binding_container_borrow?(node)
-
-      bindings.delete(node.name.to_s)
-      node.mir_binding_entry = nil if node.respond_to?(:mir_binding_entry=)
-    end
-    nil
-  end
-
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(body: T::Array[AST::Node], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_moved_source_guards(body, bindings)
-    AST.each_locatable(body) do |node|
-      next unless node.is_a?(AST::Identifier)
-      next unless AST.moved?(node)
-      entry = bindings[node.name.to_s]
-      entry&.mark_moved_guard!
-    end
+    body.each { |node| mark_moved_source_guards_in_node(node, bindings) }
   end
 
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(node: AST::Node, bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.mark_moved_source_guards_in_node(node, bindings)
+    if node.is_a?(AST::Identifier) && AST.moved?(node)
+      bindings[node.name.to_s]&.mark_moved_guard!
+    end
+    return if node.is_a?(AST::FunctionDef)
+
+    AST.each_child_node(node) { |child| mark_moved_source_guards_in_node(child, bindings) }
+  end
+
+  sig { params(body: T::Array[AstBodyNode], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.stamp_cleanup_scopes!(body, bindings)
     stamp_default_scopes!(body, loop_depth: 0)
     stamp_extended_loop_lifetimes!(body, bindings)
   end
 
-  sig { params(body: T::Array[T.untyped], loop_depth: Integer).void }
+  sig { params(body: T::Array[AstBodyNode], loop_depth: Integer).void }
   private_class_method def self.stamp_default_scopes!(body, loop_depth:)
     body.each do |node|
       stamp_binding_default_scope!(node, loop_depth)
@@ -270,7 +258,7 @@ module CleanupClassifier
     end
   end
 
-  sig { params(node: T.untyped, loop_depth: Integer).void }
+  sig { params(node: AstBodyNode, loop_depth: Integer).void }
   private_class_method def self.stamp_binding_default_scope!(node, loop_depth)
     return unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return if node.is_a?(AST::BindExpr) && node.mode == :assign
@@ -286,7 +274,7 @@ module CleanupClassifier
     entry.set_cleanup_scope!(scope)
   end
 
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(body: T::Array[AstBodyNode], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.stamp_extended_loop_lifetimes!(body, bindings)
     body.each do |node|
       AST.child_bodies(node).each do |child_body|
@@ -296,7 +284,7 @@ module CleanupClassifier
     end
   end
 
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  sig { params(body: T::Array[AstBodyNode], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.stamp_loop_extensions!(body, bindings)
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
     local_names = local_facts.names
@@ -311,7 +299,7 @@ module CleanupClassifier
       when AST::Assignment
         target = AST.root_identifier(node.name)
         next if target&.name && local_names.include?(target.name.to_s)
-        mark_iteration_values_function!(node.value, local_entries)
+        mark_iteration_values_function!(node.value, local_entries) if node.value.is_a?(AST::Locatable)
       when AST::FuncCall
         mark_call_lifetime_extensions!(node.args, params_for_call(node), local_entries, nil)
       when AST::MethodCall
@@ -322,18 +310,18 @@ module CleanupClassifier
     end
   end
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: AST::Node).returns(T::Boolean) }
   private_class_method def self.value_extends_loop?(value)
     Type.from_node!(value, context: "cleanup lifetime extension").heap_ptr?
   end
 
-  sig { params(entry_obj: CleanupEntry, value: T.untyped).void }
+  sig { params(entry_obj: CleanupEntry, value: AST::Node).void }
   private_class_method def self.promote_entry_to_heap_cleanup!(entry_obj, value)
     ti = Type.from_node!(value, context: "cleanup lifetime promotion")
     entry_obj.promote_to_cleanup!(kind: ti.string? ? :heap_string : :uniform, alloc: :heap, has_moved_guard: true)
   end
 
-  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], local_entries: T::Hash[String, CleanupEntry], receiver_nonlocal: T.nilable(T::Boolean)).void }
+  sig { params(args: T::Array[AST::Node], params: T::Array[AST::Param], local_entries: T::Hash[String, CleanupEntry], receiver_nonlocal: T.nilable(T::Boolean)).void }
   private_class_method def self.mark_call_lifetime_extensions!(args, params, local_entries, receiver_nonlocal)
     return unless receiver_nonlocal
     params.each_with_index do |param, idx|
@@ -343,9 +331,9 @@ module CleanupClassifier
     end
   end
 
-  sig { params(expr: T.untyped, local_entries: T::Hash[String, CleanupEntry]).void }
+  sig { params(expr: AST::Node, local_entries: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.mark_iteration_values_function!(expr, local_entries)
-    ident = AST.root_identifier(expr) rescue nil
+    ident = AST.root_identifier(expr)
     return unless ident
 
     entry = local_entries[ident.name.to_s]
@@ -415,43 +403,71 @@ module CleanupClassifier
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
-  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[CleanupEntry]) }
-  private_class_method def self.walk_bindings(body, schema_lookup, bindings)
-    classify_in_body = ->(b) {
-      AST.each_locatable(b) do |node|
-        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-        next if node.is_a?(AST::BindExpr) && node.mode == :assign
-
-        var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-        moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
-        cleanup = classify_binding(node.full_type!, node, schema_lookup)
-        cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
-        unless cleanup
-          if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
-             !optional_empty_initializer?(node.respond_to?(:value) ? node.value : nil)
-            ti = node.full_type!
-            cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
-          end
-        end
-        if cleanup
-          cleanup.set_alloc!(moved_alloc) if moved_alloc
-        else
-          cleanup = no_cleanup_alloc_entry(node.full_type!, schema_lookup)
-        end
-        # Stamp on node for identity-based lookup in lower_var_decl (avoids
-        # same-name collisions when two vars share a name in different scopes).
-        node.mir_binding_entry = cleanup if cleanup
-        bindings[var_name] = cleanup if cleanup
-      end
-    }
-    classify_in_body.call(body)
-    # AST.walk_body recurses into statement-position HasBodies but not into
-    # expression-position BG blocks (`x = BG STREAM { ... }`). AST.each_bg_block
-    # is the canonical "every BG fiber reachable from this body" walker; its
-    # body is exactly the set of additional cleanup-bearing scopes we must
-    # classify.
-    AST.each_bg_block(body) { |bg| classify_in_body.call(bg.body) if bg.body }
+  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).returns(T::Array[CleanupEntry]) }
+  private_class_method def self.walk_bindings(body, schema_lookup, bindings, entries_by_place)
+    classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place)
     bindings.values
+  end
+
+  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place)
+    body.each do |node|
+      classify_cleanup_binding_node(node, schema_lookup, bindings, entries_by_place) if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      classify_inline_bg_binding_body(node, schema_lookup, bindings, entries_by_place)
+      AST.child_bodies(node).each do |child_body|
+        classify_cleanup_binding_body(child_body, schema_lookup, bindings, entries_by_place)
+      end
+    end
+  end
+
+  sig { params(node: AstBodyNode, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_inline_bg_binding_body(node, schema_lookup, bindings, entries_by_place)
+    AST.expression_children(node).each do |child|
+      next unless child.is_a?(AST::Locatable)
+
+      if child.is_a?(AST::BgBlock) || child.is_a?(AST::BgStreamBlock)
+        body = child.body
+        classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place) if body
+        next
+      end
+
+      classify_inline_bg_binding_body(child, schema_lookup, bindings, entries_by_place)
+    end
+  end
+
+  sig { params(node: BindingNode, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_cleanup_binding_node(node, schema_lookup, bindings, entries_by_place)
+    return if node.is_a?(AST::BindExpr) && node.mode == :assign
+
+    var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+    if binding_container_borrow?(node)
+      bindings.delete(var_name)
+      entries_by_place.delete(place_for_binding_node(var_name, node))
+      node.mir_binding_entry = nil if node.respond_to?(:mir_binding_entry=)
+      return
+    end
+    value = node.value
+    value_node = T.let(value.is_a?(AST::Locatable) ? value : nil, T.nilable(AST::Node))
+    moved_alloc = moved_payload_alloc(value_node, bindings)
+    cleanup = classify_binding(node.full_type!, node, schema_lookup)
+    cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
+    unless cleanup
+      if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
+         !optional_empty_initializer?(value)
+        ti = node.full_type!
+        cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
+      end
+    end
+    if cleanup
+      cleanup.set_alloc!(moved_alloc) if moved_alloc
+    else
+      cleanup = no_cleanup_alloc_entry(node.full_type!, schema_lookup)
+    end
+    # Stamp on node for identity-based lookup in lower_var_decl (avoids
+    # same-name collisions when two vars share a name in different scopes).
+    node.mir_binding_entry = cleanup if cleanup
+    bindings[var_name] = cleanup if cleanup
+    entries_by_place[place_for_binding_node(var_name, node)] = cleanup if cleanup
   end
 
   sig { params(full_type: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -464,11 +480,12 @@ module CleanupClassifier
     nil
   end
 
-  sig { params(node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
+  sig { params(node: T.nilable(AST::Node), bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
   private_class_method def self.moved_payload_alloc(node, bindings)
     return nil unless ownership_transfer_payload?(node)
+    payload = T.must(node)
     names = []
-    collect_payload_binding_names(node, names)
+    collect_payload_binding_names(payload, names)
     allocs = names.filter_map do |name|
       entry = bindings[name]
       entry&.needs_cleanup? ? entry.alloc : nil
@@ -477,21 +494,21 @@ module CleanupClassifier
     allocs.include?(:heap) ? :heap : :frame
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   private_class_method def self.ownership_transfer_payload?(node)
     return false unless node
     return true if node.is_a?(AST::MoveNode)
     return true if AST.moved?(node)
-    AST.wrapped_children(node).any? { |child| ownership_transfer_payload?(child) }
+    AST.wrapped_children(node).any? { |child| child.is_a?(AST::Locatable) && ownership_transfer_payload?(child) }
   end
 
-  sig { params(node: T.untyped, names: T::Array[String]).void }
+  sig { params(node: AST::Node, names: T::Array[String]).void }
   private_class_method def self.collect_payload_binding_names(node, names)
     if node.is_a?(AST::Identifier)
       names << node.name.to_s
       return
     end
-    AST.wrapped_children(node).each { |child| collect_payload_binding_names(child, names) }
+    AST.wrapped_children(node).each { |child| collect_payload_binding_names(child, names) if child.is_a?(AST::Locatable) }
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -607,23 +624,24 @@ module CleanupClassifier
   # Single dispatch point for MATCH AS variant cleanup. Returns nil when the
   # variant doesn't need an AS-binding cleanup (unit variants, @indirect
   # pointees, plain non-heap-bearing inline structs).
-  sig { params(variant_type: T.untyped, union_lookup: T.untyped, variant_name: T.untyped).returns(T.nilable(CleanupEntry)) }
+  sig { params(variant_type: Schemas::UnionSchema::VariantValue, union_lookup: T.any(String, Symbol), variant_name: T.any(String, Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.match_as_entry_for(variant_type, union_lookup, variant_name)
-    if Schemas.inline_struct?(variant_type)
+    _ = union_lookup
+    _ = variant_name
+    if variant_type.is_a?(Schemas::InlineStructVariant)
       return nil unless Type.variant_has_heap?(variant_type)
       # Inline-struct variant cleanup uses the unified :non_copy_union path
       # (same CheatLib.cleanup emit). match_as: true distinguishes the MATCH
       # AS origin for downstream guards.
       return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true)
     end
-    return nil unless variant_type
+    return nil unless variant_type.is_a?(Type)
     return nil if variant_type.indirect?
 
-    pt = variant_type
-    if pt.array? && !pt.string?
-      elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
+    if variant_type.array? && !variant_type.string?
+      elem_zig = variant_type.element_type ? (Type.new(variant_type.element_type).zig_type rescue variant_type.element_type.to_s) : "UNKNOWN"
       return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true, elem_zig_type: elem_zig)
-    elsif pt.map?
+    elsif variant_type.map?
       return entry(:uniform, alloc: :heap, has_moved_guard: true, match_as: true)
     end
     nil
@@ -809,7 +827,7 @@ module CleanupClassifier
     AST.container_borrow?(node) || AST.container_borrow?(binding_value(node))
   end
 
-  sig { params(entry: T.nilable(CleanupEntry), node: T.untyped, ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  sig { params(entry: T.nilable(CleanupEntry), node: AST::Node, ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
     return nil unless entry
     return entry unless node.respond_to?(:symbol)
@@ -820,16 +838,17 @@ module CleanupClassifier
     entry
   end
 
-  sig { params(sym: T.nilable(SymbolEntry), node: Object).returns(T.nilable(Symbol)) }
+  sig { params(sym: T.nilable(SymbolEntry), node: BasicObject).returns(T.nilable(Symbol)) }
   private_class_method def self.storage_from_symbol(sym, node)
     symbol = sym.is_a?(SymbolEntry) ? (AST.declaration_symbol(sym) || sym) : sym
     storage = symbol&.storage
-    storage || (node.respond_to?(:storage) ? T.cast(node.public_send(:storage), T.nilable(Symbol)) : nil)
+    reflected = T.unsafe(node)
+    storage || (reflected.respond_to?(:storage) ? T.cast(reflected.public_send(:storage), T.nilable(Symbol)) : nil)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
 
-  sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean, extra: T.untyped).returns(CleanupEntry) }
+  sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean, extra: CleanupExtraValue).returns(CleanupEntry) }
   private_class_method def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
     CleanupEntry.build(kind, alloc: alloc, has_moved_guard: has_moved_guard, **extra)
   end
@@ -840,7 +859,7 @@ module CleanupClassifier
       ti.inf_stream? || ti.split_open_stream? || ti.shared_promise?
   end
 
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T::Boolean) }
+  sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.mutable_owning_slot?(ti, node, schema_lookup)
     return false unless node.respond_to?(:var_mutated) && node.var_mutated == true
     ownership_bearing_type?(ti, schema_lookup)

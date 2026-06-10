@@ -74,8 +74,8 @@ module Annotator
           check = T.let("", String)
           path.each do |seg|
             check = check.empty? ? seg.to_s : "#{check}.#{seg}"
-            if @og.moved?(check)
-              emit_use_of_moved_path_error!(node, path, @og[check])
+            if ownership_graph.moved?(check)
+              emit_use_of_moved_path_error!(node, path, ownership_graph[check])
               break
             end
           end
@@ -100,8 +100,8 @@ module Annotator
         # lock-acquire-and-release inline.
         if node.target.is_a?(AST::Identifier) && !node.is_assignment_lhs
           sym = node.target.symbol
-          in_auto_lock = @in_auto_locked_assign == node.target.name
-          in_with_block = (@with_block_depth || 0) > 0
+          in_auto_lock = phase_receiver_state.auto_locked_assign_name == node.target.name
+          in_with_block = inside_with_block?
           cap_error = [
             [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
             [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
@@ -151,8 +151,8 @@ module Annotator
 
         field_type = field_def.type
         # SOA tracking: record field access on pipeline variable `_`
-        if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-          @pipeline_accessed_fields << node.field
+        if phase_receiver_state.pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+          T.must(phase_receiver_state.pipeline_accessed_fields).add(node.field)
         end
         # For generic instances (e.g. Pair<Number>), substitute type params into field type.
         # Handles compound types like T[], ?T, !T via apply_type_subst.

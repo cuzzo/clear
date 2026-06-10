@@ -277,7 +277,7 @@ RSpec.describe Scope do
       drops = annotator.send(:collect_scope_drops, node: nil)
     end
 
-    graph = annotator.instance_variable_get(:@og)
+    graph = annotator.send(:ownership_graph)
     expect(drops.map(&:name)).to eq(["inner"])
     expect(graph.live?("outer")).to eq(true)
     expect(graph.live?("inner")).to eq(false)

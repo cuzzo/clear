@@ -721,8 +721,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
 
-    @og = T.let(@og, T.untyped)
-    if param.mutable && !@og.can_write?(arg_node.name)
+    if param.mutable && !ownership_graph.can_write?(arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
@@ -924,7 +923,7 @@ module FunctionAnalysis
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
       unless param.takes
-        @og[param.name]&.kind = :borrowed
+        ownership_graph[param.name]&.kind = :borrowed
       end
       param.type
     end
@@ -1093,7 +1092,7 @@ module FunctionAnalysis
   def return_is_borrow?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if node.is_a?(AST::Identifier)
-      return false unless @og[node.name]&.kind == :borrowed
+      return false unless ownership_graph[node.name]&.kind == :borrowed
       # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —
       # the caller controls their lifetime. Only flag variables explicitly assigned
       # from a collection index borrow (BindExpr with container_borrow=true).

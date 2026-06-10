@@ -100,6 +100,65 @@ RSpec.describe "coverage gap tools" do
     end
   end
 
+  it "ignores Sorbet-generated branch artifacts in Ruby diff branch coverage" do
+    expect(ruby_synthetic_branch_line?("sig { returns(String) }")).to be(true)
+    expect(ruby_synthetic_branch_line?("sig do")).to be(true)
+    expect(ruby_synthetic_branch_line?("def helper(value)")).to be(true)
+    expect(ruby_synthetic_branch_line?("T.bind(self, SemanticAnnotator)")).to be(true)
+    expect(ruby_synthetic_branch_line?("T.let(nil, T.nilable(Symbol))")).to be(true)
+    expect(ruby_synthetic_branch_line?("@source_code = T.let(@source_code, T.untyped)")).to be(true)
+    expect(ruby_synthetic_branch_line?("value = T.cast(raw, String)")).to be(true)
+    expect(ruby_synthetic_branch_line?("return value if present")).to be(false)
+  end
+
+  it "does not turn non-executable SimpleCov lines into misses when subprocesses report zero" do
+    source_path = File.join(@tmp, "ruby_merge_probe.rb")
+    File.write(source_path, <<~RUBY)
+      sig do
+        params(value: String)
+      end
+      covered_call
+    RUBY
+    rel_path = Pathname.new(source_path).relative_path_from(Pathname.new(ROOT)).to_s
+    coverage_path = File.join(@tmp, "ruby-merge-resultset.json")
+    File.write(coverage_path, JSON.generate(
+      "rspec" => {
+        "coverage" => {
+          File.join(ROOT, rel_path) => {
+            "lines" => [nil, nil, nil, 1],
+            "branches" => {
+              "[:if, 0, 2, 0, 4, 12]" => {
+                "[:then, 1, 2, 0, 2, 24]" => 0,
+                "[:else, 2, 4, 0, 4, 14]" => 1,
+              },
+            },
+          },
+        },
+      },
+      "subprocess" => {
+        "coverage" => {
+          File.join(ROOT, rel_path) => {
+            "lines" => [0, 0, 0, 0],
+            "branches" => {
+              "[:if, 0, 2, 0, 4, 12]" => {
+                "[:then, 1, 2, 0, 2, 24]" => 0,
+                "[:else, 2, 4, 0, 4, 14]" => 0,
+              },
+            },
+          },
+        },
+      },
+    ))
+    old_paths = ENV["RUBY_COVERAGE_PATHS"]
+    ENV["RUBY_COVERAGE_PATHS"] = coverage_path
+
+    begin
+      expect(ruby_added_coverage({ rel_path => Set[1, 2, 3, 4] }, [rel_path])).to eq(["100.0%", "100.0%"])
+    ensure
+      old_paths ? ENV["RUBY_COVERAGE_PATHS"] = old_paths : ENV.delete("RUBY_COVERAGE_PATHS")
+    end
+  end
+
   it "alerts when an added production Zig atomic site lacks merged coverage evidence" do
     FileUtils.mkdir_p(File.join(@tmp, "zig/runtime"))
     source_path = File.join(@tmp, "zig/runtime/prod.zig")

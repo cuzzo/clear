@@ -21,6 +21,7 @@ module EscapeAnalysis
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
   HoistBindings = T.type_alias { T::Hash[String, T::Array[AST::VarDecl]] }
+  CallSitesByCallee = T.type_alias { T::Hash[String, T::Array[Semantic::CallSiteFact]] }
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
@@ -280,11 +281,13 @@ module EscapeAnalysis
   def self.propagate_caller_sync!(fn_nodes, body_summaries)
     return if fn_nodes.empty?
 
-    # Index annotated callsites: callee_name => [{ args: }, ...].
-    callsites = Hash.new { |h, k| h[k] = [] }
+    # Index annotated call sites by callee name. These facts are collected once
+    # during body analysis and keyed by stable CallSiteId.
+    callsites = T.let(Hash.new { |h, k| h[k] = [] }, CallSitesByCallee)
     body_summaries.each_value do |summary|
-      summary.func_calls.each do |call|
-        callsites[call.name.to_s] << { args: call.args }
+      summary.call_site_facts.each do |call_site|
+        next if call_site.fn_var_call
+        T.must(callsites[call_site.callee_name]) << call_site
       end
     end
 
@@ -293,7 +296,7 @@ module EscapeAnalysis
       changed = T.let(false, T::Boolean)
       fn_nodes.each do |callee_name, callee_fn|
         next unless callee_fn&.params
-        sites = callsites[callee_name]
+        sites = T.must(callsites[callee_name])
         next if sites.empty?
 
         callee_fn.params.each_with_index do |param, idx|
@@ -341,12 +344,15 @@ module EscapeAnalysis
 
   # Most-general unifier: returns the single non-nil value when every
   # callsite's arg projects to the same value, else nil.
-  sig { params(sites: T::Array[T::Hash[T.untyped, T.untyped]], idx: Integer, project: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(sites: T::Array[Semantic::CallSiteFact], idx: Integer, project: T.proc.params(entry: SymbolEntry).returns(T.nilable(Symbol))).returns(T.nilable(Symbol)) }
   private_class_method def self.unify_caller_attr(sites, idx, &project)
     observed = sites.map do |site|
-      arg = site[:args][idx]
+      arg = site.args[idx]
       next nil unless arg && arg.respond_to?(:symbol)
-      project.call(arg.symbol)
+      symbol = T.unsafe(arg).symbol
+      next nil unless symbol.is_a?(SymbolEntry)
+
+      project.call(symbol)
     end
     return nil if observed.empty?
     unique = observed.uniq
@@ -892,11 +898,18 @@ module EscapeAnalysis
 
     walk_body(fn.body) do |node|
       escape_nodes << node if node.is_a?(AST::Locatable)
-      record_symbol_fact!(node, symbols)
       return_values << node.value if node.is_a?(AST::ReturnNode) && node.value
-      assignment_nodes << node if node.is_a?(AST::Assignment) || (node.is_a?(AST::BindExpr) && node.mode == :assign)
-      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
-      record_binding_fact!(node, symbols, binding_values)
+      assignment_nodes << node if node.is_a?(AST::Assignment)
+      case node
+      when AST::VarDecl
+        record_binding_fact!(node, symbols, binding_values)
+      when AST::BindExpr
+        if node.mode == :assign
+          assignment_nodes << node
+        else
+          record_binding_fact!(node, symbols, binding_values)
+        end
+      end
     end
     FunctionFacts.new(
       fn: fn,
@@ -908,10 +921,10 @@ module EscapeAnalysis
     )
   end
 
-  sig { params(node: T.untyped, symbols: T::Hash[String, SymbolEntry]).void }
+  sig { params(node: BindingNode, symbols: T::Hash[String, SymbolEntry]).void }
   private_class_method def self.record_symbol_fact!(node, symbols)
     sym = symbol_for_binding_node(node)
-    symbols[node.name.to_s] = sym if sym && node.respond_to?(:name)
+    symbols[node.name.to_s] = sym if sym
   end
 
   sig { params(node: BindingNode, symbols: T::Hash[String, SymbolEntry], binding_values: T::Hash[String, T::Array[AST::Locatable]]).void }
@@ -1179,10 +1192,9 @@ module EscapeAnalysis
     facts.return_values.any? { |value| expr_has_heap_identifier?(value) }
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(SymbolEntry)) }
+  sig { params(node: BindingNode).returns(T.nilable(SymbolEntry)) }
   private_class_method def self.symbol_for_binding_node(node)
-    return node.symbol if (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && node.respond_to?(:symbol)
-    nil
+    node.symbol
   end
 
   sig { params(sym: T.nilable(SymbolEntry), names: T.nilable(T::Set[String]), name: T.nilable(String)).returns(T::Boolean) }

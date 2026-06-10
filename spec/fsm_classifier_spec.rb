@@ -126,8 +126,8 @@ RSpec.describe "FSM classifier (Phase A)" do
       f = fn(ast, "twoReads")
       expect(f.fsm_eligible).to eq(true)
       pts = f.fsm_suspend_points
-      expect(pts.map { |p| p[:kind] }).to eq([:io, :io])
-      expect(pts.map { |p| p[:id] }).to eq([0, 1])
+      expect(pts.map(&:kind)).to eq([:io, :io])
+      expect(pts.map { |point| point.id.value }).to eq([0, 1])
     end
 
     it "enumerates NEXT as a suspend point" do
@@ -139,7 +139,7 @@ RSpec.describe "FSM classifier (Phase A)" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       f = fn(ast, "awaits")
-      kinds = f.fsm_suspend_points.map { |p| p[:kind] }
+      kinds = f.fsm_suspend_points.map(&:kind)
       expect(kinds).to include(:next)
     end
 
@@ -153,7 +153,7 @@ RSpec.describe "FSM classifier (Phase A)" do
         END
       CLEAR
       f = fn(ast, "main")
-      kinds = f.fsm_suspend_points.map { |p| p[:kind] }
+      kinds = f.fsm_suspend_points.map(&:kind)
       expect(kinds).to include(:lock)
     end
 

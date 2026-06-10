@@ -1474,8 +1474,8 @@ module AST
     attr_accessor :heap_carry_return_vars # Set of var names that are heap carry return vars (their cleanup is skipped inside __pr_body)
     # FSM Phase A: set by FsmClassifier. fsm_eligible=true means this function can be
     # compiled as an FsmTask (state-machine resume fn) rather than a stackful fiber.
-    # fsm_suspend_points is an Array of { id:, kind:, node: } enumerating the
-    # yield-relevant call sites inside the body.
+    # fsm_suspend_points is an Array of Semantic::SuspendPointFact enumerating
+    # the yield-relevant call sites inside the body.
     attr_accessor :fsm_eligible
     attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends
     attr_accessor :fsm_suspend_points

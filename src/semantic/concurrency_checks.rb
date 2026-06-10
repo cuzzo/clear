@@ -30,11 +30,12 @@ module ConcurrencyChecks
   module_function
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
-  ErrorHandler = T.type_alias { T.proc.params(arg0: T.untyped, arg1: T.untyped).returns(T.untyped) }
-  SigLookup = T.type_alias { T.proc.params(arg0: String).returns(T.untyped) }
+  ErrorHandler = T.type_alias { T.proc.params(node: AST::Locatable, message: String).void }
+  SigLookup = T.type_alias { T.proc.params(name: String).returns(T.nilable(T.any(FunctionSignature, Type))) }
   LockRanks = T.type_alias { T::Hash[Symbol, Integer] }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
   WithScopeNodes = T.type_alias { Annotator::Phases::WithScopeNodes }
+  WithScopeBlock = T.type_alias { T.proc.params(with_block: AST::WithBlock, scope: T::Array[AST::Locatable]).void }
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
@@ -155,7 +156,7 @@ module ConcurrencyChecks
 
   # For each WITH on parameter `p`, any call inside whose callee has REQUIRES
   # naming a parameter aliasing `p` reacquires `p`'s lock.
-  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, sig_lookup: SigLookup, error_handler: ErrorHandler).returns(T.untyped) }
+  sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, sig_lookup: SigLookup, error_handler: ErrorHandler).void }
   def check_reentrant!(fn, with_blocks, with_scope_nodes, sig_lookup, error_handler)
     each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
       held_params = collect_held_params(with_block, fn)
@@ -188,7 +189,7 @@ module ConcurrencyChecks
   # ── Internal helpers ────────────────────────────────────────────────────
 
   # Yield each known WithBlock along with the annotated in-scope nodes.
-  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, blk: T.untyped).returns(T.untyped) }
+  sig { params(with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, blk: WithScopeBlock).void }
   def each_with_scope(with_blocks, with_scope_nodes, &blk)
     with_blocks.each do |node|
       yield(node, with_scope_nodes.fetch(node.object_id))

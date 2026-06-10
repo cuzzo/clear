@@ -20,6 +20,13 @@ require "sorbet-runtime"
 module FixableHelper
     extend T::Sig
 
+  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+
+  class CapabilityFixCandidate < T::Struct
+    const :sigil, String
+    const :description, String
+  end
+
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
   sig { params(reg: T.nilable(AST::VarDecl), name: String).returns(T.nilable(T::Array[String])) }
@@ -1201,7 +1208,7 @@ module FixableHelper
   #  - the binding has no scope-local decl (param / field / global)
   #  - the decl line has no `;` (multi-line value expression)
   #  - the sigil is already present (idempotency — would be a no-op)
-  sig { params(name: T.untyped, sigil: T.untyped, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
+  sig { params(name: String, sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
   def build_decl_cap_insert_fix(name, sigil, description: nil, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.nilable(String))
@@ -1229,10 +1236,10 @@ module FixableHelper
 
   # Shared helper — replace an existing sigil on the declaration line.
   # Returns nil when the old sigil isn't found on the line.
-  sig { params(name: T.untyped, old_sigil: T.untyped, new_sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
+  sig { params(name: String, old_sigil: String, new_sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
   def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description: nil, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
-    @source_code = T.let(@source_code, T.untyped)
+    @source_code = T.let(@source_code, T.nilable(String))
     scope = lookup_scope_for(name)
     decl = scope&.resolve_entry(name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
@@ -1252,15 +1259,15 @@ module FixableHelper
   end
 
   # Shared emit for the WITH-CAP-NEEDS-X family. `candidates` is an
-  # ordered list of `{sigil:, description:}` hashes; one Fix is
+  # ordered list of typed fix candidates; one Fix is
   # generated per candidate via `build_decl_cap_insert_fix`. Falls
   # back to plain `error!` (registry-formatted) when no candidate
   # is locatable (e.g. WITH target is a GetField / param).
-  sig { params(node: AST::WithBlock, name: T.untyped, code: Symbol, candidates: T::Array[T.untyped], confidence: Symbol, kw: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, name: String, code: Symbol, candidates: T::Array[CapabilityFixCandidate], confidence: Symbol, kw: DiagnosticKwValue).returns(T.noreturn) }
   def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
     T.bind(self, SemanticAnnotator) rescue nil
     fixes = candidates.filter_map do |c|
-      build_decl_cap_insert_fix(name, c[:sigil], description: c[:description], confidence: confidence)
+      build_decl_cap_insert_fix(name, c.sigil, description: c.description, confidence: confidence)
     end
     return error!(node, code, **kw) if fixes.empty?
     fixable!(node,

@@ -55,6 +55,41 @@ RSpec.describe "P1.4 caller-sync propagation" do
     expect(bump_param[:symbol].sync).to eq(:locked)
   end
 
+  it "uses typed call-site facts for caller sync" do
+    src = <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN bumpIt(c: Counter) ->
+        x = c.value;
+      END
+
+      FN main() ->
+        c = Counter{ value: 0 } @shared:locked;
+        bumpIt(c);
+      END
+    CHT
+
+    ast, annotator = annotate(src)
+    fn_nodes = fn_nodes_from(ast)
+    summaries = body_summaries_from(annotator).dup
+    main_summary = summaries.fetch("main")
+    summaries["main"] = Annotator::Phases::FunctionBodySummary.new(
+      name: "main",
+      definition_id: main_summary.definition_id,
+      body_id: main_summary.body_id,
+      callees: main_summary.callees,
+      propagating_callees: main_summary.propagating_callees,
+      has_fnptr_call: main_summary.has_fnptr_call,
+      raises_directly: main_summary.raises_directly,
+      call_site_facts: main_summary.call_site_facts
+    )
+
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes, summaries)
+
+    bump_param = fn_nodes["bumpIt"].params.first
+    expect(bump_param[:symbol].sync).to eq(:locked)
+  end
+
   it "leaves entry.sync nil when callers disagree" do
     src = <<~CHT
       STRUCT Counter { value: Int64 }

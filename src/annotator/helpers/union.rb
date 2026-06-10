@@ -126,8 +126,7 @@ module UnionAnalysis
         )
       end
       var_data = schema.variants[node.field]
-      @match_pattern_context = T.let(@match_pattern_context, T.untyped)
-      if Schemas.inline_struct?(var_data) && !@match_pattern_context
+      if Schemas.inline_struct?(var_data) && !inside_match_pattern_context?
         error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
       stamp_type!(node.target, type_name)

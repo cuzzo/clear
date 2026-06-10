@@ -1761,6 +1761,19 @@ RSpec.describe MIRChecker do
       )
     end
 
+    def fsm_destroy_stmt(name, source_kind: :body, target: "__ctx_0")
+      MIR::FsmDestroyStmt.new(
+        source_kind: source_kind,
+        name: name,
+        stmt: MIR::RcRelease.new(
+          MIR::FieldGet.new(MIR::Ident.new(target), name),
+          "Payload",
+          "arcRelease",
+          MIR::Ident.new("allocator"),
+        ),
+      )
+    end
+
     def fsm_capture_fact(name, cleanup_at: :finalize)
       MIR::FsmCaptureFact.new(name: name, cleanup_at: cleanup_at)
     end
@@ -1878,6 +1891,60 @@ RSpec.describe MIRChecker do
       expect {
         MIRChecker.check_fsm_structure!(structure)
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-FINALIZE-LIST/)
+    end
+
+    it "rejects destroy statement actions with unknown sources" do
+      structure = MIR::FsmStructure.new([], [], [], ["tmp"], 0, nil)
+      structure.destroy_actions = [fsm_destroy_stmt("tmp", source_kind: :mystery)]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-SOURCE/)
+    end
+
+    it "rejects destroy statement actions targeting the wrong ctx field" do
+      structure = MIR::FsmStructure.new([], [], [], ["tmp"], 0, nil)
+      structure.destroy_actions = [fsm_destroy_stmt("tmp", target: "__ctx_1")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-TARGET/)
+    end
+
+    it "rejects destroy statement actions absent from finalize_cleanups" do
+      structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
+      structure.destroy_actions = [fsm_destroy_stmt("tmp")]
+
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-FINALIZE-LIST/)
+    end
+
+    it "returns no ctx target name for non-structural destroy statements" do
+      non_release = MIR::FsmDestroyStmt.new(
+        source_kind: :body,
+        name: "tmp",
+        stmt: MIR::Comment.new("not a release"),
+      )
+      release_without_field = MIR::FsmDestroyStmt.new(
+        source_kind: :body,
+        name: "tmp",
+        stmt: MIR::RcRelease.new(MIR::Ident.new("tmp"), "Payload", "arcRelease", MIR::Ident.new("allocator")),
+      )
+      release_without_ctx_ident = MIR::FsmDestroyStmt.new(
+        source_kind: :body,
+        name: "tmp",
+        stmt: MIR::RcRelease.new(
+          MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_0"), "inner"), "tmp"),
+          "Payload",
+          "arcRelease",
+          MIR::Ident.new("allocator"),
+        ),
+      )
+
+      expect(non_release.ctx_cleanup_target_name).to be_nil
+      expect(release_without_field.ctx_cleanup_target_name).to be_nil
+      expect(release_without_ctx_ident.ctx_cleanup_target_name).to be_nil
     end
 
     it "rejects destroy cleanup actions with no-cleanup entries" do

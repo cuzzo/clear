@@ -1800,7 +1800,38 @@ module MIR
     def ctx_cleanup_target_name = nil
   end
 
-  FsmDestroyAction = T.type_alias { T.any(FsmDestroyCleanup, FsmDestroyLockRelease) }
+  class FsmDestroyStmt < T::Struct
+    extend T::Sig
+
+    const :source_kind, Symbol
+    const :name, String
+    const :stmt, Emittable
+
+    sig { returns(Integer) }
+    def destroy_order_bucket = FsmDestroyCleanup::SOURCE_DESTROY_ORDER.fetch(source_kind, 2)
+
+    sig { params(index: Integer).returns(Integer) }
+    def destroy_order_index(index) = index
+
+    sig { returns(T.nilable(String)) }
+    def cleanup_name = name
+
+    sig { returns(T.nilable(String)) }
+    def ctx_cleanup_target_name
+      current_stmt = stmt
+      return nil unless current_stmt.is_a?(MIR::RcRelease)
+
+      source = current_stmt.source
+      return nil unless source.is_a?(FieldGet)
+
+      object = source.object
+      return nil unless object.is_a?(Ident)
+
+      "#{object.name}.#{source.field}"
+    end
+  end
+
+  FsmDestroyAction = T.type_alias { T.any(FsmDestroyCleanup, FsmDestroyStmt, FsmDestroyLockRelease) }
 
   FsmStructure = Struct.new(
     :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
@@ -2898,7 +2929,7 @@ module MIR
   SharePromote = Struct.new(:source, :zig_base, :alloc) do
     extend T::Sig
     include Expr
-    sig { params(source: T.untyped, zig_base: String, alloc: Symbol).void }
+    sig { params(source: Emittable, zig_base: String, alloc: Symbol).void }
     def initialize(source, zig_base, alloc)
       super(source, zig_base, alloc)
     end
@@ -2981,7 +3012,7 @@ module MIR
   MakeList = Struct.new(:elem_type, :items, :alloc) do
     extend T::Sig
     include Expr
-    sig { params(elem_type: String, items: T::Array[T.untyped], alloc: Symbol).void }
+    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol).void }
     def initialize(elem_type, items, alloc)
       super(elem_type, items, alloc)
     end

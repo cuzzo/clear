@@ -147,7 +147,44 @@ module CapabilityPlan
 
     sig { returns(T::Boolean) }
     def deferred_lock_param?
-      source_entry&.is_param == true && sync.nil? && lock_capability?
+      deferred_sync_param? && lock_capability?
+    end
+
+    sig { returns(T::Boolean) }
+    def deferred_sync_param?
+      parameter_target? && sync.nil? && !declared_sync_contract?
+    end
+
+    sig { returns(T::Boolean) }
+    def parameter_target?
+      source_entry&.is_param == true
+    end
+
+    sig { returns(T::Boolean) }
+    def declared_sync_contract?
+      entry = source_entry
+      return false unless entry
+
+      entry.declared_sync_contract?
+    end
+
+    sig { returns(T::Boolean) }
+    def exclusive_sync?
+      SymbolEntry.locked_family_sync?(sync)
+    end
+
+    sig { returns(T::Boolean) }
+    def write_locked_sync?
+      SymbolEntry.write_locked_sync?(sync)
+    end
+
+    sig { returns(Symbol) }
+    def exclusive_validation_action
+      return :valid if exclusive_sync?
+      return :declared_contract if parameter_target? && declared_sync_contract?
+      return :defer if deferred_sync_param?
+
+      :mismatch
     end
 
     sig { returns(T::Boolean) }
