@@ -2109,14 +2109,14 @@ module DiagnosticRegistry
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "A consuming MIR operation has no explicit ownership contract.",
-      cause: "The stdlib registry declares a TAKES/consuming parameter, but the lowered structural MIR node did not name the concrete binding being consumed in ownership_contract.consumes. MIRChecker cannot prove whether that binding is cleaned, transferred, double-freed, or leaked.",
-      fix_hint: "Lowering bug — carry the consumed binding names from the annotated TAKES/GIVE site into ownership_contract.consumes, and emit matching MIR::TransferMark nodes. If the call deep-copies instead of consumes, do not mark the source moved.",
+      cause: "The stdlib registry declares a TAKES/consuming parameter, but the lowered structural MIR node did not carry a typed ownership operand fact for the concrete binding being consumed. MIRChecker cannot prove whether that binding is cleaned, transferred, double-freed, or leaked.",
+      fix_hint: "Lowering bug — carry typed MIR::OwnershipOperandFact entries from the annotated TAKES/GIVE site into the ownership contract, and emit matching MIR::TransferMark nodes. If the call deep-copies instead of consumes, do not mark the source moved.",
     },
     OWNERSHIP_CONTRACT_WITHOUT_TRANSFER: {
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "An ownership contract consumes a binding with no TransferMark.",
-      cause: "ownership_contract.consumes says a binding leaves the current scope, but MIR has no TransferMark for that binding. The checker cannot distinguish an intended transfer from a missing cleanup.",
+      cause: "The ownership contract's typed owned operand facts say a binding leaves the current scope, but MIR has no TransferMark for that binding. The checker cannot distinguish an intended transfer from a missing cleanup.",
       fix_hint: "Lowering bug — emit MIR::TransferMark at the consuming boundary, or keep the binding's normal Cleanup if ownership does not actually transfer.",
     },
     OWNERSHIP_TRANSFER_COPIED: {

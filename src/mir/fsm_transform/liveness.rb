@@ -15,17 +15,27 @@
 #
 # Returns a struct with:
 #
-#   cross_segment_vars: { name => { type:, first_def_seg:,
-#                                   last_use_seg: } }
+#   cross_segment_vars: { name => CrossSegmentVarFact(type_info:,
+#                                                      first_def_seg:,
+#                                                      last_use_seg:) }
 #
 # The lowering uses this to (a) emit ctx struct field decls, and
 # (b) rewrite step-local Lets to ctx-field Sets in the segment
 # whose body would otherwise declare them locally.
 
 require "sorbet-runtime"
+require_relative "../../ast/type"
 
 module FsmTransform
   module Liveness
+    class CrossSegmentVarFact < T::Struct
+      extend T::Sig
+
+      const :type_info, T.nilable(Type)
+      const :first_def_seg, Integer
+      const :last_use_seg, Integer
+    end
+
     Result = Struct.new(:cross_segment_vars) do
       extend T::Sig
     end
@@ -105,11 +115,11 @@ module FsmTransform
           # "used again next iteration" -> cross-iteration.
           next unless cyclic_segs.include?(def_seg)
         end
-        cross[name] = {
-          type: first_def[:"#{name}__type"],
+        cross[name] = CrossSegmentVarFact.new(
+          type_info: first_def[:"#{name}__type"],
           first_def_seg: def_seg,
           last_use_seg: use_seg,
-        }
+        )
       end
 
       Result.new(cross)
@@ -215,15 +225,22 @@ module FsmTransform
       end
     end
 
-    sig { params(stmt: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    sig { params(stmt: T.untyped).returns(T.nilable(Type)) }
     def stmt_decl_type(stmt)
-      candidates = []
+      candidates = T.let([], T::Array[T.untyped])
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << stmt.type                if stmt.respond_to?(:type)
       candidates << stmt.declared_type       if stmt.respond_to?(:declared_type)
       value = stmt.value
       candidates << value.full_type!(context: "FSM liveness declaration value") if value
-      candidates.compact.first
+      normalize_decl_type(candidates.compact.first)
+    end
+
+    sig { params(value: T.untyped).returns(T.nilable(Type)) }
+    def normalize_decl_type(value)
+      return nil if value.nil?
+
+      Type.new(value)
     end
 
     # Collect identifier reads anywhere in stmt's expressions.

@@ -182,6 +182,26 @@ RSpec.describe Scope do
     expect(Scope.live_param_syms(fn)).to eq({ "argc" => argc })
   end
 
+  it "keeps live parameter symbols canonical after branch-local materialization" do
+    fn = AST::FunctionDef.new(tok("main"), "main", [
+      AST::Param.new(name: "arg", type: Type.new(:String)),
+    ], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
+    root = Scope.new
+    canonical = root.declare("arg", nil, Type.new(:String), false)
+    fn.params.first.symbol = canonical
+
+    branch = root.dup
+    branch_entry = branch.entry_for_write!("arg")
+    branch_entry.mark_read!
+    canonical.sync = :locked
+
+    live = Scope.live_param_syms(fn)
+    expect(live.fetch("arg")).to equal(canonical)
+    expect(live.fetch("arg")).not_to equal(branch_entry)
+    expect(live.fetch("arg").sync).to eq(:locked)
+    expect(branch_entry.read).to eq(true)
+  end
+
   it "answers type and mutability queries through composed bindings" do
     scope = Scope.new
     locked = scope.declare("locked", nil, Type.new(:Counter), true, false, nil, :heap, Set[:RESTRICT], sync: :locked)

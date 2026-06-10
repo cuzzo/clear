@@ -174,7 +174,7 @@ module MIRLoweringLiterals
       # Empty list: MIR expression depends on collection type
       if plan.list_collection?
         inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
-        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :list_empty, list_alloc, nil)
+        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :array_list_empty, list_alloc, nil)
         return wrap_list_literal_capability(inner, ti, list_alloc)
       end
       # Dynamic empty list: use makeList with empty items

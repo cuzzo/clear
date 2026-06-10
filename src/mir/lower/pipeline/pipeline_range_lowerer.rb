@@ -930,7 +930,7 @@ class PipelineRangeLowerer
     obs_target = without_pointer_prefix(@host.range_transpile_type(smooth_node.full_type!))
     acc_alloc = observable_alloc_expr(obs_target, "newWith", [
       MIR::AllocatorRef.new(:heap),
-      MIR::Call.new("CheatLib.obs.AtomicReduce(#{inner_zig}).init", [init_mir], false, false, MIR::CallableContract.no_ownership(1)),
+      MIR::RuntimeCall.new(MIR::RuntimeCalls.atomic_reduce_init_spec(inner_zig), [init_mir]),
     ])
 
     lower_range_fold_observable(p, smooth_node, label, source_node,

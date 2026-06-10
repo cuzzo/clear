@@ -702,7 +702,7 @@ RSpec.describe "pipeline backend coverage" do
 
       nodes = [
         MIR::DeepCopy.new(MIR::Ident.new("x"), "Payload", nil, :full_value, :heap),
-        MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil),
+        MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil),
         MIR::StructInit.new("Box", []),
         MIR::TypeSentinel.new(:max, "i64"),
         MIR::Undef.new("i64"),
@@ -1018,7 +1018,7 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     def batch_init_timeout(block)
-      init_call = collect_mir_nodes(block, MIR::Call).find { |call| call.callee.include?("BatchWindow") }
+      init_call = collect_mir_nodes(block, MIR::RuntimeCall).find { |call| call.spec.callee.include?("BatchWindow") }
       init_call&.args&.[](2)&.value
     end
 
@@ -1967,7 +1967,7 @@ RSpec.describe "pipeline backend coverage" do
       join_block = lowerer.lower(where_site, join)
       expect(collect_mir_nodes(join_block, MIR::ErrCleanup)).not_to be_empty
       expect(collect_mir_nodes(join_block, MIR::TransferMark).map(&:name)).to include("__jl_owned", "__match")
-      expect(collect_mir_nodes(join_block, MIR::Call).map(&:callee)).to include("CheatLib.eql")
+      expect(collect_mir_nodes(join_block, MIR::RuntimeCall).map { |call| call.spec.callee }).to include("CheatLib.eql")
     end
 
     it "builds typed lazy range prefixes for finite stage chains" do
@@ -2229,7 +2229,7 @@ RSpec.describe "pipeline backend coverage" do
     it "keeps default stream capacity worker count structural until emission" do
       conc = AST::ConcurrentOp.new(tok, nil, {})
       lowerer = pipeline_host.instance_variable_get(:@concurrent_lowerer)
-      worker_count = MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
+      worker_count = MIR::RuntimeCall.new(MIR::RuntimeCalls.thread_count_spec, [])
 
       capacity_mir = lowerer.send(:stream_concurrent_capacity_mir, conc, worker_count)
 
@@ -2337,7 +2337,7 @@ RSpec.describe "pipeline backend coverage" do
       owned_distinct_nodes = []
       MIR.each_node(owned_distinct_result) { |node| owned_distinct_nodes << node }
       owned_submit = owned_distinct_nodes.find { |node| node.is_a?(MIR::MethodCall) && node.method == "submit" }
-      expect(T.must(owned_submit).callable_contract.ownership_contract.consumes).to eq(["__name"])
+      expect(T.must(owned_submit).callable_contract.ownership_contract.owned_operand_names).to eq(["__name"])
 
       bounded_distinct_smooth = typed(AST::BinaryOp.new(tok, source, :SMOOTH, distinct),
         Type.new(:"~Int64[4]", collection: :set, observable: true, observable_terminal: :distinct))

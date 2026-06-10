@@ -186,10 +186,8 @@ module FsmTransform
     # register defers before any potentially-erroring bind block.
     #
     # `suppress_runtime_ref` asks the wrapper to emit `_ = &<bg_rt>;`
-    # top of runStepK when the rendered body doesn't reference
-    # bg_rt (avoiding the unused-binding diagnostic). The caller
-    # computes this from the rendered body text -- the unified
-    # emit can't reliably introspect MIR nodes for the check.
+    # top of runStepK when structural MIR facts show the segment does
+    # not reference bg_rt (avoiding the unused-binding diagnostic).
     #
     # `err_cleanups` are direct (non-defer) stmts injected into
     # the dispatch arm's catch handler before the standard
@@ -457,9 +455,9 @@ module FsmTransform
       items.map(&:emit_value)
     end
 
-    sig { params(items: T::Array[FsmBodyItem]).returns(String) }
-    def fsm_body_joined_text(items)
-      fsm_body_emit_values(items).join("\n")
+    sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
+    def mir_nodes_reference_ident?(nodes, name)
+      MIR.nodes(nodes).grep(MIR::Ident).any? { |ident| ident.name.to_s == name }
     end
 
     sig { params(ctx_id: Integer, lock_index: Integer, lock_ref: String, unlock_method: String).returns(T::Array[MIR::Node]) }
@@ -726,8 +724,8 @@ module FsmTransform
               conservative_names.include?(name)
           }
           .map do |name, info|
-            t = info[:type] ? Type.new(info[:type]) : nil
-            ctx_field_decl(name.to_s, t ? t.zig_type : "anyopaque", MIR::Undef.new(nil))
+            type_info = info.type_info
+            ctx_field_decl(name.to_s, type_info ? type_info.zig_type : "anyopaque", MIR::Undef.new(nil))
           end
       promoted_guard_decls = fsm_promoted_names.map { |name| ctx_field_decl("#{name}_moved", "bool", MIR::Lit.new("false")) }
       promoted_field_decls = promoted_value_decls + promoted_guard_decls
@@ -942,9 +940,11 @@ module FsmTransform
         end
 
         prologue_stmts = prologue || []
-        rt_used = (fsm_body_joined_text(body_stmts) +
-                   fsm_body_joined_text(prologue_stmts) +
-                   (descriptor && descriptor.setup_stmts || []).join("\n")).include?(bg_rt)
+        rt_roots = T.let([], T::Array[MIR::Node])
+        rt_roots.concat(fsm_body_mir_nodes(body_stmts))
+        rt_roots.concat(fsm_body_mir_nodes(prologue_stmts))
+        rt_roots.concat(descriptor&.setup_stmts || [])
+        rt_used = mir_nodes_reference_ident?(rt_roots, bg_rt)
         suppress_runtime_ref = !rt_used
 
         FsmSegmentSpec.new(
@@ -1324,7 +1324,8 @@ module FsmTransform
       # releases LIFO of acquisition.
       fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
         name: meta[:lock_field_ref].to_s,
-        guard_field: "__lock_held_#{cap_idx}",
+        ctx_id: id,
+        guard_index: cap_idx,
         lock_ref: MIR::Ident.new(meta[:lock_field_ref].to_s),
         unlock_method: meta[:unlock_method].to_s,
       )

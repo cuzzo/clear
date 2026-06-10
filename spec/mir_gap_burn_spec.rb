@@ -702,10 +702,12 @@ RSpec.describe "MIR gap-burn characterization" do
     if_slots.last.replace([])
     expect(if_chain.default_body).to eq([])
 
-    contract = MIR::OwnershipContract.consumes(["owned"])
+    contract = MIR::OwnershipContract.consume_operands([
+      MIR::OwnershipOperandFact.owned_binding("owned", Type.new(:String), "coverage", :heap),
+    ])
     raw = registry_call("coverage", FunctionSignature.borrowing_intrinsic, ownership_contract: contract)
     expect(raw.explicit_ownership_contract).to eq(contract)
-    expect(raw.ownership_contract.consumes).to eq(["owned"])
+    expect(raw.ownership_contract.owned_operand_names).to eq(["owned"])
 
     stream = MIR::StreamSpawn.new({}, [])
     expect(stream.boundary_fact).to be_nil
@@ -785,7 +787,11 @@ RSpec.describe "MIR gap-burn characterization" do
     collection = id("source", type: :Any)
     each_stmt = AST::ForEach.new(tok, "item", collection, [], nil, false)
 
-    expect(FsmTransform.foreach_local_entry(each_stmt)).to eq({ name: "item", zig_type: "anyopaque" })
+    fact = FsmTransform.foreach_local_entry(each_stmt)
+    expect(fact).to be_a(FsmTransform::PromotedLocalFact)
+    expect(T.must(fact).name).to eq("item")
+    expect(T.must(fact).type_zig).to eq("anyopaque")
+    expect(T.must(fact).is_suspend_result).to eq(false)
   end
 
   it "uses typed intrinsic contracts for loop frame and receiver escape facts" do
@@ -1563,7 +1569,9 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.lower(AST::ThrowNode.new(tok, nil))).to be_a(MIR::ReturnStmt)
     expect(low.lower(AST::DieNode.new(tok, 2))).to be_a(MIR::ExprStmt)
     expect(low.lower(AST::ShareNode.new(tok, id("shared", storage: :heap)))).to be_a(MIR::CapWrap)
-    expect(low.lower(AST::FreezeNode.new(tok, id("frozen", type: :String, storage: :heap)))).to be_a(MIR::FreezeExpr)
+    freeze = low.lower(AST::FreezeNode.new(tok, id("frozen", type: :String, storage: :heap)))
+    expect(freeze).to be_a(MIR::FreezeExpr)
+    expect(freeze.alloc).to eq(:heap)
     expect(low.lower(AST::Slice.new(tok, id("items", type: :"Int64[]"), lit(0, type: :Int64), lit(1, type: :Int64)))).to be_a(MIR::SliceExpr)
     expect(low.lower(AST::OrRaise.new(tok))).to be_a(MIR::FieldGet)
     expect(low.lower(AST::OrBreak.new(tok))).to be_a(MIR::BreakStmt)

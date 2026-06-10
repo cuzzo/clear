@@ -2141,7 +2141,7 @@ module MIRLoweringExpressions
     inner = lower(node.value)
     # Dereference Rc data pointer to get *const T for freeze()
     rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
-    MIR::FreezeExpr.new(rc_data, zig_base)
+    MIR::FreezeExpr.new(rc_data, zig_base, MIR::AllocatorRef.new(:heap))
   end
 
   sig { params(ti: Type).returns(String) }

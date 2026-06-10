@@ -78,19 +78,14 @@ module MIR
 
     sig do
       params(
-        consumes: T::Array[String],
         operands: T::Array[MIR::OwnershipOperandFact],
         produces: T::Array[String],
         borrows: T::Array[String],
         covers_consuming_params: T::Boolean,
       ).void
     end
-    def initialize(consumes: [], operands: [], produces: [], borrows: [], covers_consuming_params: false)
-      normalized_operands = operands.dup
-      consumes.map(&:to_s).reject(&:empty?).uniq.each do |name|
-        normalized_operands << OwnershipOperandFact.owned_binding(name, Type.new(:Any), "legacy ownership contract")
-      end
-      @operands = T.let(normalized_operands.freeze, T::Array[MIR::OwnershipOperandFact])
+    def initialize(operands: [], produces: [], borrows: [], covers_consuming_params: false)
+      @operands = T.let(operands.dup.freeze, T::Array[MIR::OwnershipOperandFact])
       @produces = T.let(normalize_names(produces).freeze, T::Array[String])
       @borrows = T.let(normalize_names(borrows).freeze, T::Array[String])
       @covers_consuming_params = T.let(covers_consuming_params, T::Boolean)
@@ -101,18 +96,13 @@ module MIR
       new
     end
 
-    sig { params(consumes: T::Array[String]).returns(OwnershipContract) }
-    def self.consumes(consumes)
-      new(consumes: consumes, covers_consuming_params: true)
-    end
-
     sig { params(operands: T::Array[MIR::OwnershipOperandFact]).returns(OwnershipContract) }
     def self.consume_operands(operands)
       new(operands: operands, covers_consuming_params: true)
     end
 
     sig { returns(T::Array[String]) }
-    def consumes
+    def owned_operand_names
       @operands.reject(&:borrowed).filter_map(&:name).map(&:to_s).reject(&:empty?).uniq.freeze
     end
 
@@ -1783,9 +1773,13 @@ module MIR
     extend T::Sig
 
     const :name, String
-    const :guard_field, String
+    const :ctx_id, Integer
+    const :guard_index, Integer
     const :lock_ref, Emittable
     const :unlock_method, String
+
+    sig { returns(String) }
+    def guard_field = "__lock_held_#{guard_index}"
 
     sig { returns(Integer) }
     def destroy_order_bucket = 0
@@ -2842,13 +2836,36 @@ module MIR
   #                    dupeValue dispatch to the right deep-copy.)
   #   :passthrough  -> source (no copy needed, value type)
   # alloc: Symbol (:heap, :frame) resolved via rt; nil only for :passthrough.
+  DEEP_COPY_SHAPE_BY_PREFIX = T.let({
+    "" => :inferred,
+    "*" => :pointer,
+    "[]" => :slice
+  }.freeze, T::Hash[String, Symbol])
+
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
-                        :alloc) do
+                        :alloc, :copy_shape) do
     extend T::Sig
     include Expr
-    sig { params(source: T.untyped, zig_type: T.nilable(String), elem_type: T.nilable(String), strategy: Symbol, alloc: T.nilable(Symbol)).void }
-    def initialize(source, zig_type, elem_type, strategy, alloc)
-      super(source, zig_type, elem_type, strategy, alloc)
+    sig do
+      params(
+        source: T.untyped,
+        zig_type: T.nilable(String),
+        elem_type: T.nilable(String),
+        strategy: Symbol,
+        alloc: T.nilable(Symbol),
+        copy_shape: Symbol
+      ).void
+    end
+    def initialize(source, zig_type, elem_type, strategy, alloc, copy_shape = self.class.copy_shape_for_zig_type(zig_type))
+      super(source, zig_type, elem_type, strategy, alloc, copy_shape)
+    end
+
+    sig { params(zig_type: T.nilable(String)).returns(Symbol) }
+    def self.copy_shape_for_zig_type(zig_type)
+      text = zig_type.to_s
+      DEEP_COPY_SHAPE_BY_PREFIX.fetch(T.must(text[0, 2])) do
+        DEEP_COPY_SHAPE_BY_PREFIX.fetch(T.must(text[0, 1]), :value)
+      end
     end
 
     sig { returns(T::Array[Emittable]) }
@@ -2866,6 +2883,7 @@ module MIR
   # Strategy determines the Zig pattern:
   #   :pool           -> try T.initCapacity(alloc, cap)
   #   :list_capacity  -> try T.initCapacity(alloc, cap)
+  #   :array_list_empty -> @as(T, .empty)
   #   :list_empty     -> T{}
   #   :set_empty      -> T{}
   #   :map_bare       -> T{ .alloc = alloc }
@@ -2985,20 +3003,35 @@ module MIR
     end
   end
 
+  # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
+  # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
+  # these at call sites. kind: :heap | :frame | :cleanup.
+  AllocatorRef = Struct.new(:kind) do
+    include Expr
+  end
+
   # Compact an @multiowned tree into a single contiguous buffer.
   # Zig: try CheatLib.freeze(T, alloc, inner_ptr)
   # inner: MIR expr for the Rc data pointer (*const T)
   # zig_base: Zig type name for T
-  FreezeExpr = Struct.new(:inner, :zig_base) do
+  # alloc_ref: typed allocator operand -- resolved to Zig by emitter.
+  FreezeExpr = Struct.new(:inner, :zig_base, :alloc_ref) do
     extend T::Sig
     include Expr
+    sig { params(inner: Emittable, zig_base: String, alloc_ref: AllocatorRef).void }
+    def initialize(inner, zig_base, alloc_ref = AllocatorRef.new(:heap))
+      super(inner, zig_base, alloc_ref)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
     sig { returns(T::Array[Emittable]) }
     def ownership_source_exprs = child_exprs
+    sig { returns(Symbol) }
+    def alloc = alloc_ref.kind
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :frozen)
+      owned_effect_for_alloc(alloc, cleanup_kind: :frozen)
     end
   end
 
@@ -3485,6 +3518,94 @@ module MIR
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
       OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+    end
+  end
+
+  class RuntimeCallSpec < T::Struct
+    extend T::Sig
+
+    const :callee, String
+    const :try_wrap, T::Boolean, default: false
+    const :owned_return, T::Boolean, default: false
+    const :callable_contract, CallableContract
+
+    sig { params(args: T::Array[Emittable]).returns(Call) }
+    def call(args)
+      Call.new(callee, args, try_wrap, owned_return, callable_contract)
+    end
+  end
+
+  RuntimeCall = Struct.new(:spec, :args) do
+    extend T::Sig
+    include Expr
+
+    sig { params(spec: RuntimeCallSpec, args: T::Array[Emittable]).void }
+    def initialize(spec, args)
+      super(spec, args)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([args])
+
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      spec.callable_contract.ownership_contract
+    end
+
+    sig { returns(T::Boolean) }
+    def owned_return? = spec.owned_return
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless owned_return?
+      alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
+      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+    end
+  end
+
+  module RuntimeCalls
+    extend T::Sig
+
+    EQL = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.eql",
+        callable_contract: CallableContract.no_ownership(2),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    THREAD_COUNT = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.threadCount",
+        callable_contract: CallableContract.no_ownership(0),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    sig { returns(RuntimeCallSpec) }
+    def self.eql_spec
+      EQL
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.thread_count_spec
+      THREAD_COUNT
+    end
+
+    sig { params(element_zig: String).returns(RuntimeCallSpec) }
+    def self.batch_window_init_spec(element_zig)
+      RuntimeCallSpec.new(
+        callee: "CheatLib.BatchWindow(#{element_zig}).init",
+        callable_contract: CallableContract.no_ownership(3),
+      )
+    end
+
+    sig { params(inner_zig: String).returns(RuntimeCallSpec) }
+    def self.atomic_reduce_init_spec(inner_zig)
+      RuntimeCallSpec.new(
+        callee: "CheatLib.obs.AtomicReduce(#{inner_zig}).init",
+        callable_contract: CallableContract.no_ownership(1),
+      )
     end
   end
 
@@ -4073,13 +4194,6 @@ module MIR
     def ownership_effect
       owned_effect_for_alloc(alloc)
     end
-  end
-
-  # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
-  # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
-  # these at call sites. kind: :heap | :frame | :cleanup.
-  AllocatorRef = Struct.new(:kind) do
-    include Expr
   end
 
   # Uninitialized-memory sentinel. Zig: `undefined`. VM: nil (the slot is

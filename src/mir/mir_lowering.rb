@@ -1736,7 +1736,7 @@ class MIRLowering
     return false unless source_expr.is_a?(MIR::Emittable)
 
     contract = source_expr.explicit_ownership_contract
-    contract.is_a?(MIR::OwnershipContract) && !contract.consumes.empty?
+    contract.is_a?(MIR::OwnershipContract) && !contract.owned_operand_names.empty?
   end
 
   sig { params(expr: MIR::Node).returns(OwnershipFactTarget) }
@@ -2098,7 +2098,7 @@ class MIRLowering
   def ownership_contract_consumes(node)
     contract = node.explicit_ownership_contract
     return [] unless contract
-    contract.consumes.map(&:to_s)
+    contract.owned_operand_names.map(&:to_s)
   end
 
   sig do

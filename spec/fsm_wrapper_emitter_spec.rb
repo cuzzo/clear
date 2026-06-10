@@ -298,7 +298,8 @@ RSpec.describe FsmWrapperEmitter do
       actions = [
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_2.lock",
-          guard_field: "__lock_held_0",
+          ctx_id: 2,
+          guard_index: 0,
           lock_ref: ctx_field("__ctx_2", "lock"),
           unlock_method: "unlock",
         ),

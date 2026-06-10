@@ -88,7 +88,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
-  sig { params(node_or_token: T.untyped, message: String).returns(T::Array[T.untyped]) }
+  sig { params(node_or_token: T.untyped, message: String).returns(NilClass) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -97,6 +97,7 @@ module ErrorHelper
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
+    nil
   end
 
   # Emit a fixable finding — a diagnostic with one or more suggested

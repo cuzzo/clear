@@ -428,12 +428,36 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("try fetch(rt)")
   end
 
+  it "builds contracted runtime helper calls from named constructors" do
+    eql = MIR::RuntimeCall.new(MIR::RuntimeCalls.eql_spec, [MIR::Ident.new("a"), MIR::Ident.new("b")])
+    expect(eql.spec.callable_contract.checked_arg_count).to eq(2)
+    expect(e.emit(eql)).to eq("CheatLib.eql(a, b)")
+
+    thread_count = MIR::RuntimeCall.new(MIR::RuntimeCalls.thread_count_spec, [])
+    expect(thread_count.spec.callable_contract.checked_arg_count).to eq(0)
+    expect(e.emit(thread_count)).to eq("CheatLib.threadCount()")
+
+    batch = MIR::RuntimeCall.new(MIR::RuntimeCalls.batch_window_init_spec("i64"), [
+      MIR::AllocatorRef.new(:heap),
+      MIR::Lit.new("4"),
+      MIR::Lit.new("100"),
+    ])
+    expect(batch.spec.callable_contract.checked_arg_count).to eq(3)
+    expect(e.emit(batch)).to eq("CheatLib.BatchWindow(i64).init(rt.heapAlloc(), 4, 100)")
+
+    atomic = MIR::RuntimeCall.new(MIR::RuntimeCalls.atomic_reduce_init_spec("i64"), [MIR::Lit.new("0")])
+    expect(atomic.spec.callable_contract.checked_arg_count).to eq(1)
+    expect(e.emit(atomic)).to eq("CheatLib.obs.AtomicReduce(i64).init(0)")
+  end
+
   it "rebases runtime-scoped calls and allocators" do
     e.rt_name = "__rt"
 
     expect(e.emit(MIR::Call.new("rt.sleep", [MIR::Lit.new("1")], false))).to eq("__rt.sleep(1)")
     expect(e.emit(MIR::FreezeExpr.new(MIR::Ident.new("value"), "Payload")))
       .to eq("try CheatLib.freeze(Payload, __rt.heapAlloc(), value)")
+    expect(e.emit(MIR::FreezeExpr.new(MIR::Ident.new("value"), "Payload", MIR::AllocatorRef.new(:frame))))
+      .to eq("try CheatLib.freeze(Payload, __rt.frameAlloc(), value)")
     expect(e.send(:emit_thunk_yield_statement, :check)).to eq("__rt.checkYield();")
   end
 
@@ -833,11 +857,13 @@ RSpec.describe MIREmitter do
   describe "DeepCopy" do
     it "emits string copy via dupeValue with explicit []const u8 type" do
       node = MIR::DeepCopy.new(MIR::Ident.new("src"), "[]const u8", nil, :full_value, :heap)
+      expect(node.copy_shape).to eq(:slice)
       expect(e.emit(node)).to include("try CheatLib.dupeValue([]const u8, __copy_src, rt.heapAlloc())")
     end
 
     it "emits union copy via dupeValue with explicit union type" do
       node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :full_value, :heap)
+      expect(node.copy_shape).to eq(:value)
       expect(e.emit(node)).to include("try CheatLib.dupeValue(Result, __copy_src, rt.heapAlloc())")
     end
 
@@ -847,15 +873,24 @@ RSpec.describe MIREmitter do
       # both shallow (Copy elements -> @memcpy) and deep (heap-owning
       # elements -> recursive dupeValue) internally.
       node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]i64", "i64", :full_value, :heap)
+      expect(node.copy_shape).to eq(:slice)
       expect(e.emit(node)).to include("try CheatLib.dupeValue([]i64, __copy_src, rt.heapAlloc())")
 
       node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]Value", "Value", :full_value, :heap)
+      expect(node.copy_shape).to eq(:slice)
       expect(e.emit(node)).to include("try CheatLib.dupeValue([]Value, __copy_src, rt.heapAlloc())")
     end
 
     it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
+      expect(node.copy_shape).to eq(:inferred)
       expect(e.emit(node)).to eq("(if (@typeInfo(@TypeOf(n)) == .pointer) n.* else n)")
+    end
+
+    it "emits pointer-shaped full copies from the explicit MIR shape" do
+      node = MIR::DeepCopy.new(MIR::Ident.new("ptr"), "*Payload", nil, :full_value, :heap)
+      expect(node.copy_shape).to eq(:pointer)
+      expect(e.emit(node)).to include("try CheatLib.dupeValue(@TypeOf(ptr), __copy_src, rt.heapAlloc())")
     end
   end
 
@@ -866,8 +901,13 @@ RSpec.describe MIREmitter do
     end
 
     it "emits empty list" do
-      node = MIR::ContainerInit.new("CheatLib.ArrayListUnmanaged(i64)", :list_empty, nil, nil)
+      node = MIR::ContainerInit.new("CheatLib.ArrayListUnmanaged(i64)", :array_list_empty, nil, nil)
       expect(e.emit(node)).to eq("@as(CheatLib.ArrayListUnmanaged(i64), .empty)")
+    end
+
+    it "emits structural empty containers without type-prefix inspection" do
+      node = MIR::ContainerInit.new("Set(i64)", :set_empty, nil, nil)
+      expect(e.emit(node)).to eq("Set(i64){}")
     end
 
     it "emits map with allocator" do

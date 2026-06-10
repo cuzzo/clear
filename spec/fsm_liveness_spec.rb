@@ -52,6 +52,11 @@ RSpec.describe FsmTransform::Liveness do
 
       result = FsmTransform::Liveness.analyze([seg0, seg1], { captured: {} })
       expect(result.cross_segment_vars).to have_key("x")
+      fact = result.cross_segment_vars.fetch("x")
+      expect(fact).to be_a(FsmTransform::Liveness::CrossSegmentVarFact)
+      expect(fact.type_info).to eq(Type.new(:Int64))
+      expect(fact.first_def_seg).to eq(0)
+      expect(fact.last_use_seg).to eq(1)
     end
 
     it "flags a pre-decl referenced in the suspend call's args" do
@@ -155,6 +160,10 @@ RSpec.describe FsmTransform::Liveness do
       FsmTransform::Liveness.collect_defs(stmt, defs)
 
       expect(defs).to eq("slot" => nil)
+    end
+
+    it "normalizes raw declaration types into Type facts" do
+      expect(FsmTransform::Liveness.stmt_decl_type(bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
     end
   end
 end

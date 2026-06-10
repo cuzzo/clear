@@ -356,11 +356,11 @@ class PipelineBatchWindowLowerer < T::Struct
     [
       MIR::Let.new("res_list", MIR::MakeList.new(plan.result_zig, [], plan.alloc), true, nil, nil),
       MIR::Let.new("__bw",
-        MIR::Call.new("CheatLib.BatchWindow(#{plan.element_zig}).init", [
+        MIR::RuntimeCall.new(MIR::RuntimeCalls.batch_window_init_spec(plan.element_zig), [
           MIR::AllocatorRef.new(plan.alloc),
           MIR::Cast.new(plan.size_mir, "usize", :intCast),
           MIR::Lit.new(plan.timeout_ns),
-        ], false, false, MIR::CallableContract.no_ownership(3)),
+        ]),
         true, nil, nil),
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("__bw"), "deinit", [], false, MIR::CallableContract.no_ownership(0))),
     ]

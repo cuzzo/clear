@@ -794,7 +794,7 @@ RSpec.describe MIRChecker do
       loop_body = [alloc_mark("tmp", :frame, scope: :iteration), MIR::Let.new("tmp", iz, false, nil, nil)]
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::ForStmt.new("i", MIR::Ident.new("items"), loop_body, nil, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new("items"), "i", loop_body, nil, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("for_no_restore", body))
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
@@ -1229,11 +1229,15 @@ RSpec.describe MIRChecker do
       iz = registry_call("items", takes_signature,
         allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
 
-      expect { iz.ownership_contract.consumes << "late" }.to raise_error(FrozenError)
+      expect {
+        iz.ownership_contract.operands << MIR::OwnershipOperandFact.owned_binding("late", Type.new(:String), "spec", :heap)
+      }.to raise_error(FrozenError)
     end
 
     it "rejects a consumed binding that has no TransferMark" do
-      contract = MIR::OwnershipContract.consumes(["m"])
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("m", Type.new(:String), "spec", :heap),
+      ])
       iz = registry_call("items", takes_signature, ownership_contract: contract,
         allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       body = [
@@ -1246,7 +1250,9 @@ RSpec.describe MIRChecker do
     end
 
     it "preserves registry ownership metadata when stripping try" do
-      contract = MIR::OwnershipContract.consumes(["m"])
+      contract = MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding("m", Type.new(:String), "spec", :heap),
+      ])
       iz = registry_call("intrinsic", takes_signature, ownership_contract: contract,
         allocs: MIR.inline_alloc_metadata(alloc: :heap), target_var: "items")
       stripped = iz.without_try
@@ -1662,7 +1668,9 @@ RSpec.describe MIRChecker do
       checker.send(:verify_ownership_surfaces_finalized!, [method, reassign], [])
 
       iz = registry_call("map", FunctionSignature.borrowing_intrinsic,
-        ownership_contract: MIR::OwnershipContract.consumes(["owned"]),
+        ownership_contract: MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding("owned", Type.new(:String), "spec", :heap),
+        ]),
         allocs: MIR.inline_alloc_metadata(val_alloc: :heap),
         target_var: "map")
       checker.send(:check_consumed_allocators_match_sink!, iz, ["owned"], "owned" => [alloc_mark("owned", :frame)])
@@ -2046,12 +2054,13 @@ RSpec.describe MIRChecker do
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-ZIG-FIELD/)
     end
 
-    it "rejects malformed FSM lock destroy actions" do
+    it "rejects malformed FSM lock destroy guard indices" do
       structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
       structure.destroy_actions = [
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
-          guard_field: "__lock_held_x",
+          ctx_id: 0,
+          guard_index: -1,
           lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "unlock",
         ),
@@ -2062,29 +2071,31 @@ RSpec.describe MIRChecker do
       }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-GUARD/)
     end
 
-    it "rejects lock destroy actions with malformed guard prefixes" do
+    it "derives lock destroy guard fields from typed guard indices" do
       structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
-      structure.destroy_actions = [
-        MIR::FsmDestroyLockRelease.new(
-          name: "__ctx_0.lock",
-          guard_field: "held_0",
-          lock_ref: mir_ref("__ctx_0.lock"),
-          unlock_method: "unlock",
-        ),
-      ]
+      action = MIR::FsmDestroyLockRelease.new(
+        name: "__ctx_0.lock",
+        ctx_id: 0,
+        guard_index: 12,
+        lock_ref: mir_ref("__ctx_0.lock"),
+        unlock_method: "unlock",
+      )
+      structure.destroy_actions = [action]
 
+      expect(action.guard_field).to eq("__lock_held_12")
       expect {
         MIRChecker.check_fsm_structure!(structure)
-      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-DESTROY-LOCK-GUARD/)
+      }.not_to raise_error
     end
 
     it "rejects lock destroy actions outside the FSM ctx" do
       structure = MIR::FsmStructure.new([], [], [], [], 0, nil)
       structure.destroy_actions = [
         MIR::FsmDestroyLockRelease.new(
-          name: "lock",
-          guard_field: "__lock_held_0",
-          lock_ref: mir_ref("lock"),
+          name: "__ctx_1.lock",
+          ctx_id: 1,
+          guard_index: 0,
+          lock_ref: mir_ref("__ctx_1.lock"),
           unlock_method: "unlock",
         ),
       ]
@@ -2099,7 +2110,8 @@ RSpec.describe MIRChecker do
       structure.destroy_actions = [
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
-          guard_field: "__lock_held_0",
+          ctx_id: 0,
+          guard_index: 0,
           lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "release",
         ),
@@ -2159,7 +2171,8 @@ RSpec.describe MIRChecker do
         fsm_cleanup_action("rf_buf", allocator: "__ctx_0.alloc"),
         MIR::FsmDestroyLockRelease.new(
           name: "__ctx_0.lock",
-          guard_field: "__lock_held_0",
+          ctx_id: 0,
+          guard_index: 0,
           lock_ref: mir_ref("__ctx_0.lock"),
           unlock_method: "unlockShared",
         ),

@@ -104,7 +104,7 @@ RSpec.describe "MIRLowering body finalization performance" do
     cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     body = [
       MIR::AllocMark.new("items", :heap, Type.new(:"Int64[]", collection: :list), :heap),
-      MIR::Let.new("items", MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), true, Type.new("std.ArrayListUnmanaged(i64)")),
+      MIR::Let.new("items", MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil), true, Type.new("std.ArrayListUnmanaged(i64)")),
       MIR::Cleanup.new("items", cleanup),
     ]
 

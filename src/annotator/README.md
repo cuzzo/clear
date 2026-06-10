@@ -264,12 +264,14 @@ AST::Identifier(
 )
 ```
 
-The current implementation still has a difficult scope-copy contract:
-`Scope#dup` deep-copies `SymbolEntry` values for nested branches. That isolates
-branch-local state, but post-pass updates can make old nested references stale.
-The current mitigation is to refresh through helpers such as
-`Scope.live_param_syms`. This is a real architectural smell. A cleaner model
-would split stable binding identity from branch-local flow state.
+`Scope#dup` creates a composed child scope with a parent link and no eager
+local binding copies. Reads resolve through the parent chain. Branch-local
+mutations must go through `Scope#entry_for_write`, which materializes a local
+`SymbolEntry` copy only for the binding being mutated. Function parameter
+entries remain canonical on `AST::Param#symbol`; post-body consumers that may
+hold older capture maps refresh through helpers such as `Scope.live_param_syms`.
+This keeps branch-flow state isolated while preserving stable parameter
+identity.
 
 ### 4. Function Signatures
 
@@ -624,9 +626,10 @@ wide for v0.1 comfort:
 * `SemanticAnnotator` still exposes a large include surface. Most mutable
   phase state now has typed owners, but explicit phase objects would make the
   ownership of visitor methods clearer.
-* Scopes deep-copy `SymbolEntry` objects, while later passes mutate canonical
-  function parameter entries. This works only because some consumers refresh
-  through helper APIs.
+* Scopes use composed parent-linked bindings with copy-on-write branch entries.
+  Function parameter entries stay canonical on `AST::Param#symbol`, and
+  capture consumers refresh through `Scope.live_param_syms` before reading
+  storage-axis fields.
 * Capability handling now stores predicate/deferred/audit state explicitly.
   Sync-family/deferred-param decisions live on typed `CapabilityTransition`
   actions, while `SymbolEntry` owns declared sync-contract facts. A future

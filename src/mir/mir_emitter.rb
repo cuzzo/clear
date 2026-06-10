@@ -144,6 +144,7 @@ class MIREmitter
 
     # --- Expressions ---
     when MIR::Call             then emit_call(node)
+    when MIR::RuntimeCall      then emit_runtime_call(node)
     when MIR::TailCall         then emit_tail_call(node)
     when MIR::MethodCall       then emit_method_call(node)
     when MIR::FieldGet         then emit_field_get(node)
@@ -2108,12 +2109,12 @@ class MIREmitter
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
-      type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
-      if type_arg.start_with?("[]")
+      type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
+      if node.copy_shape == :slice
         "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
       else
-        pointer_type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
-        pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
+        pointer_type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
+        pointer_value = node.copy_shape == :value ? "__copy_src.*" : "__copy_src"
         "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
       end
     else
@@ -2126,13 +2127,10 @@ class MIREmitter
     case node.strategy
     when :pool, :list_capacity
       "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
+    when :array_list_empty
+      "@as(#{node.zig_type}, .empty)"
     when :list_empty, :set_empty, :map_empty
-      if node.zig_type.start_with?("std.ArrayListUnmanaged(") ||
-         node.zig_type.start_with?("CheatLib.ArrayListUnmanaged(")
-        "@as(#{node.zig_type}, .empty)"
-      else
-        "#{node.zig_type}{}"
-      end
+      "#{node.zig_type}{}"
     when :map_bare
       "#{node.zig_type}{ .alloc = #{alloc_zig(node.alloc)} }"
     else
@@ -2206,7 +2204,7 @@ class MIREmitter
 
   sig { params(node: MIR::FreezeExpr).returns(String) }
   def emit_freeze(node)
-    "try CheatLib.freeze(#{node.zig_base}, #{@rt_name}.heapAlloc(), #{emit(node.inner)})"
+    "try CheatLib.freeze(#{node.zig_base}, #{emit(node.alloc_ref)}, #{emit(node.inner)})"
   end
 
   sig { params(node: MIR::MakeList).returns(String) }
@@ -2233,6 +2231,11 @@ class MIREmitter
     args = node.args.map { |a| emit(a) }.join(", ")
     call = "#{runtime_scoped_callee(node.callee)}(#{args})"
     node.try_wrap ? "try #{call}" : call
+  end
+
+  sig { params(node: MIR::RuntimeCall).returns(String) }
+  def emit_runtime_call(node)
+    emit_call(node.spec.call(node.args))
   end
 
   sig { params(callee: String).returns(String) }

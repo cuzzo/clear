@@ -83,6 +83,21 @@ module ThunkTransform
 
     end
 
+    class ThunkParamFact < T::Struct
+      extend T::Sig
+
+      const :name, String
+      const :type_info, Type
+
+      sig { params(param: AST::Param).returns(ThunkParamFact) }
+      def self.from_param(param)
+        new(
+          name: param.name.to_s,
+          type_info: Type.new(param.type),
+        )
+      end
+    end
+
     SUPPORTED_COMBINE_OPS = T.let(Set[:ADD, :SUB, :MUL, :DIV].freeze, T::Set[Symbol])
 
     # Synthesize a structural MIR trampoline body for a function whose
@@ -94,10 +109,10 @@ module ThunkTransform
       assert_non_fallible_ret!(fn_node, return_type)
 
       params = function_params(fn_node)
-      param_fields = params.map { |p| frame_field(p[:name].to_s, param_type_info(p, lowering)) }
+      param_fields = params.map { |param| frame_field(param.name, param.type_info) }
 
-      param_init_fields = params.map { |p|
-        frame_init(p[:name].to_s, MIR::Ident.new(p[:name].to_s))
+      param_init_fields = params.map { |param|
+        frame_init(param.name, MIR::Ident.new(param.name))
       }
 
       context = current_frame_context(fn_node)
@@ -112,7 +127,7 @@ module ThunkTransform
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
         param = params[i]
         Kernel.raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
-        frame_init(param[:name].to_s, lower_frame_expr(arg, lowering, context))
+        frame_init(param.name, lower_frame_expr(arg, lowering, context))
       }
 
       combine_lhs = lower_frame_expr(plan.combine_lhs, lowering, context)
@@ -164,7 +179,7 @@ module ThunkTransform
     sig { params(fn_node: AST::FunctionDef).returns(T::Set[String]) }
     def param_names(fn_node)
       names = T.let(Set.new, T::Set[String])
-      function_params(fn_node).each { |p| names << p[:name].to_s }
+      function_params(fn_node).each { |param| names << param.name }
       names
     end
 
@@ -232,12 +247,6 @@ module ThunkTransform
       else
         mir
       end
-    end
-
-    sig { params(param: AST::Param, _lowering: Object).returns(Type) }
-    def param_type_info(param, _lowering)
-      type = param[:type]
-      type.is_a?(Type) ? type : Type.new(type)
     end
 
     sig { params(fn_node: AST::FunctionDef, _lowering: Object).returns(Type) }
@@ -316,12 +325,12 @@ module ThunkTransform
       variants = cycle_fns.map { |cf|
         MIR::ThunkVariant.new(
           name: cf.name,
-          param_fields: function_params(cf).map { |p| frame_field(p[:name].to_s, param_type_info(p, lowering)) },
+          param_fields: function_params(cf).map { |param| frame_field(param.name, param.type_info) },
         )
       }
 
-      initial_fields = function_params(fn_node).map { |p|
-        frame_init(p[:name].to_s, MIR::Ident.new(p[:name].to_s))
+      initial_fields = function_params(fn_node).map { |param|
+        frame_init(param.name, MIR::Ident.new(param.name))
       }
 
       arms = cycle_fns.map { |cf|
@@ -361,7 +370,7 @@ module ThunkTransform
         if target_args.length != target_params.length
       arg_inits = target_args.each_with_index.map { |arg, i|
         target_param = target_params.fetch(i)
-        frame_init(target_param[:name].to_s, lower_frame_expr(arg, lowering, context))
+        frame_init(target_param.name, lower_frame_expr(arg, lowering, context))
       }
       MIR::MutualThunkArm.new(
         variant_name: cf.name,
@@ -391,9 +400,9 @@ module ThunkTransform
       plan
     end
 
-    sig { params(fn_node: AST::FunctionDef).returns(T::Array[AST::Param]) }
+    sig { params(fn_node: AST::FunctionDef).returns(T::Array[ThunkParamFact]) }
     def function_params(fn_node)
-      fn_node.params
+      fn_node.params.map { |param| ThunkParamFact.from_param(param) }
     end
 
   end

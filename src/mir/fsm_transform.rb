@@ -38,6 +38,14 @@ module FsmTransform
   extend T::Sig
   module_function
 
+  class PromotedLocalFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :type_zig, String
+    const :is_suspend_result, T::Boolean, default: false
+  end
+
   # Public entry. Given a BG block and the surrounding lowering
   # context (captures, runtime, etc.), produce an MIR::FsmGenericBody
   # for the wrapper emitter to render.
@@ -84,8 +92,8 @@ module FsmTransform
     # already declared as ctx fields by their suspend descriptor's
     # ctx_field_decls, so omit them from the field-decl list to
     # avoid duplicate struct members.
-    promoted_names = all_locals.map { |p| p[:name] }
-    field_locals   = all_locals.reject { |p| p[:is_suspend_result] }
+    promoted_names = all_locals.map(&:name)
+    field_locals   = all_locals.reject(&:is_suspend_result)
     captured_map   = (ctx[:captured] || {}).keys.to_a
     ctx_id         = ctx[:id]
     promo_capture_map = (captured_map + promoted_names).to_h { |n|
@@ -120,8 +128,8 @@ module FsmTransform
     ext_ctx = coerce_context_fields(ctx[:extra_ctx_fields]) +
               field_locals.map do |p|
                 MIR::ContextFieldDecl.new(
-                  name: p[:name].to_s,
-                  type_zig: p[:zig_type].to_s,
+                  name: p.name,
+                  type_zig: p.type_zig,
                   default_value: MIR::Undef.new(nil),
                 )
               end
@@ -223,16 +231,16 @@ module FsmTransform
   # BindExpr(:decl) name and its Zig type. The recursive splitter
   # promotes all of them to ctx fields so reads/writes across
   # segment boundaries resolve via the capture_map. Returns
-  # `[{ name:, zig_type: }, ...]` (deduped on name).
-  sig { params(stmts: T.untyped).returns(T::Array[T.untyped]) }
+  # typed facts (deduped on name).
+  sig { params(stmts: T.untyped).returns(T::Array[PromotedLocalFact]) }
   def collect_body_locals(stmts)
     T.bind(self, T.untyped) rescue nil
-    out = []
-    seen = {}
+    out = T.let([], T::Array[PromotedLocalFact])
+    seen = T.let({}, T::Hash[String, T::Boolean])
     AST.each_locatable(stmts) do |node|
       entry = local_entry_for_node(node)
       next unless entry
-      name = entry[:name]
+      name = entry.name
       next if seen[name]
       seen[name] = true
       out << entry
@@ -240,7 +248,7 @@ module FsmTransform
     out
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: T.untyped).returns(T.nilable(PromotedLocalFact)) }
   def local_entry_for_node(node)
     T.bind(self, T.untyped) rescue nil
     case node
@@ -248,21 +256,17 @@ module FsmTransform
       local_entry(node.name, node.full_type!)
     when AST::BindExpr
       return nil unless node.mode == :decl
-      entry = local_entry(node.name, node.full_type!)
-      if entry
-        # Mark suspend-result decls so the caller can include them in the
-        # capture_map but skip duplicate ctx field declarations.
-        entry[:is_suspend_result] = true if suspend_value?(node.value)
-      end
-      entry
+      # Mark suspend-result decls so the caller can include them in the
+      # capture_map but skip duplicate ctx field declarations.
+      local_entry(node.name, node.full_type!, is_suspend_result: suspend_value?(node.value))
     when AST::ForRange
-      node.var_name ? { name: node.var_name, zig_type: "i64" } : nil
+      node.var_name ? PromotedLocalFact.new(name: node.var_name.to_s, type_zig: "i64") : nil
     when AST::ForEach
       foreach_local_entry(node)
     end
   end
 
-  sig { params(node: AST::ForEach).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::ForEach).returns(T.nilable(PromotedLocalFact)) }
   def foreach_local_entry(node)
     T.bind(self, T.untyped) rescue nil
     return nil unless node.var_name
@@ -272,7 +276,7 @@ module FsmTransform
       elem_t = ct.element_type
       elem_t ? Type.new(elem_t).zig_type : "anyopaque"
     end
-    { name: node.var_name, zig_type: elem_zig }
+    PromotedLocalFact.new(name: node.var_name.to_s, type_zig: elem_zig)
   end
 
   # True if the BG body contains a WithBlock or an IF/WHILE/FOR
@@ -318,12 +322,12 @@ module FsmTransform
     !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
   end
 
-  sig { params(name: T.untyped, type_obj: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-  def local_entry(name, type_obj)
+  sig { params(name: T.untyped, type_obj: T.untyped, is_suspend_result: T::Boolean).returns(T.nilable(PromotedLocalFact)) }
+  def local_entry(name, type_obj, is_suspend_result: false)
     T.bind(self, T.untyped) rescue nil
     return nil if name.nil?
     t = type_obj ? Type.new(type_obj) : nil
     zig_t = t ? t.zig_type : "anyopaque"
-    { name: name, zig_type: zig_t }
+    PromotedLocalFact.new(name: name.to_s, type_zig: zig_t, is_suspend_result: is_suspend_result)
   end
 end

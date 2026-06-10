@@ -1006,10 +1006,10 @@ class MIRChecker
       if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
         collect_linear_expr_ident_names(node, names)
       end
-      next unless node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall) || node.is_a?(MIR::MethodCall)
+      next unless node.is_a?(MIR::Call) || node.is_a?(MIR::RuntimeCall) || node.is_a?(MIR::TailCall) || node.is_a?(MIR::MethodCall)
 
-      callable = node.callable_contract
-      callable&.ownership_contract&.consumes&.each { |name| names.add(name.to_s) }
+      callable = node.is_a?(MIR::RuntimeCall) ? node.spec.callable_contract : node.callable_contract
+      callable&.ownership_contract&.owned_operand_names&.each { |name| names.add(name.to_s) }
     end
     names
   end
@@ -1776,28 +1776,18 @@ class MIRChecker
 
   sig { params(action: MIR::FsmDestroyLockRelease, ctx_id: Integer, source: T.nilable(AST::Node)).void }
   def self.check_fsm_destroy_lock_action!(action, ctx_id, source)
-    unless action.guard_field.start_with?("__lock_held_")
-      raise FsmStructureError, format_fsm_error(
-        "INV-FSM-DESTROY-LOCK-GUARD",
-        "lock destroy action '#{action.name}' uses malformed guard #{action.guard_field.inspect}.",
-        source,
-      )
-    end
-
-    suffix = action.guard_field.delete_prefix("__lock_held_")
-    unless Integer(suffix, exception: false)
-      raise FsmStructureError, format_fsm_error(
-        "INV-FSM-DESTROY-LOCK-GUARD",
-        "lock destroy action '#{action.name}' uses non-numeric guard #{action.guard_field.inspect}.",
-        source,
-      )
-    end
-
-    lock_ref = fsm_destroy_expr_text(action.lock_ref)
-    unless lock_ref.include?("__ctx_#{ctx_id}.")
+    unless action.ctx_id == ctx_id
       raise FsmStructureError, format_fsm_error(
         "INV-FSM-DESTROY-LOCK-TARGET",
-        "lock destroy action '#{action.name}' does not target ctx #{ctx_id}.",
+        "lock destroy action '#{action.name}' targets ctx #{action.ctx_id}, expected ctx #{ctx_id}.",
+        source,
+      )
+    end
+
+    unless action.guard_index >= 0
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-DESTROY-LOCK-GUARD",
+        "lock destroy action '#{action.name}' uses invalid guard index #{action.guard_index.inspect}.",
         source,
       )
     end
@@ -1809,8 +1799,6 @@ class MIRChecker
         source,
       )
     end
-
-    check_fsm_destroy_required_expr!("lock target", action.name, action.lock_ref, source)
   end
 
   sig { params(kind: String, name: String, value: T.nilable(MIR::Emittable), source: T.nilable(AST::Node)).void }
@@ -2201,6 +2189,8 @@ class MIRChecker
       case node
       when MIR::Call
         verify_callable_contract!(node.callable_contract, node.callee.to_s, "MIR::Call", transfers, allocs)
+      when MIR::RuntimeCall
+        verify_callable_contract!(node.spec.callable_contract, node.spec.callee, "MIR::RuntimeCall", transfers, allocs)
       when MIR::TailCall
         verify_callable_contract!(node.callable_contract, node.callee.to_s, "MIR::TailCall", transfers, allocs)
       when MIR::MethodCall
@@ -2248,7 +2238,7 @@ class MIRChecker
       transfers,
       require_operands: function_signature_takes_ownership?(sig, contract.checked_arg_count),
     )
-    check_consumed_allocators_match_sink!(contract, ownership.consumes, allocs)
+    check_consumed_allocators_match_sink!(contract, ownership.owned_operand_names, allocs)
     nil
   end
 
@@ -2350,6 +2340,13 @@ class MIRChecker
 
         @errors << error(:OWNERSHIP_FACT_REQUIRED, node.callee.to_s,
           "MIR::Call carries ownership through owned_return/callable_contract. " \
+          "Finalize call ownership into OwnedCreate/OwnedTransfer/OwnedReturn facts.")
+      when MIR::RuntimeCall
+        next unless node.owned_return? || callable_contract_consumes?(node.spec.callable_contract)
+        next if facts_seen && ownership_fact_covers_node?(fact_sources, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, node.spec.callee,
+          "MIR::RuntimeCall carries ownership through owned_return/callable_contract. " \
           "Finalize call ownership into OwnedCreate/OwnedTransfer/OwnedReturn facts.")
       when MIR::MethodCall
         next unless node.owned_result_alloc || callable_contract_consumes?(node.callable_contract)
@@ -2547,7 +2544,7 @@ class MIRChecker
 
   sig { params(contract: MIR::OwnershipContract).returns(T::Array[String]) }
   def ownership_contract_consumes(contract)
-    contract.consumes
+    contract.owned_operand_names
   end
 
   sig { params(contract: MIR::OwnershipContract).returns(T::Boolean) }
@@ -2563,6 +2560,7 @@ class MIRChecker
                node.target_var
              end
     return target.to_s if target
+    return node.spec.callee if node.is_a?(MIR::RuntimeCall)
     return node.callee.to_s if node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall)
     return node.method.to_s if node.is_a?(MIR::MethodCall)
     return "MIR::BgBlock" if node.is_a?(MIR::BgBlock)

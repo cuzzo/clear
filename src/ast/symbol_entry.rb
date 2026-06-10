@@ -8,12 +8,11 @@
 # Most fields are scope-local (live, moved, borrowed_alias, valid, read,
 # lifetime). Mutating them on a nested-scope copy is correct.
 #
-# Storage-axis fields (storage, sync, type, capabilities) are
-# function-global. After annotation, `Scope.dup` has produced one entry
-# per nested scope that captured the binding. Any pass that mutates a
-# storage-axis field on a parameter (e.g.
-# `EscapeAnalysis.propagate_caller_sync!`) MUST mutate
-# `param[:symbol]` (the function-level entry), and any consumer that
+# Storage-axis fields (storage, sync, type, capabilities) are function-global.
+# `Scope.dup` creates a parent-linked child scope and materializes branch-local
+# copies only through `Scope#entry_for_write`. Any pass that mutates a
+# storage-axis field on a parameter (e.g. `EscapeAnalysis.propagate_caller_sync!`)
+# MUST mutate `param.symbol` (the function-level entry), and any consumer that
 # reads from a captured SymbolEntry reference must refresh through
 # `Scope.live_param_syms(fn)` first. See the doc comment on
 # `Scope#initialize_copy` for the full rationale.

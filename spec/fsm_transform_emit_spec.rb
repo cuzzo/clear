@@ -23,6 +23,10 @@ RSpec.describe FsmTransform::Emit do
     MIREmitter.new.emit(expr)
   end
 
+  def tok(value = "x")
+    Lexer::Token.new(:IDENT, value, 1, 1)
+  end
+
   def fsm_ctx(overrides = {})
     raw = {
       id: 1,
@@ -118,6 +122,17 @@ RSpec.describe FsmTransform::Emit do
     expect(updated.extra_ctx_fields.first.type_zig).to eq("i64")
     expect(updated.extra_ctx_fields.first.default_value.value).to eq("0")
     expect(updated.id).to eq(12)
+  end
+
+  it "detects runtime binding use structurally instead of from rendered text" do
+    runtime_use = MIR::ExprStmt.new(
+      MIR::FieldGet.new(MIR::Ident.new("__rt_bg12"), "arena_mode"),
+      false,
+    )
+    string_only = MIR::ExprStmt.new(MIR::Lit.new("__rt_bg12"), false)
+
+    expect(described_class.mir_nodes_reference_ident?([runtime_use], "__rt_bg12")).to eq(true)
+    expect(described_class.mir_nodes_reference_ident?([string_only], "__rt_bg12")).to eq(false)
   end
 
   it "returns nil for an empty unified FSM and skips fn-less inert segments" do
@@ -353,7 +368,8 @@ RSpec.describe FsmTransform::Emit do
     )
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_a",
-      guard_field: "__lock_held_0",
+      ctx_id: 1,
+      guard_index: 0,
       lock_ref: ctx_field("__ctx_1", "lock_a"),
       unlock_method: "unlock",
     )
@@ -365,7 +381,8 @@ RSpec.describe FsmTransform::Emit do
     )
     described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_b",
-      guard_field: "__lock_held_1",
+      ctx_id: 1,
+      guard_index: 1,
       lock_ref: ctx_field("__ctx_1", "lock_b"),
       unlock_method: "unlock",
     )
@@ -442,6 +459,8 @@ RSpec.describe FsmTransform::Emit do
     action = described_class.fsm_destroy_actions(ctx).first
     expect(action).to be_a(MIR::FsmDestroyLockRelease)
     expect(action.guard_field).to eq("__lock_held_0")
+    expect(action.ctx_id).to eq(7)
+    expect(action.guard_index).to eq(0)
     expect(render_expr(action.lock_ref)).to eq("__ctx_7.lock")
     expect(action.unlock_method).to eq("unlock")
   end
@@ -658,5 +677,25 @@ RSpec.describe FsmTransform::Emit do
       .to raise_error(TypeError, /Emittable/)
     expect { FsmTransform.coerce_promoted_decls(["bad"]) }
       .to raise_error(TypeError, /Emittable/)
+  end
+
+  it "collects conservative promoted locals as typed facts" do
+    first_acc = AST::VarDecl.new(tok("acc"), "acc", Type.new(:Int64), nil, true)
+    duplicate_acc = AST::VarDecl.new(tok("acc"), "acc", Type.new(:String), nil, true)
+    promise = AST::Identifier.new(tok("p"), "p")
+    next_result = AST::BindExpr.new(tok("r"), "r", Type.new(:Int64), AST::NextExpr.new(tok("NEXT"), promise))
+    next_result.mode = :decl
+    first_acc.full_type = Type.new(:Int64)
+    duplicate_acc.full_type = Type.new(:String)
+    next_result.full_type = Type.new(:Int64)
+
+    facts = FsmTransform.collect_body_locals([first_acc, duplicate_acc, next_result])
+
+    expect(facts).to all(be_a(FsmTransform::PromotedLocalFact))
+    expect(facts.map(&:name)).to eq(["acc", "r"])
+    expect(facts.first.type_zig).to eq("i64")
+    expect(facts.first.is_suspend_result).to eq(false)
+    expect(facts.last.type_zig).to eq("i64")
+    expect(facts.last.is_suspend_result).to eq(true)
   end
 end

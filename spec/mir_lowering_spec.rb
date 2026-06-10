@@ -3539,10 +3539,10 @@ RSpec.describe MIRLowering do
 
       expect_checker_clean(mir)
       consuming_call = collect_mir_nodes(mir, MIR::RegistryCall).find do |call|
-        call.ownership_contract.consumes.any?
+        call.ownership_contract.owned_operand_names.any?
       end
       expect(consuming_call).not_to be_nil
-      consumed = T.must(consuming_call).ownership_contract.consumes
+      consumed = T.must(consuming_call).ownership_contract.owned_operand_names
       expect(consumed.length).to eq(1)
       expect(consumed.first).to match(/\A__tmp_\d+\z/)
       expect(T.must(consuming_call).args[1].expr).to be_a(MIR::Ident)
@@ -4342,7 +4342,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :uniform, elem_zig_type: "i64")
     expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :uniform, zig_type: "std.ArrayListUnmanaged(i64)")
     expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :uniform, zig_type: "Node")
-    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :uniform)
+    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :array_list_empty, :heap, nil), nil)).to include(kind: :uniform)
   end
 
   it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do

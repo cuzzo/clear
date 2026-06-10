@@ -490,7 +490,7 @@ class PipelineConcurrentLowerer < T::Struct
     workers = concurrent_option(conc_op, "workers")
     return self.visit_mir.call(workers) if workers
 
-    MIR::Call.new("CheatLib.threadCount", [], false, false, MIR::CallableContract.no_ownership(0))
+    MIR::RuntimeCall.new(MIR::RuntimeCalls.thread_count_spec, [])
   end
 
   sig { params(conc_op: AST::ConcurrentOp).returns(MIR::Cast) }

@@ -623,6 +623,8 @@ RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
     expect(mir).to include("const :type_info, Type")
     expect(mir).to include("const :operands, T::Array[OwnershipOperandFact]")
     expect(mir).not_to include("const :names, T::Array[String]")
+    expect(mir).not_to include("def self.consumes")
+    expect(mir).not_to include("def consumes")
   end
 
   it "requires MIRChecker to reject missing or borrowed ownership operands" do

@@ -40,7 +40,15 @@ RSpec.describe FsmTransform::Emit do
   let(:liveness_double) {
     Class.new {
       def initialize(names) ; @names = names ; end
-      def cross_segment_vars ; @names.to_h { |n| [n, nil] } ; end
+      def cross_segment_vars
+        @names.to_h do |n|
+          [n, FsmTransform::Liveness::CrossSegmentVarFact.new(
+            type_info: nil,
+            first_def_seg: 0,
+            last_use_seg: 1,
+          )]
+        end
+      end
     }
   }
 

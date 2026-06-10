@@ -400,7 +400,7 @@ class PipelineMaterializer
   def var_and_defer(elem_zig)
     var_decl = MIR::Let.new("pipe_mat",
       MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
-        :list_empty, result_alloc, nil),
+        :array_list_empty, result_alloc, nil),
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
