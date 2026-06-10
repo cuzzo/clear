@@ -209,17 +209,14 @@ module ReentranceBridge
     blessed_ids = blessed.map(&:object_id).to_set
 
     if blessed.empty?
-      error!(fn_node, :TAIL_CALL_NEEDS_RECURSIVE, fn: fn_name, hint: "RETURN that directly calls '#{fn_name}' in tail position " \
-             "(e.g., RETURN #{fn_name}(...)). The recursive call cannot be " \
-             "wrapped in an expression.")
+      error!(fn_node, :TAIL_CALL_NEEDS_RECURSIVE,
+        fn: fn_name)
     end
 
     all_self_calls.each do |call|
       next if blessed_ids.include?(call.object_id)
-      error!(call, :TAIL_CALL_NOT_TAIL_POSITION, fn: fn_name, hint: "All recursive self-calls must be the ENTIRE return expression (e.g., " \
-             "RETURN #{fn_name}(...)). Non-tail recursion would consume the fiber " \
-             "stack on every invocation. If recursion is genuinely non-tail, declare " \
-             "':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.")
+      error!(call, :TAIL_CALL_NOT_TAIL_POSITION,
+        fn: fn_name)
     end
   end
 
@@ -247,10 +244,8 @@ module ReentranceBridge
     if raw == :unbounded && user_size != :service
       mutual_md_callee = find_mutual_max_depth_callee(call_names)
       if mutual_md_callee
-        error!(node, :STACK_SAFETY_MUTUAL_RECURSION, callee: mutual_md_callee, hint: "which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds " \
-               "compose as a product across counters and can't be statically bounded; " \
-               "the spawn site must be `@service` (OS thread). Either declare `@service` " \
-               "explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).")
+        error!(node, :STACK_SAFETY_MUTUAL_RECURSION,
+          callee: mutual_md_callee)
         return
       end
     end
@@ -261,10 +256,10 @@ module ReentranceBridge
     end
 
     if user_size && EffectTracker::TIER_ORDER.fetch(user_size, 0) < EffectTracker::TIER_ORDER.fetch(computed, 0)
-      error!(node, :STACK_SAFETY_USER_SIZE_TOO_SMALL, size: user_size, budget: EffectTracker::STACK_TIER_BUDGET[user_size], hint: "is too small for this fiber. Call-graph analysis requires at least @#{computed}. " \
-             "Use @#{computed} (or @service for OS-thread). " \
-             "(`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented " \
-             "but not yet wired through the compiler.)")
+      error!(node, :STACK_SAFETY_USER_SIZE_TOO_SMALL,
+        size: user_size,
+        budget: EffectTracker::STACK_TIER_BUDGET[user_size],
+        computed: computed)
     end
   end
 

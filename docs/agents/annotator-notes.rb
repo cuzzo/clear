@@ -45,6 +45,22 @@
 #   already lives.
 # - Fixed: @service clear-fix generation now uses the concrete AST::BgBlock
 #   token contract instead of dynamic respond_to? probing.
+# - Fixed: RequireNode import resolution moved from the annotator shell into
+#   Annotator::Phases::ImportResolution.
+# - Fixed: UnionVariantLit visiting moved from the annotator shell into
+#   UnionAnalysis beside union schema and field validation.
+# - Fixed: held-lock tracking now uses the typed AST::Locatable token contract
+#   instead of probing capability targets with respond_to?(:token).
+# - Fixed: annotator error hints no longer embed local string literals. Existing
+#   source-error guidance now lives in DiagnosticRegistry templates/fix_hint
+#   metadata.
+# - Fixed: an architecture invariant now blocks reintroducing local
+#   `hint: "..."` strings under src/annotator.
+# - Fixed: observable terminal mismatch now routes through
+#   :OBSERVABLE_TERMINAL_MISMATCH instead of constructing CompilerError
+#   directly in the annotator.
+# - Fixed: an architecture invariant now blocks direct CompilerError.new under
+#   src/annotator.
 # - Not changed: Kernel.raise / raise sites that enforce compiler invariants
 #   stay as hard failures. They are not source diagnostics and should not route
 #   through error! unless they become recoverable user-facing errors.
@@ -54,6 +70,7 @@
 # - Not changed: semantic_index remains the frontend result handoff used by the
 #   compiler frontend and importer. Removing the ivar should be part of a broader
 #   API change that returns an annotation result object.
-# - Follow-up: many error!(..., hint: ...) call sites remain outside this first
-#   cleanup. New diagnostics should prefer registry templates or registry
-#   fix_hint data over large local strings.
+# - Follow-up: non-fatal note! telemetry strings remain in lock, pipeline, and
+#   async auto-pinning paths. They are informational compiler telemetry rather
+#   than source errors; move them to a note registry only if/when notes become
+#   first-class diagnostic codes.

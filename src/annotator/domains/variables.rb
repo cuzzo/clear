@@ -62,12 +62,9 @@ module Annotator
           # with the analyzer. Reject loudly instead of silently winning
           # one of the two via `||=` (H7).
           if target_t.observable_terminal && target_t.observable_terminal != pipe_terminal
-            raise CompilerError.new(
-              node.token,
-              "Observable terminal mismatch: LHS stamped #{target_t.observable_terminal.inspect}, " \
-              "pipe analyzer produced #{pipe_terminal.inspect}",
-              nil,
-            )
+            error!(node, :OBSERVABLE_TERMINAL_MISMATCH,
+              lhs: target_t.observable_terminal.inspect,
+              pipe: pipe_terminal.inspect)
           end
           target_t.stamp_observable_terminal!(pipe_terminal)
           node.type = target_t
@@ -329,8 +326,8 @@ module Annotator
                  when :SUB then :fetchSub
                  when :MUL, :DIV
                    op_str = node.compound_op == :MUL ? "*=" : "/="
-                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND, op: op_str, hint: "Atomic ops are limited to load / store / fetch_add / fetch_sub. " \
-                          "For more complex updates, use compareAndSwap or switch to @shared:locked.")
+                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND,
+                     op: op_str)
                    nil
                  else
                    error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)

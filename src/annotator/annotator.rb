@@ -15,6 +15,7 @@ require_relative "phases/declaration_index"
 require_relative "phases/auto_finalization"
 require_relative "phases/deferred_validation"
 require_relative "phases/expression_domains"
+require_relative "phases/import_resolution"
 require_relative "phases/program_finalization"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
@@ -79,6 +80,7 @@ class SemanticAnnotator
   include Annotator::Phases::BuiltinEnvironment
   include Annotator::Phases::DeferredValidation
   include Annotator::Phases::ExpressionDomains
+  include Annotator::Phases::ImportResolution
   include Annotator::Phases::ProgramFinalization
   include Annotator::Phases::TypeRegistration
   include Annotator::Phases::SignatureRegistration
@@ -478,7 +480,7 @@ class SemanticAnnotator
 
     lock_capabilities.each do |capability|
       variable_name = capability.var_name
-      token = capability.var_node.respond_to?(:token) ? capability.var_node.token : node.token
+      token = capability.var_node.token
       @receiver_state.held_locks[variable_name] ||= HeldLockEntry.new(token: token)
       lock_type = capability.lock_identity
       @receiver_state.held_lock_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
@@ -555,6 +557,16 @@ class SemanticAnnotator
   end
 
 private
+
+  sig { returns(T.nilable(ModuleImporter)) }
+  def active_importer
+    @importer
+  end
+
+  sig { returns(String) }
+  def import_source_dir
+    @source_dir
+  end
 
   sig { returns(Semantic::SemanticIdIndex) }
   def semantic_id_index_from_body_summaries
@@ -711,60 +723,6 @@ private
     semantic_function_registry.add_synthetic_definition!(node)
   end
 
-  sig { params(node: AST::RequireNode).returns(NilClass) }
-  def visit_RequireNode(node)
-    unless @importer
-      error!(node, :REQUIRE_NEEDS_IMPORTER)
-    end
-
-    importer = T.must(@importer)
-    mod = if node.kind == :package
-      importer.compile_package(node.path, caller_dir: @source_dir)
-    else
-      importer.compile_file(node.path, caller_dir: @source_dir)
-    end
-    mod = T.must(mod)
-    stamp_type!(node, :Void)
-
-    # Packages are always external — only :pub symbols are importable.
-    same_dir = (node.kind != :package) && (mod.source_dir == @source_dir)
-
-    # Import function signatures that are visible from this call site.
-    mod.global_scope.visible_entries.each do |name, entry|
-      sig = entry.fn_signature
-      next unless sig
-
-      # For package imports: skip functions that were themselves imported from
-      # another module (they have a pre-existing module_alias). Those functions
-      # live in their own package's Zig module and must be accessed through it.
-      next if node.kind == :package && sig.module_alias
-
-      # For local imports: skip re-exporting functions that were imported from
-      # a deeper module. They live in their original namespace's struct wrapper
-      # and the requiring file already has them with the correct module_alias.
-      next if node.kind != :package && sig.module_alias
-
-      vis = sig.visibility || :package
-      importable = (vis == :pub) || (vis == :package && same_dir)
-      next unless importable
-
-      # Tag the signature with the namespace so the transpiler can qualify calls.
-      imported_sig = sig.dup
-      imported_sig.module_alias = node.namespace
-      current_scope.declare(name, nil, imported_sig, false, false, nil, :static)
-    end
-
-    # Import type definitions (structs, unions, enums) respecting visibility.
-    mod.global_scope.types.each do |type_name, type_entry|
-      schema = type_entry.schema
-      vis = schema.visibility || :package
-      next if vis == :private
-      next unless (vis == :pub) || (vis == :package && same_dir)
-      current_scope.declare_type(type_name, schema)
-    end
-    nil
-  end
-
   # Unifies analysis for callables (Functions and Lambdas).
   # Handles scope entry, parameter/capture declaration, body analysis, 
   # cleanup generation, and return-type inference.
@@ -782,17 +740,6 @@ private
     stmts.each do |stmt|
       visit(stmt)
     end
-  end
-
-  # Called after Pass 2 (all function signatures registered).
-  # Verifies that every method requirement declared inside the UNION body
-  # is satisfied by a concrete top-level function with a matching signature.
-  sig { params(node: AST::UnionVariantLit).returns(T.nilable(Symbol)) }
-  def visit_UnionVariantLit(node)
-    schema = lookup_type_schema(node.union_name.to_sym)
-    var_data = validate_union_schema!(node, schema)
-    validate_union_fields!(node, T.must(var_data).typed_fields)
-    stamp_type!(node, node.union_name.to_sym)
   end
 
   # AST node types that DON'T propagate a BG handle's tied lifetime

@@ -369,10 +369,8 @@ module Annotator
         # returned value cannot outlive those captures.
         inline_bg_sources = collect_bg_sources_in_expr(node.value).uniq
         if inline_bg_sources.any?
-          source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
           error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-                 type: node.value.full_type!(context: "inline BG return").to_s,
-                 hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
+            type: node.value.full_type!(context: "inline BG return").to_s)
         end
 
         # RETURN inside a WITH block is forbidden ONLY when the returned value
@@ -385,11 +383,12 @@ module Annotator
         if inside_with_block?
           val = node.value
           if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
-            error!(node, :RETURN_FROM_WITH_SCOPED, name: val.name, hint: "WITH aliases are borrows of locked data and cannot escape their scope.")
+            error!(node, :RETURN_FROM_WITH_SCOPED,
+              name: val.name)
           elsif val.is_a?(AST::GetField) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-            error!(node, :RETURN_FIELD_FROM_WITH_SCOPED, hint: "Field access borrows from the locked data; the borrow cannot escape the WITH scope.")
+            error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
           elsif val.is_a?(AST::GetIndex) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-            error!(node, :RETURN_INDEX_FROM_WITH_SCOPED, hint: "Index access borrows from the locked data; the borrow cannot escape the WITH scope.")
+            error!(node, :RETURN_INDEX_FROM_WITH_SCOPED)
           end
         end
         promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)

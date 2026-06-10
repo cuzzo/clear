@@ -135,6 +135,15 @@ module UnionAnalysis
     end
   end
 
+  sig { params(node: AST::UnionVariantLit).returns(T.nilable(Symbol)) }
+  def visit_UnionVariantLit(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    schema = lookup_type_schema(node.union_name.to_sym)
+    var_data = validate_union_schema!(node, schema)
+    validate_union_fields!(node, T.must(var_data).typed_fields)
+    stamp_type!(node, node.union_name.to_sym)
+  end
+
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.

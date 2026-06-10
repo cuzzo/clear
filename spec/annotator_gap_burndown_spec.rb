@@ -899,9 +899,10 @@ RSpec.describe "annotator branch gap burndown" do
       false
     )
 
-    expect {
-      ann.send(:promote_pipe_to_observable_dest!, decl)
-    }.to raise_error(CompilerError, /Observable terminal mismatch/)
+    ann.send(:promote_pipe_to_observable_dest!, decl)
+    error = direct_errors(ann).find { |err| err[1] == :OBSERVABLE_TERMINAL_MISMATCH }
+    expect(error).not_to be_nil
+    expect(error[3]).to include(lhs: ":count", pipe: ":sum")
   end
 
   it "notes bare affine versioned declarations without a token-local fix" do

@@ -112,6 +112,41 @@ RSpec.describe "architecture invariants: placement-field writers" do
   end
 end
 
+RSpec.describe "architecture invariants: annotator shell" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  it "keeps concrete AST visitors out of SemanticAnnotator except program orchestration" do
+    visitor_names = source("src/annotator/annotator.rb").scan(/^\s*def (visit_[A-Z]\w*)/).flatten
+    expect(visitor_names).to eq(["visit_Program"])
+  end
+
+  it "keeps annotator error hints registry-backed" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].filter_map do |path|
+      matches = File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        "#{path.delete_prefix("#{ARCH_ROOT}/")}:#{index + 1}" if line.match?(/hint:\s*"/)
+      end
+      matches unless matches.empty?
+    end.flatten
+
+    expect(offenders).to be_empty,
+      -> { "Annotator local hint strings should move to DiagnosticRegistry:\n  - #{offenders.join("\n  - ")}" }
+  end
+
+  it "routes annotator source errors through error helpers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].filter_map do |path|
+      matches = File.readlines(path, chomp: true).each_with_index.filter_map do |line, index|
+        "#{path.delete_prefix("#{ARCH_ROOT}/")}:#{index + 1}" if line.include?("CompilerError.new")
+      end
+      matches unless matches.empty?
+    end.flatten
+
+    expect(offenders).to be_empty,
+      -> { "Annotator source errors should use error!/fixable!:\n  - #{offenders.join("\n  - ")}" }
+  end
+end
+
 RSpec.describe "architecture invariants: MIR pass order" do
   def source(rel)
     File.read(File.join(ARCH_ROOT, rel))

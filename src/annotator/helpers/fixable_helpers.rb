@@ -677,10 +677,9 @@ module FixableHelper
   #
   # `code` selects the error code that fires when the fix isn't
   # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
-  # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
-  # the human-readable migration text appended to the error template.
-  sig { params(fn_node: AST::FunctionDef, code: Symbol, hint: String).returns(NilClass) }
-  def emit_reentrant_error!(fn_node, code, hint:)
+  # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case).
+  sig { params(fn_node: AST::FunctionDef, code: Symbol).returns(NilClass) }
+  def emit_reentrant_error!(fn_node, code)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
     fix = nil
@@ -694,9 +693,9 @@ module FixableHelper
         )]
       )
     end
-    return error!(fn_node, code, name: fn_node.name, hint: hint) unless fix
+    return error!(fn_node, code, name: fn_node.name) unless fix
     fixable!(fn_node,
-      message: T.must(DiagnosticRegistry.format(code, name: fn_node.name, hint: hint)),
+      message: T.must(DiagnosticRegistry.format(code, name: fn_node.name)),
       category: :reentrance,
       level: :error,
       fixes: [fix])

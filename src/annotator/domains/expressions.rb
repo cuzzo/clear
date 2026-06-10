@@ -259,7 +259,9 @@ module Annotator
 
         if ti.primitive? && !is_atomic_primitive && node.capability?
           cap_name = node.sync || node.ownership || node.layout
-          error!(node, :CAPABILITY_ON_PRIMITIVE, cap: cap_name, type: base_type, hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
+          error!(node, :CAPABILITY_ON_PRIMITIVE,
+            cap: cap_name,
+            type: base_type)
         end
 
         # Struct atomics need AtomicPtr snapshot semantics; direct atomic ops only

@@ -383,8 +383,7 @@ module Annotator
         has_guard = !capability_plan.guarded.empty?
         has_fallible = has_guard || is_snapshot_txn || !lock_capabilities.empty?
         unless has_fallible
-          error!(node, :ON_RETRY_NEEDS_FALLIBLE_CAP, hint: "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
-                 "The declared capabilities never produce a lock-acquire error.")
+          error!(node, :ON_RETRY_NEEDS_FALLIBLE_CAP)
         end
 
         resolve_error_selectors!(node, clause, is_snapshot_txn)
@@ -636,8 +635,7 @@ module Annotator
           end
 
           if analysis_result.has_non_escaping_capture
-            error!(node, :DO_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                   "Move the DO block outside the WITH block, or use COPY to get an owned value.")
+            error!(node, :DO_CAPTURES_WITH_SCOPED)
           end
 
           analysis = (!branch.pinned && !branch.parallel && analysis_result.has_shared) ? analysis_result : nil
@@ -681,8 +679,7 @@ module Annotator
         node.capture_analysis = stream_analysis_result
 
         if stream_analysis_result.has_non_escaping_capture
-          error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                 "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
+          error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED)
         end
       end
 
@@ -756,8 +753,7 @@ module Annotator
         # WITH-scoped (BORROWED/RESTRICT) bindings cannot escape into fibers.
         # The fiber may outlive the WITH block, turning the alias into a dangling pointer.
         if analysis_result.has_non_escaping_capture
-          error!(node, :BG_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                 "Move the BG block outside the WITH block, or use COPY to get an owned value.")
+          error!(node, :BG_CAPTURES_WITH_SCOPED)
         end
 
         # Auto-pin detection
@@ -765,8 +761,7 @@ module Annotator
 
         # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
         if prev_bg_pinned && !node.pinned && analysis_result.has_outer_ref
-          error!(node, :BG_PINNED_CAPTURE_MISMATCH, hint: "Thread-local memory cannot escape to a stealable fiber. " \
-                 "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
+          error!(node, :BG_PINNED_CAPTURE_MISMATCH)
         end
 
         # Auto-pin when shared state is captured.

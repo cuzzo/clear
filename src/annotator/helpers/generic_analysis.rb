@@ -329,8 +329,7 @@ module GenericAnalysis
     error!(node, :POLY_SHARED_INCONSISTENT,
       fn: node.name,
       first: first[:name], first_cap: shared_call_capability_display(first[:type]),
-      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]),
-      hint: "")
+      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]))
   end
 
   # Recursively match param_type against actual_type to bind type params.

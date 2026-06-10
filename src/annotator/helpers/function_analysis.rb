@@ -234,12 +234,10 @@ module FunctionAnalysis
         case node.reentrant
         when :non_reentrant
           unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
-            emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE,
-              hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).")
+            emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE)
           end
         when nil
-          emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE,
-            hint: "Add `EFFECTS REENTRANT` to the function signature to allow this.")
+          emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE)
         end
 
         validate_tail_call!(node, body_scan) if node.tail_call
@@ -249,15 +247,13 @@ module FunctionAnalysis
           if plan
             node.thunk_plan = plan
           else
-            error!(node, :REENTRANCE_THUNK_NON_TAIL, name: node.name, hint: "a shape this phase does not yet recognize. Supported: simple " \
-                   "recurrence (zero or more `IF base -> RETURN const;` followed by a final " \
-                   "`RETURN expr <op> #{node.name}(args);`). Wider shapes (multi-recursion, " \
-                   "arbitrary control flow with recursion) land in later sub-phases. For " \
-                   "now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.")
+            error!(node, :REENTRANCE_THUNK_NON_TAIL,
+              name: node.name)
           end
         end
       elsif node.tail_call
-        error!(node, :REENTRANCE_TAIL_CALL_NOT_RECURSIVE, name: node.name, hint: "Remove :tailCall - it only applies to self-recursive functions.")
+        error!(node, :REENTRANCE_TAIL_CALL_NOT_RECURSIVE,
+          name: node.name)
       elsif node.reentrance_kind == :reentrant_thunk
         # Mutual :THUNK validation runs after the complete call graph exists.
       end

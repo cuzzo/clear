@@ -1170,23 +1170,27 @@ module DiagnosticRegistry
     # Reentrance
     REENTRANCE_DIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' directly calls itself. %{hint}",
+      template: "Reentrancy Error: '%{name}' directly calls itself. Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
       summary:  "Function calls itself directly without an `@reentrant` annotation declaring the recursion budget.",
+      fix_hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
     },
     REENTRANCE_INDIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' calls itself recursively. %{hint}",
+      template: "Reentrancy Error: '%{name}' calls itself recursively. Add `EFFECTS REENTRANT` to the function signature to allow this.",
       summary:  "Function reaches itself through a call chain without declaring the recursion budget.",
+      fix_hint: "Add `EFFECTS REENTRANT` to the function signature to allow this.",
     },
     REENTRANCE_THUNK_NON_TAIL: {
       severity: :error, category: :reentrance,
-      template: "EFFECTS REENTRANT:THUNK on '%{name}' has non-tail recursion in %{hint}",
+      template: "EFFECTS REENTRANT:THUNK on '%{name}' has non-tail recursion in a shape this phase does not yet recognize. Supported: simple recurrence (zero or more `IF base -> RETURN const;` followed by a final `RETURN expr <op> %{name}(args);`). Wider shapes (multi-recursion, arbitrary control flow with recursion) land in later sub-phases. For now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.",
       summary:  "EFFECTS REENTRANT:THUNK requires the recursion to be in tail position; this call isn't.",
+      fix_hint: "a shape this phase does not yet recognize. Supported: simple recurrence (zero or more `IF base -> RETURN const;` followed by a final `RETURN expr <op> %{name}(args);`). Wider shapes (multi-recursion, arbitrary control flow with recursion) land in later sub-phases. For now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.",
     },
     REENTRANCE_TAIL_CALL_NOT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "@reentrant:tailCall on '%{name}' but the function is not recursive. %{hint}",
+      template: "@reentrant:tailCall on '%{name}' but the function is not recursive. Remove :tailCall - it only applies to self-recursive functions.",
       summary:  "`@reentrant:tailCall` declared on a function that doesn't recurse.",
+      fix_hint: "Remove :tailCall - it only applies to self-recursive functions.",
     },
 
     # IF / MATCH / WHEN
@@ -1327,20 +1331,22 @@ module DiagnosticRegistry
     },
     RETURN_FROM_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "Cannot RETURN '%{name}' from inside a WITH block. %{hint}",
+      template: "Cannot RETURN '%{name}' from inside a WITH block. Either RETURN COPY alias (breaks the borrow), or restructure so the value's lifetime exceeds the WITH (move the value out of the cell before the WITH body ends).",
       summary:  "WITH-scoped aliases (`AS x`) are non-escaping — they can't be returned.",
       cause: "A WITH ... AS alias block creates a scoped binding that doesn't outlive the WITH body. Returning the alias would let the caller see a value whose backing storage is gone.",
       fix_hint: "Either RETURN COPY alias (breaks the borrow), or restructure so the value's lifetime exceeds the WITH (move the value out of the cell before the WITH body ends).",
     },
     RETURN_FIELD_FROM_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "Cannot RETURN a field of a WITH-scoped binding. %{hint}",
+      template: "Cannot RETURN a field of a WITH-scoped binding. Field access borrows from the locked data; the borrow cannot escape the WITH scope.",
       summary:  "Field of a WITH-scoped binding can't be returned (would outlive the WITH).",
+      fix_hint: "Field access borrows from the locked data; the borrow cannot escape the WITH scope.",
     },
     RETURN_INDEX_FROM_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "Cannot RETURN an indexed access of a WITH-scoped binding. %{hint}",
+      template: "Cannot RETURN an indexed access of a WITH-scoped binding. Index access borrows from the locked data; the borrow cannot escape the WITH scope.",
       summary:  "Indexed access on a WITH-scoped binding can't be returned (would outlive the WITH).",
+      fix_hint: "Index access borrows from the locked data; the borrow cannot escape the WITH scope.",
     },
 
     # Function calls
@@ -1353,7 +1359,7 @@ module DiagnosticRegistry
     # Atomic compound ops
     ATOMIC_NO_MUL_DIV_COMPOUND: {
       severity: :error, category: :capability,
-      template: "Atomic primitives do not support `%{op}`. %{hint}",
+      template: "Atomic primitives do not support `%{op}`. Use a CAS loop via `c.compareAndSwap(old, new)` to update the cell atomically with an arbitrary computation, OR switch the binding from `@shared:atomic` to `@shared:locked` and do the math inside `WITH EXCLUSIVE c AS x { x.v *= 2; }` — the lock makes the read-modify-write atomic.",
       summary:  "Compound `*=` / `/=` not available on `@shared:atomic` targets.",
       cause: "`@shared:atomic` lowers to single-instruction atomic primitives (load, store, fetchAdd, fetchSub, AND/OR/XOR). Multiplication and division have no single-instruction atomic form on any mainstream architecture, so they're rejected at compile time rather than silently lowered to a non-atomic load+op+store race.",
       fix_hint: "Use a CAS loop via `c.compareAndSwap(old, new)` to update the cell atomically with an arbitrary computation, OR switch the binding from `@shared:atomic` to `@shared:locked` and do the math inside `WITH EXCLUSIVE c AS x { x.v *= 2; }` — the lock makes the read-modify-write atomic.",
@@ -1578,8 +1584,9 @@ module DiagnosticRegistry
     # Capability / MOVE / GIVE / COPY / SHARE / LINK / FREEZE / CLONE / RESOLVE
     CAPABILITY_ON_PRIMITIVE: {
       severity: :error, category: :capability,
-      template: "Capability @%{cap} cannot be applied to primitive type %{type}. %{hint}",
+      template: "Capability @%{cap} cannot be applied to primitive type %{type}. Wrap in a STRUCT (e.g. STRUCT Wrapper { value: %{type} }) and apply the capability to the struct.",
       summary:  "Sigils that wrap a value (`@multiowned`, `@shared`, `@locked`, ...) only apply to heap-managed types.",
+      fix_hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: %{type} }) and apply the capability to the struct.",
     },
     MOVE_NEEDS_IDENTIFIER: {
       severity: :error, category: :ownership,
@@ -1663,8 +1670,9 @@ module DiagnosticRegistry
     # ON / RETRY / SELECTORS
     ON_RETRY_NEEDS_FALLIBLE_CAP: {
       severity: :error, category: :capability,
-      template: "ON / RETRY clause requires a WITH capability that can fail %{hint}",
+      template: "ON / RETRY clause requires a WITH capability that can fail (EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). The declared capabilities never produce a lock-acquire error.",
       summary:  "ON / RETRY only attaches to WITH captures whose acquire can fail (locks with timeouts, snapshots, etc).",
+      fix_hint: "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). The declared capabilities never produce a lock-acquire error.",
     },
     SELECTORS_NO_MATCH: {
       severity: :error, category: :capability,
@@ -1675,8 +1683,9 @@ module DiagnosticRegistry
     # BG / DO block
     DO_CAPTURES_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "DO block captures a WITH-scoped (BORROWED/RESTRICT) binding. %{hint}",
+      template: "DO block captures a WITH-scoped (BORROWED/RESTRICT) binding. WITH bindings are stack aliases that become invalid when the WITH block exits. Move the DO block outside the WITH block, or use COPY to get an owned value.",
       summary:  "DO branches can't capture WITH-scoped bindings — they must end with the WITH.",
+      fix_hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. Move the DO block outside the WITH block, or use COPY to get an owned value.",
     },
     BG_STREAM_NO_YIELD: {
       severity: :error, category: :type,
@@ -1690,8 +1699,9 @@ module DiagnosticRegistry
     },
     BG_STREAM_CAPTURES_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "BG STREAM block captures a WITH-scoped (BORROWED/RESTRICT) binding. %{hint}",
+      template: "BG STREAM block captures a WITH-scoped (BORROWED/RESTRICT) binding. WITH bindings are stack aliases that become invalid when the WITH block exits. Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.",
       summary:  "BG STREAM fibers outlive the WITH — they can't capture WITH-scoped bindings.",
+      fix_hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.",
     },
     YIELD_OUTSIDE_BG_STREAM: {
       severity: :error, category: :type,
@@ -1705,15 +1715,16 @@ module DiagnosticRegistry
     },
     BG_CAPTURES_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "BG block captures a WITH-scoped (BORROWED/RESTRICT) binding. %{hint}",
+      template: "BG block captures a WITH-scoped (BORROWED/RESTRICT) binding. Either capture a longer-lived value (the original binding the WITH aliases, or a COPY), restructure so the BG runs inside the WITH and finishes before it exits, or use SHARE to extend the lifetime via Arc.",
       summary:  "BG fibers outlive the WITH — they can't capture WITH-scoped bindings.",
       cause: "A BG block captured a binding whose lifetime is bounded by an enclosing WITH alias. The fiber may outlive the WITH body — the capture would dangle.",
       fix_hint: "Either capture a longer-lived value (the original binding the WITH aliases, or a COPY), restructure so the BG runs inside the WITH and finishes before it exits, or use SHARE to extend the lifetime via Arc.",
     },
     BG_PINNED_CAPTURE_MISMATCH: {
       severity: :error, category: :capability,
-      template: "BG block inside @pinned scope captures local variables but is not @pinned. %{hint}",
+      template: "BG block inside @pinned scope captures local variables but is not @pinned. Thread-local memory cannot escape to a stealable fiber. Add @pinned to this BG block, or avoid capturing variables from the pinned scope.",
       summary:  "BG blocks inside `@pinned` scopes that capture locals must themselves be `@pinned`.",
+      fix_hint: "Thread-local memory cannot escape to a stealable fiber. Add @pinned to this BG block, or avoid capturing variables from the pinned scope.",
     },
 
     # NEXT / move / borrow
@@ -1769,25 +1780,29 @@ module DiagnosticRegistry
     # EFFECTS REENTRANT:TAIL_CALL specifics
     TAIL_CALL_NEEDS_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "EFFECTS REENTRANT:TAIL_CALL on '%{fn}' requires at least one %{hint}",
+      template: "EFFECTS REENTRANT:TAIL_CALL on '%{fn}' requires at least one RETURN that directly calls '%{fn}' in tail position (e.g., RETURN %{fn}(...)). The recursive call cannot be wrapped in an expression.",
       summary:  "TAIL_CALL requires the function to actually contain a tail-recursive call.",
+      fix_hint: "RETURN that directly calls '%{fn}' in tail position (e.g., RETURN %{fn}(...)). The recursive call cannot be wrapped in an expression.",
     },
     TAIL_CALL_NOT_TAIL_POSITION: {
       severity: :error, category: :reentrance,
-      template: "EFFECTS REENTRANT:TAIL_CALL: '%{fn}' is called in non-tail position. %{hint}",
+      template: "EFFECTS REENTRANT:TAIL_CALL: '%{fn}' is called in non-tail position. All recursive self-calls must be the ENTIRE return expression (e.g., RETURN %{fn}(...)). Non-tail recursion would consume the fiber stack on every invocation. If recursion is genuinely non-tail, declare ':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.",
       summary:  "TAIL_CALL declared but the recursive call site isn't in tail position.",
+      fix_hint: "All recursive self-calls must be the ENTIRE return expression (e.g., RETURN %{fn}(...)). Non-tail recursion would consume the fiber stack on every invocation. If recursion is genuinely non-tail, declare ':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.",
     },
 
     # Stack safety
     STACK_SAFETY_MUTUAL_RECURSION: {
       severity: :error, category: :reentrance,
-      template: "Stack safety: this fiber transitively calls '%{callee}' %{hint}",
+      template: "Stack safety: this fiber transitively calls '%{callee}' which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds compose as a product across counters and can't be statically bounded; the spawn site must be `@service` (OS thread). Either declare `@service` explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).",
       summary:  "Stack-tier analysis found mutual recursion that can't be bounded.",
+      fix_hint: "which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds compose as a product across counters and can't be statically bounded; the spawn site must be `@service` (OS thread). Either declare `@service` explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).",
     },
     STACK_SAFETY_USER_SIZE_TOO_SMALL: {
       severity: :error, category: :reentrance,
-      template: "Stack safety: @%{size} (%{budget} bytes) %{hint}",
+      template: "Stack safety: @%{size} (%{budget} bytes) is too small for this fiber. Call-graph analysis requires at least @%{computed}. Use @%{computed} (or @service for OS-thread). (`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented but not yet wired through the compiler.)",
       summary:  "User-declared stack tier is too small for the fiber's worst-case path.",
+      fix_hint: "is too small for this fiber. Call-graph analysis requires at least @%{computed}. Use @%{computed} (or @service for OS-thread). (`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented but not yet wired through the compiler.)",
     },
     STACK_SAFETY_STACK_ALIAS: {
       severity: :warning, category: :reentrance,
@@ -2280,6 +2295,13 @@ module DiagnosticRegistry
       cause: "@observable layers a publish/subscribe channel on top of a tense source — every write fans out to subscribers. Some other capabilities are incompatible because they impose a representation that the publish layer can't observe atomically (e.g., `@indirect:atomic` already CAS-publishes a different snapshot, `@locked` blocks subscribers).",
       fix_hint: "Drop one of the conflicting wrappers (typically @observable if the consumer doesn't need diff feeds), OR pick a different sync model: `@versioned` cells get observable-like snapshots via WITH SNAPSHOT without the publish layer.",
     },
+    OBSERVABLE_TERMINAL_MISMATCH: {
+      severity: :error, category: :type,
+      template: "Observable terminal mismatch: LHS stamped %{lhs}, pipe analyzer produced %{pipe}",
+      summary:  "Observable destination terminal disagrees with the pipeline terminal analyzer.",
+      cause: "The observable destination already carried a terminal stamp that disagreed with the pipeline analyzer. Choosing either side would hide a stale phase fact, so annotation rejects the program.",
+      fix_hint: "Treat this as a compiler invariant failure unless the source explicitly declared conflicting observable shapes. The pipeline analyzer should be the authority for terminal kind.",
+    },
     SOA_NEEDS_FIXED_ARRAY: {
       severity: :error, category: :type,
       template: "@soa requires a fixed-size array type (e.g. Particle[10000]@soa)",
@@ -2302,7 +2324,7 @@ module DiagnosticRegistry
     },
     POLY_SHARED_INCONSISTENT: {
       severity: :error, category: :type,
-      template: "Type Error: polymorphic @shared parameters in '%{fn}' must use the same synchronization capability. Parameter '%{first}' is %{first_cap}, but parameter '%{second}' is %{second_cap}.%{hint}",
+      template: "Type Error: polymorphic @shared parameters in '%{fn}' must use the same synchronization capability. Parameter '%{first}' is %{first_cap}, but parameter '%{second}' is %{second_cap}. Pick one sync family across all `@shared` params (`%{first_cap}` or `%{second_cap}`), or restrict the function to a single concrete family by adding `REQUIRES p1: <family>, p2: <family>` with the same family for both. If the params genuinely belong to different families, split the function into separate specialised versions.",
       summary:  "Polymorphic @shared parameters disagree on synchronization capability.",
       cause: "When a function takes multiple `@shared` parameters and dispatches polymorphically (via REQUIRES with multiple sync families), every shared param must agree on its sync family. Allowing them to diverge would force per-pair monomorphisation across families — the cross-product blows up combinatorially.",
       fix_hint: "Pick one sync family across all `@shared` params (`%{first_cap}` or `%{second_cap}`), or restrict the function to a single concrete family by adding `REQUIRES p1: <family>, p2: <family>` with the same family for both. If the params genuinely belong to different families, split the function into separate specialised versions.",
