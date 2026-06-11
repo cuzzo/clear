@@ -196,4 +196,6 @@ module TestAnnotation
       (function_call_graph[name] || []).each { |c| queue << c }
     end
   end
+  private :validate_strict_io!
+
 end

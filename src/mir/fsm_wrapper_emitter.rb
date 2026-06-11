@@ -714,4 +714,59 @@ module FsmWrapperEmitter
       stripped.strip.empty? ? "" : pad + stripped
     }.join("\n")
   end
+  private :arm_uses_continue?
+  private :empty?
+  private :indent_block
+  private :render_b1_body
+  private :render_b1_ctx_struct
+  private :render_b1_resume_fn
+  private :render_body_items
+  private :render_ctx_struct
+  private :render_destroy_actions
+  private :render_destroy_cleanup_action
+  private :render_destroy_lock_action
+  private :render_destroy_stmt_action
+  private :render_destroy_task
+  private :render_dispatch
+  private :render_dispatch_arm
+  private :render_fsm_spawn_call
+  private :render_fsm_state_field_decls
+  private :render_generic_body
+  private :render_generic_ctx_struct
+  private :render_io_body
+  private :render_member_fn
+  private :render_resume_fn_cleanups
+  private :render_run_body
+  private :render_spawn_setup
+  private :render_step
+  private :render_struct_init_fields
+  private :render_tail
+  private_class_method :arm_uses_continue?
+  private_class_method :empty?
+  private_class_method :indent_block
+  private_class_method :render_b1_body
+  private_class_method :render_b1_ctx_struct
+  private_class_method :render_b1_resume_fn
+  private_class_method :render_body_items
+  private_class_method :render_ctx_struct
+  private_class_method :render_destroy_actions
+  private_class_method :render_destroy_cleanup_action
+  private_class_method :render_destroy_lock_action
+  private_class_method :render_destroy_stmt_action
+  private_class_method :render_destroy_task
+  private_class_method :render_dispatch
+  private_class_method :render_dispatch_arm
+  private_class_method :render_fsm_spawn_call
+  private_class_method :render_fsm_state_field_decls
+  private_class_method :render_generic_body
+  private_class_method :render_generic_ctx_struct
+  private_class_method :render_io_body
+  private_class_method :render_member_fn
+  private_class_method :render_resume_fn_cleanups
+  private_class_method :render_run_body
+  private_class_method :render_spawn_setup
+  private_class_method :render_step
+  private_class_method :render_struct_init_fields
+  private_class_method :render_tail
+
 end

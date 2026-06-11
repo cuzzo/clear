@@ -295,5 +295,10 @@ module FsmTransform
       :resolve_next
     private_class_method :resolve_io,
       :resolve_next
-  end
+    private :ctx_field_decl
+  private :state_field_decl
+  private_class_method :ctx_field_decl
+  private_class_method :state_field_decl
+
+end
 end

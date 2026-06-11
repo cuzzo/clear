@@ -484,4 +484,43 @@ module PredicateRewriter
 
   private :emit_length_lint
   private_class_method :emit_length_lint
+  private :apply_edits
+  private :compute_compare_span
+  private :expand_paren_wrap
+  private :expression_terminator_op?
+  private :length_call?
+  private :literal_node?
+  private :literal_source_length
+  private :match_length_compare
+  private :match_nil_compare
+  private :match_pattern
+  private :nil_literal?
+  private :pick_length_predicate
+  private :push_always_finding
+  private :receiver_source_for_method_call
+  private :rightmost_compact_offset
+  private :terminal?
+  private :walk
+  private :walk_lint
+  private :walk_to_expr_end
+  private_class_method :apply_edits
+  private_class_method :compute_compare_span
+  private_class_method :expand_paren_wrap
+  private_class_method :expression_terminator_op?
+  private_class_method :length_call?
+  private_class_method :literal_node?
+  private_class_method :literal_source_length
+  private_class_method :match_length_compare
+  private_class_method :match_nil_compare
+  private_class_method :match_pattern
+  private_class_method :nil_literal?
+  private_class_method :pick_length_predicate
+  private_class_method :push_always_finding
+  private_class_method :receiver_source_for_method_call
+  private_class_method :rightmost_compact_offset
+  private_class_method :terminal?
+  private_class_method :walk
+  private_class_method :walk_lint
+  private_class_method :walk_to_expr_end
+
 end

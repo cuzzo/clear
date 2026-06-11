@@ -56,25 +56,25 @@ RSpec.describe "ThunkTransform module wiring" do
 
     it "passes for plain integer return types" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Int64))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:Int64))
       }.not_to raise_error
     end
 
     it "passes for void return type" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:Void))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:Void))
       }.not_to raise_error
     end
 
     it "raises a directed error message when the return type is fallible" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/THUNK trampoline.*'deep'.*fallible/)
     end
 
     it "names the helpers a future maintainer must extend" do
       expect {
-        ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, Type.new(:"!Int64"))
+        ThunkTransform::Emit.send(:assert_non_fallible_ret!, fake_fn, Type.new(:"!Int64"))
       }.to raise_error(/build_trampoline.*build_mutual_trampoline.*errdefer/m)
     end
   end
@@ -262,7 +262,7 @@ RSpec.describe "ThunkTransform emit coverage" do
   end
 
   it "binds thunk frame params structurally before emitting Zig" do
-    context = ThunkTransform::Emit.current_frame_context(fn("sample", params: [param("n"), param("name")]))
+    context = ThunkTransform::Emit.send(:current_frame_context, fn("sample", params: [param("n"), param("name")]))
     mir = MIR::BinOp.new(
       "+",
       MIR::Ident.new("n"),
@@ -273,13 +273,13 @@ RSpec.describe "ThunkTransform emit coverage" do
       )
     )
 
-    rebound = ThunkTransform::Emit.bind_frame_refs(mir, context)
+    rebound = ThunkTransform::Emit.send(:bind_frame_refs, mir, context)
 
     expect(FakeThunkLowering.new.emit_expr(rebound)).to eq("current.n + obj.n + name_extra")
   end
 
   it "binds nested thunk call, method, index, and wrapper expressions structurally" do
-    context = ThunkTransform::Emit.mutual_frame_context(fn("sample", params: [param("n"), param("items")]))
+    context = ThunkTransform::Emit.send(:mutual_frame_context, fn("sample", params: [param("n"), param("items")]))
     call = MIR::Call.new(
       "next",
       [
@@ -296,7 +296,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       MIR::CallableContract.no_ownership(1)
     )
 
-    rebound = ThunkTransform::Emit.bind_frame_refs(
+    rebound = ThunkTransform::Emit.send(:bind_frame_refs,
       MIR::TryCatch.new(MIR::TryExpr.new(call), MIR::Deref.new(MIR::Ident.new("items")), nil),
       context
     )
@@ -304,7 +304,7 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(FakeThunkLowering.new.emit_expr(rebound)).
       to eq("try next(f.items[f.n].value(&f.n.?)) catch f.items.*")
 
-    casted = ThunkTransform::Emit.bind_frame_refs(
+    casted = ThunkTransform::Emit.send(:bind_frame_refs,
       MIR::Cast.new(MIR::UnaryOp.new("-", MIR::Ident.new("n")), "i64", :as),
       context
     )
@@ -386,15 +386,15 @@ RSpec.describe "ThunkTransform recursive splitter helpers" do
   it "walks arrays while looking for mutual-recursion calls" do
     call = AST::FuncCall.new(tok, "even", [])
 
-    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
-    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x")], ["even"])).to be(false)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_any_call?, [AST::Identifier.new(tok, "x")], ["even"])).to be(false)
   end
 
   it "walks arrays while looking for self-recursion calls" do
     call = AST::FuncCall.new(tok, "fact", [])
 
-    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x"), call], "fact")).to be(true)
-    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x")], "fact")).to be(false)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_self_call?, [AST::Identifier.new(tok, "x"), call], "fact")).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.send(:contains_self_call?, [AST::Identifier.new(tok, "x")], "fact")).to be(false)
   end
 end
 

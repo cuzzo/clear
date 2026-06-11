@@ -62,7 +62,7 @@ RSpec.describe DiagnosticExamples do
         "describe \"example\" do\n",
       ]
 
-      scan = DiagnosticExamples.scan_fix_lines(lines, 1)
+      scan = DiagnosticExamples.send(:scan_fix_lines, lines, 1)
 
       expect(scan.fix_lines).to eq([
         "Add the missing argument.",

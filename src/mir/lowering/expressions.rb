@@ -77,15 +77,21 @@ module MIRLoweringExpressions
     const :union_payload_zig, T.nilable(String)
     const :indirect, T::Boolean
 
+    private
+
     sig { returns(T::Boolean) }
     def union_payload?
       union_payload
     end
 
+    public
+
     sig { returns(MIR::Node) }
     def value
       value_for(target)
     end
+
+    private
 
     sig { params(root: MIR::Node).returns(MIR::Node) }
     def value_for(root)
@@ -96,8 +102,6 @@ module MIRLoweringExpressions
       end
       indirect ? MIR::Deref.new(result) : result
     end
-
-    private
 
     sig { params(root: MIR::Node).returns(MIR::Node) }
     def field_root(root)
@@ -2225,5 +2229,73 @@ module MIRLoweringExpressions
   end
 
   private :emit_optional_comparison_then_expr
+
+  private :aggregate_field_wants_dynamic_slice?
+  private :atomic_capture_load?
+  private :binary_int_arithmetic_facts
+  private :binary_operand_facts
+  private :binary_operation_plan
+  private :binary_power_type_arg
+  private :classify_binary_operation
+  private :classify_optional_binary_comparison
+  private :classify_string_binary_operation
+  private :classify_unit_variant_comparison
+  private :comptime_number_literal?
+  private :copy_source_zig_type
+  private :copy_type_capabilities
+  private :direct_binary_builtin
+  private :emit_binary_operation_plan
+  private :emit_symbol_binary_comparison
+  private :field_access_path
+  private :field_access_plan
+  private :float_coercion?
+  private :float_literal_text
+  private :index_access_plan
+  private :index_access_value
+  private :index_collection_value
+  private :integer_division?
+  private :invalid_union_equality_type
+  private :lower_call_smooth
+  private :lower_collect_smooth
+  private :lower_complex_smooth
+  private :lower_direct_or_builtin_index_get
+  private :lower_identifier
+  private :lower_lazy_boolean_op
+  private :lower_or_rescue
+  private :lower_recover_smooth
+  private :lower_smooth
+  private :lower_smooth_call_rhs
+  private :lower_smooth_func_call
+  private :lower_smooth_identifier_call
+  private :materialize_or_fallback_value
+  private :move_mark_field!
+  private :or_exit_bc_reassign
+  private :or_exit_error_update_stmts
+  private :or_exit_facts
+  private :or_exit_scope
+  private :or_fallback_access_path?
+  private :or_fallback_expected_type
+  private :or_pass_fallback
+  private :or_rescue_facts
+  private :pick_equality_helper
+  private :recursive_field_copy_required?
+  private :signed_integer_modulo?
+  private :slice_element_zig_type
+  private :smooth_collect_block
+  private :smooth_collect_type
+  private :smooth_snapshot_stmts
+  private :string_comparison_operand
+  private :string_comparison_operands
+  private :string_comparison_operator
+  private :struct_field_wants_slice?
+  private :struct_lit_field_types
+  private :struct_lit_type_subst
+  private :substitute_mir_type
+  private :synthetic_pipeline_binding_name?
+  private :try_lower_equality_assert
+  private :type_info_for
+  private :union_variant_lit_field_types
+  private :unit_variant_access
+  private :unit_variant_constructor
 
 end

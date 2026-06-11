@@ -156,7 +156,7 @@ RSpec.describe Pprof::Profile do
 
   it 'gzips the output with a valid gzip magic' do
     pb = described_class.new
-    bytes = pb.encode_gzip
+    bytes = pb.send(:encode_gzip)
     expect(bytes[0, 2].bytes).to eq([0x1f, 0x8b])
     # Round-trip through Zlib to confirm
     inflated = Zlib::GzipReader.new(StringIO.new(bytes)).read
@@ -175,7 +175,7 @@ RSpec.describe PprofConverter do
 
   describe '.convert_alloc' do
     it 'returns nil when alloc.txt is missing' do
-      expect(described_class.convert_alloc(@profile_dir, nil)).to be_nil
+      expect(described_class.send(:convert_alloc, @profile_dir, nil)).to be_nil
     end
 
     it 'writes heap.pb.gz with four sample-type columns' do
@@ -184,7 +184,7 @@ RSpec.describe PprofConverter do
         0x401234        1000      40000  500    20000       500
         0x402000        2000      80000  2000   80000       0
       PROF
-      out = described_class.convert_alloc(@profile_dir, nil)
+      out = described_class.send(:convert_alloc, @profile_dir, nil)
       expect(out).to eq(File.join(@profile_dir, 'heap.pb.gz'))
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
@@ -196,7 +196,7 @@ RSpec.describe PprofConverter do
       File.write(File.join(@profile_dir, 'alloc.txt'), <<~PROF)
         0x401234   1000   40000   200   8000   800
       PROF
-      out = described_class.convert_alloc(@profile_dir, nil)
+      out = described_class.send(:convert_alloc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -210,7 +210,7 @@ RSpec.describe PprofConverter do
         # alloc-profile v2 (multi-frame, comma-separated leaf-first)
         0x401234,0x402000,0x403000   1000  40000  500  20000  500
       PROF
-      out = described_class.convert_alloc(@profile_dir, nil)
+      out = described_class.send(:convert_alloc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       # Three Locations (one per unique addr), three Functions
@@ -227,7 +227,7 @@ RSpec.describe PprofConverter do
         0x10,0x20    100  1000  0  0  100
         0x30,0x20    100  1000  0  0  100
       PROF
-      out = described_class.convert_alloc(@profile_dir, nil)
+      out = described_class.send(:convert_alloc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       # 0x20 should be ONE Location/Function reused by both samples.
@@ -240,7 +240,7 @@ RSpec.describe PprofConverter do
       File.write(File.join(@profile_dir, 'alloc.txt'), <<~PROF)
         0xdeadbeef   1   16   0   0   1
       PROF
-      out = described_class.convert_alloc(@profile_dir, nil)
+      out = described_class.send(:convert_alloc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       # The address 0xdeadbeef should appear in string_table.
       expect(bytes).to include('0xdeadbeef')
@@ -250,7 +250,7 @@ RSpec.describe PprofConverter do
   describe '.convert_locks' do
     it 'returns nil for empty input' do
       File.write(File.join(@profile_dir, 'locks.txt'), "# header only\n")
-      expect(described_class.convert_locks(@profile_dir, nil)).to be_nil
+      expect(described_class.send(:convert_locks, @profile_dir, nil)).to be_nil
     end
 
     it 'sums read+write contention into the contentions column' do
@@ -258,7 +258,7 @@ RSpec.describe PprofConverter do
         # addr  acq cont total_wait max_wait total_hold max_hold r_acq r_cont r_wait r_max
         0x500   100 5    50000      1000     200000     5000     50    2      10000  500
       PROF
-      out = described_class.convert_locks(@profile_dir, nil)
+      out = described_class.send(:convert_locks, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -272,7 +272,7 @@ RSpec.describe PprofConverter do
       content = "# lock-profile v3\n" \
                 "0x500#{tab}100#{tab}5#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n"
       File.write(File.join(@profile_dir, 'locks.txt'), content)
-      out = described_class.convert_locks(@profile_dir, nil)
+      out = described_class.send(:convert_locks, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -286,7 +286,7 @@ RSpec.describe PprofConverter do
                 "0x500#{tab}100#{tab}5#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0" \
                 "#{tab}0xC1,0xC2,0xC3\n"
       File.write(File.join(@profile_dir, 'locks.txt'), content)
-      out = described_class.convert_locks(@profile_dir, nil)
+      out = described_class.send(:convert_locks, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -301,7 +301,7 @@ RSpec.describe PprofConverter do
                 "0x500#{tab}40#{tab}2#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0xA\n" \
                 "0x500#{tab}10#{tab}1#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0xB\n"
       File.write(File.join(@profile_dir, 'locks.txt'), content)
-      out = described_class.convert_locks(@profile_dir, nil)
+      out = described_class.send(:convert_locks, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       expect(decoded[2].length).to eq(2)        # one Sample per (lock,caller) row
@@ -313,7 +313,7 @@ RSpec.describe PprofConverter do
       File.write(File.join(@profile_dir, 'mvcc.txt'), <<~PROF)
         0x600   128   5000   1000   200   10
       PROF
-      out = described_class.convert_mvcc(@profile_dir, nil)
+      out = described_class.send(:convert_mvcc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -326,7 +326,7 @@ RSpec.describe PprofConverter do
       File.write(File.join(@profile_dir, 'mvcc.txt'), <<~PROF)
         0x700   64   100   50   5   0   3
       PROF
-      out = described_class.convert_mvcc(@profile_dir, nil)
+      out = described_class.send(:convert_mvcc, @profile_dir, nil)
       expect(out).to eq(File.join(@profile_dir, 'mvcc.pb.gz'))
     end
 
@@ -335,7 +335,7 @@ RSpec.describe PprofConverter do
       content = "# mvcc-profile v2\n" \
                 "0x700#{tab}64#{tab}1000#{tab}50#{tab}5#{tab}0#{tab}3#{tab}0xC1,0xC2,0xC3\n"
       File.write(File.join(@profile_dir, 'mvcc.txt'), content)
-      out = described_class.convert_mvcc(@profile_dir, nil)
+      out = described_class.send(:convert_mvcc, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
       sample = ProtoTestDecoder.parse(decoded[2].first)
@@ -351,7 +351,7 @@ RSpec.describe PprofConverter do
         # channel-profile v1
         # id pushes pops push_blocked pop_blocked max_depth capacity
       PROF
-      expect(described_class.convert_channels(@profile_dir, nil)).to be_nil
+      expect(described_class.send(:convert_channels, @profile_dir, nil)).to be_nil
     end
 
     it 'emits one Sample per registered channel' do
@@ -361,7 +361,7 @@ RSpec.describe PprofConverter do
         0#{tab}5#{tab}5#{tab}0#{tab}2#{tab}5#{tab}8
         1#{tab}9#{tab}9#{tab}0#{tab}3#{tab}9#{tab}16
       PROF
-      out = described_class.convert_channels(@profile_dir, nil)
+      out = described_class.send(:convert_channels, @profile_dir, nil)
       expect(out).to eq(File.join(@profile_dir, 'channels.pb.gz'))
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       decoded = ProtoTestDecoder.parse(bytes)
@@ -375,7 +375,7 @@ RSpec.describe PprofConverter do
       tab = "\t"
       File.write(File.join(@profile_dir, 'channels.txt'),
                  "# channel-profile v1\n0#{tab}5#{tab}5#{tab}0#{tab}2#{tab}5#{tab}8\n")
-      out = described_class.convert_channels(@profile_dir, nil)
+      out = described_class.send(:convert_channels, @profile_dir, nil)
       bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
       expect(bytes).to include('capacity')
     end
@@ -384,7 +384,7 @@ RSpec.describe PprofConverter do
   describe '.convert_perf' do
     it 'returns nil when perf_to_profile is unavailable or perf.data is missing' do
       # No perf.data => nil regardless of perf_to_profile presence.
-      expect(described_class.convert_perf(@profile_dir, nil)).to be_nil
+      expect(described_class.send(:convert_perf, @profile_dir, nil)).to be_nil
     end
 
     it 'returns nil when perf.data exists but perf_to_profile is unavailable' do
@@ -393,7 +393,7 @@ RSpec.describe PprofConverter do
         .with('which perf_to_profile > /dev/null 2>&1')
         .and_return(false)
 
-      expect(described_class.convert_perf(@profile_dir, nil)).to be_nil
+      expect(described_class.send(:convert_perf, @profile_dir, nil)).to be_nil
     end
 
     it 'writes cpu.pb.gz when perf_to_profile succeeds' do
@@ -407,7 +407,7 @@ RSpec.describe PprofConverter do
         end
       end
 
-      expect(described_class.convert_perf(@profile_dir, nil)).to eq(File.join(@profile_dir, 'cpu.pb.gz'))
+      expect(described_class.send(:convert_perf, @profile_dir, nil)).to eq(File.join(@profile_dir, 'cpu.pb.gz'))
     end
   end
 
@@ -460,7 +460,7 @@ RSpec.describe PprofConverter do
         "entryWrapper\n/runtime/scheduler.zig:44\n"
       )
 
-      resolved = described_class.resolve_addrs(%w[0x10 0x20], '/tmp/fake-bin', @profile_dir)
+      resolved = described_class.send(:resolve_addrs, %w[0x10 0x20], '/tmp/fake-bin', @profile_dir)
 
       expect(resolved['0x10']).to include(func: 'main', clear_line: 10, is_user_zig: true)
       expect(resolved['0x20']).to include(func: 'entryWrapper', clear_line: nil, is_user_zig: false)
@@ -472,11 +472,11 @@ RSpec.describe PprofConverter do
       source = File.join(@profile_dir, 'source.cht')
       File.write(source, 'FN main() RETURNS Void -> RETURN; END')
 
-      expect(described_class.clear_source_path(@profile_dir, '/build/._clear_tmp_foo.zig:3', is_user_zig: true)).to eq(source)
+      expect(described_class.send(:clear_source_path, @profile_dir, '/build/._clear_tmp_foo.zig:3', is_user_zig: true)).to eq(source)
     end
 
     it 'returns the addr2line file path for non-user frames' do
-      expect(described_class.clear_source_path(@profile_dir, '/runtime/scheduler.zig:44', is_user_zig: false)).to eq('/runtime/scheduler.zig')
+      expect(described_class.send(:clear_source_path, @profile_dir, '/runtime/scheduler.zig:44', is_user_zig: false)).to eq('/runtime/scheduler.zig')
     end
   end
 end

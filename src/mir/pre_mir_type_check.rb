@@ -92,4 +92,7 @@ module PreMirTypeCheck
       end
     end
   end
+  private :walk
+  private_class_method :walk
+
 end

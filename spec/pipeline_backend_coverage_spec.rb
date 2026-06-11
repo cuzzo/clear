@@ -1763,7 +1763,7 @@ RSpec.describe "pipeline backend coverage" do
         bc_target: true,
         named_source: true,
       )
-      expect(shape.infinite_stream?).to be true
+      expect(shape.send(:infinite_stream?)).to be true
       expect(shape.bc_named_infinite_stream?).to be true
 
       source = id("users", type: Type.new(:"User[]"))

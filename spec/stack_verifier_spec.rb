@@ -448,7 +448,7 @@ RSpec.describe StackVerifier do
   describe "#extract_full_call_graph" do
     it "builds frame_sizes, call_graph, fn_names from objdump" do
       v = stub_verifier(BASIC_OBJDUMP)
-      g = v.extract_full_call_graph
+      g = v.send(:extract_full_call_graph)
 
       expect(g[:fn_names].values).to include("#{PREFIX}.clearMain", "#{PREFIX}.compute")
 
@@ -463,13 +463,13 @@ RSpec.describe StackVerifier do
 
     it "identifies BG entries by __BgCtxN.run suffix" do
       v = stub_verifier(BASIC_OBJDUMP)
-      g = v.extract_full_call_graph
+      g = v.send(:extract_full_call_graph)
       expect(g[:bg_entries].length).to eq(1)
       expect(g[:fn_names][g[:bg_entries].first]).to include("__BgCtx0.run")
     end
 
     it "returns nil when objdump output is empty" do
-      expect(stub_verifier("").extract_full_call_graph).to be_nil
+      expect(stub_verifier("").send(:extract_full_call_graph)).to be_nil
     end
 
     # Regression: call-graph frame sizes must include huge-frame
@@ -491,7 +491,7 @@ RSpec.describe StackVerifier do
          12dd23c:\t41 ba 10 80 08 00    \tmov    $0x88010,%r10d
          12dd242:\t4c 29 d4             \tsub    %r10,%rsp
       OBJ
-      g = stub_verifier(output).extract_full_call_graph
+      g = stub_verifier(output).send(:extract_full_call_graph)
       runner_addr = g[:fn_addrs]["#{PREFIX}.runRegisterBytecode"]
       expect(g[:frame_sizes][runner_addr]).to eq(0x88010)
     end

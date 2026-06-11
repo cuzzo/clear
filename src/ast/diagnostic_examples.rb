@@ -201,4 +201,13 @@ module DiagnosticExamples
 
   private :extract_first_heredoc_in_it
   private_class_method :extract_first_heredoc_in_it
+  private :extract_heredoc
+  private :load!
+  private :scan_file
+  private :scan_fix_lines
+  private_class_method :extract_heredoc
+  private_class_method :load!
+  private_class_method :scan_file
+  private_class_method :scan_fix_lines
+
 end

@@ -966,6 +966,25 @@ module Annotator
         :reject_duplicate_match_patterns!,
         :validate_match_pattern_types!,
         :visit_match_patterns!
-    end
+      private :analyze_when_match_case!
+  private :annotate_struct_pattern!
+  private :borrow_match_payload_binding!
+  private :captured_move_consumed_by_loop?
+  private :consume_match_subject_if_takes!
+  private :emit_unknown_destructure_field!
+  private :loop_value_copyable?
+  private :match_branch_logic
+  private :match_enum_schema
+  private :match_pattern_type_matches_subject?
+  private :match_payload_binding_type
+  private :match_payload_struct_schema
+  private :match_subject_plan
+  private :match_union_schema
+  private :match_union_substitution
+  private :normalized_match_payload
+  private :validate_moved_values_not_reused_by_loop!
+  private :verify_match_multi_arm_payloads!
+
+end
   end
 end

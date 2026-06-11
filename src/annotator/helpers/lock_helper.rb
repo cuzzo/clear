@@ -466,4 +466,12 @@ module LockHelper
   end
 
   private :check_lock_handler_reachability!
+  private :build_lock_graph
+  private :propagate_lock_acquires!
+  private :rank_of_cap
+  private :report_lock_cycle!
+  private :resolve_held_calls!
+  private :scc_is_cyclic?
+  private :verify_handler_reachability!
+
 end

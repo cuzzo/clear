@@ -136,7 +136,7 @@ RSpec.describe FsmTransform::Emit do
     it "passes when no defers appear" do
       seg_codes = [[], []]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0), fake_seg(1)],
           liveness_double.new([]), {}, []
         )
@@ -148,7 +148,7 @@ RSpec.describe FsmTransform::Emit do
       # tmp lives entirely within this runSegN.
       seg_codes = [[cleanup("tmp")]]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
           liveness_double.new([]), {}, []
         )
@@ -158,7 +158,7 @@ RSpec.describe FsmTransform::Emit do
     it "raises when a defer targets a cross-segment liveness var" do
       seg_codes = [[cleanup("list")]]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
           liveness_double.new(["list"]), {}, []
         )
@@ -173,7 +173,7 @@ RSpec.describe FsmTransform::Emit do
       seg_codes = [[cleanup("s")]]
       captured = { "s" => :stub }
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
           liveness_double.new([]), captured, []
         )
@@ -183,7 +183,7 @@ RSpec.describe FsmTransform::Emit do
     it "raises when an errdefer targets a cross-segment var" do
       seg_codes = [[err_cleanup("X")]]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
           liveness_double.new(["X"]), {}, []
         )
@@ -193,7 +193,7 @@ RSpec.describe FsmTransform::Emit do
     it "raises when a defer targets a conservatively-promoted local" do
       seg_codes = [[cleanup("promoted")]]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0)],
           liveness_double.new([]), {}, ["promoted"]
         )
@@ -203,7 +203,7 @@ RSpec.describe FsmTransform::Emit do
     it "names the offending segment in the error message" do
       seg_codes = [[], [cleanup("s")]]
       expect {
-        FsmTransform::Emit.check_fsm_cleanup_invariant!(
+        FsmTransform::Emit.send(:check_fsm_cleanup_invariant!,
           seg_codes, [fake_seg(0), fake_seg(7)],
           liveness_double.new([]), { "s" => :stub }, []
         )
@@ -415,7 +415,7 @@ RSpec.describe FsmTransform::Emit do
           fsm_spec(index: 1, tail: FsmTransform::Segments::NextSuspend.new(Object.new, nil), descriptor: descriptor),
         ], ctx, 7)
 
-      actions = FsmTransform::Emit.fsm_destroy_actions(ctx)
+      actions = FsmTransform::Emit.send(:fsm_destroy_actions, ctx)
       expect(actions.length).to eq(1)
       action = actions.first
       expect(action).to be_a(MIR::FsmDestroyCleanup)

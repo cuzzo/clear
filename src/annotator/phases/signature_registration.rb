@@ -120,6 +120,9 @@ module Annotator
         error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate extern method declaration '#{owner}.#{node.name}'")
       end
       private :reject_duplicate_extern_method!
-    end
+          private :register_extern_function_signature
+      private :register_function_signature
+
+end
   end
 end

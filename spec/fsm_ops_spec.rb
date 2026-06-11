@@ -24,7 +24,7 @@ RSpec.describe FsmOps do
   end
 
   def render_stmt(stmt)
-    emitter.emit(lowerer.lower_stmt(stmt))
+    emitter.emit(lowerer.lower_stmts([stmt]).first)
   end
 
   describe "expression lowering" do
@@ -140,7 +140,7 @@ RSpec.describe FsmOps do
 
     it "raises on IoSubmit unknown verb" do
       stmt = FO.io_submit(:bogus, "w", [])
-      expect { lowerer.lower_stmt(stmt) }
+      expect { lowerer.lower_stmts([stmt]) }
         .to raise_error(ArgumentError, /unknown verb/)
     end
 
@@ -157,7 +157,7 @@ RSpec.describe FsmOps do
       stmt = FsmOps::StmtCall.new(FO.fn("CheatHeader.tick"), [FO.arg(0)], true)
       expect(render_stmt(stmt)).to eq("try CheatHeader.tick(path_arg);")
 
-      expect { lowerer.lower_stmt(Object.new) }
+      expect { lowerer.send(:lower_stmt, Object.new) }
         .to raise_error(ArgumentError, /unknown statement op/)
     end
   end

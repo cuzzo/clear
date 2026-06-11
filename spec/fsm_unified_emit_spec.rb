@@ -107,7 +107,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
 
     expect {
       typed_spec = fsm_spec(spec)
-      FsmTransform::Emit.build_dispatch_tail(typed_spec, 0, [typed_spec], 0)
+      FsmTransform::Emit.send(:build_dispatch_tail, typed_spec, 0, [typed_spec], 0)
     }.to raise_error(ArgumentError, /Unsupported segment tail/)
   end
 

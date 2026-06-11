@@ -663,4 +663,23 @@ module GenericAnalysis
     :validate_generic_annotation!,
     :validate_observable_annotation_capabilities!,
     :validate_generic_instance_annotation!
+     private :annotation_schema_for!
+     private :find_container_source
+     private :generic_binding_value
+     private :generic_shared_family_param?
+     private :generic_type_has_capabilities?
+     private :observable_capability_explanation
+     private :observable_capability_labels
+     private :same_generic_binding?
+     private :same_shared_call_capability?
+     private :shared_call_capability_display
+     private :type_annotation_facts
+     private :type_annotation_inner
+     private :type_annotation_token
+     private :validate_collection_annotation_capabilities!
+     private :validate_generic_type_arg!
+     private :validate_param_annotation_capabilities!
+     private :validate_plain_type_annotation!
+     private :validate_shape_annotation_capabilities!
+
 end

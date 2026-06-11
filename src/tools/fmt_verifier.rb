@@ -140,4 +140,7 @@ module FmtVerifier
       end
     end
   end
+  private :normalize_for_compare
+  private_class_method :normalize_for_compare
+
 end

@@ -30,10 +30,14 @@ class PipelineSourceShape < T::Struct
     elem_type
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def infinite_stream?
     type.inf_stream?
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def bc_infinite_stream?

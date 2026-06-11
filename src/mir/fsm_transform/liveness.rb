@@ -271,5 +271,20 @@ module FsmTransform
       return unless node.respond_to?(:each_pair)
       node.each_pair { |_, v| walk_idents(v, &block) }
     end
-  end
+      private :collect_defs
+    private :collect_tail_uses
+    private :collect_uses
+    private :compute_cyclic_segments
+    private :normalize_decl_type
+    private :stmt_decl_type
+    private :tail_targets
+    private_class_method :collect_defs
+    private_class_method :collect_tail_uses
+    private_class_method :collect_uses
+    private_class_method :compute_cyclic_segments
+    private_class_method :normalize_decl_type
+    private_class_method :stmt_decl_type
+    private_class_method :tail_targets
+
+end
 end

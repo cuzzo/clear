@@ -35,7 +35,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     resource.close_method = "close"
 
     annotator, = register(struct, enum, native, resource)
-    scope = annotator.current_scope
+    scope = annotator.send(:current_scope)
 
     box_schema = scope.types.fetch(:Box).schema
     expect(box_schema).to be_a(Schemas::StructSchema)
@@ -92,7 +92,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline, Empty: nil }, :package)
 
     annotator, = register(union)
-    scope = annotator.current_scope
+    scope = annotator.send(:current_scope)
 
     union_schema = scope.types.fetch(:Value).schema
     expect(union_schema).to be_a(Schemas::UnionSchema)

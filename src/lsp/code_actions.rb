@@ -107,5 +107,14 @@ module LSP
       pos ||= range[side.to_s]
       [pos[:line] || pos["line"], pos[:character] || pos["character"]]
     end
-  end
+    private :build_action
+  private :build_text_edit
+  private :range_position
+  private :ranges_overlap?
+  private_class_method :build_action
+  private_class_method :build_text_edit
+  private_class_method :range_position
+  private_class_method :ranges_overlap?
+
+end
 end

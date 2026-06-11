@@ -427,5 +427,20 @@ module FsmTransform
       end
       out
     end
-  end
+      private :contains_suspend_anywhere?
+    private :contains_unsupported_shape?
+    private :io_suspending_call?
+    private :rewrite_pipeline_io
+    private :split_while_loop_next
+    private :stmt_unsupported?
+    private :suspend_for
+    private_class_method :contains_suspend_anywhere?
+    private_class_method :contains_unsupported_shape?
+    private_class_method :io_suspending_call?
+    private_class_method :rewrite_pipeline_io
+    private_class_method :split_while_loop_next
+    private_class_method :stmt_unsupported?
+    private_class_method :suspend_for
+
+end
 end

@@ -260,4 +260,8 @@ class ModuleImporter
     end
     nil
   end
+  private :auto_type?
+  private :reject_auto_in_public_signatures!
+  private :resolve_stdlib_package
+
 end

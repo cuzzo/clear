@@ -1312,4 +1312,43 @@ module MIRLoweringConcurrency
     :emit_stackful_bg_block,
     :fsm_bg_block_from_transform!
 
+  private :bg_alloc_expr
+  private :bg_body_materialization
+  private :bg_body_steps
+  private :bg_capture_materialization
+  private :bg_lowering_names
+  private :bg_mir_nodes
+  private :bg_scheduler_plan
+  private :bg_stream_expected_type?
+  private :bg_type_plan
+  private :bg_uses_fsm_transform?
+  private :boundary_capture_fact
+  private :boundary_capture_forbidden_reason
+  private :boundary_capture_local?
+  private :boundary_capture_locked?
+  private :boundary_capture_multiowned_rc?
+  private :boundary_capture_scheduler_affine?
+  private :boundary_capture_shared_arc?
+  private :boundary_capture_storage
+  private :boundary_capture_versioned?
+  private :boundary_capture_write_locked?
+  private :capture_ownership_mirror_node?
+  private :do_branch_spawn_call_plan
+  private :do_branch_stmt_nodes
+  private :enforce_bg_capture_strategies!
+  private :execution_boundary_fact
+  private :finalize_bg_discard_expr
+  private :lower_bg_body_steps
+  private :lower_bg_pre_step
+  private :lower_bg_result_step
+  private :lower_bg_statement_result
+  private :lower_bg_value_result
+  private :next_expr_plan
+  private :next_result_owned_alloc
+  private :observable_next_string?
+  private :profile_dispatch_numeric_id
+  private :profile_dispatch_symbol
+  private :profiled_task_config_plan
+  private :with_stream_body_context
+
 end

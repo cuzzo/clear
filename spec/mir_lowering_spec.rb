@@ -246,7 +246,7 @@ RSpec.describe MIRLowering do
       profiled = low.send(:profiled_task_config_plan, base, 9, :parallel)
 
       expect(profiled).to be_a(MIR::TaskConfigPlan)
-      expect(MIREmitter.new.emit_task_config_plan(profiled))
+      expect(MIREmitter.new.send(:emit_task_config_plan, profiled))
         .to eq(".{ .stack_size = .Large, .profile_site_id = 9, .profile_dispatch = 2 }")
     end
 
@@ -263,7 +263,7 @@ RSpec.describe MIRLowering do
 
       task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
       spawn = low.send(:fiber_spawn_call_plan, "__rt", "__Worker", "__worker", task_config, :parallel)
-      out = MIREmitter.new.emit_fiber_spawn_call(spawn)
+      out = MIREmitter.new.send(:emit_fiber_spawn_call, spawn)
 
       expect(out).to include("CheatHeader.spawnBest")
       expect(out).to include("&__Worker.run")
@@ -297,7 +297,7 @@ RSpec.describe MIRLowering do
       expect(names.ctx_type).to eq("__BgCtx12")
       expect(types.promise_zig).to include("Promise")
       expect(capture.capture_inits.map(&:name)).to include(:inner, :alloc)
-      expect(MIREmitter.new.emit_struct_init_fields(capture.capture_inits))
+      expect(MIREmitter.new.send(:emit_struct_init_fields, capture.capture_inits))
         .to include(".inner = __bg12_promise.inner")
       expect(scheduler.dispatch).to eq(true)
       expect(MIREmitter.new.emit(T.must(scheduler.arena_init))).to eq("__rt_bg12.arena_mode = true;")
@@ -3720,8 +3720,8 @@ RSpec.describe MIRLowering do
       expect(namespace.name).to eq("helper")
       expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
       expect(namespace.items).not_to include(an_object_having_attributes(name: "main"))
-      expect(low.program_state.fn_sigs).to include("helper_value")
-      expect(low.program_state.fn_sigs).not_to include("main")
+      expect(low.send(:program_state).fn_sigs).to include("helper_value")
+      expect(low.send(:program_state).fn_sigs).not_to include("main")
       expect(emit(namespace)).to include("const helper = struct")
       expect(emit(namespace)).not_to include("clearMain")
     end
@@ -4471,7 +4471,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     assignment = AST::Assignment.new(tok, target, value)
     assignment.full_type = Type.new(:Void)
 
-    body = l.lower_step_stmts([assignment], no_result: false, ctx_id: 3)
+    body = l.send(:lower_step_stmts, [assignment], no_result: false, ctx_id: 3)
 
     expect(body.length).to eq(1)
     expect(body.first).to be_a(MIR::Set)

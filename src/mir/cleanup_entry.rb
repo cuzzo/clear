@@ -109,8 +109,12 @@ class CleanupEntry < Hash
   sig { returns(T::Boolean) }
   def via_pointer? = self[:via_pointer] == true
 
+  private
+
   sig { returns(T::Boolean) }
   def needs_release_fields? = self[:needs_release_fields] == true
+
+  public
 
   sig { returns(T::Boolean) }
   def rc_release_fields_cleanup? = kind == :rc && needs_release_fields?

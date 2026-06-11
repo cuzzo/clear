@@ -1385,4 +1385,40 @@ module FunctionAnalysis
     :verify_lifetime!,
     :verify_takes_argument!,
     :fn_type_argument_match?
+  private :analyze_routine
+  private :any_array_intrinsic_arg?
+  private :any_element_collection_param?
+  private :argument_name
+  private :atomic_cell_arg?
+  private :atomic_cell_to_atomic_param?
+  private :atomic_cell_to_bare_value_param?
+  private :basic_argument_match?
+  private :borrowed_takes_argument?
+  private :build_lambda_signature
+  private :call_argument_facts
+  private :call_arity_plan
+  private :call_signature_site
+  private :declare_and_verify_params
+  private :declare_captures
+  private :default_argument_for
+  private :explicit_primitive_atomic_param?
+  private :get_return_strategy
+  private :inject_default_arguments!
+  private :param_mutable?
+  private :paths_overlap?
+  private :receiver_container_alloc
+  private :reentrant_fn_argument_rejected?
+  private :return_is_borrow?
+  private :shared_argument_match?
+  private :verify_call_arity!
+  private :verify_captures!
+  private :verify_lifetime_source!
+  private :verify_link_argument!
+  private :verify_mutable_argument!
+  private :verify_no_mixed_atomic_returned_lifetime!
+  private :verify_owned_takes_argument!
+  private :verify_param_lifetime!
+  private :verify_returns
+  private :warn_multi_atomic_bare_value_call!
+
 end

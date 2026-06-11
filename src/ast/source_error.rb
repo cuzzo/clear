@@ -147,6 +147,8 @@ module ErrorHelper
       raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
     end
   end
+  private :format_diagnostic_template
+
 end
 
 class SourceError < StandardError

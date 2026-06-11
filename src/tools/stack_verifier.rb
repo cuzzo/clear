@@ -477,4 +477,7 @@ class StackVerifier
     name = name.sub(/Env$/, '')
     name
   end
+  private :extract_full_call_graph
+  private :objdump_output
+
 end

@@ -785,10 +785,14 @@ module MIR
       nil
     end
 
+    private
+
     sig { returns(T::Array[Symbol]) }
     def values
       @placeholders.values
     end
+
+    public
 
     sig { params(key: T.any(Symbol, String)).returns(T::Boolean) }
     def key?(key)

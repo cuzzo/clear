@@ -407,5 +407,24 @@ module ThunkTransform
 
     private :build_mutual_arm
     private_class_method :build_mutual_arm
-  end
+      private :assert_non_fallible_ret!
+    private :bind_frame_refs
+    private :current_frame_context
+    private :find_cycle_member
+    private :function_params
+    private :mutual_frame_context
+    private :mutual_thunk_plan!
+    private :thunk_plan!
+    private :validate_combine_op!
+    private_class_method :assert_non_fallible_ret!
+    private_class_method :bind_frame_refs
+    private_class_method :current_frame_context
+    private_class_method :find_cycle_member
+    private_class_method :function_params
+    private_class_method :mutual_frame_context
+    private_class_method :mutual_thunk_plan!
+    private_class_method :thunk_plan!
+    private_class_method :validate_combine_op!
+
+end
 end

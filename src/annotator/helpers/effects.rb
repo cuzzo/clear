@@ -1250,4 +1250,20 @@ module EffectTracker
     end
   end
 
+  private :assign_bg_spawn_shape!
+  private :bg_spawn_form_for
+  private :effect_call_site_arg_families
+  private :effect_call_site_context
+  private :effect_direct_effects
+  private :effect_direct_effects_for
+  private :fallibility_hint_for
+  private :function_value_reference?
+  private :inherit_effects_from_callee
+  private :max_tier_for_calls
+  private :mutually_recursive_in_call_graph?
+  private :promote_suspends_for_current_context
+  private :reachable_in_call_graph?
+  private :resolve_maybe_effects
+  private :validate_tight_node!
+
 end

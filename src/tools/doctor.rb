@@ -1679,4 +1679,67 @@ module Doctor
     :emit_exact_local_bg_sites!,
     :focus_match?,
     :run_diff
+  private :diff_heap
+  private :diff_locks
+  private :diff_mvcc
+  private :emit_atomic_migration!
+  private :emit_atomic_ptr_migration!
+  private :emit_atomic_ptr_upgrade_from_mvcc!
+  private :emit_generic_local_bg_hint!
+  private :emit_parallel_bg_advice!
+  private :local_bg_source_lines
+  private :local_dispatch_warning?
+  private :locate_diff_binary
+  private :parse_alloc_for_diff
+  private :parse_locks_for_diff
+  private :parse_mvcc_for_diff
+  private :run_peek
+  private :section_atomic_escape
+  private :section_channels
+  private :section_cpu
+  private :section_fibers
+  private :section_freeze
+  private :section_hardware
+  private :section_heap
+  private :section_heap_silent
+  private :section_locks
+  private :section_mvcc
+  private :section_syscalls
+  private :site_scheduler_skew
+  private :sort_key
+  private :sort_label
+  private :task_dispatch_counts
+  private :task_site_metadata
+  private_class_method :diff_heap
+  private_class_method :diff_locks
+  private_class_method :diff_mvcc
+  private_class_method :emit_atomic_migration!
+  private_class_method :emit_atomic_ptr_migration!
+  private_class_method :emit_atomic_ptr_upgrade_from_mvcc!
+  private_class_method :emit_generic_local_bg_hint!
+  private_class_method :emit_parallel_bg_advice!
+  private_class_method :local_bg_source_lines
+  private_class_method :local_dispatch_warning?
+  private_class_method :locate_diff_binary
+  private_class_method :parse_alloc_for_diff
+  private_class_method :parse_locks_for_diff
+  private_class_method :parse_mvcc_for_diff
+  private_class_method :run_peek
+  private_class_method :section_atomic_escape
+  private_class_method :section_channels
+  private_class_method :section_cpu
+  private_class_method :section_fibers
+  private_class_method :section_freeze
+  private_class_method :section_hardware
+  private_class_method :section_heap
+  private_class_method :section_heap_silent
+  private_class_method :section_locks
+  private_class_method :section_mvcc
+  private_class_method :section_syscalls
+  private_class_method :site_scheduler_skew
+  private_class_method :sort_key
+  private_class_method :sort_label
+  private_class_method :task_dispatch_counts
+  private_class_method :task_site_metadata
+
 end

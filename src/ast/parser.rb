@@ -4251,4 +4251,29 @@ class Parser
     :parse_lock_rank_arg!,
     :starts_function_requirement?,
     :parse_when_block
+   private :apply_cap_dim!
+   private :deep_clone_node
+   private :parse_benchmark_stmt
+   private :parse_bg_body_stmt
+   private :parse_bg_prefix
+   private :parse_bg_stream_block
+   private :parse_bg_then_body
+   private :parse_branch_prefix
+   private :parse_comma_seq
+   private :parse_error_selector
+   private :parse_error_selectors
+   private :parse_generic_type_param_names
+   private :parse_generic_type_param_symbols
+   private :parse_lock_action
+   private :parse_lock_error_clause
+   private :parse_profile_stmt
+   private :parse_smash_stmt
+   private :parse_snapshot_block
+   private :parse_stub
+   private :parse_test_that
+   private :parse_view_block
+   private :parse_when_tags
+   private :parse_with_match_arms
+   private :test_hook_match?
+
 end

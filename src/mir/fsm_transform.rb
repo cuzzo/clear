@@ -330,4 +330,17 @@ module FsmTransform
     zig_t = t ? t.zig_type : "anyopaque"
     PromotedLocalFact.new(name: name.to_s, type_zig: zig_t, is_suspend_result: is_suspend_result)
   end
+  private :body_needs_conservative?
+  private :collect_body_locals
+  private :contains_suspend_anywhere?
+  private :foreach_local_entry
+  private :local_entry_for_node
+  private :suspend_value?
+  private_class_method :body_needs_conservative?
+  private_class_method :collect_body_locals
+  private_class_method :contains_suspend_anywhere?
+  private_class_method :foreach_local_entry
+  private_class_method :local_entry_for_node
+  private_class_method :suspend_value?
+
 end

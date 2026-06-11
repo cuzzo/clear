@@ -129,7 +129,7 @@ RSpec.describe FmtVerifier do
     it "strips standalone `// CLR:N` lines" do
       input = "// CLR:5\nconst x = 1;\n// CLR:6\nconst y = 2;\n"
       expected = "const x = 1;\nconst y = 2;\n"
-      expect(FmtVerifier.normalize_for_compare(input)).to eq(expected)
+      expect(FmtVerifier.send(:normalize_for_compare, input)).to eq(expected)
     end
 
     it "leaves trailing inline `// CLR:N` markers alone (only matches whole-line)" do
@@ -137,17 +137,17 @@ RSpec.describe FmtVerifier do
       # whole-line normalization targets only the standalone form
       # the emitter actually produces.
       input = "const x = 1; // CLR:5\n"
-      expect(FmtVerifier.normalize_for_compare(input)).to eq(input)
+      expect(FmtVerifier.send(:normalize_for_compare, input)).to eq(input)
     end
 
     it "is a no-op on Zig output without CLR markers" do
       input = "pub fn main() void {\n  return;\n}\n"
-      expect(FmtVerifier.normalize_for_compare(input)).to eq(input)
+      expect(FmtVerifier.send(:normalize_for_compare, input)).to eq(input)
     end
 
     it "normalizes lowering-generated temp identifiers" do
       input = "const __guard_12 = __tmp_5_6;\n"
-      expect(FmtVerifier.normalize_for_compare(input)).to eq("const __guard_N = __tmp_N_6;\n")
+      expect(FmtVerifier.send(:normalize_for_compare, input)).to eq("const __guard_N = __tmp_N_6;\n")
     end
   end
 

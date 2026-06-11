@@ -31,7 +31,7 @@ RSpec.describe LockHelper do
 
   describe "#tarjan_scc" do
     it "returns an empty array for an empty graph" do
-      expect(host.tarjan_scc(Set.new, Hash.new { |h, k| h[k] = Set.new })).to eq([])
+      expect(host.send(:tarjan_scc, Set.new, Hash.new { |h, k| h[k] = Set.new })).to eq([])
     end
 
     it "returns a singleton SCC for each isolated node" do
@@ -40,32 +40,32 @@ RSpec.describe LockHelper do
       nodes << :A
       nodes << :B
       nodes << :C
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.map(&:sort)).to match_array([[:A], [:B], [:C]])
     end
 
     it "returns a single SCC for a self-loop" do
       nodes, adj = adj_from([[:A, :A]])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs).to eq([[:A]])
     end
 
     it "returns three singletons for a DAG chain A->B->C" do
       nodes, adj = adj_from([[:A, :B], [:B, :C]])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.map(&:sort)).to match_array([[:A], [:B], [:C]])
     end
 
     it "returns a single 2-node SCC for an AB/BA cycle" do
       nodes, adj = adj_from([[:A, :B], [:B, :A]])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.length).to eq(1)
       expect(sccs.first.to_set).to eq(Set[:A, :B])
     end
 
     it "returns a single 3-node SCC for A->B->C->A" do
       nodes, adj = adj_from([[:A, :B], [:B, :C], [:C, :A]])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.length).to eq(1)
       expect(sccs.first.to_set).to eq(Set[:A, :B, :C])
     end
@@ -76,7 +76,7 @@ RSpec.describe LockHelper do
         [:C, :D], [:D, :C],       # SCC {C, D}
         [:E, :F],                  # DAG {E -> F}
       ])
-      sccs = host.tarjan_scc(nodes, adj).map(&:to_set)
+      sccs = host.send(:tarjan_scc, nodes, adj).map(&:to_set)
       expect(sccs).to include(Set[:A, :B])
       expect(sccs).to include(Set[:C, :D])
       expect(sccs).to include(Set[:E])
@@ -89,7 +89,7 @@ RSpec.describe LockHelper do
         [:A, :B], [:B, :A],
         [:A, :C], [:C, :A],
       ])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.length).to eq(1)
       expect(sccs.first.to_set).to eq(Set[:A, :B, :C])
     end
@@ -100,7 +100,7 @@ RSpec.describe LockHelper do
         [:B, :B],   # self-loop
         [:B, :C],
       ])
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       scc_sets = sccs.map(&:to_set)
       expect(scc_sets).to include(Set[:A])
       expect(scc_sets).to include(Set[:B])
@@ -113,7 +113,7 @@ RSpec.describe LockHelper do
       n = 10_000
       edges = (0...n - 1).map { |i| [i, i + 1] }
       nodes, adj = adj_from(edges)
-      sccs = host.tarjan_scc(nodes, adj)
+      sccs = host.send(:tarjan_scc, nodes, adj)
       expect(sccs.length).to eq(n) # each node is its own singleton SCC
     end
   end
@@ -121,17 +121,17 @@ RSpec.describe LockHelper do
   describe "#scc_is_cyclic?" do
     it "flags a multi-node SCC as cyclic" do
       _, adj = adj_from([[:A, :B], [:B, :A]])
-      expect(host.scc_is_cyclic?([:A, :B], adj)).to be true
+      expect(host.send(:scc_is_cyclic?, [:A, :B], adj)).to be true
     end
 
     it "flags a single-node SCC with a self-loop as cyclic" do
       _, adj = adj_from([[:A, :A]])
-      expect(host.scc_is_cyclic?([:A], adj)).to be true
+      expect(host.send(:scc_is_cyclic?, [:A], adj)).to be true
     end
 
     it "does not flag a single-node SCC without a self-loop as cyclic" do
       _, adj = adj_from([[:A, :B]])
-      expect(host.scc_is_cyclic?([:A], adj)).to be false
+      expect(host.send(:scc_is_cyclic?, [:A], adj)).to be false
     end
   end
 end

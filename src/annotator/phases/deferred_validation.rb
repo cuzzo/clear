@@ -58,6 +58,8 @@ module Annotator
         end
         deferred_with_validations.clear
       end
-    end
+          private :flush_deferred_with_validations!
+
+end
   end
 end

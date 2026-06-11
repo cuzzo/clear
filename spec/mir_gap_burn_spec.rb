@@ -342,9 +342,9 @@ RSpec.describe "MIR gap-burn characterization" do
     low = MIRLowering.new(input: input)
 
     expect(low.lowering_input).to eq(input)
-    expect(low.fn_sig_for("answer")).to eq(sig)
+    expect(low.send(:fn_sig_for, "answer")).to eq(sig)
     expect(low.send(:bc_target?)).to eq(true)
-    expect(low.program_state.debug_mode).to eq(true)
+    expect(low.send(:program_state).debug_mode).to eq(true)
   end
 
   it "keeps default MIR lowering input buckets independent" do
@@ -813,7 +813,7 @@ RSpec.describe "MIR gap-burn characterization" do
     collection = id("source", type: :Any)
     each_stmt = AST::ForEach.new(tok, "item", collection, [], nil, false)
 
-    fact = FsmTransform.foreach_local_entry(each_stmt)
+    fact = FsmTransform.send(:foreach_local_entry, each_stmt)
     expect(fact).to be_a(FsmTransform::PromotedLocalFact)
     expect(T.must(fact).name).to eq("item")
     expect(T.must(fact).type_zig).to eq("anyopaque")
@@ -1180,7 +1180,7 @@ RSpec.describe "MIR gap-burn characterization" do
 
     violations = []
     bad_identifier = AST::Identifier.new(tok, "untyped_hash_value")
-    PreMirTypeCheck.walk({ nested: [bad_identifier, Type.new(:String), nil, 1, true, "leaf"] }, violations, {})
+    PreMirTypeCheck.send(:walk, { nested: [bad_identifier, Type.new(:String), nil, 1, true, "leaf"] }, violations, {})
     expect(violations).to include(hash_including(cls: "Identifier", loc: "1:1"))
   end
 
@@ -1460,8 +1460,8 @@ RSpec.describe "MIR gap-burn characterization" do
     or_ast = AST::BinaryOp.new(tok, lit("a", type: :String), :OR, lit("b", type: :String))
     or_ast.full_type = :String
 
-    expect(low.destination_placement_plan(MIR::Ident.new("s"), string_ast, :heap, Type.new(:String)).action).to eq(:string)
-    expect(low.destination_placement_plan(MIR::Cast.new(MIR::Ident.new("s"), "[]const u8", nil), or_ast, :heap, Type.new(:String)).action).to eq(:cast_wrapped_or)
+    expect(low.send(:destination_placement_plan, MIR::Ident.new("s"), string_ast, :heap, Type.new(:String)).action).to eq(:string)
+    expect(low.send(:destination_placement_plan, MIR::Cast.new(MIR::Ident.new("s"), "[]const u8", nil), or_ast, :heap, Type.new(:String)).action).to eq(:cast_wrapped_or)
 
     dupe = low.send(:materialize_owned_sink_value, MIR::Ident.new("s"), string_ast, :heap, Type.new(:String))
     expect(dupe).to be_a(MIR::DupeSlice)
@@ -1565,8 +1565,8 @@ RSpec.describe "MIR gap-burn characterization" do
     source = lit("s", type: :String)
     direct = Type.new(:String)
     direct.layout = :indirect
-    expect(low.destination_placement_plan(MIR::Ident.new("p"), source, :heap, direct).action).to eq(:heap_indirect)
-    expect(low.destination_placement_plan(MIR::HeapCreate.new("[]const u8", MIR::Ident.new("s"), :heap), source, :heap, direct).action).not_to eq(:heap_indirect)
+    expect(low.send(:destination_placement_plan, MIR::Ident.new("p"), source, :heap, direct).action).to eq(:heap_indirect)
+    expect(low.send(:destination_placement_plan, MIR::HeapCreate.new("[]const u8", MIR::Ident.new("s"), :heap), source, :heap, direct).action).not_to eq(:heap_indirect)
 
     shared = id("rc", type: :String, storage: :heap)
     rc_type = Type.new(:Payload)
@@ -2080,29 +2080,29 @@ RSpec.describe "MIR gap-burn characterization" do
     list_hoists = []
     counter = Hoist::HoistCounter.new
     expect(counter.next_name).to eq("__hoist_1")
-    Hoist.hoist_concats_within!(list, list_hoists, counter)
+    Hoist.send(:hoist_concats_within!, list, list_hoists, counter)
     expect(list.items.first).to be_a(AST::Identifier)
     expect(list_hoists.first.name).to eq("__hoist_2")
 
     heap_needed = string_concat.call("c", "d")
     heap_needed.needs_heap_create = true
-    indirect_replacement = Hoist.make_temp!(heap_needed, [], "__hoist_1")
+    indirect_replacement = Hoist.send(:make_temp!, heap_needed, [], "__hoist_1")
     expect(indirect_replacement.needs_heap_create).to eq(true)
 
     owner = id("owner", type: Type.new(:Box, location: :heap), storage: :heap)
     field = AST::GetField.new(tok, owner, "name")
     field.full_type = Type.new(:String)
     borrow_hoists = []
-    borrowed_replacement = Hoist.make_temp!(field, borrow_hoists, "__hoist_1", moved: false)
+    borrowed_replacement = Hoist.send(:make_temp!, field, borrow_hoists, "__hoist_1", moved: false)
     expect(borrowed_replacement.symbol.storage).to eq(:borrow)
 
     borrowed_left = id("maybe_owned", storage: :heap)
     borrowed_left.container_borrow = true
     fallback = AST::BinaryOp.new(tok, borrowed_left, :OR_RESCUE, lit("fallback"))
     fallback.full_type = Type.new(:String)
-    expect(Hoist.owned_fallback_temp?(fallback, nil)).to eq(true)
+    expect(Hoist.send(:owned_fallback_temp?, fallback, nil)).to eq(true)
     fallback_hoists = []
-    Hoist.make_temp!(fallback, fallback_hoists, "__hoist_1")
+    Hoist.send(:make_temp!, fallback, fallback_hoists, "__hoist_1")
     expect(fallback_hoists.first.symbol.storage).to eq(:heap)
 
     collection_type = Type.new(:"Box[]", collection: :list)
@@ -2225,11 +2225,11 @@ RSpec.describe "MIR gap-burn characterization" do
 
     struct_lit = AST::StructLit.new(tok, "Box", { "name" => string_concat.call("s", "t") }, :heap, [])
     struct_hoists = []
-    Hoist.hoist_concats_within!(struct_lit, struct_hoists, Hoist::HoistCounter.new)
+    Hoist.send(:hoist_concats_within!, struct_lit, struct_hoists, Hoist::HoistCounter.new)
     expect(struct_lit.fields["name"]).to be_a(AST::Identifier)
 
     nested_list = AST::ListLit.new(tok, [lit("plain")], :heap)
-    Hoist.hoist_concats_within!(nested_list, [], Hoist::HoistCounter.new)
+    Hoist.send(:hoist_concats_within!, nested_list, [], Hoist::HoistCounter.new)
 
     low = lowering
     wrapped = MIR::Cast.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), "[]const u8", :as)
@@ -2711,7 +2711,7 @@ RSpec.describe "MIR gap-burn characterization" do
     low.define_singleton_method(:with_ownership_consumption) { |mir, *_args, **_kwargs| mir }
     low.capture_state.current_fsm_owned_result_guards = { "owned" => "owned_moved" }
 
-    lowered = low.lower_step_stmts([owned], no_result: false, ctx_id: 9)
+    lowered = low.send(:lower_step_stmts, [owned], no_result: false, ctx_id: 9)
     expect(lowered).to include(
       an_object_having_attributes(
         target: an_object_having_attributes(field: "owned_moved"),
@@ -3192,8 +3192,8 @@ RSpec.describe "MIR gap-burn characterization" do
     task_config = MIR::TaskConfigPlan.new(stack_variant: "Standard")
     shared_spawn = low.send(:fiber_spawn_call_plan, "rt", "Ctx", "ctx", task_config, :shared)
     default_spawn = low.send(:fiber_spawn_call_plan, "rt", "Ctx", "ctx", task_config, :unknown)
-    expect(MIREmitter.new.emit_fiber_spawn_call(shared_spawn)).to include("spawnPinned")
-    expect(MIREmitter.new.emit_fiber_spawn_call(default_spawn)).to include("spawnBest")
+    expect(MIREmitter.new.send(:emit_fiber_spawn_call, shared_spawn)).to include("spawnPinned")
+    expect(MIREmitter.new.send(:emit_fiber_spawn_call, default_spawn)).to include("spawnBest")
 
     nested_fn = fn([id("inner")])
     names = low.send(:collect_identifier_names, [id("outer"), nested_fn])
@@ -3618,7 +3618,7 @@ RSpec.describe "MIR gap-burn characterization" do
     any_call.full_type = Type.new(:Any)
     carry_sig = FunctionSignature.new(params: [param("source", type: :Int64)], return_type: Type.new(:String))
     expect(method_low.send(:call_owned_return?, any_call)).to eq(false)
-    method_low.program_state.fn_sigs = { "returns_from_arg" => carry_sig }
+    method_low.send(:program_state).fn_sigs = { "returns_from_arg" => carry_sig }
     expect(method_low.send(:call_owned_return?, any_call)).to eq(false)
 
     carry_sig.heap_carry_return_vars = Set["source"]
@@ -3671,7 +3671,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(direct.callee).to eq("c_lib.native")
 
     trampoline_sig = FunctionSignature.new(params: [param("value", type: :Int64)], return_type: Type.new(:Int64))
-    extern_low.program_state.fn_sigs = { "native" => trampoline_sig }
+    extern_low.send(:program_state).fn_sigs = { "native" => trampoline_sig }
     trampoline = AST::FuncCall.new(tok, "native", [value_arg])
     trampoline.full_type = Type.new(:Int64)
     trampoline_out = extern_low.send(:build_extern_trampoline_call, trampoline)
@@ -3679,7 +3679,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(MIREmitter.new.emit(trampoline_out)).to include("a0: i64")
 
     module_sig = FunctionSignature.new(params: [param("port", type: :Int64)], return_type: Type.new(:Void), module_alias: "http")
-    extern_low.program_state.fn_sigs = { "startTestServer" => module_sig }
+    extern_low.send(:program_state).fn_sigs = { "startTestServer" => module_sig }
     module_call = AST::FuncCall.new(tok, "startTestServer", [lit(19_876, type: :Int64)])
     module_call.full_type = Type.new(:Void)
     module_call.module_alias = "http"

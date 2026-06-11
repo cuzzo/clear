@@ -201,7 +201,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       ]
       with_node = AST::WithBlock.new(nil, [cap], body)
 
-      AtomicPtrMigrationSuggester.classify_with_block!(with_node, candidates_by_name)
+      AtomicPtrMigrationSuggester.send(:classify_with_block!, with_node, candidates_by_name)
 
       expect(candidates_by_name["c"]).to include(n_uses: 1, disqualified: false)
     end
@@ -215,7 +215,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         var_node: AST::Identifier.new(nil, "c"),
       )
 
-      AtomicPtrMigrationSuggester.classify_with_block!(
+      AtomicPtrMigrationSuggester.send(:classify_with_block!,
         AST::WithBlock.new(nil, [cap], []),
         candidates_by_name,
       )
@@ -233,7 +233,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         alias: "a",
       )
 
-      AtomicPtrMigrationSuggester.classify_with_block!(
+      AtomicPtrMigrationSuggester.send(:classify_with_block!,
         AST::WithBlock.new(nil, [cap], []),
         candidates_by_name,
       )

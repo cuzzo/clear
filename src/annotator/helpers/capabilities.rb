@@ -1270,6 +1270,22 @@ module CapabilityHelper
     :record_capture_info!,
     :validate_capability_transition!,
     :with_capability_fact
+  private :add_capture_name_when
+  private :alias_mutated?
+  private :borrowed_source_qualifier
+  private :cap_var_layout
+  private :declare_capability_binding_or_error!
+  private :declare_view_borrow_constraints!
+  private :emit_borrowed_rejection!
+  private :emit_view_not_observable_finding!
+  private :new_capture_analysis
+  private :non_escaping_fiber_capture?
+  private :predicate_impurity_reason
+  private :record_capture_move!
+  private :set_capture_close_plan_when
+  private :unwrapped_capability_alias_type
+  private :view_capability_alias_type
+
 end
 
 # ============================================================================

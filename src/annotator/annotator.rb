@@ -821,4 +821,8 @@ private
     ownership_graph.pop_scope!(archive: archive)
   end
 
+  private :current_fn_ctx
+  private :current_held_lock_types
+  private :semantic_function_registry
+
 end

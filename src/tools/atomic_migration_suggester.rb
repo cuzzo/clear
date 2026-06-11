@@ -196,4 +196,13 @@ module AtomicMigrationSuggester
       node.target.name == alias_name &&
       node.field.to_s == field_name
   end
+  private :eligible_compound_rhs?
+  private :field_get_of?
+  private :stmt_eligible?
+  private :with_body_eligible?
+  private_class_method :eligible_compound_rhs?
+  private_class_method :field_get_of?
+  private_class_method :stmt_eligible?
+  private_class_method :with_body_eligible?
+
 end

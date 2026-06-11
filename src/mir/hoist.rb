@@ -409,6 +409,39 @@ module Hoist
     :ast_borrow_expr?,
     :hoist_body!,
     :hoist_escape_value!
+  private :allocating?
+  private :ast_access_path?
+  private :ast_container_borrow_expr?
+  private :collection_value_store_call?
+  private :composite_element_store?
+  private :concat?
+  private :each_call
+  private :each_call_like
+  private :each_call_like_child
+  private :each_method_call
+  private :hoist_concats_within!
+  private :make_temp!
+  private :moved_arg?
+  private :non_body_exprs
+  private :owned_fallback_temp?
+  private :synthesized_body?
+  private_class_method :allocating?
+  private_class_method :ast_access_path?
+  private_class_method :ast_container_borrow_expr?
+  private_class_method :collection_value_store_call?
+  private_class_method :composite_element_store?
+  private_class_method :concat?
+  private_class_method :each_call
+  private_class_method :each_call_like
+  private_class_method :each_call_like_child
+  private_class_method :each_method_call
+  private_class_method :hoist_concats_within!
+  private_class_method :make_temp!
+  private_class_method :moved_arg?
+  private_class_method :non_body_exprs
+  private_class_method :owned_fallback_temp?
+  private_class_method :synthesized_body?
+
 end
 
 # Lowering-side hoist helpers.
@@ -1325,4 +1358,31 @@ module MIRHoistLowering
     :normalize_allocating_result_expr!,
     :normalize_stmt_child_exprs!,
     :normalize_allocating_used_expr
+  private :cleanup_entry_for_owned_result
+  private :cleanup_entry_for_ownership_effect
+  private :consumes_owned_children?
+  private :each_mir_expr_in_value
+  private :heap_string_entry
+  private :hoist_cleanup_entry
+  private :hoist_normalized_alloc_expr
+  private :hoist_normalized_value_expr
+  private :if_bind_transfer_present?
+  private :lower_scoped
+  private :mir_alloc_mark_type_info
+  private :mir_consumes_owned_operands?
+  private :mir_expr_child?
+  private :mir_owned_alloc
+  private :normalize_allocating_mir_body
+  private :normalize_used_expr_attr!
+  private :normalized_alloc_wrapper_alias?
+  private :owned_call_result_requires_cleanup?
+  private :rc_cleanup_entry
+  private :record_hoisted_allocation!
+  private :refresh_ownership_consumption_for_replaced_child!
+  private :replace_mir_expr_child!
+  private :replace_mir_expr_in_value!
+  private :stamp_allocating_result_target!
+  private :typed_cleanup_entry_for_mir_result
+  private :uniform_cleanup_entry
+
 end

@@ -392,4 +392,47 @@ module LintFixRewriter
 
   private :types_match_for_drop?
   private_class_method :types_match_for_drop?
+  private :annotate
+  private :any_decoration?
+  private :apply_edits
+  private :collect_bg_referenced_names
+  private :collect_identifier_names
+  private :collect_mutation_sensitive_names
+  private :compute_redundant_type_edit
+  private :decl_mode_bind_expr?
+  private :edit_from_span
+  private :line_col_for_offset
+  private :locate_type_annotation_span
+  private :mentions_name_in_set?
+  private :mutable_unused_edits
+  private :mutable_unused_finding?
+  private :mutating_method_name?
+  private :offset_for
+  private :redundant_type_annotation_edits
+  private :terminal?
+  private :walk_for_bg_names
+  private :walk_for_mutation_sensitive_names
+  private :walk_for_redundant_type
+  private_class_method :annotate
+  private_class_method :any_decoration?
+  private_class_method :apply_edits
+  private_class_method :collect_bg_referenced_names
+  private_class_method :collect_identifier_names
+  private_class_method :collect_mutation_sensitive_names
+  private_class_method :compute_redundant_type_edit
+  private_class_method :decl_mode_bind_expr?
+  private_class_method :edit_from_span
+  private_class_method :line_col_for_offset
+  private_class_method :locate_type_annotation_span
+  private_class_method :mentions_name_in_set?
+  private_class_method :mutable_unused_edits
+  private_class_method :mutable_unused_finding?
+  private_class_method :mutating_method_name?
+  private_class_method :offset_for
+  private_class_method :redundant_type_annotation_edits
+  private_class_method :terminal?
+  private_class_method :walk_for_bg_names
+  private_class_method :walk_for_mutation_sensitive_names
+  private_class_method :walk_for_redundant_type
+
 end

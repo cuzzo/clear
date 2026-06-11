@@ -168,4 +168,11 @@ module AtomicPtrMigrationSuggester
 
   private :stmt_eligible?
   private_class_method :stmt_eligible?
+  private :alias_root?
+  private :whole_struct_replace?
+  private :with_body_eligible?
+  private_class_method :alias_root?
+  private_class_method :whole_struct_replace?
+  private_class_method :with_body_eligible?
+
 end

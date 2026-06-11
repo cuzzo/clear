@@ -152,5 +152,14 @@ module LSP
     def severity_label(severity)
       SEVERITY_LABELS.fetch(severity, "error")
     end
-  end
+    private :build_markdown
+  private :find_overlapping
+  private :header_line
+  private :severity_label
+  private_class_method :build_markdown
+  private_class_method :find_overlapping
+  private_class_method :header_line
+  private_class_method :severity_label
+
+end
 end

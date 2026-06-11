@@ -821,6 +821,8 @@ class Type
     sync_wrapped   any_sync — locked / write_locked / atomic over a payload
   ].each_slice(2).map(&:first).freeze, T::Array[T.nilable(Symbol)])
 
+  private
+
   sig { returns(Symbol) }
   def escape_class
     return :value          if primitive?
@@ -832,6 +834,8 @@ class Type
     return :value          if non_string_array?
     :by_ref
   end
+
+  public
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership=(value)
@@ -949,10 +953,14 @@ class Type
     value
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def is_observable
     @capabilities.observable
   end
+
+  public
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def observable_terminal=(value)
@@ -1056,12 +1064,16 @@ class Type
     @placement.provenance
   end
 
+  private
+
   sig { params(location: T.nilable(Symbol)).returns(TypePlacement) }
   def apply_declared_location!(location)
     return placement unless location && location != :stack
 
     apply_placement!(provenance: location)
   end
+
+  public
 
   sig { returns(TypePlacement) }
   def mark_stack_value!
@@ -1078,30 +1090,42 @@ class Type
     apply_placement!(provenance: :frame)
   end
 
+  private
+
   sig { returns(TypePlacement) }
   def mark_rodata!
     apply_placement!(provenance: :rodata)
   end
+
+  public
 
   sig { returns(TypePlacement) }
   def mark_borrowed_reference!
     apply_placement!(provenance: :borrow)
   end
 
+  private
+
   sig { returns(TypePlacement) }
   def pin_heap_for_sync_wrapper!
     mark_heap_allocated!
   end
+
+  public
 
   sig { returns(TypePlacement) }
   def pin_heap_for_indirect!
     mark_heap_allocated!
   end
 
+  private
+
   sig { returns(TypePlacement) }
   def pin_heap_for_collection!
     mark_heap_allocated!
   end
+
+  public
 
   sig { returns(TypePlacement) }
   def reset_to_bare_data_placement!
@@ -1403,10 +1427,14 @@ class Type
     shape.resolved
   end
 
+  private
+
   sig { returns(TypeId) }
   def type_id
     TypeId.new(key: semantic_type_key)
   end
+
+  public
 
   sig { returns(String) }
   def semantic_type_key
@@ -1787,10 +1815,14 @@ class Type
     multiowned? || shared?
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def shared_or_multiowned?
     shared? || multiowned?
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def rc_map?
@@ -2423,6 +2455,9 @@ class Type
   def self.observable_wrappers
     T.must(@observable_wrappers = T.let(observable_terminals.transform_values(&:wrapper).freeze, T.nilable(T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)])))
   end
+
+  private
+
   sig { params(tense_type: Type).returns(String) }
   def observable_wrapper_zig(tense_type)
     # A2: a missing terminal stamp here means an upstream pass produced
@@ -2455,6 +2490,8 @@ class Type
     builder.call(tense_type)
   end
 
+  public
+
   # Preferred predicate name for ~T / stream-like future values.
   sig { returns(T::Boolean) }
   def future?
@@ -2482,11 +2519,15 @@ class Type
     wrapped if wrapped&.array?
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def open_stream_alias?
     shape = optional_stream_shape_type
     shape&.dynamic? || false
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def stream?

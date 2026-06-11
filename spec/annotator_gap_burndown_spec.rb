@@ -135,11 +135,11 @@ RSpec.describe "annotator branch gap burndown" do
     ))
 
     expect(missing_symbol.admits_atomic?).to be(false)
-    expect(transition_for_sync("direct_locked", sync: :locked).exclusive_sync?).to be(true)
-    expect(transition_for_sync("direct_write_locked", sync: :write_locked).exclusive_sync?).to be(true)
+    expect(transition_for_sync("direct_locked", sync: :locked).send(:exclusive_sync?)).to be(true)
+    expect(transition_for_sync("direct_write_locked", sync: :write_locked).send(:exclusive_sync?)).to be(true)
     expect(transition_for_sync("direct_write_locked", sync: :write_locked).write_locked_sync?).to be(true)
     expect(transition_for_sync("direct_locked", sync: :locked).write_locked_sync?).to be(false)
-    expect(transition_for_sync("direct_atomic", sync: :atomic).exclusive_sync?).to be(false)
+    expect(transition_for_sync("direct_atomic", sync: :atomic).send(:exclusive_sync?)).to be(false)
     expect(transition_for_sync("direct_locked", sync: :locked).exclusive_validation_action).to eq(:valid)
     expect(transition_for_sync("direct_atomic", sync: :atomic).exclusive_validation_action).to eq(:mismatch)
     expect(transition_for_sync("direct_atomic", sync: :atomic).admits_atomic?).to be(true)
@@ -154,7 +154,7 @@ RSpec.describe "annotator branch gap burndown" do
     param_ident.symbol.is_param = true
     expect(param_ident.symbol.declared_sync_contract?).to be(false)
     param_transition = capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: param_ident))
-    expect(param_transition.parameter_target?).to be(true)
+    expect(param_transition.send(:parameter_target?)).to be(true)
     expect(param_transition.declared_sync_contract?).to be(false)
     expect(param_transition.deferred_sync_param?).to be(true)
     expect(param_transition.send(:deferred_lock_param?)).to be(true)
@@ -171,8 +171,8 @@ RSpec.describe "annotator branch gap burndown" do
     versioned_param.symbol.sync_families = Set[:VERSIONED]
     expect(versioned_param.symbol.declared_sync_contract?).to be(true)
     versioned_transition = capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: versioned_param))
-    expect(versioned_transition.parameter_target?).to be(true)
-    expect(versioned_transition.exclusive_sync?).to be(false)
+    expect(versioned_transition.send(:parameter_target?)).to be(true)
+    expect(versioned_transition.send(:exclusive_sync?)).to be(false)
     expect(versioned_transition.declared_sync_contract?).to be(true)
     expect(versioned_transition.deferred_sync_param?).to be(false)
     expect(versioned_transition.exclusive_validation_action).to eq(:declared_contract)
@@ -244,7 +244,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     result = ann.send(:visit, extern_fn)
 
-    signature = FunctionSignature.unwrap(ann.current_scope.resolve_entry!("native_len").type)
+    signature = FunctionSignature.unwrap(ann.send(:current_scope).resolve_entry!("native_len").type)
     expect(result).to be_nil
     expect(signature.extern).to eq(true)
     expect(signature.return_type.resolved).to eq(:Int64)
@@ -382,7 +382,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "reports tokenless struct-pattern field diagnostics" do
     ann = quiet_annotator
-    ann.current_scope.declare_type(:Point, Schemas::StructSchema.new(
+    ann.send(:current_scope).declare_type(:Point, Schemas::StructSchema.new(
       fields: { "x" => AST::StructField.new(type: Type.new(:Int64)) }
     ))
 
@@ -400,7 +400,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "annotates struct extra-patterns in match arms" do
     ann = quiet_annotator
-    ann.current_scope.declare_type(:Point, Schemas::StructSchema.new(
+    ann.send(:current_scope).declare_type(:Point, Schemas::StructSchema.new(
       fields: { "x" => AST::StructField.new(type: Type.new(:Int64)) }
     ))
     ann.define_singleton_method(:visit) do |node|
@@ -429,7 +429,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "stops union destructure binding after an unknown tokenless field" do
     ann = quiet_annotator
-    ann.current_scope.declare_type(:Result, Schemas::UnionSchema.new(
+    ann.send(:current_scope).declare_type(:Result, Schemas::UnionSchema.new(
       variants: {
         "Ok" => Schemas::InlineStructVariant.new(fields: { "value" => Type.new(:Int64) })
       }
@@ -457,7 +457,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:visit_MatchStatement, match)
 
     expect(direct_errors(ann).map { |err| err[1] }).to include(:MATCH_DESTRUCTURE_FIELD_UNKNOWN)
-    expect(ann.current_scope.entry?("missing")).to be(false)
+    expect(ann.send(:current_scope).entry?("missing")).to be(false)
   end
 
   it "records TRUE identifier while loops and visits scalar loop bodies" do
@@ -678,7 +678,7 @@ RSpec.describe "annotator branch gap burndown" do
     binding = AST::Identifier.new(token, "item")
     bind = AST::BinaryOp.new(token(:AS, "AS"), scalar, :BIND_VAR, binding)
     ann.send(:visit_BindVar, bind)
-    expect(ann.current_scope.resolve_entry!("item").type.resolved).to eq(:Int64)
+    expect(ann.send(:current_scope).resolve_entry!("item").type.resolved).to eq(:Int64)
     expect(bind.full_type!.resolved).to eq(:Int64)
   end
 
@@ -755,8 +755,8 @@ RSpec.describe "annotator branch gap burndown" do
     resource.ownership_kind = :resource
     promise = symbol_entry(type: Type.new(:"~String"), storage: :stack)
     promise.ownership_kind = :affine
-    ann.current_scope.install_entry("file_handle", resource)
-    ann.current_scope.install_entry("promise", promise)
+    ann.send(:current_scope).install_entry("file_handle", resource)
+    ann.send(:current_scope).install_entry("promise", promise)
     ann.send(:ownership_graph).declare("file_handle", kind: :resource, type_info: Type.new(:File), scope_depth: 0, line: 1)
     ann.send(:ownership_graph).declare("promise", kind: :affine, type_info: Type.new(:"~String"), scope_depth: 0, line: 1)
     match = AST::MatchStatement.new(token(:MATCH, "MATCH"), AST::Identifier.new(token, "tag"), [], nil, nil, nil, true, false)
@@ -953,7 +953,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "dispatches assignment targets and rejects invalid targets" do
     ann = quiet_annotator
-    ann.current_scope.declare("x", nil, Type.new(:Int64), true, false, nil, :stack)
+    ann.send(:current_scope).declare("x", nil, Type.new(:Int64), true, false, nil, :stack)
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:verify_unrestricted!) { |_node| nil }
     ann.define_singleton_method(:verify_tied_assignment!) { |_node| nil }
@@ -980,12 +980,12 @@ RSpec.describe "annotator branch gap burndown" do
     missing = AST::Identifier.new(token, "missing")
     ann.send(:visit_assignment_variable, missing, AST::Assignment.new(token(:EQUAL, "="), missing, value))
 
-    ann.current_scope.declare("fixed", nil, Type.new(:Int64), false, false, nil, :stack)
+    ann.send(:current_scope).declare("fixed", nil, Type.new(:Int64), false, false, nil, :stack)
     ann.define_singleton_method(:build_declare_mutable_fix) { |_name, _scope| :make_mutable }
     fixed = AST::Identifier.new(token, "fixed")
     ann.send(:visit_assignment_variable, fixed, AST::Assignment.new(token(:EQUAL, "="), fixed, value))
 
-    ann.current_scope.declare("plain", nil, Type.new(:Int64), false, false, nil, :stack)
+    ann.send(:current_scope).declare("plain", nil, Type.new(:Int64), false, false, nil, :stack)
     ann.define_singleton_method(:build_declare_mutable_fix) { |_name, _scope| nil }
     plain = AST::Identifier.new(token, "plain")
     ann.send(:visit_assignment_variable, plain, AST::Assignment.new(token(:EQUAL, "="), plain, value))
@@ -1653,7 +1653,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(symbol_call.full_type!.resolved).to eq(:Int64)
 
     not_fn_ann = quiet_annotator
-    not_fn_ann.current_scope.declare("not_fn", nil, Type.new(:Int64), false, false, nil, :stack)
+    not_fn_ann.send(:current_scope).declare("not_fn", nil, Type.new(:Int64), false, false, nil, :stack)
     not_fn_call = AST::FuncCall.new(token(:VAR_ID, "not_fn"), "not_fn", [])
     not_fn_ann.send(:resolve_call, not_fn_call, not_fn_call.args)
 
@@ -1754,17 +1754,17 @@ RSpec.describe "annotator branch gap burndown" do
     registries = { KNOWN: registry }
     label = ->(_t) { "label" }
 
-    emit = IntrinsicRegistry.build_emit({ label: label, cleanup: { registry: registry } }, registries)
+    emit = IntrinsicRegistry.send(:build_emit, { label: label, cleanup: { registry: registry } }, registries)
     expect(emit.label).to eq(label)
     expect(emit.cleanup.registry).to eq(:KNOWN)
-    expect(IntrinsicRegistry.nested_emit({ registry: {} }, registries).registry).to eq(:unknown)
+    expect(IntrinsicRegistry.send(:nested_emit, { registry: {} }, registries).registry).to eq(:unknown)
 
     converted = IntrinsicRegistry.convert_registry({ "ok" => { args: [], return: :Int64 }, "skip" => :not_hash }, registries)
     expect(converted["ok"]).to be_a(FunctionSignature)
     expect(converted).not_to have_key("skip")
 
     expect {
-      IntrinsicRegistry.build_emit({ unmapped_key: true }, registries)
+      IntrinsicRegistry.send(:build_emit, { unmapped_key: true }, registries)
     }.to raise_error(RuntimeError, /unmapped registry key/)
     expect {
       IntrinsicRegistry.to_return_def(-> { Type.new(:Int64) })
@@ -1818,7 +1818,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(SemanticAnnotator.new(source_code: nil).send(:literal_source_length, Lexer::Token.new(:STRING, "abc", 1, 1))).to eq(3)
 
     bind_ann = quiet_annotator
-    bind_ann.current_scope.declare("a", nil, Type.new(:Int64), true, false, nil, :stack, Set.new, [], sync: :atomic)
+    bind_ann.send(:current_scope).declare("a", nil, Type.new(:Int64), true, false, nil, :stack, Set.new, [], sync: :atomic)
     bind_ann.define_singleton_method(:visit) { |_node| nil }
     bind_ann.define_singleton_method(:verify_unrestricted!) { |_node| nil }
     bind_ann.define_singleton_method(:validate_assignment_type) { |_node, _expected, _actual| nil }
@@ -1927,7 +1927,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(direct_errors(pipe_ann).map { |e| e[1] }).to include(:CONCURRENT_BAD_FOLLOWING_OP)
 
     lifetime_ann = quiet_annotator
-    lifetime_ann.current_scope.declare("x", nil, Type.new(:String), true)
+    lifetime_ann.send(:current_scope).declare("x", nil, Type.new(:String), true)
     arg = AST::Identifier.new(token, "x")
     sig = FunctionSignature.new(
       params: [AST::Param.new(name: "p", type: Type.new(:String))],
@@ -1988,7 +1988,7 @@ RSpec.describe "annotator branch gap burndown" do
     source_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym.instance_variable_set(:@lifetime, [source_sym])
-    tied_ann.current_scope.install_entry("source", source_sym)
+    tied_ann.send(:current_scope).install_entry("source", source_sym)
     tied_ann.semantic_function_nodes.replace({
       "tied" => AST::FunctionDef.new(token, "tied", [], [], Type.new(:String), nil, [], [], nil, :package)
     })
@@ -3824,7 +3824,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:visit_FuncCall, native)
     expect(native.full_type!.resolved).to eq(:Any)
 
-    ann.current_scope.declare_type(:Handle, Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close")))
+    ann.send(:current_scope).declare_type(:Handle, Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close")))
     missing_static = AST::StaticCall.new(
       token(:COLON2, "::"),
       AST::Identifier.new(nil, "Handle"),
@@ -3841,7 +3841,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
     ann.send(:visit_StaticCall, unknown_static)
 
-    ann.current_scope.declare_type(:FallibleHandle, Schemas::ResourceSchema.new(
+    ann.send(:current_scope).declare_type(:FallibleHandle, Schemas::ResourceSchema.new(
       close_plan: Schemas::ResourceClosePlan.method("close"),
       static_methods: {
         "open" => { args: [], return: :FallibleHandle, allocates: true, can_fail: true },
@@ -3854,7 +3854,7 @@ RSpec.describe "annotator branch gap burndown" do
       "open",
       []
     )
-    expect(ann.current_fn_ctx).to be_nil
+    expect(ann.send(:current_fn_ctx)).to be_nil
     ann.send(:visit_StaticCall, fallible_static)
     expect(fallible_static.stdlib_allocates).to eq(true)
     expect(fallible_static.can_fail).to eq(true)
@@ -3939,7 +3939,7 @@ RSpec.describe "annotator branch gap burndown" do
       sync: :locked,
       storage: :stack,
     )
-    expect(fact.lock_capability?).to eq(true)
+    expect(fact.send(:lock_capability?)).to eq(true)
     expect(fact.lock_identity).to eq(:Counter)
   end
 
@@ -4144,6 +4144,6 @@ RSpec.describe "annotator branch gap burndown" do
       ann.send(:visit_FunctionDef, fn)
     }.to raise_error(RuntimeError, "intentional")
 
-    expect(ann.current_fn_ctx).to be_nil
+    expect(ann.send(:current_fn_ctx)).to be_nil
   end
 end

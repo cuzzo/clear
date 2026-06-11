@@ -265,5 +265,20 @@ module ThunkTransform
     def contains_self_call?(node, fn_name)
       contains_any_call?(node, Set[fn_name])
     end
-  end
+      private :contains_any_call?
+    private :contains_self_call?
+    private :direct_self_call
+    private :match_base_case
+    private :match_mutual_base_case
+    private :match_recursive_combine
+    private :match_tail_mutual_call
+    private_class_method :contains_any_call?
+    private_class_method :contains_self_call?
+    private_class_method :direct_self_call
+    private_class_method :match_base_case
+    private_class_method :match_mutual_base_case
+    private_class_method :match_recursive_combine
+    private_class_method :match_tail_mutual_call
+
+end
 end

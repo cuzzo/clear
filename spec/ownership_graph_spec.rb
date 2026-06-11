@@ -270,7 +270,7 @@ RSpec.describe OwnershipGraph do
       snapshot.each_place_state { |place_id, state| yielded_places << [place_id, state] }
 
       expect(snapshot.state_for("x")).to eq(:moved)
-      expect(snapshot.state_for_place(place)).to eq(:moved)
+      expect(snapshot.send(:state_for_place, place)).to eq(:moved)
       expect(snapshot.move_line_for("x")).to eq(14)
       expect(snapshot.move_line_for_place(place)).to eq(14)
       expect(snapshot.move_col_for("x")).to eq(6)
@@ -336,12 +336,12 @@ RSpec.describe OwnershipGraph do
       graph.declare("x.a")
       graph.declare("x.a.b")
       graph.declare("y")
-      expect(graph.owned_children("x")).to eq(["x.a", "x.a.b"])
+      expect(graph.send(:owned_children, "x")).to eq(["x.a", "x.a.b"])
     end
 
     it "returns empty for leaf nodes" do
       graph.declare("x")
-      expect(graph.owned_children("x")).to be_empty
+      expect(graph.send(:owned_children, "x")).to be_empty
     end
   end
 end

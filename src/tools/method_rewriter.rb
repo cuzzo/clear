@@ -437,4 +437,27 @@ module MethodRewriter
   private_class_method :apply_edits,
     :collect_method_names,
     :stdlib_method_names
+  private :apply_flat_edits
+  private :compute_edit
+  private :fsm_lowered?
+  private :match_paren
+  private :needs_parens?
+  private :next_non_ws
+  private :offset_for
+  private :resolve_nested_edits
+  private :split_args_by_comma
+  private :walk_collect_edits
+  private :walk_collect_user_decls
+  private_class_method :apply_flat_edits
+  private_class_method :compute_edit
+  private_class_method :fsm_lowered?
+  private_class_method :match_paren
+  private_class_method :needs_parens?
+  private_class_method :next_non_ws
+  private_class_method :offset_for
+  private_class_method :resolve_nested_edits
+  private_class_method :split_args_by_comma
+  private_class_method :walk_collect_edits
+  private_class_method :walk_collect_user_decls
+
 end

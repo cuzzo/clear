@@ -199,10 +199,14 @@ module MIRLoweringFunctions
       self.guarded_cleanup_names = context.guarded_cleanup_names
     end
 
+    private
+
     sig { returns(T::Boolean) }
     def current_decl_heap?
       current_decl_alloc == :heap
     end
+
+    public
 
     sig { returns(Symbol) }
     def current_decl_or_frame_alloc
@@ -2008,5 +2012,59 @@ module MIRLoweringFunctions
     :build_extern_trampoline_method,
     :call_owned_return?,
     :collect_catch_reassigns
+
+  private :activate_function_context
+  private :ast_expr_produces_heap?
+  private :attach_explicit_move_consumption!
+  private :body_has_faulting_alloc?
+  private :borrowed_array_argument_required?
+  private :borrowed_ownership_operand?
+  private :build_post_inner_fn
+  private :build_post_outer_fn
+  private :call_never_returns_success?
+  private :call_owned_return_from_args?
+  private :call_type_owned_return?
+  private :concrete_call_type_owned_return?
+  private :cross_boundary_arg
+  private :empty_stdlib_call_facts
+  private :faulting_return_type_str
+  private :finalize_call_result
+  private :finalized_needs_rt!
+  private :function_body_has_value_return?
+  private :function_catch_clauses
+  private :function_entry_plan
+  private :function_lowering_context
+  private :function_param_fact
+  private :function_param_facts
+  private :function_param_zig_type
+  private :function_return_retains_shared_handle?
+  private :has_default_catch?
+  private :infer_catch_value_allocator
+  private :intrinsic_ast_arg
+  private :intrinsic_result_ownership_bearing?
+  private :lower_extern_call
+  private :lower_extern_direct_call
+  private :lower_extern_direct_method
+  private :lower_extern_method
+  private :lower_intrinsic
+  private :lower_safe_nav_method_call
+  private :materialize_stdlib_arguments
+  private :mutable_scalar_param_shadows
+  private :owned_slice_argument_required?
+  private :ownership_consumed_arg_names
+  private :record_lowered_entry_markers!
+  private :recursion_yield_prologue
+  private :reentrance_guard_prologue
+  private :registry_call_args
+  private :runtime_frame_prologue
+  private :runtime_frame_save_required?
+  private :stdlib_call_facts
+  private :stdlib_coerce_type
+  private :stdlib_consumed_alloc
+  private :stdlib_sink_type_for_arg
+  private :takes_param_ownership_mir
+  private :typed_name_set
+  private :unused_param_suppressions
+  private :walk_catch_body_for_reassigns
 
 end

@@ -89,5 +89,8 @@ module LSP
         fixes: [],
       )
     end
-  end
+    private :synthetic_finding_from
+  private_class_method :synthetic_finding_from
+
+end
 end

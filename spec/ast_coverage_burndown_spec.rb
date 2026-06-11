@@ -63,7 +63,7 @@ RSpec.describe "AST coverage burndown" do
       RUBY
       file.close
 
-      expect(DiagnosticExamples.load!([file.path])).to eq({})
+      expect(DiagnosticExamples.send(:load!, [file.path])).to eq({})
     ensure
       file&.unlink
     end
@@ -323,10 +323,10 @@ RSpec.describe "AST coverage burndown" do
     end
 
     it "exposes stable semantic type ids at phase boundaries" do
-      number_id = Type.new(:Number).type_id
-      float_id = Type.new(:Float64).type_id
-      shared_string_id = Type.new(:String, ownership: :shared).type_id
-      plain_string_id = Type.new(:String).type_id
+      number_id = Type.new(:Number).send(:type_id)
+      float_id = Type.new(:Float64).send(:type_id)
+      shared_string_id = Type.new(:String, ownership: :shared).send(:type_id)
+      plain_string_id = Type.new(:String).send(:type_id)
 
       expect(number_id.key).to eq(float_id.key)
       expect(number_id.to_s).to eq(float_id.key)
@@ -337,7 +337,7 @@ RSpec.describe "AST coverage burndown" do
         return_type: :String,
         reentrant: true
       )
-      fn_id = Type.new(fn_sig).type_id.key
+      fn_id = Type.new(fn_sig).send(:type_id).key
 
       expect(fn_id).to include("fn(")
       expect(fn_id).to include("Int64")

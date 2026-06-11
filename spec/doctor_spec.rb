@@ -48,7 +48,7 @@ RSpec.describe Doctor do
 
   it "prints a clear no-profile message for an empty profile directory" do
     Dir.mktmpdir do |dir|
-      out = capture_stdout { Doctor.section_heap(dir, nil) }
+      out = capture_stdout { Doctor.send(:section_heap, dir, nil) }
 
       expect(out).to include("No heap profile found")
       expect(out).to include(File.join(dir, "alloc.txt"))
@@ -57,12 +57,12 @@ RSpec.describe Doctor do
 
   it "formats sort keys and values for all doctor --by modes" do
     Doctor.instance_variable_set(:@opts, { by: :inuse_allocs })
-    expect(Doctor.sort_key).to eq(:inuse_allocs)
-    expect(Doctor.sort_label).to eq("in-use allocations (alloc - free)")
+    expect(Doctor.send(:sort_key)).to eq(:inuse_allocs)
+    expect(Doctor.send(:sort_label)).to eq("in-use allocations (alloc - free)")
     expect(Doctor.fmt_sort_value(inuse_allocs: 12_345)).to eq("12,345 allocs")
 
     Doctor.instance_variable_set(:@opts, { by: :unknown })
-    expect(Doctor.sort_key).to eq(:bytes)
+    expect(Doctor.send(:sort_key)).to eq(:bytes)
     expect(Doctor.fmt_sort_value(bytes: 512)).to eq("512 B")
   ensure
     Doctor.instance_variable_set(:@opts, nil)
@@ -79,7 +79,7 @@ RSpec.describe Doctor do
 
       sites = nil
       out = capture_stdout do
-        sites, = Doctor.section_heap(dir, nil)
+        sites, = Doctor.send(:section_heap, dir, nil)
       end
 
       expect(sites.map { |s| s[:addr] }).to eq(["0xbbb", "0xaaa"])
@@ -114,12 +114,12 @@ RSpec.describe Doctor do
       )
 
       Doctor.instance_variable_set(:@opts, { cumulative: false, by: :bytes })
-      flat = capture_stdout { Doctor.section_heap(dir, binary) }
+      flat = capture_stdout { Doctor.send(:section_heap, dir, binary) }
       expect(flat).to include("makeNode (line 10)")
       expect(flat).to include("entryWrapper (runtime.zig:44)")
 
       Doctor.instance_variable_set(:@opts, { cumulative: true, by: :bytes })
-      cumulative = capture_stdout { Doctor.section_heap(dir, binary) }
+      cumulative = capture_stdout { Doctor.send(:section_heap, dir, binary) }
       expect(cumulative).to include("Top functions by cumulative bytes")
       expect(cumulative).to include("2.0 KB cum")
       expect(cumulative).to include("512 B  cum")
@@ -150,7 +150,7 @@ RSpec.describe Doctor do
         end
       end
 
-      out = capture_stdout { Doctor.section_cpu(dir, perf_data) }
+      out = capture_stdout { Doctor.send(:section_cpu, dir, perf_data) }
 
       expect(out).to include("CPU Profile")
       expect(out).to include("99.0%  hot_symbol")
@@ -165,7 +165,7 @@ RSpec.describe Doctor do
       File.write(perf_data, "perf")
       allow(Doctor).to receive(:`).and_return("")
 
-      out = capture_stdout { Doctor.section_cpu(dir, perf_data) }
+      out = capture_stdout { Doctor.send(:section_cpu, dir, perf_data) }
 
       expect(out).to include("no samples collected")
     end
@@ -226,7 +226,7 @@ RSpec.describe Doctor do
         // CLEAR_PROFILE_TASK_SITE id=12 kind=BG line=4 column=9 dispatch=parallel form=stack
       ZIG
 
-      expect(Doctor.task_site_metadata(dir)[12]).to include(
+      expect(Doctor.send(:task_site_metadata, dir)[12]).to include(
         kind: "BG",
         line: 4,
         column: 9,
@@ -248,7 +248,7 @@ RSpec.describe Doctor do
         4 100 100 25 0 30 100
       PROFILE
 
-      out = capture_stdout { Doctor.section_channels(dir) }
+      out = capture_stdout { Doctor.send(:section_channels, dir) }
 
       expect(out).to include("Channel Saturation")
       expect(out).to include("slow consumer")
@@ -283,7 +283,7 @@ RSpec.describe Doctor do
         4\t100\t100\t50\t150000\t5000\tlocal\tfsm\t0:95,1:5
       PROFILE
 
-      out = capture_stdout { Doctor.section_fibers(dir) }
+      out = capture_stdout { Doctor.send(:section_fibers, dir) }
 
       expect(out).to include("Fibers")
       expect(out).to include("finished in under 10us")
@@ -304,7 +304,7 @@ RSpec.describe Doctor do
         0xok\t10\t0\t0\t0\t10000\t1000\t0\t0\t0\t0\t-
       PROFILE
 
-      out = capture_stdout { Doctor.section_locks(dir) }
+      out = capture_stdout { Doctor.send(:section_locks, dir) }
 
       expect(out).to include("contended lock")
       expect(out).to include("hot lock + long hold")
@@ -336,7 +336,7 @@ RSpec.describe Doctor do
         0xcont\t2000\t500\t4000000\t1000000\t8000000\t2000000\t0\t0\t0\t0\t-
       PROFILE
 
-      out = capture_stdout { Doctor.section_locks(dir) }
+      out = capture_stdout { Doctor.send(:section_locks, dir) }
 
       expect(out).to include("Lock Hold & Contention")
       expect(out).to include("WARNING: 4 lock samples dropped")
@@ -357,7 +357,7 @@ RSpec.describe Doctor do
         END
       CLEAR
 
-      out = capture_stdout { Doctor.emit_atomic_ptr_migration!(dir) }
+      out = capture_stdout { Doctor.send(:emit_atomic_ptr_migration!, dir) }
 
       expect(out).to include("AtomicPtr fit detected")
       expect(out).to include("'cfg: Cfg' @shared:writeLocked")
@@ -376,7 +376,7 @@ RSpec.describe Doctor do
         END
       CLEAR
 
-      out = capture_stdout { Doctor.emit_atomic_ptr_migration!(dir) }
+      out = capture_stdout { Doctor.send(:emit_atomic_ptr_migration!, dir) }
 
       expect(out).to include("'cfg: Cfg' @shared:locked")
     end
@@ -402,7 +402,7 @@ RSpec.describe Doctor do
         0xok\t64\t1\t0\t0\t0\t1\t-
       PROFILE
 
-      out = capture_stdout { Doctor.section_mvcc(dir) }
+      out = capture_stdout { Doctor.send(:section_mvcc, dir) }
 
       expect(out).to include("MVCC Cells")
       expect(out).to include("WARNING: 7 mvcc samples dropped")
@@ -427,7 +427,7 @@ RSpec.describe Doctor do
         { line: 6, kind: :other },
       ])
 
-      out = capture_stdout { Doctor.section_atomic_escape(dir) }
+      out = capture_stdout { Doctor.send(:section_atomic_escape, dir) }
 
       expect(out).to include("Atomic Escape")
       expect(out).to include("RETURN escapes atomic-tied value")
@@ -468,10 +468,10 @@ RSpec.describe Doctor do
         inuse_bytes: 192_000,
       }]
 
-      syscalls = capture_stdout { Doctor.section_syscalls(dir) }
+      syscalls = capture_stdout { Doctor.send(:section_syscalls, dir) }
       llc_rate = nil
-      hardware = capture_stdout { llc_rate = Doctor.section_hardware(dir) }
-      freeze = capture_stdout { Doctor.section_freeze(dir, sites, { "0xnode" => { func: "entryWrapper" } }, llc_rate) }
+      hardware = capture_stdout { llc_rate = Doctor.send(:section_hardware, dir) }
+      freeze = capture_stdout { Doctor.send(:section_freeze, dir, sites, { "0xnode" => { func: "entryWrapper" } }, llc_rate) }
 
       expect(syscalls).to include("Syscalls")
       expect(syscalls).to include("total")
@@ -490,7 +490,7 @@ RSpec.describe Doctor do
                150      LLC-load-misses:u
       PROFILE
 
-      hardware = capture_stdout { Doctor.section_hardware(dir) }
+      hardware = capture_stdout { Doctor.send(:section_hardware, dir) }
       expect(hardware).to include("LLC miss rate: 15.0% (moderate)")
 
       sites = [
@@ -503,7 +503,7 @@ RSpec.describe Doctor do
         "0xfunc" => { func: "buildTree" },
         "0xraw" => { func: "" },
       }
-      freeze = capture_stdout { Doctor.section_freeze(dir, sites, resolved, 25.0) }
+      freeze = capture_stdout { Doctor.send(:section_freeze, dir, sites, resolved, 25.0) }
 
       expect(freeze).to include("line 12")
       expect(freeze).to include("buildTree")

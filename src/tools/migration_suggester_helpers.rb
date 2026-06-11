@@ -194,4 +194,7 @@ module MigrationSuggesterHelpers
   end
 
   private :analyze_fn
+  private :classify_uses!
+  private :walk_recursive
+
 end

@@ -572,4 +572,12 @@ module FsmLowering
 
   private :fsm_owned_transfer_identifier?,
     :guard_fsm_result_cleanup!
+  private :coerce_fsm_result_value
+  private :fsm_ast_result_consumed_roots
+  private :lock_error_done_stmts
+  private :lock_error_set_error_stmt
+  private :lower_one_step_to_mir
+  private :lower_step_stmts
+  private :uniform_fsm_result_target_alloc
+
 end

@@ -86,5 +86,9 @@ module MIR
     def statements
       packet.statements
     end
-  end
+      private :cleanup_stmt
+    private :let_node
+    private :packet
+
+end
 end

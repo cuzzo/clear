@@ -1265,6 +1265,16 @@ class OwnershipDataflow
   def dup_state(state)
     state.dup
   end
+    private :block_exit_cleanup_summaries
+    private :block_exit_cleanup_summary
+    private :cleanup_entry_pairs
+    private :declares_name?
+    private :duplicate_binding_names
+    private :exit_snapshot
+    private :insert_ordered_worklist!
+    private :preserve_guard_after_full_move?
+    private :reverse_postorder_index
+
 end
 
 # ==========================================

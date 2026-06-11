@@ -104,4 +104,9 @@ module MultiStatementLinter
     FixCollector.push(finding)
     _ = line_text  # reserved for future fix proposal
   end
+  private :emit_finding
+  private :scan_top_level_semis
+  private_class_method :emit_finding
+  private_class_method :scan_top_level_semis
+
 end

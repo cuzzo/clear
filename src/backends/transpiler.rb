@@ -261,6 +261,9 @@ class ZigTranspiler
   end
 
   private :transpile_mir
+  private :emit_error_name_enum
+  private :main_stack_variant
+
 end
 
 # --- RUN IT ---

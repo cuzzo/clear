@@ -219,4 +219,7 @@ module UnionAnalysis
       move_if_not_copyable!(val_node)
     end
   end
+  private :validate_union_fields!
+  private :validate_union_schema!
+
 end

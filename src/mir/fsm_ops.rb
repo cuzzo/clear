@@ -423,7 +423,9 @@ module FsmOps
     def resolve_fn(fn_path)
       fn_path.render("__ctx_#{@ctx_id}")
     end
-  end
+    private :lower_stmt
+
+end
 
   # =====================================================================
   # Structure-derivation helpers

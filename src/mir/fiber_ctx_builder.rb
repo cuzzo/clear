@@ -118,10 +118,14 @@ module FiberCtxBuilder
       kind == CaptureCleanupKind::CapturedValue
     end
 
+    private
+
     sig { returns(T::Boolean) }
     def uniform_value?
       kind == CaptureCleanupKind::UniformValue
     end
+
+    public
 
     sig { returns(T::Boolean) }
     def rc_release?

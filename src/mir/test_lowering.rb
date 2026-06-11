@@ -453,4 +453,12 @@ module TestLowering
   end
 
   private :lower_when_block
+  private :build_let_ast_map
+  private :collect_identifier_refs
+  private :compute_used_let_names
+  private :format_tag_suffix
+  private :lower_test_that
+  private :stub_local_idents
+  private :with_test_that_bindings
+
 end

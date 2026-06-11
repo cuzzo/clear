@@ -184,7 +184,9 @@ module FsmTransform
           alias_overrides_by_index: @alias_overrides_for.dup,
         )
       end
-    end
+          private :stamp_overrides
+
+end
 
     module_function
 
@@ -630,5 +632,34 @@ module FsmTransform
       :emit_with_fragment,
       :stmt_introduces_split?,
       :with_unsupported?
-  end
+      private :contains_suspend_anywhere?
+    private :contains_unsupported?
+    private :emit_for_each_fragment
+    private :emit_for_range_fragment
+    private :emit_if_fragment
+    private :emit_stmts
+    private :emit_suspend
+    private :emit_suspend_with_pre
+    private :emit_while_fragment
+    private :lock_release_stmts
+    private :remap_tail
+    private :renumber_with_entry
+    private :stmt_unsupported_suspend?
+    private :with_lock_suspend?
+    private_class_method :contains_suspend_anywhere?
+    private_class_method :contains_unsupported?
+    private_class_method :emit_for_each_fragment
+    private_class_method :emit_for_range_fragment
+    private_class_method :emit_if_fragment
+    private_class_method :emit_stmts
+    private_class_method :emit_suspend
+    private_class_method :emit_suspend_with_pre
+    private_class_method :emit_while_fragment
+    private_class_method :lock_release_stmts
+    private_class_method :remap_tail
+    private_class_method :renumber_with_entry
+    private_class_method :stmt_unsupported_suspend?
+    private_class_method :with_lock_suspend?
+
+end
 end

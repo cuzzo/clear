@@ -296,5 +296,8 @@ module Pprof
         Wire.field_varint(4, f[:filename_idx]) +
         Wire.field_varint(5, f[:start_line])
     end
-  end
+      private :encode_gzip
+    private :intern
+
+end
 end

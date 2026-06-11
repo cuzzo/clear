@@ -920,4 +920,21 @@ module ReentranceBridge
   end
 
   private :emit_mutual_thunk_unsupported!
+  private :canonical_reentrance_kind
+  private :compute_reachable
+  private :emit_service_required_error!
+  private :find_mutual_max_depth_callee
+  private :find_plain_reentrant_callee
+  private :insert_service_after_open_brace_fix
+  private :offer_legacy_reentrant_migration!
+  private :offer_unconstrained_fn_param_fix!
+  private :reachable_from_self?
+  private :replace_stack_sigil_with_service_fix
+  private :service_required_fix
+  private :thunk_all_self_calls_in_tail_position?
+  private :thunk_cycle_members
+  private :try_stamp_mutual_thunk_plan!
+  private :validate_not_logical_return!
+  private :validate_requires_clauses!
+
 end

@@ -557,4 +557,7 @@ class PipelineMaterializer
       MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_mat"), true), false, nil, nil),
     ]
   end
+  private :item_kind
+  private :item_setup_stmts
+
 end

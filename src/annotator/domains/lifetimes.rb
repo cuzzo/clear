@@ -1264,6 +1264,21 @@ module Annotator
         :collect_bg_sources_walk,
         :handle_assignment_path_move!,
         :reject_borrowed_index_assignment_move!
-    end
+      private :bg_lifetime_sources
+  private :bg_sources_for_block
+  private :classify_og_kind
+  private :collect_bg_sources_in_expr
+  private :declare_assignment_graph_path!
+  private :dest_scope_depth_for_target
+  private :get_lifetime_paths
+  private :get_path_to_root
+  private :handle_assignment_identifier_move!
+  private :init_value_contents_heap?
+  private :reject_scoped_assignment_move!
+  private :resolve_borrow_source
+  private :share_consumes_source?
+  private :value_copy_capture?
+
+end
   end
 end

@@ -13,7 +13,7 @@ RSpec.describe "annotator completion phases" do
   end
 
   it "initializes builtin environment during annotator construction" do
-    scope = SemanticAnnotator.new.current_scope
+    scope = SemanticAnnotator.new.send(:current_scope)
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
     expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)
@@ -28,7 +28,7 @@ RSpec.describe "annotator completion phases" do
     SemanticAnnotator.new.annotate!(program)
 
     expect(program.full_type!.resolved).to eq(:Void)
-    expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
+    expect(MIRPassState.for!(program).send(:completed_stages)).to eq([:annotated])
   end
 
   it "runs body analysis and program finalization for executable statements" do
@@ -43,7 +43,7 @@ RSpec.describe "annotator completion phases" do
     SemanticAnnotator.new.annotate!(program)
 
     expect(program.full_type!.resolved).to eq(:Int64)
-    expect(MIRPassState.for!(program).completed_stages).to eq([:annotated])
+    expect(MIRPassState.for!(program).send(:completed_stages)).to eq([:annotated])
   end
 
   it "publishes a frozen semantic index after annotation completes" do

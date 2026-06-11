@@ -1507,5 +1507,64 @@ module FsmTransform
       :collect_result_names,
       :lift_ctx_cleanups_to_destroy!,
       :register_owned_suspend_result_cleanups!
-  end
+    private :build_dispatch_tail
+  private :build_segment_descriptor
+  private :build_spawn_setup
+  private :check_fsm_cleanup_invariant!
+  private :collect_ctx_field_reads
+  private :collect_fsm_nodes
+  private :collect_required_move_guards
+  private :compute_sp_indices
+  private :ctx_inner_result_target?
+  private :decimal_digits?
+  private :expand_lock_segment
+  private :fsm_body_emit_values
+  private :fsm_ctx_field_prefix
+  private :fsm_ctx_name?
+  private :fsm_destroy_actions
+  private :fsm_destroy_finalizer_name
+  private :fsm_fact_guard_name
+  private :fsm_owned_result_guards
+  private :fsm_segment_fact_roots
+  private :materialize_fsm_segment_facts
+  private :mir_nodes_reference_ident?
+  private :ordered_fsm_destroy_actions
+  private :prior_lock_release_stmts
+  private :promote_fsm_mir_to_ctx_fields
+  private :result_source_name
+  private :rewrite_promoted_fsm_node
+  private :rewrite_promoted_fsm_struct_fields!
+  private :tail_resume_target
+  private :true_literal?
+  private_class_method :build_dispatch_tail
+  private_class_method :build_segment_descriptor
+  private_class_method :build_spawn_setup
+  private_class_method :check_fsm_cleanup_invariant!
+  private_class_method :collect_ctx_field_reads
+  private_class_method :collect_fsm_nodes
+  private_class_method :collect_required_move_guards
+  private_class_method :compute_sp_indices
+  private_class_method :ctx_inner_result_target?
+  private_class_method :decimal_digits?
+  private_class_method :expand_lock_segment
+  private_class_method :fsm_body_emit_values
+  private_class_method :fsm_ctx_field_prefix
+  private_class_method :fsm_ctx_name?
+  private_class_method :fsm_destroy_actions
+  private_class_method :fsm_destroy_finalizer_name
+  private_class_method :fsm_fact_guard_name
+  private_class_method :fsm_owned_result_guards
+  private_class_method :fsm_segment_fact_roots
+  private_class_method :materialize_fsm_segment_facts
+  private_class_method :mir_nodes_reference_ident?
+  private_class_method :ordered_fsm_destroy_actions
+  private_class_method :prior_lock_release_stmts
+  private_class_method :promote_fsm_mir_to_ctx_fields
+  private_class_method :result_source_name
+  private_class_method :rewrite_promoted_fsm_node
+  private_class_method :rewrite_promoted_fsm_struct_fields!
+  private_class_method :tail_resume_target
+  private_class_method :true_literal?
+
+end
 end

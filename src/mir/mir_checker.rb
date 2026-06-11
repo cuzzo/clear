@@ -2868,4 +2868,17 @@ class MIRChecker
     :verify_ownership_consumption_operands!,
     :verify_return_transfers_heap!,
     :verify_structural_ownership_contracts!
+  private :collect_linear_expr_ident_names
+  private :copy_linear_state!
+  private :each_heap_create
+  private :escaping_transfer_target?
+  private :linear_exit_scope!
+  private :normalize_guarded_conditional_releases!
+  private :owned_return_init?
+  private :ownership_consumption_operand_names
+  private :ownership_registry_errors
+  private :ownership_source_expr
+  private :stdlib_owned_return?
+  private :value_constructor_expr?
+
 end

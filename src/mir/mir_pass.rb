@@ -860,4 +860,6 @@ class MIRPass
     end
   end
 
+  private :live_cleanup_entry
+
 end

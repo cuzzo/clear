@@ -1266,4 +1266,58 @@ module MIRLoweringControlFlow
 
   private :finalize_return_value,
     :return_transfer_required?
+  private :aggregate_return_literal?
+  private :collect_returned_binding_names
+  private :conjoin_match_conditions
+  private :equality_match_condition
+  private :finalize_loop_frame_alloc_scopes!
+  private :for_each_loop_stmt
+  private :for_each_owned_collection_source?
+  private :for_each_owned_collection_source_alloc
+  private :for_each_plan
+  private :for_range_plan
+  private :heap_carry_recursive_param_value
+  private :heap_carry_return_value
+  private :hoist_unhoisted_return_allocs
+  private :hoisted_match_case_body
+  private :if_chain_match_case_branches
+  private :loop_body_exits?
+  private :lower_control_condition
+  private :lower_if_chain_match
+  private :lower_match_branch
+  private :lower_match_default_body
+  private :lower_switch_match
+  private :lower_union_match
+  private :match_lowering_facts
+  private :prepend_loop_mark
+  private :return_destination_type
+  private :return_lowering_plan
+  private :return_move_guard_required?
+  private :return_move_guard_required_names
+  private :return_payload_pointer_value
+  private :return_transfer_required_names
+  private :return_transfers_heap_binding?
+  private :return_value_already_payload_pointer?
+  private :return_value_destination_type
+  private :return_with_transfer_marks
+  private :returned_binding_names
+  private :returned_hoist_binding?
+  private :returned_owned_binding?
+  private :returned_takes_param?
+  private :stamp_loop_frame_alloc_scopes!
+  private :string_match_condition
+  private :switch_match_pattern
+  private :synthetic_return_ownership_plan
+  private :tail_call_return?
+  private :union_if_chain_match_case
+  private :union_if_chain_payload_bindings
+  private :union_match_arm_plans
+  private :union_match_default_body
+  private :union_match_payload_bindings
+  private :union_match_switchable?
+  private :union_match_variant_name
+  private :union_tag_condition
+  private :value_if_chain_match_case
+  private :with_if_bind_alias_maps
+
 end

@@ -216,10 +216,14 @@ class SymbolEntry
     !families.empty?
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def lock_sync?
     locked? || write_locked?
   end
+
+  public
 
   sig { returns(T::Boolean) }
   def sync_or_shared_storage?
@@ -343,10 +347,14 @@ class SymbolEntry
     storage == :borrow
   end
 
+  private
+
   sig { returns(T::Boolean) }
   def local_storage?
     self.class.local_storage_value?(storage)
   end
+
+  public
 
   sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
   def self.heap_storage_value?(storage)

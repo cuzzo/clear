@@ -262,7 +262,7 @@ RSpec.describe FsmWrapperEmitter do
         true,
       )
 
-      out = FsmWrapperEmitter.render_dispatch(dispatch)
+      out = FsmWrapperEmitter.send(:render_dispatch, dispatch)
 
       expect(out).to include("if (__ctx_4.skip) {")
       expect(out).to include("__ctx_4.step = 2;")
@@ -270,7 +270,7 @@ RSpec.describe FsmWrapperEmitter do
     end
 
     it "rejects unknown dispatch tails" do
-      expect { FsmWrapperEmitter.render_tail(Object.new, 0) }
+      expect { FsmWrapperEmitter.send(:render_tail, Object.new, 0) }
         .to raise_error(ArgumentError, /unknown tail/)
     end
   end
@@ -411,7 +411,7 @@ RSpec.describe FsmWrapperEmitter do
         stmt: MIR::ExprStmt.new(MIR::Call.new("releaseShared", [], false), false),
       )
 
-      out = FsmWrapperEmitter.render_destroy_stmt_action(action, MIREmitter.new)
+      out = FsmWrapperEmitter.send(:render_destroy_stmt_action, action, MIREmitter.new)
 
       expect(out).to eq("releaseShared();")
     end

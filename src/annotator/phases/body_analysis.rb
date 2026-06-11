@@ -442,6 +442,11 @@ module Annotator
           program.statements << fn
         end
       end
-    end
+          private :record_async_body_fact!
+      private :with_block_raises_directly?
+      private :with_body_fact_frame
+      private :with_body_fact_scopes_cleared
+
+end
   end
 end

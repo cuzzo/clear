@@ -1163,4 +1163,48 @@ module MIRLoweringCapabilities
   private :emit_snapshot_mutable_call,
     :polymorphic_flow_required?
 
+  private :append_fallible_clause
+  private :assemble_with_block
+  private :ast_contains_return?
+  private :borrowed_capability_binding
+  private :borrowed_const_param_alias?
+  private :build_fallible_clause_mir
+  private :build_field_path_zig
+  private :build_sorted_acquire_entries
+  private :coop_yield_mir
+  private :default_failure_action
+  private :error_action_stmts
+  private :exclusive_capability_binding
+  private :exclusive_lock_expr
+  private :exclusive_lock_sync
+  private :failure_action_kind
+  private :guard_fail_flow_body
+  private :lower_polymorphic_universal
+  private :lower_with_match_block
+  private :materialize_sorted_lock_bindings
+  private :materialize_with_capability_binding
+  private :materialized_view_capability_bindings
+  private :multi_mutable_snapshot_txn
+  private :mutable_snapshot_cap
+  private :mutable_snapshot_plan
+  private :mutable_snapshot_with?
+  private :read_locked_capability_binding
+  private :restrict_capability_binding
+  private :safe_with_capability_alias
+  private :shared_capability_binding
+  private :single_mutable_snapshot_txn
+  private :snapshot_capability_binding
+  private :sorted_lock_acquire
+  private :structured_with_bindings
+  private :view_capability_binding
+  private :with_binding_materialization
+  private :with_block_body_stmts
+  private :with_block_control_label
+  private :with_block_inline_bindings
+  private :with_cap_is_param?
+  private :with_cap_zig_target
+  private :with_capability_alias_maps
+  private :with_capability_binding_context
+  private :with_capability_specs
+
 end

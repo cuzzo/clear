@@ -150,4 +150,11 @@ module Completions
         -a 'bash zsh fish'
     FISH
   end
+  private :bash
+  private :fish
+  private :zsh
+  private_class_method :bash
+  private_class_method :fish
+  private_class_method :zsh
+
 end

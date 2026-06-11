@@ -213,4 +213,13 @@ module ConcurrencyChecks
     :check_reentrant!
   private_class_method :check_naked_nested_with!,
     :check_reentrant!
+  private :any_lock_rank?
+  private :check_hold_across_yield!
+  private :collect_held_params
+  private :lock_holding_names
+  private_class_method :any_lock_rank?
+  private_class_method :check_hold_across_yield!
+  private_class_method :collect_held_params
+  private_class_method :lock_holding_names
+
 end

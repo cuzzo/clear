@@ -1168,4 +1168,11 @@ class PipelineHost
     @concurrent_lowerer.lower(site.options, conc_op)
   end
 
+
+
+  private :lower_dispatch_plan
+
+
+  private :visit_mir
+
 end

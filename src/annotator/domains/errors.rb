@@ -733,6 +733,16 @@ module Annotator
         current_fn_ctx&.mark_runtime_used!
         stamp_type!(node, :Void)
       end
-    end
+      private :baked_in_default_sync_policy
+  private :coerce_empty_collection_fallback!
+  private :emit_error_type_conflict!
+  private :resolve_catch_clause!
+  private :resolve_error_registration!
+  private :return_value_type
+  private :same_return_capabilities?
+  private :type_display
+  private :validate_sync_policy_body!
+
+end
   end
 end

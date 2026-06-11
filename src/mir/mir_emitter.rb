@@ -2754,4 +2754,14 @@ class MIREmitter
     :emit_do_branch_plan,
     :emit_sharded_map_get,
     :emit_sharded_map_put
+  private :bg_stackful_runtime_suppress_line
+  private :emit_context_field_decls
+  private :emit_do_block
+  private :emit_fiber_spawn_call
+  private :emit_fsm_bg_body
+  private :emit_inline_bc_as_zig
+  private :emit_struct_init_fields
+  private :emit_task_config_plan
+  private :fsm_bg_body_plan?
+
 end

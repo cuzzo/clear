@@ -161,6 +161,12 @@ module Annotator
         params&.any? ? params.map(&:to_sym) : nil
       end
       private :type_params
-    end
+          private :register_enum_declaration
+      private :register_extern_struct_declaration
+      private :register_struct_declaration
+      private :register_type_declaration
+      private :register_union_declaration
+
+end
   end
 end

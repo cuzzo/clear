@@ -82,5 +82,8 @@ module LSP
       end
       headers
     end
-  end
+      private :read_headers
+    private_class_method :read_headers
+
+end
 end

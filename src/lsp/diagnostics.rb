@@ -167,5 +167,14 @@ module LSP
 
     private :template_regex
     private_class_method :template_regex
-  end
+    private :code_for
+  private :fallback_token_length
+  private :literal_span_in
+  private :token_length
+  private_class_method :code_for
+  private_class_method :fallback_token_length
+  private_class_method :literal_span_in
+  private_class_method :token_length
+
+end
 end

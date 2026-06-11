@@ -117,7 +117,7 @@ RSpec.describe Doctor do
       old_stderr = $stderr
       $stderr = StringIO.new
       expect {
-        described_class.run_peek("/nonexistent", /foo/)
+        described_class.send(:run_peek, "/nonexistent", /foo/)
       }.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
     ensure
       $stderr = old_stderr

@@ -1341,4 +1341,56 @@ module MIRLoweringVariables
   # ================================================================
 
 
+  private :allocating_init_var_decl_plan
+  private :assignment_target_plan
+  private :assignment_value
+  private :auto_lock_assignment_facts
+  private :auto_lock_assignment_value
+  private :binding_metadata_var_decl_plan
+  private :binding_placement_fact
+  private :classified_cleanup_var_decl_plan
+  private :cleanup_entry_for_ast_binding
+  private :compose_capability_wrap
+  private :ensure_cleanup_binding_owns_string_init
+  private :field_access_moves_owner?
+  private :field_assignment_requires_cleanup?
+  private :field_assignment_root_identifier
+  private :field_owner_move_marks
+  private :indexed_assignment_allocs
+  private :indexed_assignment_registry_alloc
+  private :indexed_assignment_target_var
+  private :list_collection_copy?
+  private :lower_atomic_assignment
+  private :lower_auto_lock_assignment
+  private :lower_direct_indexed_set
+  private :lower_field_assignment_with_cleanup
+  private :lower_indexed_assignment
+  private :lower_map_indexed_assignment
+  private :lower_template_indexed_assignment
+  private :lower_var_decl
+  private :lower_var_decl_init
+  private :mark_field_assignment_cleanup!
+  private :mark_guarded_cleanup_name!
+  private :moved_guard_cleanup_entry
+  private :mutated_owned_var_decl?
+  private :mutated_owned_var_decl_plan
+  private :optional_nil_initializer?
+  private :owned_binding_source_alloc
+  private :owned_return_call_init?
+  private :owned_return_call_var_decl_plan
+  private :owned_return_transfer_binding?
+  private :source_already_has_declared_capability?
+  private :special_assignment_result
+  private :stamp_var_decl_init_target!
+  private :transfer_only_var_decl?
+  private :transfer_only_var_decl_plan
+  private :type_requires_alloc_cleanup?
+  private :var_decl_alloc_mark
+  private :var_decl_facts
+  private :var_decl_materialization_plan
+  private :var_decl_safe_name
+  private :var_decl_source_borrowed?
+  private :var_decl_source_transfer_required?
+  private :var_decl_suppression
+
 end

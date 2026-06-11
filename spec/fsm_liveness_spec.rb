@@ -157,13 +157,13 @@ RSpec.describe FsmTransform::Liveness do
       defs = {}
       stmt = AST::Assignment.new(nil, "slot", ident("source"))
 
-      FsmTransform::Liveness.collect_defs(stmt, defs)
+      FsmTransform::Liveness.send(:collect_defs, stmt, defs)
 
       expect(defs).to eq("slot" => nil)
     end
 
     it "normalizes raw declaration types into Type facts" do
-      expect(FsmTransform::Liveness.stmt_decl_type(bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
+      expect(FsmTransform::Liveness.send(:stmt_decl_type, bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
     end
   end
 end

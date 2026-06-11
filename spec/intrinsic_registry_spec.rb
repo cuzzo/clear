@@ -22,7 +22,7 @@ RSpec.describe IntrinsicRegistry do
       reg.each do |mname, entry|
         next unless entry.is_a?(Hash)
 
-        expect { IntrinsicRegistry.convert_entry(mname, entry, REGISTRIES) }
+        expect { IntrinsicRegistry.send(:convert_entry, mname, entry, REGISTRIES) }
           .not_to(raise_error, "#{rname}[#{mname.inspect}] failed to convert")
       end
     end
@@ -33,7 +33,7 @@ RSpec.describe IntrinsicRegistry do
       reg.each do |mname, entry|
         next unless entry.is_a?(Hash)
 
-        fs = IntrinsicRegistry.convert_entry(mname, entry, REGISTRIES)
+        fs = IntrinsicRegistry.send(:convert_entry, mname, entry, REGISTRIES)
         expect(fs.return_type).to be_a(Type)
         expect(fs.return_def).to be_a(FunctionReturn)
         expect(fs.intrinsic_contract).to be_a(IntrinsicContract)
@@ -62,7 +62,7 @@ RSpec.describe IntrinsicRegistry do
   end
 
   it "normalizes allocation, ownership, and template facts into a contract" do
-    fs = IntrinsicRegistry.convert_entry("append", STD_LIB["append"], REGISTRIES)
+    fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
     contract = fs.intrinsic_contract
 
     expect(contract).to be_a(IntrinsicContract)
@@ -78,7 +78,7 @@ RSpec.describe IntrinsicRegistry do
   end
 
   it "keeps method argument takes separate from canonical signature params" do
-    fs = IntrinsicRegistry.convert_entry("insert", POOL_METHODS["insert"], REGISTRIES)
+    fs = IntrinsicRegistry.send(:convert_entry, "insert", POOL_METHODS["insert"], REGISTRIES)
     contract = T.must(fs.intrinsic_contract)
 
     expect(contract.ownership.argument_takes_indices).to include(0)
@@ -198,7 +198,7 @@ RSpec.describe IntrinsicRegistry do
   end
 
   it "round-trips representative emit fields incl. recursion" do
-    fs = IntrinsicRegistry.convert_entry(
+    fs = IntrinsicRegistry.send(:convert_entry,
       "insert", POOL_METHODS["insert"], REGISTRIES
     )
     expect(fs.emit.tag).to eq(:pool_method)
@@ -213,7 +213,7 @@ RSpec.describe IntrinsicRegistry do
                        .select { |e| e.is_a?(Hash) }
                        .find { |e| e[:eql].is_a?(Hash) || e[:cleanup].is_a?(Hash) }
     if nested
-      fe = IntrinsicRegistry.convert_entry("x", nested, REGISTRIES)
+      fe = IntrinsicRegistry.send(:convert_entry, "x", nested, REGISTRIES)
       sub = fe.emit.eql || fe.emit.cleanup
       expect(sub).to be_a(IntrinsicEmit)
     end

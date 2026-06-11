@@ -100,13 +100,13 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "maps profile dispatch ids and emits task-site comments" do
-    expect(described_class.profile_dispatch_id(:local)).to eq(1)
-    expect(described_class.profile_dispatch_id(:parallel)).to eq(2)
-    expect(described_class.profile_dispatch_id(:shared)).to eq(3)
-    expect(described_class.profile_dispatch_id(:unexpected)).to eq(1)
+    expect(described_class.send(:profile_dispatch_id, :local)).to eq(1)
+    expect(described_class.send(:profile_dispatch_id, :parallel)).to eq(2)
+    expect(described_class.send(:profile_dispatch_id, :shared)).to eq(3)
+    expect(described_class.send(:profile_dispatch_id, :unexpected)).to eq(1)
 
     ctx = fsm_ctx(profile_site_id: 11, profile_line: 22, profile_column: 5)
-    expect(described_class.bg_profile_site_comment(ctx, :parallel, :fsm))
+    expect(described_class.send(:bg_profile_site_comment, ctx, :parallel, :fsm))
       .to eq("// CLEAR_PROFILE_TASK_SITE id=11 kind=BG line=22 column=5 dispatch=parallel form=fsm")
   end
 
@@ -131,8 +131,8 @@ RSpec.describe FsmTransform::Emit do
     )
     string_only = MIR::ExprStmt.new(MIR::Lit.new("__rt_bg12"), false)
 
-    expect(described_class.mir_nodes_reference_ident?([runtime_use], "__rt_bg12")).to eq(true)
-    expect(described_class.mir_nodes_reference_ident?([string_only], "__rt_bg12")).to eq(false)
+    expect(described_class.send(:mir_nodes_reference_ident?, [runtime_use], "__rt_bg12")).to eq(true)
+    expect(described_class.send(:mir_nodes_reference_ident?, [string_only], "__rt_bg12")).to eq(false)
   end
 
   it "returns nil for an empty unified FSM and skips fn-less inert segments" do
@@ -156,7 +156,7 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "returns no resume target for terminal segment tails" do
-    expect(described_class.tail_resume_target(FsmTransform::Segments::Done.new(nil))).to be_nil
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::Done.new(nil))).to be_nil
   end
 
   it "derives segment facts from MIR roots and prefers materialized structure roots" do
@@ -202,9 +202,9 @@ RSpec.describe FsmTransform::Emit do
     expect(facts.move_guard_writes).not_to include("fake")
     expect(facts.result_names).to eq(["payload"])
     expect(facts.ownership_facts.map(&:name)).to eq(["payload"])
-    expect(described_class.fsm_fact_guard_name("__ctx_12")).to eq("")
-    expect(described_class.fsm_fact_guard_name("__ctx_12.payload")).to eq("payload")
-    expect(described_class.promoted_fsm_field_name("payload_L3_moved", ["payload"]))
+    expect(described_class.send(:fsm_fact_guard_name, "__ctx_12")).to eq("")
+    expect(described_class.send(:fsm_fact_guard_name, "__ctx_12.payload")).to eq("payload")
+    expect(described_class.send(:promoted_fsm_field_name, "payload_L3_moved", ["payload"]))
       .to eq("payload_moved")
   end
 
@@ -272,14 +272,14 @@ RSpec.describe FsmTransform::Emit do
     cond = MIR::Ident.new("has_work")
     tail = FsmTransform::Segments::CondBranch.new(cond, 2, 3)
     spec = fsm_spec(index: 1, tail: tail, descriptor: nil)
-    lowered = described_class.build_dispatch_tail(spec, 0, [], 7)
+    lowered = described_class.send(:build_dispatch_tail, spec, 0, [], 7)
 
     expect(lowered).to be_a(MIR::FsmTailCondJump)
     expect(lowered.condition).to eq(cond)
 
     bad_tail = FsmTransform::Segments::CondBranch.new(Object.new, 2, 3)
     expect {
-      described_class.build_dispatch_tail(fsm_spec(index: 1, tail: bad_tail, descriptor: nil), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 1, tail: bad_tail, descriptor: nil), 0, [], 7)
     }.to raise_error(ArgumentError, /CondBranch tail condition must be structural MIR/)
   end
 
@@ -290,7 +290,7 @@ RSpec.describe FsmTransform::Emit do
     tail = FsmTransform::Segments::NextSuspend.new(Object.new, nil)
 
     expect {
-      described_class.build_dispatch_tail(fsm_spec(index: 4, tail: tail, descriptor: descriptor), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: descriptor), 0, [], 7)
     }.to raise_error(ArgumentError, /Unsupported descriptor tail/)
   end
 
@@ -298,7 +298,7 @@ RSpec.describe FsmTransform::Emit do
     tail = FsmTransform::Segments::NextSuspend.new(Object.new, nil)
 
     expect {
-      described_class.build_dispatch_tail(fsm_spec(index: 4, tail: tail, descriptor: nil), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: nil), 0, [], 7)
     }.to raise_error(ArgumentError, /has no descriptor/)
   end
 
@@ -329,7 +329,7 @@ RSpec.describe FsmTransform::Emit do
       2, [], FsmTransform::Segments::NextSuspend.new(Object.new, "payload", 4)
     )
 
-    result = described_class.build_segment_descriptor(
+    result = described_class.send(:build_segment_descriptor,
       segment, ctx, lowering, { "payload" => "__ctx_3.payload" }, sp_idx: 9
     )
 
@@ -353,7 +353,7 @@ RSpec.describe FsmTransform::Emit do
       body, ["payload"], "__ctx_8", ctx)
 
     expect(rewritten).to eq([kept])
-    action = described_class.fsm_destroy_actions(ctx).first
+    action = described_class.send(:fsm_destroy_actions, ctx).first
     expect(action).to be_a(MIR::FsmDestroyCleanup)
     expect(action.name).to eq("payload")
     expect(render_expr(action.target)).to eq("__ctx_8.payload")
@@ -363,26 +363,26 @@ RSpec.describe FsmTransform::Emit do
   it "orders lock releases before capture and body cleanups" do
     cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     ctx = fsm_ctx
-    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+    described_class.send(:fsm_destroy_actions, ctx) << MIR::FsmDestroyCleanup.new(
       source_kind: :body,
       name: "body",
       target: ctx_field("__ctx_1", "body"),
       cleanup_entry: cleanup_entry,
     )
-    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
+    described_class.send(:fsm_destroy_actions, ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_a",
       ctx_id: 1,
       guard_index: 0,
       lock_ref: ctx_field("__ctx_1", "lock_a"),
       unlock_method: "unlock",
     )
-    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyCleanup.new(
+    described_class.send(:fsm_destroy_actions, ctx) << MIR::FsmDestroyCleanup.new(
       source_kind: :capture,
       name: "cap",
       target: ctx_field("__ctx_1", "cap"),
       cleanup_entry: cleanup_entry,
     )
-    described_class.fsm_destroy_actions(ctx) << MIR::FsmDestroyLockRelease.new(
+    described_class.send(:fsm_destroy_actions, ctx) << MIR::FsmDestroyLockRelease.new(
       name: "__ctx_1.lock_b",
       ctx_id: 1,
       guard_index: 1,
@@ -390,7 +390,7 @@ RSpec.describe FsmTransform::Emit do
       unlock_method: "unlock",
     )
 
-    ordered = described_class.ordered_fsm_destroy_actions(ctx)
+    ordered = described_class.send(:ordered_fsm_destroy_actions, ctx)
 
     expect(ordered.map(&:name)).to eq(["__ctx_1.lock_b", "__ctx_1.lock_a", "cap", "body"])
   end
@@ -410,12 +410,12 @@ RSpec.describe FsmTransform::Emit do
       capture_inits: [MIR::StructInitField.new(name: :payload, value: MIR::Ident.new("payload"))],
     )
 
-    setup = described_class.build_spawn_setup(ctx, lowering)
+    setup = described_class.send(:build_spawn_setup, ctx, lowering)
 
-    expect(FsmWrapperEmitter.render_fsm_spawn_call(setup.spawn_call))
+    expect(FsmWrapperEmitter.send(:render_fsm_spawn_call, setup.spawn_call))
       .to eq("try CheatHeader.spawnFsmBest(__ctx_8_ptr.task);")
     expect(MIREmitter.new.emit(setup.alloc_expr)).to eq("rt.heapAlloc()")
-    expect(FsmWrapperEmitter.render_struct_init_fields(setup.ctx_init_fields, MIREmitter.new))
+    expect(FsmWrapperEmitter.send(:render_struct_init_fields, setup.ctx_init_fields, MIREmitter.new))
       .to include(".payload = payload,")
   end
 
@@ -454,12 +454,12 @@ RSpec.describe FsmTransform::Emit do
       rt_name: "rt",
     )
 
-    expanded = described_class.expand_lock_segment(spec, ctx, {}, lowering, 20)
+    expanded = described_class.send(:expand_lock_segment, spec, ctx, {}, lowering, 20)
 
     held_field = expanded.extra_fields.find { |field| field.name == "__lock_held_0" }
     expect(held_field&.type_zig).to eq("bool")
     expect(held_field&.default_value&.value).to eq("false")
-    action = described_class.fsm_destroy_actions(ctx).first
+    action = described_class.send(:fsm_destroy_actions, ctx).first
     expect(action).to be_a(MIR::FsmDestroyLockRelease)
     expect(action.guard_field).to eq("__lock_held_0")
     expect(action.ctx_id).to eq(7)
@@ -506,7 +506,7 @@ RSpec.describe FsmTransform::Emit do
     )
     ctx = fsm_ctx(id: 7, bg_rt: "__rt_bg7", captured: { "lock" => :stub }, pointer_captures: Set["lock"])
 
-    expanded = described_class.expand_lock_segment(
+    expanded = described_class.send(:expand_lock_segment,
       spec, ctx, { "lock" => "__ctx_7.lock" }, lowering, 20
     )
 
@@ -692,7 +692,7 @@ RSpec.describe FsmTransform::Emit do
     duplicate_acc.full_type = Type.new(:String)
     next_result.full_type = Type.new(:Int64)
 
-    facts = FsmTransform.collect_body_locals([first_acc, duplicate_acc, next_result])
+    facts = FsmTransform.send(:collect_body_locals, [first_acc, duplicate_acc, next_result])
 
     expect(facts).to all(be_a(FsmTransform::PromotedLocalFact))
     expect(facts.map(&:name)).to eq(["acc", "r"])

@@ -425,4 +425,27 @@ module PprofConverter
 
   private :build_location_index
   private_class_method :build_location_index
+  private :clear_source_path
+  private :convert_alloc
+  private :convert_channels
+  private :convert_locks
+  private :convert_mvcc
+  private :convert_perf
+  private :extract_zig_line
+  private :file_is_transpiled_zig?
+  private :parse_addr
+  private :parse_columns
+  private :resolve_addrs
+  private_class_method :clear_source_path
+  private_class_method :convert_alloc
+  private_class_method :convert_channels
+  private_class_method :convert_locks
+  private_class_method :convert_mvcc
+  private_class_method :convert_perf
+  private_class_method :extract_zig_line
+  private_class_method :file_is_transpiled_zig?
+  private_class_method :parse_addr
+  private_class_method :parse_columns
+  private_class_method :resolve_addrs
+
 end

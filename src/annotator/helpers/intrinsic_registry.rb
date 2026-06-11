@@ -281,4 +281,17 @@ module IntrinsicRegistry
 
     nil
   end
+  private :build_emit
+  private :convert_entry
+  private :nested_emit
+  private :normalize_lifetime
+  private :params_from_arg_spec
+  private :registries
+  private_class_method :build_emit
+  private_class_method :convert_entry
+  private_class_method :nested_emit
+  private_class_method :normalize_lifetime
+  private_class_method :params_from_arg_spec
+  private_class_method :registries
+
 end

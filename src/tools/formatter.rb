@@ -3034,4 +3034,12 @@ class Formatter::Emitter
     end
     true  # start of line — treat as expression start
   end
+  private :bracket_close?
+  private :bracket_open?
+  private :nl_after_end
+  private :out_ends_with_nl?
+  private :root_depth?
+  private :top_level_keyword?
+  private :trim_trailing_body_nls
+
 end

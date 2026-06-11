@@ -450,6 +450,8 @@ module Annotator
         match_node.expr_mode = true
         stamp_type!(match_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
       end
-    end
+      private :collect_implicit_type_params
+
+end
   end
 end

@@ -1343,7 +1343,7 @@ RSpec.describe MIRChecker do
 
   describe "ownership registry invariants" do
     it "has no unregistered ownership-significant MIR node classes" do
-      errors = checker.ownership_registry_errors
+      errors = checker.send(:ownership_registry_errors)
 
       expect(errors).to be_empty
     end
@@ -1576,7 +1576,7 @@ RSpec.describe MIRChecker do
       end
       stub_const("MIR::SpecCheckerUnregisteredStmt", unregistered_stmt)
       stub_const("MIR::SpecCheckerOwnershipFieldExpr", unregistered_owned)
-      registry_errors = checker.ownership_registry_errors
+      registry_errors = checker.send(:ownership_registry_errors)
 
       errors = checker.errors.join("\n")
       expect(errors).to include("MOVEMARK_WITHOUT_GUARD")

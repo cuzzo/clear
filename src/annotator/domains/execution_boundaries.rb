@@ -929,6 +929,19 @@ module Annotator
       private :mark_with_runtime_requirements!,
         :validate_no_multi_object_atomic!,
         :validate_lock_error_clause!
-    end
+      private :async_next_result_requires_heap?
+  private :cap_admits_atomic?
+  private :field_name_for_msg
+  private :resolve_error_selectors!
+  private :retryable_with_call_fallible?
+  private :retryable_with_fallible_body_error!
+  private :retryable_with_fallible_sources
+  private :retryable_with_universal_poly_candidate?
+  private :validate_snapshot_match_arms!
+  private :validate_with_match_source_shape!
+  private :with_block_has_versioned_arm?
+  private :with_requires_binding?
+
+end
   end
 end

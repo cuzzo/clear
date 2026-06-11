@@ -271,7 +271,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.send(:visit_BlockExpr, block)
     expect(block.storage).to eq(:rodata)
 
-    a.current_scope.declare("counter", id("counter", type: Type.new(:Int64)), Type.new(:Int64), true, false, nil, :stack)
+    a.send(:current_scope).declare("counter", id("counter", type: Type.new(:Int64)), Type.new(:Int64), true, false, nil, :stack)
     assign = AST::Assignment.new(tok, id("counter", type: Type.new(:Int64)), lit("2", type: Type.new(:Int64)))
     a.send(:visit_assignment_variable, assign.name, assign)
     expect(assign.full_type!(context: "assignment test").resolved).to eq(:Int64)

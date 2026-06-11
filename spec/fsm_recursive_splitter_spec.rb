@@ -135,7 +135,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
     it "rejects catch blocks and unhandled pivot statements" do
       catch_block = AST::CatchBlock.new(nil, [], nil)
-      expect(FsmTransform::RecursiveSplitter.contains_unsupported?([catch_block]))
+      expect(FsmTransform::RecursiveSplitter.send(:contains_unsupported?, [catch_block]))
         .to eq(true)
 
       builder = FsmTransform::RecursiveSplitter::Builder.new
@@ -164,14 +164,14 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     end
 
     it "remaps loop-back tails and passes through unknown tails" do
-      remapped = FsmTransform::RecursiveSplitter.remap_tail(
+      remapped = FsmTransform::RecursiveSplitter.send(:remap_tail,
         FsmTransform::Segments::LoopBack.new(4),
         { 4 => 1 },
       )
       passthrough = Object.new
 
       expect(remapped.target_index).to eq(1)
-      expect(FsmTransform::RecursiveSplitter.remap_tail(passthrough, {}))
+      expect(FsmTransform::RecursiveSplitter.send(:remap_tail, passthrough, {}))
         .to equal(passthrough)
     end
   end

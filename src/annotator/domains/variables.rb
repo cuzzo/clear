@@ -731,6 +731,16 @@ module Annotator
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
       private :finalize_decl_node!
-    end
+      private :accumulate_stack_bytes
+  private :classify_ownership!
+  private :mark_var_mutated
+  private :promote_pipe_to_observable_dest!
+  private :track_union_alias
+  private :validate_assignment_type
+  private :visit_assignment_field
+  private :visit_assignment_index
+  private :visit_assignment_variable
+
+end
   end
 end
