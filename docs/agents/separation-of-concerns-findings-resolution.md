@@ -57,6 +57,8 @@ After the resolution pass:
 - Focused `bundle exec prspec` targets covering touched annotator/type paths:
   567 examples, 0 failures.
 - Full `bundle exec prspec spec/`: 5784 examples, 0 failures.
+- Covered `COVERAGE=1 COVERAGE_DIR=/tmp/cheat-soc-coverage bundle exec prspec spec/`:
+  5784 examples, 0 failures; branch coverage 86.23%.
 - `bundle exec srb tc`: only the pre-existing unrelated
   `src/mir/lowering/expressions.rb:440` `lowering_counters` error remains.
 - Regenerated Decomplex report:
