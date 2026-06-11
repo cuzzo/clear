@@ -441,6 +441,11 @@ module MIRLoweringExpressions
     )
   end
 
+  sig { returns(MIRLoweringCounters) }
+  def lowering_counters
+    T.cast(self, MIRLowering).lowering_counters
+  end
+
   sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
   def integer_division?(facts)
     facts.op == :DIV && facts.left_type.integer? && facts.right_type.integer?

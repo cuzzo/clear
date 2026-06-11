@@ -687,7 +687,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
-        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
+        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1 --test-timeout 240s
 
   zig-hammer:
     # Hammer stress tests (`*-hammer-test.zig`): high-iteration
