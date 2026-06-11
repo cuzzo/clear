@@ -2610,29 +2610,37 @@ class Type
   def slot_size(lookup_arg = nil, &lookup_block)
     resolver = lookup_arg || lookup_block
 
-    # 1. Primitives / Pointers (Heap objects are 1 slot pointers; Rc/Arc/Locked are also pointer-sized)
     # Generic instances (e.g. Id<T>) are intrinsic scalar types — always 1 slot.
     return 1 if scalar_slot?
 
-    # 2. Fixed Arrays (Recursion)
-    if fixed?
-      fixed_capacity = capacity
-      return fixed_capacity * T.must(element_type).slot_size(resolver) if fixed_capacity.is_a?(Integer)
-    end
+    fixed_slots = fixed_array_slot_size(resolver)
+    return fixed_slots if fixed_slots
 
-    # 3. Structs (The tricky part)
-    if struct?
-      raise "Need lookup context for struct size" unless resolver
-      schema = resolver.call(resolved)
-      return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
-      # Enum/Union/Resource types — treat as slot size 1.
-      return 1 if (Schemas.enum?(schema) || Schemas.union?(schema) || Schemas.resource?(schema))
-      # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)
-      return 1 if schema.respond_to?(:type_params) && schema.type_params
-      return schema.fields.values.sum { |f| f.type.slot_size(resolver) }
-    end
+    return struct_slot_size(resolver) if struct?
 
     1 # Default
+  end
+
+  sig { params(resolver: T.nilable(Proc)).returns(T.nilable(Integer)) }
+  def fixed_array_slot_size(resolver)
+    return nil unless fixed?
+
+    fixed_capacity = capacity
+    return nil unless fixed_capacity.is_a?(Integer)
+
+    fixed_capacity * T.must(element_type).slot_size(resolver)
+  end
+
+  sig { params(resolver: T.nilable(Proc)).returns(Integer) }
+  def struct_slot_size(resolver)
+    raise "Need lookup context for struct size" unless resolver
+
+    schema = resolver.call(resolved)
+    return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
+    return 1 if (Schemas.enum?(schema) || Schemas.union?(schema) || Schemas.resource?(schema))
+    return 1 if schema.respond_to?(:type_params) && schema.type_params
+
+    schema.fields.values.sum { |f| f.type.slot_size(resolver) }
   end
 
   sig { returns(T::Boolean) }
@@ -2831,13 +2839,7 @@ class Type
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
-    if non_string_array?
-      return true unless fixed?
-      et = element_type
-      return false unless et
-      elem_t = Type.from_node(et)
-      return !!(elem_t && elem_t.needs_cleanup?(schema_lookup))
-    end
+    return non_string_array_needs_cleanup?(schema_lookup) if non_string_array?
 
     return true if any_rc? || link? || resource? || collection? || future? || (string? && heap?) ||
                    any_sync? ||
@@ -2851,6 +2853,17 @@ class Type
       end
     end
     false
+  end
+
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def non_string_array_needs_cleanup?(schema_lookup)
+    return true unless fixed?
+
+    et = element_type
+    return false unless et
+
+    elem_t = Type.from_node(et)
+    !!(elem_t && elem_t.needs_cleanup?(schema_lookup))
   end
 
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
@@ -3522,22 +3535,32 @@ class Type
     # 5b. Handle Generic Struct Instances
     #    Pair<Number> -> Pair(f64),  Map<String,Number> -> Map([]const u8, f64)
     #    Id<User>     -> u64        (compiler-intrinsic handle, type param is for CLEAR safety only)
-    if generic_instance?
-      return "u64" if id_handle?
-      args_zig = shape.generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
-      return "#{shape.generic_base_raw}(#{args_zig})"
-    end
+    generic_zig = generic_instance_zig_type
+    return generic_zig if generic_zig
 
     # 6. Map primitives and builtins to Zig types; user types pass through.
     ZIG_TYPE_MAP[resolved] || resolved.to_s
   end
 
+  sig { returns(T.nilable(String)) }
+  def generic_instance_zig_type
+    return nil unless generic_instance?
+    return "u64" if id_handle?
+
+    args_zig = shape.generic_args_raw.map { |arg| Type.new(arg).zig_type }.join(", ")
+    "#{shape.generic_base_raw}(#{args_zig})"
+  end
+
   private :apply_placement!,
     :atomic_pointer_wrapped?,
     :elem_has_heap_internals?,
+    :fixed_array_slot_size,
+    :generic_instance_zig_type,
     :heap_cleanup_allocator?,
+    :non_string_array_needs_cleanup?,
     :plain_indirect_value?,
     :scalar_slot?,
+    :struct_slot_size,
     :sync_requires_heap_provenance?
 end
 

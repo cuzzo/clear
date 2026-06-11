@@ -22,6 +22,16 @@ module Annotator
       def apply_auto_resolution_stamps!(program, resolved_slots)
         T.bind(self, SemanticAnnotator)
 
+        touched_functions = restamp_auto_resolution_slots!(resolved_slots)
+        touched_functions.each { |fn| restamp_auto_function_signature!(fn) }
+        restamp_stale_auto_nodes!(program)
+      end
+      private :apply_auto_resolution_stamps!
+
+      sig { params(resolved_slots: AutoUnifier::ResultMap).returns(T::Set[AST::FunctionDef]) }
+      def restamp_auto_resolution_slots!(resolved_slots)
+        T.bind(self, SemanticAnnotator)
+
         touched_functions = T.let(Set.new, T::Set[AST::FunctionDef])
         resolved_slots.each_value do |resolution|
           slot = resolution.slot
@@ -36,11 +46,9 @@ module Annotator
             restamp_auto_local!(slot)
           end
         end
-
-        touched_functions.each { |fn| restamp_auto_function_signature!(fn) }
-        restamp_stale_auto_nodes!(program)
+        touched_functions
       end
-      private :apply_auto_resolution_stamps!
+      private :restamp_auto_resolution_slots!
 
       sig { params(slot: AutoConstraintCollector::Slot, type: AutoConstraintCollector::ObservedType).void }
       def restamp_auto_param!(slot, type)

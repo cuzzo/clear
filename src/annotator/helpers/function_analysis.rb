@@ -89,41 +89,35 @@ module FunctionAnalysis
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
     verify_captures!(node)
-    # Save and reset returns on the current FunctionContext (supports nested lambdas).
-    fn_ctx = current_fn_ctx
-    saved_returns = fn_ctx&.returns
-    fn_ctx.returns = [] if fn_ctx
 
-    with_new_scope do
-      og_push_scope
-      declare_and_verify_params(node)
-      declare_captures(node)
+    found_returns = collect_routine_returns do
+      with_new_scope do
+        og_push_scope
+        declare_and_verify_params(node)
+        declare_captures(node)
 
-      # PRE clauses run at function entry — visit them with parameters in
-      # scope so each predicate type-checks and resolves identifiers
-      # against the parameter set. Visited before the body so the body's
-      # locals can't leak into the predicate's symbol scope.
-      visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
+        # PRE clauses run at function entry -- visit them with parameters in
+        # scope so each predicate type-checks and resolves identifiers
+        # against the parameter set. Visited before the body so the body's
+        # locals can't leak into the predicate's symbol scope.
+        visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
 
-      if body.is_a?(Array)
-        visit_stmts(body)
-      else
-        visit(body)
+        if body.is_a?(Array)
+          visit_stmts(body)
+        else
+          visit(body)
+        end
+
+        # DEBUG_POST clauses run AFTER the body is annotated (return type
+        # is known and synthetic `result` can be typed against it). Still
+        # inside the routine scope so parameters are visible.
+        visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
+
+        finalize_scope(node)
+        og_pop_scope(archive: true)
       end
-
-      # DEBUG_POST clauses run AFTER the body is annotated (return type
-      # is known and synthetic `result` can be typed against it). Still
-      # inside the routine scope so parameters are visible.
-      visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
-
-      finalize_scope(node)
-      og_pop_scope(archive: true)
     end
 
-    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
-    # Restore saved returns (for enclosing function/lambda).
-    restore_ctx = current_fn_ctx
-    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
     verify_returns(node, found_returns, is_implicit ? nil : declared_return)
 
     # Resolve return type (infer if implicit or :Any)
@@ -143,6 +137,25 @@ module FunctionAnalysis
 
     return_type
   end
+
+  sig { params(blk: T.proc.void).returns(T::Array[AST::ReturnFact]) }
+  def collect_routine_returns(&blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    # Save and reset returns on the current FunctionContext (supports nested lambdas).
+    fn_ctx = current_fn_ctx
+    saved_returns = fn_ctx&.returns
+    fn_ctx.returns = [] if fn_ctx
+
+    blk.call
+    found_returns = T.let((current_fn_ctx&.returns || []).uniq, T::Array[AST::ReturnFact])
+
+    # Restore saved returns (for enclosing function/lambda).
+    restore_ctx = current_fn_ctx
+    restore_ctx.returns = saved_returns if restore_ctx && saved_returns
+    found_returns
+  end
+  private :collect_routine_returns
 
   sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)

@@ -624,20 +624,8 @@ module GenericAnalysis
       ti = expr.target.full_type!(context: "slice container source")
       return root_variable_name(expr.target) if ti.array?
     end
-    # Non-Copy field extraction from a struct is a borrow of the parent.
-    # Without this, the extracted variable gets its own cleanup defer while
-    # the parent's cleanup also frees the field -- double-free.
-    # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
-    # values, not borrows from an existing variable.
     if expr.is_a?(AST::GetField)
-      if expr.target.is_a?(AST::Identifier)
-        target_schema = lookup_type_schema(expr.target.name.to_sym)
-        return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
-      end
-      field_ti = expr.full_type!(context: "field container source")
-      if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) }
-        return root_variable_name(expr.target)
-      end
+      return field_container_source(expr)
     end
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return find_container_source(expr.left)
@@ -649,8 +637,28 @@ module GenericAnalysis
     nil
   end
 
+  sig { params(expr: AST::GetField).returns(T.nilable(String)) }
+  def field_container_source(expr)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    # Non-Copy field extraction from a struct is a borrow of the parent.
+    # Without this, the extracted variable gets its own cleanup defer while
+    # the parent's cleanup also frees the field -- double-free.
+    # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
+    # values, not borrows from an existing variable.
+    if expr.target.is_a?(AST::Identifier)
+      target_schema = lookup_type_schema(expr.target.name.to_sym)
+      return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
+    end
+    field_ti = expr.full_type!(context: "field container source")
+    return nil if field_ti.implicitly_copyable? { |type_name| lookup_type_schema(type_name) }
+
+    root_variable_name(expr.target)
+  end
+
   private :apply_type_subst,
     :enforce_shared_family_call_sync!,
+    :field_container_source,
     :extract_type_bindings!,
     :validate_generic_annotation!,
     :validate_observable_annotation_capabilities!,

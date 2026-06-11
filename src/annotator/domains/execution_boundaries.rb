@@ -226,14 +226,8 @@ module Annotator
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
         T.bind(self, SemanticAnnotator)
 
-        capability_plan = CapabilityPlan.require_for(node)
-        return unless node.polymorphic && capability_plan.all.length == 1
-
-        bound_fact = capability_plan.first_transition
-        bound_var = bound_fact.var_node
-        bound_name = bound_fact.var_name
-        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
-        return unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+        bound_name = unrequired_polymorphic_runtime_bound_name(node)
+        return unless bound_name
 
         fn_node = function_node_for(fn_ctx.name)
         return unless fn_node && !with_requires_binding?(fn_node, bound_name)
@@ -241,6 +235,22 @@ module Annotator
         fn_ctx.uses_rt = true
         fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
       end
+
+      sig { params(node: AST::WithBlock).returns(T.nilable(String)) }
+      def unrequired_polymorphic_runtime_bound_name(node)
+        T.bind(self, SemanticAnnotator)
+
+        capability_plan = CapabilityPlan.require_for(node)
+        return nil unless node.polymorphic && capability_plan.all.length == 1
+
+        bound_fact = capability_plan.first_transition
+        bound_var = bound_fact.var_node
+        bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+        return nil unless bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+
+        bound_fact.var_name
+      end
+      private :unrequired_polymorphic_runtime_bound_name
 
       sig { params(fn_node: AST::FunctionDef, bound_name: T.nilable(String)).returns(T::Boolean) }
       def with_requires_binding?(fn_node, bound_name)

@@ -142,20 +142,28 @@ module Annotator
           current_fn_ctx&.record_heap_use!
         end
 
+        deep_copy = collection_copy_deep_copy_required(node)
+        node.deep_copy = deep_copy unless deep_copy.nil?
+      end
+
+      sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
+      def collection_copy_deep_copy_required(node)
+        T.bind(self, SemanticAnnotator)
+
         # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
         # For list/array types, check if element type is a non-Copy union.
         vti = Type.from_node!(node.value, context: "array/list deep-copy")
-        if vti.direct_indexable_collection?
-          elem = vti.element_type
-          if elem
-            schema = lookup_type_schema(elem.resolved)
-            if Schemas.union?(schema)
-              has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-              node.deep_copy = has_heap
-            end
-          end
-        end
+        return nil unless vti.direct_indexable_collection?
+
+        elem = vti.element_type
+        return nil unless elem
+
+        schema = lookup_type_schema(elem.resolved)
+        return nil unless Schemas.union?(schema)
+
+        (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
+      private :collection_copy_deep_copy_required
 
       sig { params(node: AST::Copy).returns(T.nilable(T::Boolean)) }
       def visit_Copy(node)

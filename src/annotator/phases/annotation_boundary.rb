@@ -29,6 +29,16 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         program.full_type!(context: "annotation boundary program")
+        assert_no_annotation_type_violations!(program)
+        assert_no_pending_deferred_validations!
+        assert_annotation_function_signatures!
+      end
+      private :verify_annotation_boundary!
+
+      sig { params(program: AST::Program).void }
+      def assert_no_annotation_type_violations!(program)
+        T.bind(self, SemanticAnnotator)
+
         violations = annotation_type_violations(program)
         unless violations.empty?
           sample = violations.first(20).map do |violation|
@@ -37,17 +47,29 @@ module Annotator
           more = violations.length > 20 ? "\n  ... (+#{violations.length - 20} more)" : ""
           raise "annotation boundary has unresolved AST type facts:\n#{sample}#{more}"
         end
+      end
+      private :assert_no_annotation_type_violations!
+
+      sig { void }
+      def assert_no_pending_deferred_validations!
+        T.bind(self, SemanticAnnotator)
 
         unless pending_deferred_validation_count.zero?
           raise "annotation boundary has pending deferred validations"
         end
+      end
+      private :assert_no_pending_deferred_validations!
+
+      sig { void }
+      def assert_annotation_function_signatures!
+        T.bind(self, SemanticAnnotator)
 
         semantic_function_nodes.each do |name, fn|
           signature = FunctionSignature.unwrap(fn.full_type!(context: "annotation boundary function #{name}"))
           raise "annotation boundary missing function signature for #{name}" unless signature
         end
       end
-      private :verify_annotation_boundary!
+      private :assert_annotation_function_signatures!
 
       sig { params(program: AST::Program).returns(T::Array[BoundaryTypeViolation]) }
       def annotation_type_violations(program)

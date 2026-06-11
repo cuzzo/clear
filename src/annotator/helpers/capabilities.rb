@@ -456,18 +456,44 @@ module CapabilityHelper
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
+    call_declared_impurity_reason(call) ||
+      matched_stdlib_impurity_reason(call) ||
+      semantic_function_impurity_reason(callee)
+  end
+
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
+  def call_declared_impurity_reason(call)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     return "is an extern call" if call.extern_call
     extern_effects = call.extern_effects
     return "has extern effects" if extern_effects && !extern_effects.empty?
     return "can fail" if call.can_fail
-    if call.matched_stdlib_def
-      md = T.must(call.matched_stdlib_def)
-      return "allocates" if md.emits_allocating?
-      return "can fail" if md.can_fail
-      return "suspends" if md.intrinsic_suspends?
-      return "mutates its receiver" if md.mutates_receiver?
-      return nil
-    end
+
+    nil
+  end
+  private :call_declared_impurity_reason
+
+  sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
+  def matched_stdlib_impurity_reason(call)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    return nil unless call.matched_stdlib_def
+
+    md = T.must(call.matched_stdlib_def)
+    return "allocates" if md.emits_allocating?
+    return "can fail" if md.can_fail
+    return "suspends" if md.intrinsic_suspends?
+    return "mutates its receiver" if md.mutates_receiver?
+
+    nil
+  end
+  private :matched_stdlib_impurity_reason
+
+  sig { params(callee: String).returns(T.nilable(String)) }
+  def semantic_function_impurity_reason(callee)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     fn_nodes = function_node_map
     fn = fn_nodes[callee]
     return nil unless fn
@@ -476,6 +502,7 @@ module CapabilityHelper
     return nil if effects.empty?
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
+  private :semantic_function_impurity_reason
 
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)

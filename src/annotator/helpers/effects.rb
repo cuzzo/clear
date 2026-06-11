@@ -401,31 +401,62 @@ module EffectTracker
   sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
+
     fn_nodes = function_node_map
-    needs_rt = {}
+    needs_rt = initial_needs_rt_map(fn_nodes)
+    seed_imported_needs_rt!(needs_rt)
+    propagate_needs_rt!(needs_rt)
+
+    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
+    # on finalized storage and cleanup facts. This annotator pass only
+    # computes local analysis used by can_fail/effects; it must not stamp the
+    # final calling convention bit.
+  end
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Hash[String, T::Boolean]) }
+  def initial_needs_rt_map(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    needs_rt = T.let({}, T::Hash[String, T::Boolean])
     fn_nodes.each do |name, fn_node|
-      fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
-      ret_type = fsig&.return_type
-      heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      has_takes_heap = fn_node.params.any? { |p|
-        next unless p.takes
-        ti = p.type
-        is_pure_copy = ti.primitive? || ti.id_handle?
-        !is_pure_copy
-      }
-      has_catch = function_has_catch_clauses?(fn_node)
-      has_raise = function_raises_directly?(name)
-      # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
-      # recognized get a synthesized trampoline that allocates child
-      # frames via rt.heapAlloc(). Force needs_rt=true so callers
-      # pass rt when calling them.
-      thunk_uses_rt = !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil?
-      # Phase: recursion co-op yield. Non-TIGHT recursive fns get
-      # `rt.checkYield()` injected at entry by mir_lowering, so they
-      # need rt threaded.
-      yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == Compiler::Entrypoint::NAME
+      needs_rt[name] = function_needs_runtime_directly?(name, fn_node)
     end
+    needs_rt
+  end
+  private :initial_needs_rt_map
+
+  sig { params(name: String, fn_node: AST::FunctionDef).returns(T::Boolean) }
+  def function_needs_runtime_directly?(name, fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
+    ret_type = fsig&.return_type
+    heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
+    has_takes_heap = fn_node.params.any? { |p|
+      next unless p.takes
+      ti = p.type
+      is_pure_copy = ti.primitive? || ti.id_handle?
+      !is_pure_copy
+    }
+    has_catch = function_has_catch_clauses?(fn_node)
+    has_raise = function_raises_directly?(name)
+    # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
+    # recognized get a synthesized trampoline that allocates child
+    # frames via rt.heapAlloc(). Force needs_rt=true so callers
+    # pass rt when calling them.
+    thunk_uses_rt = !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil?
+    # Phase: recursion co-op yield. Non-TIGHT recursive fns get
+    # `rt.checkYield()` injected at entry by mir_lowering, so they
+    # need rt threaded.
+    yield_uses_rt = recursion_yield_needed?(fn_node)
+    fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap ||
+      has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == Compiler::Entrypoint::NAME
+  end
+  private :function_needs_runtime_directly?
+
+  sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
+  def seed_imported_needs_rt!(needs_rt)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     # Seed imported (cross-module) functions: if a callee is not a local function
     # but is imported with needs_rt=true, include it so propagation works.
@@ -438,6 +469,12 @@ module EffectTracker
         needs_rt[c] = true if sig&.needs_rt
       end
     end
+  end
+  private :seed_imported_needs_rt!
+
+  sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
+  def propagate_needs_rt!(needs_rt)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     changed = T.let(true, T::Boolean)
     while changed
@@ -450,12 +487,8 @@ module EffectTracker
         end
       end
     end
-
-    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
-    # on finalized storage and cleanup facts. This annotator pass only
-    # computes local analysis used by can_fail/effects; it must not stamp the
-    # final calling convention bit.
   end
+  private :propagate_needs_rt!
 
   # Post-pass: compute can_fail for every function.
   # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
@@ -955,6 +988,15 @@ module EffectTracker
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
+    assign_base_stack_tiers!(fn_nodes)
+    propagate_unbounded_stack_tiers!(fn_nodes)
+    nil
+  end
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  def assign_base_stack_tiers!(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
+
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
     #   :reentrant            unbounded -> :service (OS thread)
@@ -1027,6 +1069,12 @@ module EffectTracker
       fn_node.stack_tier = tier
       fn_node.stack_vars_bytes = stack_bytes
     end
+  end
+  private :assign_base_stack_tiers!
+
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  def propagate_unbounded_stack_tiers!(fn_nodes)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     # Phase 2: propagate :unbounded through call graph.
     # Any function that transitively calls an :unbounded function is also :unbounded.
@@ -1044,6 +1092,7 @@ module EffectTracker
       end
     end
   end
+  private :propagate_unbounded_stack_tiers!
 
   # Phase 4g: detect mutual recursion in function_call_graph (the graph
   # already excludes self-loops -- see annotator.rb:530). Returns
