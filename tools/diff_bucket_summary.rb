@@ -22,10 +22,26 @@ def sh_quiet(*args)
 end
 
 def parse_options(argv)
-  options = { format: "text" }
+  options = {
+    format: "text",
+    src_visibility: false,
+    src_visibility_only: false,
+    src_visibility_path: "src",
+  }
   OptionParser.new do |parser|
-    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown]"
+    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown] [--src-visibility]"
     parser.on("--format FORMAT", %w[text markdown], "Output format") { |value| options[:format] = value }
+    parser.on("--src-visibility", "Append src/**/*.rb public/private/OTHER code-line breakdown") do
+      options[:src_visibility] = true
+    end
+    parser.on("--src-visibility-only", "Print only the src/**/*.rb public/private/OTHER code-line breakdown") do
+      options[:src_visibility] = true
+      options[:src_visibility_only] = true
+    end
+    parser.on("--src-visibility-path PATH", "Directory to scan for --src-visibility (default: src)") do |value|
+      options[:src_visibility] = true
+      options[:src_visibility_path] = value
+    end
   end.parse!(argv)
   options[:base] = argv.shift
   abort "unexpected arguments: #{argv.join(" ")}" unless argv.empty?
@@ -140,6 +156,12 @@ SRC_RUBY_CHANGE_BUCKETS = {
   src_other: "src/**/*.rb OTHER",
 }.freeze
 
+SRC_RUBY_VISIBILITY_BUCKET_LABELS = {
+  src_public_fn: "public functions",
+  src_private_fn: "private functions",
+  src_other: "OTHER",
+}.freeze
+
 SRC_RUBY_VISIBILITY_CALLS = {
   public: :public,
   private: :private,
@@ -156,9 +178,13 @@ def ruby_ast_node?(value)
 end
 
 def ruby_method_spans(source)
-  collect_ruby_method_spans(RubyVM::AbstractSyntaxTree.parse(source))
-rescue SyntaxError
-  []
+  ruby_method_spans_result(source)[:spans]
+end
+
+def ruby_method_spans_result(source)
+  { spans: collect_ruby_method_spans(RubyVM::AbstractSyntaxTree.parse(source)), parse_error: nil }
+rescue SyntaxError => e
+  { spans: [], parse_error: e.message }
 end
 
 def collect_ruby_method_spans(node, singleton_context: false)
@@ -167,8 +193,10 @@ def collect_ruby_method_spans(node, singleton_context: false)
   case node.type
   when :SCOPE
     collect_ruby_method_spans(node.children[2], singleton_context: singleton_context)
-  when :CLASS, :MODULE
+  when :CLASS
     collect_ruby_method_spans(node.children[2], singleton_context: false)
+  when :MODULE
+    collect_ruby_method_spans(node.children[1], singleton_context: false)
   when :SCLASS
     collect_ruby_method_spans(node.children[1], singleton_context: true)
   when :BLOCK
@@ -328,6 +356,67 @@ def classify_src_ruby_line_changes(new_source:, old_source:, added_lines:, delet
     breakdown[bucket][:deletions] += 1
   end
   breakdown
+end
+
+def empty_src_ruby_visibility_counts
+  SRC_RUBY_CHANGE_BUCKETS.keys.to_h { |bucket| [bucket, 0] }
+end
+
+def src_ruby_code_line?(line)
+  stripped = line.strip
+  !stripped.empty? && !stripped.start_with?("#")
+end
+
+def classify_src_ruby_source_lines(source)
+  parsed = ruby_method_spans_result(source.to_s)
+  counts = empty_src_ruby_visibility_counts
+  source.to_s.lines.each_with_index do |line, idx|
+    next unless src_ruby_code_line?(line)
+
+    bucket = src_ruby_line_bucket(idx + 1, parsed[:spans])
+    counts[bucket] += 1
+  end
+  {
+    counts: counts,
+    total: counts.values.sum,
+    parse_error: parsed[:parse_error],
+  }
+end
+
+def src_ruby_visibility_files(root: ROOT, directory: "src")
+  scan_root = File.expand_path(directory, root)
+  Dir.glob(File.join(scan_root, "**", "*.rb")).select { |path| File.file?(path) }.sort
+end
+
+def relative_to_root(path, root)
+  value = path.to_s
+  prefix = "#{root}/"
+  value.start_with?(prefix) ? value.delete_prefix(prefix) : value
+end
+
+def src_ruby_visibility_breakdown(root: ROOT, directory: "src")
+  files = src_ruby_visibility_files(root: root, directory: directory)
+  counts = empty_src_ruby_visibility_counts
+  parse_failures = []
+
+  files.each do |path|
+    result = classify_src_ruby_source_lines(File.read(path))
+    result[:counts].each { |bucket, count| counts[bucket] += count }
+    next unless result[:parse_error]
+
+    parse_failures << {
+      path: relative_to_root(path, root),
+      error: result[:parse_error],
+    }
+  end
+
+  {
+    directory: directory,
+    files: files.length,
+    counts: counts,
+    total: counts.values.sum,
+    parse_failures: parse_failures,
+  }
 end
 
 def current_source(path, root: ROOT)
@@ -770,6 +859,60 @@ def print_markdown(base, rows)
   end
 end
 
+def src_ruby_visibility_rows(breakdown)
+  total = breakdown[:total]
+  rows = [["bucket", "lines", "share"]]
+  SRC_RUBY_VISIBILITY_BUCKET_LABELS.each do |bucket, label|
+    count = breakdown[:counts].fetch(bucket, 0)
+    rows << [label, count.to_s, pct(count, total)]
+  end
+  rows << ["total", total.to_s, pct(total, total)]
+end
+
+def src_ruby_visibility_scope(breakdown)
+  File.join(breakdown[:directory].to_s, "**", "*.rb")
+end
+
+def print_src_ruby_visibility_text(breakdown)
+  puts
+  puts "Src Ruby visibility breakdown:"
+  puts "  scope: #{src_ruby_visibility_scope(breakdown)}"
+  puts "  files: #{breakdown[:files]}"
+  puts "  counted lines: nonblank, non-comment Ruby source lines; protected methods are grouped into OTHER"
+  print_table(src_ruby_visibility_rows(breakdown))
+  return if breakdown[:parse_failures].empty?
+
+  puts "  parse failures:"
+  breakdown[:parse_failures].first(10).each do |failure|
+    puts "    #{failure[:path]} - #{failure[:error].lines.first.to_s.strip}"
+  end
+  puts "    ... #{breakdown[:parse_failures].length - 10} more" if breakdown[:parse_failures].length > 10
+end
+
+def print_src_ruby_visibility_markdown(breakdown)
+  puts
+  puts "## Src Ruby Visibility Breakdown"
+  puts
+  puts "**Scope:** `#{src_ruby_visibility_scope(breakdown)}`"
+  puts
+  puts "**Files:** #{breakdown[:files]}"
+  puts
+  puts "Counts are nonblank, non-comment Ruby source lines. Protected methods are grouped into `OTHER`."
+  puts
+  src_ruby_visibility_rows(breakdown).each_with_index do |row, idx|
+    puts "| #{row.map { |cell| markdown_escape(cell) }.join(" | ")} |"
+    puts "| --- | ---: | ---: |" if idx.zero?
+  end
+  return if breakdown[:parse_failures].empty?
+
+  puts
+  puts "**Parse failures:**"
+  breakdown[:parse_failures].first(10).each do |failure|
+    puts "- `#{failure[:path]}` - #{markdown_escape(failure[:error].lines.first.to_s.strip)}"
+  end
+  puts "- _#{breakdown[:parse_failures].length - 10} more parse failures omitted._" if breakdown[:parse_failures].length > 10
+end
+
 def type_guardrail_findings(adds_by_path)
   NilKill::StaticDiffAudit.new(root: ROOT, added_lines: adds_by_path).findings +
     rubocop_guardrail_findings(adds_by_path) +
@@ -957,12 +1100,23 @@ end
 
 if $PROGRAM_NAME == __FILE__
   options = parse_options(ARGV)
+  if options[:src_visibility_only]
+    src_visibility = src_ruby_visibility_breakdown(directory: options[:src_visibility_path])
+    if options[:format] == "markdown"
+      print_src_ruby_visibility_markdown(src_visibility)
+    else
+      print_src_ruby_visibility_text(src_visibility)
+    end
+    exit
+  end
+
   base = options[:base] || default_base_ref
   stats = numstat(base)
   line_changes = changed_lines(base)
   adds_by_path = line_changes[:added]
   guardrail_findings = type_guardrail_findings(adds_by_path)
   special_alerts = special_coverage_alerts(adds_by_path)
+  src_visibility = options[:src_visibility] ? src_ruby_visibility_breakdown(directory: options[:src_visibility_path]) : nil
 
   bucket_order = [
     [:total, "total"],
@@ -1006,11 +1160,13 @@ if $PROGRAM_NAME == __FILE__
 
   if options[:format] == "markdown"
     print_markdown(base, rows)
+    print_src_ruby_visibility_markdown(src_visibility) if src_visibility
     print_type_guardrails_markdown(guardrail_findings)
     print_special_coverage_markdown(special_alerts)
   else
     puts "Diff base: #{base}...HEAD"
     print_table(rows)
+    print_src_ruby_visibility_text(src_visibility) if src_visibility
     print_type_guardrails_text(guardrail_findings)
     print_special_coverage_text(special_alerts)
   end

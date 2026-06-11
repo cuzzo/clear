@@ -156,6 +156,88 @@ RSpec.describe "coverage gap tools" do
     expect(breakdown[:src_private_fn]).to include(additions: 0, deletions: 0)
   end
 
+  it "counts src Ruby source lines by public, private, and other visibility" do
+    source = <<~RUBY
+      require "set"
+
+      # ignored comment
+      class Probe
+        def public_call
+          changed_public
+        end
+
+        def helper
+          changed_private_by_declaration
+        end
+        private :helper
+
+        private
+
+        def hidden
+          changed_private_by_scope
+        end
+
+        protected
+
+        def shielded
+          changed_protected
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_source_lines(source)
+
+    expect(breakdown[:parse_error]).to be_nil
+    expect(breakdown[:counts]).to include(
+      src_public_fn: 3,
+      src_private_fn: 6,
+      src_other: 9,
+    )
+    expect(breakdown[:total]).to eq(18)
+  end
+
+  it "summarizes src Ruby visibility across a source tree" do
+    FileUtils.mkdir_p(File.join(@tmp, "src", "nested"))
+    File.write(File.join(@tmp, "src", "visible.rb"), <<~RUBY)
+      module Visible
+        def call
+          value
+        end
+        private
+        def hidden
+          value
+        end
+      end
+    RUBY
+    File.write(File.join(@tmp, "src", "nested", "constant.rb"), <<~RUBY)
+      # ignored comment
+
+      VALUE = 1
+    RUBY
+
+    breakdown = src_ruby_visibility_breakdown(root: @tmp)
+
+    expect(breakdown[:files]).to eq(2)
+    expect(breakdown[:parse_failures]).to be_empty
+    expect(breakdown[:counts]).to include(
+      src_public_fn: 3,
+      src_private_fn: 3,
+      src_other: 4,
+    )
+    expect(breakdown[:total]).to eq(10)
+  end
+
+  it "reports parse failures and counts unparsable src Ruby code as other" do
+    FileUtils.mkdir_p(File.join(@tmp, "src"))
+    File.write(File.join(@tmp, "src", "bad.rb"), "def broken(\n")
+
+    breakdown = src_ruby_visibility_breakdown(root: @tmp)
+
+    expect(breakdown[:counts]).to include(src_public_fn: 0, src_private_fn: 0, src_other: 1)
+    expect(breakdown[:total]).to eq(1)
+    expect(breakdown[:parse_failures].map { |failure| failure[:path] }).to eq(["src/bad.rb"])
+  end
+
   it "does not count non-executable Ruby additions in diff line coverage" do
     source_path = File.join(@tmp, "ruby_probe.rb")
     File.write(source_path, <<~RUBY)
