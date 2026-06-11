@@ -39,6 +39,68 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     expect(extern_fn.full_type!.resolved).to eq(:Void)
   end
 
+  it "rejects duplicate ordinary function declarations" do
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.register_program_signatures(index_for(
+        function_def("main"),
+        function_def("main")
+      ))
+    }.to raise_error(CompilerError, /Duplicate function declaration 'main'/)
+  end
+
+  it "rejects duplicate free extern declarations" do
+    first = AST::ExternFnDecl.new(tok("puts"), "puts", [], Type.new(:Void), "c", nil)
+    second = AST::ExternFnDecl.new(tok("puts"), "puts", [], Type.new(:Void), "c", nil)
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.register_program_signatures(index_for(first, second))
+    }.to raise_error(CompilerError, /Duplicate function declaration 'puts'/)
+  end
+
+  it "allows local functions to shadow stdlib intrinsic names" do
+    annotator = SemanticAnnotator.new
+
+    annotator.register_program_signatures(index_for(function_def("positive?")))
+
+    signature = FunctionSignature.unwrap(annotator.current_scope.resolve_entry!("positive?").type)
+    expect(signature).to be_a(FunctionSignature)
+    expect(signature&.intrinsic).to eq(false)
+  end
+
+  it "rejects local functions that collide with imported function signatures" do
+    annotator = SemanticAnnotator.new
+    imported = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      visibility: :pub,
+      module_alias: "dep"
+    )
+    annotator.current_scope.declare("helper", nil, imported, false, false, nil, :static)
+
+    expect {
+      annotator.register_program_signatures(index_for(function_def("helper")))
+    }.to raise_error(CompilerError, /Duplicate function declaration 'helper'/)
+  end
+
+  it "rejects extern free functions that collide with imported function signatures" do
+    annotator = SemanticAnnotator.new
+    imported = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      visibility: :pub,
+      module_alias: "dep"
+    )
+    extern_fn = AST::ExternFnDecl.new(tok("helper"), "helper", [], Type.new(:Void), "native", nil)
+    annotator.current_scope.declare("helper", nil, imported, false, false, nil, :static)
+
+    expect {
+      annotator.register_program_signatures(index_for(extern_fn))
+    }.to raise_error(CompilerError, /Duplicate function declaration 'helper'/)
+  end
+
   it "registers extern methods on known type schemas and ignores unknown owners" do
     struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
     known = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
@@ -57,6 +119,37 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     expect(annotator.current_scope.entry?("skip")).to eq(false)
     expect(known.full_type!.resolved).to eq(:Void)
     expect(unknown.full_type!.resolved).to eq(:Void)
+  end
+
+  it "rejects duplicate extern methods on the same owner type" do
+    struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
+    first = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
+    first.owner_type = "Parser"
+    second = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
+    second.owner_type = "Parser"
+    annotator = SemanticAnnotator.new
+    index = index_for(struct, first, second)
+
+    annotator.register_type_declarations(index)
+
+    expect {
+      annotator.register_program_signatures(index)
+    }.to raise_error(CompilerError, /Duplicate extern method declaration 'Parser.parse'/)
+  end
+
+  it "rejects extern methods that collide with existing schema methods" do
+    struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
+    method = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
+    method.owner_type = "Parser"
+    annotator = SemanticAnnotator.new
+    index = index_for(struct)
+    annotator.register_type_declarations(index)
+    parser_schema = annotator.current_scope.types.fetch(:Parser).schema
+    parser_schema.methods["parse"] = FunctionSignature.new(params: [], return_type: Type.new(:Bool))
+
+    expect {
+      annotator.register_program_signatures(index_for(method))
+    }.to raise_error(CompilerError, /Duplicate extern method declaration 'Parser.parse'/)
   end
 
   it "registers synthesized union default method signatures after declared functions" do

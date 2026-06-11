@@ -482,7 +482,10 @@ class Type
   end
 
   # Operator categories
-  BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
+  EQUALITY_OPS = [:EQ, :NEQ].freeze
+  ORDERING_OPS = [:LT, :GT, :LTE, :GTE].freeze
+  LOGICAL_OPS = [:AND, :OR].freeze
+  BOOL_RESULT_OPS = T.let((EQUALITY_OPS + ORDERING_OPS).freeze, T::Array[Symbol])
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
 
   # Resolves the result type of a binary operation given two operand types.
@@ -514,8 +517,14 @@ class Type
     t_right = right_type.resolved
 
     case op
-    when :AND, :OR, *BOOL_RESULT_OPS
-      BinaryOpResult.new(type: Type.new(:Bool))
+    when *LOGICAL_OPS
+      resolve_logical_op(op, left_type, right_type)
+
+    when *EQUALITY_OPS
+      resolve_equality_op(op, left_type, right_type)
+
+    when *ORDERING_OPS
+      resolve_ordering_op(op, left_type, right_type)
 
     when *NUMBER_RESULT_OPS, :WRAP_ADD, :CHECK_ADD
       resolve_numeric_op(left_type, right_type)
@@ -558,10 +567,60 @@ class Type
 
   private
 
+  sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
+  def self.resolve_logical_op(op, left_type, right_type)
+    return BinaryOpResult.new(type: Type.new(:Bool)) if left_type.resolved == :Bool && right_type.resolved == :Bool
+    BinaryOpResult.new(error: "Operator #{op} requires Bool operands, got #{left_type.resolved} and #{right_type.resolved}")
+  end
+
+  sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
+  def self.resolve_equality_op(op, left_type, right_type)
+    return BinaryOpResult.new(type: Type.new(:Bool)) if equality_compatible?(left_type, right_type)
+    BinaryOpResult.new(error: "Operator #{op} cannot compare #{left_type.resolved} with #{right_type.resolved}")
+  end
+
+  sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
+  def self.resolve_ordering_op(op, left_type, right_type)
+    return BinaryOpResult.new(type: Type.new(:Bool)) if ordered_compatible?(left_type, right_type)
+    BinaryOpResult.new(error: "Operator #{op} requires ordered operands, got #{left_type.resolved} and #{right_type.resolved}")
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.equality_compatible?(left_type, right_type)
+    left_type.resolved == right_type.resolved ||
+      optional_nil_comparable?(left_type, right_type) ||
+      scalar_comparable?(left_type, right_type)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.ordered_compatible?(left_type, right_type)
+    scalar_comparable?(left_type, right_type)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.scalar_comparable?(left_type, right_type)
+    (left_type.numeric? && right_type.numeric?) ||
+      (left_type.string? && right_type.string?)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.optional_nil_comparable?(left_type, right_type)
+    (left_type.optional? && right_type.resolved == :NIL) ||
+      (right_type.optional? && left_type.resolved == :NIL)
+  end
+
   sig { params(left_type: Type, right_type: Type).returns(BinaryOpResult) }
   def self.resolve_numeric_op(left_type, right_type)
     t_left = left_type.resolved
     t_right = right_type.resolved
+
+    if left_type.any? || right_type.any?
+      return BinaryOpResult.new(type: Type.new(:Any))
+    end
+
+    unless left_type.numeric? && right_type.numeric?
+      return BinaryOpResult.new(error: "Numeric operator requires numeric operands, got #{t_left} and #{t_right}")
+    end
 
     # Same type: result is that type
     if t_left == t_right

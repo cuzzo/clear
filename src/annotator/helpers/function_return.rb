@@ -72,6 +72,18 @@ class FunctionReturn
   sig { params(kind_name: Symbol).returns(FunctionReturn) }
   def self.variant(kind_name) = new(kind: Kind.const_get(kind_name))
 
+  sig { returns(FunctionReturn) }
+  def copy
+    case kind
+    when Kind::Fixed
+      FunctionReturn.fixed(Type.new(T.must(fixed)))
+    when Kind::Infer
+      FunctionReturn.infer(T.must(infer))
+    else
+      FunctionReturn.new(kind: kind)
+    end
+  end
+
   # Resolve to a concrete Type. receiver is the call's receiver type
   # (for parametric shapes); args/host support the Infer variant's
   # host-method dispatch. Always returns a Type, never nil.

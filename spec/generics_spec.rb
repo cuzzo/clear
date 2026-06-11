@@ -391,7 +391,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "stores type_params in the registered function signature" do
-        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END\nFN main() RETURNS Void -> PASS END"))
+        ast = run(fn_src("FN identity<T>(x: T) RETURNS T -> RETURN x; END"))
         # Verify it doesn't raise — the signature is checked at call site
         expect(ast).not_to be_nil
       end

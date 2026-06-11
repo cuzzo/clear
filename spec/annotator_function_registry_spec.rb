@@ -37,6 +37,15 @@ RSpec.describe Annotator::FunctionRegistry do
     expect(seen).to eq(["main"])
   end
 
+  it "rejects duplicate function nodes" do
+    registry = described_class.new
+    registry.register!(function_def("main"))
+
+    expect {
+      registry.register!(function_def("main"))
+    }.to raise_error(RuntimeError, /duplicate function node 'main'/)
+  end
+
   it "tracks synthetic definitions as a clearable queue" do
     registry = described_class.new
     generated = function_def("generated")

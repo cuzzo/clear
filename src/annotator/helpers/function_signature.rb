@@ -421,6 +421,55 @@ class FunctionSignature
     end
   end
 
+  sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
+  def import_copy(module_alias:)
+    copy = dup
+    copy.replace_import_mutable_state!(module_alias: module_alias)
+  end
+
+  sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
+  def replace_import_mutable_state!(module_alias:)
+    @params = self.class.copy_params_for_import(@params)
+    @type_params = @type_params&.dup
+    @module_alias = module_alias
+    @extern_effects = @extern_effects.dup
+    @fn_type_params = @fn_type_params&.dup
+    @owner_type_params = @owner_type_params&.dup
+    @effects = @effects&.dup
+    @requires = self.class.copy_requires_for_import(@requires)
+    @heap_carry_return_vars = @heap_carry_return_vars&.dup
+    @return_def = @return_def.copy
+    self
+  end
+  protected :replace_import_mutable_state!
+
+  sig { params(params: T::Array[AST::Param]).returns(T::Array[AST::Param]) }
+  def self.copy_params_for_import(params)
+    params.map do |param|
+      AST::Param.new(
+        name: param.name,
+        type: Type.new(param.type),
+        default: param.default,
+        mutable: param.mutable,
+        takes: param.takes,
+        comptime: param.comptime,
+        name_token: param.name_token,
+        required: param.required,
+        sync: param.sync,
+        symbol: nil
+      )
+    end
+  end
+
+  sig { params(requires: RequiresMap).returns(RequiresMap) }
+  def self.copy_requires_for_import(requires)
+    copied = T.let({}, RequiresMap)
+    requires.each do |name, families|
+      copied[name] = families.dup
+    end
+    copied
+  end
+
   private
 
   sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }

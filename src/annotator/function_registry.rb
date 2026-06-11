@@ -14,6 +14,7 @@ module Annotator
 
     sig { params(node: AST::FunctionDef).returns(AST::FunctionDef) }
     def register!(node)
+      raise "duplicate function node '#{node.name}'" if nodes.key?(node.name)
       nodes[node.name] = node
       node
     end

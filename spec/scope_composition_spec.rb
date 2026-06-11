@@ -207,9 +207,20 @@ RSpec.describe Scope do
     locked = scope.declare("locked", nil, Type.new(:Counter), true, false, nil, :heap, Set[:RESTRICT], sync: :locked)
     write_locked = scope.declare("write_locked", nil, Type.new(:Counter), false, false, nil, :heap, Set.new, sync: :write_locked)
 
+    locked_full_type = scope.resolve_full_type("locked")
+    write_locked_full_type = scope.resolve_full_type("write_locked")
+
     expect(scope.resolve_full_type("missing").resolved).to eq(:Any)
-    expect(scope.resolve_full_type("locked")).to equal(locked.type)
-    expect(scope.resolve_full_type("write_locked")).to equal(write_locked.type)
+    expect(locked_full_type).not_to equal(locked.type)
+    expect(write_locked_full_type).not_to equal(write_locked.type)
+    expect(locked_full_type.sync).to eq(:locked)
+    expect(write_locked_full_type.sync).to eq(:write_locked)
+    expect(locked_full_type.heap?).to eq(true)
+    expect(write_locked_full_type.heap?).to eq(true)
+    expect(locked.type.sync).to be_nil
+    expect(write_locked.type.sync).to be_nil
+    expect(locked.type.heap?).to eq(false)
+    expect(write_locked.type.heap?).to eq(false)
     expect(scope.resolve_type("locked")).to equal(locked.type)
     expect(scope.resolve_type("missing").resolved).to eq(:Any)
     expect(scope.is_mutable?("locked")).to eq(true)

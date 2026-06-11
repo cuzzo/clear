@@ -63,6 +63,25 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     expect(resource.full_type!.resolved).to eq(:Void)
   end
 
+  it "rejects duplicate type declarations" do
+    first = AST::StructDef.new(tok("Box"), "Box", {}, :pub, [])
+    second = AST::StructDef.new(tok("Box"), "Box", {}, :pub, [])
+
+    expect {
+      register(first, second)
+    }.to raise_error(CompilerError, /Duplicate type declaration 'Box'/)
+  end
+
+  it "rejects inline union helper struct name collisions" do
+    helper = AST::StructDef.new(tok("Value_Data"), "Value_Data", {}, :pub, [])
+    inline = Schemas::InlineStructVariant.new(fields: { "owned" => Type.new(:String) })
+    union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline }, :package)
+
+    expect {
+      register(helper, union)
+    }.to raise_error(CompilerError, /Duplicate type declaration 'Value_Data'/)
+  end
+
   it "registers union schemas, helper structs, and typed inline deinit entries" do
     inline = Schemas::InlineStructVariant.new(fields: {
       "owned" => Type.new(:String),

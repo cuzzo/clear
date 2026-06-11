@@ -528,11 +528,10 @@ class SemanticAnnotator
     @receiver_state = T.let(ReceiverState.new, ReceiverState)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
+    @program = T.let(nil, T.nilable(AST::Program))
     # WITH validations on parameter bindings need caller-sync propagation first.
     @branch_terminated = T.let(false, T::Boolean)
-    effects_init!
-    capability_audit_init!
-    initialize_builtin_environment!
+    reset_compilation_state!
   end
 
   sig { params(node: AST::Program).returns(NilClass) }
@@ -541,6 +540,7 @@ class SemanticAnnotator
     # parallel, multi-program test harness) doesn't leak in. Stdlib
     # types are preserved.
     AST.reset_user_types!
+    reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     visit(node)
     finalize_auto_types!(node)
@@ -557,6 +557,18 @@ class SemanticAnnotator
   end
 
 private
+
+  sig { void }
+  def reset_compilation_state!
+    @receiver_state = ReceiverState.new
+    @function_registry = Annotator::FunctionRegistry.new
+    @semantic_index = nil
+    @program = nil
+    @branch_terminated = false
+    effects_init!
+    capability_audit_init!
+    initialize_builtin_environment!
+  end
 
   sig { returns(T.nilable(ModuleImporter)) }
   def active_importer
@@ -625,6 +637,7 @@ private
     result = unifier.resolve!
 
     unifier.stamp_map_pairs!(result.resolved)
+    apply_auto_resolution_stamps!(program_node, result.resolved)
 
     # Resolved slots: emit :info findings with :auto fix (replace
     # the Auto keyword span with the resolved type's source form).

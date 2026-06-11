@@ -92,6 +92,7 @@ module Annotator
 
         validate_sync_policy_body!(decl)
         program_node.sync_policy = decl.handlers
+        stamp_type!(decl, :Void)
       end
 
       # Per-handler-block validation: every selector must name a type the
@@ -190,6 +191,7 @@ module Annotator
             visit_stmts(T.must(clause.body))
           end
         end
+        stamp_type!(node, :Void)
       end
 
       # Resolve a parsed CATCH clause into its runtime-dispatch form.

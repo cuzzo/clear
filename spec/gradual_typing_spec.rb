@@ -1018,6 +1018,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
     expect(fn.params.first[:type]).to be_a(Type)
     expect(fn.params.first[:type].auto?).to be false
     expect(fn.params.first[:type].resolved).to eq(:Int64)
+    expect(fn.params.first.symbol.type.resolved).to eq(:Int64)
 
     findings = FixCollector.drain.select { |f| f.message.include?("Inferred type") }
     expect(findings).not_to be_empty
@@ -1029,10 +1030,9 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
 
   it "resolves an Auto local from its concrete RHS" do
     ast = annotate(<<~CLEAR)
-      FN main() RETURNS !Void ->
+      FN main() RETURNS Int64 ->
         x: Auto = 42;
-        ASSERT x == 42, "ok";
-        RETURN;
+        RETURN x;
       END
     CLEAR
     fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
@@ -1041,12 +1041,13 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
     # numeric — the literal 42 pins it via the RHS).
     expect(decl.type).to be_a(Type)
     expect(decl.type.auto?).to be false
+    expect(decl.full_type.resolved).to eq(:Int64)
+    expect(decl.symbol.type.resolved).to eq(:Int64)
+    ret = fn.body.find { |stmt| stmt.is_a?(AST::ReturnNode) }
+    expect(ret.value.full_type.resolved).to eq(:Int64)
   end
 
-  it "is a no-op for programs without any Auto" do
-    # The fast-path `program_has_auto?` short-circuits without
-    # running collector / unifier — verified indirectly by
-    # confirming no Auto findings get emitted.
+  it "emits no Auto findings for programs without any Auto" do
     annotate(<<~CLEAR)
       FN add(x: Int64, y: Int64) RETURNS Int64 ->
         RETURN x + y;
@@ -1061,6 +1062,179 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
       f.message.include?("Cannot infer type")
     }
     expect(auto_findings).to be_empty
+  end
+
+  it "restamps signatures and calls after parameter Auto resolves" do
+    src = <<~CLEAR
+      FN id(x: Auto) RETURNS Int64 ->
+        RETURN x;
+      END
+      id(1);
+    CLEAR
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new(source_code: src)
+
+    annotator.annotate!(ast)
+
+    fn = ast.statements.first
+    call = ast.statements.last
+    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("id").type)
+    expect(fn.params.first.type.resolved).to eq(:Int64)
+    expect(fn.params.first.symbol.type.resolved).to eq(:Int64)
+    expect(fn.body.first.value.full_type.resolved).to eq(:Int64)
+    expect(call.full_type.resolved).to eq(:Int64)
+    expect(sig.params.first.type.resolved).to eq(:Int64)
+  end
+
+  it "restamps Auto return signatures, calls, and program result type" do
+    src = <<~CLEAR
+      FN id(x: Int64) RETURNS Auto ->
+        RETURN x;
+      END
+      id(1);
+    CLEAR
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new(source_code: src)
+
+    annotator.annotate!(ast)
+
+    fn = ast.statements.first
+    call = ast.statements.last
+    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("id").type)
+    expect(fn.return_type.resolved).to eq(:Int64)
+    expect(sig.return_type.resolved).to eq(:Int64)
+    expect(call.full_type.resolved).to eq(:Int64)
+    expect(ast.full_type.resolved).to eq(:Int64)
+  end
+
+  it "restamps shape-inferred Auto locals and their empty initializer" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        xs: Auto = [];
+        xs.append(1);
+        RETURN;
+      END
+    CLEAR
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+
+    SemanticAnnotator.new(source_code: src).annotate!(ast)
+
+    decl = ast.statements.first.body.first
+    expect(decl.type.to_s).to eq("Int64[]")
+    expect(decl.full_type.to_s).to eq("Int64[]")
+    expect(decl.symbol.type.to_s).to eq("Int64[]")
+    expect(decl.value.full_type.to_s).to eq("Int64[]")
+  end
+
+  it "runs implicit gradual Auto inference even when source text omits Auto" do
+    saved = Parser.gradual_mode
+    Parser.gradual_mode = true
+    src = <<~CLEAR
+      FN id(x) RETURNS Int64 ->
+        RETURN x;
+      END
+      id(1);
+    CLEAR
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    annotator = SemanticAnnotator.new(source_code: src)
+
+    annotator.annotate!(ast)
+
+    fn = ast.statements.first
+    sig = FunctionSignature.unwrap(annotator.semantic_root_scope.resolve_entry!("id").type)
+    expect(fn.params.first.type.resolved).to eq(:Int64)
+    expect(fn.params.first.symbol.type.resolved).to eq(:Int64)
+    expect(sig.params.first.type.resolved).to eq(:Int64)
+  ensure
+    Parser.gradual_mode = saved
+  end
+
+  it "handles defensive Auto restamp paths without stale fact rewrites" do
+    annotator = SemanticAnnotator.new
+    token = Lexer::Token.new(:VAR_ID, "x", 1, 1)
+    param = AST::Param.new(name: "x", type: Type.new(:Auto, auto: true))
+    fn = AST::FunctionDef.new(token, "f", [param], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
+    decl = AST::BindExpr.new(token, "local", Type.new(:Int64), nil)
+    unknown_slot = AutoConstraintCollector::Slot.new(
+      kind: :unknown,
+      decl_node: fn,
+      sources: []
+    )
+    param_slot = AutoConstraintCollector::Slot.new(
+      kind: :param,
+      fn_name: "f",
+      index: 0,
+      decl_node: fn,
+      sources: []
+    )
+    local_slot = AutoConstraintCollector::Slot.new(
+      kind: :local,
+      decl_node: decl,
+      sources: []
+    )
+    resolutions = {
+      AutoSlotId.new(kind: :unknown) => AutoUnifier::Resolution.new(
+        slot: unknown_slot,
+        type: Type.new(:Int64),
+        sources: []
+      ),
+      AutoSlotId.param("f", 0) => AutoUnifier::Resolution.new(
+        slot: param_slot,
+        type: Type.new(:Int64),
+        sources: []
+      ),
+      AutoSlotId.local(decl) => AutoUnifier::Resolution.new(
+        slot: local_slot,
+        type: Type.new(:Int64),
+        sources: []
+      ),
+    }
+    program = AST::Program.new(token, [fn, decl])
+    program.full_type = Type.new(:Void)
+
+    expect {
+      annotator.send(:apply_auto_resolution_stamps!, program, resolutions)
+    }.not_to raise_error
+    expect(param.type.resolved).to eq(:Int64)
+    expect(decl.full_type.resolved).to eq(:Int64)
+
+    missing_call = AST::FuncCall.new(token, "missing", [])
+    missing_call.full_type = Type.new(:Auto, auto: true)
+    stale_program = AST::Program.new(token, [missing_call])
+    stale_program.full_type = Type.new(:Auto, auto: true)
+    expect {
+      annotator.send(:restamp_stale_auto_nodes!, stale_program)
+    }.not_to raise_error
+    expect(missing_call.full_type.auto?).to be(true)
+
+    auto_sig = FunctionSignature.new(params: [], return_type: Type.new(:Auto, auto: true))
+    annotator.semantic_root_scope.declare("auto_ret", nil, auto_sig, false, false, nil, :static)
+    auto_call = AST::FuncCall.new(token, "auto_ret", [])
+    auto_call.full_type = Type.new(:Auto, auto: true)
+    expect {
+      annotator.send(:restamp_stale_auto_nodes!, AST::Program.new(token, [auto_call]))
+    }.not_to raise_error
+    expect(auto_call.full_type.auto?).to be(true)
+
+    left_auto = AST::Identifier.new(token, "left")
+    left_auto.full_type = Type.new(:Auto, auto: true)
+    right_int = AST::Literal.new(token, :INT64, 1, :stack)
+    right_int.full_type = Type.new(:Int64)
+    stale_binary = AST::BinaryOp.new(token, left_auto, :ADD, right_int)
+    stale_binary.full_type = Type.new(:Auto, auto: true)
+    expect(annotator.send(:restamp_binary_type_after_auto!, stale_binary)).to be(false)
+
+    left_bool = AST::Literal.new(token, :BOOLEAN, true, :stack)
+    left_bool.full_type = Type.new(:Bool)
+    bad_binary = AST::BinaryOp.new(token, right_int, :ADD, left_bool)
+    bad_binary.full_type = Type.new(:Auto, auto: true)
+    expect {
+      annotator.send(:restamp_binary_type_after_auto!, bad_binary)
+    }.to raise_error(CompilerError, /Cannot add|Numeric operator/)
   end
 end
 
@@ -1198,7 +1372,8 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       # Two callers pass Int64 and String — ambiguity. Body uses x+x —
       # operator evidence intersects: {Int64, Float64, String}. The
       # diagnostic surfaces those candidates as :interactive Fixes.
-      annotate(<<~CLEAR)
+      expect {
+        annotate(<<~CLEAR)
         FN parseValue(x: Auto) RETURNS Int64 ->
           y = x + x;
           RETURN 0;
@@ -1209,6 +1384,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
           RETURN;
         END
       CLEAR
+      }.to raise_error(RuntimeError, /unresolved AST type facts/)
 
       findings = FixCollector.drain.select { |f|
         f.message.include?("Ambiguous Auto") && f.message.include?("'x' of `parseValue`")
@@ -1232,7 +1408,8 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
     it "suggests Float64 (default) and Int64 (truncation note) for `/`" do
       # `divide` is never called — param x is unresolved. Body uses
       # `x / 2` — DIV's defaults are Float64, alt Int64 with note.
-      annotate(<<~CLEAR)
+      expect {
+        annotate(<<~CLEAR)
         FN divide(x: Auto) RETURNS Int64 ->
           y = x / 2;
           RETURN 0;
@@ -1241,6 +1418,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
           RETURN;
         END
       CLEAR
+      }.to raise_error(RuntimeError, /unresolved AST type facts/)
 
       findings = FixCollector.drain.select { |f|
         f.message.include?("Cannot infer type") && f.message.include?("'x' of `divide`")
@@ -1266,7 +1444,8 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
     # an Auto-return slot through the unresolved-finding path with
     # operator-evidence lookup.
     it "emits unresolved finding for a return Auto slot with op-evidence" do
-      annotate(<<~CLEAR)
+      expect {
+        annotate(<<~CLEAR)
         FN foo(x: Auto) RETURNS Auto ->
           RETURN x + x;
         END
@@ -1274,6 +1453,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
           RETURN;
         END
       CLEAR
+      }.to raise_error(RuntimeError, /unresolved AST type facts/)
       findings = FixCollector.drain.select { |f|
         f.message.include?("Cannot infer type") &&
           f.message.include?("return type of `foo`")

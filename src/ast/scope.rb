@@ -329,7 +329,7 @@ class Scope
     entry = resolve_entry(name)
     return Type.new(:Any) if entry.nil?
 
-    base_type = entry.type
+    base_type = Type.new(entry.type)
 
     value_sync = if entry.locked?
       :locked

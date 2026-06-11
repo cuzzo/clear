@@ -612,7 +612,7 @@ RSpec.describe "AST coverage burndown" do
       expect(float_result.right_coercion).to be_nil
 
       fallback_result = Type.binary_op(:MUL, Type.new(:String), Type.new(:Bool))
-      expect(fallback_result.type.resolved).to eq(:Float64)
+      expect(fallback_result.error).to include("numeric operands")
       expect(Type.binary_op(:NOPE, Type.new(:Int64), Type.new(:Int64)).error).to include("Unknown operator")
     end
 

@@ -299,6 +299,8 @@ module Annotator
           stamp_bg_handle_lifetime!(node)
 
         elsif scope.is_immutable?(node.name)
+          node.symbol = scope.resolve_entry(node.name)
+          stamp_type!(node, scope.resolve_type(node.name))
           emit_immutable_assignment_error!(node, scope)
 
         else

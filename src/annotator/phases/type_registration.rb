@@ -51,7 +51,7 @@ module Annotator
           )
         end
 
-        current_scope.declare_type(node.name.to_sym, schema)
+        declare_type_schema!(node, node.name.to_sym, schema)
         stamp_type!(node, :Void)
       end
 
@@ -61,7 +61,7 @@ module Annotator
         validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
         stamp_field_defaults!(node.field_decls)
 
-        current_scope.declare_type(node.name.to_sym, Schemas::StructSchema.new(
+        declare_type_schema!(node, node.name.to_sym, Schemas::StructSchema.new(
           fields: node.field_decls,
           type_params: type_params(node.type_params),
           visibility: node.visibility || :package,
@@ -72,7 +72,7 @@ module Annotator
       sig { params(node: AST::EnumDef).void }
       def register_enum_declaration(node)
         T.bind(self, SemanticAnnotator)
-        current_scope.declare_type(node.name.to_sym, Schemas::EnumSchema.new(
+        declare_type_schema!(node, node.name.to_sym, Schemas::EnumSchema.new(
           variants: node.variants.to_set,
           visibility: node.visibility || :package,
         ))
@@ -88,7 +88,7 @@ module Annotator
         end
 
         register_inline_struct_variants!(node)
-        current_scope.declare_type(node.name.to_sym, Schemas::UnionSchema.new(
+        declare_type_schema!(node, node.name.to_sym, Schemas::UnionSchema.new(
           variants: node.variants,
           type_params: type_params(node.type_params),
           visibility: node.visibility || :package,
@@ -114,7 +114,7 @@ module Annotator
           next unless Schemas.inline_struct?(variant_data)
 
           synthetic_name = :"#{node.name}_#{variant_name}"
-          current_scope.declare_type(synthetic_name, Schemas::StructSchema.new(
+          declare_type_schema!(node, synthetic_name, Schemas::StructSchema.new(
             fields: variant_data.fields.transform_values { |type| AST::StructField.new(type: type) }
           ))
 
@@ -123,6 +123,17 @@ module Annotator
         end
       end
       private :register_inline_struct_variants!
+
+      sig { params(node: TypeDeclaration, name: Symbol, schema: Scope::ScopeTypeSchema).void }
+      def declare_type_schema!(node, name, schema)
+        T.bind(self, SemanticAnnotator)
+
+        if current_scope.resolve_type_entry(name)
+          error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate type declaration '#{name}'")
+        end
+        current_scope.declare_type(name, schema)
+      end
+      private :declare_type_schema!
 
       sig { params(variant_data: Schemas::InlineStructVariant).returns(T::Array[Schemas::InlineStructDeinitEntry]) }
       def inline_struct_deinit_entries(variant_data)

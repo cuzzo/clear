@@ -93,6 +93,25 @@ RSpec.describe "annotator completion phases" do
     expect(summary.call_site_facts.map(&:propagates_failure)).to eq([true])
   end
 
+  it "resets compilation state between reused annotator runs" do
+    annotator = SemanticAnnotator.new
+    first = parse(<<~CLEAR)
+      FN stale() RETURNS Int64 ->
+        RETURN 1;
+      END
+    CLEAR
+    second = parse(<<~CLEAR)
+      stale();
+    CLEAR
+
+    annotator.annotate!(first)
+
+    expect {
+      annotator.annotate!(second)
+    }.to raise_error(CompilerError, /undefined|unknown/i)
+    expect(annotator.semantic_function_nodes).not_to have_key("stale")
+  end
+
   it "appends synthesized functions during body analysis" do
     annotator = SemanticAnnotator.new
     program = AST::Program.new(tok, [])
@@ -171,6 +190,43 @@ RSpec.describe "annotator completion phases" do
     expect {
       annotator.mark_annotation_complete!(program)
     }.to raise_error(RuntimeError, /unresolved type info/)
+  end
+
+  it "rejects annotation completion if a child node remains unstamped" do
+    child = AST::Identifier.new(tok("x"), "x")
+    program = AST::Program.new(tok, [child])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.to raise_error(RuntimeError, /unresolved AST type facts/)
+  end
+
+  it "rejects annotation completion if a child node remains Auto" do
+    child = AST::Identifier.new(tok("x"), "x")
+    child.full_type = Type.new(:Auto, auto: true)
+    program = AST::Program.new(tok, [child])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.to raise_error(RuntimeError, /Identifier .* Auto/)
+  end
+
+  it "ignores lifetime metadata nodes at the annotation boundary" do
+    lifetime = AST::Identifier.new(tok("n"), "n")
+    fn = AST::FunctionDef.new(tok("identity"), "identity", [], [], Type.new(:Int64), [lifetime], [], [], nil, :pub, [], false)
+    fn.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+    program = AST::Program.new(tok, [fn])
+    program.full_type = Type.new(:Void)
+    annotator = SemanticAnnotator.new
+    annotator.semantic_function_nodes["identity"] = fn
+
+    expect {
+      annotator.mark_annotation_complete!(program)
+    }.not_to raise_error
   end
 
   it "rejects annotation completion if a function lacks a signature" do

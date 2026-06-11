@@ -149,6 +149,7 @@ module Annotator
         # Standard binary operations - visit children first
         visit(node.left)
         visit(node.right)
+        validate_predicate_purity! if current_predicate_context
 
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
