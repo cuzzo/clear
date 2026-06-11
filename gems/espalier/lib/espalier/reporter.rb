@@ -28,6 +28,10 @@ module Espalier
       sections << project_prioritization
       sections << run_summary
       sections << state_owner_pressure
+      sections << encapsulation_pressure_section
+      sections << owner_state_cohesion_section
+      sections << collaboration_meshes_section
+      sections << mediator_candidates_section
       sections << coordinator_mutator_collisions
       sections << conditional_delegation_hubs
       sections << state_lifecycle_pressure
@@ -44,6 +48,10 @@ module Espalier
         - [Project Prioritization](#project-prioritization)
         - [Run Summary](#run-summary)
         - [State Owner Pressure](#state-owner-pressure)
+        - [Encapsulation Pressure](#encapsulation-pressure)
+        - [Owner State Cohesion](#owner-state-cohesion)
+        - [Collaboration Meshes](#collaboration-meshes)
+        - [Mediator/Reification Candidates](#mediatorreification-candidates)
         - [Coordinator/Mutator Collisions](#coordinatormutator-collisions)
         - [Conditional Delegation Hubs](#conditional-delegation-hubs)
         - [State Lifecycle Pressure](#state-lifecycle-pressure)
@@ -73,6 +81,24 @@ module Espalier
       if (top_private = privatization_candidates.first)
         lines << "- Strongest visibility-tightening candidate: #{method_ref(top_private)} " \
                  "(score=#{fmt(top_private[:score])}, internal callers=#{top_private[:callers].size})."
+      end
+      if (top_encapsulation = encapsulation_rows.first)
+        lines << "- Highest encapsulation pressure: #{owner_ref(top_encapsulation[:owner], top_encapsulation[:file])} " \
+                 "(score=#{fmt(top_encapsulation[:score])}, public=#{top_encapsulation[:public_methods]}, " \
+                 "state=#{top_encapsulation[:state_count]}, public mutators=#{top_encapsulation[:public_mutators]})."
+      end
+      if (top_cohesion = owner_state_cohesion_rows.first)
+        lines << "- Lowest owner state cohesion: #{owner_ref(top_cohesion[:owner], top_cohesion[:file])} " \
+                 "(score=#{fmt(top_cohesion[:score])}, components=#{top_cohesion[:component_count]}, " \
+                 "fragmentation=#{fmt(top_cohesion[:fragmentation])})."
+      end
+      if (top_mesh = collaboration_mesh_rows.first)
+        lines << "- Broadest collaboration mesh: #{mesh_label(top_mesh)} " \
+                 "(score=#{fmt(top_mesh[:score])}, owners=#{top_mesh[:node_count]}, edges=#{top_mesh[:edge_count]})."
+      end
+      if (top_mediator = mediator_candidate_rows.first)
+        lines << "- Strongest mediator/reification candidate: #{mesh_owner_list(top_mediator[:owners])} " \
+                 "(score=#{fmt(top_mediator[:score])}, terms=#{top_mediator[:common_terms].join(', ')})."
       end
       lines << "- Start where architecture pressure overlaps Decomplex/Boobytrap/SlopCop/NilKill evidence; those are more likely root-cause work than local cleanup."
       lines << ""
@@ -127,6 +153,91 @@ module Espalier
       method_scores.first(@limit).each_with_index do |row, idx|
         lines << "| #{idx + 1} | #{method_ref(row)} | #{fmt(row[:score])} | #{row[:reads]} | #{row[:writes]} | " \
                  "#{row[:always_calls]} | #{row[:conditional_calls]} | #{quality_summary(row)} | #{method_refactor(row)} |"
+      end
+      lines << ""
+      lines.join("\n")
+    end
+
+    def owner_state_cohesion_section
+      rows = owner_state_cohesion_rows.first(@limit)
+      lines = ["## Owner State Cohesion", "_Class-level LCOM-style state clusters: methods connected through shared instance state._", ""]
+      if rows.empty?
+        lines << "None."
+        lines << ""
+        return lines.join("\n")
+      end
+
+      lines << "| # | owner | score | flags | state | stateful methods | components | bridges | largest | fragmentation | isolated | sample components | suggested refactor |"
+      lines << "|---|-------|-------|-------|-------|------------------|------------|---------|---------|---------------|----------|-------------------|--------------------|"
+      rows.each_with_index do |row, idx|
+        lines << "| #{idx + 1} | #{owner_ref(row[:owner], row[:file])} | #{fmt(row[:score])} | #{escape(flag_list(row[:flags]))} | " \
+                 "#{row[:state_count]} | #{row[:stateful_methods]} | #{row[:component_count]} | " \
+                 "#{escape(bridge_list(row[:bridge_methods], row[:bridge_method_count]))} | " \
+                 "#{row[:largest_component_methods]} (#{fmt(row[:largest_component_ratio])}) | #{fmt(row[:fragmentation])} | " \
+                 "#{row[:isolated_components]} | #{escape(component_list(row[:component_samples]))} | " \
+                 "#{escape(cohesion_refactor(row))} |"
+      end
+      lines << ""
+      lines.join("\n")
+    end
+
+    def encapsulation_pressure_section
+      rows = encapsulation_rows.first(@limit)
+      lines = ["## Encapsulation Pressure", "_Owners where public API, mutable state, and internal-helper evidence suggest implementation detail is leaking._", ""]
+      if rows.empty?
+        lines << "None."
+        lines << ""
+        return lines.join("\n")
+      end
+
+      lines << "| # | owner | score | flags | public/private | state | public state | public mutators | internal helpers | fan-out | suggested refactor |"
+      lines << "|---|-------|-------|-------|----------------|-------|--------------|-----------------|------------------|---------|--------------------|"
+      rows.each_with_index do |row, idx|
+        lines << "| #{idx + 1} | #{owner_ref(row[:owner], row[:file])} | #{fmt(row[:score])} | #{escape(flag_list(row[:flags]))} | " \
+                 "#{row[:public_methods]}/#{row[:private_methods]} | #{row[:state_count]} | #{row[:public_state_methods]} | " \
+                 "#{row[:public_mutators]} | #{helper_list(row[:privacy_candidates])} | #{row[:fan_out]} | " \
+                 "#{escape(encapsulation_refactor(row))} |"
+      end
+      lines << ""
+      lines.join("\n")
+    end
+
+    def collaboration_meshes_section
+      rows = collaboration_mesh_rows.first(@limit)
+      lines = ["## Collaboration Meshes", "_Owner-to-owner webs from manifest-visible delegation targets._", ""]
+      if rows.empty?
+        lines << "None."
+        lines << ""
+        return lines.join("\n")
+      end
+
+      lines << "| # | kind | score | owners | edges/calls | density | bidirectional | shared terms | top edges | suggested review |"
+      lines << "|---|------|-------|--------|-------------|---------|---------------|--------------|-----------|------------------|"
+      rows.each_with_index do |row, idx|
+        lines << "| #{idx + 1} | #{row[:kind]} | #{fmt(row[:score])} | #{mesh_owner_list(row[:owners])} | " \
+                 "#{row[:edge_count]}/#{row[:total_calls]} | #{fmt(row[:density])} | #{row[:bidirectional_pairs]} | " \
+                 "#{escape(term_list(row[:common_terms]))} | #{escape(edge_list(row[:top_edges]))} | " \
+                 "#{escape(collaboration_refactor(row))} |"
+      end
+      lines << ""
+      lines.join("\n")
+    end
+
+    def mediator_candidates_section
+      rows = mediator_candidate_rows.first(@limit)
+      lines = ["## Mediator/Reification Candidates", "_Dense or broad collaboration clusters where a missing or overloaded role object may exist._", ""]
+      if rows.empty?
+        lines << "None."
+        lines << ""
+        return lines.join("\n")
+      end
+
+      lines << "| # | owners | score | shared terms | driver | evidence | suggested refactor |"
+      lines << "|---|--------|-------|--------------|--------|----------|--------------------|"
+      rows.each_with_index do |row, idx|
+        lines << "| #{idx + 1} | #{mesh_owner_list(row[:owners])} | #{fmt(row[:score])} | " \
+                 "#{escape(term_list(row[:common_terms]))} | `#{row[:driver]}` | " \
+                 "#{escape(row[:evidence].join('; '))} | #{escape(row[:suggestion])} |"
       end
       lines << ""
       lines.join("\n")
@@ -265,6 +376,26 @@ module Espalier
       end
     end
 
+    def architecture_analyzer
+      @architecture_analyzer ||= ArchitectureAnalyzer.new(@manifest)
+    end
+
+    def encapsulation_rows
+      @encapsulation_rows ||= architecture_analyzer.encapsulation_pressure
+    end
+
+    def collaboration_mesh_rows
+      @collaboration_mesh_rows ||= architecture_analyzer.collaboration_meshes
+    end
+
+    def mediator_candidate_rows
+      @mediator_candidate_rows ||= architecture_analyzer.mediator_candidates
+    end
+
+    def owner_state_cohesion_rows
+      @owner_state_cohesion_rows ||= architecture_analyzer.owner_state_cohesion
+    end
+
     def method_row(mod, fn)
       delegations = fn[:DELEGATIONS] || {}
       always = Array(delegations[:always_calls])
@@ -299,6 +430,12 @@ module Espalier
 
     def module_ref(row)
       "`#{row[:module]}` (#{file_link(row[:file])})"
+    end
+
+    def owner_ref(owner, file = nil)
+      mod = @manifest.find { |row| row[:module].to_s == owner.to_s }
+      file ||= mod && mod[:file]
+      file ? "`#{owner}` (#{file_link(file)})" : "`#{owner}`"
     end
 
     def method_ref(row)
@@ -435,6 +572,90 @@ module Espalier
       else
         "audit cohesion before local cleanup"
       end
+    end
+
+    def encapsulation_refactor(row)
+      if row[:public_mutators] >= 5 && row[:state_count] >= 5
+        "split mutable lifecycle state from the public facade"
+      elsif row[:state_count] >= 8 && row[:public_state_methods] >= 5
+        "extract a smaller state/context owner behind this public surface"
+      elsif row[:public_state_methods] >= 8
+        "narrow public state access through a smaller query/session object"
+      elsif row[:privacy_candidates].any?
+        "hide internal helpers behind the public entrypoint"
+      elsif row[:fan_out] >= 8
+        "check whether public orchestration should move to a coordinator"
+      else
+        "verify the broad public surface is intentional"
+      end
+    end
+
+    def collaboration_refactor(row)
+      if row[:kind] == :dense_cycle
+        "review bidirectional responsibilities and extract a boundary protocol"
+      elsif row[:stateful_calls].positive?
+        "check whether stateful collaboration belongs behind a mediator"
+      else
+        "verify this fan-out is an intentional facade/coordinator"
+      end
+    end
+
+    def cohesion_refactor(row)
+      if row[:fragmentation].to_f >= 0.5 && row[:component_count].to_i >= 3
+        "split state clusters into smaller owner/context objects"
+      elsif row[:isolated_components].to_i >= 2
+        "review isolated state concerns before adding more API"
+      else
+        "verify these state clusters belong on one owner"
+      end
+    end
+
+    def mesh_label(row)
+      "`#{row[:driver]}` #{row[:kind]}"
+    end
+
+    def mesh_owner_list(owners)
+      visible = owners.first(6).map { |owner| "`#{owner}`" }
+      suffix = owners.size > visible.size ? " +#{owners.size - visible.size}" : nil
+      ([visible.join(", "), suffix].compact.join(" "))
+    end
+
+    def flag_list(flags)
+      flags.empty? ? "-" : flags.join(", ")
+    end
+
+    def helper_list(names)
+      return "-" if names.empty?
+
+      visible = names.first(3).map { |name| "`#{name}`" }
+      suffix = names.size > visible.size ? " +#{names.size - visible.size}" : nil
+      ([visible.join(", "), suffix].compact.join(" "))
+    end
+
+    def term_list(terms)
+      terms.empty? ? "-" : terms.join(", ")
+    end
+
+    def edge_list(edges)
+      edges.empty? ? "-" : edges.join("; ")
+    end
+
+    def component_list(components)
+      return "-" if components.empty?
+
+      components.first(3).map do |component|
+        states = Array(component[:states]).first(2).join(", ")
+        methods = Array(component[:methods]).first(2).join(", ")
+        "#{component[:method_count]}m/#{component[:state_count]}s #{states}: #{methods}"
+      end.join("; ")
+    end
+
+    def bridge_list(names, count)
+      return "-" if count.to_i.zero?
+
+      visible = Array(names).first(3).map { |name| "`#{name}`" }
+      suffix = count.to_i > visible.size ? " +#{count.to_i - visible.size}" : nil
+      ([visible.join(", "), suffix].compact.join(" "))
     end
 
     def owner_flags(row)

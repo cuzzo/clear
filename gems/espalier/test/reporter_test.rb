@@ -156,6 +156,64 @@ class ReporterTest < Minitest::Test
     assert_includes report, "many-mutators"
   end
 
+  def test_report_lists_owner_state_cohesion_candidates
+    manifest = [
+      {
+        module: "SplitWorkflow",
+        file: "src/split_workflow.rb",
+        type: :class,
+        state: [
+          { name: "@parse_cache", type: "Hash", properties: [] },
+          { name: "@parse_errors", type: "Array", properties: [] },
+          { name: "@emit_buffer", type: "String", properties: [] },
+          { name: "@emit_stats", type: "Hash", properties: [] }
+        ],
+        functions: [
+          {
+            name: "run",
+            visibility: :public,
+            EFFECTS: { reads: [], writes: [] },
+            DELEGATIONS: { always_calls: %w[parse_input emit_output] },
+            CALL_GRAPH: { internal_calls: %w[parse_input emit_output] }
+          },
+          {
+            name: "parse_input",
+            visibility: :public,
+            EFFECTS: { reads: ["@parse_cache"], writes: ["@parse_errors"] },
+            DELEGATIONS: {}
+          },
+          {
+            name: "normalize_input",
+            visibility: :public,
+            EFFECTS: { reads: ["@parse_errors"], writes: ["@parse_cache"] },
+            DELEGATIONS: {}
+          },
+          {
+            name: "emit_output",
+            visibility: :public,
+            EFFECTS: { reads: ["@emit_buffer"], writes: ["@emit_stats"] },
+            DELEGATIONS: {}
+          },
+          {
+            name: "flush_output",
+            visibility: :public,
+            EFFECTS: { reads: ["@emit_stats"], writes: ["@emit_buffer"] },
+            DELEGATIONS: {}
+          }
+        ]
+      }
+    ]
+
+    report = Espalier::Reporter.new(manifest, root: Dir.pwd).to_markdown
+
+    assert_includes report, "## Owner State Cohesion"
+    assert_includes report, "`SplitWorkflow`"
+    assert_includes report, "orchestration-bridges"
+    assert_includes report, "`run`"
+    assert_includes report, "@parse_cache"
+    assert_includes report, "@emit_buffer"
+  end
+
   def test_report_lists_conservative_privatization_candidates
     manifest = [
       {

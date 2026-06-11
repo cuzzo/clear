@@ -7,6 +7,7 @@ rescue LoadError
   require_relative "../../decomplex/lib/decomplex/ruby_topology"
 end
 require_relative "espalier/privacy_analyzer"
+require_relative "espalier/architecture_analyzer"
 require_relative "espalier/aggregator"
 require_relative "espalier/formatter"
 require_relative "espalier/reporter"

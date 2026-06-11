@@ -20,6 +20,13 @@ Espalier owns architecture-level synthesis:
 
 - which objects own the most state;
 - which state fields are protocol-shaped or lifecycle-sensitive;
+- where public API surface, mutable state, and internal-helper evidence suggest
+  encapsulation pressure;
+- where one owner has multiple disconnected instance-state clusters;
+- where manifest-visible owner-to-owner delegations form broad hubs or dense
+  webs;
+- where those collaboration webs suggest a missing or overloaded mediator,
+  context, or role object;
 - which methods both mutate state and coordinate many collaborators;
 - which methods are conditional delegation hubs;
 - where sibling-tool findings converge on an architectural boundary.
@@ -47,6 +54,48 @@ Required manifest fields:
 Ranks modules/classes by state count, method count, total state access, and
 delegation count. This finds state bags and phase objects where many unrelated
 responsibilities may be sharing one mutable context.
+
+### Encapsulation Pressure
+
+Ranks owners where public method surface overlaps mutable state, public
+state-touching methods, public mutators, lifecycle-sensitive fields, broad
+fan-out, or Espalier privacy candidates. This is intentionally not just a
+method-count metric: pure data carriers and simple reader objects should be
+suppressed, while classes such as phase contexts, compiler facades, and mutable
+registries should surface when they expose implementation detail through a broad
+public API.
+
+### Owner State Cohesion
+
+Ranks class/module-level LCOM-style state fragmentation. Espalier builds a
+bipartite graph of methods and instance state slots from direct reads/writes;
+disconnected components mean the owner contains multiple state concerns that do
+not interact through shared fields.
+
+Internal call propagation is used only as evidence. A method that calls helpers
+from more than one state component is reported as an orchestration bridge, but
+it does not merge those components. This avoids hiding split owners behind a
+single public entrypoint such as `run`, `emit`, or `parse`.
+
+The report suppresses simple data carriers, isolated accessor-only fields,
+duplicate owner/file manifest entries, and tiny low-fragmentation cases. Bridge
+counts are displayed but capped in the score so parser/emitter-style APIs do not
+dominate the ranking merely because many methods route through the same
+entrypoints.
+
+### Collaboration Meshes
+
+Ranks manifest-visible owner-to-owner delegation graphs. A hub row means one
+owner delegates to many other owners; a dense-cycle row means several owners are
+mutually coupled. The graph is conservative: Espalier only creates an edge when
+a delegation receiver resolves to another owner present in the manifest.
+
+### Mediator/Reification Candidates
+
+Ranks collaboration meshes where repeated vocabulary and graph shape suggest a
+missing role object, or where an existing role object such as a host, context,
+server, helper, or builder appears overloaded. These are subjective review
+candidates and should not be treated as proof that an extraction is required.
 
 ### Coordinator/Mutator Collisions
 
