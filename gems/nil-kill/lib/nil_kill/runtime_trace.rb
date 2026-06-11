@@ -26,6 +26,7 @@ module NilKillRuntimeTrace
   @ivar_runtime = {}
   @tuples = {}
   @collections = {}
+  @method_edges = {}
   @objects = {}
   @object_tokens = {}
   # Mutation coalescing: a tight loop mutating ONE object at ONE site
@@ -116,7 +117,7 @@ module NilKillRuntimeTrace
   @lock = Mutex.new
 
   class << self
-    attr_reader :methods, :tlets, :structs, :tuples, :collections, :objects, :frames, :path_cache, :target_cache, :lock
+    attr_reader :methods, :tlets, :structs, :tuples, :collections, :method_edges, :objects, :frames, :path_cache, :target_cache, :lock
   end
 
   def self.trace_plan
@@ -148,7 +149,7 @@ module NilKillRuntimeTrace
     index = Hash.new { |h, k| h[k] = [] }
     methods.each do |raw_key, method_plan|
       owner, method_id, kind, path, line = raw_key.split("\0", 5)
-      next if method_plan && method_plan["sample"] == false
+      next if method_plan && method_plan["sample"] == false && method_plan["frame"] == false
       index[owner] << {
         owner: owner,
         method_id: method_id,
@@ -157,6 +158,8 @@ module NilKillRuntimeTrace
         line: line.to_i,
         params: method_plan.fetch("params", {}),
         return: method_plan["return"] != false,
+        sample: method_plan["sample"] != false,
+        frame: method_plan["frame"] != false,
       }
     end
     @planned_methods_by_class = index
@@ -181,10 +184,11 @@ module NilKillRuntimeTrace
       next unless target
       trace_key = [klass_name, entry[:kind], entry[:method_id], target.object_id]
       next unless @targeted_tracepoint_keys.add?(trace_key)
-      sample_params = entry[:params].values.any?
-      sample_return = entry[:return]
-      @targeted_tracepoints << TracePoint.new(:call) { |tp| record_call(tp, forced_entry: entry) }.enable(target: target) if sample_params
-      @targeted_tracepoints << TracePoint.new(:return) { |tp| record_return(tp, forced_entry: entry) }.enable(target: target) if sample_return
+      sample_params = entry[:sample] && entry[:params].values.any?
+      sample_return = entry[:sample] && entry[:return]
+      frame_method = entry[:frame]
+      @targeted_tracepoints << TracePoint.new(:call) { |tp| record_call(tp, forced_entry: entry) }.enable(target: target) if sample_params || frame_method
+      @targeted_tracepoints << TracePoint.new(:return) { |tp| record_return(tp, forced_entry: entry) }.enable(target: target) if sample_return || frame_method
     end
   end
 
@@ -279,8 +283,12 @@ module NilKillRuntimeTrace
     ms = @sym_s[method_id]
     key = [owner, ms, kind, abs, line]
     plan = source_method_plan(owner, method_id, kind, abs, line)
-    by_line[line] = { abs: abs, method_s: ms, plan: plan,
-                      bucket: method_bucket(key, plan),
+    sample_method = plan.nil? || plan["sample"] != false
+    frame_method = plan.nil? || plan["frame"] != false
+    by_line[line] = { abs: abs, method_s: ms, kind: kind, owner: owner, line: line,
+                      key: [owner, kind, ms, abs, line], method_key: key, plan: plan,
+                      sample_method: sample_method, frame_method: frame_method,
+                      bucket: (sample_method || frame_method) ? method_bucket(key, plan) : nil,
                       prefix: "#{abs}:#{line}" }
   end
 
@@ -827,6 +835,7 @@ module NilKillRuntimeTrace
     method_id = tp.method_id.to_s
     plan = owner && target ? method_plan(owner[0], tp.method_id, owner[1], path, tp.lineno) : nil
     sample_method = plan.nil? || plan["sample"] != false
+    frame_method = target && (plan.nil? || plan["frame"] != false)
     params = target ? (tp.parameters rescue nil) : nil
     by_path[tp.lineno] = {
       target: target,
@@ -836,21 +845,25 @@ module NilKillRuntimeTrace
       line: tp.lineno,
       key: owner && [owner, method_id, path],
       bucket_key: owner && [owner[0], method_id, owner[1], path, tp.lineno],
+      method_key: owner && [owner[0], method_id, owner[1], path, tp.lineno],
       method_site: "#{path}:#{tp.lineno}",
       plan: plan,
       sample_method: sample_method,
+      frame_method: frame_method,
       params: params,
     }
   end
 
   def self.forced_method_metadata(tp, entry)
     plan = {
-      "sample" => true,
+      "sample" => entry[:sample],
       "params" => entry[:params],
       "return" => entry[:return],
+      "frame" => entry[:frame],
     }
     path = abs_path(entry[:path])
     params = entry[:params].keys.map { |name| [:req, name.to_sym] }
+    sample_method = entry[:sample] != false
     {
       target: true,
       owner: [entry[:owner], entry[:kind]],
@@ -859,9 +872,11 @@ module NilKillRuntimeTrace
       line: entry[:line],
       key: [[entry[:owner], entry[:kind]], entry[:method_id].to_s, path],
       bucket_key: [entry[:owner], entry[:method_id].to_s, entry[:kind], path, entry[:line]],
+      method_key: [entry[:owner], entry[:method_id].to_s, entry[:kind], path, entry[:line]],
       method_site: "#{path}:#{entry[:line]}",
       plan: plan,
-      sample_method: true,
+      sample_method: sample_method,
+      frame_method: entry[:frame] != false,
       params: params,
       forced_values: forced_param_values(tp, entry),
     }
@@ -911,6 +926,39 @@ module NilKillRuntimeTrace
     }
   end
 
+  def self.method_edge_record(caller_key, callee_key)
+    @method_edges[[caller_key, callee_key]] ||= { calls: 0, ok_calls: 0, raised_calls: 0 }
+  end
+
+  def self.record_method_edge_entry(frame, stack)
+    caller = stack.last
+    return unless caller && caller[:method_key] && frame[:method_key]
+
+    edge_key = [caller[:method_key], frame[:method_key]]
+    method_edge_record(edge_key[0], edge_key[1])[:calls] += 1
+    frame[:edge_key] = edge_key
+  end
+
+  def self.record_method_edge_outcome(frame, outcome)
+    edge_key = frame && frame[:edge_key]
+    return unless edge_key
+
+    rec = method_edge_record(edge_key[0], edge_key[1])
+    outcome == :raised ? rec[:raised_calls] += 1 : rec[:ok_calls] += 1
+  end
+
+  def self.source_method_frame(ctx)
+    {
+      key: ctx[:key],
+      method_key: ctx[:method_key],
+      bucket: ctx[:bucket],
+      sample_method: ctx[:sample_method],
+      plan: ctx[:plan],
+      method_site: ctx[:prefix],
+      edge_key: nil,
+    }
+  end
+
   def self.source_method_plan(owner, method_id, kind, path, line)
     method_plan(owner, method_id, kind, path, line)
   end
@@ -923,9 +971,15 @@ module NilKillRuntimeTrace
     abs = ctx[:abs]
     plan = ctx[:plan]
     b = ctx[:bucket]
+    frame = source_method_frame(ctx)
     with_collection_hooks_disabled do
       @lock.synchronize do
-        b[:calls] += 1
+        stack = @frames[Thread.current.object_id]
+        record_method_edge_entry(frame, stack)
+        stack << frame if ctx[:frame_method]
+        b[:calls] += 1 if b
+        next unless ctx[:sample_method]
+
         params.each do |name, value|
           next unless sample_param?(plan, name)
           cls = class_name(value)
@@ -955,13 +1009,17 @@ module NilKillRuntimeTrace
   def self.record_source_method_return(owner, method_id, kind, path, line, value)
     ctx = site_ctx(owner, method_id, kind, path, line)
     return value unless ctx
-    return value unless sample_return?(ctx[:plan])
 
     abs = ctx[:abs]
     b = ctx[:bucket]
     with_collection_hooks_disabled do
       @lock.synchronize do
-        b[:ok_calls] += 1
+        frame = pop_frame_for_key(ctx[:key])
+        record_method_edge_outcome(frame, :ok)
+        return value if ctx[:frame_method] && frame.nil?
+        b[:ok_calls] += 1 if b
+        return value unless ctx[:sample_method] && sample_return?(ctx[:plan])
+
         b[:returns] << class_name(value)
         shape = container_shape(value)
         if shape
@@ -988,6 +1046,11 @@ module NilKillRuntimeTrace
 
     b = ctx[:bucket]
     @lock.synchronize do
+      frame = pop_frame_for_key(ctx[:key])
+      record_method_edge_outcome(frame, :raised)
+      return if ctx[:frame_method] && frame.nil?
+      return unless b
+
       b[:raised_calls] += 1
       b[:raised] << class_name(error)
     end
@@ -1004,12 +1067,14 @@ module NilKillRuntimeTrace
       return unless params
       method_plan = meta[:plan]
       sample_method = meta[:sample_method]
-      b = sample_method ? bucket_for_meta(meta) : nil
+      b = (sample_method || meta[:frame_method]) ? bucket_for_meta(meta) : nil
       binding = tp.binding
       frame = {
         key: meta[:key],
+        method_key: meta[:method_key],
         bucket: b,
         sample_method: sample_method,
+        frame_method: meta[:frame_method],
         plan: method_plan,
         params: Hash.new { |h, k| h[k] = NKSet.new },
         param_sites: Hash.new { |h, k| h[k] = NKTally.new },
@@ -1023,9 +1088,11 @@ module NilKillRuntimeTrace
         method_site: meta[:method_site],
       }
       @lock.synchronize do
-        active_trace = @frames[Thread.current.object_id].reverse.filter_map { |active| active[:method_site] }
+        stack = @frames[Thread.current.object_id]
+        active_trace = stack.reverse.filter_map { |active| active[:method_site] }
         frame[:trace] = (Array(frame[:trace]) + active_trace).uniq
-        b[:calls] += 1 if b && sample_method
+        record_method_edge_entry(frame, stack)
+        b[:calls] += 1 if b
         params.each do |kind, name|
           next unless name
           next if %i[rest keyrest block].include?(kind)
@@ -1054,8 +1121,8 @@ module NilKillRuntimeTrace
             register_collection_owner(value, owner_kind: "method_param", name: name.to_s, path: meta[:path], line: meta[:line], bucket: b)
           end
         end
-        if sample_return?(method_plan)
-          @frames[Thread.current.object_id] << frame
+        if meta[:frame_method] || sample_return?(method_plan)
+          stack << frame
         elsif b
           commit_params_observed(b, frame)
         end
@@ -1070,13 +1137,15 @@ module NilKillRuntimeTrace
       meta = forced_entry ? forced_method_metadata(tp, forced_entry) : method_metadata(tp, known_target: true)
       return unless meta
       frame = pop_frame_for_meta(meta)
-      return if frame && !frame[:sample_method]
+      @lock.synchronize { record_method_edge_outcome(frame, :ok) } if frame
       b = frame ? frame[:bucket] : bucket_for_meta(meta)
       return unless b
       value = tp.return_value
       @lock.synchronize do
         commit_params(b, frame, :ok) if frame
         b[:ok_calls] += 1
+        return if frame && !frame[:sample_method]
+
         b[:returns] << class_name(value) if sample_return?(frame && frame[:plan])
         next_shape = sample_return?(frame && frame[:plan])
         return unless next_shape
@@ -1105,11 +1174,11 @@ module NilKillRuntimeTrace
       meta = forced_entry ? forced_method_metadata(tp, forced_entry) : method_metadata(tp, known_target: true)
       return unless meta
       frame = pop_frame_for_meta(meta)
-      return if frame && !frame[:sample_method]
+      @lock.synchronize { record_method_edge_outcome(frame, :raised) } if frame
       b = frame ? frame[:bucket] : bucket_for_meta(meta)
       return unless b
       @lock.synchronize do
-        commit_params(b, frame, :raised) if frame
+        commit_params(b, frame, :raised) if frame && frame[:sample_method]
         b[:raised_calls] += 1
         b[:raised] << class_name(tp.raised_exception)
       end
@@ -1124,6 +1193,14 @@ module NilKillRuntimeTrace
 
   def self.pop_frame_for_meta(meta)
     expected = meta[:key]
+    return nil unless expected
+    stack = @frames[Thread.current.object_id]
+    idx = stack.rindex { |frame| frame[:key] == expected }
+    return nil unless idx
+    stack.delete_at(idx)
+  end
+
+  def self.pop_frame_for_key(expected)
     return nil unless expected
     stack = @frames[Thread.current.object_id]
     idx = stack.rindex { |frame| frame[:key] == expected }
@@ -1604,6 +1681,16 @@ module NilKillRuntimeTrace
     counts.transform_values(&:to_h)
   end
 
+  def self.method_key_payload(key)
+    {
+      class: key[0],
+      method: key[1],
+      kind: key[2],
+      path: key[3],
+      line: key[4],
+    }
+  end
+
   def self.dump
     flush_pending_mutations!
     FileUtils.mkdir_p(OUT_DIR)
@@ -1634,6 +1721,17 @@ module NilKillRuntimeTrace
           return_elem_shapes: rec[:return_elem_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           return_kv_shapes: [rec[:return_kv_shapes][0].to_a.sort.map { |shape| shape_payload(shape) }, rec[:return_kv_shapes][1].to_a.sort.map { |shape| shape_payload(shape) }],
           raised: rec[:raised].to_a.sort,
+        )
+      end
+    end
+    File.open(File.join(OUT_DIR, "method-edges-#{pid}.jsonl"), "w") do |file|
+      @method_edges.each do |(caller_key, callee_key), rec|
+        file.puts JSON.generate(
+          caller: method_key_payload(caller_key),
+          callee: method_key_payload(callee_key),
+          calls: rec[:calls],
+          ok_calls: rec[:ok_calls],
+          raised_calls: rec[:raised_calls],
         )
       end
     end

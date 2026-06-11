@@ -233,7 +233,7 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
-  it "source-instruments only trace-plan methods when method TracePoint collection is disabled" do
+  it "source-instruments sampled and frame-only trace-plan methods when method TracePoint collection is disabled" do
     Dir.mktmpdir("nil-kill-runtime-source-plan", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -282,7 +282,7 @@ RSpec.describe "nil-kill runtime trace" do
       File.write(instrumented, instrumented_source)
 
       expect(instrumented_source).to include('record_source_method_call("Worker", "untyped"')
-      expect(instrumented_source).not_to include('record_source_method_call("Worker", "typed"')
+      expect(instrumented_source).to include('record_source_method_call("Worker", "typed"')
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
@@ -301,7 +301,7 @@ RSpec.describe "nil-kill runtime trace" do
       expect(status).to be_success, err
       method_events = Dir.glob(File.join(trace_dir, "methods-*.jsonl")).flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "untyped", "returns" => include("String")))
-      expect(method_events).not_to include(a_hash_including("class" => "Worker", "method" => "typed"))
+      expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "typed"))
     end
   end
 
