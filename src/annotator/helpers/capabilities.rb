@@ -943,13 +943,17 @@ module CapabilityHelper
   sig { params(fact: WithCapabilityFact).void }
   def declare_view_capability!(fact)
     T.bind(self, SemanticAnnotator) rescue nil
-    inner = Type.new(fact.resolved_type).tense_type
-    bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
+    bind_type = view_capability_alias_type(fact)
     alias_name = fact.alias_name
-    current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
+    current_scope.declare(alias_name, nil, bind_type, false, false, nil, :stack)
     record_capture_local!(alias_name)
     declare_view_borrow_constraints!(alias_name) if fact.capability == :VIEW
-    og_declare(alias_name, nil, bind_type_sym)
+    og_declare(alias_name, nil, bind_type)
+  end
+
+  sig { params(fact: WithCapabilityFact).returns(Type) }
+  def view_capability_alias_type(fact)
+    Type.new(fact.resolved_type).tense_type
   end
 
   sig { params(alias_name: String).void }

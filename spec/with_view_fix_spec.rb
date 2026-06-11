@@ -23,7 +23,7 @@ RSpec.describe "WITH VIEW on non-@observable: fixable error" do
     src = <<~CLEAR
       FN viewer(running: ~Float64) RETURNS ~Float64 ->
           WITH VIEW running AS s {
-              ASSERT s != NIL, "ok";
+              ASSERT s >= 0.0, "ok";
           }
           RETURN GIVE running;
       END
@@ -40,7 +40,7 @@ RSpec.describe "WITH VIEW on non-@observable: fixable error" do
     src = <<~CLEAR
       FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
           WITH VIEW running AS s {
-              ASSERT s != NIL, "ok";
+              ASSERT s >= 0.0, "ok";
           }
           RETURN GIVE running;
       END

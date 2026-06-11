@@ -589,24 +589,53 @@ class Type
   def self.equality_compatible?(left_type, right_type)
     left_type.resolved == right_type.resolved ||
       optional_nil_comparable?(left_type, right_type) ||
+      optional_payload_comparable?(left_type, right_type) ||
       scalar_comparable?(left_type, right_type)
   end
 
   sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
   def self.ordered_compatible?(left_type, right_type)
-    scalar_comparable?(left_type, right_type)
+    scalar_comparable?(left_type, right_type) ||
+      optional_payload_ordered_comparable?(left_type, right_type)
   end
 
   sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
   def self.scalar_comparable?(left_type, right_type)
     (left_type.numeric? && right_type.numeric?) ||
-      (left_type.string? && right_type.string?)
+      (left_type.string? && right_type.string?) ||
+      same_generic_parameter?(left_type, right_type)
   end
 
   sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
   def self.optional_nil_comparable?(left_type, right_type)
     (left_type.optional? && right_type.resolved == :NIL) ||
       (right_type.optional? && left_type.resolved == :NIL)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.optional_payload_comparable?(left_type, right_type)
+    return false unless left_type.optional? != right_type.optional?
+
+    optional_type = left_type.optional? ? left_type : right_type
+    payload_type = left_type.optional? ? right_type : left_type
+    inner_type = T.must(optional_type.wrapped_type)
+    inner_type.resolved == payload_type.resolved || scalar_comparable?(inner_type, payload_type)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.optional_payload_ordered_comparable?(left_type, right_type)
+    return false unless left_type.optional? != right_type.optional?
+
+    optional_type = left_type.optional? ? left_type : right_type
+    payload_type = left_type.optional? ? right_type : left_type
+    scalar_comparable?(T.must(optional_type.wrapped_type), payload_type)
+  end
+
+  sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
+  def self.same_generic_parameter?(left_type, right_type)
+    left_type.generic_type_parameter? &&
+      right_type.generic_type_parameter? &&
+      left_type.resolved == right_type.resolved
   end
 
   sig { params(left_type: Type, right_type: Type).returns(BinaryOpResult) }
@@ -616,6 +645,10 @@ class Type
 
     if left_type.any? || right_type.any?
       return BinaryOpResult.new(type: Type.new(:Any))
+    end
+
+    if same_generic_parameter?(left_type, right_type)
+      return BinaryOpResult.new(type: left_type)
     end
 
     unless left_type.numeric? && right_type.numeric?
@@ -656,6 +689,10 @@ class Type
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
     lt = Type.new(t_left)
     rt = Type.new(t_right)
+
+    if same_generic_parameter?(left_type, right_type)
+      return BinaryOpResult.new(type: left_type)
+    end
 
     # A. Numeric addition (all int/float types)
     if lt.numeric? && rt.numeric?

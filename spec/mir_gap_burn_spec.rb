@@ -127,6 +127,32 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(fresh.specs.first.setup_mir.map(&:class)).to include(MIR::Let, MIR::ErrDeferStmt)
     expect(fresh.specs.first.cleanup_plan.captured_value?).to eq(true)
     expect(fresh.specs.first.cleanup_mir_for("ctx")).to be_a(MIR::DeferStmt)
+
+    atomic_type = Type.new(:Int64)
+    atomic_sym = SymbolEntry.new(reg: "cell", type: atomic_type, mutable: true, storage: :heap, sync: :atomic)
+    expect(FiberCtxBuilder.needs_capture_value_cleanup?(atomic_type, nil, atomic_sym)).to eq(true)
+
+    atomic_analysis = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "cell" => atomic_type },
+      strategies: {
+        "cell" => CaptureStrategy::FreshHeapCopy.new(
+          zig_type: "i64",
+          ctx_init_name: "cell",
+          alloc_sym: :heap
+        )
+      },
+      pointer_captures: Set.new,
+      capture_symbols: { "cell" => atomic_sym },
+    )
+    atomic = FiberCtxBuilder.build(
+      atomic_analysis,
+      body_access_prefix: "ctx",
+      fresh_heap_alloc: "__alloc",
+      fresh_heap_id: 9,
+    )
+
+    expect(atomic.specs.first.setup_mir.map(&:class)).to include(MIR::Let, MIR::ErrDeferStmt)
+    expect(atomic.specs.first.cleanup_plan.captured_value?).to eq(true)
   end
 
   it "builds rc, move, pointer-local, and default fiber capture specs structurally" do

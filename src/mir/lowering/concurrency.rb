@@ -149,7 +149,7 @@ module MIRLoweringConcurrency
     MIR::ExecutionBoundaryFact.new(
       kind: kind,
       dispatch: dispatch,
-      captures: names.map { |name| boundary_capture_fact(name, symbols[name]) },
+      captures: names.map { |name| boundary_capture_fact(name, symbols[name], captured[name]) },
     )
   end
 
@@ -282,53 +282,57 @@ module MIRLoweringConcurrency
     node.name.to_s.start_with?("#{receiver}.")
   end
 
-  sig { params(name: String, symbol: T.nilable(SymbolEntry)).returns(MIR::BoundaryCaptureFact) }
-  def boundary_capture_fact(name, symbol)
-    storage = symbol&.storage
-    sync = symbol&.sync
-    ownership = symbol&.ownership_kind
-    forbidden = boundary_capture_forbidden_reason(symbol)
+  sig { params(name: String, symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(MIR::BoundaryCaptureFact) }
+  def boundary_capture_fact(name, symbol, captured_type)
+    storage = boundary_capture_storage(symbol, captured_type)
+    sync = captured_type&.sync || symbol&.sync
+    ownership = captured_type&.ownership || symbol&.ownership_kind
+    forbidden = boundary_capture_forbidden_reason(symbol, captured_type)
     MIR::BoundaryCaptureFact.new(
       name: name,
       storage: storage,
       sync: sync,
       ownership: ownership,
       parallel_safe: forbidden.nil?,
-      scheduler_affine: boundary_capture_scheduler_affine?(symbol),
-      requires_pinned: boundary_capture_requires_pinned?(symbol),
+      scheduler_affine: boundary_capture_scheduler_affine?(symbol, captured_type),
+      requires_pinned: boundary_capture_requires_pinned?(symbol, captured_type),
       forbidden_reason: forbidden,
     )
   end
 
-  sig { params(symbol: T.nilable(SymbolEntry)).returns(T.nilable(Symbol)) }
-  def boundary_capture_forbidden_reason(symbol)
-    return nil unless symbol
-    return :local_scheduler_affinity if symbol.local?
-    return :non_atomic_rc if boundary_capture_multiowned_rc?(symbol)
-    return nil if boundary_capture_shared_arc?(symbol)
-    return :affine_locked if symbol.locked?
-    return :affine_write_locked if symbol.write_locked?
-    return :affine_versioned if SymbolEntry.versioned_sync?(symbol.sync)
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T.nilable(Symbol)) }
+  def boundary_capture_forbidden_reason(symbol, captured_type)
+    return nil unless symbol || captured_type
+    return :local_scheduler_affinity if boundary_capture_local?(symbol, captured_type)
+    return :non_atomic_rc if boundary_capture_multiowned_rc?(symbol, captured_type)
+    return nil if boundary_capture_shared_arc?(symbol, captured_type)
+    return :affine_locked if boundary_capture_locked?(symbol, captured_type)
+    return :affine_write_locked if boundary_capture_write_locked?(symbol, captured_type)
+    return :affine_versioned if boundary_capture_versioned?(symbol, captured_type)
 
     nil
   end
 
-  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
-  def boundary_capture_scheduler_affine?(symbol)
-    return false unless symbol
-    return true if symbol.local?
-    return false if boundary_capture_shared_arc?(symbol)
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_scheduler_affine?(symbol, captured_type)
+    return false unless symbol || captured_type
+    return true if boundary_capture_local?(symbol, captured_type)
+    return false if boundary_capture_shared_arc?(symbol, captured_type)
 
-    symbol.locked? || symbol.write_locked? || SymbolEntry.versioned_sync?(symbol.sync)
+    boundary_capture_locked?(symbol, captured_type) ||
+      boundary_capture_write_locked?(symbol, captured_type) ||
+      boundary_capture_versioned?(symbol, captured_type)
   end
 
-  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
-  def boundary_capture_requires_pinned?(symbol)
-    boundary_capture_scheduler_affine?(symbol) || boundary_capture_multiowned_rc?(symbol)
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_requires_pinned?(symbol, captured_type)
+    boundary_capture_scheduler_affine?(symbol, captured_type) ||
+      boundary_capture_multiowned_rc?(symbol, captured_type)
   end
 
-  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
-  def boundary_capture_shared_arc?(symbol)
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_shared_arc?(symbol, captured_type)
+    return true if captured_type&.shared?
     return false unless symbol
 
     type_info = symbol.type
@@ -337,14 +341,42 @@ module MIRLoweringConcurrency
     symbol.storage == :shared
   end
 
-  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
-  def boundary_capture_multiowned_rc?(symbol)
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_multiowned_rc?(symbol, captured_type)
+    return true if captured_type&.multiowned?
     return false unless symbol
 
     type_info = symbol.type
     return true if type_info.respond_to?(:multiowned?) && type_info.multiowned?
 
     symbol.storage == :multiowned
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T.nilable(Symbol)) }
+  def boundary_capture_storage(symbol, captured_type)
+    return :shared if boundary_capture_shared_arc?(symbol, captured_type)
+    return :multiowned if boundary_capture_multiowned_rc?(symbol, captured_type)
+    return symbol&.storage
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_local?(symbol, captured_type)
+    !!(captured_type&.local? || symbol&.local?)
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_locked?(symbol, captured_type)
+    !!(captured_type&.locked? || symbol&.locked?)
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_write_locked?(symbol, captured_type)
+    !!(captured_type&.write_locked? || symbol&.write_locked?)
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T::Boolean) }
+  def boundary_capture_versioned?(symbol, captured_type)
+    !!(captured_type&.versioned? || SymbolEntry.versioned_sync?(symbol&.sync))
   end
 
   sig { params(node: AST::DoBlock).returns(MIR::DoBlock) }

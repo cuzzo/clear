@@ -683,6 +683,34 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("(x > 10.0)")
     end
 
+    it "lowers left-optional equality to a nil-safe payload comparison" do
+      left = make_id("maybe", full_type: :"?Int64")
+      right = make_lit(:INT64, 1, full_type: :Int64)
+      node = make_binop(left, :EQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to eq("(if (maybe) |__opt_cmp_1| (__opt_cmp_1 == 1) else false)")
+    end
+
+    it "lowers right-optional inequality with a true nil fallback" do
+      left = make_lit(:INT64, 1, full_type: :Int64)
+      right = make_id("maybe", full_type: :"?Int64")
+      node = make_binop(left, :NEQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to eq("(if (maybe) |__opt_cmp_1| (1 != __opt_cmp_1) else true)")
+    end
+
+    it "lowers optional string equality through the string comparison helper" do
+      left = make_id("maybe_name", full_type: :"?String")
+      right = make_lit(:STRING, "alice", full_type: :String)
+      node = make_binop(left, :EQ, right)
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::IfOptional)
+      expect(emit(result)).to include("CheatLib.eql(__opt_cmp_1,")
+      expect(emit(result)).to end_with(" else false)")
+    end
+
     it "lowers string equality" do
       left = make_id("name", full_type: :String)
       right = make_lit(:STRING, "alice")
@@ -3659,9 +3687,13 @@ RSpec.describe MIRLowering do
       imported_fn_ast = AST::FunctionDef.new(tok, "helper_value", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
       imported_fn_ast.needs_rt = false
       imported_fn_ast.can_fail = false
+      imported_main_ast = AST::FunctionDef.new(tok, "main", [], nil, :Void, nil, [], nil, nil, :pub, nil, false)
+      imported_main_ast.needs_rt = false
+      imported_main_ast.can_fail = false
       imported_ast = AST::Program.new(tok, [
         AST::StructDef.new(tok, "PublicType", {}, :pub, nil),
         imported_fn_ast,
+        imported_main_ast,
       ])
       imported_type = MIR::StructDef.new("PublicType", [], nil, :pub)
       imported_mod = ModuleImporter::CompiledModule.new(
@@ -3680,13 +3712,18 @@ RSpec.describe MIRLowering do
       importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
       node = AST::RequireNode.new(tok, "helper.cht", "helper", :local)
 
-      result = lowering(importer: importer, source_dir: Dir.pwd).lower(node)
+      low = lowering(importer: importer, source_dir: Dir.pwd)
+      result = low.lower(node)
 
       expect(result).to include(imported_type)
       namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
       expect(namespace.name).to eq("helper")
       expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
+      expect(namespace.items).not_to include(an_object_having_attributes(name: "main"))
+      expect(low.program_state.fn_sigs).to include("helper_value")
+      expect(low.program_state.fn_sigs).not_to include("main")
       expect(emit(namespace)).to include("const helper = struct")
+      expect(emit(namespace)).not_to include("clearMain")
     end
 
     it "emits a repeated local require module only once" do

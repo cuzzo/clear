@@ -13,6 +13,7 @@ require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "../semantic/escape_analysis"
 require_relative "../semantic/bg_capture_classifier"
+require_relative "../compiler/entrypoint"
 require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
@@ -219,7 +220,7 @@ class MIRPass
 
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
   def finalized_runtime_input?(fn)
-      fn.name.to_s == "main" ||
+      fn.name.to_s == Compiler::Entrypoint::NAME ||
       fn.uses_rt == true ||
       function_error_context?(fn) ||
       fn.uses_alloc == true ||

@@ -17,6 +17,7 @@ require "set"
 require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../ast/ast"
+require_relative "../compiler/entrypoint"
 require_relative "./importer"
 require_relative "../annotator"
 require_relative "./zig_type_mapper"
@@ -205,7 +206,7 @@ class ZigTranspiler
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
     # Uses a single-threaded scheduler so BG blocks (spawnBest) work correctly.
-    has_cheat_main = T.must(result).ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+    has_cheat_main = T.must(result).ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == Compiler::Entrypoint::NAME }
     test_block = if has_cheat_main
       <<~ZIG_TEST
 

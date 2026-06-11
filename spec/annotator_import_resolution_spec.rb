@@ -210,6 +210,7 @@ RSpec.describe "annotator import resolution boundaries" do
       :static
     )
     source_scope.declare("public_helper", nil, FunctionSignature.new(params: [], return_type: Type.new(:Int64), visibility: :pub), false, false, nil, :static)
+    source_scope.declare("main", nil, FunctionSignature.new(params: [], return_type: Type.new(:Void), visibility: :pub), false, false, nil, :static)
     source_scope.declare_type(:PrivateBox, Schemas::StructSchema.new(fields: {}, visibility: :private))
     source_scope.declare_type(:PackageBox, Schemas::StructSchema.new(fields: {}, visibility: :package))
     source_scope.declare_type(:PublicBox, Schemas::StructSchema.new(fields: {}, visibility: :pub))
@@ -221,6 +222,7 @@ RSpec.describe "annotator import resolution boundaries" do
     expect(imported_scope.resolve_entry("private_helper")).to be_nil
     expect(imported_scope.resolve_entry("package_helper")).to be_nil
     expect(imported_scope.resolve_entry("public_helper")).not_to be_nil
+    expect(imported_scope.resolve_entry("main")).to be_nil
     expect(imported_scope.resolve_type_entry(:PrivateBox)).to be_nil
     expect(imported_scope.resolve_type_entry(:PackageBox)).to be_nil
     expect(imported_scope.resolve_type_entry(:PublicBox)).not_to be_nil

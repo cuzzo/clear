@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require_relative "../../compiler/entrypoint"
+
 module Annotator
   module Domains
     module Errors
@@ -84,7 +86,7 @@ module Annotator
 
         decl = decls.first
         has_main = program_node.statements.any? { |s|
-          s.is_a?(AST::FunctionDef) && s.name == "main"
+          s.is_a?(AST::FunctionDef) && s.name == Compiler::Entrypoint::NAME
         }
         unless has_main
           error!(decl, :SYNC_POLICY_NEEDS_MAIN_FILE)

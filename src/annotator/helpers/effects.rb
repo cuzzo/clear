@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require 'set'
+require_relative "../../compiler/entrypoint"
 require_relative "../../semantic/capability_plan"
 require_relative "../../semantic/semantic_ids"
 
@@ -423,7 +424,7 @@ module EffectTracker
       # `rt.checkYield()` injected at entry by mir_lowering, so they
       # need rt threaded.
       yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = fn_node.uses_runtime? || heap_return || (function_has_fnptr_call?(name)) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == Compiler::Entrypoint::NAME
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
@@ -487,7 +488,7 @@ module EffectTracker
         rescue StandardError
           false
         end
-      error_fallible[name] = function_raises_directly?(name) || declared_fallible || name == "main"
+      error_fallible[name] = function_raises_directly?(name) || declared_fallible || name == Compiler::Entrypoint::NAME
     end
 
     # Seed imported (cross-module) functions. Read the callee's
@@ -645,7 +646,7 @@ module EffectTracker
       # decision point; a future STRICT mode flips exactly this gate to
       # also require/surface the fault. (puck-clear-bugs.md #3/#12)
       next unless fn_node.error_fallible
-      next if name == "main"
+      next if name == Compiler::Entrypoint::NAME
 
       # A fn that absorbs its errors locally via CATCH (or a
       # DEFAULT catch-all) doesn't propagate, so the surface

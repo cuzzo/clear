@@ -66,7 +66,7 @@ FN listLen(v: Value) RETURNS Int64 ->
 END
 
 FN isLambda?(v: Value) RETURNS Bool ->
-    PARTIAL MATCH v START Value.Lambda AS lam -> IF lam.envId >= 0 THEN RETURN TRUE; END RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 

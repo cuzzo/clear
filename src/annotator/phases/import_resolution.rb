@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "../../ast/ast"
 require_relative "../../ast/schemas"
+require_relative "../../compiler/entrypoint"
 
 module Annotator
   module Phases
@@ -32,6 +33,7 @@ module Annotator
           sig = entry.fn_signature
           next unless sig
           next if sig.module_alias
+          next if name == Compiler::Entrypoint::NAME
 
           vis = sig.visibility || :package
           importable = (vis == :pub) || (vis == :package && same_dir)

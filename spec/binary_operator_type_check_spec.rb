@@ -61,6 +61,34 @@ RSpec.describe "binary operator type checking" do
     expect_reject_expr('"x" || FALSE')
   end
 
+  it "accepts optional payload equality and ordering against concrete payloads" do
+    expect {
+      annotate(<<~CLEAR)
+        ENUM Color { Red, Blue }
+        FN main() RETURNS Bool ->
+          maybe_count: ?Int64 = 1_i64;
+          maybe_color: ?Color = Color.Red;
+          concrete_color: Color = Color.Blue;
+          RETURN maybe_count >= 0_i64 && maybe_color != concrete_color;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "accepts numeric operators on the same generic type parameter" do
+    expect {
+      annotate(<<~CLEAR)
+        FN dec<T>(n: T, one: T) RETURNS T ->
+          IF n <= one -> RETURN one;
+          RETURN n - one;
+        END
+        FN main() RETURNS Int64 ->
+          RETURN dec(2_i64, 1_i64);
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "resolves direct Type.binary_op operator branches" do
     auto = Type.new(:Auto, auto: true)
 
@@ -82,9 +110,15 @@ RSpec.describe "binary operator type checking" do
     expect(Type.binary_op(:LT, Type.new(:Int64), Type.new(:Float64)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:LT, Type.new(:String), Type.new(:"Byte[1]")).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:LT, Type.new(:Bool), Type.new(:Int64)).error).to include("ordered")
-    expect(Type.binary_op(:LT, Type.new(:"?Int64"), Type.new(:Int64)).error).to include("ordered")
+    expect(Type.binary_op(:LT, Type.new(:"?Int64"), Type.new(:Int64)).type.resolved).to eq(:Bool)
+    expect(Type.binary_op(:EQ, Type.new(:"?Int64"), Type.new(:Int64)).type.resolved).to eq(:Bool)
+    expect(Type.binary_op(:EQ, Type.new(:Int64), Type.new(:"?Int64")).type.resolved).to eq(:Bool)
+    expect(Type.binary_op(:LT, Type.new(:"?Bool"), Type.new(:Bool)).error).to include("ordered")
+    expect(Type.binary_op(:LTE, Type.new(:T), Type.new(:T)).type.resolved).to eq(:Bool)
 
     expect(Type.binary_op(:SUB, Type.new(:Int64), Type.new(:Int64)).type.resolved).to eq(:Int64)
+    expect(Type.binary_op(:SUB, Type.new(:T), Type.new(:T)).type.resolved).to eq(:T)
+    expect(Type.binary_op(:ADD, Type.new(:T), Type.new(:T)).type.resolved).to eq(:T)
     expect(Type.binary_op(:SUB, Type.new(:Int8), Type.new(:Int64)).type.resolved).to eq(:Int64)
     expect(Type.binary_op(:SUB, Type.new(:Int64), Type.new(:Int8)).type.resolved).to eq(:Int64)
     expect(Type.binary_op(:SUB, Type.new(:Float32), Type.new(:Float64)).type.resolved).to eq(:Float64)

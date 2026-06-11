@@ -271,7 +271,8 @@ module FiberCtxBuilder
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
         source_mir = MIR::Ident.new(source_ref)
-        needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup)
+        capture_symbol = analysis&.capture_symbols&.dig(name)
+        needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup, capture_symbol)
         setup_mir = T.let([
           MIR::Let.new(
             dupe_var,
@@ -416,14 +417,22 @@ module FiberCtxBuilder
     false
   end
 
-  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil)
+  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc), capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil, capture_symbol = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     return false if ti.void? || ti.any? || ti.rodata? || ti.borrowed_reference?
     needs_move_capture_cleanup?(ti, schema_lookup) ||
-      ti.any_sync? || ti.any_rc? || !!(ti.ownership && ti.ownership != :affine)
+      ti.any_sync? || ti.any_rc? || symbol_capture_value_needs_cleanup?(capture_symbol) ||
+      !!(ti.ownership && ti.ownership != :affine)
   rescue StandardError
     false
+  end
+
+  sig { params(capture_symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def self.symbol_capture_value_needs_cleanup?(capture_symbol)
+    return false unless capture_symbol
+
+    capture_symbol.atomic?
   end
 
   sig { params(ti: Type).returns(String) }

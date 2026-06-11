@@ -341,6 +341,26 @@ RSpec.describe SemanticAnnotator do
           .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
       end
     end
+
+    context "DO block with @parallel override on @shared:locked capture" do
+      let(:code) {
+        counter_struct + <<~FLUX
+          FN touch(v: Int64) RETURNS Void -> RETURN; END
+          FN f() RETURNS !Void ->
+              c = Counter{ value: 0_i64 } @shared:locked;
+              DO {
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); },
+                @parallel -> WITH EXCLUSIVE c AS inner { touch(inner.value); }
+              }
+              RETURN;
+          END
+        FLUX
+      }
+
+      it "preserves shared ownership in MIR boundary facts" do
+        expect { ZigTranspiler.new.transpile(code) }.not_to raise_error
+      end
+    end
   end
 
   describe "@local capability" do

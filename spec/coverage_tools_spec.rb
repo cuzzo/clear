@@ -477,6 +477,19 @@ RSpec.describe "coverage gap tools" do
     expect(ZigCoverageSupport.sanitize_name("///")).to eq("run")
   end
 
+  it "clears stale hidden kcov process directories before reusing a run name" do
+    root = File.join(@tmp, "coverage-fuzz")
+    stale = File.join(root, "all-fuzz", ".zig-coverage-all-fuzz-old", "cobertura.xml")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "<coverage/>")
+
+    kcov_dir = ZigCoverageSupport.prepare_kcov_dir(root, "all-fuzz")
+
+    expect(kcov_dir).to eq(File.join(root, "all-fuzz"))
+    expect(File.directory?(kcov_dir)).to be true
+    expect(File.exist?(stale)).to be false
+  end
+
   it "excludes Zig test, VOPR, and Loom harness files from Codecov kcov reports" do
     pattern = ZigCoverageSupport::KCOV_CODECOV_EXCLUDE_PATTERN
 

@@ -63,6 +63,8 @@ module MIRLoweringExpressions
     const :variant, T.nilable(UnitVariantAccess), default: nil
     const :tag_source, T.nilable(Symbol), default: nil
     const :union_error_type, T.nilable(Symbol), default: nil
+    const :optional_side, T.nilable(Symbol), default: nil
+    const :optional_capture, T.nilable(String), default: nil
   end
 
   class FieldAccessPlan < T::Struct
@@ -164,9 +166,12 @@ module MIRLoweringExpressions
     GTE: ">=",
   }.freeze, T::Hash[Symbol, String])
 
+  OPTIONAL_COMPARISON_OPS = T.let([:EQ, :NEQ, :LT, :LTE, :GT, :GTE].freeze, T::Array[Symbol])
+
   BINARY_PLAN_EMITTERS = T.let({
     pow: :emit_power_binary_plan,
     builtin: :emit_builtin_binary_plan,
+    optional_comparison: :emit_optional_comparison_plan,
     symbol_comparison: :emit_symbol_binary_plan,
     string_comparison: :emit_string_binary_comparison,
     unit_variant_comparison: :emit_unit_variant_comparison,
@@ -367,6 +372,9 @@ module MIRLoweringExpressions
     return BinaryOperationPlan.new(kind: :pow, facts: facts, type_arg: binary_power_type_arg(facts)) if facts.op == :POW
     return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intMod) if signed_integer_modulo?(facts)
 
+    optional_plan = classify_optional_binary_comparison(facts)
+    return optional_plan if optional_plan
+
     string_plan = classify_string_binary_operation(facts)
     return string_plan if string_plan
     return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intDiv) if integer_division?(facts)
@@ -414,6 +422,23 @@ module MIRLoweringExpressions
   sig { params(op: Symbol).returns(T.nilable(String)) }
   def string_comparison_operator(op)
     STRING_COMPARISON_OPS[op]
+  end
+
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_optional_binary_comparison(facts)
+    return nil unless OPTIONAL_COMPARISON_OPS.include?(facts.op)
+    return nil unless facts.left_type.optional? != facts.right_type.optional?
+
+    optional_side = facts.left_type.optional? ? :left : :right
+    payload_type = optional_side == :left ? facts.right_type : facts.left_type
+    return nil if payload_type.resolved == :NIL
+
+    BinaryOperationPlan.new(
+      kind: :optional_comparison,
+      facts: facts,
+      optional_side: optional_side,
+      optional_capture: "__opt_cmp_#{lowering_counters.next_tmp_id}",
+    )
   end
 
   sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
@@ -489,6 +514,38 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering)
     facts = plan.facts
     emit_builtin(T.must(plan.builtin), [facts.left, facts.right])
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::IfOptional) }
+  def emit_optional_comparison_plan(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    capture = T.must(plan.optional_capture)
+    optional_side = T.must(plan.optional_side)
+    capture_ref = MIR::Ident.new(capture)
+    optional_source = optional_side == :left ? facts.left : facts.right
+    then_expr = emit_optional_comparison_then_expr(facts, optional_side, capture_ref)
+    else_expr = MIR::Lit.new(facts.op == :NEQ ? "true" : "false")
+    result = MIR::IfOptional.new(optional_source, capture, then_expr, else_expr)
+    result.result_type = Type.new(:Bool)
+    result
+  end
+
+  sig { params(facts: BinaryOperandFacts, optional_side: Symbol, capture_ref: MIR::Ident).returns(MIR::Node) }
+  def emit_optional_comparison_then_expr(facts, optional_side, capture_ref)
+    inner_type = optional_side == :left ? T.must(facts.left_type.wrapped_type) : T.must(facts.right_type.wrapped_type)
+    inner_facts = BinaryOperandFacts.new(
+      node: facts.node,
+      op: facts.op,
+      left: optional_side == :left ? capture_ref : facts.left,
+      right: optional_side == :right ? capture_ref : facts.right,
+      left_type: optional_side == :left ? inner_type : facts.left_type,
+      right_type: optional_side == :right ? inner_type : facts.right_type,
+      int_arithmetic: facts.int_arithmetic,
+      left_unit_variant: facts.left_unit_variant,
+      right_unit_variant: facts.right_unit_variant,
+    )
+    emit_binary_operation_plan(classify_binary_operation(inner_facts))
   end
 
   sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }

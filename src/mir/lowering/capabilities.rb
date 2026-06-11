@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 require_relative "../../ast/lexer"
 require_relative "../../backends/zig_type"
+require_relative "../../compiler/entrypoint"
 require_relative "../../semantic/capability_plan"
 
 module MIRLoweringCapabilities
@@ -291,7 +292,7 @@ module MIRLoweringCapabilities
   sig { params(alias_name: String).returns(String) }
   def safe_with_capability_alias(alias_name)
     cleaned = (alias_name.end_with?("!") || alias_name.end_with?("?")) ? T.must(alias_name[0..-2]) : alias_name
-    cleaned = "clearMain" if cleaned == "main"
+    cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
     ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 

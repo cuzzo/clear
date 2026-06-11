@@ -29,7 +29,7 @@ RSpec.describe "WITH VIEW / WITH MATERIALIZED VIEW codegen" do
             };
             running: ~Int64@observable = gen |> SUM _;
             WITH VIEW running AS s {
-                ASSERT s != NIL, "started";
+                ASSERT s >= 0_i64, "started";
             }
             _ = NEXT running;
             RETURN;
@@ -73,7 +73,7 @@ RSpec.describe "WITH VIEW / WITH MATERIALIZED VIEW codegen" do
             };
             running: ~Int64@observable = gen |> SUM _;
             WITH MATERIALIZED VIEW running AS s {
-                ASSERT s != NIL, "ok";
+                ASSERT s >= 0_i64, "ok";
             }
             _ = NEXT running;
             RETURN;

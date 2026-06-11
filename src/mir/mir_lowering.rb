@@ -22,6 +22,7 @@ require_relative "../semantic/capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
+require_relative "../compiler/entrypoint"
 require_relative "../ast/async_result_shape"
 require_relative "../ast/error_registry"
 require_relative "../backends/importer"
@@ -2530,7 +2531,7 @@ class MIRLowering
   sig { params(name: String).returns(String) }
   def zig_safe_name(name)
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
-    cleaned = "clearMain" if cleaned == "main"
+    cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
     cleaned = T.must(cleaned)
     ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
@@ -3051,6 +3052,7 @@ class MIRLowering
       if T.must(mod).ast
         T.must(mod).ast.statements.each do |stmt|
           next unless stmt.is_a?(AST::FunctionDef)
+          next if stmt.name == Compiler::Entrypoint::NAME
           fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
         end
       end
@@ -3143,6 +3145,7 @@ class MIRLowering
     if mod.ast
       return mod.ast.statements.filter_map do |stmt|
         next nil if stmt.is_a?(AST::FunctionDef) && stmt.visibility == :private
+        next nil if stmt.is_a?(AST::FunctionDef) && stmt.name == Compiler::Entrypoint::NAME
         next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
         next lower(stmt) if stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
 
@@ -3151,9 +3154,18 @@ class MIRLowering
     end
 
     items = mod.mir_items
-    return items.select { |item| item.is_a?(MIR::Emittable) } if items.is_a?(Array)
+    return items.select { |item| importable_module_item?(item) } if items.is_a?(Array)
     []
   end
+
+  sig { params(item: T.untyped).returns(T::Boolean) }
+  def importable_module_item?(item)
+    return false unless item.is_a?(MIR::Emittable)
+    return false if item.is_a?(MIR::FnDef) && item.name.to_s == Compiler::Entrypoint::NAME
+
+    true
+  end
+  private :importable_module_item?
 
   sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
   def imported_module_dependency_items(mod)
