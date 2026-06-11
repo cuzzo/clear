@@ -157,4 +157,52 @@ class ReportTest < Minitest::Test
   ensure
     f&.unlink
   end
+
+  def test_report_renders_function_lcom_and_operational_discontinuity
+    f = Tempfile.new(["rep_soc", ".rb"])
+    f.write(<<~RB)
+      class Billing
+        def mixed(price, tax, logger)
+          subtotal = price + tax
+          total = subtotal * 2
+          rounded = total.round
+
+          timestamp = Time.now
+          buffer = []
+          buffer << timestamp
+          logger.info(buffer)
+
+          [rounded, buffer]
+        end
+      end
+
+      class Importer
+        def run(input)
+          raw = input.fetch(:raw)
+          normalized = raw.strip
+          valid = normalized != ""
+
+          # Phase 2: load side table
+          path = "/tmp/table"
+          bytes = File.read(path)
+          checksum = bytes.hash
+          checksum
+        end
+      end
+    RB
+    f.close
+
+    md = Decomplex::Report.new([f.path]).to_markdown
+
+    assert_includes md, "## Function LCOM"
+    assert_includes md, "[late_join]"
+    assert_includes md, "component 1"
+    assert_includes md, "## Operational Discontinuity (High Confidence)"
+    assert_includes md, "## Operational Discontinuity"
+    assert_includes md, "reset_boundaries=1"
+    assert_includes md, "confidence=high"
+    assert_includes md, "load side table"
+  ensure
+    f&.unlink
+  end
 end

@@ -461,6 +461,99 @@ helper has a good name and a clear concern. The metric says: "review this
 as if the helper bodies were inline, because that is the cognitive cost
 the reader is paying."
 
+### Function LCOM
+
+Question: does one function contain multiple independent local data
+pipelines?
+
+Class-level LCOM asks whether methods share fields. Function LCOM asks a
+smaller question: do local variables inside one method form one connected
+data-flow graph?
+
+```ruby
+CLASS BillingService
+  FN prepareInvoice(price, tax, logger)
+    subtotal = price + tax
+    total = subtotal.round
+
+    timestamp = now()
+    buffer = []
+    buffer.push(timestamp)
+    logger.info(buffer)
+
+    RETURN [total, buffer]
+  END
+END
+```
+
+There are two local pipelines:
+
+```text
+price -> subtotal -> total
+timestamp -> buffer -> logger
+```
+
+They only meet at the terminal return. That terminal join does not make
+the function cohesive; it is often evidence that two concerns are being
+packaged together at the end.
+
+Decomplex builds an undirected graph from local interactions:
+
+- `x = y + z` connects `x`, `y`, and `z`.
+- variables co-used in a call, branch, return, or side effect are
+  connected.
+- the terminal statement is also tested separately so late joins do not
+  hide independent pipelines.
+
+The metric is high-recall and tier 3. A finding means "inspect for mixed
+concerns", not "extract immediately."
+
+### Operational Discontinuity
+
+Question: did the function author visibly separate phases while keeping
+them inside one scope?
+
+This metric looks for a structural boundary plus a local lifecycle reset:
+
+```ruby
+CLASS Importer
+  FN run(input)
+    raw = input.fetch(:raw)
+    normalized = raw.strip()
+    valid = normalized != ""
+
+    # load side table
+    path = "/tmp/table"
+    bytes = read(path)
+    checksum = hash(bytes)
+    RETURN checksum
+  END
+END
+```
+
+The blank/comment boundary is not enough by itself. Decomplex also
+requires the locals from the first phase to go dead and a new set of
+locals to start after the boundary:
+
+```text
+dead: raw | normalized | valid
+new:  path | bytes | checksum
+```
+
+That is a likely implicit sub-function boundary. Sometimes this is fine
+setup code. Sometimes it is validation, calculation, IO, and logging
+sharing one method because extraction was never done.
+
+Decomplex splits the report by confidence:
+
+- tier 2: repeated resets, explicit `Phase`/`Step`/numbered comments, or
+  a high reset score.
+- tier 3: the remaining review-only resets.
+
+Parser-shaped `parse_*` methods stay review-only unless they have an
+explicit phase marker, because grammar alternatives often look like
+phase resets without being extraction-worthy design problems.
+
 ### False Simplicity
 
 Question: does the local code look simple while hiding non-local work?

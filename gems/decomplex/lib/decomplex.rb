@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "decomplex/ast"
+require_relative "decomplex/local_flow"
 require_relative "decomplex/ruby_topology"
 require_relative "decomplex/site_extractor"
 require_relative "decomplex/miner"
@@ -11,6 +12,8 @@ require_relative "decomplex/semantic_alias"
 require_relative "decomplex/sequence_mine"
 require_relative "decomplex/ordered_protocol_mine"
 require_relative "decomplex/weighted_inlined_cognitive_complexity"
+require_relative "decomplex/function_lcom"
+require_relative "decomplex/operational_discontinuity"
 require_relative "decomplex/derived_state"
 require_relative "decomplex/inconsistent_rename_clone"
 require_relative "decomplex/flay_similarity"

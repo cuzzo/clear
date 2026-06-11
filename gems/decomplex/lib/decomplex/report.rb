@@ -66,6 +66,46 @@ module Decomplex
           WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
         ))
       )
+      @function_lcom = FunctionLCOM.scan(
+        @files,
+        min_components: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_COMPONENTS",
+          FunctionLCOM::DEFAULT_MIN_COMPONENTS
+        )),
+        min_locals: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_LOCALS",
+          FunctionLCOM::DEFAULT_MIN_LOCALS
+        )),
+        min_statements: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_STATEMENTS",
+          FunctionLCOM::DEFAULT_MIN_STATEMENTS
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_FUNCTION_LCOM_MIN_SCORE",
+          FunctionLCOM::DEFAULT_MIN_SCORE
+        ))
+      )
+      operational_discontinuity = OperationalDiscontinuity.scan(
+        @files,
+        min_dead: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_DEAD",
+          OperationalDiscontinuity::DEFAULT_MIN_DEAD
+        )),
+        min_new: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_NEW",
+          OperationalDiscontinuity::DEFAULT_MIN_NEW
+        )),
+        max_continuing: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MAX_CONTINUING",
+          OperationalDiscontinuity::DEFAULT_MAX_CONTINUING
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_OPERATIONAL_DISCONTINUITY_MIN_SCORE",
+          OperationalDiscontinuity::DEFAULT_MIN_SCORE
+        ))
+      )
+      @operational_discontinuity_high_confidence, @operational_discontinuity =
+        operational_discontinuity.partition { |finding| OperationalDiscontinuity.high_confidence?(finding) }
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
@@ -98,6 +138,9 @@ module Decomplex
       ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"],
       ["Implicit Control Flow", :@implicit_control_flow, 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure"],
       ["Weighted Inlined Cognitive Complexity", :@weighted_inlined_complexity, 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method"],
+      ["Operational Discontinuity (High Confidence)", :@operational_discontinuity_high_confidence, 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary"],
+      ["Function LCOM", :@function_lcom, 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns"],
+      ["Operational Discontinuity", :@operational_discontinuity, 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary"],
       ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)"],
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
     ].freeze
@@ -311,6 +354,37 @@ module Decomplex
         "  - reason: #{item[:reason]}\n"
     end
 
+    def render_function_lcom_item(item)
+      mode = item[:mode] == :late_join ? "late_join" : "disjoint"
+      out = "- *POSSIBLE* [#{mode}] #{nav(item[:at])} -- score=#{item[:score]} " \
+            "components=#{item[:components]}, locals=#{item[:locals]}, statements=#{item[:statements]}\n"
+      item[:component_vars].first(4).each_with_index do |vars, index|
+        lines = item[:component_lines][index]
+        out << "  - component #{index + 1}: `#{vars.first(8).join(' | ')}`"
+        out << " (lines #{lines.first}-#{lines.last})" if lines && !lines.empty?
+        out << "\n"
+      end
+      out
+    end
+
+    def render_operational_discontinuity_item(item)
+      reasons = Array(item[:confidence_reasons]).join(", ")
+      confidence = item[:confidence] || :review
+      out = "- *POSSIBLE* #{nav(item[:at])} -- score=#{item[:score]} " \
+            "reset_boundaries=#{item[:resets]}, dead=#{item[:dead_total]}, new=#{item[:new_total]}, " \
+            "confidence=#{confidence}"
+      out << " (#{reasons})" unless reasons.empty?
+      out << "\n"
+      item[:reset_points].first(3).each do |reset|
+        marker = reset[:text].to_s.empty? ? reset[:kind].to_s : reset[:text]
+        out << "  - line #{reset[:line]} #{marker}: dead `#{reset[:dead].first(6).join(' | ')}` " \
+               "-> new `#{reset[:new].first(6).join(' | ')}`"
+        out << " (continuing `#{reset[:continuing].join(' | ')}`)" unless reset[:continuing].empty?
+        out << "\n"
+      end
+      out
+    end
+
     def render(out, title, v)
       v.first(25).each do |h|
         out << case title
@@ -363,6 +437,10 @@ module Decomplex
                  render_implicit_control_flow_item(h)
                when "Weighted Inlined Cognitive Complexity"
                  render_weighted_inlined_complexity_item(h)
+               when "Function LCOM"
+                 render_function_lcom_item(h)
+               when "Operational Discontinuity", "Operational Discontinuity (High Confidence)"
+                 render_operational_discontinuity_item(h)
                when "False Simplicity"
                  "- *POSSIBLE* [#{h[:kind]}] scatter=#{h[:scatter]} " \
                  "support=#{h[:support]} `#{h[:detail]}` -- #{nav(h[:at])}" \
