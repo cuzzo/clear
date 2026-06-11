@@ -1583,7 +1583,8 @@ RSpec.describe "pipeline backend coverage" do
       block = materializer.pipeline_block(id("source", type: Type.new(:"Int64[]"))) do |items, label|
         [MIR::BreakStmt.new(label, MIR::Ident.new(items))]
       end
-      expect(pipeline_host.instance_variable_get(:@current_pipe_label)).to eq("__pblk1")
+      label_state = pipeline_host.instance_variable_get(:@label_state)
+      expect(label_state.current_label).to eq("__pblk1")
       expect(block.body.first).to be_a(MIR::AllocMark)
       expect(block.body.last.value.name).to eq("pipe_items")
 

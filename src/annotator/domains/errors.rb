@@ -519,6 +519,7 @@ module Annotator
 
         is_safe_autocast?(actual_type, expected_type)
       end
+      private :return_type_compatible?
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
       def same_return_capabilities?(expected_t, actual_t)

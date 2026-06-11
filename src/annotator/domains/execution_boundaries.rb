@@ -214,6 +214,7 @@ module Annotator
           node.snapshot_mode == :transaction ||
           with_block_has_versioned_arm?(node)
       end
+      private :with_block_uses_runtime?
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_has_versioned_arm?(node)
@@ -235,6 +236,7 @@ module Annotator
         fn_ctx.uses_rt = true
         fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
       end
+      private :mark_unrequired_polymorphic_with_runtime!
 
       sig { params(node: AST::WithBlock).returns(T.nilable(String)) }
       def unrequired_polymorphic_runtime_bound_name(node)
@@ -925,6 +927,7 @@ module Annotator
       end
 
       private :mark_with_runtime_requirements!,
+        :validate_no_multi_object_atomic!,
         :validate_lock_error_clause!
     end
   end

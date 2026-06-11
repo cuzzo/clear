@@ -1260,7 +1260,10 @@ module Annotator
         end
       end
 
-      private :handle_assignment_path_move!
+      private :bg_capture_independent?,
+        :collect_bg_sources_walk,
+        :handle_assignment_path_move!,
+        :reject_borrowed_index_assignment_move!
     end
   end
 end

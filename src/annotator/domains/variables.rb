@@ -730,6 +730,7 @@ module Annotator
       # ==========================================
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
+      private :finalize_decl_node!
     end
   end
 end

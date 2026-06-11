@@ -49,6 +49,9 @@ module Espalier
       @manifest = Array(manifest)
       @owners = @manifest.map { |mod| mod[:module].to_s }.to_set
       @owner_by_simple = build_owner_by_simple
+      @module_by_owner = @manifest.each_with_object({}) do |mod, out|
+        out[mod[:module].to_s] ||= mod
+      end
     end
 
     def encapsulation_pressure(threshold: DEFAULT_ENCAPSULATION_THRESHOLD)
@@ -271,6 +274,7 @@ module Espalier
             target = target_owner_for(call[:name], source, state_types)
             next unless target
             next if target == source
+            next if collaboration_target_noise?(target)
 
             key = [source, target]
             row = grouped[key] ||= {
@@ -297,6 +301,23 @@ module Espalier
           samples: row[:samples].uniq
         )
       end.sort_by { |row| [-row[:count], row[:source], row[:target]] }
+    end
+
+    def collaboration_target_noise?(owner)
+      mod = @module_by_owner[owner]
+      return false unless mod
+
+      funcs = functions(mod)
+      state_count = states(mod).size
+      delegations = delegation_count(funcs)
+      write_methods = funcs.count { |fn| effect_list(fn, :writes).any? }
+      simple = owner.split("::").last
+
+      return true if funcs.empty? && simple.match?(/(?:Entry|Fact|Plan|Record|Result|Shape|Site|Spec)\z/)
+      return false unless delegations.zero?
+
+      small_value_name = simple.match?(/(?:Binding|Entry|Fact|Frame|Plan|Record|Result|Shape|Site|Spec|State)\z/)
+      small_value_name && state_count <= 4 && funcs.size <= 6 && write_methods <= 1
     end
 
     def calls_for(fn)
@@ -770,11 +791,23 @@ module Espalier
 
     def cohesion_noise?(summary, method_count, components, fragmentation, isolated, bridge_methods)
       return true if summary[:data_carrier]
+      return true if small_helper_object_facade?(method_count, components, bridge_methods)
       return true if method_count < 6 && fragmentation < 0.5 && bridge_methods.empty?
       return true if fragmentation < 0.18 && isolated >= components.size - 1 && bridge_methods.size <= 4
       return true if fragmentation < 0.18 && components.size < 4
       return true if isolated == components.size && summary[:delegations] <= method_count && bridge_methods.empty?
       false
+    end
+
+    def small_helper_object_facade?(method_count, components, bridge_methods)
+      return false unless method_count <= 5 && components.size <= 3 && bridge_methods.size <= 2
+
+      state_names = components.flat_map { |component| component[:states] }.uniq
+      return false if state_names.empty?
+
+      state_names.all? do |state_name|
+        state_name.delete_prefix("@").match?(/(?:_store|_stack|_state|_tracker)\z/)
+      end
     end
 
     def cohesion_score(component_count:, fragmentation:, isolated:, method_count:, state_count:, public_components:, bridge_count:)

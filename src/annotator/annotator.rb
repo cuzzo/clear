@@ -323,6 +323,7 @@ class SemanticAnnotator
       @receiver_state.loop_depth -= 1
     end
   end
+  private :with_loop_context
 
   sig do
     params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean)

@@ -922,6 +922,7 @@ module EffectTracker
     T.unsafe(target).computed_stack_tier = (raw == :unbounded) ? :service : raw
     validate_fiber_stack!(validation_node, calls, user_size, can_smash)
   end
+  private :assign_async_stack_tier!
 
   # Returns a typed decision; reason is non-nil only for :stackful.
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(Annotator::Phases::BgSpawnDecision) }

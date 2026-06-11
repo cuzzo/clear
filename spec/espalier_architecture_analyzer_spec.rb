@@ -142,6 +142,45 @@ RSpec.describe Espalier::ArchitectureAnalyzer do
     expect(dense[:bidirectional_pairs]).to eq(3)
   end
 
+  it "does not count small value objects as collaboration mesh targets" do
+    value_owners = %w[
+      PipelineLabelState
+      PipelineNamedBinding
+      PipelineSourceShape
+      PipelineSite
+      PipelineIndexAllocationFact
+      PipelineConcurrentHeadResult
+    ]
+    manifest = [
+      {
+        module: "PipelineHost",
+        file: "src/pipeline_host.rb",
+        state: [{ name: "@state", type: "Object", properties: [] }],
+        functions: [
+          fn(
+            "build_records",
+            reads: ["@state"],
+            calls: value_owners.map { |owner| "#{owner}.new" }
+          )
+        ]
+      }
+    ] + value_owners.map do |owner|
+      {
+        module: owner,
+        file: "src/#{owner.gsub(/([a-z])([A-Z])/, '\\1_\\2').downcase}.rb",
+        state: [{ name: "@value", type: "Object", properties: [] }],
+        functions: [
+          fn("value", reads: ["@value"]),
+          fn("value=", writes: ["@value"])
+        ]
+      }
+    end
+
+    meshes = described_class.collaboration_meshes(manifest, threshold: 0.0)
+
+    expect(meshes).to be_empty
+  end
+
   it "flags split owner state cohesion without letting orchestration calls hide the split" do
     manifest = [
       {
@@ -195,6 +234,36 @@ RSpec.describe Espalier::ArchitectureAnalyzer do
           fn("name", reads: ["@name"]),
           fn("age", reads: ["@age"]),
           fn("active?", reads: ["@active"])
+        ]
+      }
+    ]
+
+    rows = described_class.owner_state_cohesion(manifest, threshold: 0.0)
+
+    expect(rows).to be_empty
+  end
+
+  it "suppresses tiny helper-object facades after state has been extracted" do
+    manifest = [
+      {
+        module: "Profiler",
+        file: "src/profiler.rb",
+        state: [
+          { name: "@record_store", type: "RecordStore", properties: [] },
+          { name: "@stage_stack", type: "StageStack", properties: [] },
+          { name: "@work_stack", type: "WorkFrameStack", properties: [] }
+        ],
+        functions: [
+          fn("measure", reads: ["@stage_stack"], writes: ["@stage_stack"]),
+          fn("record_for", reads: ["@record_store"], writes: ["@record_store"]),
+          fn("records", reads: ["@record_store"]),
+          fn("current_label", reads: ["@stage_stack"]),
+          fn(
+            "measure_work",
+            reads: ["@work_stack"],
+            writes: ["@work_stack"],
+            internal_calls: %w[current_label record_for]
+          )
         ]
       }
     ]

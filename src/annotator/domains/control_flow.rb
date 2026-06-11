@@ -957,10 +957,15 @@ module Annotator
       private :analyze_control_flow_branches,
         :analyze_match_case!,
         :analyze_value_match_case!,
+        :check_match_exhaustiveness!,
+        :declare_match_destructure_fields!,
         :declare_union_payload_binding!,
         :declare_match_destructure_bindings!,
         :declare_match_payload_binding!,
-        :emit_missing_match_variants!
+        :emit_missing_match_variants!,
+        :reject_duplicate_match_patterns!,
+        :validate_match_pattern_types!,
+        :visit_match_patterns!
     end
   end
 end

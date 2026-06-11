@@ -1261,11 +1261,15 @@ module CapabilityHelper
 
   private :declare_borrowed_capability!,
     :declare_capability_projection!,
+    :declare_restrict_capability!,
     :declare_restrict_alias!,
+    :declare_snapshot_capability!,
     :declare_unwrapped_capability_alias!,
     :declare_view_capability!,
+    :record_capture_local!,
     :record_capture_info!,
-    :validate_capability_transition!
+    :validate_capability_transition!,
+    :with_capability_fact
 end
 
 # ============================================================================
