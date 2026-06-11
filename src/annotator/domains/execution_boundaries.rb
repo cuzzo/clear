@@ -913,6 +913,9 @@ module Annotator
 
         type_info.ownership_bearing?(->(name) { lookup_type_schema(name) })
       end
+
+      private :mark_with_runtime_requirements!,
+        :validate_lock_error_clause!
     end
   end
 end

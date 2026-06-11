@@ -1668,4 +1668,15 @@ module Doctor
       "#{n} B"
     end
   end
+
+  private :cumulative?,
+    :emit_parallel_bg_hint!,
+    :emit_exact_local_bg_sites!,
+    :focus_match?,
+    :run_diff
+  private_class_method :cumulative?,
+    :emit_parallel_bg_hint!,
+    :emit_exact_local_bg_sites!,
+    :focus_match?,
+    :run_diff
 end

@@ -621,5 +621,14 @@ module FsmTransform
         tail
       end
     end
+
+    private :emit_pivot,
+      :emit_with_fragment,
+      :stmt_introduces_split?,
+      :with_unsupported?
+    private_class_method :emit_pivot,
+      :emit_with_fragment,
+      :stmt_introduces_split?,
+      :with_unsupported?
   end
 end

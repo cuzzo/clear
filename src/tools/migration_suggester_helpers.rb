@@ -192,4 +192,6 @@ module MigrationSuggesterHelpers
     walk.call(expr)
     eligible
   end
+
+  private :analyze_fn
 end

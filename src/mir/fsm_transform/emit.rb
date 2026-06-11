@@ -1492,5 +1492,20 @@ module FsmTransform
     def bg_profile_site_comment(ctx, dispatch, form)
       "// CLEAR_PROFILE_TASK_SITE id=#{ctx.profile_site_id} kind=BG line=#{ctx.profile_line} column=#{ctx.profile_column} dispatch=#{dispatch} form=#{form}"
     end
+
+    private :build_fsm_segment_facts,
+      :build_fsm_structure,
+      :build_fsm_unified,
+      :collect_move_guard_writes,
+      :collect_result_names,
+      :lift_ctx_cleanups_to_destroy!,
+      :register_owned_suspend_result_cleanups!
+    private_class_method :build_fsm_segment_facts,
+      :build_fsm_structure,
+      :build_fsm_unified,
+      :collect_move_guard_writes,
+      :collect_result_names,
+      :lift_ctx_cleanups_to_destroy!,
+      :register_owned_suspend_result_cleanups!
   end
 end

@@ -69,6 +69,93 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
   end
 
+  it "breaks src Ruby changed lines into public, private, and other buckets" do
+    source = <<~RUBY
+      require "set"
+
+      class Probe
+        def public_call
+          changed_public
+        end
+
+        def helper
+          changed_private_by_declaration
+        end
+        private :helper
+
+        private
+
+        def hidden
+          changed_private_by_scope
+        end
+
+        class << self
+          private
+
+          def singleton_hidden
+            changed_private_singleton
+          end
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: source,
+      added_lines: Set[1, 5, 9, 16, 23],
+      deleted_lines: Set[5, 9],
+    )
+
+    expect(breakdown[:src_public_fn]).to include(additions: 1, deletions: 1)
+    expect(breakdown[:src_private_fn]).to include(additions: 3, deletions: 1)
+    expect(breakdown[:src_other]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_public_fn][:added_lines]).to eq(Set[5])
+    expect(breakdown[:src_private_fn][:added_lines]).to eq(Set[9, 16, 23])
+    expect(breakdown[:src_other][:added_lines]).to eq(Set[1])
+  end
+
+  it "classifies inline private method declarations in src Ruby buckets" do
+    source = <<~RUBY
+      class Probe
+        private def hidden
+          changed_inline_private
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: "",
+      added_lines: Set[3],
+      deleted_lines: Set.new,
+    )
+
+    expect(breakdown[:src_private_fn]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_private_fn][:added_lines]).to eq(Set[3])
+  end
+
+  it "does not treat dynamic visibility calls as src Ruby visibility mode changes" do
+    source = <<~RUBY
+      class Probe
+        private VISIBILITY_LIST
+
+        def still_public
+          changed_public
+        end
+      end
+    RUBY
+
+    breakdown = classify_src_ruby_line_changes(
+      new_source: source,
+      old_source: "",
+      added_lines: Set[5],
+      deleted_lines: Set.new,
+    )
+
+    expect(breakdown[:src_public_fn]).to include(additions: 1, deletions: 0)
+    expect(breakdown[:src_private_fn]).to include(additions: 0, deletions: 0)
+  end
+
   it "does not count non-executable Ruby additions in diff line coverage" do
     source_path = File.join(@tmp, "ruby_probe.rb")
     File.write(source_path, <<~RUBY)

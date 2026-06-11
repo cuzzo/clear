@@ -29,6 +29,7 @@ module Espalier
         mod[:functions].each do |fn|
           output << "#### - `#{fn[:name]}`"
           output << "  - **Signature**: `#{fn[:signature]}`"
+          output << "  - **Visibility**: `#{fn[:visibility] || :public}`"
           
           # Print effects compactly
           reads = fn[:EFFECTS][:reads].map { |r| "`#{r}`" }.join(", ")
@@ -46,6 +47,16 @@ module Espalier
             end
             if fn[:DELEGATIONS][:conditionally_calls]
               output << "    - conditionally_calls: [#{fn[:DELEGATIONS][:conditionally_calls].map { |c| "`#{c}`" }.join(', ')}]"
+            end
+          end
+
+          if fn[:CALL_GRAPH]
+            output << "  - **CALL_GRAPH**:"
+            if fn[:CALL_GRAPH][:internal_callers]
+              output << "    - internal_callers: [#{fn[:CALL_GRAPH][:internal_callers].map { |c| "`#{c}`" }.join(', ')}]"
+            end
+            if fn[:CALL_GRAPH][:internal_calls]
+              output << "    - internal_calls: [#{fn[:CALL_GRAPH][:internal_calls].map { |c| "`#{c}`" }.join(', ')}]"
             end
           end
 

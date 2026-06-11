@@ -365,7 +365,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
+      ThunkTransform::Emit.send(:build_mutual_arm, cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/cycle member 'odd' not found/)
 
     target = fn("odd", params: [param("n")])
@@ -374,7 +374,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       mutual_plan(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
+      ThunkTransform::Emit.send(:build_mutual_arm, cf, cf.mutual_thunk_plan, FakeThunkLowering.new)
     }.to raise_error(/target arg\/param count mismatch/)
   end
 

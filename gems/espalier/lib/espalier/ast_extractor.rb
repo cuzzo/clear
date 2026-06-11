@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "set"
 
 module Espalier
   # Extracts the structural skeleton, state instance variables, and call delegation
@@ -31,6 +32,7 @@ module Espalier
         @namespace_stack = []
         @current_class = nil
         @current_method = nil
+        @current_visibility = :public
         @context_stack = [] # Stack of :conditional, :iterates, etc.
       end
 
@@ -51,7 +53,10 @@ module Espalier
         @modules << @current_class
 
         @namespace_stack.push(name)
+        outer_visibility = @current_visibility
+        @current_visibility = :public
         super
+        @current_visibility = outer_visibility
         @namespace_stack.pop
 
         @current_class = outer_class
@@ -73,7 +78,10 @@ module Espalier
         @modules << @current_class
 
         @namespace_stack.push(name)
+        outer_visibility = @current_visibility
+        @current_visibility = :public
         super
+        @current_visibility = outer_visibility
         @namespace_stack.pop
 
         @current_class = outer_class
@@ -151,6 +159,7 @@ module Espalier
           name: mtd_name,
           signature: sig,
           parameters: params,
+          visibility: node.receiver ? :public : @current_visibility,
           effects: { reads: Set.new, writes: Set.new },
           delegations: []
         }
@@ -227,6 +236,11 @@ module Espalier
 
       # Call delegation collections
       def visit_call_node(node)
+        if @current_class && @current_method.nil? && visibility_directive?(node)
+          handle_visibility_directive(node)
+          return
+        end
+
         return super unless @current_method
 
         msg = node.name.to_s
@@ -263,6 +277,51 @@ module Espalier
       end
 
       private
+
+      def visibility_directive?(node)
+        node.receiver.nil? && %i[private protected public].include?(node.name)
+      end
+
+      def handle_visibility_directive(node)
+        visibility = node.name.to_sym
+        args = node.arguments&.arguments || []
+        if args.empty?
+          @current_visibility = visibility
+          return
+        end
+
+        args.each do |arg|
+          if arg.is_a?(Prism::DefNode)
+            with_visibility(visibility) { arg.accept(self) }
+          elsif (name = literal_method_name(arg))
+            set_existing_method_visibility(name, visibility)
+          else
+            arg.accept(self)
+          end
+        end
+      end
+
+      def with_visibility(visibility)
+        old_visibility = @current_visibility
+        @current_visibility = visibility
+        yield
+      ensure
+        @current_visibility = old_visibility
+      end
+
+      def literal_method_name(node)
+        return node.value.to_s if node.is_a?(Prism::SymbolNode)
+        return node.value.to_s if node.is_a?(Prism::StringNode)
+
+        nil
+      end
+
+      def set_existing_method_visibility(method_name, visibility)
+        return unless @current_class
+
+        method = @current_class[:methods].reverse.find { |m| m[:name] == method_name }
+        method[:visibility] = visibility if method
+      end
 
       def parse_params(node)
         # Extracts simple names of params

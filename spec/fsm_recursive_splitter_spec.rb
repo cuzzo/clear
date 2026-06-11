@@ -140,7 +140,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
       builder = FsmTransform::RecursiveSplitter::Builder.new
       expect {
-        FsmTransform::RecursiveSplitter.emit_pivot(AST::PassStmt.new(nil), 0, builder, lowering, {})
+        FsmTransform::RecursiveSplitter.send(:emit_pivot, AST::PassStmt.new(nil), 0, builder, lowering, {})
       }.to raise_error(FsmTransform::RecursiveSplitter::UnsupportedShape, /Unhandled pivot kind/)
     end
 

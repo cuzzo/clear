@@ -460,7 +460,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include('@import("std")')
       expect(zig).to include('@import("runtime/runtime-header.zig")')
       expect(zig).to include("CheatHeader.CheatLib")
@@ -478,7 +478,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include("fn double(")
       expect(zig).to include("clearMain")
       expect(zig).to include("42")
@@ -493,7 +493,7 @@ RSpec.describe "MIR pipeline comparison" do
           RETURN;
         END
       CLEAR
-      zig = ZigTranspiler.new.transpile_mir(src)
+      zig = ZigTranspiler.new.send(:transpile_mir, src)
       expect(zig).to include("Dir")
       expect(zig).to include("enum")
       expect(zig).to include("clearMain")
@@ -509,7 +509,7 @@ RSpec.describe "MIR pipeline comparison" do
         END
       CLEAR
       old_zig = ZigTranspiler.new.transpile(src)
-      new_zig = ZigTranspiler.new.transpile_mir(src)
+      new_zig = ZigTranspiler.new.send(:transpile_mir, src)
 
       # Both should have the same structural elements
       expect(new_zig).to include("Point")

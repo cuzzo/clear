@@ -400,6 +400,15 @@ module Hoist
     end
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
   end
+
+  private :collect_stmt_hoists!,
+    :ast_borrow_expr?,
+    :hoist_body!,
+    :hoist_escape_value!
+  private_class_method :collect_stmt_hoists!,
+    :ast_borrow_expr?,
+    :hoist_body!,
+    :hoist_escape_value!
 end
 
 # Lowering-side hoist helpers.
@@ -1312,4 +1321,8 @@ module MIRHoistLowering
     end
   end
 
+  private :normalize_allocating_mir_stmt!,
+    :normalize_allocating_result_expr!,
+    :normalize_stmt_child_exprs!,
+    :normalize_allocating_used_expr
 end

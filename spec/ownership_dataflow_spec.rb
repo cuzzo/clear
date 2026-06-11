@@ -266,7 +266,7 @@ RSpec.describe OwnershipDataflow do
       SRC
       df = OwnershipDataflow.analyze(fn_node)
 
-      expect(df.stmt_moves_name?(fn_node.body.fetch(1), "a")).to be(true)
+      expect(df.send(:stmt_moves_name?, fn_node.body.fetch(1), "a")).to be(true)
       expect(df.linear_scope_decl_always_moves?(fn_node.body, "a")).to be(true)
     end
   end

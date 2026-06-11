@@ -1714,4 +1714,8 @@ module FixableHelper
 
     msg
   end
+
+  private :build_decl_cap_insert_fix,
+    :build_decl_cap_replace_fix,
+    :literal_source_length
 end

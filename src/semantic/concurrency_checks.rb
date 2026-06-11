@@ -209,4 +209,8 @@ module ConcurrencyChecks
     out
   end
 
+  private :check_naked_nested_with!,
+    :check_reentrant!
+  private_class_method :check_naked_nested_with!,
+    :check_reentrant!
 end

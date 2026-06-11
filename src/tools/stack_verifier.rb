@@ -453,6 +453,8 @@ class StackVerifier
     end
   end
 
+  private :extract_frame_sizes
+
   private
 
   sig { params(path: String).returns(String) }

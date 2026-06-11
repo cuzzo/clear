@@ -464,4 +464,6 @@ module LockHelper
     anchor = sample&.site_token
     error!(anchor || semantic_program, :LOCK_CYCLE_DETECTED, message: msg)
   end
+
+  private :check_lock_handler_reachability!
 end

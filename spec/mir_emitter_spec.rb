@@ -530,7 +530,7 @@ RSpec.describe MIREmitter do
       ],
     )
 
-    zig = e.emit_bg_stackful_plan(plan)
+    zig = e.send(:emit_bg_stackful_plan, plan)
 
     expect(zig).to include("var pool = try Pool(User).initCapacity(__rt_bg0.heapAlloc(), 4);")
     expect(zig).to include("defer CheatLib.cleanup(@TypeOf(pool), __rt_bg0.heapAlloc(), &pool);")

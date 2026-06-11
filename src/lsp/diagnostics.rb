@@ -164,5 +164,8 @@ module LSP
         Regexp.new('\A' + body + '[.!?\s]*\z', Regexp::MULTILINE)
       end
     end
+
+    private :template_regex
+    private_class_method :template_regex
   end
 end

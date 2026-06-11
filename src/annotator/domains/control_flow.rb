@@ -936,6 +936,14 @@ module Annotator
         end
         stamp_type!(node, :Void)
       end
+
+      private :analyze_control_flow_branches,
+        :analyze_match_case!,
+        :analyze_value_match_case!,
+        :declare_union_payload_binding!,
+        :declare_match_destructure_bindings!,
+        :declare_match_payload_binding!,
+        :emit_missing_match_variants!
     end
   end
 end

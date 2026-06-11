@@ -3531,6 +3531,14 @@ class Type
     # 6. Map primitives and builtins to Zig types; user types pass through.
     ZIG_TYPE_MAP[resolved] || resolved.to_s
   end
+
+  private :apply_placement!,
+    :atomic_pointer_wrapped?,
+    :elem_has_heap_internals?,
+    :heap_cleanup_allocator?,
+    :plain_indirect_value?,
+    :scalar_slot?,
+    :sync_requires_heap_provenance?
 end
 
 # ==========================================

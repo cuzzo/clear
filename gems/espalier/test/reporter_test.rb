@@ -155,4 +155,73 @@ class ReporterTest < Minitest::Test
     assert_includes report, "state-heavy"
     assert_includes report, "many-mutators"
   end
+
+  def test_report_lists_conservative_privatization_candidates
+    manifest = [
+      {
+        module: "CompilerPhase",
+        file: "src/compiler_phase.rb",
+        type: :class,
+        functions: [
+          {
+            name: "run",
+            signature: "def run(node)",
+            visibility: :public,
+            EFFECTS: { reads: [], writes: [] },
+            DELEGATIONS: { always_calls: ["prepare", "validate"] },
+            CALL_GRAPH: { internal_calls: ["prepare", "validate"] }
+          },
+          {
+            name: "prepare",
+            signature: "def prepare(node)",
+            visibility: :public,
+            EFFECTS: { reads: ["@state"], writes: ["@state"] },
+            DELEGATIONS: {},
+            CALL_GRAPH: { internal_callers: ["run"] }
+          },
+          {
+            name: "validate",
+            signature: "def validate(node)",
+            visibility: :public,
+            EFFECTS: { reads: [], writes: [] },
+            DELEGATIONS: {},
+            CALL_GRAPH: { internal_callers: ["run"] }
+          }
+        ]
+      },
+      {
+        module: "ExternalUser",
+        file: "src/external_user.rb",
+        type: :class,
+        functions: [
+          {
+            name: "call_phase",
+            signature: "def call_phase(phase)",
+            visibility: :public,
+            EFFECTS: { reads: [], writes: [] },
+            DELEGATIONS: { always_calls: ["phase.validate"] }
+          }
+        ]
+      }
+    ]
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "src"))
+      File.write(File.join(dir, "src/compiler_phase.rb"), <<~RB)
+        class CompilerPhase
+          def run(node); end
+          def prepare(node); end
+          def validate(node); end
+        end
+      RB
+
+      report = Espalier::Reporter.new(manifest, root: dir).to_markdown
+
+      assert_includes report, "## Privatization Candidates"
+      assert_includes report, "`CompilerPhase#prepare`"
+      assert_includes report, "medium"
+      assert_includes report, "public but only has same-owner callers"
+      refute_includes report, "`CompilerPhase#validate`"
+    end
+  end
 end

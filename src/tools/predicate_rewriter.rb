@@ -481,4 +481,7 @@ module PredicateRewriter
     end
     out
   end
+
+  private :emit_length_lint
+  private_class_method :emit_length_lint
 end

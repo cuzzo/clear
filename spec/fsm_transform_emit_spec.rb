@@ -136,14 +136,15 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "returns nil for an empty unified FSM and skips fn-less inert segments" do
-    expect(described_class.build_fsm_unified(fsm_ctx, [], [], Object.new)).to be_nil
+    expect(described_class.send(:build_fsm_unified, fsm_ctx, [], [], Object.new)).to be_nil
 
     lowering = Class.new {
       def capture_inits_fsm(_capture_inits)
         ""
       end
     }.new
-    result = described_class.build_fsm_unified(
+    result = described_class.send(
+      :build_fsm_unified,
       fsm_ctx,
       [fsm_spec(index: 0, body_stmts: [], tail: FsmTransform::Segments::Done.new(nil))],
       [],
@@ -193,7 +194,7 @@ RSpec.describe FsmTransform::Emit do
       ],
     )
 
-    facts = described_class.build_fsm_segment_facts(spec, 12, ["payload"])
+    facts = described_class.send(:build_fsm_segment_facts, spec, 12, ["payload"])
 
     expect(facts.ctx_reads).to include("payload", "payload_moved", "inner")
     expect(facts.required_move_guards).to eq(["payload"])
@@ -245,7 +246,8 @@ RSpec.describe FsmTransform::Emit do
       ),
     )
 
-    structure = described_class.build_fsm_structure(
+    structure = described_class.send(
+      :build_fsm_structure,
       fsm_ctx(id: 33, captured: { "payload" => :stub }),
       [spec],
       [action],
@@ -346,7 +348,8 @@ RSpec.describe FsmTransform::Emit do
     entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     body = [MIR::Cleanup.new("payload_L2", entry), kept]
 
-    rewritten = described_class.lift_ctx_cleanups_to_destroy!(
+    rewritten = described_class.send(
+      :lift_ctx_cleanups_to_destroy!,
       body, ["payload"], "__ctx_8", ctx)
 
     expect(rewritten).to eq([kept])

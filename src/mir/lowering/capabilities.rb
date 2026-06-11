@@ -1160,5 +1160,7 @@ module MIRLoweringCapabilities
     )
   end
 
+  private :emit_snapshot_mutable_call,
+    :polymorphic_flow_required?
 
 end

@@ -1308,5 +1308,8 @@ module MIRLoweringConcurrency
       plan.result_alloc)
   end
 
+  private :boundary_capture_requires_pinned?,
+    :emit_stackful_bg_block,
+    :fsm_bg_block_from_transform!
 
 end

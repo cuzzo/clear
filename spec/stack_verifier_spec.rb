@@ -170,7 +170,7 @@ RSpec.describe StackVerifier do
   describe "#extract_frame_sizes" do
     it "parses sub $0xN,%rsp instructions into per-fn frame entries" do
       v = stub_verifier(BASIC_OBJDUMP)
-      frames = v.extract_frame_sizes
+      frames = v.send(:extract_frame_sizes)
 
       names = frames.map { |f| f[:name] }
       expect(names).to include("main", "compute", "clearMain.__BgCtx0.run")
@@ -183,7 +183,7 @@ RSpec.describe StackVerifier do
     end
 
     it "returns [] when objdump output is empty" do
-      expect(stub_verifier("").extract_frame_sizes).to eq([])
+      expect(stub_verifier("").send(:extract_frame_sizes)).to eq([])
     end
 
     it "ignores functions whose name doesn't start with the module prefix" do
@@ -192,7 +192,7 @@ RSpec.describe StackVerifier do
         0000000001162900 <some_other_module.foo>:
          1162900:\t48 81 ec aa 00 00 00 \tsub    $0xaa,%rsp
       EXTRA
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       expect(frames.map { |f| f[:name] }).not_to include("some_other_module.foo")
     end
 
@@ -222,7 +222,7 @@ RSpec.describe StackVerifier do
          12dd242:\t4c 29 d4             \tsub    %r10,%rsp
          12dd245:\t42 85 a4 14 00 f0 ff \ttest   %esp,-0x1000(%rsp,%r10,1)
       OBJ
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       huge = frames.find { |f| f[:name] == "runRegisterBytecode" }
       expect(huge).not_to be_nil
       expect(huge[:stack_bytes]).to eq(0x88010)
@@ -240,7 +240,7 @@ RSpec.describe StackVerifier do
         00000000012dd400 <#{PREFIX}.smallFn>:
          12dd400:\t48 81 ec 80 00 00 00 \tsub    $0x80,%rsp
       OBJ
-      frames = stub_verifier(output).extract_frame_sizes
+      frames = stub_verifier(output).send(:extract_frame_sizes)
       expect(frames.length).to eq(2)
       big = frames.find { |f| f[:name] == "bigFn" }
       small = frames.find { |f| f[:name] == "smallFn" }
@@ -772,7 +772,7 @@ RSpec.describe StackVerifier do
     it "extract_frame_sizes parses real objdump output (format check)" do
       skip "build failed" unless @real_bin
       v = StackVerifier.new(@real_bin, @real_prefix)
-      frames = v.extract_frame_sizes
+      frames = v.send(:extract_frame_sizes)
       expect(frames.map { |f| f[:name] }).to include("main")
       frames.each { |f| expect(f[:stack_bytes]).to be > 0 }
     end

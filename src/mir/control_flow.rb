@@ -698,6 +698,8 @@ class OwnershipDataflow
     MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
+  private
+
   sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
   def stmt_moves_name?(stmt, var)
     return false if stmt.is_a?(AST::ReturnNode)
@@ -705,6 +707,8 @@ class OwnershipDataflow
     collect_binding_move_places(stmt, state).any? { |place| place.path == var } ||
       (AST.call?(stmt) && collect_bg_capture_places_in_args(T.cast(stmt, T.any(AST::FuncCall, AST::MethodCall)), state).any? { |place| place.path == var })
   end
+
+  public
 
   sig { params(place: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupDecision)) }
   def block_exit_cleanup_summary(place)

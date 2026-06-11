@@ -245,6 +245,8 @@ module CapabilityPlan
       refreshed_target = target.with_source_entry(source_entry)
       CapabilityPlan.transition_from(request, refreshed_target, borrowed_qualifier)
     end
+
+    private :deferred_lock_param?
   end
 
   WithCapabilityFacts = T.type_alias { T::Array[CapabilityTransition] }

@@ -430,4 +430,11 @@ module MethodRewriter
     end
     out
   end
+
+  private :apply_edits,
+    :collect_method_names,
+    :stdlib_method_names
+  private_class_method :apply_edits,
+    :collect_method_names,
+    :stdlib_method_names
 end

@@ -389,4 +389,7 @@ module LintFixRewriter
     end
     [line, col]
   end
+
+  private :types_match_for_drop?
+  private_class_method :types_match_for_drop?
 end

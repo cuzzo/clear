@@ -57,7 +57,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
   end
 
   def build_unified(ctx, specs, promoted_field_decls, lowering)
-    FsmTransform::Emit.build_fsm_unified(
+    FsmTransform::Emit.send(:build_fsm_unified,
       ctx, fsm_specs(specs), promoted_field_decls, lowering)
   end
 

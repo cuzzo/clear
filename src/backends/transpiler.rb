@@ -259,6 +259,8 @@ class ZigTranspiler
       #{test_block}
     ZIG
   end
+
+  private :transpile_mir
 end
 
 # --- RUN IT ---

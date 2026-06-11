@@ -4246,4 +4246,9 @@ class Parser
       error!(kind_tok, :STUB_BAD_AFTER, fn: fn_name)
     end
   end
+
+  private :match_optional_retry!,
+    :parse_lock_rank_arg!,
+    :starts_function_requirement?,
+    :parse_when_block
 end

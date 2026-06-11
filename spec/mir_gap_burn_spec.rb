@@ -2116,14 +2116,14 @@ RSpec.describe "MIR gap-burn characterization" do
     store_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
     store_call.matched_signature = store_sig
     store_hoists = []
-    Hoist.collect_stmt_hoists!(store_call, store_hoists, Hoist::HoistCounter.new, nil)
+    Hoist.send(:collect_stmt_hoists!, store_call, store_hoists, Hoist::HoistCounter.new, nil)
     expect(store_call.args.first).to be_a(AST::Identifier)
     expect(store_hoists.first.value).to be(stored_concat)
 
     yielded_concat = string_concat.call("g", "h")
     yield_expr = AST::YieldExpr.new(tok, yielded_concat)
     yield_hoists = []
-    Hoist.collect_stmt_hoists!(yield_expr, yield_hoists, Hoist::HoistCounter.new, nil)
+    Hoist.send(:collect_stmt_hoists!, yield_expr, yield_hoists, Hoist::HoistCounter.new, nil)
     expect(yield_expr.expr).to be_a(AST::Identifier)
     expect(yield_hoists.first.value).to be(yielded_concat)
 
@@ -3993,7 +3993,8 @@ RSpec.describe "MIR gap-burn characterization" do
     callee_sig.requires = { "x" => Set[:LOCKED] }
     errors = []
 
-    ConcurrencyChecks.check_reentrant!(
+    ConcurrencyChecks.send(
+      :check_reentrant!,
       fn_node,
       [with_block],
       { with_block.object_id => [call] },

@@ -30,6 +30,10 @@ module Decomplex
       @pcsc   = pc.scattered
       sm      = SequenceMine.scan(@files)
       @broken = sm.broken_protocol
+      icf     = ImplicitControlFlow.scan(@files)
+      @implicit_control_flow = icf.ordered_protocols(
+        min_support: Integer(ENV.fetch("DECOMPLEX_ICF_MIN_SUPPORT", "1"))
+      )
       @derived = DerivedState.scan(@files)
       @rename_clones = InconsistentRenameClone.scan(@files)
       @similarity = FlaySimilarity.scan(
@@ -47,6 +51,21 @@ module Decomplex
       @state_heat = state_mesh.findings
       @state_branch = StateBranchDensity.scan(@files).findings
       @temporal_ordering = TemporalOrderingPressure.scan(@files)
+      @weighted_inlined_complexity = WeightedInlinedCognitiveComplexity.scan(
+        @files,
+        min_score: Float(ENV.fetch(
+          "DECOMPLEX_WICC_MIN_SCORE",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_SCORE
+        )),
+        min_hidden: Float(ENV.fetch(
+          "DECOMPLEX_WICC_MIN_HIDDEN",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MIN_HIDDEN
+        )),
+        max_depth: Integer(ENV.fetch(
+          "DECOMPLEX_WICC_MAX_DEPTH",
+          WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
+        ))
+      )
       # sections_data also asserts the span contract -- running it on
       # the normal report path keeps that tripwire live.
       sd = sections_data
@@ -77,6 +96,8 @@ module Decomplex
       ["Neglected Path Conditions", :@pcneg, 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)"],
       ["Oversized Predicates", :@oversized_predicates, 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate"],
       ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"],
+      ["Implicit Control Flow", :@implicit_control_flow, 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure"],
+      ["Weighted Inlined Cognitive Complexity", :@weighted_inlined_complexity, 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method"],
       ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)"],
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
     ].freeze
@@ -254,6 +275,42 @@ module Decomplex
 
     private
 
+    def render_state_heatmap_item(item)
+      out = "- `#{item[:field]}` -- messiness **#{item[:messiness]}** " \
+            "(writes=#{item[:writes]}, reads=#{item[:reads]}, re-derived=#{item[:re_derivations]}, " \
+            "scatter=#{item[:scatter]}, receiver patterns=#{item[:receiver_types]})\n"
+      writers = item[:top_writers].map { |site| nav(site) }
+      readers = item[:top_readers].map { |site| nav(site) }
+      out << "  - writers: #{writers.join(' ; ')}\n" unless writers.empty?
+      out << "  - readers: #{readers.join(' ; ')}\n" unless readers.empty?
+      out
+    end
+
+    def render_implicit_control_flow_item(item)
+      if item[:kind] == :order_drift
+        return "- *POSSIBLE* [order_drift] conf=#{item[:confidence]} support=#{item[:support]} " \
+               "#{nav(item[:at])} observed `#{item[:observed].join(' -> ')}` " \
+               "against protocol `#{item[:protocol].join(' -> ')}` " \
+               "(#{item[:dependency].join('|')} state=`#{item[:states].join(' | ')}`)\n"
+      end
+
+      sites = item[:sites].first(4).map { |site| nav(site) }.join(" ; ")
+      more = item[:sites].size > 4 ? " (+#{item[:sites].size - 4} more)" : ""
+      "- *POSSIBLE* [protocol_pressure] support=#{item[:support]} " \
+        "`#{item[:protocol].join(' -> ')}` " \
+        "(#{item[:dependency].join('|')} state=`#{item[:states].join(' | ')}`) -- " \
+        "#{nav(item[:at])}\n" \
+        "  - sites: #{sites}#{more}\n"
+    end
+
+    def render_weighted_inlined_complexity_item(item)
+      "- *POSSIBLE* #{nav(item[:at])} -- inlined=#{item[:inlined]} " \
+        "(local=#{item[:local]}, hidden=#{item[:hidden]}, depth=#{item[:depth]})\n" \
+        "  - chain: `#{item[:call_chain].join(' -> ')}`\n" \
+        "  - single-caller helpers: `#{item[:single_caller_callees].first(8).join(' | ')}`\n" \
+        "  - reason: #{item[:reason]}\n"
+    end
+
     def render(out, title, v)
       v.first(25).each do |h|
         out << case title
@@ -272,11 +329,7 @@ module Decomplex
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \
                  "  - #{h[:sites].first(6).map { |s| nav(s) }.join(' ; ')}\n"
                when "State Heatmap"
-                 "- `#{h[:field]}` -- messiness **#{h[:messiness]}** " \
-                 "(writes=#{h[:writes]}, reads=#{h[:reads]}, re-derived=#{h[:re_derivations]}, " \
-                 "scatter=#{h[:scatter]}, receiver patterns=#{h[:receiver_types]})\n" \
-                 "  - writers: #{h[:top_writers].map { |s| nav(s) }.join(' ; ')}\n" \
-                 "  - readers: #{h[:top_readers].map { |s| nav(s) }.join(' ; ')}\n"
+                 render_state_heatmap_item(h)
                when "State-Based Branch Density"
                  "- #{nav(h[:at])} -- **#{h[:decisions]}** state-based branch decision(s), " \
                  "refs=`#{h[:state_refs].first(8).join(' | ')}` score=#{h[:score]}\n" \
@@ -306,6 +359,10 @@ module Decomplex
                when "Broken Protocols"
                  "- *POSSIBLE* conf=#{h[:confidence]} support=#{h[:support]} " \
                  "#{nav(h[:at])} does `#{h[:has]}` without `#{h[:missing]}`\n"
+               when "Implicit Control Flow"
+                 render_implicit_control_flow_item(h)
+               when "Weighted Inlined Cognitive Complexity"
+                 render_weighted_inlined_complexity_item(h)
                when "False Simplicity"
                  "- *POSSIBLE* [#{h[:kind]}] scatter=#{h[:scatter]} " \
                  "support=#{h[:support]} `#{h[:detail]}` -- #{nav(h[:at])}" \

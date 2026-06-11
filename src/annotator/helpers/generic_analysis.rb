@@ -649,4 +649,10 @@ module GenericAnalysis
     nil
   end
 
+  private :apply_type_subst,
+    :enforce_shared_family_call_sync!,
+    :extract_type_bindings!,
+    :validate_generic_annotation!,
+    :validate_observable_annotation_capabilities!,
+    :validate_generic_instance_annotation!
 end

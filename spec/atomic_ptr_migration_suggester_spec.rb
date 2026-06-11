@@ -249,11 +249,11 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       other_target = AST::Assignment.new(nil, AST::GetField.new(nil, AST::Identifier.new(nil, "other"), "port"), AST::Literal.new(nil, :INT64, 81, :stack))
       call_stmt = AST::FuncCall.new(nil, "print", [AST::GetField.new(nil, alias_id, "port")])
 
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(field_write, "a", :Cfg)).to eq(false)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(matching_replace, "a", :Cfg)).to eq(true)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(mismatched_replace, "a", :Cfg)).to eq(false)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(other_target, "a", :Cfg)).to eq(true)
-      expect(AtomicPtrMigrationSuggester.stmt_eligible?(call_stmt, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, field_write, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, matching_replace, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, mismatched_replace, "a", :Cfg)).to eq(false)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, other_target, "a", :Cfg)).to eq(true)
+      expect(AtomicPtrMigrationSuggester.send(:stmt_eligible?, call_stmt, "a", :Cfg)).to eq(true)
     end
   end
 end

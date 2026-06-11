@@ -187,7 +187,7 @@ RSpec.describe Doctor do
         form: "fsm",
       }]
 
-      out = capture_stdout { Doctor.emit_parallel_bg_hint!(dir, rows) }
+      out = capture_stdout { Doctor.send(:emit_parallel_bg_hint!, dir, rows) }
 
       expect(out).to include("Exact imbalanced local BG task sites")
       expect(out).to include("line 2: x = BG { 1 };")
@@ -210,7 +210,7 @@ RSpec.describe Doctor do
         try CheatHeader.spawnBest(...);
       ZIG
 
-      out = capture_stdout { Doctor.emit_parallel_bg_hint!(dir, []) }
+      out = capture_stdout { Doctor.send(:emit_parallel_bg_hint!, dir, []) }
 
       expect(out).to include("Profile contains local BG dispatches")
       expect(out).to include("Candidate BG sites:")

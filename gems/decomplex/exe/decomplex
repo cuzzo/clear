@@ -92,6 +92,54 @@ if ARGV[0] == "temporal-ordering"
   exit 0
 end
 
+if ["implicit-control-flow", "ordered-protocols"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort "no .rb files" if files.empty?
+  rows = Decomplex::ImplicitControlFlow.scan(files).ordered_protocols
+  md = +"# Decomplex Implicit Control Flow\n\n"
+  md << "| # | first site | kind | support | protocol | dependency | state |\n"
+  md << "|---|------------|------|---------|----------|------------|-------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | #{h[:kind]} | #{h[:support]} | " \
+          "`#{h[:protocol].join(' -> ')}` | " \
+          "`#{h[:dependency].join(' | ')}` | `#{h[:states].join(' | ')}` |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
+if ["weighted-inlined-complexity", "wicc"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort "no .rb files" if files.empty?
+  rows = Decomplex::WeightedInlinedCognitiveComplexity.scan(files)
+  md = +"# Decomplex Weighted Inlined Cognitive Complexity\n\n"
+  md << "| # | method | inlined | local | hidden | depth | single-caller helpers | chain |\n"
+  md << "|---|--------|---------|-------|--------|-------|-----------------------|-------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | #{h[:inlined]} | #{h[:local]} | " \
+          "#{h[:hidden]} | #{h[:depth]} | `#{h[:single_caller_callees].join(' | ')}` | " \
+          "`#{h[:call_chain].join(' -> ')}` |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
 if ARGV[0] == "report"
   require_relative "../lib/decomplex/report"
   args = ARGV[1..]
@@ -141,6 +189,13 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
                    Markdown table of branches whose predicate reads state
       temporal-ordering
                    Markdown table of public mutable lifecycle surfaces
+      implicit-control-flow
+                   Markdown table of state-dependent internal call-order pressure
+      ordered-protocols
+                   Alias for implicit-control-flow
+      weighted-inlined-complexity
+                   Markdown table of same-owner hidden cognitive complexity
+      wicc         Alias for weighted-inlined-complexity
       delta        Before/after diff against a baseline snapshot
 
     v0 mines exact-match case/when dispatch + && conjunction only.

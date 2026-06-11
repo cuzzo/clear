@@ -77,4 +77,84 @@ class ReportTest < Minitest::Test
   ensure
     f&.unlink
   end
+
+  def test_report_renders_implicit_control_flow
+    f = Tempfile.new(["rep_implicit_control_flow", ".rb"])
+    f.write(<<~RB)
+      class CompilerPhase
+        def prepare; @phase = :prepared; end
+        def validate; @valid = @phase == :prepared; end
+        def commit; @committed = @valid; end
+
+        def ok1; prepare; validate; commit; end
+        def ok2; prepare; validate; commit; end
+      end
+    RB
+    f.close
+
+    md = Decomplex::Report.new([f.path]).to_markdown
+
+    assert_includes md, "## Implicit Control Flow"
+    assert_includes md, "prepare -> validate"
+    assert_includes md, "protocol_pressure"
+    assert_includes md, "write_read"
+  ensure
+    f&.unlink
+  end
+
+  def test_report_renders_weighted_inlined_cognitive_complexity
+    f = Tempfile.new(["rep_weighted_inlined_complexity", ".rb"])
+    f.write(<<~RB)
+      class BillingService
+        def checkout(user, cart)
+          validate_user(user)
+          reserve_inventory(cart)
+          apply_discount(cart)
+          process_payment(user, cart)
+        end
+
+        def validate_user(user)
+          return false unless user
+          if user.active? && !user.suspended?
+            true
+          end
+        end
+
+        def reserve_inventory(cart)
+          if cart.available?
+            if cart.quantity > 0
+              reserve(cart)
+            end
+          end
+        end
+
+        def apply_discount(cart)
+          if cart.total > 100 && eligible?
+            if holiday?
+              20
+            else
+              10
+            end
+          end
+        end
+
+        def process_payment(user, cart)
+          if gateway.ready?
+            if cart.total > 0 && user.active?
+              charge(user, cart)
+            end
+          end
+        end
+      end
+    RB
+    f.close
+
+    md = Decomplex::Report.new([f.path]).to_markdown
+
+    assert_includes md, "## Weighted Inlined Cognitive Complexity"
+    assert_includes md, "checkout ->"
+    assert_includes md, "single-caller helpers"
+  ensure
+    f&.unlink
+  end
 end

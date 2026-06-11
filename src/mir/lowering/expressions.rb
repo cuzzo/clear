@@ -2219,5 +2219,6 @@ module MIRLoweringExpressions
     Type.new(type).zig_type
   end
 
+  private :emit_optional_comparison_then_expr
 
 end

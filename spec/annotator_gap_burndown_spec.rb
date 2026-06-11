@@ -157,7 +157,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(param_transition.parameter_target?).to be(true)
     expect(param_transition.declared_sync_contract?).to be(false)
     expect(param_transition.deferred_sync_param?).to be(true)
-    expect(param_transition.deferred_lock_param?).to be(true)
+    expect(param_transition.send(:deferred_lock_param?)).to be(true)
     expect(param_transition.exclusive_validation_action).to eq(:defer)
 
     declared_family_param = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :heap, sync: nil)

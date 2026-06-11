@@ -165,4 +165,7 @@ module AtomicPtrMigrationSuggester
       rhs.is_a?(AST::StructLit) &&
       rhs.name.to_s == struct_name.to_s
   end
+
+  private :stmt_eligible?
+  private_class_method :stmt_eligible?
 end

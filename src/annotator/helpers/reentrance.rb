@@ -918,4 +918,6 @@ module ReentranceBridge
       error!(fn_node, :REQUIRES_NON_REENTRANT_NOT_PARAM, fn: fn_node.name, name: bound_name)
     end
   end
+
+  private :emit_mutual_thunk_unsupported!
 end

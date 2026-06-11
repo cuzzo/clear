@@ -1231,6 +1231,14 @@ module CapabilityHelper
     end
     nil
   end
+
+  private :declare_borrowed_capability!,
+    :declare_capability_projection!,
+    :declare_restrict_alias!,
+    :declare_unwrapped_capability_alias!,
+    :declare_view_capability!,
+    :record_capture_info!,
+    :validate_capability_transition!
 end
 
 # ============================================================================
@@ -1372,5 +1380,4 @@ module CapabilityAudit
     "#{fn_name}:#{var_name}"
   end
   private :capability_audit_key
-
 end

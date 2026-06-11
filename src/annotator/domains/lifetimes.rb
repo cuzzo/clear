@@ -1251,6 +1251,8 @@ module Annotator
           :affine
         end
       end
+
+      private :handle_assignment_path_move!
     end
   end
 end

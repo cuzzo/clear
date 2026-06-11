@@ -1352,4 +1352,12 @@ module FunctionAnalysis
     types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
     "(#{types.join(', ')})"
   end
+
+  private :verify_argument_type!,
+    :verify_argument_aliases!,
+    :verify_atomic_argument!,
+    :verify_function_signature!,
+    :verify_lifetime!,
+    :verify_takes_argument!,
+    :fn_type_argument_match?
 end

@@ -290,5 +290,10 @@ module FsmTransform
     rescue StandardError
       false
     end
+
+    private :resolve_io,
+      :resolve_next
+    private_class_method :resolve_io,
+      :resolve_next
   end
 end

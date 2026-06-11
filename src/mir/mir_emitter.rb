@@ -2745,4 +2745,13 @@ class MIREmitter
     storage_type = ZigType.new(zig_type).cleanup_storage_type
     direct_cleanup_statement(name, "CheatLib.cleanup(#{storage_type}, #{alloc}, #{arg})", guarded)
   end
+
+  private :emit_bg_block,
+    :emit_bg_stackful_plan,
+    :emit_bg_stream_plan,
+    :emit_capture_cleanup_actions,
+    :emit_do_block_plan,
+    :emit_do_branch_plan,
+    :emit_sharded_map_get,
+    :emit_sharded_map_put
 end

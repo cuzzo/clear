@@ -422,4 +422,7 @@ module PprofConverter
     end
     addr2line_file.to_s.sub(/:\d+\z/, '')
   end
+
+  private :build_location_index
+  private_class_method :build_location_index
 end

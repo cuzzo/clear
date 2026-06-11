@@ -232,6 +232,8 @@ module Pprof
       File.binwrite(path, encode_gzip)
     end
 
+    private :encode
+
     private
 
     sig { params(s: Hash).returns(String) }

@@ -1264,4 +1264,6 @@ module MIRLoweringControlFlow
   # conditions: Array of Zig boolean fragments ("subject.x == 10")
   # binding_stmts: Array of MIR nodes (const decls for :bind fields)
 
+  private :finalize_return_value,
+    :return_transfer_required?
 end

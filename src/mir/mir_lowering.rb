@@ -3701,4 +3701,19 @@ class MIRLowering
     )
     T.must(program_state.pipeline_host)
   end
+
+  private :append_implicit_alloc_fact!,
+    :append_block_result_transfer!,
+    :append_lowered_statement_packet!,
+    :append_move_guard_for_transfer_mark!,
+    :append_ownership_facts_for_owned_result!,
+    :append_ownership_transfer_facts_for_contract!,
+    :append_transfer_marks!,
+    :apply_lowered_coercion,
+    :finalize_lowered_body_construction!,
+    :mark_ownership_finalized_node!,
+    :merge_body_mark_names!,
+    :owned_or_destination?,
+    :ownership_finalized_body?,
+    :record_ownership_finalization_node!
 end

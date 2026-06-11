@@ -2003,5 +2003,10 @@ module MIRLoweringFunctions
   # Collections
   # ================================================================
 
+  private :build_catch_clauses,
+    :build_extern_trampoline_call,
+    :build_extern_trampoline_method,
+    :call_owned_return?,
+    :collect_catch_reassigns
 
 end

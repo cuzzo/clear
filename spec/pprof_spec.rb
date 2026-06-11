@@ -85,7 +85,7 @@ end
 RSpec.describe Pprof::Profile do
   it 'reserves string_table[0] = "" so pprof readers parse correctly' do
     pb = described_class.new
-    bytes = pb.encode
+    bytes = pb.send(:encode)
     decoded = ProtoTestDecoder.parse(bytes)
     expect(decoded[6].first).to eq('') # string_table is field 6
   end
@@ -95,7 +95,7 @@ RSpec.describe Pprof::Profile do
     pb.add_function(name: 'foo', filename: 'a.cht')
     second_id = pb.add_function(name: 'foo', filename: 'a.cht')
     expect(second_id).to eq(1)
-    decoded = ProtoTestDecoder.parse(pb.encode)
+    decoded = ProtoTestDecoder.parse(pb.send(:encode))
     expect(decoded[5].length).to eq(1) # one Function entry only
   end
 
@@ -108,7 +108,7 @@ RSpec.describe Pprof::Profile do
     lid = pb.add_location(function_id: fid, line: 42, address: 0x1234)
     pb.add_sample([lid], [10, 1024], addr: '0x1234')
 
-    bytes = pb.encode
+    bytes = pb.send(:encode)
     decoded = ProtoTestDecoder.parse(bytes)
 
     expect(decoded[1].length).to eq(2)              # 2 sample_types
@@ -135,7 +135,7 @@ RSpec.describe Pprof::Profile do
     lid = pb.add_location(function_id: fid, line: 1, address: 0x100)
     pb.add_sample([lid], [10])
 
-    decoded = ProtoTestDecoder.parse(pb.encode)
+    decoded = ProtoTestDecoder.parse(pb.send(:encode))
     expect(decoded[3].length).to eq(1)            # one Mapping
     mapping = ProtoTestDecoder.parse(decoded[3].first)
     expect(mapping[1].first).to eq(1)             # Mapping.id
@@ -150,7 +150,7 @@ RSpec.describe Pprof::Profile do
   it 'omits the Mapping field entirely when none is registered' do
     pb = described_class.new
     pb.add_sample_type('count', 'samples')
-    decoded = ProtoTestDecoder.parse(pb.encode)
+    decoded = ProtoTestDecoder.parse(pb.send(:encode))
     expect(decoded[3]).to be_empty
   end
 
@@ -160,7 +160,7 @@ RSpec.describe Pprof::Profile do
     expect(bytes[0, 2].bytes).to eq([0x1f, 0x8b])
     # Round-trip through Zlib to confirm
     inflated = Zlib::GzipReader.new(StringIO.new(bytes)).read
-    expect(inflated.b).to eq(pb.encode.b)
+    expect(inflated.b).to eq(pb.send(:encode).b)
   end
 end
 

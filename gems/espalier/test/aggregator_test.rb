@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "tmpdir"
 require_relative "../lib/espalier"
 
 class AggregatorTest < Minitest::Test
@@ -17,11 +18,20 @@ class AggregatorTest < Minitest::Test
             name: "connect",
             signature: "def connect(id)",
             parameters: ["id"],
+            visibility: :public,
             effects: { reads: %w[@max_limit].to_set, writes: %w[@active_connections].to_set },
             delegations: [
               { receiver: "self", message: "limit_reached?", type: :conditional },
               { receiver: "Socket", message: "open", type: :always }
             ]
+          },
+          {
+            name: "limit_reached?",
+            signature: "def limit_reached?",
+            parameters: [],
+            visibility: :public,
+            effects: { reads: %w[@max_limit].to_set, writes: Set.new },
+            delegations: []
           }
         ]
       }
@@ -62,8 +72,9 @@ class AggregatorTest < Minitest::Test
     assert_includes state_conn[:properties], "protocol interfaces: write, close"
 
     # Function check
-    fn = mod[:functions].first
+    fn = mod[:functions].find { |f| f[:name] == "connect" }
     assert_equal "def connect(id: String) -> Socket", fn[:signature]
+    assert_equal :public, fn[:visibility]
     assert_equal %w[@max_limit], fn[:EFFECTS][:reads]
     assert_equal %w[@active_connections], fn[:EFFECTS][:writes]
     
@@ -76,6 +87,13 @@ class AggregatorTest < Minitest::Test
     assert_equal true, fn[:quality_metrics][:broken_protocol]
     assert_equal 0.85, fn[:quality_metrics][:churn_risk]
     assert_equal 0.4, fn[:quality_metrics][:coverage_gap]
+
+    helper = mod[:functions].find { |f| f[:name] == "limit_reached?" }
+    assert_equal ["connect"], helper[:CALL_GRAPH][:internal_callers]
+    assert_equal ["limit_reached?"], fn[:CALL_GRAPH][:internal_calls]
+    assert_equal [{ caller: "connect", callee: "limit_reached?", type: :conditional }], mod[:call_graph][:internal_edges]
+    assert_equal true, helper[:quality_metrics][:privacy_candidate]
+    assert_equal :high, helper[:quality_metrics][:privacy_confidence]
   end
 
   def test_delegations_mapped_to_concrete_type_when_available
@@ -91,6 +109,7 @@ class AggregatorTest < Minitest::Test
             name: "fetch",
             signature: "def fetch",
             parameters: [],
+            visibility: :public,
             effects: { reads: %w[@backend].to_set, writes: Set.new },
             delegations: [
               { receiver: "@backend", message: "get_data", type: :always },
@@ -111,5 +130,63 @@ class AggregatorTest < Minitest::Test
     assert_includes fn[:DELEGATIONS][:always_calls], "RemoteService.get_data"
     # "@unknown_ivar" falls back to "@unknown_ivar.process" since we don't have types for it
     assert_includes fn[:DELEGATIONS][:always_calls], "@unknown_ivar.process"
+  end
+
+  def test_uses_decomplex_topology_for_internal_call_graph
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "worker.rb")
+      File.write(path, <<~RB)
+        class Worker
+          def run
+            prepare
+            if ready?
+              validate
+            end
+          end
+
+          def prepare; end
+          def ready?; true; end
+          def validate; end
+        end
+      RB
+
+      modules = Espalier::AstExtractor.new(path).extract
+      manifest = Espalier::Aggregator.new.aggregate(modules)
+      mod = manifest.first
+
+      assert_equal [
+        { caller: "run", callee: "prepare", type: :always },
+        { caller: "run", callee: "ready?", type: :conditional },
+        { caller: "run", callee: "validate", type: :conditional }
+      ], mod[:call_graph][:internal_edges]
+
+      run = mod[:functions].find { |fn| fn[:name] == "run" }
+      prepare = mod[:functions].find { |fn| fn[:name] == "prepare" }
+      assert_equal %w[prepare ready? validate], run[:CALL_GRAPH][:internal_calls]
+      assert_equal ["run"], prepare[:CALL_GRAPH][:internal_callers]
+    end
+  end
+
+  def test_accepts_precomputed_decomplex_topology
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "phase.rb")
+      File.write(path, <<~RB)
+        class Phase
+          def run
+            self.prepare
+          end
+
+          def prepare; end
+        end
+      RB
+
+      modules = Espalier::AstExtractor.new(path).extract
+      topology = Decomplex::RubyTopology.scan([path])
+      manifest = Espalier::Aggregator.new(ruby_topology: topology).aggregate(modules)
+
+      assert_equal [
+        { caller: "run", callee: "prepare", type: :always }
+      ], manifest.first[:call_graph][:internal_edges]
+    end
   end
 end

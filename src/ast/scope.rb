@@ -420,6 +420,8 @@ class Scope
     end
   end
 
+  private :local_entry?
+
 end
 
 # Helper module for scope stack management.

@@ -504,4 +504,5 @@ class OwnershipGraph
     @nodes[place_id(path)] || @completed_nodes[place_id(path)]
   end
 
+  private :clear_completed_snapshot!, :prune_scope!, :remove_edge
 end

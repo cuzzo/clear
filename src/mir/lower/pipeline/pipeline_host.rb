@@ -648,6 +648,8 @@ class PipelineHost
     end
   end
 
+  private :lower_execution_plan
+
   private
 
   ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)

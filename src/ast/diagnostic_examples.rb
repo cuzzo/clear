@@ -198,4 +198,7 @@ module DiagnosticExamples
     min_indent = nonempty.map { |l| l[/\A( *)/].length }.min
     raw_lines.map { |l| l.sub(/\A {0,#{min_indent}}/, "") }.join
   end
+
+  private :extract_first_heredoc_in_it
+  private_class_method :extract_first_heredoc_in_it
 end

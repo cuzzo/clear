@@ -405,5 +405,7 @@ module ThunkTransform
       fn_node.params.map { |param| ThunkParamFact.from_param(param) }
     end
 
+    private :build_mutual_arm
+    private_class_method :build_mutual_arm
   end
 end

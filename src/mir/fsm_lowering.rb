@@ -569,4 +569,7 @@ module FsmLowering
       exit_kind: :done,
     )
   end
+
+  private :fsm_owned_transfer_identifier?,
+    :guard_fsm_result_cleanup!
 end

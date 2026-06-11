@@ -31,6 +31,7 @@ module Espalier
       sections << coordinator_mutator_collisions
       sections << conditional_delegation_hubs
       sections << state_lifecycle_pressure
+      sections << privatization_candidates_section
       sections << cross_tool_overlap
       sections.compact.join("\n")
     end
@@ -46,6 +47,7 @@ module Espalier
         - [Coordinator/Mutator Collisions](#coordinatormutator-collisions)
         - [Conditional Delegation Hubs](#conditional-delegation-hubs)
         - [State Lifecycle Pressure](#state-lifecycle-pressure)
+        - [Privatization Candidates](#privatization-candidates)
         - [Cross-Tool Overlap](#cross-tool-overlap)
       MD
     end
@@ -67,6 +69,10 @@ module Espalier
       if top_lifecycle
         lines << "- Highest state lifecycle pressure: `#{top_lifecycle[:state]}` in #{module_ref(top_lifecycle)} " \
                  "(score=#{fmt(top_lifecycle[:score])}, readers=#{top_lifecycle[:readers]}, writers=#{top_lifecycle[:writers]})."
+      end
+      if (top_private = privatization_candidates.first)
+        lines << "- Strongest visibility-tightening candidate: #{method_ref(top_private)} " \
+                 "(score=#{fmt(top_private[:score])}, internal callers=#{top_private[:callers].size})."
       end
       lines << "- Start where architecture pressure overlaps Decomplex/Boobytrap/SlopCop/NilKill evidence; those are more likely root-cause work than local cleanup."
       lines << ""
@@ -154,6 +160,26 @@ module Espalier
       lines.join("\n")
     end
 
+    def privatization_candidates_section
+      rows = privatization_candidates.first(@limit)
+      lines = ["## Privatization Candidates", "_Public methods that likely should be private: same-owner callers, no manifest-visible external receiver calls, and helper/protocol evidence._", ""]
+      if rows.empty?
+        lines << "None."
+        lines << ""
+        return lines.join("\n")
+      end
+
+      lines << "| # | method | score | confidence | internal callers | state touches | reason |"
+      lines << "|---|--------|-------|------------|------------------|---------------|--------|"
+      rows.each_with_index do |row, idx|
+        lines << "| #{idx + 1} | #{method_ref(row)} | #{fmt(row[:score])} | " \
+                 "#{row[:confidence]} | #{escape(row[:callers].join(', '))} | " \
+                 "#{row[:state_touches]} | #{escape(row[:reason])} |"
+      end
+      lines << ""
+      lines.join("\n")
+    end
+
     def cross_tool_overlap
       rows = all_methods
         .reject { |row| row[:name].to_s == "initialize" }
@@ -230,6 +256,12 @@ module Espalier
     def all_methods
       @all_methods ||= @manifest.flat_map do |mod|
         functions(mod).map { |fn| method_row(mod, fn) }
+      end
+    end
+
+    def privatization_candidates
+      @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest).map do |row|
+        row.merge(line: method_line(row[:file], row[:name]))
       end
     end
 

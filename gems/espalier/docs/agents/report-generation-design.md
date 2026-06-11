@@ -67,6 +67,14 @@ records protocol interfaces such as `push`, `pop`, `clear`, `[]=`, `[]`, or
 `<<`. These fields often want lifecycle helpers, records, or smaller phase
 state objects.
 
+### Privatization Candidates
+
+Ranks public methods that look like same-owner helper/protocol steps: they have
+internal callers, no manifest-visible external receiver calls, and evidence
+such as state touches, helper-shaped names, internal coordination, or overlapping
+quality metrics. These are visibility-tightening review candidates, not automatic
+API changes.
+
 ### Cross-Tool Overlap
 
 If the manifest contains quality metrics, the report should surface them as
@@ -95,4 +103,3 @@ second full manifest.
 - Do not rank decision complexity directly; Decomplex owns that.
 - Do not claim a finding is a bug. Espalier findings are architecture review
   candidates.
-

@@ -451,4 +451,6 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("profile placeholder")
   end
+
+  private :lower_when_block
 end

@@ -327,7 +327,7 @@ RSpec.describe MIRLowering do
         Set.new,
       )
 
-      expect(MIREmitter.new.emit_capture_cleanup_actions(capture.capture_frees))
+      expect(MIREmitter.new.send(:emit_capture_cleanup_actions, capture.capture_frees))
         .to include("defer __ctx_2.map.deinit(rt.heapAlloc(), rt.heapAlloc());")
     end
 
@@ -4514,7 +4514,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     l.function_state.fn_name_rename_map = { "owned" => "owned_renamed" }
     l.function_state.guarded_cleanup_names = {}
 
-    l.guard_fsm_result_cleanup!(
+    l.send(
+      :guard_fsm_result_cleanup!,
       [MIR::Cleanup.new("owned", cleanup)],
       [MIR::FsmResultTransferFact.new(name: "owned_renamed", target_alloc: :heap, move_guarded: true)],
     )
