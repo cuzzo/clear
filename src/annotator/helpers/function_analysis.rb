@@ -91,8 +91,7 @@ module FunctionAnalysis
     verify_captures!(node)
 
     found_returns = collect_routine_returns do
-      with_new_scope do
-        og_push_scope
+      with_routine_analysis_scope(node) do
         declare_and_verify_params(node)
         declare_captures(node)
 
@@ -112,9 +111,6 @@ module FunctionAnalysis
         # is known and synthetic `result` can be typed against it). Still
         # inside the routine scope so parameters are visible.
         visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
-
-        finalize_scope(node)
-        og_pop_scope(archive: true)
       end
     end
 
@@ -137,6 +133,22 @@ module FunctionAnalysis
 
     return_type
   end
+
+  sig { params(node: RoutineNode, blk: T.proc.void).void }
+  def with_routine_analysis_scope(node, &blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+
+    with_new_scope do
+      og_push_scope
+      begin
+        blk.call
+        finalize_scope(node)
+      ensure
+        og_pop_scope(archive: true)
+      end
+    end
+  end
+  private :with_routine_analysis_scope
 
   sig { params(blk: T.proc.void).returns(T::Array[AST::ReturnFact]) }
   def collect_routine_returns(&blk)

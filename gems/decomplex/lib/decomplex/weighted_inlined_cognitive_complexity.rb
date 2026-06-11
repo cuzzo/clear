@@ -14,7 +14,7 @@ module Decomplex
     Contribution = Struct.new(:callee_id, :callee_name, :score, :weight, :depth, :chain, keyword_init: true)
 
     DEFAULT_MIN_SCORE = 12.0
-    DEFAULT_MIN_HIDDEN = 5.0
+    DEFAULT_MIN_HIDDEN = 15.0
     DEFAULT_MAX_DEPTH = 2
     DEPTH_WEIGHTS = [1.0, 1.0, 0.6, 0.35].freeze
     EDGE_WEIGHTS = { always: 1.0, conditional: 0.75, iterates: 1.15 }.freeze

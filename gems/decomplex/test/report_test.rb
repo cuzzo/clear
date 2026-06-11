@@ -143,6 +143,8 @@ class ReportTest < Minitest::Test
             if cart.total > 0 && user.active?
               charge(user, cart)
             end
+          elsif gateway.retryable?
+            retry_later(user)
           end
         end
       end

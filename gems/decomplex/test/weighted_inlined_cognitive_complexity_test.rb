@@ -110,6 +110,43 @@ class WeightedInlinedCognitiveComplexityTest < Minitest::Test
     refute out.any? { |row| %w[left right].include?(row[:method]) }
   end
 
+  def test_default_hidden_threshold_skips_low_tail_wrappers
+    code = <<~RB
+      class MediumProtocol
+        def run(item)
+          first(item)
+          second(item)
+        end
+
+        def first(item)
+          if item.ready?
+            if item.valid? && !item.locked?
+              true
+            end
+          end
+        end
+
+        def second(item)
+          if item.valid? && !item.locked?
+            if item.total > 100
+              true
+            end
+          end
+        end
+      end
+    RB
+
+    loose = scan(code, min_score: 0, min_hidden: 5)
+    strict = scan(
+      code,
+      min_score: 0,
+      min_hidden: Decomplex::WeightedInlinedCognitiveComplexity::DEFAULT_MIN_HIDDEN
+    )
+
+    assert loose.any? { |row| row[:method] == "run" }
+    refute strict.any? { |row| row[:method] == "run" }
+  end
+
   def test_case_dispatch_is_not_treated_like_many_independent_branches
     out = scan(<<~RB, min_score: 0, min_hidden: 0)
       class Dispatcher

@@ -45,20 +45,7 @@ module Annotator
         branch_results = T.let([], T::Array[BranchAnalysisResult])
 
         branches.each do |branch_logic|
-          # Restore graph to pre-branch state before analyzing each branch
-          ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
-          prev_terminated = @branch_terminated
-          @branch_terminated = false
-          with_new_scope(current_scope) do
-            og_push_scope
-            branch_results << BranchAnalysisResult.new(
-              drops: branch_logic.call,
-              snapshot: ownership_graph.fork_lightweight,
-              terminated: @branch_terminated,
-            )
-            og_pop_scope
-          end
-          @branch_terminated = prev_terminated
+          branch_results << analyze_control_flow_branch(branch_logic, og_snapshot)
         end
 
         if merge_to_parent
@@ -90,6 +77,36 @@ module Annotator
 
         branch_results.map(&:drops)
       end
+
+      sig { params(branch_logic: T.proc.returns(BasicObject), og_snapshot: BranchSnapshot).returns(BranchAnalysisResult) }
+      def analyze_control_flow_branch(branch_logic, og_snapshot)
+        T.bind(self, SemanticAnnotator)
+
+        # Restore graph to pre-branch state before analyzing each branch.
+        ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
+        prev_terminated = @branch_terminated
+        @branch_terminated = false
+
+        begin
+          with_new_scope(current_scope) do
+            pushed_og_scope = T.let(false, T::Boolean)
+            begin
+              og_push_scope
+              pushed_og_scope = true
+              BranchAnalysisResult.new(
+                drops: branch_logic.call,
+                snapshot: ownership_graph.fork_lightweight,
+                terminated: @branch_terminated,
+              )
+            ensure
+              og_pop_scope if pushed_og_scope
+            end
+          end
+        ensure
+          @branch_terminated = prev_terminated
+        end
+      end
+      private :analyze_control_flow_branch
 
       sig { params(node: AST::BlockExpr).returns(T.nilable(Scope)) }
       def visit_BlockExpr(node)

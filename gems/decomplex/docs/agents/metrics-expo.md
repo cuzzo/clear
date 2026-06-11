@@ -447,6 +447,11 @@ The weighting intentionally distinguishes helper shapes:
 - Call-chain depth is capped, so one method does not absorb the whole
   owner.
 
+Default reports require at least 15 hidden weighted points. Lower-score
+helper hops are still available through `DECOMPLEX_WICC_MIN_HIDDEN`, but
+the default report skips that low tail because it mostly finds tiny
+wrappers and grammar-style forwarding methods.
+
 The usual finding looks like:
 
 ```text
