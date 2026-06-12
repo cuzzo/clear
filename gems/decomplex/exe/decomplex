@@ -140,6 +140,30 @@ if ["weighted-inlined-complexity", "wicc"].include?(ARGV[0])
   exit 0
 end
 
+if ["locality-drag", "dormant-locals"].include?(ARGV[0])
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort "no .rb files" if files.empty?
+  rows = Decomplex::LocalityDrag.scan(files)
+  md = +"# Decomplex Locality Drag\n\n"
+  md << "| # | method | local | score | gap | unrelated | setup ignored | boundaries | first use |\n"
+  md << "|---|--------|-------|-------|-----|-----------|---------------|------------|-----------|\n"
+  rows.each_with_index do |h, idx|
+    md << "| #{idx + 1} | `#{h[:at]}` | `#{h[:variable]}` | #{h[:score]} | " \
+          "#{h[:gap_lines]} | #{h[:unrelated_statements]} | #{h[:setup_statements]} | " \
+          "#{h[:boundary_crossings]} | #{h[:used_at]} |\n"
+  end
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
 if ARGV[0] == "report"
   require_relative "../lib/decomplex/report"
   args = ARGV[1..]
@@ -196,6 +220,10 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
       weighted-inlined-complexity
                    Markdown table of same-owner hidden cognitive complexity
       wicc         Alias for weighted-inlined-complexity
+      locality-drag
+                   Markdown table of dormant locals in complex methods
+      dormant-locals
+                   Alias for locality-drag
       delta        Before/after diff against a baseline snapshot
 
     v0 mines exact-match case/when dispatch + && conjunction only.

@@ -207,4 +207,48 @@ class ReportTest < Minitest::Test
   ensure
     f&.unlink
   end
+
+  def test_report_renders_locality_drag
+    f = Tempfile.new(["rep_locality_drag", ".rb"])
+    f.write(<<~RB)
+      class Importer
+        def run(user, cart, logger)
+          receipt_id = user.id
+
+          total = cart.total
+          if total > 100
+            if cart.discountable?
+              discount = 10
+            end
+          end
+          if cart.taxable?
+            if cart.region
+              tax = total * 0.2
+            end
+          end
+          if logger.enabled?
+            if logger.debug?
+              logger.info(total)
+            end
+          end
+          if cart.valid?
+            if cart.ready?
+              status = :ready
+            end
+          end
+
+          emit(receipt_id)
+        end
+      end
+    RB
+    f.close
+
+    md = Decomplex::Report.new([f.path]).to_markdown
+
+    assert_includes md, "## Locality Drag"
+    assert_includes md, "`receipt_id` dormant until line"
+    assert_includes md, "unrelated line"
+  ensure
+    f&.unlink
+  end
 end

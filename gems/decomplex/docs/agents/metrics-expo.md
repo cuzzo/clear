@@ -466,6 +466,70 @@ helper has a good name and a clear concern. The metric says: "review this
 as if the helper bodies were inline, because that is the cognitive cost
 the reader is paying."
 
+### Locality Drag
+
+Question: did a complex function initialize a local far away from the
+place that first uses it?
+
+```ruby
+CLASS BillingService
+  FN checkout(user, cart, logger)
+    receiptId = user.id
+
+    total = cart.total
+    IF total > 100 THEN discount = 10 END
+    IF cart.taxable? THEN tax = total * 0.2 END
+    IF logger.enabled? THEN logger.info(total) END
+    IF cart.valid? THEN status = :ready END
+
+    emitReceipt(receiptId)
+  END
+END
+```
+
+`receiptId` is live across a block of work that does not affect it. A
+reader has to keep it in mind while scanning unrelated calculation,
+logging, validation, or parser work. Often the better shape is to move
+the initialization closer to the first use:
+
+```ruby
+CLASS BillingService
+  FN checkout(user, cart, logger)
+    total = cart.total
+    IF total > 100 THEN discount = 10 END
+    IF cart.taxable? THEN tax = total * 0.2 END
+    IF logger.enabled? THEN logger.info(total) END
+    IF cart.valid? THEN status = :ready END
+
+    receiptId = user.id
+    emitReceipt(receiptId)
+  END
+END
+```
+
+Sometimes the better shape is an extraction instead:
+
+```ruby
+CLASS BillingService
+  FN checkout(user, cart, logger)
+    prepareCart(cart, logger)
+    emitReceipt(user.id)
+  END
+END
+```
+
+Decomplex looks for assigned locals whose first later read is separated
+by unrelated statements in a non-trivial method. A statement is related
+if it touches the local or a local derived from it; everything else
+counts as unrelated reader burden. The score rises with unrelated
+statement count, line distance, structural boundary crossings, and local
+cognitive complexity.
+
+This metric is meant to be reviewed with WICC, Function LCOM, and
+Operational Discontinuity. Alone, it often says "move this declaration
+closer." Combined with those metrics, it can say "this public function
+has trapped private phases."
+
 ### Function LCOM
 
 Question: does one function contain multiple independent local data

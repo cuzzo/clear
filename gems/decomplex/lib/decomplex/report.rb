@@ -66,6 +66,29 @@ module Decomplex
           WeightedInlinedCognitiveComplexity::DEFAULT_MAX_DEPTH
         ))
       )
+      @locality_drag = LocalityDrag.scan(
+        @files,
+        min_unrelated_statements: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_UNRELATED_STATEMENTS",
+          LocalityDrag::DEFAULT_MIN_UNRELATED_STATEMENTS
+        )),
+        min_gap_lines: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_GAP_LINES",
+          LocalityDrag::DEFAULT_MIN_GAP_LINES
+        )),
+        min_local_complexity: Float(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_LOCAL_COMPLEXITY",
+          LocalityDrag::DEFAULT_MIN_LOCAL_COMPLEXITY
+        )),
+        min_score: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MIN_SCORE",
+          LocalityDrag::DEFAULT_MIN_SCORE
+        )),
+        max_findings_per_method: Integer(ENV.fetch(
+          "DECOMPLEX_LOCALITY_DRAG_MAX_FINDINGS_PER_METHOD",
+          LocalityDrag::DEFAULT_MAX_FINDINGS_PER_METHOD
+        ))
+      )
       @function_lcom = FunctionLCOM.scan(
         @files,
         min_components: Integer(ENV.fetch(
@@ -138,6 +161,7 @@ module Decomplex
       ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"],
       ["Implicit Control Flow", :@implicit_control_flow, 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure"],
       ["Weighted Inlined Cognitive Complexity", :@weighted_inlined_complexity, 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method"],
+      ["Locality Drag", :@locality_drag, 2, "local initialized far before first use while unrelated work runs -- move setup closer or extract a private phase"],
       ["Operational Discontinuity (High Confidence)", :@operational_discontinuity_high_confidence, 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary"],
       ["Function LCOM", :@function_lcom, 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns"],
       ["Operational Discontinuity", :@operational_discontinuity, 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary"],
@@ -354,6 +378,28 @@ module Decomplex
         "  - reason: #{item[:reason]}\n"
     end
 
+    def render_locality_drag_item(item)
+      out = "- *POSSIBLE* #{nav(item[:at])} -- `#{item[:variable]}` dormant until line " \
+            "#{item[:used_at]} score=#{item[:score]} " \
+            "(gap=#{item[:gap_lines]} lines, unrelated=#{item[:unrelated_statements]}, " \
+            "boundaries=#{item[:boundary_crossings]}, local=#{item[:local_complexity]})\n" \
+            "  - reason: #{item[:reason]}\n"
+      out << "  - ignored setup initializers: #{item[:setup_statements]}\n" if item[:setup_statements].positive?
+      unless item[:definition_deps].empty?
+        out << "  - definition deps: `#{item[:definition_deps].first(6).join(' | ')}`\n"
+      end
+      unless item[:use_reads].empty?
+        out << "  - first-use reads: `#{item[:use_reads].first(8).join(' | ')}`\n"
+      end
+      item[:boundaries].first(2).each do |boundary|
+        out << "  - crosses line #{boundary[:line]} #{boundary[:marker]}\n"
+      end
+      item[:examples].first(2).each do |example|
+        out << "  - unrelated line #{example[:line]}: `#{example[:source]}`\n"
+      end
+      out
+    end
+
     def render_function_lcom_item(item)
       mode = item[:mode] == :late_join ? "late_join" : "disjoint"
       out = "- *POSSIBLE* [#{mode}] #{nav(item[:at])} -- score=#{item[:score]} " \
@@ -437,6 +483,8 @@ module Decomplex
                  render_implicit_control_flow_item(h)
                when "Weighted Inlined Cognitive Complexity"
                  render_weighted_inlined_complexity_item(h)
+               when "Locality Drag"
+                 render_locality_drag_item(h)
                when "Function LCOM"
                  render_function_lcom_item(h)
                when "Operational Discontinuity", "Operational Discontinuity (High Confidence)"

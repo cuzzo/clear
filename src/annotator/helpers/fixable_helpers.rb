@@ -1718,19 +1718,27 @@ module FixableHelper
   private :build_decl_cap_insert_fix,
     :build_decl_cap_replace_fix,
     :literal_source_length
+  private :anchor_at
+  private :auto_rank_candidates
   private :auto_slot_label
+  private :auto_type_source_form
   private :auto_token_for
   private :build_auto_ambiguity_message
   private :build_auto_candidate_fix
   private :build_auto_op_evidence_block
   private :build_auto_replace_fixes
+  private :build_atomic_escape_migration_fix
   private :build_cast_wrap_fix
   private :build_declare_mutable_fix
+  private :closest_name
   private :consumer_source_text
   private :emit_overflow_suffix_fix!
   private :levenshtein
   private :ownership_active_phrase
   private :ownership_passive_phrase
   private :smallest_fitting_int_type
+  private :slot_id_for
+  private :variant_anchor_from_getfield
+  private :variant_anchor_from_unionlit
 
 end

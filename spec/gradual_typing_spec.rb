@@ -1265,19 +1265,19 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
     let(:host) { Class.new { include ErrorHelper; include FixableHelper }.new }
 
     it "ranks `+` as Int64 default with Float64 and String alternatives" do
-      ranked = host.auto_rank_candidates(Set[:ADD])
+      ranked = host.send(:auto_rank_candidates, Set[:ADD])
       types = ranked.map(&:first)
       expect(types).to eq([:Int64, :Float64, :String])
     end
 
     it "ranks `*` as Int64 default with Float64 (no String — can't multiply strings)" do
-      ranked = host.auto_rank_candidates(Set[:MUL])
+      ranked = host.send(:auto_rank_candidates, Set[:MUL])
       types = ranked.map(&:first)
       expect(types).to eq([:Int64, :Float64])
     end
 
     it "ranks `/` as Float64 default with Int64 alternative + truncation note" do
-      ranked = host.auto_rank_candidates(Set[:DIV])
+      ranked = host.send(:auto_rank_candidates, Set[:DIV])
       expect(ranked[0][0]).to eq(:Float64)
       expect(ranked[1][0]).to eq(:Int64)
       # Note specifically warns about integer-division truncation
@@ -1286,17 +1286,17 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
     end
 
     it "ranks `%` as Int64 only (modulo is integer-only)" do
-      ranked = host.auto_rank_candidates(Set[:MOD])
+      ranked = host.send(:auto_rank_candidates, Set[:MOD])
       expect(ranked.map(&:first)).to eq([:Int64])
     end
 
     it "ranks `&&` and `||` as Bool only" do
-      expect(host.auto_rank_candidates(Set[:AND]).map(&:first)).to eq([:Bool])
-      expect(host.auto_rank_candidates(Set[:OR]).map(&:first)).to eq([:Bool])
+      expect(host.send(:auto_rank_candidates, Set[:AND]).map(&:first)).to eq([:Bool])
+      expect(host.send(:auto_rank_candidates, Set[:OR]).map(&:first)).to eq([:Bool])
     end
 
     it "intersects candidates across multiple ops (+ and * → Int64, Float64)" do
-      ranked = host.auto_rank_candidates(Set[:ADD, :MUL])
+      ranked = host.send(:auto_rank_candidates, Set[:ADD, :MUL])
       types = ranked.map(&:first)
       # `+` allows {Int64, Float64, String}; `*` allows {Int64, Float64}.
       # Intersection: {Int64, Float64}; Int64 ranks first (default for both).
@@ -1305,12 +1305,12 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
 
     it "produces an empty list when ops have no common candidate" do
       # `+` allows numeric+String; `&&` only allows Bool. No intersection.
-      ranked = host.auto_rank_candidates(Set[:ADD, :AND])
+      ranked = host.send(:auto_rank_candidates, Set[:ADD, :AND])
       expect(ranked).to be_empty
     end
 
     it "returns [] for an empty op set" do
-      expect(host.auto_rank_candidates(Set.new)).to eq([])
+      expect(host.send(:auto_rank_candidates, Set.new)).to eq([])
     end
   end
 
