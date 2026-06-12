@@ -15,7 +15,11 @@ RSpec.describe FsmTransform::Segments do
       params: [],
       return_type: Type.new(:String),
       intrinsic: true,
-      emit: IntrinsicEmit.new(suspends: suspends, fsm_setup: fsm_setup)
+      emit: IntrinsicEmit.new(
+        suspends: suspends,
+        fsm_setup: fsm_setup || [],
+        fsm_setup_present: !fsm_setup.nil?,
+      )
     )
   end
 
@@ -85,7 +89,7 @@ RSpec.describe FsmTransform::Segments do
     last = lit
     bind = AST::BindExpr.new(tok, "a", nil, next_expr("p1"))
     assign = AST::Assignment.new(tok, "b", io_call("sleep"))
-    segments = described_class.split([first, bind, assign, last], nil)
+    segments = described_class.split([first, bind, assign, last], nil).segments
 
     expect(segments.map(&:index)).to eq([0, 1, 2])
     expect(segments[0].stmts).to eq([first])
@@ -101,7 +105,7 @@ RSpec.describe FsmTransform::Segments do
 
   it "handles the legacy while-loop single-suspend shape" do
     loop = AST::WhileLoop.new(tok, lit, [lit, next_expr, lit], nil)
-    segments = described_class.send(:split_while_loop_next, [lit, loop, lit])
+    segments = described_class.send(:split_while_loop_next, [lit, loop, lit]).segments
 
     expect(segments.length).to eq(5)
     expect(segments[0].tail).to be_a(described_class::Goto)
@@ -111,7 +115,7 @@ RSpec.describe FsmTransform::Segments do
     expect(segments[3].tail).to be_a(described_class::LoopBack)
     expect(segments[4].tail).to be_a(described_class::Done)
 
-    expect(described_class.split([lit, loop, lit], nil).map(&:tail).map(&:kind)).
+    expect(described_class.split([lit, loop, lit], nil).segments.map(&:tail).map(&:kind)).
       to eq(%i[goto cond_branch next loop_back done])
   end
 

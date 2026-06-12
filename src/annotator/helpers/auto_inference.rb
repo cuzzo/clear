@@ -716,7 +716,7 @@ class ShapeEvidenceCollector
   # Build a per-function map from binding-name to the slot triple
   # `{ list: slot, key: slot, value: slot }`. Only includes shape
   # slots whose decl_node lives inside this function body.
-  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn: AST::FunctionDef).void }
   def collect_in_function(fn)
     name_map = build_name_map(fn)
     return if name_map.empty?
@@ -786,7 +786,7 @@ class ShapeEvidenceCollector
   # method classes come from std_lib metadata, not from local method-name
   # switches, so adding a new collection mutator updates inference by
   # updating the registry entry.
-  sig { params(call: AST::MethodCall, name_map: NameShapeMap).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(call: AST::MethodCall, name_map: NameShapeMap).void }
   def record_method_call(call, name_map)
     target = call.object
     return unless target.is_a?(AST::Identifier)
@@ -804,7 +804,7 @@ class ShapeEvidenceCollector
   # Append (k, v) to the matching map sub-slots when the slot map
   # carries both halves. No-op for non-map shapes — keeps
   # method-call dispatch noise out of the call sites.
-  sig { params(slots: AutoShapeSlots, args: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(slots: AutoShapeSlots, args: T::Array[T.untyped]).void }
   def record_map_pair_evidence(slots, args)
     return unless slots.key && slots.value
     T.must(slots.key).sources << args[0]
@@ -813,7 +813,7 @@ class ShapeEvidenceCollector
 
   # Detect `x[i] = v`. For list shape: v is element evidence. For
   # map shape: i is key, v is value.
-  sig { params(assign: AST::Assignment, name_map: NameShapeMap).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(assign: AST::Assignment, name_map: NameShapeMap).void }
   def record_index_assign(assign, name_map)
     target = assign.name
     return unless target.is_a?(AST::GetIndex)

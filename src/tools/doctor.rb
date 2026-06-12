@@ -63,7 +63,7 @@ module Doctor
     section_atomic_escape(profile_dir)
     section_syscalls(profile_dir)
     llc_miss_rate = section_hardware(profile_dir)
-    section_freeze(profile_dir, sites, resolved, llc_miss_rate)
+    section_freeze(profile_dir, sites || [], resolved, llc_miss_rate)
   end
 
   # Returns true if a sample's trace (function names, leaf-first)
@@ -1215,9 +1215,9 @@ module Doctor
   # ── FREEZE Recommendation ──
   # Fires when: high LLC miss rate + many small scattered heap allocations
   # (the signature of individually malloc'd tree/list nodes).
-  sig { params(profile_dir: String, sites: T.nilable(Array), resolved: T.nilable(Hash), llc_miss_rate: T.nilable(Float)).returns(NilClass) }
+  sig { params(profile_dir: String, sites: Array, resolved: T.nilable(Hash), llc_miss_rate: T.nilable(Float)).returns(NilClass) }
   def section_freeze(profile_dir, sites, resolved, llc_miss_rate)
-    return unless llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites && sites.any?
+    return unless llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites.any?
 
     candidates = sites.select do |s|
       avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0

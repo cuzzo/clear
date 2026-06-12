@@ -64,14 +64,14 @@ module Annotator
             end
             validate_with_guard_no_body_mutation!(node)
             fallible_sources = retryable_with_fallible_sources(node)
-            if is_snapshot_txn_body && !T.must(fallible_sources).empty?
+            if is_snapshot_txn_body && !fallible_sources.empty?
               retryable_with_fallible_body_error!(
                 node,
                 "WITH SNAPSHOT ... AS MUTABLE",
                 fallible_sources
               )
             end
-            if retryable_with_universal_poly_candidate?(node) && !T.must(fallible_sources).empty?
+            if retryable_with_universal_poly_candidate?(node) && !fallible_sources.empty?
               retryable_with_fallible_body_error!(
                 node,
                 "WITH POLYMORPHIC",
@@ -335,12 +335,12 @@ module Annotator
         is_param && !has_req
       end
 
-      sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T::Array[String])).void }
+      sig { params(node: AST::WithBlock, with_name: String, sources: T::Array[String]).void }
       def retryable_with_fallible_body_error!(node, with_name, sources)
         T.bind(self, SemanticAnnotator)
 
-        detail = T.must(sources).first(3).join(", ")
-        detail += ", ..." if T.must(sources).length > 3
+        detail = sources.first(3).join(", ")
+        detail += ", ..." if sources.length > 3
         error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
       end
 
@@ -407,7 +407,7 @@ module Annotator
         when :return
           visit(T.must(clause.value))
         when :block
-          visit_stmts(T.must(clause.body))
+          visit_stmts(clause.body)
         end
       end
 
@@ -553,7 +553,7 @@ module Annotator
             when :exit
               visit(T.must(clause.message))
             when :block
-              visit_stmts(T.must(clause.body))
+              visit_stmts(clause.body)
             end
           end
         end
@@ -566,7 +566,7 @@ module Annotator
       #   3. Retry selectors resolve to Transient types only.
       #   4. The matched set intersects the block's possible error set.
 
-      sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).void }
       def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
         T.bind(self, SemanticAnnotator)
 

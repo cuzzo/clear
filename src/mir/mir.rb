@@ -423,9 +423,9 @@ module MIR
       nil
     end
 
-    sig { params(name: Symbol, body: T.nilable(T::Array[Emittable]), writer: BodySlot::Writer).returns(BodySlot) }
+    sig { params(name: Symbol, body: T::Array[Emittable], writer: BodySlot::Writer).returns(BodySlot) }
     def body_slot(name, body, writer)
-      BodySlot.new(name, body || [], writer)
+      BodySlot.new(name, body, writer)
     end
 
     sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol).returns(OwnershipEffect) }
@@ -552,9 +552,9 @@ module MIR
       ])
     end
 
-    sig { params(body: T.nilable(T::Array[Emittable]), result_type: T.nilable(Type)).returns(OwnershipEffect) }
+    sig { params(body: T::Array[Emittable], result_type: T.nilable(Type)).returns(OwnershipEffect) }
     def self.from_block_body(body, result_type:)
-      stmts = body || []
+      stmts = body
       break_stmt = stmts.reverse.grep(MIR::BreakStmt).first
       value = break_stmt&.value
       first_active_effect([
@@ -1600,11 +1600,11 @@ module MIR
       params(
         code: BgBlockPlan,
         captures: T.nilable(T::Hash[String, Type]),
-        run_body: T.nilable(T::Array[Emittable]),
+        run_body: T::Array[Emittable],
         fsm_structure: Object,
       ).void
     end
-    def initialize(code, captures = nil, run_body = nil, fsm_structure = nil)
+    def initialize(code, captures = nil, run_body = [], fsm_structure = nil)
       unless MIR.structural_bg_block_plan?(code)
         raise TypeError, "MIR::BgBlock code must be a structural emission plan, got #{code.class}"
       end
@@ -1841,35 +1841,47 @@ module MIR
 
     sig { returns(T::Array[String]) }
     def required_move_guards
-      @required_move_guards = T.let(@required_move_guards, T.nilable(T::Array[String]))
-      @required_move_guards ||= []
+      raw = instance_variable_get(:@required_move_guards)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[String])
+        instance_variable_set(:@required_move_guards, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def required_move_guards=(value)
-      @required_move_guards = value
+      instance_variable_set(:@required_move_guards, value)
     end
 
     sig { returns(T::Array[String]) }
     def move_guard_writes
-      @move_guard_writes = T.let(@move_guard_writes, T.nilable(T::Array[String]))
-      @move_guard_writes ||= []
+      raw = instance_variable_get(:@move_guard_writes)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[String])
+        instance_variable_set(:@move_guard_writes, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[String]).returns(T::Array[String]) }
     def move_guard_writes=(value)
-      @move_guard_writes = value
+      instance_variable_set(:@move_guard_writes, value)
     end
 
     sig { returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts
-      @ownership_facts = T.let(@ownership_facts, T.nilable(T::Array[FsmOwnershipFact]))
-      @ownership_facts ||= []
+      raw = instance_variable_get(:@ownership_facts)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[FsmOwnershipFact])
+        instance_variable_set(:@ownership_facts, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[FsmOwnershipFact]).returns(T::Array[FsmOwnershipFact]) }
     def ownership_facts=(value)
-      @ownership_facts = value
+      instance_variable_set(:@ownership_facts, value)
     end
 
     sig { returns(T::Boolean) }
@@ -1885,13 +1897,17 @@ module MIR
 
     sig { returns(T::Array[FsmDestroyAction]) }
     def destroy_actions
-      @destroy_actions = T.let(@destroy_actions, T.nilable(T::Array[FsmDestroyAction]))
-      @destroy_actions ||= []
+      raw = instance_variable_get(:@destroy_actions)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[FsmDestroyAction])
+        instance_variable_set(:@destroy_actions, raw)
+      end
+      raw
     end
 
     sig { params(value: T::Array[FsmDestroyAction]).returns(T::Array[FsmDestroyAction]) }
     def destroy_actions=(value)
-      @destroy_actions = value
+      instance_variable_set(:@destroy_actions, value)
     end
   end
 
@@ -2647,13 +2663,17 @@ module MIR
       super(code, branch_bodies)
     end
 
-    sig { returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
+    sig { returns(T::Array[MIR::ExecutionBoundaryFact]) }
     def boundary_facts
-      @boundary_facts = T.let(nil, T.nilable(T::Array[MIR::ExecutionBoundaryFact])) unless defined?(@boundary_facts)
-      @boundary_facts
+      raw = instance_variable_get(:@boundary_facts)
+      unless raw.is_a?(Array)
+        raw = T.let([], T::Array[MIR::ExecutionBoundaryFact])
+        instance_variable_set(:@boundary_facts, raw)
+      end
+      raw
     end
-    sig { params(value: T.nilable(T::Array[MIR::ExecutionBoundaryFact])).returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
-    def boundary_facts=(value); @boundary_facts = T.let(value, T.nilable(T::Array[MIR::ExecutionBoundaryFact])); end
+    sig { params(value: T::Array[MIR::ExecutionBoundaryFact]).returns(T::Array[MIR::ExecutionBoundaryFact]) }
+    def boundary_facts=(value); instance_variable_set(:@boundary_facts, value); end
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([], T::Array[BodySlot])

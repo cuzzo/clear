@@ -73,9 +73,9 @@ module LSP
     # debounce window deterministically.
     sig { returns(T::Array[T.untyped]) }
     def flush_pending!
-      threads = T.let(nil, T.nilable(T::Array[Thread]))
+      threads = T.let([], T::Array[Thread])
       @timer_mutex.synchronize { threads = @timers.values.dup }
-      T.must(threads).each(&:join)
+      threads.each(&:join)
     end
 
     private

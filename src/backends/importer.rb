@@ -133,7 +133,7 @@ class ModuleImporter
   # (gradual-typing.md §7). The importer rejects with a diagnostic
   # that points the user at running `clear fix --apply` on the
   # imported module before re-importing.
-  sig { params(ast: AST::Program, abs_path: String).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(ast: AST::Program, abs_path: String).void }
   def reject_auto_in_public_signatures!(ast, abs_path)
     rel_path = File.basename(abs_path)
     ast.statements.each do |stmt|
@@ -232,8 +232,8 @@ class ModuleImporter
 
     result = lowering.lower_module(ast)
     emitter = MIREmitter.new
-    zig_body = T.must(result[:items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs = T.must(result[:type_items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    zig_body = result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs = result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     CompiledModule.new(
       ast,

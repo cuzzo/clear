@@ -267,7 +267,7 @@ RSpec.describe "annotator import resolution boundaries" do
     expect(imported_union).to be_a(Schemas::UnionSchema)
     inline = imported_union&.variants&.fetch("Inline")
     expect(inline).to be_a(Schemas::InlineStructVariant)
-    expect(inline&.deinit_entries).to be_nil
+    expect(inline&.deinit_entries).to eq([])
   end
 
   it "rejects REQUIRE when no importer is configured" do

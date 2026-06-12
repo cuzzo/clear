@@ -190,7 +190,7 @@ module Annotator
           when :exit
             visit(T.must(clause.message))
           when :block
-            visit_stmts(T.must(clause.body))
+            visit_stmts(clause.body)
           end
         end
         stamp_type!(node, :Void)

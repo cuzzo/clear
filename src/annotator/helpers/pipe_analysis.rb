@@ -1170,13 +1170,12 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: T.untyped, names: T::Set[String]).void }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(node) do |n|
       names << n.name if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
     end
-    nil
   end
 
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
@@ -1820,7 +1819,7 @@ module PipeAnalysis
   SOA_MIN_FIELDS = 4
   SOA_THRESHOLD  = 0.5  # warn when < 50% of fields accessed
 
-  sig { params(node: AST::BinaryOp, item_type: T.untyped).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::BinaryOp, item_type: T.untyped).void }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, SemanticAnnotator) rescue nil
     accessed = phase_receiver_state.pipeline_accessed_fields
@@ -1842,7 +1841,7 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).void }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
     receiver_state = phase_receiver_state

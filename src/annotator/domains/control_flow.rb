@@ -268,7 +268,7 @@ module Annotator
         # A destructuring pattern's type IS the subject it destructures
         # (the MATCH expr) — not a guess.
         stamp_type!(pat, match_node.expr.full_type!(context: "match destructure subject"))
-        nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
+        nil
       end
 
       sig { params(pattern: AST::Node).returns(T.nilable(String)) }
@@ -701,7 +701,7 @@ module Annotator
 
         # Store case result types so use sites can promote to expression mode.
         node.case_result_types = node.cases.map { |c| expr_result_type(c.body) }
-        node.default_result_type = expr_result_type(node.default_case)
+        node.default_result_type = expr_result_type(node.default_case || [])
 
         stamp_type!(node, :Void)
       end

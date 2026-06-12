@@ -160,6 +160,7 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
       params: [AST::UnionMethodParamRequirement.new(name: "value", type: Type.new(:Int64))],
       return_type: Type.new(:String),
       body: [AST::Literal.new(tok("default"), :STRING, "default", :stack)],
+      has_default_body: true,
     )
     union = AST::UnionDef.new(tok("Choice"), "Choice", { Item: Type.new(:Int64) }, :pub)
     union.methods = [req]

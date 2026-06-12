@@ -155,7 +155,7 @@ class StackVerifier
     report
   end
 
-  sig { params(report: Hash, io: StringIO).returns(T.nilable(Array)) }
+  sig { params(report: Hash, io: StringIO).void }
   def print_report(report, io: $stderr)
     return if report[:functions].empty?
 
@@ -441,7 +441,7 @@ class StackVerifier
   end
 
   # Print optimal tier report.
-  sig { params(results: Array, io: StringIO).returns(T.nilable(Array)) }
+  sig { params(results: Array, io: StringIO).void }
   def print_tier_report(results, io: $stderr)
     return if results.empty?
 

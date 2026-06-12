@@ -162,7 +162,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         path = get_path_to_root(node)
-        return unless path
+        return if path.empty?
 
         # Check root, then progressively longer sub-paths.
         check = T.let("", String)

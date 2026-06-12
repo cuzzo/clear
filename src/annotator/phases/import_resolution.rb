@@ -200,7 +200,7 @@ module Annotator
         end
         Schemas::InlineStructVariant.new(
           fields: fields,
-          deinit_entries: variant.deinit_entries&.dup
+          deinit_entries: variant.deinit_entries.dup
         )
       end
       private :clone_inline_struct_variant

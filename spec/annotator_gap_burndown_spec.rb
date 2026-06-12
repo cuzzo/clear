@@ -4223,7 +4223,7 @@ RSpec.describe "annotator branch gap burndown" do
       expected_type: Type.new(:Int64),
       actual_type: Type.new(:Int64),
       actual: :Int64,
-      path: nil,
+      path: [],
     )
     ann.send(:verify_mutable_argument!, mutable_facts)
 
@@ -4246,7 +4246,7 @@ RSpec.describe "annotator branch gap burndown" do
       expected_type: Type.new(:Int64),
       actual_type: Type.new(:Int64),
       actual: :Int64,
-      path: nil,
+      path: [],
     )
     ann.send(:verify_takes_argument!, give_facts)
 

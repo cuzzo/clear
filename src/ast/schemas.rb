@@ -214,13 +214,22 @@ module Schemas
     FieldInputMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
 
     attr_reader :fields
-    attr_accessor :deinit_entries
-    sig { params(fields: FieldInputMap, deinit_entries: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).void }
-    def initialize(fields:, deinit_entries: nil)
+    sig { params(fields: FieldInputMap, deinit_entries: T::Array[Schemas::InlineStructDeinitEntry]).void }
+    def initialize(fields:, deinit_entries: [])
       @fields = T.let(fields.transform_values { |field_type|
         Type.new(field_type)
       }, Schemas::InlineStructVariant::FieldMap)
-      @deinit_entries = T.let(deinit_entries, T.nilable(T::Array[Schemas::InlineStructDeinitEntry]))
+      @deinit_entries = T.let(deinit_entries, T::Array[Schemas::InlineStructDeinitEntry])
+    end
+
+    sig { returns(T::Array[Schemas::InlineStructDeinitEntry]) }
+    def deinit_entries
+      @deinit_entries
+    end
+
+    sig { params(entries: T::Array[Schemas::InlineStructDeinitEntry]).returns(T::Array[Schemas::InlineStructDeinitEntry]) }
+    def deinit_entries=(entries)
+      @deinit_entries = entries
     end
 
     sig { returns(T::Hash[String, Type]) }

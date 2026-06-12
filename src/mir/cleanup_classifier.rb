@@ -534,7 +534,7 @@ module CleanupClassifier
   #   3. via_pointer: true        — needs_pointer_passing? types (HashMap,
   #                                  Pool) arrive at the callee already as
   #                                  *T; cleanup must NOT re-apply &.
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[CleanupEntry])) }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
     fn_node.params.select { |p| p.takes }.each do |p|
       ti = p.type

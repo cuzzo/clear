@@ -541,7 +541,7 @@ end
         builder.fill(T.must(cap_indices[i]), [],
           Segments::LockSuspend.new(with_stmt, cap, prior,
                                     post_acquire, after_idx,
-                                    T.must(lock_indices[i]), lock_indices[0...i]))
+                                    T.must(lock_indices[i]), lock_indices[0...i] || []))
       end
 
       release_stmts = T.let([], T::Array[MIR::Node])

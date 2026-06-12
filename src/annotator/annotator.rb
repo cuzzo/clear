@@ -767,9 +767,8 @@ private
   # @return [Symbol] The final resolved/inferred return type
   #
   # Visit a statement body.
-  sig { params(stmts: T.nilable(T::Array[AST::Node])).void }
+  sig { params(stmts: T::Array[AST::Node]).void }
   def visit_stmts(stmts)
-    return unless stmts
     stmts.each do |stmt|
       visit(stmt)
     end

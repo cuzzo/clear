@@ -178,7 +178,7 @@ module EscapeAnalysis
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
 
     fn_nodes.each do |name, fn|
-      facts_by_name[name] = function_facts(fn, body_summaries&.[](name), hoist_bindings&.[](name)) if fn.body
+      facts_by_name[name] = function_facts(fn, body_summaries&.[](name), hoist_bindings&.[](name) || []) if fn.body
     end
 
     facts_by_name.each_value do |facts|
@@ -865,8 +865,8 @@ module EscapeAnalysis
     facts.symbols[name]
   end
 
-  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary), hoist_bindings: T.nilable(T::Array[AST::VarDecl])).returns(FunctionFacts) }
-  private_class_method def self.function_facts(fn, summary = nil, hoist_bindings = nil)
+  sig { params(fn: AST::FunctionDef, summary: T.nilable(Annotator::Phases::FunctionBodySummary), hoist_bindings: T::Array[AST::VarDecl]).returns(FunctionFacts) }
+  private_class_method def self.function_facts(fn, summary = nil, hoist_bindings = [])
     symbols = T.let({}, T::Hash[String, SymbolEntry])
     binding_values = T.let({}, T::Hash[String, T::Array[AST::Locatable]])
     return_values = T.let([], T::Array[AST::Node])
@@ -882,10 +882,10 @@ module EscapeAnalysis
         record_symbol_fact!(node, symbols) if node.is_a?(AST::BindExpr)
         assignment_nodes << node
       end
-      hoist_bindings&.each { |node| record_binding_fact!(node, symbols, binding_values) }
+      hoist_bindings.each { |node| record_binding_fact!(node, symbols, binding_values) }
       summary.return_nodes.each { |node| return_values << node.value if node.value }
       escape_nodes.concat(summary.escape_nodes)
-      escape_nodes.concat(hoist_bindings) if hoist_bindings
+      escape_nodes.concat(hoist_bindings)
       return FunctionFacts.new(
         fn: fn,
         symbols: symbols,

@@ -30,7 +30,7 @@ module FixableHelper
 
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
-  sig { params(reg: T.nilable(AST::VarDecl), name: String).returns(T.nilable(T::Array[String])) }
+  sig { params(reg: T.nilable(AST::VarDecl), name: String).void }
   def emit_mutable_unused_finding!(reg, name)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless reg && reg.token

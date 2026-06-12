@@ -805,21 +805,21 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     left = T.cast(lower(node.left), MIR::Node)
     snapshot_stmts = smooth_snapshot_stmts(node, left)
-    left = MIR::Ident.new("__snap_input") if snapshot_stmts
+    left = MIR::Ident.new("__snap_input") unless snapshot_stmts.empty?
     call_mir = lower_smooth_call_rhs(node)
-    return call_mir unless snapshot_stmts
+    return call_mir if snapshot_stmts.empty?
 
     label = "__snap_blk"
     MIR::BlockExpr.new(label, snapshot_stmts + [MIR::BreakStmt.new(label, call_mir)])
   end
 
-  sig { params(node: AST::BinaryOp, left: MIR::Node).returns(T.nilable(T::Array[MIR::Stmt])) }
+  sig { params(node: AST::BinaryOp, left: MIR::Node).returns(T::Array[MIR::Stmt]) }
   def smooth_snapshot_stmts(node, left)
     T.bind(self, MIRLowering) rescue nil
-    return nil unless current_function_has_catch? && current_function_snapshot_types.size == 1
+    return [] unless current_function_has_catch? && current_function_snapshot_types.size == 1
 
     t = Type.new(node.left.full_type!)
-    return nil unless t.catch_snapshot_payload?
+    return [] unless t.catch_snapshot_payload?
 
     snap_zig_type = transpile_type(t)
     [

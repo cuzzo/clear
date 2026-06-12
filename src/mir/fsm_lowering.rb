@@ -304,11 +304,11 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: AST::ThenStep).returns(T.nilable(T::Array[MIR::Emittable])) }
+  sig { params(step: AST::ThenStep).returns(T::Array[MIR::Emittable]) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step.expr)
-    return nil if mir.nil?
+    return [] if mir.nil?
     pending = flush_pending
     # `lower_var_decl` may return an Array (e.g. [AllocMark, Let,
     # Cleanup]) for cleanup-needing bindings. After the FreshHeapCopy
@@ -319,7 +319,7 @@ module FsmLowering
     if mir.is_a?(Array)
       return pending + mir.compact
     end
-    return nil unless mir.is_a?(MIR::Emittable)
+    return [] unless mir.is_a?(MIR::Emittable)
 
     main = wrap_step_as_stmt(step, mir)
     return pending if main.nil?
@@ -508,7 +508,7 @@ module FsmLowering
         capture_state.current_bg_pointer_captures = pointer_captures
         function_state.pending_stmts = []
         with_fiber_capture_map(capture_map, rt_override: bg_rt) do
-          lower_finalized_fsm_step_mir(clause.body || [], no_result: true)
+          lower_finalized_fsm_step_mir(clause.body, no_result: true)
         end
       ensure
         function_state.pending_stmts = prev_fiber_pending

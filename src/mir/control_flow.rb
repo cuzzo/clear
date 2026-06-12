@@ -1484,13 +1484,13 @@ class UseAfterMoveChecker
   end
 
   # Check a single identifier read against the ownership state.
-  sig { params(node: AST::Identifier, state: OwnershipDataflow::OwnershipState).returns(T.nilable(T::Array[String])) }
+  sig { params(node: AST::Identifier, state: OwnershipDataflow::OwnershipState).void }
   def check_identifier_node_read(node, state)
     place = OwnershipDataflow.place_for_binding_node(node.name.to_s, node)
     check_identifier_read(node.name.to_s, state, node.token, place)
   end
 
-  sig { params(name: String, state: OwnershipDataflow::OwnershipState, token: Lexer::Token, place: T.nilable(OwnershipDataflow::PlaceId)).returns(T.nilable(T::Array[String])) }
+  sig { params(name: String, state: OwnershipDataflow::OwnershipState, token: Lexer::Token, place: T.nilable(OwnershipDataflow::PlaceId)).void }
   def check_identifier_read(name, state, token, place = nil)
     entry = OwnershipDataflow.lookup_state_entry(state, place || name)
     return unless entry  # not tracked (not in scope, or primitive)
@@ -1540,11 +1540,9 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[AST::Node]), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
+  sig { params(stmts: T::Array[AST::Node], schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
   def self.walk_stmts!(stmts, schema_lookup = nil, fn_nodes = {})
-    return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s, schema_lookup, fn_nodes) }
-    nil
   end
 
   sig { params(stmt: T.nilable(T.any(AST::Node, Struct)), schema_lookup: T.nilable(Proc), fn_nodes: FnNodes).void }
@@ -1701,18 +1699,17 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
-  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).void }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     AST.each_locatable(nodes, descend_functions: true) do |node|
       next unless visited.add?(node.object_id)
       yield node
     end
-    nil
   end
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).void }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1882,11 +1879,9 @@ class BorrowChecker
     token.line ? " (line #{token.line})" : ""
   end
 
-  sig { params(stmts: T.nilable(T::Array[AST::Node]), state: BorrowState).void }
+  sig { params(stmts: T::Array[AST::Node], state: BorrowState).void }
   def check_stmts(stmts, state)
-    return unless stmts.is_a?(Array)
     stmts.each { |stmt| check_stmt(stmt, state) }
-    nil
   end
 
   sig { params(stmt: AST::Node, state: BorrowState).void }

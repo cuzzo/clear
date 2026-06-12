@@ -715,14 +715,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.untyped, block: T.untyped).void }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped, block: T.untyped).void }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -740,7 +740,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(expr: T.untyped, block: T.untyped).void }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -1257,7 +1257,7 @@ module AST
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil
     const :message, T.nilable(Node), default: nil
-    const :body, T.nilable(T::Array[Node]), default: nil
+    const :body, T::Array[Node], default: []
   end
 
   class ErrorClause < T::Struct
@@ -1269,7 +1269,7 @@ module AST
     const :token, T.nilable(Lexer::Token)
     const :value, T.nilable(Node), default: nil
     const :message, T.nilable(Node), default: nil
-    const :body, T.nilable(T::Array[Node]), default: nil
+    const :body, T::Array[Node], default: []
     prop :matched_types, T::Array[Symbol], default: []
     prop :bubble_types, T::Array[Symbol], default: []
 
@@ -1974,13 +1974,17 @@ module AST
 
     sig { returns(T::Array[AST::WithBlock]) }
     def semantic_with_blocks
-      @semantic_with_blocks = T.let(@semantic_with_blocks, T.nilable(T::Array[AST::WithBlock]))
-      @semantic_with_blocks ||= []
+      raw_blocks = instance_variable_get(:@semantic_with_blocks)
+      unless raw_blocks.is_a?(Array)
+        raw_blocks = T.let([], T::Array[AST::WithBlock])
+        instance_variable_set(:@semantic_with_blocks, raw_blocks)
+      end
+      raw_blocks
     end
 
     sig { params(blocks: T::Array[AST::WithBlock]).void }
     def semantic_with_blocks=(blocks)
-      @semantic_with_blocks = T.let(blocks, T.nilable(T::Array[AST::WithBlock]))
+      instance_variable_set(:@semantic_with_blocks, blocks)
     end
   end
 
@@ -2408,7 +2412,8 @@ module AST
     const :name, String
     const :params, T::Array[UnionMethodParamRequirement]
     const :return_type, T.nilable(Type), default: nil
-    const :body, T.nilable(T::Array[AST::Node]), default: nil
+    const :body, T::Array[AST::Node], default: []
+    const :has_default_body, T::Boolean, default: false
     const :visibility, Symbol, default: :package
   end
 

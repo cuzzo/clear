@@ -26,10 +26,14 @@ class IntrinsicEmit < T::Struct
 
   # --- FSM emission fragments ---
   # FsmOps DSL op-objects, not strings -- passthrough, no coercion.
-  prop :fsm_setup,           T.nilable(T::Array[T.untyped]), default: nil
-  prop :fsm_state_decls,     T.nilable(T::Array[T.untyped]), default: nil
-  prop :fsm_finish_block,    T.nilable(T::Array[T.untyped]), default: nil
-  prop :fsm_state_finalize,  T.nilable(T::Array[T.untyped]), default: nil
+  prop :fsm_setup,           T::Array[T.untyped],            default: []
+  prop :fsm_state_decls,     T::Array[T.untyped],            default: []
+  prop :fsm_finish_block,    T::Array[T.untyped],            default: []
+  prop :fsm_state_finalize,  T::Array[T.untyped],            default: []
+  prop :fsm_setup_present,          T::Boolean,              default: false
+  prop :fsm_state_decls_present,    T::Boolean,              default: false
+  prop :fsm_finish_block_present,   T::Boolean,              default: false
+  prop :fsm_state_finalize_present, T::Boolean,              default: false
   prop :fsm_finish_value,    T.untyped,                      default: nil
 
   # --- Dispatch flags ---
@@ -73,7 +77,7 @@ class IntrinsicEmit < T::Struct
 
   # --- Arg-shape (element typing deferred; union keeps it bounded) ---
   prop :arity,           T.nilable(Integer),                 default: nil
-  prop :takes_args,      T.nilable(T::Array[Integer]),       default: nil
+  prop :takes_args,      T::Array[Integer],                  default: []
 
   # --- Procs (varying arity by role) ---
   prop :label,           T.nilable(Proc),                    default: nil

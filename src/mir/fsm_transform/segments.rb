@@ -119,11 +119,11 @@ module FsmTransform
           post_acquire_idx: T.nilable(Integer),
           next_index: T.nilable(Integer),
           lock_index: T.nilable(Integer),
-          prior_lock_indices: T.nilable(T::Array[Integer]),
+          prior_lock_indices: T::Array[Integer],
         ).void
       end
-      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = nil)
-        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices || [])
+      def initialize(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index = nil, prior_lock_indices = [])
+        super(with_node, cap, prior_caps, post_acquire_idx, next_index, lock_index || 0, prior_lock_indices)
       end
 
       sig { returns(Symbol) }
@@ -148,6 +148,10 @@ module FsmTransform
     # A segment is a list of AST::Stmt nodes followed by a Tail.
     Segment = Struct.new(:index, :stmts, :tail)
 
+    class SplitResult < T::Struct
+      const :segments, T::Array[Segment]
+    end
+
     module_function
 
     sig { params(tail: T.untyped).returns(T::Boolean) }
@@ -167,7 +171,7 @@ module FsmTransform
     #
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
-    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(T::Array[Segment])) }
+    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(SplitResult)) }
     def split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
@@ -175,14 +179,14 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       body = rewrite_pipeline_io(body)
 
-      if (loop_segments = split_while_loop_next(body))
-        return loop_segments
+      if (loop_result = split_while_loop_next(body))
+        return loop_result
       end
 
       return nil if contains_unsupported_shape?(body)
 
-      segments = []
-      current_stmts = []
+      segments = T.let([], T::Array[Segment])
+      current_stmts = T.let([], T::Array[T.untyped])
 
       flush = lambda do |tail|
         segments << Segment.new(segments.length, current_stmts, tail)
@@ -199,7 +203,7 @@ module FsmTransform
       end
       flush.call(Done.new(nil))
 
-      segments
+      SplitResult.new(segments: segments)
     end
 
     # Stage 2 splitter: pre-stmts + WhileLoop containing one top-level
@@ -212,7 +216,7 @@ module FsmTransform
     #   2  loop_pre         -- NextSuspend / IoSuspend -> 3
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
-    sig { params(body: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+    sig { params(body: T.untyped).returns(T.nilable(SplitResult)) }
     def split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
@@ -270,13 +274,14 @@ module FsmTransform
       cond_node = loop_node.respond_to?(:condition) ? loop_node.condition : nil
       return nil if cond_node.nil?
 
-      [
+      segments = [
         Segment.new(0, pre,        Goto.new(1)),
         Segment.new(1, [],         CondBranch.new(cond_node, 2, 4)),
         Segment.new(2, loop_pre,   sus_tail),        # NextSuspend or IoSuspend
         Segment.new(3, loop_post,  LoopBack.new(1)),
         Segment.new(4, post,       Done.new(nil)),
       ]
+      SplitResult.new(segments: segments)
     end
 
     # Stage 1 punt: anything outside top-level linear stmts +

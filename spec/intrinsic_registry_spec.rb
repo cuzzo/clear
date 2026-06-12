@@ -250,6 +250,7 @@ RSpec.describe IntrinsicRegistry do
       takes_args: [0],
       narrows_receiver_collection: true,
       fsm_setup: [],
+      fsm_setup_present: true,
     )
     contract = IntrinsicContract.from_emit(emit, [receiver_param, value_param])
 

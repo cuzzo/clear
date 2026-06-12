@@ -236,7 +236,7 @@ module Hoist
     blk.call(node) if matches.call(node)
     # A body-bearing control-flow node: walk only its condition/subject
     # expressions, never its statement bodies.
-    children = non_body_exprs(node) || node.to_a
+    children = non_body_exprs(node)
     children.each do |child|
       each_call_like_child(child, matches, &blk)
     end
@@ -252,8 +252,8 @@ module Hoist
   end
 
   # For a body-bearing control-flow node, the expression members that
-  # are NOT statement bodies. nil for a plain node (recurse normally).
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  # are NOT statement bodies. Plain nodes recurse through their fields normally.
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
   def non_body_exprs(node)
     case node
     when AST::IfStatement, AST::WhileLoop, AST::WhileBindLoop
@@ -261,6 +261,7 @@ module Hoist
     when AST::ForRange                     then [node.start_expr, node.end_expr]
     when AST::ForEach                      then [node.collection]
     when AST::MatchStatement               then [node.expr]
+    else node.to_a
     end
   end
 

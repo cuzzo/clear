@@ -91,7 +91,7 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
-  sig { params(node_or_token: T.untyped, message: String).returns(T.nilable(T::Array[String])) }
+  sig { params(node_or_token: T.untyped, message: String).void }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)

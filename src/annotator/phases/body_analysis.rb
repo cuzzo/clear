@@ -37,7 +37,8 @@ module Annotator
     class BodyFactContext < T::Struct
       const :record_call_sites, T::Boolean
       const :failure_absorbed, T::Boolean
-      const :with_scope_stack, T.nilable(T::Array[AST::WithBlock])
+      const :track_with_scope_stack, T::Boolean
+      const :with_scope_stack, T::Array[AST::WithBlock]
     end
 
     class BodyFactFrame < T::Struct
@@ -46,7 +47,8 @@ module Annotator
       const :summary, BodyScanSummary
       prop :record_call_sites, T::Boolean, default: true
       prop :failure_absorbed, T::Boolean, default: false
-      prop :with_scope_stack, T.nilable(T::Array[AST::WithBlock]), factory: -> { [] }
+      prop :track_with_scope_stack, T::Boolean, default: true
+      prop :with_scope_stack, T::Array[AST::WithBlock], factory: -> { [] }
       prop :next_local_ordinal, Integer, default: 0
       prop :next_place_ordinal, Integer, default: 0
       prop :next_call_site_ordinal, Integer, default: 0
@@ -73,7 +75,8 @@ module Annotator
         BodyFactContext.new(
           record_call_sites: record_call_sites,
           failure_absorbed: failure_absorbed,
-          with_scope_stack: with_scope_stack&.dup
+          track_with_scope_stack: track_with_scope_stack,
+          with_scope_stack: with_scope_stack.dup
         )
       end
 
@@ -81,7 +84,8 @@ module Annotator
       def restore_context(context)
         self.record_call_sites = context.record_call_sites
         self.failure_absorbed = context.failure_absorbed
-        self.with_scope_stack = context.with_scope_stack&.dup
+        self.track_with_scope_stack = context.track_with_scope_stack
+        self.with_scope_stack = context.with_scope_stack.dup
       end
 
     end
@@ -189,7 +193,8 @@ module Annotator
           snapshots = frames.map(&:context)
           frames.each do |frame|
             frame.record_call_sites = false
-            frame.with_scope_stack = nil
+            frame.track_with_scope_stack = false
+            frame.with_scope_stack = []
           end
           yield
         ensure
@@ -208,7 +213,10 @@ module Annotator
         begin
           frames = body_fact_frames
           snapshots = frames.map(&:context)
-          frames.each { |frame| frame.with_scope_stack = nil }
+          frames.each do |frame|
+            frame.track_with_scope_stack = false
+            frame.with_scope_stack = []
+          end
           yield
         ensure
           frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
@@ -246,7 +254,7 @@ module Annotator
         begin
           frames = body_fact_frames
           snapshots = frames.map(&:context)
-          frames.each { |frame| frame.with_scope_stack = [scope] if frame.with_scope_stack }
+          frames.each { |frame| frame.with_scope_stack = [scope] if frame.track_with_scope_stack }
           yield
         ensure
           frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
@@ -334,7 +342,9 @@ module Annotator
           summary = frame.summary
           if node.is_a?(AST::Locatable) && !node.is_a?(AST::FunctionDef)
             summary.escape_nodes << node
-            frame.with_scope_stack&.each { |scope| (summary.with_scope_nodes[scope.object_id] ||= []) << node }
+            if frame.track_with_scope_stack
+              frame.with_scope_stack.each { |scope| (summary.with_scope_nodes[scope.object_id] ||= []) << node }
+            end
           end
 
           if suspend_kind && node.is_a?(AST::Locatable)

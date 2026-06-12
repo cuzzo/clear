@@ -40,7 +40,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
-  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).returns(T.nilable(T::Array[String])) }
+  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).void }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}

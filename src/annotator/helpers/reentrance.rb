@@ -31,7 +31,7 @@ module ReentranceBridge
   # Compute and stamp the canonical reentrance_kind for every FunctionDef
   # in @fn_nodes. Idempotent. Validates REQUIRES clauses against the
   # parameter list of each function.
-  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(program_node: AST::Program).void }
   def bridge_reentrance!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
     program_node.statements.each do |stmt|
@@ -93,7 +93,7 @@ module ReentranceBridge
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
 
-    suggestion_reason = T.let(nil, T.nilable(T::Array[String]))
+    suggestion_reason = T.let([], T::Array[String])
     if thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
       suggestion_reason = [
         "EFFECTS REENTRANT:TAIL_CALL",
@@ -105,9 +105,9 @@ module ReentranceBridge
         "the body matches the simple-recurrence shape; heap CPS keeps the fiber stack at depth=1"
       ]
     end
-    return if suggestion_reason.nil?
+    return if suggestion_reason.empty?
 
-    suggestion = T.must(suggestion_reason[0])
+    suggestion = T.must(suggestion_reason.first)
     edits = effects_clause_edits(fn_node, suggestion)
     return if edits.empty?
 
@@ -173,7 +173,7 @@ module ReentranceBridge
 
   # Tail-call lowering relies on recursion becoming a self-loop; any
   # wrapped or nested self-call would still consume real stack.
-  sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).returns(T.nilable(T::Array[AST::FuncCall])) }
+  sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).void }
   def validate_tail_call!(fn_node, body_scan)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_name = fn_node.name

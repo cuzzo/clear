@@ -364,7 +364,7 @@ module Annotator
 
         reject_borrowed_index_assignment_move!(node)
         path = get_path_to_root(node.value)
-        return if path.nil?
+        return if path.empty?
         value_type = Type.new(node.value.resolved_type)
         return unless value_type.requires_move?
 
@@ -446,7 +446,7 @@ module Annotator
         return unless actual_arg
 
         path = get_path_to_root(actual_arg)
-        return if path.nil?
+        return if path.empty?
 
         root_var = path.first.to_s
         borrowed_scope = lookup_scope_for(root_var)
@@ -515,7 +515,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         path = get_path_to_root(node.name)
-        return if path.nil?
+        return if path.empty?
         root_name = path.first.to_s
         unless ownership_graph.can_write?(root_name)
           error!(node, :ASSIGN_WHILE_BORROWED, name: root_name)
@@ -649,7 +649,7 @@ module Annotator
         end
       end
 
-      sig { params(node: T.any(AST::Node, String, Symbol)).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(node: T.any(AST::Node, String, Symbol)).returns(T::Array[Symbol]) }
       def get_path_to_root(node)
         T.bind(self, SemanticAnnotator)
 
@@ -659,7 +659,7 @@ module Annotator
           path.unshift(curr.is_a?(AST::GetField) ? curr.field.to_sym : :*)
           curr = curr.target
         end
-        return nil unless curr.is_a?(AST::Identifier)
+        return [] unless curr.is_a?(AST::Identifier)
         path.unshift(curr.name.to_sym)
         path
       end
@@ -728,7 +728,7 @@ module Annotator
 
         declared_names = declared.flat_map do |n|
           path = get_path_to_root(n)
-          path ? [path.first.to_s] : []
+          path.empty? ? [] : [T.must(path.first).to_s]
         end
 
         source_names = sources.map do |s|
@@ -1040,7 +1040,10 @@ module Annotator
         return [] if rl.nil?
         return [:wildcard] if rl == :wildcard
         sources = rl.is_a?(Array) ? rl : [rl]
-        sources.map { |s| get_path_to_root(s)&.join(".") }.compact
+        sources.filter_map do |source|
+          path = get_path_to_root(source)
+          path.join(".") unless path.empty?
+        end
       end
 
       # Backward-compat shim: legacy single-binding callers got a single

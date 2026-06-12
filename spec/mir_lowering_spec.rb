@@ -2078,9 +2078,6 @@ RSpec.describe MIRLowering do
       expect(lits.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
     end
 
-    it "returns empty array for nil" do
-      expect(lowering.lower_body(nil)).to eq([])
-    end
   end
 
   # =========================================================================

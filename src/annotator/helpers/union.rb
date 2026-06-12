@@ -34,12 +34,12 @@ module UnionAnalysis
       local = scope&.resolve_entry(fn_name)
 
       if local.nil?
-        if req.body
+        if req.has_default_body
           # No concrete override — synthesize a top-level function from the default body.
           fn_params = req.params.map(&:to_param)
           fn_node = AST::FunctionDef.new(
             req.token, req.name, fn_params, [], req.return_type,
-            nil, T.must(req.body), nil, nil, req_vis, nil, nil
+            nil, req.body, nil, nil, req_vis, nil, nil
           )
           queue_synthetic_function!(fn_node)
           next

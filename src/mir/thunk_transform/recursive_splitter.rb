@@ -90,10 +90,10 @@ module ThunkTransform
     # When the shape matches but codegen isn't yet wired, the
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
-    sig { params(body: T.nilable(T::Array[AST::Node]), fn_name: String, lowering: Object).returns(T.nilable(Plan)) }
+    sig { params(body: T::Array[AST::Node], fn_name: String, lowering: Object).returns(T.nilable(Plan)) }
     def split(body, fn_name, lowering)
       _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
-      return nil if body.nil? || body.empty?
+      return nil if body.empty?
 
       # Walk top-level statements: zero or more IF base-cases
       # (each: `IF cond -> RETURN expr;`), then exactly one final
@@ -136,10 +136,10 @@ module ThunkTransform
     # variant in place). Returns nil if the body has any non-tail
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
-    sig { params(body: T.nilable(T::Array[AST::Node]), fn_name: String, partner_names: T::Array[String], lowering: Object).returns(T.nilable(MutualPlan)) }
+    sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String], lowering: Object).returns(T.nilable(MutualPlan)) }
     def split_mutual(body, fn_name, partner_names, lowering)
       _ = lowering
-      return nil if body.nil? || body.empty?
+      return nil if body.empty?
       cycle = (partner_names + [fn_name]).map(&:to_s).to_set
 
       stmts = body
@@ -243,20 +243,20 @@ module ThunkTransform
       right_call = direct_self_call(expr.right, fn_name)
 
       if left_call && !contains_self_call?(expr.right, fn_name)
-        RecursiveCombine.new(lhs: expr.right, op: expr.op, args: left_call)
+        RecursiveCombine.new(lhs: expr.right, op: expr.op, args: left_call.args)
       elsif right_call && !contains_self_call?(expr.left, fn_name)
-        RecursiveCombine.new(lhs: expr.left, op: expr.op, args: right_call)
+        RecursiveCombine.new(lhs: expr.left, op: expr.op, args: right_call.args)
       else
         nil
       end
     end
 
-    # If `node` is exactly `fn_name(args...)`, return its args.
+    # If `node` is exactly `fn_name(args...)`, return the call node.
     # Returns nil otherwise (including for nested self-calls).
-    sig { params(node: AST::Node, fn_name: String).returns(T.nilable(T::Array[AST::Node])) }
+    sig { params(node: AST::Node, fn_name: String).returns(T.nilable(AST::FuncCall)) }
     def direct_self_call(node, fn_name)
       return nil unless node.is_a?(AST::FuncCall) && node.name == fn_name
-      node.args
+      node
     end
 
     # Recursive subtree walk: returns true iff any AST::FuncCall

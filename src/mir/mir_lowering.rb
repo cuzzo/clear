@@ -218,11 +218,12 @@ class MIRLowering
     const :items, T::Array[MIR::Emittable]
     const :type_items, T::Array[MIR::Emittable]
 
-    sig { params(key: Symbol).returns(T.nilable(T::Array[MIR::Emittable])) }
+    sig { params(key: Symbol).returns(T::Array[MIR::Emittable]) }
     def [](key)
       case key
       when :items then items
       when :type_items then type_items
+      else []
       end
     end
   end
@@ -1019,10 +1020,8 @@ class MIRLowering
   # Lower a body (array of statements) into an array of MIR nodes.
   # Flushes function_state.pending_stmts before each statement so hoisted Lets (from
   # hoist_alloc calls inside lower()) precede the statement that uses them.
-  sig { params(stmts: T.nilable(T::Array[LowerableStmt])).returns(T::Array[MIR::Emittable]) }
+  sig { params(stmts: T::Array[LowerableStmt]).returns(T::Array[MIR::Emittable]) }
   def lower_body(stmts)
-    return [] unless stmts
-
     finalize_lowered_body_construction!(construct_lowered_body(stmts))
   end
 
@@ -2434,7 +2433,7 @@ class MIRLowering
     }
     return lower_body(stmts) unless last_user_idx
 
-    prefix_lowered = lower_body(stmts[0...last_user_idx])
+    prefix_lowered = lower_body(stmts[0...last_user_idx] || [])
     result_mir = lower(stmts[last_user_idx])
     pending = flush_pending
     suffix_lowered = lower_body(stmts.drop(last_user_idx + 1))
@@ -2819,7 +2818,7 @@ class MIRLowering
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_entries = data.deinit_entries || []
+      deinit_entries = data.deinit_entries
       deinit_stmts = deinit_entries.flat_map { |de|
         self_field = MIR::FieldGet.new(self_ref, de.field)
         case de.kind

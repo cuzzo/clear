@@ -57,7 +57,7 @@ module MigrationSuggesterHelpers
   # `classify_uses!` (also shared) handles the non-WITH cases
   # (Identifier disqualify, FuncCall/MethodCall arg disqualify,
   # ReturnNode disqualify).
-  sig { params(fn_node: AST::FunctionDef, annotator: SemanticAnnotator).returns(T.nilable(T::Array[Hash])) }
+  sig { params(fn_node: AST::FunctionDef, annotator: SemanticAnnotator).returns(T::Array[Hash]) }
   def analyze_fn(fn_node, annotator)
     candidates = {}
     walk_recursive(fn_node.body) do |node|
@@ -81,7 +81,7 @@ module MigrationSuggesterHelpers
   # yielded directly. Suggesters need to see WITH blocks nested inside
   # those BG bodies, so descend into VarDecl / BindExpr / Assignment
   # values too.
-  sig { params(body: Array, visitor: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: Array, visitor: T.untyped).void }
   def walk_recursive(body, &visitor)
     AST.walk_body(body) do |node|
       yield node
@@ -93,7 +93,6 @@ module MigrationSuggesterHelpers
         end
       end
     end
-    nil
   end
 
   # Generic non-WITH disqualifications:
@@ -103,7 +102,7 @@ module MigrationSuggesterHelpers
   #   - ReturnNode value (binding escapes via RETURN)
   # Per-suggester WITH handling is dispatched to the suggester's
   # `classify_with_block!`.
-  sig { params(node: T.untyped, candidates: T::Hash[String, Hash]).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: T.untyped, candidates: T::Hash[String, Hash]).void }
   def classify_uses!(node, candidates)
     case node
     when AST::WithBlock
@@ -122,7 +121,6 @@ module MigrationSuggesterHelpers
       info = val.is_a?(AST::Identifier) ? candidates[val.name] : nil
       info[:disqualified] = true if info
     end
-    nil
   end
 
   # Class-name-based control-flow detection. Used by the body-stmt

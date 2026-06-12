@@ -129,42 +129,46 @@ end
 module FixCollector
     extend T::Sig
 
-  @findings = T.let(nil, T.nilable(T::Array[FixableFinding]))
+  @findings = T.let([], T::Array[FixableFinding])
+  @enabled = T.let(false, T::Boolean)
 
   sig { returns(T::Array[FixableFinding]) }
   def self.enable!
-    @findings = []
+    @findings.clear
+    @enabled = true
+    @findings
   end
 
-  sig { returns(T.untyped) }
+  sig { void }
   def self.disable!
-    @findings = nil
+    @findings.clear
+    @enabled = false
   end
 
   sig { returns(T::Boolean) }
   def self.enabled?
-    !@findings.nil?
+    @enabled
   end
 
-  sig { params(finding: FixableFinding).returns(T.nilable(T::Array[FixableFinding])) }
+  sig { params(finding: FixableFinding).void }
   def self.push(finding)
-    @findings << finding if @findings
+    @findings << finding if @enabled
   end
 
   sig { returns(T::Array[FixableFinding]) }
   def self.drain
-    out = @findings || []
-    @findings = [] if @findings
+    out = @findings.dup
+    @findings.clear if @enabled
     out
   end
 
   sig { returns(T::Boolean) }
   def self.has_fatal?
-    !@findings.nil? && @findings.any?(&:fatal?)
+    @enabled && @findings.any?(&:fatal?)
   end
 
   sig { returns(Integer) }
   def self.fatal_count
-    @findings ? @findings.count(&:fatal?) : 0
+    @enabled ? @findings.count(&:fatal?) : 0
   end
 end

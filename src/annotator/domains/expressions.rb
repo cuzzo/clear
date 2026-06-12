@@ -335,11 +335,11 @@ module Annotator
       # Returns the Type of the last value-producing expression in a branch body,
       # or nil if the branch doesn't end with a usable expression.
       # Used to determine whether an IF/MATCH node can be promoted to expression mode.
-      sig { params(branch: T.nilable(T::Array[AST::Node])).returns(T.nilable(Type)) }
+      sig { params(branch: T::Array[AST::Node]).returns(T.nilable(Type)) }
       def expr_result_type(branch)
         T.bind(self, SemanticAnnotator)
 
-        return nil if branch.nil? || branch.empty?
+        return nil if branch.empty?
         last = branch.last
         # ELSE_IF chain: the last element is a nested IfStatement — use its result type
         if last.is_a?(AST::IfStatement)

@@ -230,7 +230,7 @@ module EffectTracker
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
   # families are concrete, or keeps them MAYBE when polymorphism propagates.
-  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).returns(T.nilable(T::Array[T::Array[T::Set[Symbol]]])) }
+  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).void }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_ctx = current_fn_ctx
@@ -1154,7 +1154,7 @@ module EffectTracker
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
   # calls to plain EFFECTS REENTRANT or EXTERN FN functions. Stops at FunctionDef boundaries.
-  sig { params(stmts: AstScanInput, loop_node: TightLoopNode).returns(T.nilable(T::Array[AST::Node])) }
+  sig { params(stmts: AstScanInput, loop_node: TightLoopNode).void }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map

@@ -1625,7 +1625,7 @@ RSpec.describe MIRChecker do
       errors = checker.errors.join("\n")
       expect(errors).to include("FSM-consumed BG body")
       expect(errors).to include("MIR::StreamSpawn has no typed ExecutionBoundaryFact")
-      expect(errors).to include("MIR::DoBlock has no typed ExecutionBoundaryFact array")
+      expect(errors).to include("MIR::DoBlock has 0 boundary facts for 1 branch bodies")
       expect(errors).to include("invalid boundary kind")
       expect(errors).to include("invalid boundary dispatch")
     end

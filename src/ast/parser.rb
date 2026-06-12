@@ -50,15 +50,15 @@ class Parser
   @@suffix_rules = T.let({}, T::Hash[T.untyped, T.untyped])
   @gradual_mode = T.let(false, T.nilable(T::Boolean))
 
-  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
-  def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
-    if pattern
+  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
+  def self.stmt(type, value, node_class = nil, pattern = [], inject: [], &block)
+    unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@stmt_rules[[type, value]] = lambda do
         T.bind(self, Parser) rescue nil
         start_token = current
         args = process_pattern(pattern)
-        T.must(args).concat(inject)
+        args.concat(inject)
         T.unsafe(node_class).new(start_token, *args)
       end
     else
@@ -66,9 +66,9 @@ class Parser
     end
   end
 
-  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(Proc) }
-  def self.primary(type, value=nil, node_class = nil, pattern = nil,  &block)
-    if pattern
+  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T::Array[T.untyped], block: T.untyped).returns(Proc) }
+  def self.primary(type, value=nil, node_class = nil, pattern = [],  &block)
+    unless pattern.empty?
       # If pattern provided, create a block that runs the engine
       @@primary_rules[[type, value]] = lambda do
         T.bind(self, Parser) rescue nil
@@ -492,7 +492,7 @@ class Parser
   end
 
   ## START PATTERN DSL
-  sig { params(pattern: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(pattern: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def process_pattern(pattern)
     captures = []
 
@@ -1206,10 +1206,12 @@ class Parser
           ret_type = parse_type_annotation
         end
         # Optional default body: FN name(...) RETURNS T -> body END
-        default_body = T.let(nil, T.nilable(T::Array[AST::Node]))
+        default_body = T.let([], T::Array[AST::Node])
+        has_default_body = false
         if match?(:ARROW, '->')
           consume(:ARROW, '->')
           default_body = T.cast(parse_block_body(['END']), T::Array[AST::Node])
+          has_default_body = true
           consume(:KEYWORD, 'END')
         end
         method_reqs << AST::UnionMethodRequirement.new(
@@ -1218,6 +1220,7 @@ class Parser
           params: raw_params,
           return_type: ret_type,
           body: default_body,
+          has_default_body: has_default_body,
           visibility: stub_vis,
         )
       else
@@ -1634,7 +1637,7 @@ class Parser
 
   # REENTRANT, THUNK, and TAIL_CALL parse as TYPE_IDs matched by value because
   # the only context they appear in is right after EFFECTS.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
@@ -1997,7 +2000,8 @@ class Parser
 
     # Paren-bind form: IF (expr AS name) [&& (expr2 AS name2)] THEN ...
     # Paren primary marks BinaryOp(:BIND_VAR) with paren_bind:true when (expr AS name) is parsed.
-    if (bindings = extract_paren_bindings(condition, if_token))
+    bindings = extract_paren_bindings(condition, if_token)
+    unless bindings.empty?
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -2039,27 +2043,27 @@ class Parser
   end
 
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
-  # Returns nil if condition is not a paren-bind pattern.
+  # Returns [] if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[AST::Binding])) }
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T::Array[AST::Binding]) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
       if node.op == :BIND_VAR
-        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : nil
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : []
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)
         # Only treat as bind-chain if at least one side is a paren-bind
-        if left_binds || right_binds
+        unless left_binds.empty? && right_binds.empty?
           # Validate: bare binds in && position are illegal
-          validate_no_bare_bind!(node.left,  if_token) unless left_binds
-          validate_no_bare_bind!(node.right, if_token) unless right_binds
-          return (left_binds || []).concat(right_binds || [])
+          validate_no_bare_bind!(node.left,  if_token) if left_binds.empty?
+          validate_no_bare_bind!(node.right, if_token) if right_binds.empty?
+          return left_binds.concat(right_binds)
         end
       end
     end
-    nil
+    []
   end
 
   # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
@@ -3048,19 +3052,19 @@ class Parser
   sig do
     params(
       result: CapabilityParseResult,
-      allowed_values: T.nilable(T::Array[String]),
+      allowed_values: T::Array[String],
       cap_tok: T.nilable(Lexer::Token),
       validate_shard_count: T::Boolean
     ).void
   end
-  def parse_capability_chain!(result, allowed_values: nil, cap_tok: nil, validate_shard_count: false)
+  def parse_capability_chain!(result, allowed_values: [], cap_tok: nil, validate_shard_count: false)
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
       error!(current, :EXPECTED_CAP_AFTER_COLON) unless current.type == :VAR_ID
 
       tok = T.must(consume(:VAR_ID))
       normalized_value = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
-      if allowed_values && !allowed_values.include?(normalized_value)
+      if !allowed_values.empty? && !allowed_values.include?(normalized_value)
         error!(tok, :CAP_BAD_MODIFIER, cap: cap_tok&.value || "capability", modifier: tok.value)
       end
       apply_capability!(result, tok, normalized_value, validate_shard_count: validate_shard_count)
@@ -3430,7 +3434,7 @@ class Parser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3573,7 +3577,7 @@ class Parser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
-  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T::Array[T.untyped]) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3835,7 +3839,7 @@ class Parser
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)

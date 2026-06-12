@@ -178,7 +178,7 @@ class ZigTranspiler
 
     # Post-MIR verification on module functions.
     checker = MIRChecker.new
-    T.must(mod_result[:items]).flatten.each do |item|
+    mod_result[:items].flatten.each do |item|
       next unless item.is_a?(MIR::FnDef)
       mir_errors = checker.check_fn!(item, strict: true)
       unless mir_errors.empty?
@@ -189,7 +189,7 @@ class ZigTranspiler
     # In module mode, EXTERN FN imports use named modules (e.g. -Mhttp=lib.zig).
     # Strip the .zig suffix from simple (non-path) module imports so @import("http")
     # matches the declared module name rather than looking for a file "http.zig".
-    all_items = (T.must(mod_result[:items]) + T.must(mod_result[:type_items])).flatten
+    all_items = (mod_result[:items] + mod_result[:type_items]).flatten
     all_items.each do |item|
       next unless item.is_a?(MIR::Import)
       next if item.module_path.include?("/")      # filesystem path, leave as-is
@@ -197,8 +197,8 @@ class ZigTranspiler
     end
 
     emitter = MIREmitter.new
-    items_zig = T.must(mod_result[:items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs_zig = T.must(mod_result[:type_items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    items_zig = mod_result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     body = [type_defs_zig, items_zig].reject(&:empty?).join("\n\n")
     safety_line = body.include?("safety.") ? "const safety = @import(\"safety\");\n" : ""

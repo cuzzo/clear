@@ -155,7 +155,7 @@ class Formatter::FormatLexer
     @out  = T.let([], T::Array[T.untyped])
   end
 
-  sig { returns(T.nilable(Array)) }
+  sig { returns(Array) }
   def tokenize
     until @s.eos?
       sl, sc = @line, @col
@@ -2465,7 +2465,7 @@ class Formatter::Emitter
 
   # Ensure the last token in `out` is exactly one :NL. If the last token
   # is already :NL, leave it. Otherwise append a fresh :NL.
-  sig { params(out: Array).returns(T.nilable(Array)) }
+  sig { params(out: Array).void }
   def insert_nl(out)
     return if out_ends_with_nl?(out)
     out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)

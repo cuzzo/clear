@@ -74,7 +74,7 @@ module FunctionAnalysis
     const :expected_type, Type
     const :actual_type, Type
     const :actual, T.nilable(Symbol)
-    const :path, T.nilable(T::Array[Symbol])
+    const :path, T::Array[Symbol]
   end
 
   class EncounteredCallArgument < T::Struct
@@ -785,7 +785,7 @@ module FunctionAnalysis
   def verify_argument_aliases!(facts, encountered_args)
     T.bind(self, SemanticAnnotator)
     current_path = facts.path
-    return if current_path.nil?
+    return if current_path.empty?
 
     encountered_args.each_with_index do |prev, prev_index|
       next unless (param_mutable?(facts.param) || prev.mutable) && paths_overlap?(current_path, prev.path)
@@ -869,7 +869,7 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
+  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, SemanticAnnotator) rescue nil
     unique_args = atomic_args.compact
@@ -949,14 +949,15 @@ module FunctionAnalysis
 
   # Mixed atomic/non-atomic returned lifetimes are ambiguous because the
   # returned value's runtime layout depends on the caller's family choice.
-  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).void }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
     return if requires_map.empty?
 
     sources.each do |source|
-      path = T.must(get_path_to_root(source))
+      path = get_path_to_root(source)
+      next if path.empty?
       root_name = path.first.to_s
       families = requires_map[root_name]
       next unless families.is_a?(Set) && families.size > 1
@@ -968,11 +969,12 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: AST::FunctionDef, source_node: T.untyped).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: AST::FunctionDef, source_node: T.untyped).void }
   def verify_lifetime_source!(node, source_node)
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
-    root_param_name = T.must(path).first.to_s
+    return if path.empty?
+    root_param_name = T.must(path.first).to_s
     param = node.params.find { |p| p.name == root_param_name }
 
     if param.nil?
@@ -983,7 +985,7 @@ module FunctionAnalysis
     param_type = param.type
     current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
 
-    T.must(path).drop(1).each do |field_sym|
+    path.drop(1).each do |field_sym|
       field_name = field_sym.to_s
 
       # Stop if we hit an Array index wildcard (we can't verify types past a dynamic index easily yet)
@@ -1230,7 +1232,7 @@ module FunctionAnalysis
     return true if node.is_a?(AST::Identifier)
 
     actual_path = get_path_to_root(node)
-    unless actual_path
+    if actual_path.empty?
       error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
       return
     end

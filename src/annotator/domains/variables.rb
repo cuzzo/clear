@@ -495,7 +495,7 @@ module Annotator
       # Track alias relationships for union values extracted from another union/collection.
       # Aliased variables share backing data with the source - skip cleanup to avoid double-free.
 
-      sig { params(var_name: String, value_node: AST::Node).returns(T.nilable(T::Array[OwnershipGraph::Edge])) }
+      sig { params(var_name: String, value_node: AST::Node).void }
       def track_union_alias(var_name, value_node)
         T.bind(self, SemanticAnnotator)
 
@@ -524,7 +524,6 @@ module Annotator
         if arg_type == ret_type_obj.resolved || first_arg.full_type!(context: "union alias source").map?
           ownership_graph.add_edge(OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases))
         end
-        nil
       end
 
       sig { params(storage: Symbol, node: DeclarationNode).returns(T.nilable(Integer)) }

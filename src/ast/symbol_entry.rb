@@ -458,11 +458,11 @@ class SymbolEntry
     @lifetime
   end
 
-  # Build a tied lifetime from source SymbolEntries. Empty / nil input returns
-  # the unconstrained lifetime.
-  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T::Array[SymbolEntry]) }
+  # Build a tied lifetime from source SymbolEntries. Empty input returns the
+  # unconstrained lifetime.
+  sig { params(sources: T::Array[SymbolEntry]).returns(T::Array[SymbolEntry]) }
   def self.tied_lifetime(sources)
-    return [] if sources.nil? || sources.empty?
+    return [] if sources.empty?
     sources.uniq
   end
 

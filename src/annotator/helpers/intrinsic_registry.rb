@@ -49,7 +49,9 @@ module IntrinsicRegistry
       next if v.nil?
       case k
       when *EMIT_BOOL   then e.public_send("#{k}=", !!v)
-      when *EMIT_STRSYM, *EMIT_PASS then e.public_send("#{k}=", v)
+      when *EMIT_STRSYM, *EMIT_PASS
+        e.public_send("#{k}=", v)
+        e.public_send("#{k}_present=", true) if %i[fsm_setup fsm_state_decls fsm_finish_block fsm_state_finalize].include?(k)
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
       when :lifetime    then e.lifetime = normalize_lifetime(v).map(&:to_s)
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)

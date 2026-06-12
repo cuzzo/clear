@@ -233,10 +233,9 @@ module FsmWrapperEmitter
   # MethodCall(...))); we route each through a fresh MIREmitter
   # so the same Phase-4 path renders these as renders the arm
   # bodies.
-  sig { params(cleanups: T.nilable(T::Array[MIR::Emittable])).returns(String) }
+  sig { params(cleanups: T::Array[MIR::Emittable]).returns(String) }
   def render_resume_fn_cleanups(cleanups)
     T.bind(self, T.untyped) rescue nil
-    return "" if cleanups.nil?
     return "" if cleanups.empty?
     emitter = MIREmitter.new
     cleanups.filter_map { |stmt|
@@ -347,7 +346,7 @@ module FsmWrapperEmitter
     body_lines << pre_body unless pre_body.empty?
     if arm.body_fn_name
       tail_kind = arm.tail.respond_to?(:kind) ? arm.tail.kind : nil
-      arm_cleanups = render_resume_fn_cleanups(arm.err_cleanups)
+      arm_cleanups = render_resume_fn_cleanups(arm.err_cleanups || [])
       err_action =
         if tail_kind == :done && empty?(arm_cleanups)
           # Final arm with no per-arm err cleanups: legacy form

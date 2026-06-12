@@ -121,7 +121,7 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: Integer, col: Integer, rule: T.untyped).returns(T.nilable(T::Array[FixableFinding])) }
+  sig { params(line: Integer, col: Integer, rule: T.untyped).void }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: DiagnosticRegistry.fix_description(

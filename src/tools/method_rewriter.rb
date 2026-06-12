@@ -130,8 +130,9 @@ module MethodRewriter
   def fsm_lowered?(defn)
     em = defn.emit
     return false unless em&.suspends
-    !!(em.fsm_setup || em.fsm_state_decls || em.fsm_finish_block ||
-       em.fsm_state_finalize || em.fsm_finish_value)
+    em.fsm_setup_present || em.fsm_state_decls_present ||
+      em.fsm_finish_block_present || em.fsm_state_finalize_present ||
+      !!em.fsm_finish_value
   end
 
   # Post-order walk: collect edits for inner calls first so outer
