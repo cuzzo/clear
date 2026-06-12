@@ -77,6 +77,74 @@ RSpec.describe IntrinsicRegistry do
     expect(fs.intrinsic_bc?).to be(true)
   end
 
+  it "exposes typed intrinsic argument specs for consumers" do
+    fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
+    arg_specs = fs.intrinsic_arg_specs
+
+    expect(arg_specs.map(&:type)).to eq([:"Any[]", :Any])
+    expect(arg_specs[1].takes).to be(true)
+    expect(fs.params.map(&:type)).to eq([:"Any[]", :Any])
+    expect(fs.params[1].takes).to be(true)
+    expect(fs.intrinsic_fixed_arg_list?).to be(true)
+    expect(fs.intrinsic_args_label).to eq("(Any[], Any)")
+  end
+
+  it "normalizes string capability metadata while preserving simple registry input" do
+    spec = IntrinsicArgSpec.from_registry(
+      name: :payload,
+      type: "String",
+      sync: "locked",
+      ownership: "borrowed",
+      mutable: true,
+      takes: true,
+    )
+
+    expect(spec.name).to eq("payload")
+    expect(spec.type).to eq(:String)
+    expect(spec.sync).to eq(:locked)
+    expect(spec.ownership).to eq(:borrowed)
+    expect(spec.mutable).to be(true)
+    expect(spec.takes).to be(true)
+    expect(spec.capability_constrained?).to be(true)
+  end
+
+  it "keeps validation params separate from receiver mutation metadata" do
+    fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
+    validation = fs.intrinsic_call_validation_signature
+
+    expect(fs.params.first.mutable).to be(true)
+    expect(validation.params.first.mutable).to be(false)
+    expect(validation.params[1].takes).to be(true)
+  end
+
+  it "returns typed overload sets instead of raw registry hashes" do
+    overloads = IntrinsicRegistry.overloads(STD_LIB, "length")
+
+    expect(overloads).not_to be_empty
+    expect(overloads).to all(be_a(FunctionSignature))
+    expect(overloads.map(&:intrinsic_args_label)).to eq(["(String)", "(Any[])"])
+    expect(IntrinsicRegistry.overloads(STD_LIB, "missingIntrinsic")).to eq([])
+  end
+
+  it "marks varargs signatures without leaking the raw sentinel to callers" do
+    fs = T.must(IntrinsicRegistry.lookup(STD_LIB, "map"))
+
+    expect(fs.intrinsic_varargs?).to be(true)
+    expect(fs.intrinsic_fixed_arg_list?).to be(false)
+    expect(fs.intrinsic_arg_specs).to eq([])
+    expect(fs.intrinsic_args_label).to eq("(varargs)")
+  end
+
+  it "distinguishes declared empty args from arity-only method registry entries" do
+    declared_empty = T.must(IntrinsicRegistry.lookup(STD_LIB, "timestampMs"))
+    arity_only_method = T.must(IntrinsicRegistry.lookup(MAP_METHODS, "count"))
+
+    expect(declared_empty.intrinsic_fixed_arg_list?).to be(true)
+    expect(declared_empty.intrinsic_arg_specs).to eq([])
+    expect(arity_only_method.intrinsic_fixed_arg_list?).to be(false)
+    expect(arity_only_method.intrinsic_arg_specs).to eq([])
+  end
+
   it "keeps method argument takes separate from canonical signature params" do
     fs = IntrinsicRegistry.send(:convert_entry, "insert", POOL_METHODS["insert"], REGISTRIES)
     contract = T.must(fs.intrinsic_contract)
@@ -87,7 +155,7 @@ RSpec.describe IntrinsicRegistry do
   end
 
   it "applies intrinsic overrides through FunctionSignature without mutating the registry entry" do
-    original = T.must(IntrinsicRegistry.sig(MAP_METHODS, "put"))
+    original = T.must(IntrinsicRegistry.lookup(MAP_METHODS, "put"))
     overridden = original.with_intrinsic_override(
       pattern: "custom({0})",
       alloc: :sharded_receiver_storage,
@@ -222,7 +290,7 @@ RSpec.describe IntrinsicRegistry do
   it "keeps collection method entries fully emittable" do
     [POOL_METHODS, SET_METHODS, MAP_METHODS].each do |registry|
       registry.each_key do |name|
-        emit = IntrinsicRegistry.sig(registry, name).emit
+        emit = IntrinsicRegistry.lookup(registry, name).emit
         expect(emit).to be_a(IntrinsicEmit)
         expect(emit.zig).to be_a(String).or be_a(Symbol)
       end

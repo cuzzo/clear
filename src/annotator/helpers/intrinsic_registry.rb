@@ -1,15 +1,23 @@
-# typed: false
+# typed: strict
 # Startup converter: std_lib registry Hash entry -> FunctionSignature
 # (+ typed IntrinsicEmit). The Hash literals stay the authoring DSL;
 # this builds the typed objects consumers will read. Inert until
 # consumers are migrated (EPIC #65, per-registry slices).
 require_relative "function_signature"
+require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 
 module IntrinsicRegistry
   extend T::Sig
 
   module_function
+
+  LookupResult = T.type_alias { T.nilable(T.any(FunctionSignature, T::Array[FunctionSignature])) }
+  SigsCache = T.type_alias { T::Hash[Integer, T::Hash[T.untyped, LookupResult]] }
+  RegistriesCache = T.type_alias { T::Hash[Symbol, T.untyped] }
+
+  SIGS_CACHE = T.let({}, SigsCache)
+  REGISTRIES_CACHE = T.let({}, RegistriesCache)
 
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
   FS_KEYS = %i[args arity validate return return_type can_fail needs_rt].freeze
@@ -45,11 +53,11 @@ module IntrinsicRegistry
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
       when :lifetime    then e.lifetime = normalize_lifetime(v).map(&:to_s)
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
-      when *EMIT_INTARR then e.public_send("#{k}=", Array(v).map(&:to_i))
+      when *EMIT_INTARR then e.public_send("#{k}=", Kernel.Array(v).map(&:to_i))
       when *EMIT_NESTED
         e.public_send("#{k}=", nested_emit(v, registries))
       else
-        raise "IntrinsicRegistry: unmapped registry key #{k.inspect}"
+        Kernel.raise "IntrinsicRegistry: unmapped registry key #{k.inspect}"
       end
     end
     e
@@ -87,14 +95,14 @@ module IntrinsicRegistry
   # Declarative receiver-parametric return directives (replace the old
   # `return_type: ->(recv){...}` Procs). Mapped to FunctionReturn
   # variants whose Type is computed from the receiver at resolve time.
-  RETURN_VARIANTS = {
+  RETURN_VARIANTS = T.let({
     r_element_of:      :ElementOf,
     r_optional_element: :OptionalOfElement,
     r_id_element:      :IdOfElement,
     r_optional_value:  :OptionalOfValue,
     r_value_list:      :ValueList,
     r_key_list:        :KeyList
-  }.freeze
+  }.freeze, T::Hash[Symbol, Symbol])
 
   # Registry return descriptor -> FunctionReturn (strongly typed,
   # non-nil). No Proc, no Hash, no bare nil escape: every form maps to
@@ -110,8 +118,8 @@ module IntrinsicRegistry
       )
     end
     if v.is_a?(Proc)
-      raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
-            "use a declarative directive (r_* variant or infer_* host method)"
+      Kernel.raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
+                   "use a declarative directive (r_* variant or infer_* host method)"
     end
     if (kind = RETURN_VARIANTS[v])
       return FunctionReturn.variant(kind)
@@ -154,29 +162,21 @@ module IntrinsicRegistry
 
   sig { params(spec: T.untyped, h: T.untyped).returns(T.untyped) }
   def params_from_arg_spec(spec, h)
-    return [] unless spec.is_a?(Array)
-    takes_args = Array(h[:takes_args])
+    arg_specs = IntrinsicArgSpec.list_from_registry(spec)
+    return [] if arg_specs.empty?
+
+    takes_args = Kernel.Array(h[:takes_args])
     mutates_receiver = h[:mutates_receiver] == true
-    spec.each_with_index.map do |arg_def, i|
+    arg_specs.each_with_index.map do |arg_def, i|
       takes_index = (h[:is_method] || mutates_receiver) ? i - 1 : i
       takes_by_index = takes_index >= 0 && takes_args.include?(takes_index)
-      if arg_def.is_a?(Hash)
-        AST::Param.new(
-          name: arg_def[:name] || "arg#{i}",
-          type: arg_def[:type],
-          required: true,
-          mutable: arg_def[:mutable] || (i == 0 && mutates_receiver),
-          takes: arg_def[:takes] || takes_by_index
-        )
-      else
-        AST::Param.new(
-          name: "arg#{i}",
-          type: arg_def,
-          required: true,
-          mutable: (i == 0 && mutates_receiver),
-          takes: takes_by_index
-        )
-      end
+      AST::Param.new(
+        name: arg_def.name || "arg#{i}",
+        type: arg_def.type,
+        required: true,
+        mutable: arg_def.mutable || (i == 0 && mutates_receiver),
+        takes: arg_def.takes || takes_by_index
+      )
     end
   end
 
@@ -185,9 +185,9 @@ module IntrinsicRegistry
   # a whole registry: name -> FunctionSignature, or
   # Array[FunctionSignature] for overload sets (e.g.
   # STD_LIB["charAt"]). Consumers read THIS, never the raw Hash.
-  sig { params(reg: T.untyped).returns(T.untyped) }
+  sig { params(reg: T.untyped).returns(T::Hash[T.untyped, LookupResult]) }
   def sigs(reg)
-    (@sigs ||= {})[reg.object_id] ||=
+    SIGS_CACHE[reg.object_id] ||=
       reg.each_with_object({}) do |(name, entry), out|
         out[name] =
           if entry.is_a?(Array)
@@ -203,10 +203,13 @@ module IntrinsicRegistry
   # not thread the map.
   sig { returns(T.untyped) }
   def registries
-    @registries ||= %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS
-                       INDEX_OPS BUILTIN_OPS].each_with_object({}) do |c, h|
-      h[c] = Object.const_get(c) if Object.const_defined?(c)
+    if REGISTRIES_CACHE.empty?
+      %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS
+         INDEX_OPS BUILTIN_OPS].each do |constant_name|
+        REGISTRIES_CACHE[constant_name] = Object.const_get(constant_name) if Object.const_defined?(constant_name)
+      end
     end
+    REGISTRIES_CACHE
   end
 
   # Idempotent normalizer for the flag-day migration: returns a
@@ -228,9 +231,10 @@ module IntrinsicRegistry
 
     method_name = name.to_s
     [STD_LIB, POOL_METHODS, SET_METHODS].any? do |registry|
-      fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
-      !!(fs&.intrinsic_contract&.behavior&.is_method &&
-        fs.intrinsic_collection_narrowing?)
+      fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, method_name))
+      next false unless fs&.intrinsic_contract&.behavior&.is_method
+
+      T.must(fs).intrinsic_collection_narrowing?
     end
   end
 
@@ -238,16 +242,17 @@ module IntrinsicRegistry
   def map_pair_evidence_method?(name, arity)
     return false unless arity == 2
 
-    fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(MAP_METHODS, name.to_s))
-    !!(fs&.intrinsic_contract&.behavior&.is_method &&
-      fs.mutates_receiver? && fs.takes_ownership?)
+    fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(MAP_METHODS, name.to_s))
+    return false unless fs&.intrinsic_contract&.behavior&.is_method
+
+    T.must(fs).mutates_receiver? && T.must(fs).takes_ownership?
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
   def collection_value_store_method?(name, arity)
     method_name = name.to_s
     [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
-      fs = FunctionSignature.unwrap(IntrinsicRegistry.sig(registry, method_name))
+      fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, method_name))
       next false unless fs
       method_arity = fs.arity || [fs.params.length - 1, 0].max
       !!(method_arity == arity && fs.intrinsic_contract.behavior.is_method &&
@@ -255,12 +260,21 @@ module IntrinsicRegistry
     end
   end
 
+  sig { params(reg: T.untyped, name: T.untyped).returns(T::Array[FunctionSignature]) }
+  def overloads(reg, name)
+    result = IntrinsicRegistry.lookup(reg, name)
+    return result if result.is_a?(Array)
+    return [result] if result.is_a?(FunctionSignature)
+
+    []
+  end
+
   # Typed lookup into a registry: reg[name] as FunctionSignature
   # (or Array[FS] for overloads, or nil if absent). This method is
-  # intentionally last because its name is `sig`, which shadows the
-  # Sorbet DSL inside this module after definition.
-  sig { params(reg: T.untyped, name: T.untyped).returns(T.untyped) }
-  def sig(reg, name)
+  # intentionally named `lookup`, not `sig`, so this typed module does
+  # not shadow Sorbet's signature DSL.
+  sig { params(reg: T.untyped, name: T.untyped).returns(LookupResult) }
+  def lookup(reg, name)
     result = sigs(reg)[name]
     return result if result
 

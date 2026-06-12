@@ -58,7 +58,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
-    defn = IntrinsicRegistry.sig(registry, T.unsafe(node).name)
+    defn = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, T.unsafe(node).name))
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(
@@ -71,18 +71,20 @@ module MethodAnalysis
     end
 
     # Arity check
-    if defn.arity && defn.arity >= 0 && node.args.length != defn.arity
-      if defn.arity == 0
+    arity = defn.arity
+    if arity && arity >= 0 && node.args.length != arity
+      if arity == 0
         error!(node, :STDLIB_METHOD_NO_ARGS, label: type_label, method: node.name, got: node.args.length)
       else
-        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: defn.arity, got: node.args.length)
+        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: arity, got: node.args.length)
       end
       return true
     end
 
     # Type validation (optional)
-    if defn.arg_validator
-      defn.arg_validator.call(node, node.args, obj_type, method(:error!))
+    arg_validator = defn.arg_validator
+    if arg_validator
+      arg_validator.call(node, node.args, obj_type, method(:error!))
     end
 
     # Set tag and return type
@@ -128,7 +130,7 @@ module MethodAnalysis
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = T.must(node.args[arg_idx])
+      arg_node = node.args[arg_idx]
       move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 

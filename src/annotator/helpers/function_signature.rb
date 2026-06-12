@@ -6,6 +6,7 @@
 # declared/imported contract fields separately from mutable analysis/codegen
 # facts.
 require "sorbet-runtime"
+require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 require_relative "intrinsic_contract"
 require_relative "function_return"
@@ -97,7 +98,9 @@ class FunctionSignature
     prop :heap_carry_return, T.nilable(T::Boolean), default: nil
     prop :heap_carry_return_vars, T.nilable(T::Set[String]), default: nil
     prop :arg_validator, T.nilable(Proc), default: nil
-    prop :arg_spec, T.untyped, default: nil
+    prop :intrinsic_arg_specs, T::Array[IntrinsicArgSpec], factory: -> { [] }
+    prop :intrinsic_fixed_arg_list, T::Boolean, default: false
+    prop :intrinsic_varargs, T::Boolean, default: false
     prop :arity, T.nilable(Integer), default: nil
     prop :emit, T.nilable(IntrinsicEmit), default: nil
     prop :return_def, FunctionReturn, factory: -> { FunctionReturn.fixed(Type.new(:Void)) }
@@ -116,7 +119,9 @@ class FunctionSignature
         heap_carry_return: heap_carry_return,
         heap_carry_return_vars: heap_carry_return_vars,
         arg_validator: arg_validator,
-        arg_spec: arg_spec,
+        intrinsic_arg_specs: intrinsic_arg_specs.dup,
+        intrinsic_fixed_arg_list: intrinsic_fixed_arg_list,
+        intrinsic_varargs: intrinsic_varargs,
         arity: arity,
         emit: emit,
         return_def: return_def
@@ -195,8 +200,40 @@ class FunctionSignature
   sig { returns(T.nilable(Proc)) }
   def arg_validator = @facts.arg_validator
 
-  sig { returns(T.untyped) }
-  def arg_spec = @facts.arg_spec
+  sig { returns(T::Array[IntrinsicArgSpec]) }
+  def intrinsic_arg_specs = @facts.intrinsic_arg_specs
+
+  sig { returns(T::Boolean) }
+  def intrinsic_fixed_arg_list? = @facts.intrinsic_fixed_arg_list
+
+  sig { returns(T::Boolean) }
+  def intrinsic_varargs? = @facts.intrinsic_varargs
+
+  sig { returns(String) }
+  def intrinsic_args_label
+    return "(varargs)" if intrinsic_varargs?
+
+    "(#{intrinsic_arg_specs.map(&:display_type).join(', ')})"
+  end
+
+  sig { returns(FunctionSignature) }
+  def intrinsic_call_validation_signature
+    validation_params = intrinsic_arg_specs.each_with_index.map do |arg_spec, index|
+      AST::Param.new(
+        name: arg_spec.name || "arg#{index}",
+        type: arg_spec.type,
+        required: true,
+        mutable: arg_spec.mutable,
+        takes: arg_spec.takes
+      )
+    end
+    FunctionSignature.new(
+      params: validation_params,
+      return_type: return_type,
+      intrinsic: true,
+      return_def: return_def,
+    )
+  end
 
   sig { returns(T.nilable(Integer)) }
   def arity = @facts.arity
@@ -223,8 +260,8 @@ class FunctionSignature
 
   # Intrinsic signature semantics (set by the registry converter; nil
   # for ordinary user functions). `arg_validator` the custom arg
-  # type-checker; `arg_spec` the raw args shape; `emit` the typed
-  # codegen/dispatch metadata (IntrinsicEmit).
+  # type-checker; `intrinsic_arg_specs` the typed args shape; `emit` the
+  # typed codegen/dispatch metadata (IntrinsicEmit).
   # Strongly-typed return (FunctionReturn). Non-nil; defaults to
   # Fixed(Void). The single return facility -- resolve(receiver,
   # args, host) always yields a concrete Type. Replaced the former
@@ -376,7 +413,9 @@ class FunctionSignature
         heap_carry_return: heap_carry_return,
         heap_carry_return_vars: heap_carry_return_vars,
         arg_validator: arg_validator,
-        arg_spec: arg_spec,
+        intrinsic_arg_specs: IntrinsicArgSpec.list_from_registry(arg_spec),
+        intrinsic_fixed_arg_list: arg_spec.is_a?(Array),
+        intrinsic_varargs: arg_spec == :Varargs,
         arity: arity,
         emit: emit,
         return_def: return_def || FunctionReturn.fixed(Type.new(:Void))

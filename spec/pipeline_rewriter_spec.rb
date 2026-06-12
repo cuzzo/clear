@@ -35,6 +35,22 @@ RSpec.describe PipelineRewriter do
     expect(bind.value.args.first.name).to eq("x")
   end
 
+  it "keeps overloaded stdlib pipeline template metadata" do
+    ast = parse_and_rewrite(<<~CLEAR)
+      FN main() RETURNS Void ->
+          text = "abc";
+          result = text |> length;
+          RETURN;
+      END
+    CLEAR
+    main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+    bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
+
+    expect(bind.value).to be_a(AST::FuncCall)
+    expect(bind.value.name).to eq("length")
+    expect(bind.value.zig_pattern).to eq("CheatLib.len({0})")
+  end
+
   it "rewrites RECOVER pipelines into OR fallback expressions" do
     ast = parse_and_rewrite(<<~CLEAR)
       FN risky(n: Int64) RETURNS !Int64 -> RETURN n; END

@@ -77,7 +77,7 @@ module Annotator
         end
 
         static_methods = schema.static_methods || {}
-        method_def = IntrinsicRegistry.sig(static_methods, T.unsafe(node).method_name)
+        method_def = FunctionSignature.unwrap(IntrinsicRegistry.lookup(static_methods, T.unsafe(node).method_name))
 
         unless method_def
           available = static_methods.keys.join(", ")
@@ -100,16 +100,18 @@ module Annotator
           return
         end
 
-        expected_args = method_def.arg_spec
+        expected_args = method_def.intrinsic_arg_specs
         if node.args.length != expected_args.length
           error!(node, :STATIC_ARITY, type: type_name, method: node.method_name, expected: expected_args.length, got: node.args.length)
         end
 
         node.args.zip(expected_args).each_with_index do |(arg, expected), i|
+          next if expected && intrinsic_arg_matches?(expected, arg)
+
           actual = arg.resolved_type
-          unless expected == :Any || actual == :Any || is_safe_autocast?(actual, expected)
-            error!(node, :STATIC_ARG_TYPE, index: i + 1, type: type_name, method: node.method_name, expected: expected, got: actual)
-          end
+          next if actual == :Any
+
+          error!(node, :STATIC_ARG_TYPE, index: i + 1, type: type_name, method: node.method_name, expected: expected&.type || :Any, got: actual)
         end
 
         node.zig_pattern = method_def.intrinsic_pattern
@@ -129,23 +131,20 @@ module Annotator
       def visit_IntrinsicFunc(node, args, matched_def: nil)
         T.bind(self, SemanticAnnotator)
 
-        definitions = STD_LIB[node.name]
-        definitions = [definitions] if definitions.is_a?(Hash)
+        definitions = IntrinsicRegistry.overloads(STD_LIB, node.name)
 
         matched_def ||= find_matching_intrinsic(definitions, args)
 
         unless matched_def
-          sigs = definitions.map { |definition| format_intrinsic_args(definition[:args]) }.join(" or ")
+          sigs = definitions.map(&:intrinsic_args_label).join(" or ")
           arg_types = args.map { |arg| arg.resolved_type }.join(", ")
           error!(node, :INTRINSIC_NO_OVERLOAD, name: node.name, args: arg_types, candidates: sigs)
           return
         end
 
-        signature = normalize_intrinsic_signature(matched_def)
-
-        if signature
+        unless matched_def.intrinsic_varargs?
           call_node = Struct.new(:token, :name, :args).new(node.token, node.name, args)
-          verify_function_signature!(call_node, signature)
+          verify_function_signature!(call_node, matched_def.intrinsic_call_validation_signature)
         end
 
         reject_when = matched_def.intrinsic_reject_when
@@ -268,8 +267,8 @@ module Annotator
         intrinsic_defs = STD_LIB[node.name]
         return false unless intrinsic_defs
 
-        definitions = intrinsic_defs.is_a?(Hash) ? [intrinsic_defs] : intrinsic_defs
-        method_overloads = definitions.select { |definition| definition[:is_method] }
+        definitions = IntrinsicRegistry.overloads(STD_LIB, node.name)
+        method_overloads = definitions.select { |definition| definition.intrinsic_contract.behavior.is_method }
         return false if method_overloads.empty?
 
         ufcs_args = [node.object] + node.args

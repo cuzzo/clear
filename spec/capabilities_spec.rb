@@ -2070,19 +2070,24 @@ RSpec.describe SemanticAnnotator do
   # spec: today no stdlib entry actually sets these fields, so silent regressions
   # in the plumbing are invisible. We monkey-patch writeFile (a can_fail stdlib
   # entry) for the duration of each example, reverting after.
-
   describe "stdlib error_kind / error_type stamping" do
     let(:entry) { STD_LIB["writeFile"] }
+
+    def clear_stdlib_signature_cache!
+      IntrinsicRegistry::SIGS_CACHE.delete(STD_LIB.object_id)
+    end
 
     around do |example|
       # Deep save + restore so the registry mutation doesn't leak across tests.
       saved = entry.dup
       entry[:error_kind] = :Transient
       entry[:error_type] = :LockTimeout
+      clear_stdlib_signature_cache!
       begin
         example.run
       ensure
         entry.replace(saved)
+        clear_stdlib_signature_cache!
       end
     end
 
@@ -2110,6 +2115,7 @@ RSpec.describe SemanticAnnotator do
     it "leaves error_kind / error_type nil when the entry has no metadata" do
       entry.delete(:error_kind)
       entry.delete(:error_type)
+      clear_stdlib_signature_cache!
       src = 'writeFile("p", "c") OR 0;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil

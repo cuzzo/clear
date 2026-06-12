@@ -505,7 +505,7 @@ RSpec.describe MIRLowering do
       # charAt(s, i) == "\\"
       charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
       charat.full_type = :String
-      charat.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "charAt").first
+      charat.matched_stdlib_def = IntrinsicRegistry.lookup(STD_LIB, "charAt").first
       charat.zig_pattern = charat.matched_stdlib_def.emit.zig
       eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
       eq_node.full_type = :Boolean

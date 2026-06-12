@@ -1157,7 +1157,7 @@ module MIRLoweringFunctions
     return empty_stdlib_call_facts unless sig
 
     ast_args = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
-    if sig.arg_spec && sig.params.length != ast_args.length
+    if sig.intrinsic_fixed_arg_list? && sig.params.length != ast_args.length
       Kernel.raise "stdlib call #{node.name}: signature has #{sig.params.length} params for #{ast_args.length} args"
     end
     ownership = call_ownership_facts_for_signature(sig, ast_args)
@@ -1183,7 +1183,7 @@ module MIRLoweringFunctions
     found = FunctionSignature.unwrap(matched)
     return found if found
 
-    fallback = IntrinsicRegistry.sig(STD_LIB, T.unsafe(node).name.to_s)
+    fallback = IntrinsicRegistry.lookup(STD_LIB, T.unsafe(node).name.to_s)
     fallback = T.unsafe(fallback).first if fallback.is_a?(Array)
     FunctionSignature.unwrap(fallback)
   end

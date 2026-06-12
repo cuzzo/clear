@@ -1386,6 +1386,16 @@ RSpec.describe "annotator branch gap burndown" do
     intrinsic_call.matched_stdlib_def = intrinsic
     expect(ann.send(:resolve_borrow_source, intrinsic_call)).to equal(source)
 
+    missing_named_arg = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      arg_spec: [{ name: "other" }],
+      emit: IntrinsicEmit.new(lifetime: ["value"])
+    )
+    missing_named_call = AST::FuncCall.new(token, "missing_borrow_intrinsic", [source])
+    missing_named_call.matched_stdlib_def = missing_named_arg
+    expect(ann.send(:resolve_borrow_source, missing_named_call)).to be_nil
+
     self_lifetime = FunctionSignature.new(
       params: [],
       return_type: Type.new(:String),
@@ -1413,6 +1423,31 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:resolve_borrow_source, AST::MethodCall.new(token, source, "borrow_user", []))).to equal(source)
     expect(ann.send(:resolve_borrow_source, AST::FuncCall.new(token, "borrow_any", [source]))).to be_nil
     expect(ann.send(:resolve_borrow_source, AST::FuncCall.new(token, "missing", [source]))).to be_nil
+  end
+
+  it "matches intrinsic overloads through typed capability argument specs" do
+    ann = SemanticAnnotator.new(source_code: "")
+    matching_arg = typed_identifier("matching", Type.new(:String, sync: :locked, ownership: :borrowed))
+    wrong_sync_arg = typed_identifier("wrong_sync", Type.new(:String, sync: :raw, ownership: :borrowed))
+    wrong_owner_arg = typed_identifier("wrong_owner", Type.new(:String, sync: :locked, ownership: :owned))
+
+    capability_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+      arg_spec: [{ type: :String, sync: :locked, ownership: :borrowed }],
+    )
+    two_arg_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+      arg_spec: [:String, :String],
+    )
+
+    expect(ann.send(:find_matching_intrinsic, [two_arg_sig], [matching_arg])).to be_nil
+    expect(ann.send(:find_matching_intrinsic, [capability_sig], [wrong_sync_arg])).to be_nil
+    expect(ann.send(:find_matching_intrinsic, [capability_sig], [wrong_owner_arg])).to be_nil
+    expect(ann.send(:find_matching_intrinsic, [capability_sig], [matching_arg])).to equal(capability_sig)
   end
 
 
@@ -1783,7 +1818,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(copy.heap_carry_return).to eq(true)
     expect(copy.heap_carry_return_vars).to eq(Set["x"])
     expect(copy.arg_validator&.call([])).to eq(true)
-    expect(copy.arg_spec).to eq([{ name: "x" }])
+    expect(copy.intrinsic_arg_specs.map(&:name)).to eq(["x"])
     expect(copy.arity).to eq(1)
     expect(copy.emit&.allocates).to eq(true)
     expect(copy.return_def.kind).to eq(FunctionReturn::Kind::Infer)
@@ -3998,6 +4033,49 @@ RSpec.describe "annotator branch gap burndown" do
     expect(pure_static.stdlib_allocates).to eq(false)
     expect(pure_static.can_fail).to be_falsey
 
+    ann.send(:current_scope).declare_type(:StaticArgHandle, Schemas::ResourceSchema.new(
+      close_plan: Schemas::ResourceClosePlan.method("close"),
+      static_methods: {
+        "take" => { args: [{ type: :Int64 }], return: :StaticArgHandle },
+        "none" => { args: [], return: :StaticArgHandle }
+      }
+    ))
+    int_arg = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
+    matched_static_arg = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "StaticArgHandle"), "StaticArgHandle"),
+      "take",
+      [int_arg]
+    )
+    ann.send(:visit_StaticCall, matched_static_arg)
+    expect(matched_static_arg.full_type!.resolved).to eq(:StaticArgHandle)
+
+    any_arg = AST::Identifier.new(token(:IDENTIFIER, "missing_any"), "missing_any")
+    any_static_arg = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "StaticArgHandle"), "StaticArgHandle"),
+      "take",
+      [any_arg]
+    )
+    ann.send(:visit_StaticCall, any_static_arg)
+
+    string_arg = AST::Literal.new(token(:STRING, "\"value\""), :STRING, "value", :rodata)
+    bad_static_arg = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "StaticArgHandle"), "StaticArgHandle"),
+      "take",
+      [string_arg]
+    )
+    ann.send(:visit_StaticCall, bad_static_arg)
+
+    extra_static_arg = AST::StaticCall.new(
+      token(:COLON2, "::"),
+      AST::Identifier.new(token(:TYPE_ID, "StaticArgHandle"), "StaticArgHandle"),
+      "none",
+      [string_arg]
+    )
+    ann.send(:visit_StaticCall, extra_static_arg)
+
     pool_type = Type.new(:"String[]", collection: :pool)
     pool_value = AST::Identifier.new(token(:IDENTIFIER, "pool"), "pool")
     pool_value.full_type = pool_type
@@ -4014,7 +4092,7 @@ RSpec.describe "annotator branch gap burndown" do
     unsigned_arg = AST::Literal.new(token(:NUMBER, "1_u32"), :UINT32, 1, :stack)
     unsigned_arg.full_type = Type.new(:UInt32)
     rejected = AST::FuncCall.new(token(:VAR_ID, "negative?"), "negative?", [unsigned_arg])
-    negative_sig = T.must(IntrinsicRegistry.sig(STD_LIB, "negative?")).first
+    negative_sig = T.must(IntrinsicRegistry.lookup(STD_LIB, "negative?")).first
     ann.send(:visit_IntrinsicFunc, rejected, [unsigned_arg], matched_def: negative_sig)
 
     with_function_context(ann) do |ctx|
@@ -4029,6 +4107,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:STATIC_UNKNOWN_METHOD, :STATIC_UNKNOWN_TYPE, :INTRINSIC_NO_OVERLOAD, :INTRINSIC_REJECTED)
+    expect(codes).to include(:STATIC_ARITY, :STATIC_ARG_TYPE)
   end
 
   it "reifies WITH capabilities into typed facts before local phase consumers read them" do

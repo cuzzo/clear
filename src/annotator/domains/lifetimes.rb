@@ -474,11 +474,10 @@ module Annotator
             end
             # Named param lifetime -- find by index in args list
             args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-            arg_types = matched_def.arg_spec
-            if arg_types.is_a?(Array)
-              idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
-              return args[idx] if idx && args[idx]
+            idx = matched_def.intrinsic_arg_specs.index do |arg_spec|
+              arg_spec.name && lifetimes.include?(arg_spec.name)
             end
+            return args[idx] if idx && args[idx]
             return nil
           end
         end

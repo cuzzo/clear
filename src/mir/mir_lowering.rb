@@ -3305,7 +3305,7 @@ class MIRLowering
   # children and stdlib_def attached so the MIR checker can verify ownership.
   sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
   def emit_builtin(name, args)
-    entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
+    entry = FunctionSignature.unwrap(IntrinsicRegistry.lookup(BUILTIN_OPS, name))
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     if bc_target? && entry.intrinsic_bc?
       return MIR::InlineBc.new(name, args, entry)

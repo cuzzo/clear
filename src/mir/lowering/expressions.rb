@@ -1316,7 +1316,7 @@ module MIRLoweringExpressions
       # `IF pool[id] AS env`.
       elem_t = ti.element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
-      pool_get_def = T.must(IntrinsicRegistry.sig(POOL_METHODS, "get")).dup
+      pool_get_def = T.must(FunctionSignature.unwrap(IntrinsicRegistry.lookup(POOL_METHODS, "get"))).dup
       pool_get_emit = pool_get_def.emit ? T.must(pool_get_def.emit).dup : IntrinsicEmit.new
       pool_get_emit.elem = elem_name
       pool_get_def.replace_intrinsic_emit!(pool_get_emit)

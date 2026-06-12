@@ -3190,7 +3190,13 @@ RSpec.describe SemanticAnnotator do
           end
         end.new(:String)
 
-        match = annotator.send(:find_matching_intrinsic, [{ args: [{ type: :Int64 }] }], [arg])
+        definition = FunctionSignature.new(
+          params: [AST::Param.new(name: "arg0", type: :Int64)],
+          return_type: Type.new(:Void),
+          intrinsic: true,
+          arg_spec: [{ type: :Int64 }],
+        )
+        match = annotator.send(:find_matching_intrinsic, [definition], [arg])
         expect(match).to be_nil
       end
     end

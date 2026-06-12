@@ -478,41 +478,6 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }
-  def normalize_intrinsic_signature(config)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return nil if config.arg_spec == :Varargs
-
-    params = config.arg_spec.each_with_index.map do |arg_def, i|
-      if arg_def.is_a?(Hash)
-        # Extended format: { type: :Int64, mutable: true, takes: false }
-        AST::Param.new(
-          name: arg_def[:name] || "arg#{i}",
-          type: arg_def[:type],
-          required: true,
-          mutable: arg_def[:mutable] || false,
-          takes: arg_def[:takes] || false
-        )
-      else
-        # Simple format: just a type symbol
-        AST::Param.new(
-          name: "arg#{i}",
-          type: arg_def,
-          required: true,
-          mutable: false,
-          takes: false
-        )
-      end
-    end
-
-    FunctionSignature.new(
-      params: params,
-      return_type: config.return_type,
-      intrinsic: true,
-      emit: IntrinsicEmit.new(zig: config.intrinsic_pattern)
-    )
-  end
-
   # Single point: what allocator does the receiver/container of this call use?
   # For MethodCall on a list/struct/etc, the receiver's binding storage tells
   # us the container allocator -- auto-COPY into this container must produce
@@ -1336,38 +1301,34 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(definitions: T::Array[FunctionSignature], args: T::Array[T.untyped]).returns(T.nilable(FunctionSignature)) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    matched = definitions.find do |config|
-      next true if config[:args] == :Varargs  # Varargs accepts anything
+    definitions.find do |config|
+      next true if config.intrinsic_varargs?
 
-      # Arity check
-      next false if args.size != config[:args].size
+      specs = config.intrinsic_arg_specs
+      next false if args.size != specs.size
 
-      # Type check each argument, including capability constraints.
-      # Hash args like { type: :String, sync: :raw } check both the base
-      # type and the capability. This allows the registry to dispatch to
-      # different Zig implementations based on the argument's capability.
       args.each_with_index.all? do |arg, i|
-        spec = config[:args][i]
-        if spec.is_a?(Hash)
-          expected = spec[:type]
-          next true if expected == :Any && !spec[:sync] && !spec[:ownership]
-          next false unless expected == :Any || is_safe_autocast?(arg.resolved_type, expected)
-          # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.full_type!(context: "intrinsic capability argument")
-          next false if spec[:sync] && arg_type&.sync != spec[:sync]
-          next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
-          true
-        else
-          next true if spec == :Any
-          next true if spec.is_a?(Symbol) && any_array_intrinsic_arg?(spec, arg)
-          is_safe_autocast?(arg.resolved_type, spec)
-        end
+        intrinsic_arg_matches?(T.must(specs[i]), arg)
       end
     end
-    matched && IntrinsicRegistry.fs(matched)
+  end
+
+  sig { params(spec: IntrinsicArgSpec, arg: T.untyped).returns(T::Boolean) }
+  def intrinsic_arg_matches?(spec, arg)
+    T.bind(self, SemanticAnnotator) rescue nil
+    return true if spec.unconstrained_any?
+    return true if spec.type == :"Any[]" && any_array_intrinsic_arg?(spec.type, arg)
+    return false unless spec.type == :Any || is_safe_autocast?(arg.resolved_type, spec.type)
+    return true unless spec.capability_constrained?
+
+    arg_type = arg.full_type!(context: "intrinsic capability argument")
+    return false if spec.sync && arg_type&.sync != spec.sync
+    return false if spec.ownership && arg_type&.ownership != spec.ownership
+
+    true
   end
 
   sig { params(spec: Symbol, arg: Object).returns(T::Boolean) }
@@ -1383,15 +1344,6 @@ module FunctionAnalysis
 
     type.dynamic_stream? || type.promise_list? || type.bounded_stream? ||
       type.open_stream? || type.inf_stream?
-  end
-
-  # Formats intrinsic args for error messages
-  sig { params(args: T::Array[T.untyped]).returns(String) }
-  def format_intrinsic_args(args)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return "(varargs)" if args == :Varargs
-    types = args.map { |a| a.is_a?(Hash) ? a[:type] : a }
-    "(#{types.join(', ')})"
   end
 
   private :verify_argument_type!,
@@ -1420,6 +1372,7 @@ module FunctionAnalysis
   private :explicit_primitive_atomic_param?
   private :get_return_strategy
   private :inject_default_arguments!
+  private :intrinsic_arg_matches?
   private :param_mutable?
   private :paths_overlap?
   private :receiver_container_alloc
