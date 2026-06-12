@@ -80,12 +80,12 @@ module ErrorHelper
     format_diagnostic_template(template, args, kwargs)
   end
 
-  sig { params(code: Symbol, kwargs: T.untyped).returns(String) }
+  sig { params(code: Symbol, kwargs: DiagnosticRegistry::DiagnosticKwValue).returns(String) }
   def fix_description(code, **kwargs)
-    DiagnosticRegistry.fix_description(code, **kwargs)
+    DiagnosticRegistry.fix_description_from_hash(code, kwargs)
   end
 
-  sig { params(code: Symbol, kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
+  sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticRegistry::DiagnosticKwValue]).returns(String) }
   def fix_description_from_hash(code, kwargs)
     DiagnosticRegistry.fix_description_from_hash(code, kwargs)
   end

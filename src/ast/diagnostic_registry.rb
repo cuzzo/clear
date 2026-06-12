@@ -45,6 +45,8 @@ require "sorbet-runtime"
 
 module DiagnosticRegistry
   extend T::Sig
+
+  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
   CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
@@ -2987,7 +2989,7 @@ module DiagnosticRegistry
     end
   end
 
-  sig { params(code: Symbol, kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
+  sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
   def fix_description_from_hash(code, kwargs)
     template = FIX_DESCRIPTIONS[code]
     Kernel.raise "Internal Compiler Error: Unknown fix description code :#{code}" unless template
@@ -2999,7 +3001,7 @@ module DiagnosticRegistry
     end
   end
 
-  sig { params(code: Symbol, kwargs: T.untyped).returns(String) }
+  sig { params(code: Symbol, kwargs: DiagnosticKwValue).returns(String) }
   def fix_description(code, **kwargs)
     fix_description_from_hash(code, kwargs)
   end

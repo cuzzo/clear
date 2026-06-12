@@ -20,12 +20,12 @@ require "sorbet-runtime"
 module FixableHelper
     extend T::Sig
 
-  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+  DiagnosticKwValue = T.type_alias { DiagnosticRegistry::DiagnosticKwValue }
 
   class CapabilityFixCandidate < T::Struct
     const :sigil, String
     const :description_code, Symbol
-    const :description_params, T::Hash[Symbol, T.untyped], default: {}
+    const :description_params, T::Hash[Symbol, DiagnosticKwValue], default: {}
   end
 
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
@@ -544,7 +544,7 @@ module FixableHelper
     error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max)
   end
 
-  sig { params(node: T.untyped, target_type: Symbol, min: Integer, max: Integer, tok: T.untyped, suffix_col: Integer, old_suffix: String, new_suffix: String, val: Integer).returns(T.untyped) }
+  sig { params(node: AST::Node, target_type: Symbol, min: Integer, max: Integer, tok: Lexer::Token, suffix_col: Integer, old_suffix: String, new_suffix: String, val: Integer).returns(NilClass) }
   def emit_overflow_suffix_fix!(node, target_type, min, max, tok, suffix_col, old_suffix, new_suffix, val)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = Fix.new(
@@ -1264,7 +1264,7 @@ module FixableHelper
       name: String,
       sigil: String,
       description_code: Symbol,
-      description_params: T::Hash[Symbol, T.untyped],
+      description_params: T::Hash[Symbol, DiagnosticKwValue],
       confidence: Symbol
     ).returns(T.nilable(Fix))
   end
@@ -1302,7 +1302,7 @@ module FixableHelper
       old_sigil: String,
       new_sigil: String,
       description_code: Symbol,
-      description_params: T::Hash[Symbol, T.untyped],
+      description_params: T::Hash[Symbol, DiagnosticKwValue],
       confidence: Symbol
     ).returns(T.nilable(Fix))
   end

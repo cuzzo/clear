@@ -10,6 +10,8 @@ module PipeAnalysis
 
   requires_ancestor { SemanticAnnotator }
 
+  ConcurrentOptions = T.type_alias { T::Hash[String, AST::Node] }
+
   class PipeArityPlan < T::Struct
     extend T::Sig
 
@@ -92,7 +94,7 @@ module PipeAnalysis
     AST.pipeline_complex_op?(node) || node.is_a?(AST::RecoverOp) || node.is_a?(AST::CollectOp)
   end
 
-  sig { params(options: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  sig { params(options: ConcurrentOptions).returns(T::Boolean) }
   def concurrent_parallel_enabled?(options)
     value = options["parallel"]
     !!(value.is_a?(AST::Identifier) && %w[true TRUE].include?(value.name))
@@ -1422,7 +1424,7 @@ module PipeAnalysis
   def analyze_concurrent_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     conc    = node.right   # the ConcurrentOp node
-    options = conc.options
+    options = T.cast(conc.options, ConcurrentOptions)
     validate_concurrent_options!(node, conc, options)
     stamp_concurrent_option_values!(options)
 
@@ -1523,7 +1525,7 @@ module PipeAnalysis
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
   end
 
-  sig { params(node: AST::BinaryOp, conc: AST::ConcurrentOp, options: T::Hash[String, T.untyped]).void }
+  sig { params(node: AST::BinaryOp, conc: AST::ConcurrentOp, options: ConcurrentOptions).void }
   def validate_concurrent_options!(node, conc, options)
     T.bind(self, SemanticAnnotator) rescue nil
 
@@ -1535,14 +1537,14 @@ module PipeAnalysis
     validate_known_concurrent_options!(conc, options)
   end
 
-  sig { params(options: T::Hash[String, T.untyped], name: String).void }
+  sig { params(options: ConcurrentOptions, name: String).void }
   def validate_concurrent_numeric_option!(options, name)
     T.bind(self, SemanticAnnotator) rescue nil
     expr = options[name]
     validate_positive_numeric_concurrent_option!(name, expr) if expr
   end
 
-  sig { params(node: AST::BinaryOp, options: T::Hash[String, T.untyped]).void }
+  sig { params(node: AST::BinaryOp, options: ConcurrentOptions).void }
   def validate_concurrent_capacity_option!(node, options)
     T.bind(self, SemanticAnnotator) rescue nil
     cap = options["capacity"]
@@ -1552,7 +1554,7 @@ module PipeAnalysis
     validate_positive_numeric_concurrent_option!("capacity", cap)
   end
 
-  sig { params(options: T::Hash[String, T.untyped]).void }
+  sig { params(options: ConcurrentOptions).void }
   def validate_concurrent_parallel_option!(options)
     T.bind(self, SemanticAnnotator) rescue nil
     par_val = options["parallel"]
@@ -1563,14 +1565,14 @@ module PipeAnalysis
     error!(par_val, :CONCURRENT_PARALLEL_NEEDS_BOOL, got: concurrent_option_label(par_val))
   end
 
-  sig { params(value: T.untyped).returns(T::Boolean) }
+  sig { params(value: AST::Node).returns(T::Boolean) }
   def concurrent_bool_option?(value)
     T.bind(self, SemanticAnnotator) rescue nil
     !!((value.is_a?(AST::Literal) && value.type == :BOOLEAN) ||
       (value.is_a?(AST::Identifier) && %w[true false TRUE FALSE].include?(value.name)))
   end
 
-  sig { params(options: T::Hash[String, T.untyped]).void }
+  sig { params(options: ConcurrentOptions).void }
   def validate_concurrent_size_option!(options)
     T.bind(self, SemanticAnnotator) rescue nil
     size = options["size"]
@@ -1583,7 +1585,7 @@ module PipeAnalysis
       got: concurrent_option_label(size))
   end
 
-  sig { params(value: T.untyped).returns(String) }
+  sig { params(value: AST::Node).returns(String) }
   def concurrent_option_label(value)
     T.bind(self, SemanticAnnotator) rescue nil
     return value.name if value.is_a?(AST::Identifier)
@@ -1592,7 +1594,7 @@ module PipeAnalysis
     class_name ? class_name.split("::").last : value.class.to_s
   end
 
-  sig { params(conc: AST::ConcurrentOp, options: T::Hash[String, T.untyped]).void }
+  sig { params(conc: AST::ConcurrentOp, options: ConcurrentOptions).void }
   def validate_known_concurrent_options!(conc, options)
     T.bind(self, SemanticAnnotator) rescue nil
     options.each_key do |key|
@@ -1600,7 +1602,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(options: T::Hash[String, T.untyped]).void }
+  sig { params(options: ConcurrentOptions).void }
   def stamp_concurrent_option_values!(options)
     T.bind(self, SemanticAnnotator) rescue nil
 
