@@ -1,5 +1,5 @@
 # typed: strict
-# src/compiler_frontend.rb - Shared compilation front-end
+# src/compiler/compiler_frontend.rb - Shared compilation front-end
 #
 # Extracts the common pipeline shared by transpile(), transpile_mir(),
 # and gen.rb: lex -> parse -> annotate -> rewrite -> MIRPass -> collect metadata.
@@ -13,8 +13,8 @@ require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../ast/ast"
 require_relative "../annotator"
-require_relative "pipeline_rewriter"
-require_relative "string_concat_rewriter"
+require_relative "../mir/rewriters/pipeline_rewriter"
+require_relative "../mir/rewriters/string_concat_rewriter"
 require_relative "../mir/hoist"
 require_relative "../semantic/pass_state"
 require_relative "../mir/control_flow"

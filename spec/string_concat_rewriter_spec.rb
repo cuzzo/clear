@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/backends/string_concat_rewriter"
+require_relative "../src/mir/rewriters/string_concat_rewriter"
 
 RSpec.describe StringConcatRewriter do
   def rewrite(src)

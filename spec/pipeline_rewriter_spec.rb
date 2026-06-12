@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/backends/transpiler"  # loads compiler, annotator, lexer, parser, ast
-require_relative "../src/backends/pipeline_rewriter"
+require_relative "../src/mir/rewriters/pipeline_rewriter"
 
 RSpec.describe PipelineRewriter do
   # Real pipeline order: lex -> parse -> annotate -> rewrite.

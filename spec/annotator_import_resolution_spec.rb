@@ -1,7 +1,7 @@
 require "spec_helper"
 require "set"
 
-require_relative "../src/backends/importer"
+require_relative "../src/compiler/module_importer"
 require_relative "../src/annotator"
 
 RSpec.describe "annotator import resolution boundaries" do

@@ -34,8 +34,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
       rel == "mir/lower/pipeline/pipeline_context.rb" ||
       rel == "mir/lower/pipeline/pipeline_host.rb" ||
-      rel == "backends/pipeline_rewriter.rb" ||
-      rel == "backends/string_concat_rewriter.rb" ||
+      rel == "mir/rewriters/pipeline_rewriter.rb" ||
+      rel == "mir/rewriters/string_concat_rewriter.rb" ||
       rel == "mir/mir_lowering.rb" ||
       rel.start_with?("mir/lowering/")
   end
@@ -165,7 +165,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
 
   it "runs top-level rewrites before hoist, type check, and MIRPass" do
     expect_order(
-      "src/backends/compiler_frontend.rb",
+      "src/compiler/compiler_frontend.rb",
       "annotator.annotate!",
       "PipelineRewriter.new(annotator).rewrite!(ast)",
       "MIRPassState.for!(ast).mark!(:pipeline_rewritten)",
@@ -181,7 +181,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
 
   it "runs imported modules through the same rewrite/hoist/typecheck/MIRPass boundary" do
     expect_order(
-      "src/backends/importer.rb",
+      "src/compiler/module_importer.rb",
       "annotator.annotate!",
       "PipelineRewriter.new(annotator).rewrite!(ast)",
       "MIRPassState.for!(ast).mark!(:pipeline_rewritten)",
@@ -669,7 +669,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/annotator/helpers/generic_analysis.rb",
     "src/annotator/helpers/pipe_analysis.rb",
     "src/mir/lower/pipeline/pipeline_host.rb",
-    "src/backends/pipeline_rewriter.rb",
+    "src/mir/rewriters/pipeline_rewriter.rb",
     "src/semantic/escape_analysis.rb",
     "src/mir/lowering/expressions.rb",
     "src/mir/lowering/variables.rb",
@@ -678,6 +678,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
   TYPE_CONTRACT_SOURCE_DIRS = [
     "src/annotator",
     "src/backends",
+    "src/compiler",
     "src/mir",
     "src/semantic",
   ].freeze
@@ -766,8 +767,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       %r{\Asrc/annotator/},
       %r{\Asrc/mir/lower/pipeline/pipeline_context\.rb\z},
       %r{\Asrc/mir/lower/pipeline/pipeline_host\.rb\z},
-      %r{\Asrc/backends/pipeline_rewriter\.rb\z},
-      %r{\Asrc/backends/string_concat_rewriter\.rb\z},
+      %r{\Asrc/mir/rewriters/pipeline_rewriter\.rb\z},
+      %r{\Asrc/mir/rewriters/string_concat_rewriter\.rb\z},
       %r{\Asrc/mir/hoist\.rb\z},
       %r{\Asrc/mir/mir_pass\.rb\z},
       %r{\Asrc/mir/pre_mir_type_check\.rb\z},
@@ -821,7 +822,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
 
   it "keeps MIR/backend synthetic AST type writes behind one fail-closed helper" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
-                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/compiler/**/*.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       File.readlines(path).each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
@@ -922,7 +924,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
   end
 
   it "uses hard AST type reads in backend consumers" do
-    offenders = Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")].sort.flat_map do |path|
+    offenders = (Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/compiler/**/*.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       File.readlines(path).each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
@@ -939,7 +942,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
 
   it "does not treat full_type! itself as an optional condition in MIR/backend code" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
-                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/compiler/**/*.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       File.readlines(path).each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
@@ -956,7 +960,8 @@ RSpec.describe "architecture invariants: post-annotation type access" do
 
   it "does not manufacture untyped MIR/backend ownership facts" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
-                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/compiler/**/*.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       next [] if rel == "src/mir/pre_mir_type_check.rb"
 

@@ -37,10 +37,10 @@ unless options[:checked]
 end
 
 require "benchmark"
-require "backends/compiler_frontend"
-require "backends/importer"
-require "backends/pipeline_rewriter"
-require "backends/string_concat_rewriter"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
+require "mir/rewriters/pipeline_rewriter"
+require "mir/rewriters/string_concat_rewriter"
 require "mir/hoist"
 require "mir/pre_mir_type_check"
 require "mir/mir_pass"

@@ -1,8 +1,8 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "../ast/ast"
-require_relative "../ast/std_lib"
+require_relative "../../ast/ast"
+require_relative "../../ast/std_lib"
 
 # Pipeline Rewriter — transforms high-level pipeline operators (|>) into 
 # regular AST nodes (ForEach, IfStatement, BlockExpr) AFTER annotation.

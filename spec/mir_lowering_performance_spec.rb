@@ -2,7 +2,7 @@
 
 require "set"
 
-require_relative "../src/backends/importer"
+require_relative "../src/compiler/module_importer"
 require_relative "../src/mir/mir_lowering"
 
 RSpec.describe "MIRLowering body finalization performance" do

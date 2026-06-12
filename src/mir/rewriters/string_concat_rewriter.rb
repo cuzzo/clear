@@ -1,8 +1,8 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "../ast/ast"
-require_relative "../ast/type"
+require_relative "../../ast/ast"
+require_relative "../../ast/type"
 
 # String Concat Rewriter — flattens chained string + into StringConcat nodes.
 #

@@ -161,8 +161,8 @@ module MirPipelineSpecHelper
   end
 
   def compile_mir_frontend(src, source_dir: Dir.pwd)
-    require_relative "../src/backends/compiler_frontend"
-    require_relative "../src/backends/importer"
+    require_relative "../src/compiler/compiler_frontend"
+    require_relative "../src/compiler/module_importer"
 
     importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
     result = CompilerFrontend.compile(src, importer: importer, source_dir: source_dir)

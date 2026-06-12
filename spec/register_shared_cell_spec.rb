@@ -1,9 +1,9 @@
 require "rspec"
 require "stringio"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/compiler/compiler_frontend"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/mir/mir_checker"
-require_relative "../src/backends/importer"
+require_relative "../src/compiler/module_importer"
 require_relative "../examples/minivm/register_bc_emitter"
 
 RSpec.describe "register-VM @shared:locked scalar store cell" do

@@ -39,8 +39,8 @@ unless options[:checked]
   T::Configuration.default_checked_level = :never
 end
 
-require "backends/compiler_frontend"
-require "backends/importer"
+require "compiler/compiler_frontend"
+require "compiler/module_importer"
 require "mir_lowering"
 require "mir_checker"
 require "backends/mir_emitter"

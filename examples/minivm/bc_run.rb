@@ -82,10 +82,10 @@ if $PROGRAM_NAME == __FILE__
 
   if vm_target == "register"
     require_relative "register_bc_emitter"
-    require "compiler_frontend"
+    require "compiler/compiler_frontend"
     require "mir_lowering"
     require "mir_checker"
-    require "importer"
+    require "compiler/module_importer"
 
     MiniVM::Register::OpcodeSpec.validate_vm_enum!
     MiniVM::Register::RegisterFileLimits.validate_vm_cht!
@@ -399,10 +399,10 @@ if $PROGRAM_NAME == __FILE__
   end
 
   require_relative "bc_emitter"
-  require "compiler_frontend"
+  require "compiler/compiler_frontend"
   require "mir_lowering"
   require "mir_checker"
-  require "importer"
+  require "compiler/module_importer"
 
   source_file = File.expand_path(ARGV[0])
   source      = File.read(source_file)

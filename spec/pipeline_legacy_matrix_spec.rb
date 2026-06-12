@@ -3,8 +3,8 @@ require "stringio"
 require_relative "../src/mir/mir"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/ast/std_lib"
-require_relative "../src/backends/importer"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/compiler/module_importer"
+require_relative "../src/compiler/compiler_frontend"
 
 RSpec.describe "pipeline legacy matrix" do
   EXPECTED_CONCURRENT_STRUCTURAL_HITS = {}.freeze

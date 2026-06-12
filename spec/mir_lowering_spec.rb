@@ -9,8 +9,8 @@ require_relative "../src/mir/mir_checker"
 require_relative "../src/ast/ast"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/type"
-require_relative "../src/backends/importer"
-require_relative "../src/backends/compiler_frontend"
+require_relative "../src/compiler/module_importer"
+require_relative "../src/compiler/compiler_frontend"
 
 RSpec.describe MIRLowering do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }

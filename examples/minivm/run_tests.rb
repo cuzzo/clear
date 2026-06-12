@@ -263,10 +263,10 @@ def print_concurrency_report(paths)
   $LOAD_PATH.unshift(File.expand_path("../../src/mir", __dir__))
   $LOAD_PATH.unshift(File.expand_path("../../src/ast", __dir__))
   require_relative "register_bc_emitter"
-  require "compiler_frontend"
+  require "compiler/compiler_frontend"
   require "mir_lowering"
   require "mir_checker"
-  require "importer"
+  require "compiler/module_importer"
   require "mir"
 
   ok = true

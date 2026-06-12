@@ -10,7 +10,7 @@ require_relative "../ast/fixable_error"
 require_relative "../ast/syntax_typo_scanner"
 require_relative "../tools/predicate_rewriter"
 require_relative "../tools/multi_statement_linter"
-require_relative "../backends/importer"
+require_relative "../compiler/module_importer"
 require_relative "../annotator"
 
 module ClearFixSupport

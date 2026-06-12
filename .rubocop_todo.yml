@@ -30,7 +30,7 @@ Sorbet/EnforceSignatures:
     - 'src/ast/source_error.rb'
     - 'src/ast/symbol_entry.rb'
     - 'src/ast/type.rb'
-    - 'src/backends/pipeline_rewriter.rb'
+    - 'src/mir/rewriters/pipeline_rewriter.rb'
     - 'src/backends/transpiler.rb'
     - 'src/lsp/analyzer.rb'
     - 'src/lsp/code_actions.rb'

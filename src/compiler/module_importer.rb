@@ -25,7 +25,7 @@ class ModuleImporter
 
   # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
   # and are auto-resolvable as `REQUIRE "pkg:<name>"` without an explicit
-  # --pkg flag. Computed from this file's location: src/backends/importer.rb
+  # --pkg flag. Computed from this file's location: src/compiler/module_importer.rb
   # → ../../stdlib relative to __FILE__.
   STDLIB_ROOT = T.let(File.expand_path('../../stdlib', __dir__), String)
 
@@ -171,12 +171,12 @@ class ModuleImporter
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
-    require_relative "mir_emitter"
+    require_relative "../backends/mir_emitter"
     require_relative "../mir/hoist"
     require_relative "../semantic/pass_state"
     require_relative "../mir/pre_mir_type_check"
-    require_relative "pipeline_rewriter"
-    require_relative "string_concat_rewriter"
+    require_relative "../mir/rewriters/pipeline_rewriter"
+    require_relative "../mir/rewriters/string_concat_rewriter"
     require_relative "compiler_frontend"
 
     PipelineRewriter.new(annotator).rewrite!(ast)

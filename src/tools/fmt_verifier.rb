@@ -19,7 +19,7 @@
 # CLI: `clear fmt --verify <file-or-dir>` wires through to this module.
 
 require_relative '../backends/transpiler'
-require_relative '../backends/importer'
+require_relative '../compiler/module_importer'
 require_relative 'formatter'
 require 'tempfile'
 

@@ -52,7 +52,7 @@ require_relative "../mir/alloc"
 require_relative "helpers/method_analysis"
 require_relative "helpers/union"
 require_relative "helpers/auto_inference"
-require_relative "../backends/importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
+require_relative "../compiler/module_importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator

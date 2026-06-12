@@ -176,7 +176,7 @@ AST::FunctionDef(
 
 Nothing is MIR yet. The tree is still an annotated AST.
 
-### 1. Pipeline Rewrite (`src/backends/pipeline_rewriter.rb`)
+### 1. Pipeline Rewrite (`src/mir/rewriters/pipeline_rewriter.rb`)
 
 The pipeline rewriter fuses or rewrites pipeline expressions before MIR sees
 them. This example has no pipeline, so the tree does not change.
@@ -189,7 +189,7 @@ pass state: :pipeline_rewritten
 This stage matters because MIR lowering should see the final execution shape,
 not a high-level pipeline that still needs fusion decisions.
 
-### 2. String Concatenation Rewrite (`src/backends/string_concat_rewriter.rb`)
+### 2. String Concatenation Rewrite (`src/mir/rewriters/string_concat_rewriter.rb`)
 
 String concatenation is normalized before MIR. This example has no string
 concat in `demo`, so the `demo` tree does not change.
