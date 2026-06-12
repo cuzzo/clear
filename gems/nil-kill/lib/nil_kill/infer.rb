@@ -3,6 +3,8 @@
 
 module NilKill
   class Infer
+    attr_reader :store
+
     def initialize(argv)
       @run_sorbet = !argv.include?("--no-sorbet")
       @store = Store.new

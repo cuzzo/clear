@@ -16,6 +16,7 @@ module NilKill
       case command
       when "collect" then collect
       when "infer" then guard_fresh_runtime!; Infer.new(@argv).run
+      when "espalier-evidence" then EspalierEvidence.new(@argv).run
       when "focus-hash-record" then FocusHashRecord.new(@argv).run
       when "apply" then Apply.new(@argv).run
       when "review" then InteractiveReview.new(@argv).run
@@ -283,6 +284,7 @@ module NilKill
           bundle exec tools/nil-kill collect --instrument-source -- <command...>
           bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
           bundle exec tools/nil-kill infer [--no-sorbet]
+          bundle exec tools/nil-kill espalier-evidence [--output tmp/nil-kill/espalier-evidence.json]
           bundle exec tools/nil-kill focus-hash-record STRUCT [--targets path[:path...]]
           bundle exec tools/nil-kill apply [--dry-run]
           bundle exec tools/nil-kill review [--kind replace_nil_with_default]
