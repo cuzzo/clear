@@ -1688,7 +1688,7 @@ module MIRLoweringFunctions
     end
 
     result_type = Type.from_node!(node, context: "intrinsic result")
-    alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
+    alloc_metadata = MIR::InlineAllocMetadata.new(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
     ownership_contract = MIR::OwnershipContract.empty
     if ownership_facts.takes_any?
       operands = consumed_operands.empty? ? consumed_names.map { |name|

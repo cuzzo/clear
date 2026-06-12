@@ -749,40 +749,31 @@ module MIR
   class InlineAllocMetadata
     extend T::Sig
 
-    sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-    attr_reader :placeholders
-
-    sig { params(placeholders: T::Hash[T.any(Symbol, String), Symbol]).void }
-    def initialize(placeholders = {})
-      @placeholders = T.let(placeholders.dup.freeze, T::Hash[T.any(Symbol, String), Symbol])
+    sig do
+      params(
+        alloc: T.nilable(Symbol),
+        key_alloc: T.nilable(Symbol),
+        val_alloc: T.nilable(Symbol),
+        shard_alloc: T.nilable(Symbol),
+      ).void
     end
-
-    sig { params(value: T.nilable(Object)).returns(T.nilable(InlineAllocMetadata)) }
-    def self.from(value)
-      return nil unless value
-      return value if value.is_a?(InlineAllocMetadata)
-      unless value.is_a?(Hash)
-        raise TypeError, "allocator metadata must be MIR::InlineAllocMetadata or Hash"
-      end
-
-      normalized = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-      value.each do |key, alloc|
-        unless alloc.is_a?(Symbol)
-          raise TypeError, "allocator metadata must map #{key.inspect} to a Symbol"
-        end
-        normalized[T.cast(key, T.any(Symbol, String))] = alloc
-      end
-      new(normalized)
+    def initialize(alloc: nil, key_alloc: nil, val_alloc: nil, shard_alloc: nil)
+      slots = T.let({}, T::Hash[Symbol, Symbol])
+      slots[:alloc] = alloc if alloc
+      slots[:key_alloc] = key_alloc if key_alloc
+      slots[:val_alloc] = val_alloc if val_alloc
+      slots[:shard_alloc] = shard_alloc if shard_alloc
+      @slots = T.let(slots.freeze, T::Hash[Symbol, Symbol])
     end
 
     sig { returns(T::Boolean) }
     def empty?
-      @placeholders.empty?
+      @slots.empty?
     end
 
-    sig { params(blk: T.proc.params(key: T.any(Symbol, String), alloc: Symbol).void).void }
+    sig { params(blk: T.proc.params(key: Symbol, alloc: Symbol).void).void }
     def each(&blk)
-      @placeholders.each { |key, alloc| blk.call(key, alloc) }
+      @slots.each { |key, alloc| blk.call(key, alloc) }
       nil
     end
 
@@ -790,39 +781,34 @@ module MIR
 
     sig { returns(T::Array[Symbol]) }
     def values
-      @placeholders.values
+      @slots.values
+    end
+
+    sig { params(key: Symbol).returns(T.nilable(Symbol)) }
+    def slot(key)
+      @slots[key]
     end
 
     public
 
-    sig { params(key: T.any(Symbol, String)).returns(T::Boolean) }
-    def key?(key)
-      @placeholders.key?(key)
-    end
-
-    sig { params(key: T.any(Symbol, String)).returns(T.nilable(Symbol)) }
-    def [](key)
-      @placeholders[key]
-    end
-
     sig { returns(T.nilable(Symbol)) }
     def primary
-      self[:alloc]
+      slot(:alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def key_alloc
-      self[:key_alloc]
+      slot(:key_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def value_alloc
-      self[:val_alloc]
+      slot(:val_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
     def shard_alloc
-      self[:shard_alloc]
+      slot(:shard_alloc)
     end
 
     sig { returns(T.nilable(Symbol)) }
@@ -853,37 +839,20 @@ module MIR
 
     sig { params(alloc: Symbol).returns(InlineAllocMetadata) }
     def with_all(alloc)
-      updated = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-      @placeholders.each_key { |key| updated[key] = alloc }
-      InlineAllocMetadata.new(updated)
-    end
-
-    sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-    def to_h
-      @placeholders.dup
+      updated = T.let({}, T::Hash[Symbol, Symbol])
+      @slots.each { |key, _slot_alloc| updated[key] = alloc }
+      InlineAllocMetadata.new(
+        alloc: updated[:alloc],
+        key_alloc: updated[:key_alloc],
+        val_alloc: updated[:val_alloc],
+        shard_alloc: updated[:shard_alloc],
+      )
     end
 
     sig { returns(String) }
     def inspect
-      @placeholders.inspect
+      @slots.inspect
     end
-  end
-
-  sig do
-    params(
-      alloc: T.nilable(Symbol),
-      key_alloc: T.nilable(Symbol),
-      val_alloc: T.nilable(Symbol),
-      shard_alloc: T.nilable(Symbol),
-    ).returns(InlineAllocMetadata)
-  end
-  def self.inline_alloc_metadata(alloc: nil, key_alloc: nil, val_alloc: nil, shard_alloc: nil)
-    placeholders = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
-    placeholders[:alloc] = alloc if alloc
-    placeholders[:key_alloc] = key_alloc if key_alloc
-    placeholders[:val_alloc] = val_alloc if val_alloc
-    placeholders[:shard_alloc] = shard_alloc if shard_alloc
-    InlineAllocMetadata.new(placeholders)
   end
 
   # ================================================================
@@ -4703,10 +4672,10 @@ module MIR
                               :resolved_allocs, :template_kind, :target_var) do
     extend T::Sig
     include Stmt
-    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol, target_var: T.nilable(String)).void }
+    sig { params(target: Emittable, key: Emittable, value: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol, target_var: T.nilable(String)).void }
     def initialize(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind, target_var = nil)
       super(target, key, value, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind, target_var)
+        resolved_allocs, template_kind, target_var)
     end
     sig { returns(T::Boolean) }
     def expr?; true; end
@@ -4745,10 +4714,10 @@ module MIR
                               :resolved_allocs, :template_kind) do
     extend T::Sig
     include Expr
-    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: T.nilable(T.any(InlineAllocMetadata, T::Hash[T.any(Symbol, String), Symbol])), template_kind: Symbol).void }
+    sig { params(target: Emittable, key: Emittable, shard_idx: T.nilable(Emittable), shard_key: T.nilable(Emittable), map_kind: Symbol, stdlib_def: FunctionSignature, key_type: T.nilable(Type), value_type: T.nilable(Type), resolved_allocs: InlineAllocMetadata, template_kind: Symbol).void }
     def initialize(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type, resolved_allocs, template_kind)
       super(target, key, shard_idx, shard_key, map_kind, stdlib_def, key_type, value_type,
-        InlineAllocMetadata.from(resolved_allocs) || InlineAllocMetadata.new, template_kind)
+        resolved_allocs, template_kind)
     end
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, key])

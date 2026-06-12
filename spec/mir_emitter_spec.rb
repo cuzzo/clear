@@ -1159,7 +1159,7 @@ RSpec.describe MIREmitter do
         sig,
         Type.new(:String),
         Type.new(:Int64),
-        { alloc: :frame },
+        MIR::InlineAllocMetadata.new(alloc: :frame),
         :shard_direct_zig,
       )
 
@@ -1177,7 +1177,7 @@ RSpec.describe MIREmitter do
         sig,
         nil,
         nil,
-        nil,
+        MIR::InlineAllocMetadata.new,
         :shard_direct_zig,
       )
 

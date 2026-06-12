@@ -1016,7 +1016,7 @@ module MIRLoweringVariables
   def lower_map_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
     T.bind(self, MIRLowering) rescue nil
     shard = shard_context
-    dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: false)
+    dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op)
     sink_type = receiver_type.value_type
     val = with_sink_type(sink_type) do
       with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
@@ -1085,8 +1085,7 @@ module MIRLoweringVariables
       receiver_type,
       target_node,
       node,
-      op,
-      include_val_alloc: owns_transferred_value
+      op
     )
 
     sink_type = receiver_type.value_type || value_type_for_transfer
@@ -1158,11 +1157,10 @@ module MIRLoweringVariables
       receiver_type: Type,
       target_node: T.untyped,
       assignment: AST::Assignment,
-      op: FunctionSignature,
-      include_val_alloc: T::Boolean
+      op: FunctionSignature
     ).returns(IndexedAssignmentDispatch)
   end
-  def indexed_assignment_dispatch(kind, receiver_type, target_node, assignment, op, include_val_alloc:)
+  def indexed_assignment_dispatch(kind, receiver_type, target_node, assignment, op)
     T.bind(self, MIRLowering) rescue nil
 
     target_var = indexed_assignment_target_var(target_node)
@@ -1175,7 +1173,7 @@ module MIRLoweringVariables
     else
       :zig
     end
-    resolved_allocs = indexed_assignment_allocs(op, target_node, assignment, include_val_alloc: include_val_alloc)
+    resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
     receiver_alloc = T.unsafe(self).send(:placement_for_node, target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
@@ -1197,22 +1195,28 @@ module MIRLoweringVariables
     params(
       op: FunctionSignature,
       target_node: AST::Node,
-      assignment: AST::Assignment,
-      include_val_alloc: T::Boolean
+      assignment: AST::Assignment
     ).returns(MIR::InlineAllocMetadata)
   end
-  def indexed_assignment_allocs(op, target_node, assignment, include_val_alloc:)
+  def indexed_assignment_allocs(op, target_node, assignment)
     T.bind(self, MIRLowering) rescue nil
 
-    resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
-    [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-      registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
-      next unless registry_alloc || (include_val_alloc && alloc_key == :val_alloc)
-      alloc_sym = registry_alloc || :heap
-      next if alloc_key == :val_alloc && registry_alloc.nil? && include_val_alloc
-      resolved_allocs[alloc_key] = resolve_alloc_sym(alloc_sym, target_node, assignment)
-    end
-    MIR::InlineAllocMetadata.new(resolved_allocs)
+    MIR::InlineAllocMetadata.new(
+      alloc: indexed_assignment_resolved_alloc(op, :alloc, target_node, assignment),
+      key_alloc: indexed_assignment_resolved_alloc(op, :key_alloc, target_node, assignment),
+      val_alloc: indexed_assignment_resolved_alloc(op, :val_alloc, target_node, assignment),
+      shard_alloc: indexed_assignment_resolved_alloc(op, :shard_alloc, target_node, assignment),
+    )
+  end
+
+  sig { params(op: FunctionSignature, alloc_key: Symbol, target_node: AST::Node, assignment: AST::Assignment).returns(T.nilable(Symbol)) }
+  def indexed_assignment_resolved_alloc(op, alloc_key, target_node, assignment)
+    T.bind(self, MIRLowering) rescue nil
+
+    registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
+    return nil unless registry_alloc
+
+    resolve_alloc_sym(registry_alloc, target_node, assignment)
   end
 
   sig { params(op: FunctionSignature, alloc_key: Symbol).returns(T.nilable(Symbol)) }
@@ -1358,6 +1362,7 @@ module MIRLoweringVariables
   private :field_owner_move_marks
   private :indexed_assignment_allocs
   private :indexed_assignment_registry_alloc
+  private :indexed_assignment_resolved_alloc
   private :indexed_assignment_target_var
   private :list_collection_copy?
   private :lower_atomic_assignment

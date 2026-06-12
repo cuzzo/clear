@@ -1290,14 +1290,7 @@ module MIRLoweringExpressions
                         :sharded_zig
                       else :zig
                       end
-      resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
-      [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-        registry_alloc = indexed_assignment_registry_alloc(op, alloc_key)
-        next unless registry_alloc
-        sym = registry_alloc || :heap
-        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, plan.target_ast, plan.target_ast)
-      end
-      alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)
+      alloc_metadata = MIR::InlineAllocMetadata.new
       key_type = (kind == :numeric_map) ? map_ft.key_type : nil
       value_type = (kind == :numeric_map) ? map_ft.value_type : nil
       if shard_direct

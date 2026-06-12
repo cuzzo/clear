@@ -91,7 +91,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     expect(alloc_marks["handles"]).not_to be_nil
     expect(alloc_marks["handles"].alloc).to eq(:heap),
       "root container placement must come from escape/storage, not loop rewinds"
-    expect(ops_targeting_handles.any? { |op| op.allocs&.key?(:alloc) }).to be(true)
+    expect(ops_targeting_handles.any? { |op| op.allocs&.primary }).to be(true)
   end
 
   it "resolves every handles-targeting op to the same allocator as the root AllocMark (the contract)" do
@@ -103,9 +103,10 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     end
     root_alloc = alloc_marks["handles"].alloc
     ops.each do |op|
-      next unless op.allocs&.key?(:alloc)
-      expect(op.allocs[:alloc]).to eq(root_alloc),
-        "op alloc :#{op.allocs[:alloc]} disagrees with root 'handles' AllocMark :#{root_alloc} " \
+      op_alloc = op.allocs&.primary
+      next unless op_alloc
+      expect(op_alloc).to eq(root_alloc),
+        "op alloc :#{op_alloc} disagrees with root 'handles' AllocMark :#{root_alloc} " \
         "(resolver/checker root divergence -> INLINE_ALLOC_MISMATCH / UAF)"
     end
   end

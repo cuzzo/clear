@@ -148,7 +148,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       args: [],
       reason: "frame_alloc_probe",
       ownership_contract: MIR::OwnershipContract.empty,
-      allocs: MIR.inline_alloc_metadata(alloc: :frame),
+      allocs: MIR::InlineAllocMetadata.new(alloc: :frame),
     )
     expect(checker.send(:expr_has_frame_alloc?, registry_frame)).to be(true)
     expect(checker.send(:expr_has_frame_alloc?, nil)).to be(false)

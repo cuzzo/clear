@@ -462,7 +462,7 @@ RSpec.describe "MIR gap-burn characterization" do
       sig,
       nil,
       Type.new(:String),
-      { alloc: :heap },
+      MIR::InlineAllocMetadata.new(alloc: :heap),
       :zig,
       "map",
     )
@@ -690,11 +690,29 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(surface).to include(nested)
     expect(surface.grep(MIR::Ident).map(&:name)).to eq(["surface"])
 
-    expect { MIR::InlineAllocMetadata.from(Object.new) }.to raise_error(TypeError, /allocator metadata/)
-    expect { MIR::InlineAllocMetadata.from(alloc: "heap") }.to raise_error(TypeError, /allocator metadata/)
+    expect(MIR::InlineAllocMetadata.new.empty?).to be(true)
     allocs = MIR::InlineAllocMetadata.new(alloc: :frame, key_alloc: :heap)
+    seen_allocs = []
+    allocs.each { |key, alloc| seen_allocs << [key, alloc] }
+    expect(seen_allocs).to eq([[:alloc, :frame], [:key_alloc, :heap]])
+    expect(allocs.primary).to eq(:frame)
+    expect(allocs.key_alloc).to eq(:heap)
+    expect(allocs.value_alloc).to be_nil
+    expect(allocs.shard_alloc).to be_nil
+    expect(allocs.sink_alloc).to eq(:frame)
+    expect(allocs.requires_target_alloc?).to be(true)
+    expect(allocs.single_alloc).to be_nil
     expect(allocs.any_frame?).to be(true)
-    expect(allocs.to_h).to eq({ alloc: :frame, key_alloc: :heap })
+    expect(allocs.any_heap?).to be(true)
+    expect(allocs.inspect).to eq("{:alloc=>:frame, :key_alloc=>:heap}")
+    heap_allocs = allocs.with_all(:heap)
+    expect(heap_allocs.primary).to eq(:heap)
+    expect(heap_allocs.key_alloc).to eq(:heap)
+    expect(heap_allocs.value_alloc).to be_nil
+    expect(heap_allocs.shard_alloc).to be_nil
+    expect(MIR::InlineAllocMetadata.new(val_alloc: :heap).sink_alloc).to eq(:heap)
+    expect(MIR::InlineAllocMetadata.new(val_alloc: :heap).requires_target_alloc?).to be(false)
+    expect(MIR::InlineAllocMetadata.new(alloc: :heap, val_alloc: :heap).single_alloc).to eq(:heap)
     placement = MIR::Placement::BindingFact.new(
       name: "slot",
       type_info: Type.new(:String),
@@ -811,10 +829,55 @@ RSpec.describe "MIR gap-burn characterization" do
       return_type: Type.new(:"!?String"),
       return_alloc: :heap,
     )
-    inline = registry_call("coverage", heap_return_sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
+    inline = registry_call("coverage", heap_return_sig, allocs: MIR::InlineAllocMetadata.new(alloc: :heap))
     inline_effect = inline.ownership_effect
     expect(inline_effect.produces_owned).to be(true)
     expect(inline_effect.alloc).to eq(:heap)
+  end
+
+  it "assembles typed indexed-assignment allocator metadata without hash protocol fallbacks" do
+    harness_class = Class.new do
+      include MIRLoweringVariables
+
+      attr_reader :resolved
+
+      def initialize(registry)
+        @registry = registry
+        @resolved = []
+      end
+
+      def indexed_assignment_registry_alloc(_op, alloc_key)
+        @registry[alloc_key]
+      end
+
+      def resolve_alloc_sym(sym, target_node, assignment)
+        @resolved << [sym, target_node, assignment]
+        :"resolved_#{sym}"
+      end
+    end
+    signature = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    target = id("target")
+    assignment = AST::Assignment.new(tok, target, lit("value"))
+    harness = harness_class.new(alloc: :frame, key_alloc: :heap, val_alloc: :arena, shard_alloc: :slab)
+
+    metadata = harness.send(:indexed_assignment_allocs, signature, target, assignment)
+
+    expect(metadata).to be_a(MIR::InlineAllocMetadata)
+    expect(metadata.primary).to eq(:resolved_frame)
+    expect(metadata.key_alloc).to eq(:resolved_heap)
+    expect(metadata.value_alloc).to eq(:resolved_arena)
+    expect(metadata.shard_alloc).to eq(:resolved_slab)
+    expect(harness.resolved).to eq([
+      [:frame, target, assignment],
+      [:heap, target, assignment],
+      [:arena, target, assignment],
+      [:slab, target, assignment],
+    ])
+
+    missing_value_harness = harness_class.new(alloc: :frame)
+    missing_value = missing_value_harness.send(:indexed_assignment_allocs, signature, target, assignment)
+    expect(missing_value.primary).to eq(:resolved_frame)
+    expect(missing_value.value_alloc).to be_nil
   end
 
   it "uses an opaque ctx field type for unsupported FSM foreach local promotion" do
@@ -1814,7 +1877,7 @@ RSpec.describe "MIR gap-burn characterization" do
       intrinsic: true,
       emit: IntrinsicEmit.new(allocates: true, return_alloc: :heap, mutates_receiver: true)
     )
-    mutating_alloc = registry_call("test", stdlib_alloc, allocs: MIR.inline_alloc_metadata(alloc: :heap))
+    mutating_alloc = registry_call("test", stdlib_alloc, allocs: MIR::InlineAllocMetadata.new(alloc: :heap))
     expect(low.send(:implicit_allocating_result_fact,
       MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), ownership_finalization_context)).to be_nil
 
@@ -3824,13 +3887,13 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:compose_capability_wrap, inner, "Counter", Type.new(:Counter), :heap)).to be(inner)
 
     frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true, emit: IntrinsicEmit.new(allocates: true))
-    inline = registry_call("edge", frame_sig, allocs: MIR.inline_alloc_metadata(alloc: :frame))
+    inline = registry_call("edge", frame_sig, allocs: MIR::InlineAllocMetadata.new(alloc: :frame))
     low.send(:stamp_var_decl_init_target!, inline, "owned", :heap)
     expect(inline.target_var).to eq("owned")
     expect(inline.allocs.primary).to eq(:heap)
 
     allocating_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), emit: IntrinsicEmit.new(allocates: true))
-    transfer_init = registry_call("edge", allocating_sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
+    transfer_init = registry_call("edge", allocating_sig, allocs: MIR::InlineAllocMetadata.new(alloc: :heap))
     transfer_entry = CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
     transfer_let = MIR::Let.new("owned", transfer_init, false, Type.new(:String), nil)
     packet = low.send(

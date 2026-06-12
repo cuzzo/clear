@@ -642,7 +642,7 @@ RSpec.describe "pipeline backend coverage" do
         args: [],
         reason: "test",
         ownership_contract: MIR::OwnershipContract.empty,
-        allocs: MIR.inline_alloc_metadata(alloc: :heap),
+        allocs: MIR::InlineAllocMetadata.new(alloc: :heap),
         target_var: "pipe_src_list",
       )
       harness = materializer_coverage_harness(source_mir: source_call)
