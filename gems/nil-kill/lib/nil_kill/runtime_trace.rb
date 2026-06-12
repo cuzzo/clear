@@ -1007,6 +1007,8 @@ module NilKillRuntimeTrace
   end
 
   def self.record_source_method_return(owner, method_id, kind, path, line, value)
+    return value if Thread.current[:__nil_kill_collection_hook]
+
     ctx = site_ctx(owner, method_id, kind, path, line)
     return value unless ctx
 
@@ -1041,6 +1043,8 @@ module NilKillRuntimeTrace
   end
 
   def self.record_source_method_raise(owner, method_id, kind, path, line, error)
+    return if Thread.current[:__nil_kill_collection_hook]
+
     ctx = site_ctx(owner, method_id, kind, path, line)
     return unless ctx
 

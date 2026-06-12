@@ -2873,24 +2873,43 @@ RSpec.describe MIRLowering do
       expect(zig).to match(/defer __counter_guard_\d+\.release\(\)/)
     end
 
-    it "lowers BORROWED capability" do
-      var_node = make_id("data", full_type: :Data)
-      cap = { var_node: var_node, alias: "d", capability: :BORROWED, resolved_type: nil }
-      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
-      body_lit.coerced_type = :Int64
+	    it "lowers BORROWED capability" do
+	      var_node = make_id("data", full_type: :Data)
+	      cap = { var_node: var_node, alias: "d", capability: :BORROWED, resolved_type: nil }
+	      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+	      body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
       node.full_type = :Void
       attach_capability_plan!(node)
 
       result = lowering.lower(node)
-      zig = emit(result)
-      expect(zig).to include("const d = data")
-    end
+	      zig = emit(result)
+	      expect(zig).to include("const d = data")
+	    end
 
-    it "lowers RESTRICT capability" do
-      var_node = make_id("buf", full_type: :Buffer)
-      resolved = Type.new(:Buffer)
-      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: false, resolved_type: resolved }
+	    it "does not dereference borrowed raw array parameters" do
+	      array_type = Type.array_of(:Int64)
+	      var_node = make_id("data", full_type: array_type)
+	      symbol = SymbolEntry.new(reg: "data", type: array_type, mutable: false, storage: :stack)
+	      symbol.is_param = true
+	      var_node.symbol = symbol
+	      cap = { var_node: var_node, alias: "ref", capability: :BORROWED, resolved_type: array_type }
+	      body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
+	      body_lit.coerced_type = :Int64
+	      node = AST::WithBlock.new(tok, [cap], [body_lit], nil)
+	      node.full_type = :Void
+	      attach_capability_plan!(node)
+
+	      result = lowering.lower(node)
+	      zig = emit(result)
+	      expect(zig).to include("const ref = data;")
+	      expect(zig).not_to include("data.*")
+	    end
+
+	    it "lowers RESTRICT capability" do
+	      var_node = make_id("buf", full_type: :Buffer)
+	      resolved = Type.new(:Buffer)
+	      cap = { var_node: var_node, alias: "b", capability: :RESTRICT, alias_mutable: false, resolved_type: resolved }
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
       body_lit.coerced_type = :Int64
       node = AST::WithBlock.new(tok, [cap], [body_lit], nil)

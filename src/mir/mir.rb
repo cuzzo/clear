@@ -20,6 +20,7 @@
 require "sorbet-runtime"
 require_relative "../annotator/helpers/intrinsic_registry"
 require_relative "../ast/type"
+require_relative "../ast/ast"
 require_relative "../semantic/pass_state"
 require_relative "cleanup_entry"
 
@@ -138,9 +139,9 @@ module MIR
 
     sig { params(checked_arg_count: Integer).returns(CallableContract) }
     def self.no_ownership(checked_arg_count)
-      params = T.let([], T::Array[AST::Param])
+      params = T.let([], T::Array[::AST::Param])
       checked_arg_count.times do |idx|
-        params << AST::Param.new(name: "__arg#{idx}", type: Type.new(:Any))
+        params << ::AST::Param.new(name: "__arg#{idx}", type: Type.new(:Any))
       end
       new(
         FunctionSignature.new(params: params, return_type: Type.new(:Void)),

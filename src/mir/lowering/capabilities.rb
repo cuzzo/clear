@@ -385,22 +385,27 @@ module MIRLoweringCapabilities
     safe_alias = safe_with_capability_alias(context.alias_name)
     aliased_value = if context.node.polymorphic
       MIR::CapabilityUnwrap.new(source_mir)
-    elsif borrowed_const_param_alias?(context, is_param)
-      MIR::Deref.new(source_mir)
-    else
-      source_mir
-    end
+	    elsif borrowed_const_param_alias?(context, is_param)
+	      MIR::Deref.new(source_mir)
+	    else
+	      source_mir
+	    end
     [MIR::Let.new(safe_alias, aliased_value, false, nil, nil), MIR::Suppress.new(safe_alias)]
   end
 
   sig { params(context: WithCapabilityBindingContext, is_param: T::Boolean).returns(T::Boolean) }
-  def borrowed_const_param_alias?(context, is_param)
-    return false unless is_param
-    return false unless context.var_sync.nil? || context.var_sync == :local
+	  def borrowed_const_param_alias?(context, is_param)
+	    return false unless is_param
+	    return false unless context.var_sync.nil? || context.var_sync == :local
 
-    sym = context.var_node.symbol
-    !!(sym && !sym.mutable)
-  end
+	    sym = context.var_node.symbol
+	    return false unless sym && !sym.mutable
+
+	    source_type = Type.new(sym.type)
+	    return false if source_type.non_string_array? && !source_type.collection?
+
+	    true
+	  end
 
   sig { params(context: WithCapabilityBindingContext).returns(T.nilable(T::Array[MIR::Emittable])) }
   def restrict_capability_binding(context)
