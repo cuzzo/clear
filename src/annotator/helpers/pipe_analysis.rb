@@ -1177,19 +1177,6 @@ module PipeAnalysis
     nil
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def pre_scan_node_for_sharded(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    found = T.let(false, T::Boolean)
-    each_shard_scan_node(node) do |n|
-      if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
-        found = true
-        break
-      end
-    end
-    found
-  end
-
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
   # Accepts range inputs (unlike analyze_each_op which requires collections).
   # Visits the body, then extracts the key expression and sets shard_context.
@@ -1281,16 +1268,6 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|
       access = sharded_get_index_access(node, context: "sharded pipeline target")
-      results << access if access
-    end
-  end
-
-  # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T::Array[AST::Locatable], results: T::Array[AST::PipelineShardedAccess]).void }
-  def walk_for_sharded_getindex(nodes, results)
-    T.bind(self, SemanticAnnotator) rescue nil
-    each_shard_scan_node(nodes) do |node|
-      access = sharded_get_index_access(node, context: "pipeline target")
       results << access if access
     end
   end

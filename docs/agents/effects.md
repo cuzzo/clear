@@ -14,7 +14,7 @@ The effects system is **not** function coloring. Effects are only required on pu
 |---|---|---|
 | `HEAP` | Dynamic allocation (GPA, arena escape) | `@list`, `HashMap`, capability wraps (`@shared`, `@locked`, `@indirect`) |
 | `BLOCKING` | May yield the fiber waiting for a lock | `WITH EXCLUSIVE` or auto-lock field mutations on `@locked`/`@writeLocked` |
-| `REENTRANT` | Function is directly or indirectly recursive | `@reentrant` annotation, mutual recursion cycles |
+| `REENTRANT` | Function is directly or indirectly recursive | `EFFECTS REENTRANT` declaration, mutual recursion cycles |
 | `LOOP_UNBOUND` | Contains a loop without a provable bound | `WHILE TRUE`, `BG STREAM` generators |
 | `EXTERN` | Calls native code (opaque to the compiler) | `EXTERN FN` calls |
 | `FILE_READ` | Reads from the filesystem | Future: annotated `EXTERN FN` |

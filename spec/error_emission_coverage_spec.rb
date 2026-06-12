@@ -425,12 +425,12 @@ RSpec.describe "error emission coverage" do
   # @example_for: TIGHT_CALLS_REENTRANT_FN
   # @fix: Either remove TIGHT from the loop (so the scheduler can
   # @fix: handle the recursive call's stack), or refactor the body
-  # @fix: to avoid calling the @reentrant function inline.
+  # @fix: to avoid calling the plain EFFECTS REENTRANT function inline.
   describe ":TIGHT_CALLS_REENTRANT_FN — TIGHT loop body calls a recursive fn" do
-    it "raises when a TIGHT WHILE body calls an @reentrant function" do
+    it "raises when a TIGHT WHILE body calls a plain EFFECTS REENTRANT function" do
       expect {
         run(<<~CLEAR)
-          FN fib(n: Int64) RETURNS Int64 @reentrant ->
+          FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
@@ -444,12 +444,12 @@ RSpec.describe "error emission coverage" do
             END
           END
         CLEAR
-      }.to raise_error(CompilerError, /TIGHT loop cannot call @reentrant/)
+      }.to raise_error(CompilerError, /TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
     it "compiles when the call lives outside the TIGHT loop body" do
       run(<<~CLEAR)
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -991,12 +991,12 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: REENTRANCY_MUTUAL_CYCLE
-  # @fix: Pick one: declare `@reentrant` on every cycle member (the
+  # @fix: Pick one: declare `EFFECTS REENTRANT` on every cycle member (the
   # @fix: spawn site must run on `@service` / OS thread), or change
   # @fix: each fn to a bounded variant — `EFFECTS REENTRANT:THUNK`,
   # @fix: `:NOT_LOGICAL`, or `:MAX_DEPTH(N)`.
   describe ":REENTRANCY_MUTUAL_CYCLE — mutually recursive fns without annotation" do
-    it "raises when two functions call each other and neither carries @reentrant" do
+    it "raises when two functions call each other and neither declares reentrance" do
       expect {
         run(<<~CLEAR)
           FN ping(n: Int64) RETURNS Int64 ->

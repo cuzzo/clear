@@ -128,8 +128,12 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
 
   it "covers MIR checker and pass helpers for frame allocs and return escapes" do
     checker = MIRChecker.new
-    mutator_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-    mutator_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+    mutator_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(mutates_receiver: true)
+    )
     registry_mutator = MIR::RegistryCall.new(
       entry: mutator_sig,
       args: [],
@@ -176,14 +180,21 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   it "covers function-lowering helpers for owned returns, safe navigation, and extern methods" do
     l = lowering
     param = AST::Param.new(name: "source", type: Type.new(:String))
-    sig = FunctionSignature.new(params: [param], return_type: Type.new(:String))
-    sig.heap_carry_return_vars = Set["source"]
+    sig = FunctionSignature.new(
+      params: [param],
+      return_type: Type.new(:String),
+      heap_carry_return_vars: Set["source"]
+    )
     heap_arg = OpenStruct.new(needs_heap_create: true, full_type!: Type.new(:String))
     node = OpenStruct.new(args: [heap_arg])
     expect(l.send(:call_owned_return_from_args?, node, sig)).to be(true)
 
-    sig.heap_carry_return_vars = Set["missing"]
-    expect(l.send(:call_owned_return_from_args?, node, sig)).to be(true)
+    missing_sig = FunctionSignature.new(
+      params: [param],
+      return_type: Type.new(:String),
+      heap_carry_return_vars: Set["missing"]
+    )
+    expect(l.send(:call_owned_return_from_args?, node, missing_sig)).to be(true)
 
     recv = id("maybe", type: Type.new(:String))
     safe_target = Struct.new(:target, :token) do
@@ -230,27 +241,20 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     expect(body_scan.call_site_facts.map(&:node)).to include(call)
     expect(body_scan.return_nodes).to eq([ret])
 
-    {
-      "start" => Set["mid"],
-      "mid" => Set["deep"],
-    }.each do |name, callees|
-      a.send(:record_function_body_summary!, Annotator::Phases::FunctionBodySummary.new(
-        name: name,
-        callees: callees,
-        propagating_callees: callees,
-        has_fnptr_call: false,
-        raises_directly: false
-      ))
-    end
-    fn = AST::FunctionDef.new(tok, "deep", [], [], :Void, nil, [], [], nil, :private, [], false)
-    fn.stack_tier = :unbounded
-    a.semantic_function_nodes.replace({ "deep" => fn })
-    expect(a.send(:find_unbounded_callee, Set["start"])).to eq("deep")
-
     source = OpenStruct.new(scope_depth: 3)
+    errors = []
     a.define_singleton_method(:lifetime_sources_for_value) { |_node| [source] }
-    expect(a.send(:lifetime_violation_for_store, id("borrow"), 2)).to include("scope depth 3")
-    expect(a.send(:lifetime_violation_for_store, id("borrow"), 4)).to be_nil
+    a.define_singleton_method(:dest_scope_depth_for_target) { |_target| 2 }
+    a.define_singleton_method(:lookup_source_name) { |_entry| "borrow_source" }
+    a.define_singleton_method(:build_atomic_escape_migration_fix) { |_entry, _name| nil }
+    a.define_singleton_method(:error!) { |node, code, **kwargs| errors << [node, code, kwargs] }
+
+    a.send(:verify_tied_assignment!, AST::Assignment.new(tok, id("dest"), id("borrow")))
+    expect(errors.dig(0, 2, :message)).to include("scope depth 3")
+
+    a.define_singleton_method(:dest_scope_depth_for_target) { |_target| 4 }
+    a.send(:verify_tied_assignment!, AST::Assignment.new(tok, id("dest"), id("borrow")))
+    expect(errors.length).to eq(1)
   end
 
   it "covers annotator visit helpers for copy, block expressions, assignment, and fixable caps" do
@@ -291,18 +295,16 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
       Array(node).each { |n| blk.call(n) }
     end
     a.define_singleton_method(:sharded_unsynced_identifier?) { |node| node.equal?(shard_id) }
-    expect(a.send(:pre_scan_node_for_sharded, [id("other"), shard_id])).to be(true)
-
     access = AST::PipelineShardedAccess.new(
       map_name: "items",
       key_expr: lit,
       map_token: tok,
     )
     a.define_singleton_method(:sharded_get_index_access) do |node, context:|
-      context == "pipeline target" && node.equal?(shard_id) ? access : nil
+      context == "sharded pipeline target" && node.equal?(shard_id) ? access : nil
     end
     results = []
-    a.send(:walk_for_sharded_getindex, [shard_id], results)
+    a.send(:walk_for_sharded_access, [shard_id], results)
     expect(results).to eq([access])
   end
 

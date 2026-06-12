@@ -8,7 +8,7 @@ FN getNum(v: Value) RETURNS Float64 ->
     RETURN 0.0;
 END
 
-FN prStr(v: Value) RETURNS !String @reentrant ->
+FN prStr(v: Value) RETURNS !String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Number AS n ->
             RETURN toInt(n).toString();,

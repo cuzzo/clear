@@ -77,7 +77,7 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
 
   it "compiles a directly-self-recursive :MAX_DEPTH fn without firing any error" do
     # The pre-Tranche-5 annotator's `directly_recursive + :non_reentrant`
-    # branch fired a stale `Use @reentrant` message for MAX_DEPTH; that
+    # branch fired a stale `Use EFFECTS REENTRANT` message for MAX_DEPTH; that
     # branch now skips reentrant_max_depth so the runtime counter path
     # is the actual source of truth.
     expect {

@@ -39,7 +39,7 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
       false
     )
     fn.requires = { "cell" => Set[:LOCKED] }
-    fn.reentrant = :reentrant
+    fn.effects_decl = :reentrant
 
     signature = described_class.function_signature(fn, return_lifetime: "value")
 
@@ -115,16 +115,30 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.requires).to eq({})
     expect(signature.extern_effects).to eq({})
 
-    signature.requires = { "x" => Set[:LOCKED] }
-    expect(signature.requires.fetch("x")).to include(:LOCKED)
-    signature.requires = nil
-    expect(signature.requires).to eq({})
+    with_requires = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params,
+      requires: { "x" => Set[:LOCKED] }
+    )
+    expect(with_requires.requires.fetch("x")).to include(:LOCKED)
+    without_requires = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params
+    )
+    expect(without_requires.requires).to eq({})
 
-    signature.effects = Set[:BLOCKING]
-    signature.heap_carry_return = true
-    signature.heap_carry_return_vars = Set["value"]
+    copy_source = FunctionSignature.new(
+      params: signature.params,
+      return_type: signature.return_type,
+      type_params: signature.type_params,
+      effects: Set[:BLOCKING],
+      heap_carry_return: true,
+      heap_carry_return_vars: Set["value"]
+    )
 
-    copy = signature.dup
+    copy = copy_source.dup
     expect(copy.effects).to eq(Set[:BLOCKING])
     expect(copy.heap_carry_return).to eq(true)
     expect(copy.heap_carry_return_vars).to eq(Set["value"])

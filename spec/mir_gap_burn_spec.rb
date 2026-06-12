@@ -446,8 +446,12 @@ RSpec.describe "MIR gap-burn characterization" do
 
   it "treats sharded map allocator metadata as store consumption, not an owned result" do
     low = lowering
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-    sig.emit = IntrinsicEmit.new(zig: "put({0})", allocates: true, mutates_receiver: true)
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(zig: "put({0})", allocates: true, mutates_receiver: true)
+    )
     put = MIR::ShardedMapPut.new(
       MIR::Ident.new("map"),
       MIR::Lit.new("\"k\""),
@@ -481,8 +485,12 @@ RSpec.describe "MIR gap-burn characterization" do
 
   it "uses typed extern trampoline return types for owned result facts" do
     low = lowering
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    sig.emit = IntrinsicEmit.new(zig: "makeString()", allocates: true, return_alloc: :heap)
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(zig: "makeString()", allocates: true, return_alloc: :heap)
+    )
     trampoline = MIR::ExternTrampoline.new(
       id: 1,
       callee_name: "makeString",
@@ -821,8 +829,12 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "uses typed intrinsic contracts for loop frame and receiver escape facts" do
-    frame_alloc_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    frame_alloc_sig.emit = IntrinsicEmit.new(allocates: true, alloc: :frame)
+    frame_alloc_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(allocates: true, alloc: :frame)
+    )
     allocating_call = AST::FuncCall.new(tok, "make_frame_value", [])
     allocating_call.full_type = Type.new(:String)
     allocating_call.matched_signature = frame_alloc_sig
@@ -835,8 +847,8 @@ RSpec.describe "MIR gap-burn characterization" do
       params: [param("self", type: receiver_type)],
       return_type: Type.new(:Void),
       intrinsic: true,
+      emit: IntrinsicEmit.new(allocates: true, mutates_receiver: true)
     )
-    mutating_sig.emit = IntrinsicEmit.new(allocates: true, mutates_receiver: true)
     mutating_call = AST::MethodCall.new(tok, receiver, "append", [])
     mutating_call.full_type = Type.new(:Void)
     mutating_call.matched_signature = mutating_sig
@@ -846,8 +858,8 @@ RSpec.describe "MIR gap-burn characterization" do
       params: [param("self", type: receiver_type)],
       return_type: Type.new(:Void),
       intrinsic: true,
+      emit: IntrinsicEmit.new
     )
-    pure_sig.emit = IntrinsicEmit.new
     pure_call = AST::MethodCall.new(tok, receiver, "length", [])
     pure_call.full_type = Type.new(:Void)
     pure_call.matched_signature = pure_sig
@@ -893,8 +905,7 @@ RSpec.describe "MIR gap-burn characterization" do
     plain_sig = FunctionSignature.intrinsic_contract
     plain_call.matched_signature = plain_sig
     runtime_call = AST::FuncCall.new(tok, "runtime", [])
-    runtime_sig = FunctionSignature.intrinsic_contract
-    runtime_sig.needs_rt = true
+    runtime_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, needs_rt: true)
     runtime_call.matched_signature = runtime_sig
     missing_call = AST::FuncCall.new(tok, "missing", [])
 
@@ -1281,8 +1292,7 @@ RSpec.describe "MIR gap-burn characterization" do
     call = AST::FuncCall.new(tok, "callee", [])
     expect(EscapeAnalysis.send(:call_result_is_heap?, call, { "callee" => callee }, nil)).to eq(true)
 
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:String))
-    sig.heap_carry_return = true
+    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), heap_carry_return: true)
     foreign = AST::FuncCall.new(tok, "foreign", [])
     foreign.matched_signature = sig
     expect(EscapeAnalysis.send(:call_result_is_heap?, foreign, {}, nil)).to eq(true)
@@ -1442,9 +1452,9 @@ RSpec.describe "MIR gap-burn characterization" do
       params: [param("v", type: Type.new(:Value))],
       return_type: Type.new(:String),
       return_lifetime: ["v"],
+      heap_carry_return: true,
+      heap_carry_return_vars: Set["s"]
     )
-    sig.heap_carry_return = true
-    sig.heap_carry_return_vars = Set["s"]
 
     low = MIRLowering.new(input: MIRLoweringInput.new(fn_sigs: { "getStr" => sig }))
     call = AST::FuncCall.new(tok, "getStr", [id("v", type: Type.new(:Value))])
@@ -1798,8 +1808,12 @@ RSpec.describe "MIR gap-burn characterization" do
     bad_plan = MIRLowering::DestinationPlacementPlan.new(action: :bad, type_info: nil, dest_alloc: nil)
     expect { bad_plan.place(low, MIR::Ident.new("x"), id("x")) }.to raise_error(/unknown destination placement action/)
 
-    stdlib_alloc = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    stdlib_alloc.emit = IntrinsicEmit.new(allocates: true, return_alloc: :heap, mutates_receiver: true)
+    stdlib_alloc = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(allocates: true, return_alloc: :heap, mutates_receiver: true)
+    )
     mutating_alloc = registry_call("test", stdlib_alloc, allocs: MIR.inline_alloc_metadata(alloc: :heap))
     expect(low.send(:implicit_allocating_result_fact,
       MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), ownership_finalization_context)).to be_nil
@@ -2112,8 +2126,8 @@ RSpec.describe "MIR gap-burn characterization" do
     store_sig = FunctionSignature.new(
       params: [param("self", type: collection_type), param("value", type: Type.new(:Box), takes: true)],
       return_type: Type.new(:Void),
+      emit: IntrinsicEmit.new(mutates_receiver: true)
     )
-    store_sig.emit = IntrinsicEmit.new(mutates_receiver: true)
     store_call.matched_signature = store_sig
     store_hoists = []
     Hoist.send(:collect_stmt_hoists!, store_call, store_hoists, Hoist::HoistCounter.new, nil)
@@ -3596,17 +3610,19 @@ RSpec.describe "MIR gap-burn characterization" do
     contract = lowering.send(:callable_contract_for_lowered_args, call_sig, [borrowed_arg], [MIR::Ident.new("owner_field")])
     expect(contract.ownership_contract.operands.first.borrowed).to eq(true)
 
-    mismatch_sig = FunctionSignature.new(params: [param("a"), param("b")], return_type: Type.new(:Void))
-    mismatch_sig.arg_spec = [:a, :b]
+    mismatch_sig = FunctionSignature.new(params: [param("a"), param("b")], return_type: Type.new(:Void), arg_spec: [:a, :b])
     mismatch_call = AST::FuncCall.new(tok, "badIntrinsic", [lit(1, type: :Int64)])
     mismatch_call.matched_stdlib_def = mismatch_sig
     expect {
       lowering.send(:stdlib_call_facts, mismatch_call)
     }.to raise_error(/signature has 2 params for 1 args/)
 
-    method_sig = FunctionSignature.new(params: [param("self", type: :Counter)], return_type: Type.new(:Int64))
-    method_sig.needs_rt = false
-    method_sig.can_fail = false
+    method_sig = FunctionSignature.new(
+      params: [param("self", type: :Counter)],
+      return_type: Type.new(:Int64),
+      needs_rt: false,
+      can_fail: false
+    )
     method_low = MIRLowering.new(input: MIRLoweringInput.new(fn_sigs: { "get" => method_sig }))
     method_call = AST::MethodCall.new(tok, id("counter", type: :Counter), "get", [])
     method_call.full_type = Type.new(:Int64)
@@ -3621,10 +3637,18 @@ RSpec.describe "MIR gap-burn characterization" do
     method_low.send(:program_state).fn_sigs = { "returns_from_arg" => carry_sig }
     expect(method_low.send(:call_owned_return?, any_call)).to eq(false)
 
-    carry_sig.heap_carry_return_vars = Set["source"]
-    expect(method_low.send(:call_owned_return_from_args?, any_call, carry_sig)).to eq(true)
-    carry_sig.return_type = Type.new(:Int64)
-    expect(method_low.send(:call_owned_return_from_args?, any_call, carry_sig)).to eq(false)
+    carry_sig_with_source = FunctionSignature.new(
+      params: [param("source", type: :Int64)],
+      return_type: Type.new(:String),
+      heap_carry_return_vars: Set["source"]
+    )
+    expect(method_low.send(:call_owned_return_from_args?, any_call, carry_sig_with_source)).to eq(true)
+    carry_int_sig = FunctionSignature.new(
+      params: [param("source", type: :Int64)],
+      return_type: Type.new(:Int64),
+      heap_carry_return_vars: Set["source"]
+    )
+    expect(method_low.send(:call_owned_return_from_args?, any_call, carry_int_sig)).to eq(false)
 
     nested_if = Struct.new(:then_body, :else_body).new([], [AST::ReturnNode.new(tok, lit(1, type: :Int64))])
     expect(method_low.send(:function_body_has_value_return?, [nested_if])).to eq(true)
@@ -3799,15 +3823,13 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:compose_capability_wrap, inner, "Counter", Type.new(:Counter, ownership: :shared), :heap).strategy).to eq(:own_only)
     expect(low.send(:compose_capability_wrap, inner, "Counter", Type.new(:Counter), :heap)).to be(inner)
 
-    frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    frame_sig.emit = IntrinsicEmit.new(allocates: true)
+    frame_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true, emit: IntrinsicEmit.new(allocates: true))
     inline = registry_call("edge", frame_sig, allocs: MIR.inline_alloc_metadata(alloc: :frame))
     low.send(:stamp_var_decl_init_target!, inline, "owned", :heap)
     expect(inline.target_var).to eq("owned")
     expect(inline.allocs.primary).to eq(:heap)
 
-    allocating_sig = FunctionSignature.new(params: [], return_type: Type.new(:String))
-    allocating_sig.emit = IntrinsicEmit.new(allocates: true)
+    allocating_sig = FunctionSignature.new(params: [], return_type: Type.new(:String), emit: IntrinsicEmit.new(allocates: true))
     transfer_init = registry_call("edge", allocating_sig, allocs: MIR.inline_alloc_metadata(alloc: :heap))
     transfer_entry = CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
     transfer_let = MIR::Let.new("owned", transfer_init, false, Type.new(:String), nil)
@@ -3989,8 +4011,7 @@ RSpec.describe "MIR gap-burn characterization" do
     fn_node = fn([with_block], params: [held_param])
 
     callee_param = param("x", type: Type.new(:Counter))
-    callee_sig = FunctionSignature.new(params: [callee_param], return_type: Type.new(:Void))
-    callee_sig.requires = { "x" => Set[:LOCKED] }
+    callee_sig = FunctionSignature.new(params: [callee_param], return_type: Type.new(:Void), requires: { "x" => Set[:LOCKED] })
     errors = []
 
     ConcurrencyChecks.send(

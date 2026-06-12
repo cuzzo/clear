@@ -631,8 +631,12 @@ RSpec.describe "pipeline backend coverage" do
     end
 
     it "builds pipeline blocks with source cleanup, item setup, and result body" do
-      source_sig = FunctionSignature.new(params: [], return_type: Type.new(:"Int64[]", collection: :list), intrinsic: true)
-      source_sig.emit = IntrinsicEmit.new(allocates: true)
+      source_sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:"Int64[]", collection: :list),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(allocates: true)
+      )
       source_call = MIR::RegistryCall.new(
         entry: source_sig,
         args: [],

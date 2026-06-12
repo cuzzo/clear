@@ -70,7 +70,7 @@ FN isLambda?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
+FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
     PARTIAL MATCH a START
         Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
@@ -114,7 +114,7 @@ FN readAtom(token: String) RETURNS !Value ->
     RETURN Value{ Symbol: COPY token };
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS !String @reentrant ->
+FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
@@ -199,7 +199,7 @@ FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
     RETURN COPY getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
+FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -219,7 +219,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
     RETURN readAtom(tok) OR RAISE;
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
+FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
@@ -250,7 +250,7 @@ END
 #      26=string-append 27=string-length 28=substring 29=string-ref
 #      30=number->string 31=string->number 32=string? 33=display
 
-FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     # Arithmetic
     IF id == 1 THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
     IF id == 2 THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
@@ -332,7 +332,7 @@ END
 
 # Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     IF pool[envId] AS env THEN
         IF env.vars[name] AS found THEN RETURN COPY found; END
         parentVal = env.vars["__p"] OR Value.Nil;
@@ -346,7 +346,7 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool @reentrant ->
+FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool EFFECTS REENTRANT ->
     IF pool[envId] AS env THEN
         IF env.vars[name] AS found THEN
             IF valEqual?(found, found) THEN PASS; END
@@ -362,7 +362,7 @@ FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[500
     RETURN FALSE;
 END
 
-FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void @reentrant ->
+FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void EFFECTS REENTRANT ->
     current = envGet!(envId, "__output", pool) OR Value.Nil;
     envSet!(envId, "__output", Value{ Str: COPY (getStr(current) + chunk) }, pool) OR RAISE;
     RETURN;
@@ -462,7 +462,7 @@ END
 
 # eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE ast: Value = COPY astIn;
     MUTABLE curEnv: Id<Env> = envId;
     MUTABLE tcoActive = TRUE;
@@ -484,7 +484,7 @@ FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !V
     RETURN Value.Nil;
 END
 
-FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN
         MUTABLE empty: Value[]@list = List[];
         RETURN Value{ List: empty };
@@ -659,7 +659,7 @@ END
 
 # runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input) OR RAISE;
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv) OR RAISE;

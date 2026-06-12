@@ -2453,8 +2453,8 @@ class MIRLowering
     end
     items = []
 
-    # Auto-detect needs_safety from @nonReentrant functions
-    needs_safety ||= node.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.reentrant == :non_reentrant }
+    # Auto-detect safety runtime needs from guarded reentrance variants.
+    needs_safety ||= node.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.reentrance_guard_required? }
 
     # Standard imports
     items << MIR::Import.new("std", "std", nil)

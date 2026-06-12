@@ -6,11 +6,10 @@ require_relative "../src/ast/ast"
 require_relative "../src/backends/transpiler"
 require_relative "../src/annotator/helpers/reentrance"
 
-# Thunk Phase 1.3 — annotator bridge that unifies the legacy
-# `@reentrant` annotation and the new `EFFECTS REENTRANT[:VARIANT]`
-# clause into a single canonical `fn_node.reentrance_kind` field,
-# and validates `REQUIRES <name>: NON_REENTRANT` clauses against
-# the parameter list.
+# Thunk Phase 1.3 — annotator bridge that stamps
+# `EFFECTS REENTRANT[:VARIANT]` into the canonical
+# `fn_node.reentrance_kind` field, and validates
+# `REQUIRES <name>: NON_REENTRANT` clauses against the parameter list.
 #
 # Spec covers the mapping rules and parameter-name validation.
 # Errors that depend on call-graph state (e.g. propagating
@@ -78,43 +77,7 @@ RSpec.describe "ReentranceBridge" do
       expect(fn(ast, "sum").reentrance_kind).to eq(:reentrant_tail_call)
     end
 
-    it "is :reentrant for legacy @reentrant" do
-      ast = annotated(<<~CLEAR)
-        FN walk(n: Int64) RETURNS Void @reentrant ->
-          IF n <= 0 -> RETURN;
-          walk(n - 1);
-        END
-        FN main() RETURNS Void -> walk(3); RETURN; END
-      CLEAR
-      expect(fn(ast, "walk").reentrance_kind).to eq(:reentrant)
-    end
-
-    it "is :reentrant_tail_call for legacy @reentrant:tailCall" do
-      ast = annotated(<<~CLEAR)
-        FN sum(n: Int64, acc: Int64) RETURNS Int64 @reentrant:tailCall ->
-          IF n <= 0 -> RETURN acc;
-          RETURN sum(n - 1, acc + n);
-        END
-        FN main() RETURNS Void -> _ = sum(10, 0); RETURN; END
-      CLEAR
-      expect(fn(ast, "sum").reentrance_kind).to eq(:reentrant_tail_call)
-    end
-  end
-
-  describe "legacy attr back-fill" do
-    it "fills fn_node.reentrant when EFFECTS REENTRANT is declared" do
-      ast = annotated(<<~CLEAR)
-        FN walk(n: Int64) RETURNS Void
-          EFFECTS REENTRANT ->
-          IF n <= 0 -> RETURN;
-          walk(n - 1);
-        END
-        FN main() RETURNS Void -> walk(1); RETURN; END
-      CLEAR
-      expect(fn(ast, "walk").reentrant).to eq(:reentrant)
-    end
-
-    it "fills both fn_node.reentrant AND tail_call for EFFECTS REENTRANT:TAIL_CALL" do
+    it "sets tail_call for `EFFECTS REENTRANT:TAIL_CALL`" do
       ast = annotated(<<~CLEAR)
         FN sum(n: Int64, acc: Int64) RETURNS Int64
           EFFECTS REENTRANT:TAIL_CALL ->
@@ -124,16 +87,15 @@ RSpec.describe "ReentranceBridge" do
         FN main() RETURNS Void -> _ = sum(10, 0); RETURN; END
       CLEAR
       f = fn(ast, "sum")
-      expect(f.reentrant).to eq(:reentrant)
+      expect(f.reentrance_kind).to eq(:reentrant_tail_call)
       expect(f.tail_call).to be(true)
     end
 
-    it "leaves legacy attrs nil when there is no declaration" do
+    it "leaves tail_call false when there is no declaration" do
       ast = annotated(<<~CLEAR)
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       f = fn(ast, "main")
-      expect(f.reentrant).to be_nil
       expect(f.tail_call).to be_falsey
     end
   end

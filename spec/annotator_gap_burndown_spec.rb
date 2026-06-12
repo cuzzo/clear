@@ -1246,8 +1246,11 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers collection narrowing helper branches directly" do
     ann = SemanticAnnotator.new(source_code: "")
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
-    sig.emit = IntrinsicEmit.new(narrows_collection: true)
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      emit: IntrinsicEmit.new(narrows_collection: true)
+    )
 
     list_type = Type.new(:"Any[]", collection: :list)
     list_type.shard_count = 2
@@ -1274,8 +1277,11 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "narrows receiver collections from mutating method calls" do
     ann = SemanticAnnotator.new(source_code: "")
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
-    sig.emit = IntrinsicEmit.new(narrows_receiver_collection: true)
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      emit: IntrinsicEmit.new(narrows_receiver_collection: true)
+    )
 
     list_type = Type.new(:"Any[]", collection: :list)
     list_type.mark_heap_allocated!
@@ -1370,15 +1376,21 @@ RSpec.describe "annotator branch gap burndown" do
     ann = SemanticAnnotator.new(source_code: "")
     source = AST::Identifier.new(token, "source")
 
-    intrinsic = FunctionSignature.new(params: [], return_type: Type.new(:String))
-    intrinsic.arg_spec = [{ name: "value" }]
-    intrinsic.emit = IntrinsicEmit.new(lifetime: ["value"])
+    intrinsic = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      arg_spec: [{ name: "value" }],
+      emit: IntrinsicEmit.new(lifetime: ["value"])
+    )
     intrinsic_call = AST::FuncCall.new(token, "borrow_intrinsic", [source])
     intrinsic_call.matched_stdlib_def = intrinsic
     expect(ann.send(:resolve_borrow_source, intrinsic_call)).to equal(source)
 
-    self_lifetime = FunctionSignature.new(params: [], return_type: Type.new(:String))
-    self_lifetime.emit = IntrinsicEmit.new(lifetime: ["self"])
+    self_lifetime = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      emit: IntrinsicEmit.new(lifetime: ["self"])
+    )
     method_call = AST::MethodCall.new(token, source, "trim", [])
     method_call.matched_stdlib_def = self_lifetime
     expect(ann.send(:resolve_borrow_source, method_call)).to equal(source)
@@ -1737,16 +1749,125 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "preserves split fallibility metadata when duplicating function signatures" do
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
-    sig.can_fail = true
-    sig.alloc_fault = true
-    sig.error_fallible = false
+    source_requires = { "x" => Set[:LOCKED] }
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Void),
+      can_fail: true,
+      alloc_fault: true,
+      error_fallible: false,
+      needs_rt: true,
+      effects: Set[:HEAP],
+      return_strategy: :value,
+      stack_tier: :large,
+      requires: source_requires,
+      heap_carry_return: true,
+      heap_carry_return_vars: Set["x"],
+      arg_validator: ->(_args) { true },
+      arg_spec: [{ name: "x" }],
+      arity: 1,
+      emit: IntrinsicEmit.new(allocates: true),
+      return_def: FunctionReturn.infer(:infer_element_type)
+    )
 
     copy = sig.dup
 
     expect(copy.can_fail).to eq(true)
     expect(copy.alloc_fault).to eq(true)
     expect(copy.error_fallible).to eq(false)
+    expect(copy.needs_rt).to eq(true)
+    expect(copy.effects).to eq(Set[:HEAP])
+    expect(copy.return_strategy).to eq(:value)
+    expect(copy.stack_tier).to eq(:large)
+    expect(copy.requires).to eq("x" => Set[:LOCKED])
+    expect(copy.heap_carry_return).to eq(true)
+    expect(copy.heap_carry_return_vars).to eq(Set["x"])
+    expect(copy.arg_validator&.call([])).to eq(true)
+    expect(copy.arg_spec).to eq([{ name: "x" }])
+    expect(copy.arity).to eq(1)
+    expect(copy.emit&.allocates).to eq(true)
+    expect(copy.return_def.kind).to eq(FunctionReturn::Kind::Infer)
+
+    copy.requires["x"] << :VERSIONED
+    expect(source_requires).to eq("x" => Set[:LOCKED])
+    expect(sig.requires).to eq("x" => Set[:LOCKED])
+  end
+
+  it "covers FunctionSignature constructor seams over split storage" do
+    sig = FunctionSignature.new(
+      params: [],
+      return_type: nil,
+      return_lifetime: [:self],
+      extern: true,
+      module_alias: "native",
+      extern_effects: { alloc: :heap },
+      fn_type_params: [:T],
+      owner_type: "Box",
+      owner_type_params: [:T],
+      intrinsic: true,
+      emit: IntrinsicEmit.new(zig: :call_box)
+    )
+
+    expect(sig.return_type.raw).to eq(:Void)
+    expect(sig.return_lifetime).to eq(["self"])
+    expect(sig.extern).to eq(true)
+    expect(sig.module_alias).to eq("native")
+    expect(sig.extern_effects).to eq(alloc: :heap)
+    expect(sig.fn_type_params).to eq([:T])
+    expect(sig.owner_type).to eq("Box")
+    expect(sig.owner_type_params).to eq([:T])
+    expect(sig.intrinsic).to eq(true)
+    expect(sig.intrinsic_pattern).to eq(:call_box)
+
+    expect(FunctionSignature.allocating_intrinsic.emit&.allocates).to eq(true)
+    expect(FunctionSignature.intrinsic_contract(borrows: []).emit&.borrows).to eq([])
+
+    fn = Struct.new(
+      :needs_rt,
+      :can_fail,
+      :alloc_fault,
+      :error_fallible,
+      :effects,
+      :requires,
+      :return_strategy,
+      :return_type,
+      :stack_tier,
+      :heap_carry_return,
+      :heap_carry_return_vars,
+      keyword_init: true,
+    ).new(
+      needs_rt: true,
+      can_fail: true,
+      alloc_fault: false,
+      error_fallible: true,
+      effects: Set[:IO],
+      requires: { "lock" => Set[:LOCKED] },
+      return_strategy: :by_value,
+      return_type: Type.new(:String),
+      stack_tier: :small,
+      heap_carry_return: false,
+      heap_carry_return_vars: Set["tmp"],
+    )
+
+    source_fn_requires = T.must(fn.requires)
+    FunctionSignature.sync_from_function_def!(sig, fn)
+    expect(source_fn_requires).to eq("lock" => Set[:LOCKED])
+    expect(sig.needs_rt).to eq(true)
+    expect(sig.can_fail).to eq(true)
+    expect(sig.alloc_fault).to eq(false)
+    expect(sig.error_fallible).to eq(true)
+    expect(sig.effects).to eq(Set[:IO])
+    expect(sig.requires).to eq("lock" => Set[:LOCKED])
+    expect(sig.return_strategy).to eq(:by_value)
+    expect(sig.return_type.raw).to eq(:String)
+    expect(sig.stack_tier).to eq(:small)
+    expect(sig.heap_carry_return).to eq(false)
+    expect(sig.heap_carry_return_vars).to eq(Set["tmp"])
+
+    unchanged = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+    FunctionSignature.sync_from_function_def!(unchanged, Object.new)
+    expect(unchanged.return_type.raw).to eq(:Int64)
+    expect(unchanged.needs_rt).to be_nil
   end
 
   it "covers intrinsic registry converter edge contracts directly" do
@@ -1759,9 +1880,9 @@ RSpec.describe "annotator branch gap burndown" do
     expect(emit.cleanup.registry).to eq(:KNOWN)
     expect(IntrinsicRegistry.send(:nested_emit, { registry: {} }, registries).registry).to eq(:unknown)
 
-    converted = IntrinsicRegistry.convert_registry({ "ok" => { args: [], return: :Int64 }, "skip" => :not_hash }, registries)
+    converted = IntrinsicRegistry.sigs({ "ok" => { args: [], return: :Int64 }, "skip" => :not_hash })
     expect(converted["ok"]).to be_a(FunctionSignature)
-    expect(converted).not_to have_key("skip")
+    expect(converted["skip"]).to be_nil
 
     expect {
       IntrinsicRegistry.send(:build_emit, { unmapped_key: true }, registries)
@@ -3367,8 +3488,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(borrowed_errors).to be_empty
     expect(borrowed_fn.requires).to be_nil
 
-    sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
-    sig.requires = { "c" => Set[:LOCKED] }
+    sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void), requires: { "c" => Set[:LOCKED] })
     call_arg = AST::Identifier.new(token(:IDENTIFIER, "plain"), "plain")
     call = AST::FuncCall.new(token(:VAR_ID, "bump"), "bump", [call_arg])
     caller = function_def("caller")
@@ -3383,8 +3503,7 @@ RSpec.describe "annotator branch gap burndown" do
     plain_sym = SymbolEntry.new(reg: nil, type: Type.new(:Counter), mutable: true, storage: :stack)
     plain_arg = AST::Identifier.new(token(:IDENTIFIER, "plain_mut"), "plain_mut")
     plain_arg.symbol = plain_sym
-    universal_sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
-    universal_sig.requires = { "c" => Set.new }
+    universal_sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void), requires: { "c" => Set.new })
     WithMatchCheck.check_call_sites!(
       [
         call_site_fact(AST::FuncCall.new(token(:VAR_ID, "none"), "none", [plain_arg]), id: 1),
@@ -3610,8 +3729,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:record_function_body_summary!, summary)
 
     expect(ann.send(:function_body_summaries)).to include("body_fn" => summary)
-    expect(ann.send(:function_body_summary_for, "body_fn")).to eq(summary)
-    expect(ann.send(:function_body_summary_for, "missing")).to be_nil
+    expect(ann.send(:function_body_summaries)).not_to have_key("missing")
   end
 
   it "keeps lambda-contained calls out of function call-site facts" do

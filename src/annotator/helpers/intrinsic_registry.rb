@@ -132,15 +132,15 @@ module IntrinsicRegistry
       params: params,
       return_type: to_return_type(rdef),
       return_lifetime: normalize_lifetime(h[:lifetime]),
-      intrinsic: true
+      intrinsic: true,
+      return_def: rdef,
+      arg_validator: h[:validate].is_a?(Proc) ? h[:validate] : nil,
+      arg_spec: h[:args],
+      arity: h[:arity],
+      can_fail: h[:can_fail],
+      needs_rt: h[:needs_rt],
+      emit: build_emit(h, registries)
     )
-    fs.return_def      = rdef
-    fs.arg_validator   = h[:validate] if h[:validate].is_a?(Proc)
-    fs.arg_spec        = h[:args]
-    fs.arity           = h[:arity]
-    fs.can_fail        = h[:can_fail]
-    fs.needs_rt        = h[:needs_rt]
-    fs.emit            = build_emit(h, registries)
     fs
   end
 
@@ -177,14 +177,6 @@ module IntrinsicRegistry
           takes: takes_by_index
         )
       end
-    end
-  end
-
-  # registries: { Symbol => Hash<String, Hash> }
-  sig { params(reg: T.untyped, registries: T.untyped).void }
-  def convert_registry(reg, registries)
-    reg.each_with_object({}) do |(name, entry), out|
-      out[name] = convert_entry(name, entry, registries) if entry.is_a?(Hash)
     end
   end
 

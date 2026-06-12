@@ -588,12 +588,6 @@ module DiagnosticRegistry
       template: ":MAX_DEPTH(N) requires a positive integer N (got %{got}).",
       summary:  "EFFECTS REENTRANT:MAX_DEPTH(N) needs N > 0.",
     },
-    REENTRANT_LEGACY_AND_NEW: {
-      severity: :error, category: :syntax,
-      template: "Function '%{name}' has both legacy '@reentrant' annotation and new 'EFFECTS REENTRANT' clause. Pick one.",
-      summary:  "Legacy `@reentrant` and new `EFFECTS REENTRANT` are mutually exclusive.",
-    },
-
     # ===================================================================
     # PARSER — WITH / MATCH / SYNC POLICY / error clauses
     # ===================================================================
@@ -1170,9 +1164,9 @@ module DiagnosticRegistry
     # Reentrance
     REENTRANCE_DIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' directly calls itself. Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
-      summary:  "Function calls itself directly without an `@reentrant` annotation declaring the recursion budget.",
-      fix_hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).",
+      template: "Reentrancy Error: '%{name}' directly calls itself. Add `EFFECTS REENTRANT` to the function signature to declare the recursion budget.",
+      summary:  "Function calls itself directly without declaring the recursion budget.",
+      fix_hint: "Add `EFFECTS REENTRANT` to the function signature.",
     },
     REENTRANCE_INDIRECT_RECURSIVE: {
       severity: :error, category: :reentrance,
@@ -1188,9 +1182,9 @@ module DiagnosticRegistry
     },
     REENTRANCE_TAIL_CALL_NOT_RECURSIVE: {
       severity: :error, category: :reentrance,
-      template: "@reentrant:tailCall on '%{name}' but the function is not recursive. Remove :tailCall - it only applies to self-recursive functions.",
-      summary:  "`@reentrant:tailCall` declared on a function that doesn't recurse.",
-      fix_hint: "Remove :tailCall - it only applies to self-recursive functions.",
+      template: "EFFECTS REENTRANT:TAIL_CALL on '%{name}' but the function is not recursive. Remove :TAIL_CALL - it only applies to self-recursive functions.",
+      summary:  "`EFFECTS REENTRANT:TAIL_CALL` declared on a function that doesn't recurse.",
+      fix_hint: "Remove :TAIL_CALL - it only applies to self-recursive functions.",
     },
 
     # IF / MATCH / WHEN
@@ -2155,13 +2149,13 @@ module DiagnosticRegistry
     },
     TIGHT_CALLS_REENTRANT_FN: {
       severity: :error, category: :reentrance,
-      template: "TIGHT loop cannot call @reentrant function '%{name}'",
-      summary:  "TIGHT loops disallow calls to @reentrant functions (unbounded depth).",
+      template: "TIGHT loop cannot call plain EFFECTS REENTRANT function '%{name}'",
+      summary:  "TIGHT loops disallow calls to plain EFFECTS REENTRANT functions (unbounded depth).",
     },
     REENTRANCY_MUTUAL_CYCLE: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' is part of a mutually recursive call cycle. Add @reentrant or @nonReentrant to the function signature.",
-      summary:  "Function is in a mutual-recursion cycle but lacks an explicit reentrancy annotation.",
+      template: "Reentrancy Error: '%{name}' is part of a mutually recursive call cycle. Add EFFECTS REENTRANT or a bounded REENTRANT variant to the function signature.",
+      summary:  "Function is in a mutual-recursion cycle but lacks an explicit reentrance declaration.",
     },
     INT_LITERAL_OVERFLOW: {
       severity: :error, category: :type,
@@ -2366,8 +2360,8 @@ module DiagnosticRegistry
     },
     REENTRANT_FN_TO_NON_REENTRANT_PARAM: {
       severity: :error, category: :reentrance,
-      template: "Reentrancy Error: '%{name}' is @reentrant but parameter '%{param}' does not accept @reentrant functions. Declare the parameter type as 'FN(...) -> Type @reentrant' to allow this.",
-      summary:  "@reentrant function passed to a parameter that doesn't permit @reentrant callees.",
+      template: "Reentrancy Error: '%{name}' is plain EFFECTS REENTRANT but parameter '%{param}' does not accept plain reentrant callbacks. Add EFFECTS REENTRANT to the callee that owns '%{param}', or constrain the parameter explicitly with REQUIRES %{param}: NON_REENTRANT and pass a bounded/non-reentrant callback.",
+      summary:  "Plain EFFECTS REENTRANT function passed to a parameter that doesn't permit plain reentrant callees.",
     },
     ARG_NEEDS_ATOMIC_CELL: {
       severity: :error, category: :type,
@@ -2766,7 +2760,7 @@ module DiagnosticRegistry
       template: "%{message}",
       summary:  "Per-function effect inference (P3.x) rejected the program (yield-across-lock, naked nested-WITH, recursive lock acquire, etc.).",
       cause: "Per-function effect inference (yield / alloc_heap / io / fail) detected a violation: hold-lock-across-yield, naked nested-WITH, recursive lock acquire on the same binding, etc. The specific check is described in the message.",
-      fix_hint: "Most are structural: split the WITH (no nested re-acquire), avoid yielding while holding a lock, mark a function `@reentrant` if recursion is intentional. The message names the specific check.",
+      fix_hint: "Most are structural: split the WITH (no nested re-acquire), avoid yielding while holding a lock, add `EFFECTS REENTRANT` if recursion is intentional. The message names the specific check.",
     },
     CAPABILITY_INVALID: {
       severity: :error, category: :capability,

@@ -69,8 +69,6 @@ RSpec.describe Annotator::FunctionRegistry do
     )
 
     expect(registry.record_body_summary!(summary)).to eq(summary)
-    expect(registry.body_summary_for("caller")).to eq(summary)
-    expect(registry.body_summary_for("missing")).to be_nil
     expect(registry.body_summaries).to eq("caller" => summary)
     expect(registry.call_graph).to eq("caller" => Set["callee"])
     expect(registry.propagating_callees).to eq("caller" => Set["fallible"])

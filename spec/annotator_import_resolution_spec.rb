@@ -62,17 +62,17 @@ RSpec.describe "annotator import resolution boundaries" do
       owner_type: "Box",
       owner_type_params: [:T],
       intrinsic: true,
-      zig_pattern: :native_box
+      needs_rt: true,
+      can_fail: true,
+      alloc_fault: true,
+      error_fallible: true,
+      effects: Set[:HEAP],
+      requires: { "value" => Set[:LOCKED] },
+      heap_carry_return: true,
+      heap_carry_return_vars: Set["value"],
+      return_def: FunctionReturn.infer(:infer_element_type),
+      emit: IntrinsicEmit.new(zig: :native_box)
     )
-    source_sig.needs_rt = true
-    source_sig.can_fail = true
-    source_sig.alloc_fault = true
-    source_sig.error_fallible = true
-    source_sig.effects = Set[:HEAP]
-    source_sig.requires = { "value" => Set[:LOCKED] }
-    source_sig.heap_carry_return = true
-    source_sig.heap_carry_return_vars = Set["value"]
-    source_sig.return_def = FunctionReturn.infer(:infer_element_type)
     source_scope.declare("helper", nil, source_sig, false, false, nil, :static)
 
     imported_scope = import_scope(source_scope)
@@ -99,10 +99,18 @@ RSpec.describe "annotator import resolution boundaries" do
   end
 
   it "imports type schemas as isolated semantic copies" do
-    method_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64), visibility: :pub)
-    method_sig.return_def = FunctionReturn.fixed(Type.new(:Int64))
-    resource_method_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64), visibility: :pub)
-    resource_method_sig.return_def = FunctionReturn.variant(:ValueList)
+    method_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Int64),
+      visibility: :pub,
+      return_def: FunctionReturn.fixed(Type.new(:Int64))
+    )
+    resource_method_sig = FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:Int64),
+      visibility: :pub,
+      return_def: FunctionReturn.variant(:ValueList)
+    )
     inline_variant = Schemas::InlineStructVariant.new(
       fields: { "left" => Type.new(:Int64), "right" => Type.new(:String) },
       deinit_entries: [Schemas::InlineStructDeinitEntry.indirect(field: "right", zig_type: "[]u8")]

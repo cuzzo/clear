@@ -2,14 +2,8 @@
 require "sorbet-runtime"
 # Reentrance bridge — Thunk Phase 1.3
 #
-# Unifies the two declaration sources for function reentrance into a single
-# canonical field on each FunctionDef:
-#
-#   1. Legacy: `@reentrant` / `@reentrant:tailCall` AST attributes (parsed
-#      into fn_node.reentrant + fn_node.tail_call by the legacy parser
-#      branch).
-#   2. New: `EFFECTS REENTRANT[:VARIANT]` clause (parsed into
-#      fn_node.effects_decl by Thunk Phase 1.1).
+# Stamps the `EFFECTS REENTRANT[:VARIANT]` declaration into the canonical
+# field on each FunctionDef.
 #
 # The bridge populates fn_node.reentrance_kind with one of:
 #   nil                       no declaration
@@ -22,14 +16,7 @@ require "sorbet-runtime"
 #                             requires `!T`; raises `System MaxDepthExceeded`
 #                             when depth > N
 #
-# It ALSO writes back into the legacy attrs (fn_node.reentrant / .tail_call)
-# so existing consumers (effects.rb, stack tier pass, MIR lowering) continue
-# to work without modification. The canonical field is the source of truth
-# for new code; the legacy attrs are kept populated only for back-compat.
-#
 # Validation:
-#   - Mixing legacy `@reentrant` with `EFFECTS REENTRANT` is rejected at parse
-#     time (Phase 1.1). The bridge here trusts that invariant.
 #   - `REQUIRES <name>: NON_REENTRANT` clauses are validated against the
 #     parameter list. The fn-type check (the named param must be FN-typed)
 #     is deferred to Phase 2.
@@ -53,31 +40,18 @@ module ReentranceBridge
       kind = canonical_reentrance_kind(fn_node)
       fn_node.reentrance_kind = kind
 
-      # Back-fill legacy attrs from the new declaration so existing
-      # consumers (effects.rb, stack tier pass, MIR lowering) keep
-      # seeing what they always saw. The canonical field is the source
-      # of truth for new code.
       case kind
-      when :reentrant, :reentrant_thunk
-        fn_node.reentrant ||= :reentrant
       when :reentrant_tail_call
-        fn_node.reentrant  ||= :reentrant
         fn_node.tail_call  = true
       when :reentrant_not_logical
-        # Phase 4f.2: piggyback on the legacy @nonReentrant codegen
-        # path. Setting fn_node.reentrant = :non_reentrant makes
-        # MIRLowering emit the StackGuard prologue (which raises
-        # `error.UnexpectedRecursion` if the fn re-enters), and
+        # Phase 4f.2: MIRLowering emits the StackGuard prologue
+        # directly from reentrance_kind. The guard raises
+        # `error.UnexpectedRecursion` if the fn re-enters, and
         # function_raises_directly?(name) picks it up as a can_fail seed.
-        fn_node.reentrant = :non_reentrant
       when :reentrant_max_depth
         # Phase 4f.3: bounded recursion. The codegen path emits
         # safety.enterDepth(@src(), N) / defer safety.exitDepth(@src())
-        # in the function prologue (driven by max_depth_n on the
-        # FunctionDef). Reusing reentrant=:non_reentrant routes
-        # through the same can_fail seeding (StackGuard branch in
-        # MIRLowering switches on max_depth_n).
-        fn_node.reentrant = :non_reentrant
+        # in the function prologue (driven by max_depth_n on the FunctionDef).
         # Recursion-yield: TIGHT is IMPLIED for :MAX_DEPTH(N) iff
         # N <= YIELD_BUDGET (4096). For N > BUDGET, the bounded
         # depth is large enough that the scheduler would stall;
@@ -93,7 +67,6 @@ module ReentranceBridge
 
       validate_requires_clauses!(fn_node)
       validate_not_logical_return!(fn_node)
-      offer_legacy_reentrant_migration!(fn_node)
       offer_unconstrained_fn_param_fix!(fn_node)
     end
   end
@@ -350,22 +323,6 @@ module ReentranceBridge
         replacement: " @service ->",
       )],
     )
-  end
-
-  # Find the first :unbounded callee in the call chain for diagnostics.
-  sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
-  def find_unbounded_callee(call_names)
-    T.bind(self, SemanticAnnotator) rescue nil
-    visited = T.let(Set.new, T::Set[String])
-    queue = T.let(call_names.to_a.dup, T::Array[String])
-    until queue.empty?
-      name = T.must(queue.shift)
-      next if visited.include?(name)
-      visited << name
-      return name if function_node_for(name)&.stack_tier == :unbounded
-      (function_call_graph[name] || []).each { |callee| queue << callee }
-    end
-    nil
   end
 
   # Thunk Phase 4f: validate that every `:reentrant_thunk` function
@@ -775,58 +732,16 @@ module ReentranceBridge
     all.all? { |c| blessed_ids.include?(c.object_id) }
   end
 
-  # The mapping rule. Legacy and new declaration sources are mutually
-  # exclusive (parser-enforced); this only has to handle whichever one
-  # was set. Public so specs and downstream passes can use the same
-  # mapping if they ever need to recompute.
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Symbol)) }
   def canonical_reentrance_kind(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return fn_node.effects_decl if fn_node.effects_decl
-    if fn_node.reentrant == :reentrant
-      return fn_node.tail_call ? :reentrant_tail_call : :reentrant
-    end
-    nil
+    fn_node.effects_decl
   end
 
   # Each REQUIRES clause must reference an actual parameter by name.
   # The FN-type check (parameter must be FN-typed for NON_REENTRANT to
   # make sense) is Phase 2's unconstrained-fn-param pass; here we only
   # check the binding exists.
-  # Thunk Phase 1.4: emit a `clear fix` finding for any function that
-  # uses the legacy `@reentrant` / `@reentrant:tailCall` annotation,
-  # offering the mechanical migration to `EFFECTS REENTRANT[:TAIL_CALL]`.
-  # Idempotent: a function that already declares `EFFECTS REENTRANT`
-  # has fn_node.reentrant_token == nil and no fix is offered.
-  #
-  # When FixCollector is disabled (i.e. `clear build` / normal compile)
-  # `fixable!` is a no-op; this method does nothing user-visible.
-  sig { params(fn_node: AST::FunctionDef).void }
-  def offer_legacy_reentrant_migration!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return unless fn_node.reentrant_token
-    tok = fn_node.reentrant_token
-    if fn_node.tail_call
-      # `@reentrant:tailCall` -> `EFFECTS REENTRANT:TAIL_CALL`
-      legacy_text = '@reentrant:tailCall'
-      replacement = 'EFFECTS REENTRANT:TAIL_CALL'
-    else
-      legacy_text = '@reentrant'
-      replacement = 'EFFECTS REENTRANT'
-    end
-    fixable!(tok,
-      level: :info,
-      category: :lint,
-      message: "Legacy '#{legacy_text}' on '#{fn_node.name}'; migrate to '#{replacement}' (Thunk Phase 1).",
-      fixes: [Fix.new(
-        description: "Replace '#{legacy_text}' with '#{replacement}'.",
-        confidence: :auto,
-        edits: [Edit.new(
-          span: Span.new(file: nil, line: tok.line, col: tok.column, length: legacy_text.length),
-          replacement: replacement,
-        )],
-      )])
-  end
 
   # Thunk Phase 2: warn on FN-typed parameters that lack a REQUIRES
   # constraint, and offer two interactive fixes:
@@ -852,7 +767,7 @@ module ReentranceBridge
   # promote to :error after a deprecation window.
   #
   # Skipped per-param when:
-  #   - the parameter type carries `@reentrant` (caller opted in)
+  #   - the function declares EFFECTS REENTRANT (caller opted in)
   #   - the function already has a REQUIRES clause for this name
   #
   # Skipped wholesale when:
@@ -926,7 +841,6 @@ module ReentranceBridge
   private :find_mutual_max_depth_callee
   private :find_plain_reentrant_callee
   private :insert_service_after_open_brace_fix
-  private :offer_legacy_reentrant_migration!
   private :offer_unconstrained_fn_param_fix!
   private :reachable_from_self?
   private :replace_stack_sigil_with_service_fix

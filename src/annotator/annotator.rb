@@ -709,8 +709,8 @@ private
     # hoisted so bodies can call later definitions.
     register_program_signatures(declarations)
 
-    # Bridge legacy `@reentrant` and new `EFFECTS REENTRANT` after
-    # @fn_nodes is populated and before function bodies are checked.
+    # Stamp `EFFECTS REENTRANT` metadata after @fn_nodes is populated and
+    # before function bodies are checked.
     bridge_reentrance!(node)
 
     # Stamps the resolved SYNC POLICY, user-written or default, so later

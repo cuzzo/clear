@@ -88,7 +88,7 @@ module Annotator
         root_scope = whole_program_root_scope
         whole_program_fn_nodes.each do |name, fn|
           signature = FunctionSignature.unwrap(root_scope.resolve_entry(name)&.type)
-          signature.requires = fn.requires if signature
+          FunctionSignature.sync_from_function_def!(signature, fn) if signature
         end
       end
       private :restamp_requires_on_signatures!

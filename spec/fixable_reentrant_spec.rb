@@ -7,7 +7,7 @@ require_relative "../src/backends/transpiler"
 
 # A directly-recursive (or mutually-recursive) function without an
 # explicit reentrance declaration used to raise REENTRANCE_DIRECT_RECURSIVE
-# (or REENTRANCE_INDIRECT_RECURSIVE for the @nonReentrant variant) with
+# or REENTRANCE_INDIRECT_RECURSIVE with
 # no fix. Both now emit a FixableFinding whose :auto fix inserts
 # `EFFECTS REENTRANT ` before the function arrow.
 RSpec.describe "Reentrant function auto-fix" do

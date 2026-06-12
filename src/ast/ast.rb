@@ -1383,9 +1383,7 @@ module AST
     attr_accessor :effect_set    # projected EffectSet (yield/alloc_heap/io/fail)
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
-    attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
-    attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
-    attr_accessor :reentrant_token   # Token for the legacy @reentrant annotation (drives `clear fix` span)
+    attr_accessor :tail_call     # true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion
     attr_accessor :arrow_token       # Token for the `->` after the function header (drives REQUIRES insertion span)
     attr_accessor :name_token        # Token for the function name itself (drives the `!`-suffix fix for STYLE_MUTABLE_PARAM_NEEDS_BANG)
     # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
@@ -1419,12 +1417,9 @@ module AST
     #   :reentrant_max_depth      EFFECTS REENTRANT:MAX_DEPTH(N) (runtime depth counter;
     #                                                             requires `!T` return type;
     #                                                             max_depth_n stamped on FunctionDef)
-    # The annotator bridges this with the legacy `@reentrant`/`tail_call` attrs into a
-    # canonical reentrance_kind via src/annotator/helpers/reentrance.rb (Phase 1.3).
     attr_accessor :effects_decl
     # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
-    # `effects_decl` or `reentrant` directly. Same value space as effects_decl;
-    # the bridge unifies legacy and new declarations into one field.
+    # `effects_decl` directly. Same value space as effects_decl.
     attr_accessor :reentrance_kind
     # Thunk Phase 4c: when the splitter recognizes a simple-recurrence
     # shape on a `:reentrant_thunk` function, the annotator stamps the
@@ -1457,6 +1452,33 @@ module AST
     sig { returns(T::Boolean) }
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
+    end
+
+    sig { returns(T::Boolean) }
+    def declared_plain_reentrant?
+      (reentrance_kind || effects_decl) == :reentrant
+    end
+
+    sig { returns(T::Boolean) }
+    def plain_reentrant?
+      reentrance_kind == :reentrant
+    end
+
+    sig { returns(T::Boolean) }
+    def tail_call_reentrant?
+      reentrance_kind == :reentrant_tail_call
+    end
+
+    sig { returns(T::Boolean) }
+    def reentrance_guard_required?
+      reentrance_kind == :reentrant_not_logical || reentrance_kind == :reentrant_max_depth
+    end
+
+    sig { returns(T::Boolean) }
+    def recursive_reentrance_declared?
+      reentrance_kind == :reentrant ||
+        reentrance_kind == :reentrant_thunk ||
+        reentrance_kind == :reentrant_tail_call
     end
 
     sig { params(recursion_yield: T::Boolean, declared_runtime_return: T::Boolean).returns(T::Boolean) }

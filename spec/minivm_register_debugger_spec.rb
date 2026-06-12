@@ -27,7 +27,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
     env = { "BC_PAUSE_ON" => pause }
     cmd = ["ruby", BC_RUN_RB, "--vm=register", source_path]
     out, _ = Open3.capture2e(env, *cmd, stdin_data: commands.join("\n") + "\n")
-    out
+    out.force_encoding(Encoding::UTF_8).scrub
   end
 
   it "lists all visible bindings on :info, with byebug-style shadowing" do

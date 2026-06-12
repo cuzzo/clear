@@ -145,9 +145,11 @@ class_walk = lambda do |node, scope|
       end
     end
     class_walk.(node.body, new_scope)
+    return
   when Prism::ModuleNode
     name = node.constant_path.is_a?(Prism::ConstantReadNode) ? node.constant_path.name : node.constant_path.full_name
     class_walk.(node.body, scope + [name.to_s])
+    return
   end
   if node.respond_to?(:child_nodes)
     node.child_nodes.compact.each { |c| class_walk.(c, scope) }
@@ -191,7 +193,13 @@ typed_count = ivar_types.values.sum(&:size)
 preserved_count = rbi_preserved.values.sum(&:size)
 warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches, #{preserved_count} preserved from existing RBI"
 
-normalize_type = lambda do |_class_path, type_str|
+normalize_type = lambda do |class_path, type_str|
+  if class_path.start_with?("FunctionSignature::")
+    type_str = type_str.gsub(/\bExternEffects\b/, "FunctionSignature::ExternEffects")
+    type_str = type_str.gsub(/\bLifetimeSource\b/, "FunctionSignature::LifetimeSource")
+    type_str = type_str.gsub(/\bEffectSet\b/, "FunctionSignature::EffectSet")
+    type_str = type_str.gsub(/\bRequiresMap\b/, "FunctionSignature::RequiresMap")
+  end
   type_str
 end
 

@@ -3188,8 +3188,8 @@ class Type
       return false unless sp_t.accepts?(op_t)
     end
 
-    # Reentrant constraint: a @reentrant function cannot be passed to a parameter
-    # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
+    # Reentrant constraint: a plain EFFECTS REENTRANT function cannot be passed
+    # to a function type that rejects plain reentrant callbacks.
     return false if other_raw.reentrant && !self_raw.reentrant
 
     true

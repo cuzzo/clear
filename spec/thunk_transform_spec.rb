@@ -476,7 +476,7 @@ RSpec.describe "Phase 4b: tail-recursive :THUNK routing" do
     f = fn(ast, "sum")
     expect(f.reentrance_kind).to eq(:reentrant_thunk)
     expect(f.tail_call).to be(true)
-    expect(f.reentrant).to eq(:reentrant)
+    expect(f.recursive_reentrance_declared?).to be(true)
   end
 
   it "leaves tail_call false for a non-tail :THUNK function (handled by Phase 4d codegen)" do

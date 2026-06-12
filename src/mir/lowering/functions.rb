@@ -299,7 +299,7 @@ module MIRLoweringFunctions
     fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node)
     if fn_needs_rt
       sig = fn_sigs[node.name.to_s] || fn_sigs[node.name.to_sym]
-      sig.needs_rt = true if sig && sig.respond_to?(:needs_rt=)
+      sig.mark_runtime_required! if sig
       node.needs_rt = true if node.respond_to?(:needs_rt=)
     end
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
@@ -340,7 +340,7 @@ module MIRLoweringFunctions
       # other (`'eval' uses inferred error set of function 'evalList'
       # here -> dependency loop`). The `anyerror` prefix makes the
       # error set concrete and breaks the loop.
-      final_zig_type.fallible_return_type_for(reentrant: node.reentrant == :reentrant)
+      final_zig_type.fallible_return_type_for(reentrant: node.recursive_reentrance_declared?)
     else
       final_type
     end
@@ -374,8 +374,7 @@ module MIRLoweringFunctions
       fn_can_fail = true
       return_type_str = faulting_return_type_str(final_type, node)
       sig = fn_sigs[node.name.to_s] || fn_sigs[node.name.to_sym]
-      sig.can_fail = true if sig && sig.respond_to?(:can_fail=)
-      sig.alloc_fault = true if sig && sig.respond_to?(:alloc_fault=)
+      sig.mark_faulting_allocation! if sig
       node.can_fail = true if node.respond_to?(:can_fail=)
     end
 
@@ -587,7 +586,7 @@ module MIRLoweringFunctions
 
   sig { params(final_type: String, node: AST::FunctionDef).returns(String) }
   def faulting_return_type_str(final_type, node)
-    ZigType.new(final_type).fallible_return_type_for(reentrant: node.reentrant == :reentrant)
+    ZigType.new(final_type).fallible_return_type_for(reentrant: node.recursive_reentrance_declared?)
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
@@ -676,7 +675,7 @@ module MIRLoweringFunctions
 
   sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
   def reentrance_guard_prologue(node)
-    return [] unless node.reentrant == :non_reentrant
+    return [] unless node.reentrance_guard_required?
 
     if node.max_depth_n
       enter_call = MIR::Call.new(

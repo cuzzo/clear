@@ -11,7 +11,7 @@ FN makeAst() RETURNS !Value ->
     RETURN Value{ List: items };
 END
 
-FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
+FN eval!(TAKES ast: Value) RETURNS !Value EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym -> RETURN Value.Nil;,
         Value.List AS items -> RETURN evalList!(items);,
@@ -21,7 +21,7 @@ FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS !Value @reentrant ->
+FN evalList!(TAKES items: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE evaled: Value[]@list = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
         evaled.append(eval!(COPY items[ei]));

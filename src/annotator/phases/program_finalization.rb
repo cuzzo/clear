@@ -45,9 +45,7 @@ module Annotator
           signature = FunctionSignature.unwrap(fn.full_type!(context: "program function signature"))
           next unless signature
 
-          signature.can_fail = fn.can_fail
-          signature.effects = fn.effects
-          signature.stack_tier = fn.stack_tier
+          FunctionSignature.sync_from_function_def!(signature, fn)
         end
       end
       private :restamp_function_metadata!

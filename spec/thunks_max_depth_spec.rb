@@ -97,7 +97,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "f" }
       expect(fn.reentrance_kind).to eq(:reentrant_max_depth)
-      expect(fn.reentrant).to eq(:non_reentrant)
+      expect(fn.reentrance_guard_required?).to be(true)
       expect(fn.max_depth_n).to eq(8)
     end
   end

@@ -1317,8 +1317,9 @@ module MIRLoweringExpressions
       elem_t = ti.element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
       pool_get_def = T.must(IntrinsicRegistry.sig(POOL_METHODS, "get")).dup
-      pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
-      pool_get_def.emit.elem = elem_name
+      pool_get_emit = pool_get_def.emit ? T.must(pool_get_def.emit).dup : IntrinsicEmit.new
+      pool_get_emit.elem = elem_name
+      pool_get_def.replace_intrinsic_emit!(pool_get_emit)
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
     elsif plan.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
@@ -1896,9 +1897,13 @@ module MIRLoweringExpressions
     params = args_mir.each_index.map do |idx|
       AST::Param.new(name: "__assert_eq_arg#{idx}", type: Type.new(:Any))
     end
-    sig = FunctionSignature.new(params: params, return_type: Type.new(:Void), intrinsic: true)
-    sig.can_fail = true
-    sig.emit = IntrinsicEmit.new(borrows: :all)
+    sig = FunctionSignature.new(
+      params: params,
+      return_type: Type.new(:Void),
+      intrinsic: true,
+      can_fail: true,
+      emit: IntrinsicEmit.new(borrows: :all)
+    )
     contract = MIR::OwnershipContract.new(covers_consuming_params: true)
     MIR::Call.new(
       "std.testing.#{helper}",

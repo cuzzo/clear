@@ -189,7 +189,7 @@ REGISTER_ROADMAP = [
     detail: "Single-threaded VM: branches run sequentially. Faithful for " \
             "side-effect ordering only when each branch is order-" \
             "independent; needs a sequential-equivalence assertion." },
-  # @reentrant variants and Set landed in the P2 batch; remaining
+  # Reentrance variants and Set landed in the P2 batch; remaining
   # tests in those clusters need runtime work for set iteration /
   # sharded-list value-kind.
   { priority: "P2", title: "Map .values() / .keys() iteration",

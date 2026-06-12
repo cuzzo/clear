@@ -344,7 +344,7 @@ FN loadRegisterSourcePaths!(path: String) RETURNS !String[]@list ->
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
         entry = parts[pi];
-        IF entry.length() > 0 THEN paths.append(entry); END
+        IF entry.length() > 0 THEN paths.append(COPY entry); END
     END
     RETURN paths;
 END

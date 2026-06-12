@@ -1376,7 +1376,7 @@ module CapabilityAudit
   sig { params(var_name: String).void }
   def audit_mark_mutated(var_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
     record&.mark_mutated!
@@ -1385,7 +1385,7 @@ module CapabilityAudit
   sig { params(var_name: String, parallel: T::Boolean).void }
   def audit_mark_captured(var_name, parallel:)
     T.bind(self, SemanticAnnotator) rescue nil
-    fn_name = T.cast(current_fn_ctx&.name, T.nilable(String))
+    fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
     record&.mark_captured!(parallel: parallel)

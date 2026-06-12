@@ -37,12 +37,16 @@ RSpec.describe MIRChecker do
   end
 
   def registry_sig(return_type: Type.new(:Void), allocates: false, return_alloc: nil, mutates_receiver: false, params: [], fixed_return: true)
-    sig = FunctionSignature.new(params: params, return_type: return_type, intrinsic: true)
-    sig.emit = IntrinsicEmit.new(
-      zig: "#{return_type.resolved}({0})",
-      allocates: allocates,
-      return_alloc: return_alloc,
-      mutates_receiver: mutates_receiver,
+    sig = FunctionSignature.new(
+      params: params,
+      return_type: return_type,
+      intrinsic: true,
+      emit: IntrinsicEmit.new(
+        zig: "#{return_type.resolved}({0})",
+        allocates: allocates,
+        return_alloc: return_alloc,
+        mutates_receiver: mutates_receiver,
+      )
     )
     sig.fixed_return = fixed_return if sig.respond_to?(:fixed_return=)
     sig
@@ -133,8 +137,7 @@ RSpec.describe MIRChecker do
     end
 
     it "allows cleanup when a registry call returns an owned resource" do
-      signature = FunctionSignature.new(params: [], return_type: Type.new(:TCPClient))
-      signature.emit = IntrinsicEmit.new(zig: "accept()", allocates: true)
+      signature = FunctionSignature.new(params: [], return_type: Type.new(:TCPClient), emit: IntrinsicEmit.new(zig: "accept()", allocates: true))
       registry_call = MIR::RegistryCall.new(
         entry: signature,
         args: [],
@@ -153,8 +156,7 @@ RSpec.describe MIRChecker do
     end
 
     it "allows cleanup when an extern trampoline allocates its result" do
-      signature = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      signature.emit = IntrinsicEmit.new(zig: "parse()", allocates: true)
+      signature = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, emit: IntrinsicEmit.new(zig: "parse()", allocates: true))
       trampoline = MIR::ExternTrampoline.new(
         id: 1,
         callee_name: "parse",
@@ -334,8 +336,12 @@ RSpec.describe MIRChecker do
     it "does not require finalized owned facts for TAKES calls with only non-owning operands" do
       value_param = AST::Param.new(name: "value", type: Type.new(:Int64), default: nil, mutable: false,
         takes: true, comptime: false, name_token: nil, required: nil, sync: nil)
-      sig = FunctionSignature.new(params: [value_param], return_type: Type.new(:Void), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "append({0})", allocates: true, mutates_receiver: true)
+      sig = FunctionSignature.new(
+        params: [value_param],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "append({0})", allocates: true, mutates_receiver: true)
+      )
       contract = MIR::OwnershipContract.consume_operands([
         MIR::OwnershipOperandFact.non_owning(Type.new(:Int64), "spec"),
       ])
@@ -1702,8 +1708,12 @@ RSpec.describe MIRChecker do
     end
 
     it "covers frame-allocation and unhoisted-allocation helper branches" do
-      mutating_sig = FunctionSignature.intrinsic_contract(return_type: Type.new(:Void), allocates: true)
-      mutating_sig.emit = IntrinsicEmit.new(allocates: true, mutates_receiver: true, alloc: :frame)
+      mutating_sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(allocates: true, mutates_receiver: true, alloc: :frame)
+      )
       mutating_inline = registry_call("mutating", mutating_sig,
         allocs: MIR.inline_alloc_metadata(alloc: :frame), target_var: "items")
       frame_inline = registry_call("frame", FunctionSignature.borrowing_intrinsic,

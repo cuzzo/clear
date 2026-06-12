@@ -1369,23 +1369,6 @@ class Parser
       early_requires_clauses = @last_requires_clauses
     end
 
-    # Legacy reentrance annotations are still accepted so `clear fix` can
-    # migrate them to EFFECTS REENTRANT declarations.
-    reentrant = nil
-    tail_call = false
-    reentrant_token = nil
-    if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
-      cap_tok = consume(:VAR_ID)
-      reentrant = T.must(cap_tok).value == '@reentrant' ? :reentrant : :non_reentrant
-      reentrant_token = cap_tok if reentrant == :reentrant
-      # Check for :tailCall suffix
-      if reentrant == :reentrant && match?(:CHAR, ':') && @tokens[@pos + 1]&.value == 'tailCall'
-        consume(:CHAR, ':')
-        consume(:VAR_ID)
-        tail_call = true
-      end
-    end
-
     # EFFECTS REENTRANT variants:
     #   EFFECTS REENTRANT             -> :reentrant              (real recursion;
     #                                                             caller runs on @service)
@@ -1394,9 +1377,6 @@ class Parser
     #   EFFECTS REENTRANT:NOT_LOGICAL -> :reentrant_not_logical  (runtime StackGuard;
     #                                                             requires `!T` return)
     effects_decl, effects_span = parse_effects_decl
-    if effects_decl && reentrant
-      error!(fn_token, :REENTRANT_LEGACY_AND_NEW, name: name)
-    end
 
     # Reentrance constraints bind by parameter name; the annotator validates
     # that each name references a real parameter so the parser stays syntactic.
@@ -1509,10 +1489,8 @@ class Parser
       catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
     node.explicit_return_type = explicit_return  # post-#335: enforce-fallible-returns gate
     node.type_params = type_params unless type_params.empty?
-    node.reentrant = reentrant
-    node.tail_call = tail_call
+    node.tail_call = effects_decl == :reentrant_tail_call
     node.requires = requires_clause
-    node.reentrant_token = reentrant_token
     node.arrow_token = arrow_token
     node.name_token = name_tok
     node.effects_decl = effects_decl
@@ -2712,19 +2690,14 @@ class Parser
     consume(:CHAR, ')')
     consume(:ARROW, '->')
     return_type = parse_type_annotation
-    # Parse optional @reentrant capability on fn-type annotations.
-    # FN(Int64) -> Bool @reentrant means the parameter accepts @reentrant functions.
-    allows_reentrant = false
-    if match?(:VAR_ID) && current.value == '@reentrant'
-      consume(:VAR_ID)
-      allows_reentrant = true
+    if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
+      error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
     Type.new(FunctionSignature.new(
       params: param_types.each_with_index.map { |t, i|
         AST::Param.new(name: "arg#{i}", type: t, required: true, mutable: false, takes: false)
       },
-      return_type: return_type,
-      reentrant: allows_reentrant
+      return_type: return_type
     ))
   end
 

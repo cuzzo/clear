@@ -16,7 +16,7 @@
 
 STRUCT Vec2 { x: Float64, y: Float64 }
 
-FN dot2(a: Vec2, b: Vec2) RETURNS !Float64 @nonReentrant ->
+FN dot2(a: Vec2, b: Vec2) RETURNS !Float64 ->
   RETURN a.x * b.x + a.y * b.y;
 END
 

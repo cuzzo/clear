@@ -11,15 +11,14 @@ module Annotator
 
       sig { params(node: AST::FunctionDef, return_lifetime: T.nilable(String)).returns(FunctionSignature) }
       def self.function_signature(node, return_lifetime:)
-        signature = FunctionSignature.new(
+        FunctionSignature.new(
           params: node.params.map { |param| function_param(param) },
           return_type: node.annotation_return_type,
           return_lifetime: return_lifetime,
           visibility: node.visibility,
-          reentrant: node.reentrant == :reentrant
+          reentrant: node.declared_plain_reentrant?,
+          requires: node.requires
         )
-        signature.requires = node.requires
-        signature
       end
 
       sig { params(node: AST::ExternFnDecl).returns(FunctionSignature) }

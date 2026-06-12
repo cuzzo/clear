@@ -2,125 +2,224 @@
 # Structured representation of a function's external interface.
 # Replaces the plain Hash that was previously used for function signatures.
 #
-# Carries both the static signature (params, return type, visibility) and
-# computed metadata (needs_rt, can_fail) that callers
-# need for code generation and cleanup planning.
+# Exposes typed query APIs and named mutation seams while storing
+# declared/imported contract fields separately from mutable analysis/codegen
+# facts.
 require "sorbet-runtime"
 require_relative "intrinsic_emit"
 require_relative "intrinsic_contract"
 require_relative "function_return"
 
 class FunctionSignature
-    extend T::Sig
+  extend T::Sig
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, AST::Node, T::Array[T.any(LifetimeSource, AST::Node)])) }
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
   ExternEffects = T.type_alias { T::Hash[Symbol, Symbol] }
   EffectSet = T.type_alias { T::Set[Symbol] }
 
+  class Contract
+    extend T::Sig
+
+    sig { returns(T::Array[AST::Param]) }
+    attr_accessor :params
+    sig { returns(Type) }
+    attr_accessor :return_type
+    sig { returns(T::Array[LifetimeSource]) }
+    attr_accessor :return_lifetime
+    sig { returns(T.nilable(Symbol)) }
+    attr_reader :visibility
+    sig { returns(T.nilable(T::Array[Symbol])) }
+    attr_accessor :type_params
+    sig { returns(T::Boolean) }
+    attr_reader :reentrant
+    sig { returns(T::Boolean) }
+    attr_reader :extern
+    sig { returns(T.nilable(String)) }
+    attr_accessor :module_alias
+    sig { returns(ExternEffects) }
+    attr_accessor :extern_effects
+    sig { returns(T.nilable(T::Array[Symbol])) }
+    attr_accessor :fn_type_params
+    sig { returns(T.nilable(String)) }
+    attr_reader :owner_type
+    sig { returns(T.nilable(T::Array[Symbol])) }
+    attr_accessor :owner_type_params
+    sig { returns(T::Boolean) }
+    attr_reader :intrinsic
+
+    sig do
+      params(
+        params: T::Array[AST::Param],
+        visibility: T.nilable(Symbol),
+        type_params: T.nilable(T::Array[Symbol]),
+        reentrant: T::Boolean,
+        extern: T::Boolean,
+        module_alias: T.nilable(String),
+        extern_effects: ExternEffects,
+        fn_type_params: T.nilable(T::Array[Symbol]),
+        owner_type: T.nilable(String),
+        owner_type_params: T.nilable(T::Array[Symbol]),
+        intrinsic: T::Boolean
+      ).void
+    end
+    def initialize(params:, visibility: nil, type_params: nil, reentrant: false,
+                   extern: false, module_alias: nil, extern_effects: {},
+                   fn_type_params: nil, owner_type: nil, owner_type_params: nil,
+                   intrinsic: false)
+      @params = T.let(params, T::Array[AST::Param])
+      @return_type = T.let(Type.new(:Void), Type)
+      @return_lifetime = T.let([], T::Array[LifetimeSource])
+      @visibility = T.let(visibility, T.nilable(Symbol))
+      @type_params = T.let(type_params, T.nilable(T::Array[Symbol]))
+      @reentrant = T.let(reentrant, T::Boolean)
+      @extern = T.let(extern, T::Boolean)
+      @module_alias = T.let(module_alias, T.nilable(String))
+      @extern_effects = T.let(extern_effects, ExternEffects)
+      @fn_type_params = T.let(fn_type_params, T.nilable(T::Array[Symbol]))
+      @owner_type = T.let(owner_type, T.nilable(String))
+      @owner_type_params = T.let(owner_type_params, T.nilable(T::Array[Symbol]))
+      @intrinsic = T.let(intrinsic, T::Boolean)
+    end
+  end
+
+  class AnalysisFacts < T::Struct
+    extend T::Sig
+
+    prop :needs_rt, T.nilable(T::Boolean), default: nil
+    prop :can_fail, T.nilable(T::Boolean), default: nil
+    prop :alloc_fault, T.nilable(T::Boolean), default: nil
+    prop :error_fallible, T.nilable(T::Boolean), default: nil
+    prop :effects, T.nilable(EffectSet), default: nil
+    prop :return_strategy, T.nilable(Symbol), default: nil
+    prop :stack_tier, T.nilable(Symbol), default: nil
+    prop :requires, RequiresMap, factory: -> { {} }
+    prop :heap_carry_return, T.nilable(T::Boolean), default: nil
+    prop :heap_carry_return_vars, T.nilable(T::Set[String]), default: nil
+    prop :arg_validator, T.nilable(Proc), default: nil
+    prop :arg_spec, T.untyped, default: nil
+    prop :arity, T.nilable(Integer), default: nil
+    prop :emit, T.nilable(IntrinsicEmit), default: nil
+    prop :return_def, FunctionReturn, factory: -> { FunctionReturn.fixed(Type.new(:Void)) }
+
+    sig { returns(AnalysisFacts) }
+    def copy
+      AnalysisFacts.new(
+        needs_rt: needs_rt,
+        can_fail: can_fail,
+        alloc_fault: alloc_fault,
+        error_fallible: error_fallible,
+        effects: effects,
+        return_strategy: return_strategy,
+        stack_tier: stack_tier,
+        requires: FunctionSignature.copy_requires_for_import(requires),
+        heap_carry_return: heap_carry_return,
+        heap_carry_return_vars: heap_carry_return_vars,
+        arg_validator: arg_validator,
+        arg_spec: arg_spec,
+        arity: arity,
+        emit: emit,
+        return_def: return_def
+      )
+    end
+  end
+  private_constant :Contract, :AnalysisFacts
+
   # Static signature fields (set at creation)
   sig { returns(T.nilable(Symbol)) }
-  attr_reader :visibility
+  def visibility = @contract.visibility
+
   sig { returns(T.nilable(T::Array[Symbol])) }
-  attr_reader :type_params
+  def type_params = @contract.type_params
+
   sig { returns(T::Boolean) }
-  attr_reader :reentrant
+  def reentrant = @contract.reentrant
 
   sig { returns(T.nilable(Symbol)) }
-  attr_accessor :return_strategy
+  def return_strategy = @facts.return_strategy
 
   sig { returns(T::Array[LifetimeSource]) }
-  attr_reader :return_lifetime
-
-  sig { params(val: LifetimeInput).void }
-  def return_lifetime=(val)
-    @return_lifetime = normalize_lifetime(val)
-  end
+  def return_lifetime = @contract.return_lifetime
 
   # Always a list of AST::Param (coerced at the seam). No Hash.
   sig { returns(T::Array[AST::Param]) }
-  attr_reader :params
+  def params = @contract.params
 
   # Seam: a function signature's return is ALWAYS a Type (Void for
   # "no value"). Coerced here so callers may pass nil/Symbol during
   # construction or late return-inference assignment without any
   # reader ever needing a Symbol/Type/nil discriminator.
   sig { returns(Type) }
-  attr_reader :return_type
-
-  sig { params(val: T.nilable(Type::TypeInput)).void }
-  def return_type=(val)
-    @return_type = val.nil? ? Type.new(:Void) : Type.new(val)
-  end
+  def return_type = @contract.return_type
 
   # EXTERN function fields
   sig { returns(T::Boolean) }
-  attr_accessor :extern
+  def extern = @contract.extern
+
   sig { returns(T.nilable(String)) }
-  attr_accessor :module_alias
+  def module_alias = @contract.module_alias
+
   sig { returns(ExternEffects) }
-  attr_accessor :extern_effects
+  def extern_effects = @contract.extern_effects
 
   sig { returns(T.nilable(T::Array[Symbol])) }
-  attr_accessor :fn_type_params
+  def fn_type_params = @contract.fn_type_params
+
   sig { returns(T.nilable(String)) }
-  attr_accessor :owner_type
+  def owner_type = @contract.owner_type
+
   sig { returns(T.nilable(T::Array[Symbol])) }
-  attr_accessor :owner_type_params
+  def owner_type_params = @contract.owner_type_params
 
   sig { returns(T::Boolean) }
-  attr_accessor :intrinsic
-  sig { returns(T.nilable(T.any(String, Symbol))) }
-  attr_accessor :zig_pattern
+  def intrinsic = @contract.intrinsic
 
   sig { returns(T.nilable(T::Boolean)) }
-  attr_accessor :needs_rt
+  def needs_rt = @facts.needs_rt
+
   sig { returns(T.nilable(T::Boolean)) }
-  attr_accessor :can_fail
+  def can_fail = @facts.can_fail
+
   sig { returns(T.nilable(T::Boolean)) }
-  attr_accessor :alloc_fault
+  def alloc_fault = @facts.alloc_fault
+
   sig { returns(T.nilable(T::Boolean)) }
-  attr_accessor :error_fallible
+  def error_fallible = @facts.error_fallible
+
   sig { returns(T.nilable(EffectSet)) }
-  attr_accessor :effects
+  def effects = @facts.effects
+
   sig { returns(T.nilable(Symbol)) }
-  attr_accessor :stack_tier
+  def stack_tier = @facts.stack_tier
 
   sig { returns(T.nilable(Proc)) }
-  attr_accessor :arg_validator
-  sig { returns(T.untyped) }
-  attr_accessor :arg_spec
-  sig { returns(T.nilable(Integer)) }
-  attr_accessor :arity
-  sig { returns(T.nilable(IntrinsicEmit)) }
-  attr_reader :emit
+  def arg_validator = @facts.arg_validator
 
-  sig { params(val: T.nilable(IntrinsicEmit)).void }
-  def emit=(val)
-    @emit = T.let(val, T.nilable(IntrinsicEmit))
-  end
+  sig { returns(T.untyped) }
+  def arg_spec = @facts.arg_spec
+
+  sig { returns(T.nilable(Integer)) }
+  def arity = @facts.arity
+
+  sig { returns(T.nilable(IntrinsicEmit)) }
+  def emit = @facts.emit
 
   sig { returns(IntrinsicContract) }
   def intrinsic_contract
-    emit = @emit
-    emit ? IntrinsicContract.from_emit(emit, @params) : IntrinsicContract.empty
+    emit = @facts.emit
+    emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
   end
   sig { returns(FunctionReturn) }
-  attr_accessor :return_def
+  def return_def = @facts.return_def
 
   sig { returns(RequiresMap) }
-  attr_reader :requires
-
-  sig { params(val: T.nilable(RequiresMap)).void }
-  def requires=(val)
-    @requires.clear
-    @requires.merge!(val || {})
-  end
+  def requires = @facts.requires
 
   sig { returns(T.nilable(T::Boolean)) }
-  attr_accessor :heap_carry_return
+  def heap_carry_return = @facts.heap_carry_return
+
   sig { returns(T.nilable(T::Set[String])) }
-  attr_accessor :heap_carry_return_vars
+  def heap_carry_return_vars = @facts.heap_carry_return_vars
 
   # Intrinsic signature semantics (set by the registry converter; nil
   # for ordinary user functions). `arg_validator` the custom arg
@@ -160,7 +259,7 @@ class FunctionSignature
         return_lifetime: fn.return_lifetime,
         visibility: fn.visibility,
         type_params: fn.type_params&.map(&:to_sym),
-        reentrant: fn.reentrant == :reentrant
+        reentrant: fn.declared_plain_reentrant?
       )
     end
 
@@ -178,14 +277,17 @@ class FunctionSignature
   end
   def self.intrinsic_contract(return_type: Type.new(:Void), allocates: false, borrows: nil,
                               can_fail: nil, return_alloc: nil)
-    sig = FunctionSignature.new(params: [], return_type: return_type, intrinsic: true)
-    sig.can_fail = can_fail
-    sig.emit = IntrinsicEmit.new(
-      allocates: allocates,
-      borrows: borrows,
-      return_alloc: return_alloc,
+    FunctionSignature.new(
+      params: [],
+      return_type: return_type,
+      intrinsic: true,
+      can_fail: can_fail,
+      emit: IntrinsicEmit.new(
+        allocates: allocates,
+        borrows: borrows,
+        return_alloc: return_alloc,
+      )
     )
-    sig
   end
 
   sig { returns(FunctionSignature) }
@@ -198,72 +300,129 @@ class FunctionSignature
     intrinsic_contract(borrows: :all)
   end
 
-  sig { returns(FunctionSignature) }
-  def self.empty_borrow_intrinsic
-    intrinsic_contract(borrows: [])
-  end
-
   sig { params(sig: FunctionSignature, fn: T.untyped).returns(FunctionSignature) }
   def self.sync_from_function_def!(sig, fn)
-    sig.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
-    sig.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
-    sig.alloc_fault = fn.alloc_fault if fn.respond_to?(:alloc_fault)
-    sig.error_fallible = fn.error_fallible if fn.respond_to?(:error_fallible)
-    sig.effects = fn.effects if fn.respond_to?(:effects)
-    sig.requires = fn.requires if fn.respond_to?(:requires)
-    sig.return_strategy = fn.return_strategy if fn.respond_to?(:return_strategy)
-    sig.return_type = fn.return_type if fn.respond_to?(:return_type) && fn.return_type
-    sig.stack_tier = fn.stack_tier if fn.respond_to?(:stack_tier)
-    sig.heap_carry_return = fn.heap_carry_return if fn.respond_to?(:heap_carry_return)
-    sig.heap_carry_return_vars = fn.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
-    sig
+    T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
   end
 
-  sig { params(params: T::Array[AST::Param], return_type: T.nilable(Type::TypeInput), return_lifetime: LifetimeInput, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(ExternEffects), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[Symbol]), intrinsic: T::Boolean, zig_pattern: T.nilable(T.any(String, Symbol))).void }
+  sig do
+    params(
+      params: T::Array[AST::Param],
+      return_type: T.nilable(Type::TypeInput),
+      return_lifetime: LifetimeInput,
+      visibility: T.nilable(Symbol),
+      type_params: T.nilable(T::Array[Symbol]),
+      reentrant: T::Boolean,
+      extern: T::Boolean,
+      module_alias: T.nilable(String),
+      extern_effects: T.nilable(ExternEffects),
+      fn_type_params: T.nilable(T::Array[Symbol]),
+      owner_type: T.nilable(String),
+      owner_type_params: T.nilable(T::Array[Symbol]),
+      intrinsic: T::Boolean,
+      needs_rt: T.nilable(T::Boolean),
+      can_fail: T.nilable(T::Boolean),
+      alloc_fault: T.nilable(T::Boolean),
+      error_fallible: T.nilable(T::Boolean),
+      effects: T.nilable(EffectSet),
+      return_strategy: T.nilable(Symbol),
+      stack_tier: T.nilable(Symbol),
+      requires: T.nilable(RequiresMap),
+      heap_carry_return: T.nilable(T::Boolean),
+      heap_carry_return_vars: T.nilable(T::Set[String]),
+      arg_validator: T.nilable(Proc),
+      arg_spec: T.untyped,
+      arity: T.nilable(Integer),
+      emit: T.nilable(IntrinsicEmit),
+      return_def: T.nilable(FunctionReturn)
+    ).void
+  end
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
                  fn_type_params: nil, owner_type: nil, owner_type_params: nil,
-                 intrinsic: false, zig_pattern: nil)
-    @params = params
-    @return_type = T.let(Type.new(:Void), Type)
-    self.return_type = return_type
-    @return_lifetime = T.let([], T::Array[LifetimeSource])
-    self.return_lifetime = return_lifetime
-    @visibility = T.let(visibility, T.nilable(Symbol))
-    @type_params = T.let(type_params, T.nilable(T::Array[Symbol]))
-    @reentrant = T.let(reentrant, T::Boolean)
-    @extern = T.let(extern, T::Boolean)
-    @module_alias = T.let(module_alias, T.nilable(String))
-    @extern_effects = T.let(extern_effects || {}, ExternEffects)
-    @fn_type_params = T.let(fn_type_params, T.nilable(T::Array[Symbol]))
-    @owner_type = T.let(owner_type, T.nilable(String))
-    @owner_type_params = T.let(owner_type_params, T.nilable(T::Array[Symbol]))
-    @intrinsic = T.let(intrinsic, T::Boolean)
-    @zig_pattern = T.let(zig_pattern, T.nilable(T.any(String, Symbol)))
-    @needs_rt          = T.let(nil, T.nilable(T::Boolean))
-    @can_fail          = T.let(nil, T.nilable(T::Boolean))
-    @alloc_fault       = T.let(nil, T.nilable(T::Boolean))
-    @error_fallible    = T.let(nil, T.nilable(T::Boolean))
-    @effects           = T.let(nil, T.nilable(EffectSet))
-    @return_strategy   = T.let(nil, T.nilable(Symbol))
-    @stack_tier        = T.let(nil, T.nilable(Symbol))
-    @requires          = T.let({}, RequiresMap)
-    @heap_carry_return = T.let(nil, T.nilable(T::Boolean))
-    @heap_carry_return_vars = T.let(nil, T.nilable(T::Set[String]))
-    @arg_validator     = T.let(nil, T.nilable(Proc))
-    @arg_spec          = T.let(nil, T.untyped)
-    @arity             = T.let(nil, T.nilable(Integer))
-    @emit              = T.let(nil, T.nilable(IntrinsicEmit))
-    @return_def        = T.let(FunctionReturn.fixed(Type.new(:Void)),
-                               FunctionReturn)
+                 intrinsic: false, needs_rt: nil, can_fail: nil,
+                 alloc_fault: nil, error_fallible: nil, effects: nil,
+                 return_strategy: nil, stack_tier: nil, requires: nil,
+                 heap_carry_return: nil, heap_carry_return_vars: nil,
+                 arg_validator: nil, arg_spec: nil, arity: nil, emit: nil,
+                 return_def: nil)
+    @contract = T.let(
+      Contract.new(
+        params: params,
+        visibility: visibility,
+        type_params: type_params,
+        reentrant: reentrant,
+        extern: extern,
+        module_alias: module_alias,
+        extern_effects: extern_effects || {},
+        fn_type_params: fn_type_params,
+        owner_type: owner_type,
+        owner_type_params: owner_type_params,
+        intrinsic: intrinsic
+      ),
+      Contract
+    )
+    @facts = T.let(
+      AnalysisFacts.new(
+        needs_rt: needs_rt,
+        can_fail: can_fail,
+        alloc_fault: alloc_fault,
+        error_fallible: error_fallible,
+        effects: effects,
+        return_strategy: return_strategy,
+        stack_tier: stack_tier,
+        requires: self.class.copy_requires_for_import(requires || {}),
+        heap_carry_return: heap_carry_return,
+        heap_carry_return_vars: heap_carry_return_vars,
+        arg_validator: arg_validator,
+        arg_spec: arg_spec,
+        arity: arity,
+        emit: emit,
+        return_def: return_def || FunctionReturn.fixed(Type.new(:Void))
+      ),
+      AnalysisFacts
+    )
+    @contract.return_type = coerce_return_type(return_type)
+    @contract.return_lifetime = normalize_lifetime(return_lifetime)
+  end
+
+  sig { params(return_type: T.nilable(Type::TypeInput)).returns(FunctionSignature) }
+  def replace_return_type!(return_type)
+    @contract.return_type = coerce_return_type(return_type)
+    self
+  end
+
+  sig { params(return_strategy: T.nilable(Symbol)).returns(FunctionSignature) }
+  def replace_return_strategy!(return_strategy)
+    @facts.return_strategy = return_strategy
+    self
+  end
+
+  sig { params(emit: T.nilable(IntrinsicEmit)).returns(FunctionSignature) }
+  def replace_intrinsic_emit!(emit)
+    @facts.emit = emit
+    self
+  end
+
+  sig { returns(FunctionSignature) }
+  def mark_runtime_required!
+    @facts.needs_rt = true
+    self
+  end
+
+  sig { returns(FunctionSignature) }
+  def mark_faulting_allocation!
+    @facts.can_fail = true
+    @facts.alloc_fault = true
+    self
   end
 
   # True iff the return is a static Fixed Type (not receiver-parametric
   # or host-inferred). Callers that only honor a statically-declared
   # owned return (e.g. the MIR HPT_LEAK check) gate on this.
   sig { returns(T::Boolean) }
-  def fixed_return? = @return_def.fixed?
+  def fixed_return? = @facts.return_def.fixed?
 
   sig { returns(T::Boolean) }
   def emits_allocating?
@@ -379,7 +538,7 @@ class FunctionSignature
     emit_copy = copy.emit ? T.must(copy.emit).dup : IntrinsicEmit.new
     emit_copy.zig = pattern
     emit_copy.alloc = alloc if alloc
-    copy.emit = emit_copy
+    copy.replace_intrinsic_emit!(emit_copy)
     copy
   end
 
@@ -396,28 +555,21 @@ class FunctionSignature
   sig { returns(FunctionSignature) }
   def dup
     FunctionSignature.new(
-      params: @params, return_type: @return_type, return_lifetime: @return_lifetime,
-      visibility: @visibility, type_params: @type_params, reentrant: @reentrant,
-      extern: @extern, module_alias: @module_alias, extern_effects: @extern_effects,
-      fn_type_params: @fn_type_params, owner_type: @owner_type,
-      owner_type_params: @owner_type_params, intrinsic: @intrinsic,
-      zig_pattern: @zig_pattern
+      params: @contract.params,
+      return_type: @contract.return_type,
+      return_lifetime: @contract.return_lifetime,
+      visibility: @contract.visibility,
+      type_params: @contract.type_params,
+      reentrant: @contract.reentrant,
+      extern: @contract.extern,
+      module_alias: @contract.module_alias,
+      extern_effects: @contract.extern_effects,
+      fn_type_params: @contract.fn_type_params,
+      owner_type: @contract.owner_type,
+      owner_type_params: @contract.owner_type_params,
+      intrinsic: @contract.intrinsic
     ).tap do |s|
-      s.needs_rt = @needs_rt
-      s.can_fail = @can_fail
-      s.alloc_fault = @alloc_fault
-      s.error_fallible = @error_fallible
-      s.effects = @effects
-      s.return_strategy = @return_strategy
-      s.stack_tier = @stack_tier
-      s.requires = @requires
-      s.heap_carry_return = @heap_carry_return
-      s.heap_carry_return_vars = @heap_carry_return_vars
-      s.arg_validator = @arg_validator
-      s.arg_spec = @arg_spec
-      s.arity = @arity
-      s.emit = @emit
-      s.return_def = @return_def
+      s.replace_analysis_storage!(@facts.copy)
     end
   end
 
@@ -429,16 +581,16 @@ class FunctionSignature
 
   sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
   def replace_import_mutable_state!(module_alias:)
-    @params = self.class.copy_params_for_import(@params)
-    @type_params = @type_params&.dup
-    @module_alias = module_alias
-    @extern_effects = @extern_effects.dup
-    @fn_type_params = @fn_type_params&.dup
-    @owner_type_params = @owner_type_params&.dup
-    @effects = @effects&.dup
-    @requires = self.class.copy_requires_for_import(@requires)
-    @heap_carry_return_vars = @heap_carry_return_vars&.dup
-    @return_def = @return_def.copy
+    @contract.params = self.class.copy_params_for_import(@contract.params)
+    @contract.type_params = @contract.type_params&.dup
+    @contract.module_alias = module_alias
+    @contract.extern_effects = @contract.extern_effects.dup
+    @contract.fn_type_params = @contract.fn_type_params&.dup
+    @contract.owner_type_params = @contract.owner_type_params&.dup
+    @facts.effects = @facts.effects&.dup
+    @facts.requires = self.class.copy_requires_for_import(@facts.requires)
+    @facts.heap_carry_return_vars = @facts.heap_carry_return_vars&.dup
+    @facts.return_def = @facts.return_def.copy
     self
   end
   protected :replace_import_mutable_state!
@@ -471,6 +623,41 @@ class FunctionSignature
   end
 
   private
+
+  sig { params(val: T.nilable(Type::TypeInput)).returns(Type) }
+  def coerce_return_type(val)
+    val.nil? ? Type.new(:Void) : Type.new(val)
+  end
+
+  sig { params(fn: T.untyped).returns(FunctionSignature) }
+  def sync_from_function_def!(fn)
+    @facts.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
+    @facts.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
+    @facts.alloc_fault = fn.alloc_fault if fn.respond_to?(:alloc_fault)
+    @facts.error_fallible = fn.error_fallible if fn.respond_to?(:error_fallible)
+    @facts.effects = fn.effects if fn.respond_to?(:effects)
+    replace_requires_storage!(fn.requires) if fn.respond_to?(:requires)
+    @facts.return_strategy = fn.return_strategy if fn.respond_to?(:return_strategy)
+    @contract.return_type = coerce_return_type(fn.return_type) if fn.respond_to?(:return_type) && fn.return_type
+    @facts.stack_tier = fn.stack_tier if fn.respond_to?(:stack_tier)
+    @facts.heap_carry_return = fn.heap_carry_return if fn.respond_to?(:heap_carry_return)
+    @facts.heap_carry_return_vars = fn.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
+    self
+  end
+  protected :sync_from_function_def!
+
+  sig { params(requires: T.nilable(RequiresMap)).void }
+  def replace_requires_storage!(requires)
+    copied_requires = self.class.copy_requires_for_import(requires || {})
+    @facts.requires.clear
+    @facts.requires.merge!(copied_requires)
+  end
+
+  sig { params(facts: AnalysisFacts).void }
+  def replace_analysis_storage!(facts)
+    @facts = facts
+  end
+  protected :replace_analysis_storage!
 
   sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }
   def normalize_lifetime(val)

@@ -4141,7 +4141,7 @@ RSpec.describe SemanticAnnotator do
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
         STRUCT BigS   { #{big_fields}   }
-        FN first_a(s: BigS) RETURNS Float64 @reentrant ->
+        FN first_a(s: BigS) RETURNS Float64 EFFECTS REENTRANT ->
           RETURN s.c1.a;
         END
       CLEAR

@@ -371,14 +371,6 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def reentrance_kind=(value); end
   sig { returns(T.untyped) }
-  def reentrant; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def reentrant=(value); end
-  sig { returns(T.untyped) }
-  def reentrant_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def reentrant_token=(value); end
-  sig { returns(T.untyped) }
   def requires; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def requires=(value); end
@@ -865,32 +857,9 @@ class BindExpr
   def reassign_cleanup=(value); end
 end
 
-class BodySlot
-  sig { returns(MIR::BodySlot::Body) }
-  def body; end
-  sig { returns(Symbol) }
-  def name; end
-end
-
 class BorrowChecker
   sig { returns(T::Array[String]) }
   def errors; end
-end
-
-class Builder
-  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
-  def segments; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
-  def synthetic_fields; end
-end
-
-class CallableContract
-  sig { returns(T.untyped) }
-  def checked_arg_count; end
-  sig { returns(T.untyped) }
-  def ownership_contract; end
-  sig { returns(T.untyped) }
-  def signature; end
 end
 
 class CapabilityWrap
@@ -942,13 +911,6 @@ end
 class EffectSet
   sig { returns(T::Set[Symbol]) }
   def effects; end
-end
-
-class EnumSchema
-  sig { returns(T.untyped) }
-  def variants; end
-  sig { returns(T.untyped) }
-  def visibility; end
 end
 
 class ExternFnDecl
@@ -1026,13 +988,6 @@ class ForRange
   def tight; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def tight=(value); end
-end
-
-class FsmTransform::Builder
-  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
-  def segments; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
-  def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
@@ -1121,8 +1076,6 @@ class FunctionContext
   def loop_depth=(value); end
   sig { returns(T.untyped) }
   def name; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def name=(value); end
   sig { returns(Type) }
   def return_type; end
   sig { returns(T::Array[AST::ReturnFact]) }
@@ -1249,14 +1202,6 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def reentrance_kind=(value); end
   sig { returns(T.untyped) }
-  def reentrant; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def reentrant=(value); end
-  sig { returns(T.untyped) }
-  def reentrant_token; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def reentrant_token=(value); end
-  sig { returns(T.untyped) }
   def requires; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def requires=(value); end
@@ -1315,107 +1260,49 @@ class FunctionReturn
   def kind; end
 end
 
-class FunctionSignature
-  sig { returns(T.nilable(T::Boolean)) }
-  def alloc_fault; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def alloc_fault=(value); end
-  sig { returns(T.untyped) }
-  def arg_spec; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def arg_spec=(value); end
-  sig { returns(T.nilable(Proc)) }
-  def arg_validator; end
-  sig { params(value: T.nilable(Proc)).returns(T.nilable(Proc)) }
-  def arg_validator=(value); end
-  sig { returns(T.nilable(Integer)) }
-  def arity; end
-  sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
-  def arity=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
-  def can_fail; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def can_fail=(value); end
-  sig { returns(T.nilable(EffectSet)) }
-  def effects; end
-  sig { params(value: T.nilable(EffectSet)).returns(T.nilable(EffectSet)) }
-  def effects=(value); end
-  sig { returns(T.nilable(IntrinsicEmit)) }
-  def emit; end
-  sig { returns(T.nilable(T::Boolean)) }
-  def error_fallible; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def error_fallible=(value); end
+class FunctionSignature::Contract
   sig { returns(T::Boolean) }
   def extern; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def extern=(value); end
-  sig { returns(ExternEffects) }
+  sig { returns(FunctionSignature::ExternEffects) }
   def extern_effects; end
-  sig { params(value: ExternEffects).returns(ExternEffects) }
+  sig { params(value: FunctionSignature::ExternEffects).returns(FunctionSignature::ExternEffects) }
   def extern_effects=(value); end
   sig { returns(T.nilable(T::Array[Symbol])) }
   def fn_type_params; end
   sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
   def fn_type_params=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
-  def heap_carry_return; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def heap_carry_return=(value); end
-  sig { returns(T.nilable(T::Set[String])) }
-  def heap_carry_return_vars; end
-  sig { params(value: T.nilable(T::Set[String])).returns(T.nilable(T::Set[String])) }
-  def heap_carry_return_vars=(value); end
   sig { returns(T::Boolean) }
   def intrinsic; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def intrinsic=(value); end
   sig { returns(T.nilable(String)) }
   def module_alias; end
   sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
   def module_alias=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
-  def needs_rt; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def needs_rt=(value); end
   sig { returns(T.nilable(String)) }
   def owner_type; end
-  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
-  def owner_type=(value); end
   sig { returns(T.nilable(T::Array[Symbol])) }
   def owner_type_params; end
   sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
   def owner_type_params=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[AST::Param]) }
   def params; end
+  sig { params(value: T::Array[AST::Param]).returns(T::Array[AST::Param]) }
+  def params=(value); end
   sig { returns(T::Boolean) }
   def reentrant; end
-  sig { returns(RequiresMap) }
-  def requires; end
-  sig { returns(FunctionReturn) }
-  def return_def; end
-  sig { params(value: FunctionReturn).returns(FunctionReturn) }
-  def return_def=(value); end
-  sig { returns(T::Array[LifetimeSource]) }
+  sig { returns(T::Array[FunctionSignature::LifetimeSource]) }
   def return_lifetime; end
-  sig { returns(T.nilable(Symbol)) }
-  def return_strategy; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def return_strategy=(value); end
+  sig { params(value: T::Array[FunctionSignature::LifetimeSource]).returns(T::Array[FunctionSignature::LifetimeSource]) }
+  def return_lifetime=(value); end
   sig { returns(Type) }
   def return_type; end
-  sig { returns(T.nilable(Symbol)) }
-  def stack_tier; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def stack_tier=(value); end
+  sig { params(value: Type).returns(Type) }
+  def return_type=(value); end
   sig { returns(T.nilable(T::Array[Symbol])) }
   def type_params; end
+  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
+  def type_params=(value); end
   sig { returns(T.nilable(Symbol)) }
   def visibility; end
-  sig { returns(T.nilable(T.any(String, Symbol))) }
-  def zig_pattern; end
-  sig { params(value: T.nilable(T.any(String, Symbol))).returns(T.nilable(T.any(String, Symbol))) }
-  def zig_pattern=(value); end
 end
 
 class GetField
@@ -1457,73 +1344,6 @@ class IfStatement
   def then_result_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def then_result_type=(value); end
-end
-
-class InlineAllocMetadata
-  sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-  def placeholders; end
-end
-
-class InlineStructVariant
-  sig { returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
-  def deinit_entries; end
-  sig { params(value: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
-  def deinit_entries=(value); end
-  sig { returns(Schemas::InlineStructVariant::FieldMap) }
-  def fields; end
-end
-
-class LinearOwnershipSnapshot
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def cleanup_finalizers; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def err_finalizers; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def guarded_finalizers; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def maybe_released; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def pending_block_transfers; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def pending_return_transfers; end
-  sig { returns(T::Set[MIRChecker::PlaceId]) }
-  def released; end
-end
-
-class LinearOwnershipState
-  sig { returns(T::Hash[String, Symbol]) }
-  def alloc_kinds; end
-  sig { returns(T::Hash[String, Symbol]) }
-  def alloc_scopes; end
-  sig { returns(T::Set[String]) }
-  def cleanup_finalizers; end
-  sig { returns(T::Set[String]) }
-  def err_finalizers; end
-  sig { returns(T::Set[String]) }
-  def guarded_finalizers; end
-  sig { returns(T::Set[String]) }
-  def maybe_released; end
-  sig { returns(T::Set[String]) }
-  def move_marks; end
-  sig { returns(T::Set[String]) }
-  def owned; end
-  sig { returns(T::Set[String]) }
-  def pending_block_transfers; end
-  sig { returns(T::Set[String]) }
-  def pending_return_transfers; end
-  sig { returns(T::Set[String]) }
-  def released; end
-  sig { returns(T::Boolean) }
-  def terminated; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def terminated=(value); end
-end
-
-class LocationToken
-  sig { returns(T.untyped) }
-  def column; end
-  sig { returns(T.untyped) }
-  def line; end
 end
 
 class MIR::BodySlot
@@ -1658,17 +1478,6 @@ class MIRPassState
   def completed; end
 end
 
-class MapPairResolution
-  sig { returns(T.nilable(AutoUnifier::Resolution)) }
-  def key; end
-  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
-  def key=(value); end
-  sig { returns(T.nilable(AutoUnifier::Resolution)) }
-  def value; end
-  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
-  def value=(value); end
-end
-
 class MatchStatement
   sig { returns(T.untyped) }
   def case_result_types; end
@@ -1724,17 +1533,6 @@ class ModuleImporter
   def module_cache; end
 end
 
-class OwnershipContract
-  sig { returns(T::Array[String]) }
-  def borrows; end
-  sig { returns(T::Boolean) }
-  def covers_consuming_params; end
-  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
-  def operands; end
-  sig { returns(T::Array[String]) }
-  def produces; end
-end
-
 class OwnershipDataflow
   sig { returns(T::Hash[Integer, OwnershipState]) }
   def block_in; end
@@ -1761,48 +1559,15 @@ class Pprof::Profile
   def time_nanos=(value); end
 end
 
-class Profile
-  sig { params(value: Integer).returns(Integer) }
-  def duration_nanos=(value); end
-  sig { params(value: Integer).returns(Integer) }
-  def period=(value); end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def time_nanos=(value); end
-end
-
 class Program
   sig { returns(T.untyped) }
-  def items; end
+  def mir_pass_state; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_pass_state=(value); end
   sig { returns(T.untyped) }
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_policy=(value); end
-end
-
-class RecursiveSplitter::Builder
-  sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
-  def segments; end
-  sig { returns(T::Array[MIR::ContextFieldDecl]) }
-  def synthetic_fields; end
-end
-
-class ResourceSchema
-  sig { returns(T.nilable(String)) }
-  def as_type; end
-  sig { returns(Schemas::ResourceClosePlan) }
-  def close_plan; end
-  sig { returns(T.nilable(String)) }
-  def extern_module; end
-  sig { returns(T::Hash[String, AST::StructField]) }
-  def fields; end
-  sig { returns(Schemas::ResourceSchema::MethodsMap) }
-  def methods; end
-  sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
-  def static_methods; end
-  sig { returns(T.nilable(T::Array[Symbol])) }
-  def type_params; end
-  sig { returns(Symbol) }
-  def visibility; end
 end
 
 class Schemas::EnumSchema
@@ -1891,16 +1656,6 @@ class Scope::ScopeTypes
   def entries; end
 end
 
-class ScopeBindings
-  sig { returns(T::Hash[String, SymbolEntry]) }
-  def entries; end
-end
-
-class ScopeTypes
-  sig { returns(T::Hash[Symbol, Scope::ScopeTypeEntry]) }
-  def entries; end
-end
-
 class SemanticAnnotator
   sig { returns(T.nilable(SemanticIndex)) }
   def semantic_index; end
@@ -1946,21 +1701,6 @@ class StructLit
   def field_tokens; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_tokens=(value); end
-end
-
-class StructSchema
-  sig { returns(T.untyped) }
-  def as_type; end
-  sig { returns(T.untyped) }
-  def extern_module; end
-  sig { returns(T::Hash[String, AST::StructField]) }
-  def fields; end
-  sig { returns(T.untyped) }
-  def methods; end
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { returns(T.untyped) }
-  def visibility; end
 end
 
 class SymbolEntry
@@ -2091,19 +1831,6 @@ class TestBlock
   def lets=(value); end
 end
 
-class TestBlockCtx
-  sig { returns(T.nilable(T::Array[T.untyped])) }
-  def setup_mir; end
-  sig { returns(T::Array[T.untyped]) }
-  def test_after_each_mir; end
-  sig { returns(T::Array[T.untyped]) }
-  def test_before_each_mir; end
-  sig { returns(AST::TestBlock) }
-  def test_block; end
-  sig { returns(String) }
-  def test_name; end
-end
-
 class TestLowering::TestBlockCtx
   sig { returns(T.nilable(T::Array[T.untyped])) }
   def setup_mir; end
@@ -2152,15 +1879,6 @@ class UnionDef
   def type_params; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def type_params=(value); end
-end
-
-class UnionSchema
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { returns(Schemas::UnionSchema::VariantMap) }
-  def variants; end
-  sig { returns(T.untyped) }
-  def visibility; end
 end
 
 class UseAfterMoveChecker

@@ -261,14 +261,13 @@
 74_shared_promise
 97_stack_heap_interop
 
-# Tranche 9: TryExpr stripping + @reentrant scaffold elision. The
+# Tranche 9: TryExpr stripping + reentrance scaffold elision. The
 # bc VM has no error-union runtime, so `try expr` strips the
 # wrapper at the i64/f64/string/value paths (the inner expression
-# carries any actual side effect). `@reentrant` / `@nonReentrant`
-# annotations decorate every fn with a `safety.StackGuard.enter` /
-# push / defer pop prologue; the bc VM is single-threaded with its
-# own stack-frame management, so these three statements are
-# detected and elided.
+# carries any actual side effect). Guarded reentrance variants add
+# `safety.StackGuard.enter` / push / defer pop prologues; the bc VM
+# is single-threaded with its own stack-frame management, so these
+# statements are detected and elided.
 #
 # Error-union runtime (commit 2): RAISE / OR RAISE / CATCH for
 # Int64-return wrappers now lower to ERAISE/EGUARD/ECLR/EMATCHK/
@@ -490,7 +489,7 @@
 # - ExprStmts of MIR::TryExpr / MIR::Call were unsupported; now
 #   they delegate to compile_inline_bc_stmt / compile_call_stmt.
 # - safety.* runtime helpers (StackGuard.enter/push/pop, plus the
-#   @nonReentrant variant safety.enterDepth/exitDepth) are now
+#   bounded reentrance safety.enterDepth/exitDepth calls) are now
 #   elided as Calls/DeferStmts -- the bc VM has no analogous
 #   reentrancy tracking, so they're no-ops.
 30_distinct

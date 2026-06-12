@@ -492,7 +492,7 @@ module EffectTracker
 
   # Post-pass: compute can_fail for every function.
   # A function can fail if it has direct failure sources (Raise/OrRaise, frame alloc,
-  # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
+  # fn pointer call, guarded reentrance prologue) or any transitive callee can fail.
   # main always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
   # are excluded from propagation — they don't use CLEAR's error union convention.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
@@ -500,7 +500,7 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
-    # @nonReentrant / BG-spawn / declared `!T` / transitive ERROR
+    # guarded reentrance / BG-spawn / declared `!T` / transitive ERROR
     # callee). This is the axis that forces `RETURNS !T` (step 4). It
     # is kept strictly separate from the alloc FAULT axis below; the
     # transitive loop runs over THIS map (not the OR'd can_fail) so an
@@ -795,7 +795,7 @@ module EffectTracker
   #     translate, and a one-shot task is cheaper than an FSM state struct);
   #   - body does NOT have REENTRANT (recursion needs a stack);
   #   - body does NOT have EXTERN (opaque to the scheduler);
-  #   - function is not annotated @reentrant.
+  #   - function does not declare plain EFFECTS REENTRANT.
   #
   # BLOCKING (lock wait) is no longer disqualifying: ParkingMutex and
   # ParkingRwLock both support FSM waiters in the runtime.
@@ -808,7 +808,7 @@ module EffectTracker
       effs = fn_node.effects || Set.new
 
       reason = nil
-      if effs.include?(REENTRANT) || fn_node.reentrant == :reentrant
+      if effs.include?(REENTRANT) || fn_node.plain_reentrant?
         reason = :reentrant
       elsif effs.include?(EXTERN)
         reason = :extern
@@ -941,7 +941,7 @@ module EffectTracker
       # unless the callee is explicitly EXTERN at the scope level.
       next unless fn
       effs = fn.effects || Set.new
-      if effs.include?(REENTRANT) || fn.reentrant == :reentrant
+      if effs.include?(REENTRANT) || fn.plain_reentrant?
         return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :reentrant)
       end
       return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :extern) if effs.include?(EXTERN)
@@ -1156,7 +1156,7 @@ module EffectTracker
   # --- TIGHT loop validation ---
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
-  # calls to @reentrant or EXTERN FN functions. Stops at FunctionDef boundaries.
+  # calls to plain EFFECTS REENTRANT or EXTERN FN functions. Stops at FunctionDef boundaries.
   sig { params(stmts: AstScanInput, loop_node: TightLoopNode).returns(T.nilable(T::Array[AST::Node])) }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -1212,7 +1212,7 @@ module EffectTracker
     function_call_graph.each_key do |fn_name|
       node = fn_nodes[fn_name]
       next if node.nil?
-      next if node.reentrant  # already annotated — no complaint needed
+      next if node.reentrance_kind
 
       visited = Set.new
       queue   = (function_call_graph[fn_name] || Set.new).to_a

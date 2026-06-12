@@ -519,9 +519,9 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.to raise_error(/TIGHT loop cannot call EXTERN FN/)
     end
 
-    it "raises a compile error when TIGHT loop calls an @reentrant function directly" do
+    it "raises a compile error when TIGHT loop calls a plain EFFECTS REENTRANT function directly" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -534,12 +534,12 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
-    it "raises a compile error when @reentrant call is nested inside an IF inside TIGHT" do
+    it "raises a compile error when a plain EFFECTS REENTRANT call is nested inside an IF inside TIGHT" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -554,12 +554,12 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
-    it "raises when a TIGHT loop method-call argument calls an @reentrant function" do
+    it "raises when a TIGHT loop method-call argument calls a plain EFFECTS REENTRANT function" do
       src = <<~CLEAR
-        FN fib(n: Int64) RETURNS Int64 @reentrant ->
+        FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN n; END
           RETURN fib(n - 1) + fib(n - 2);
         END
@@ -573,7 +573,7 @@ RSpec.describe ZigTranspiler do
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call @reentrant/)
+      expect { transpile(src) }.to raise_error(/TIGHT loop cannot call plain EFFECTS REENTRANT/)
     end
 
     it "allows normal (non-reentrant, non-extern) CLEAR calls inside TIGHT" do
@@ -727,7 +727,7 @@ RSpec.describe ZigTranspiler do
   describe "HashMap param double-& fix" do
     it "does not double-wrap HashMap params with & in recursive calls" do
       src = <<~CLEAR
-        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS !Int64 @reentrant ->
+        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
             env[key] = depth;
             IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
             RETURN depth;
@@ -1373,11 +1373,11 @@ RSpec.describe ZigTranspiler do
           Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
         }
 
-        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
+        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: Env[8]@pool) RETURNS String EFFECTS REENTRANT ->
           RETURN ast;
         END
 
-        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !String @reentrant ->
+        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !String EFFECTS REENTRANT ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoAst = COPY tco.tcoAst;

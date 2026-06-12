@@ -818,7 +818,7 @@ module Annotator
         ], merge_to_parent: false)
 
         # 4. TIGHT validation: deep-scan the entire loop body AST (including nested
-        # if/while/match blocks) for direct calls to @reentrant or EXTERN FN functions.
+        # if/while/match blocks) for direct calls to plain EFFECTS REENTRANT or EXTERN FN functions.
         # Does NOT recurse into bodies of called CLEAR functions — those are separate
         # compilation units and their internal behaviour is their own concern.
         if node.tight
@@ -931,7 +931,7 @@ module Annotator
 
       # Deep validation for TIGHT loops.
       # Walks the full AST subtree (nested ifs, whiles, match blocks) looking for
-      # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef
+      # any call to a plain EFFECTS REENTRANT or EXTERN FN function. Stops at FunctionDef
       # boundaries — nested lambdas/closures are separate compilation units.
 
       sig { params(node: AST::BreakNode).returns(T.nilable(Symbol)) }

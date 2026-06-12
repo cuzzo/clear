@@ -407,8 +407,12 @@ def mir_checker_negative_source(case_name, error_code)
     end
 
     def registry_call(alloc, target, ownership_contract: MIR::OwnershipContract.empty, allocs: nil)
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(mutates_receiver: true)
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(mutates_receiver: true),
+      )
       MIR::RegistryCall.new(
         entry: sig,
         args: [],

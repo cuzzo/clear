@@ -58,11 +58,6 @@ module Annotator
       summary
     end
 
-    sig { params(name: String).returns(T.nilable(Annotator::Phases::FunctionBodySummary)) }
-    def body_summary_for(name)
-      body_summaries[name]
-    end
-
     sig { returns(T::Hash[String, T::Set[String]]) }
     def call_graph
       body_summaries.transform_values(&:callees)

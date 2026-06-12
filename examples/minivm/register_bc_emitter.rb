@@ -590,7 +590,7 @@ class RegisterBcEmitter
       stmt.expr.callee.to_s == "@setEvalBranchQuota"
   end
 
-  # `@reentrant` / `@nonReentrant` decorate every fn with a
+  # Guarded reentrance variants decorate functions with a
   # safety.StackGuard prologue:
   #     `_guard = try safety.StackGuard.enter(@src);`
   #     `_guard.push();`
@@ -610,7 +610,7 @@ class RegisterBcEmitter
         stmt.expr.receiver.is_a?(MIR::Ident) &&
         stmt.expr.receiver.name.to_s == "_guard" &&
         %w[push pop].include?(stmt.expr.method.to_s)) ||
-      # @nonReentrant: bare `safety.enterDepth()` / `safety.exitDepth()`
+      # Bounded reentrance: bare `safety.enterDepth()` / `safety.exitDepth()`
       (stmt.expr.is_a?(MIR::Call) &&
         stmt.expr.callee.to_s.start_with?("safety."))
     when MIR::DeferStmt
@@ -618,7 +618,7 @@ class RegisterBcEmitter
         stmt.body.receiver.is_a?(MIR::Ident) &&
         stmt.body.receiver.name.to_s == "_guard" &&
         stmt.body.method.to_s == "pop") ||
-      # `defer safety.exitDepth();` from @nonReentrant fns.
+      # `defer safety.exitDepth();` from bounded reentrance fns.
       (stmt.body.is_a?(MIR::Call) &&
         stmt.body.callee.to_s.start_with?("safety."))
     else
@@ -2056,7 +2056,7 @@ class RegisterBcEmitter
   def compile_call_stmt(stmt)
     return compile_debug_print(stmt) if stmt.callee.to_s == "std.debug.print"
     # safety.* runtime helpers (StackGuard already elided by
-    # reentrant_guard_stmt? in Tranche 9, but the @nonReentrant
+    # reentrant_guard_stmt? in Tranche 9, but bounded reentrance
     # variants land as bare Calls on `safety.enterDepth` /
     # `safety.exitDepth`). The bc VM has no analogous reentrancy
     # tracking, so they're no-ops.

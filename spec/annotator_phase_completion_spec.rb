@@ -81,7 +81,7 @@ RSpec.describe "annotator completion phases" do
     CLEAR
 
     annotator.annotate!(program)
-    summary = T.must(annotator.function_body_summary_for("main"))
+    summary = T.must(annotator.function_body_summaries["main"])
 
     expect(summary.definition_id.value).to be > 0
     expect(summary.body_id.value).to be > 0

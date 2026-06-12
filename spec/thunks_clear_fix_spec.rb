@@ -5,15 +5,14 @@ require_relative "../src/ast/ast"
 require_relative "../src/ast/fixable_error"
 require_relative "../src/backends/transpiler"
 
-# Thunk Phase 1.4 — `clear fix` migration that rewrites the legacy
-# `@reentrant` / `@reentrant:tailCall` annotation to the new
-# `EFFECTS REENTRANT[:TAIL_CALL]` clause.
+# Reentrance clear-fix coverage.
 #
 # Spec uses FixCollector directly (no integration with the CLI
-# `clear fix` binary needed) to verify the finding shape, edit
-# spans, and replacement text.
+# `clear fix` binary needed) to verify the finding shape for
+# unconstrained FN-typed parameters. Legacy `@reentrant` migration
+# no longer exists because the parser rejects the old annotation.
 
-RSpec.describe "ReentranceBridge clear-fix migration" do
+RSpec.describe "ReentranceBridge clear-fix findings" do
   before { FixCollector.enable! }
   after  { FixCollector.disable! }
 
@@ -51,58 +50,6 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
     CLEAR
     legacy_finding = fs.find { |f| f.message.include?("Legacy '@reentrant'") }
     expect(legacy_finding).to be_nil
-  end
-
-  it "emits an :auto fix for `@reentrant` -> `EFFECTS REENTRANT`" do
-    fs = findings(<<~CLEAR)
-      FN walk(n: Int64) RETURNS Void @reentrant ->
-        IF n <= 0 -> RETURN;
-        walk(n - 1);
-      END
-      FN main() RETURNS Void -> walk(3); RETURN; END
-    CLEAR
-    f = fs.find { |x| x.message.include?("Legacy '@reentrant'") }
-    expect(f).not_to be_nil
-    expect(f.level).to eq(:info)
-    expect(f.category).to eq(:lint)
-    expect(f.message).to match(/migrate to 'EFFECTS REENTRANT'/)
-    fix = f.fixes.first
-    expect(fix.confidence).to eq(:auto)
-    expect(fix.edits.length).to eq(1)
-    edit = fix.edits.first
-    expect(edit.replacement).to eq("EFFECTS REENTRANT")
-    expect(edit.span.length).to eq("@reentrant".length)
-  end
-
-  it "emits an :auto fix for `@reentrant:tailCall` -> `EFFECTS REENTRANT:TAIL_CALL`" do
-    fs = findings(<<~CLEAR)
-      FN sum(n: Int64, acc: Int64) RETURNS Int64 @reentrant:tailCall ->
-        IF n <= 0 -> RETURN acc;
-        RETURN sum(n - 1, acc + n);
-      END
-      FN main() RETURNS Void -> _ = sum(10, 0); RETURN; END
-    CLEAR
-    f = fs.find { |x| x.message.include?("Legacy '@reentrant:tailCall'") }
-    expect(f).not_to be_nil
-    fix = f.fixes.first
-    edit = fix.edits.first
-    expect(edit.replacement).to eq("EFFECTS REENTRANT:TAIL_CALL")
-    expect(edit.span.length).to eq("@reentrant:tailCall".length)
-  end
-
-  it "spans the @reentrant token at its source location" do
-    fs = findings(<<~CLEAR)
-      FN walk(n: Int64) RETURNS Void @reentrant ->
-        IF n <= 0 -> RETURN;
-        walk(n - 1);
-      END
-      FN main() RETURNS Void -> walk(3); RETURN; END
-    CLEAR
-    f = fs.find { |x| x.message.include?("Legacy '@reentrant'") }
-    edit = f.fixes.first.edits.first
-    expect(edit.span.line).to eq(1)
-    # Column is 1-based; @reentrant starts after `FN walk(n: Int64) RETURNS Void `.
-    expect(edit.span.col).to be > 1
   end
 
   describe "unconstrained FN-typed parameter fix (Phase 2)" do
@@ -148,9 +95,21 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
       expect(second.edits.first.replacement).to eq("EFFECTS REENTRANT ->")
     end
 
-    it "skips parameters with @reentrant on the type (caller opted in)" do
+    it "rejects legacy @reentrant on fn-type parameters before fixes are collected" do
+      expect {
+        findings(<<~CLEAR)
+          FN applyReentrant(f: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64
+            EFFECTS REENTRANT ->
+            RETURN f(x);
+          END
+          FN main() RETURNS Void -> RETURN; END
+        CLEAR
+      }.to raise_error(ParserError)
+    end
+
+    it "skips parameters when the enclosing function declares EFFECTS REENTRANT" do
       fs = findings(<<~CLEAR)
-        FN applyReentrant(f: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64
+        FN applyReentrant(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
           EFFECTS REENTRANT ->
           RETURN f(x);
         END

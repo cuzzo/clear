@@ -14,7 +14,7 @@ UNION Value {
     EnvRef: Id<Env>
 }
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS !Value @reentrant ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS !Value EFFECTS REENTRANT ->
     IF pool[envId] AS env THEN
         val = COPY (env.vars[name] OR Value{ Number: 0.0 - 777777.0 });
         PARTIAL MATCH val START

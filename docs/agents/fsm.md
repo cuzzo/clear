@@ -91,7 +91,7 @@ The non-negotiable rules per `CLAUDE.md` Invariant 13:
 
 | Reason | Why |
 |---|---|
-| `REENTRANT` (recursion or `@reentrant`) | Recursion needs a real stack. |
+| `REENTRANT` (plain `EFFECTS REENTRANT`) | Recursion needs a real stack. |
 | `EXTERN` (calls native code) | Opaque to the scheduler. |
 | `:fn_pointer` (BG calls through a fn-pointer) | Dynamic dispatch can't be lowered ahead of time. |
 | `:explicit_stack_size` (`@local` / `@large` directive) | User opted out. |
@@ -147,7 +147,7 @@ Phase A enumerates lexical suspend points only — a call to a user fn whose bod
 
 **Why uncommon:** lifting this requires interprocedural FSM lowering — the called fn must itself be FSM-able and inlined or split at the call site. That's a much larger architectural step (and overlaps significantly with the thunks+trampolines design that handles recursion + fn-pointer dispatch). Skip until the trampoline path lands.
 
-### `@reentrant` / recursion that suspends
+### Reentrant recursion that suspends
 
 Recursion needs a real stack. There's no realistic way to FSM-lower a recursive descent parser whose recursion depth depends on input. This is the trampoline path's territory.
 

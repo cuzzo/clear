@@ -4,8 +4,8 @@ require_relative "../src/ast/parser"
 require_relative "../src/ast/ast"
 
 # Thunk Phase 1.1 — parser support for `EFFECTS REENTRANT[:VARIANT]`
-# on regular FN definitions. The legacy `@reentrant` annotation
-# continues to work; the annotator bridges them in Phase 1.3.
+# on regular FN definitions. Legacy `@reentrant` / `@nonReentrant`
+# syntax is rejected.
 #
 # This spec covers ONLY the parser surface; semantic effects (stack
 # tier, propagation, NON_REENTRANT constraint solving) are out of
@@ -82,7 +82,7 @@ RSpec.describe "Parser: EFFECTS REENTRANT clause" do
     }.to raise_error(/Unknown function effect 'HEAP'/)
   end
 
-  it "rejects mixing legacy @reentrant with EFFECTS REENTRANT" do
+  it "rejects legacy @reentrant before an EFFECTS REENTRANT clause" do
     expect {
       parse(<<~CLEAR)
         FN x() RETURNS Void @reentrant
@@ -90,41 +90,38 @@ RSpec.describe "Parser: EFFECTS REENTRANT clause" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(/has both legacy '@reentrant' annotation and new 'EFFECTS REENTRANT' clause/)
+    }.to raise_error(ParserError)
   end
 
-  it "leaves the legacy reentrant attr nil when only EFFECTS is used" do
+  it "sets tail_call false when only plain EFFECTS REENTRANT is used" do
     ast = parse(<<~CLEAR)
       FN walk() RETURNS Void
         EFFECTS REENTRANT ->
         RETURN;
       END
     CLEAR
-    expect(fn(ast, "walk").reentrant).to be_nil
     expect(fn(ast, "walk").tail_call).to be_falsey
   end
 
-  it "still accepts the legacy @reentrant annotation on its own" do
-    ast = parse(<<~CLEAR)
-      FN walk() RETURNS Void @reentrant ->
-        RETURN;
-      END
-    CLEAR
-    f = fn(ast, "walk")
-    expect(f.reentrant).to eq(:reentrant)
-    expect(f.effects_decl).to be_nil
+  it "rejects legacy @reentrant on its own" do
+    expect {
+      parse(<<~CLEAR)
+        FN walk() RETURNS Void @reentrant ->
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(ParserError)
   end
 
-  it "still accepts the legacy @reentrant:tailCall annotation" do
+  it "sets tail_call for EFFECTS REENTRANT:TAIL_CALL" do
     ast = parse(<<~CLEAR)
-      FN sum(n: Int64) RETURNS Int64 @reentrant:tailCall ->
+      FN sum(n: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
         RETURN n;
       END
     CLEAR
     f = fn(ast, "sum")
-    expect(f.reentrant).to eq(:reentrant)
     expect(f.tail_call).to be(true)
-    expect(f.effects_decl).to be_nil
+    expect(f.effects_decl).to eq(:reentrant_tail_call)
   end
 end
 

@@ -131,12 +131,6 @@ module Annotator
         semantic_function_registry.body_summaries
       end
 
-      sig { params(name: String).returns(T.nilable(FunctionBodySummary)) }
-      def function_body_summary_for(name)
-        T.bind(self, SemanticAnnotator)
-        semantic_function_registry.body_summary_for(name)
-      end
-
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
         T.bind(self, SemanticAnnotator)

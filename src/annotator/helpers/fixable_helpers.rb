@@ -676,7 +676,7 @@ module FixableHelper
   # zero-length insert.
   #
   # `code` selects the error code that fires when the fix isn't
-  # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
+  # locatable (REENTRANCE_DIRECT_RECURSIVE for explicit reentrance guards,
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case).
   sig { params(fn_node: AST::FunctionDef, code: Symbol).returns(NilClass) }
   def emit_reentrant_error!(fn_node, code)

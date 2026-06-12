@@ -108,10 +108,10 @@ RSpec.describe "TAIL_CALL strictness" do
     }.to raise_error(/requires at least one RETURN that directly calls 'noop'/)
   end
 
-  it "is identical for the legacy @reentrant:tailCall annotation" do
+  it "rejects non-tail calls for inline EFFECTS REENTRANT:TAIL_CALL declarations" do
     expect {
       annotate(<<~CLEAR)
-        FN sum(n: Int64, acc: Int64) RETURNS Int64 @reentrant:tailCall ->
+        FN sum(n: Int64, acc: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
           IF n <= 0 -> RETURN sum(0, acc);
           RETURN sum(n - 1, acc) + 1;
         END

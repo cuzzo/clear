@@ -794,30 +794,6 @@ module Annotator
         nil
       end
 
-      # Return an error string when storing val_node at dest_depth would let it
-      # outlive one of its tied-lifetime sources.
-      sig { params(val_node: AST::Node, dest_depth: Integer).returns(T.nilable(String)) }
-      def lifetime_violation_for_store(val_node, dest_depth)
-        T.bind(self, SemanticAnnotator)
-
-        sources = lifetime_sources_for_value(val_node)
-        return nil if sources.empty?
-        # `:current_scope` lifetime is detected via lifetime_sources
-        # returning [self], which means source.scope_depth = sym's own
-        # depth. The same depth comparison applies uniformly.
-        # CLEAR scopes are LIFO-stacked: shallower depth = scope lives
-        # LONGER. Destination outlives source iff dest_depth < source.depth.
-        sources.each do |source|
-          next if source.scope_depth.nil?
-          if dest_depth < T.must(source.scope_depth)
-            return "Lifetime Error: cannot store value with lifetime tied to " \
-                   "scope depth #{source.scope_depth} into a destination at " \
-                   "depth #{dest_depth} (the destination outlives the source)."
-          end
-        end
-        nil
-      end
-
       sig { params(val_node: AST::Node).returns(T::Array[SymbolEntry]) }
       def lifetime_sources_for_value(val_node)
         T.bind(self, SemanticAnnotator)

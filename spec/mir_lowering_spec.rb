@@ -2543,9 +2543,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers call without rt when fn_sig says needs_rt=false" do
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-      sig.needs_rt = false
-      sig.can_fail = false
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64), needs_rt: false, can_fail: false)
       l = lowering(fn_sigs: { "pure" => sig })
       node = AST::FuncCall.new(tok, "pure", [])
       node.full_type = :Int64
@@ -2559,10 +2557,10 @@ RSpec.describe MIRLowering do
       # into registers. Do NOT pass by *const T — that would prevent SROA.
       sig = FunctionSignature.new(
         params: [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)],
-        return_type: Type.new(:Int64)
+        return_type: Type.new(:Int64),
+        needs_rt: false,
+        can_fail: false
       )
-      sig.needs_rt = false
-      sig.can_fail = false
       l = lowering(
         fn_sigs: { "sum3" => sig },
         struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Int64, "y" => :Int64 }) }
@@ -2606,9 +2604,9 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       sig = FunctionSignature.new(
         params: [AST::Param.new(name: "count", type: Type.new(:Int64), mutable: true)],
-        return_type: Type.new(:Void)
+        return_type: Type.new(:Void),
+        needs_rt: false
       )
-      sig.needs_rt = false
 
       result = lowering(fn_sigs: { "bump" => sig }).lower(node)
 
@@ -2623,8 +2621,11 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "identity", [arg])
       node.full_type = :Int64
       node.generic_type_args = [:Int64]
-      sig = FunctionSignature.new(params: [AST::Param.new(name: "x", type: Type.new(:Int64))], return_type: Type.new(:Int64))
-      sig.needs_rt = true
+      sig = FunctionSignature.new(
+        params: [AST::Param.new(name: "x", type: Type.new(:Int64))],
+        return_type: Type.new(:Int64),
+        needs_rt: true
+      )
 
       result = lowering(fn_sigs: { "identity" => sig }).lower(node)
 
@@ -2647,8 +2648,12 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "toString", [arg])
       node.full_type = :String
       node.zig_pattern = "try CheatLib.intToString({alloc}, {0})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "try CheatLib.intToString({alloc}, {0})", alloc: :frame)
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:String),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "try CheatLib.intToString({alloc}, {0})", alloc: :frame)
+      )
       node.matched_stdlib_def = sig
       result = lowering.lower(node)
       expect(result).to be_a(MIR::RegistryCall)
@@ -3356,8 +3361,12 @@ RSpec.describe MIRLowering do
       source = AST::StaticCall.new(tok, "Streams", "source", [])
       source.full_type = Type.new(:"~Int64[INF]")
       source.zig_pattern = "makeStream()"
-      source_sig = FunctionSignature.new(params: [], return_type: source.full_type!, intrinsic: true)
-      source_sig.emit = IntrinsicEmit.new(zig: "makeStream()")
+      source_sig = FunctionSignature.new(
+        params: [],
+        return_type: source.full_type!,
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "makeStream()")
+      )
       source.matched_stdlib_def = source_sig
       node = AST::NextExpr.new(tok, source)
       node.full_type = Type.new(:Int64)
@@ -3385,8 +3394,12 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "sqrt", [arg])
       node.full_type = :Number
       node.zig_pattern = "std.math.sqrt({0})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "std.math.sqrt({0})")
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Number),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "std.math.sqrt({0})")
+      )
       node.matched_stdlib_def = sig
 
       result = lowering.lower(node)
@@ -3403,8 +3416,12 @@ RSpec.describe MIRLowering do
       node = AST::StaticCall.new(tok, "Math", "max", [arg0, arg1])
       node.full_type = :Number
       node.zig_pattern = "std.math.max({0}, {1})"
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Number), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(zig: "std.math.max({0}, {1})")
+      sig = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Number),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(zig: "std.math.max({0}, {1})")
+      )
       node.matched_stdlib_def = sig
 
       result = lowering.lower(node)

@@ -232,9 +232,9 @@ module FunctionAnalysis
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
         type_params: fn_type_params.any? ? fn_type_params : nil,
-        reentrant: node.reentrant == :reentrant
+        reentrant: node.declared_plain_reentrant?,
+        requires: node.requires
       )
-      signature.requires = node.requires
       current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
       register_function_node!(node)
@@ -256,12 +256,7 @@ module FunctionAnalysis
 
       if directly_recursive
         record_effect(EffectTracker::REENTRANT)
-        case node.reentrant
-        when :non_reentrant
-          unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
-            emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE)
-          end
-        when nil
+        unless node.reentrance_kind
           emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE)
         end
 
@@ -286,10 +281,10 @@ module FunctionAnalysis
       resolved_return_type = T.must(final_return_type)
       if (is_implicit_return || declared_return == :Any)
         node.return_type = resolved_return_type
-        signature.return_type = resolved_return_type
+        signature.replace_return_type!(resolved_return_type)
       end
 
-      signature.return_strategy = get_return_strategy(signature.return_type)
+      signature.replace_return_strategy!(get_return_strategy(signature.return_type))
       stamp_type!(node, signature)
       ctx = fn_ctx
       node.uses_frame = (ctx.frame_count > 0)
@@ -299,7 +294,7 @@ module FunctionAnalysis
       node.stack_vars_bytes = ctx.stack_vars_bytes
       raises_directly =
         has_fnptr ||
-        (node.reentrant == :non_reentrant) ||
+        node.reentrance_guard_required? ||
         function_has_pre_clauses?(node) ||
         raises_in_body == true
       record_function_body_summary!(Annotator::Phases::FunctionBodySummary.new(
@@ -514,7 +509,7 @@ module FunctionAnalysis
       params: params,
       return_type: config.return_type,
       intrinsic: true,
-      zig_pattern: config.intrinsic_pattern
+      emit: IntrinsicEmit.new(zig: config.intrinsic_pattern)
     )
   end
 
@@ -738,19 +733,40 @@ module FunctionAnalysis
 
     actual_type = facts.arg_node.full_type!(context: "fn-typed argument")
     return true if facts.expected_type.accepts?(actual_type)
-    return false unless reentrant_fn_argument_rejected?(facts.expected_type, actual_type)
+    return true if reentrant_fn_argument_allowed_by_callee?(facts)
+    return false unless reentrant_fn_argument_rejected?(facts)
 
     error!(facts.arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM,
       name: argument_name(facts.arg_node, fallback: "Expression"), param: facts.param.name)
   end
 
-  sig { params(expected_type: Type, actual_type: Type).returns(T::Boolean) }
-  def reentrant_fn_argument_rejected?(expected_type, actual_type)
-    return false unless actual_type.fn_type?
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def reentrant_fn_argument_allowed_by_callee?(facts)
+    T.bind(self, SemanticAnnotator)
+    return false unless facts.actual_type.fn_type?
 
-    actual_sig = actual_type.function_signature
-    expected_sig = expected_type.function_signature
-    !!(actual_sig&.reentrant && expected_sig && !expected_sig.reentrant)
+    actual_sig = facts.actual_type.function_signature
+    return false unless actual_sig&.reentrant
+
+    callee = function_node_for(facts.site.name)
+    return false unless callee&.declared_plain_reentrant?
+
+    callee.requires_clauses&.[](facts.param.name) != :non_reentrant
+  end
+
+  sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
+  def reentrant_fn_argument_rejected?(facts)
+    T.bind(self, SemanticAnnotator)
+    return false unless facts.actual_type.fn_type?
+
+    actual_sig = facts.actual_type.function_signature
+    return false unless actual_sig&.reentrant
+
+    callee = function_node_for(facts.site.name)
+    constraint = callee&.requires_clauses&.[](facts.param.name)
+    return true if constraint == :non_reentrant
+
+    callee&.declared_plain_reentrant? != true
   end
 
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
@@ -1407,6 +1423,7 @@ module FunctionAnalysis
   private :param_mutable?
   private :paths_overlap?
   private :receiver_container_alloc
+  private :reentrant_fn_argument_allowed_by_callee?
   private :reentrant_fn_argument_rejected?
   private :return_is_borrow?
   private :shared_argument_match?

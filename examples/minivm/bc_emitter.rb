@@ -895,7 +895,7 @@ class BcEmitter
       # has no AST counterpart -- the param name is `X` in the source.
       (n.is_a?(MIR::Let) && n.init.is_a?(MIR::Ident) &&
        n.init.name.to_s == "_m_#{n.name}") ||
-      # @nonReentrant / @reentrant lowering injects a StackGuard at fn entry:
+      # Guarded reentrance lowering injects a StackGuard at fn entry:
       #   Let _guard = safety.StackGuard.enter(@src)
       #   _guard.push()
       # The matching pop is in a DeferStmt (already skipped). The VM has
@@ -4458,7 +4458,7 @@ class BcEmitter
       # actually exit the function on failure rather than letting the
       # error sentinel get bound to `valid` and ignored. Skip when the
       # callee's return type is not an error union (can_fail can come
-      # from StackGuard / @reentrant prologue and shouldn't propagate
+      # from StackGuard / reentrance prologue and shouldn't propagate
       # the call result as a Value.Error).
       if node.try_wrap && @in_helper_fn && callee_returns_error?(helper_callee)
         emit_op(STORE_SLOT, alloc_slot("__try_call_res", :any))
@@ -6761,7 +6761,7 @@ class BcEmitter
   # Does the callee's signature return an error union (`!T` or
   # `anyerror!T`)? Used by compile_call_expr to decide whether to emit
   # auto-try (BC_RET on Value.Error). Without this, can_fail can fire
-  # for non-failable callees (StackGuard / @reentrant prologues), and
+  # for non-failable callees (StackGuard / reentrance prologues), and
   # auto-try would incorrectly treat their valid return value as an
   # error to propagate.
   def callee_returns_error?(name)

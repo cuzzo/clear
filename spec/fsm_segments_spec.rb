@@ -11,9 +11,12 @@ RSpec.describe FsmTransform::Segments do
   let(:plain_def) { intrinsic_sig(suspends: false) }
 
   def intrinsic_sig(suspends:, fsm_setup: nil)
-    sig = FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true)
-    sig.emit = IntrinsicEmit.new(suspends: suspends, fsm_setup: fsm_setup)
-    sig
+    FunctionSignature.new(
+      params: [],
+      return_type: Type.new(:String),
+      intrinsic: true,
+      emit: IntrinsicEmit.new(suspends: suspends, fsm_setup: fsm_setup)
+    )
   end
 
   def typed(node, type = :Int64)

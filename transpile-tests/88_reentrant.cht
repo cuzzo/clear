@@ -1,26 +1,26 @@
-# 88_reentrant.cht — reentrancy capability tests
+# 88_reentrant.cht — reentrance capability tests
 #
-# @reentrant    — function is designed to call itself recursively.
-# @nonReentrant — function might be re-entered (e.g. calls a callback);
-#                 a runtime StackGuard errors if it IS re-entered.
+# EFFECTS REENTRANT — function is designed to call itself recursively.
+# REQUIRES cb: NON_REENTRANT — callback parameter rejects plain
+#                              reentrant functions.
 
-# Direct recursion: must be @reentrant
-FN fib(n: Int64) RETURNS Int64 @reentrant ->
+# Direct recursion: must declare EFFECTS REENTRANT.
+FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
   IF n <= 1 THEN
     RETURN n;
   END
   RETURN fib(n - 1) + fib(n - 2);
 END
 
-# Fn-pointer call: must be @reentrant or @nonReentrant.
-# Using @nonReentrant here because apply itself is not designed to recur.
-# By default the cb param blocks @reentrant functions.
-FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
+# This callback parameter explicitly rejects plain reentrant functions.
+FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+  REQUIRES cb: NON_REENTRANT ->
   RETURN cb(x);
 END
 
-# applyReentrant explicitly opts in to accepting @reentrant callbacks.
-FN applyReentrant(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
+# applyReentrant explicitly opts in to accepting plain reentrant callbacks.
+FN applyReentrant(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
+  EFFECTS REENTRANT ->
   RETURN cb(x);
 END
 
@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
   ASSERT fib(10) == 55;
   result: Int64 = apply(double, 7);
   ASSERT result == 14;
-  # fib is @reentrant, so it can only be passed to @reentrant-accepting params
+  # fib is plain reentrant, so it can only be passed to reentrant-accepting params.
   r2: Int64 = applyReentrant(fib, 6);
   ASSERT r2 == 8;
 END

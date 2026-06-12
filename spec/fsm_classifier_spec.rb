@@ -52,9 +52,9 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(f.fsm_ineligible_reason).to be_nil
     end
 
-    it "is false for @reentrant self-recursive fns" do
+    it "is false for plain EFFECTS REENTRANT self-recursive fns" do
       ast = annotate(<<~CLEAR)
-        FN countDown(n: Int64) RETURNS !Void @reentrant ->
+        FN countDown(n: Int64) RETURNS !Void EFFECTS REENTRANT ->
           IF n <= 0 THEN RETURN; END
           _ = readFile("foo.txt");
           countDown(n - 1);
@@ -193,9 +193,9 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(bg.spawn_form).to eq(:fsm)
     end
 
-    it "classifies a BG body that calls a @reentrant fn as :stackful" do
+    it "classifies a BG body that calls a plain EFFECTS REENTRANT fn as :stackful" do
       ast = annotate(<<~CLEAR)
-        FN countDown(n: Int64) RETURNS Void @reentrant ->
+        FN countDown(n: Int64) RETURNS Void EFFECTS REENTRANT ->
           IF n <= 0 THEN RETURN; END
           countDown(n - 1);
           RETURN;
@@ -348,9 +348,9 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user_code).to include("use @stack")
     end
 
-    it "falls back to stackful for BG that transitively calls @reentrant" do
+    it "falls back to stackful for BG that transitively calls plain EFFECTS REENTRANT" do
       src = <<~CLEAR
-        FN countDown(n: Int64) RETURNS Void @reentrant ->
+        FN countDown(n: Int64) RETURNS Void EFFECTS REENTRANT ->
           IF n <= 0 THEN RETURN; END
           countDown(n - 1);
           RETURN;

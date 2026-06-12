@@ -135,7 +135,7 @@ RSpec.describe "Effect Tracking" do
   describe "REENTRANT effect" do
     it "detects direct recursion" do
       effs = effects_of(<<~CLEAR, "factorial")
-        FN factorial(n: Int64) RETURNS Int64 @reentrant ->
+        FN factorial(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 1 THEN RETURN 1; END
           RETURN n * factorial(n - 1);
         END
@@ -202,7 +202,7 @@ RSpec.describe "Effect Tracking" do
 
     it "propagates REENTRANT through call graph" do
       effs = effects_of(<<~CLEAR)
-        FN recurse(n: Int64) RETURNS Int64 @reentrant ->
+        FN recurse(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
           IF n <= 0 THEN RETURN 0; END
           RETURN recurse(n - 1);
         END

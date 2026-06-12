@@ -1095,9 +1095,12 @@ RSpec.describe MIREmitter do
 
   describe "edge coverage" do
     def intrinsic_sig(**emit_kwargs)
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
-      sig.emit = IntrinsicEmit.new(**emit_kwargs)
-      sig
+      FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(**emit_kwargs)
+      )
     end
 
     it "emits miscellaneous dispatch-only expression nodes" do

@@ -104,8 +104,7 @@ RSpec.describe "predicate-impurity rejection" do
       alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_contract(allocates: true)
 
       suspend_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "wait", 1, 1), "wait", [])
-      suspend_sig = FunctionSignature.intrinsic_contract
-      suspend_sig.emit = IntrinsicEmit.new(suspends: true)
+      suspend_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true, emit: IntrinsicEmit.new(suspends: true))
       suspend_call.matched_stdlib_def = suspend_sig
 
       expect(annotator.send(:predicate_impurity_reason, alloc_call, "make")).to eq("allocates")

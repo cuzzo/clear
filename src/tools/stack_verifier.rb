@@ -189,7 +189,7 @@ class StackVerifier
     report[:warnings]&.any? { |w| w[:level] == :error }
   end
 
-  # Verify that @reentrant:tailCall functions were actually TCO'd in the binary.
+  # Verify that EFFECTS REENTRANT:TAIL_CALL functions were actually TCO'd in the binary.
   # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
   # Returns array of { name:, tco_verified: bool, has_self_call: bool }
   sig { params(fn_nodes: Hash).returns(Array) }
