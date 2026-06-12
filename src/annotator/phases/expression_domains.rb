@@ -152,7 +152,7 @@ module Annotator
           first_arg = T.must(args.first)
           reason = matched_def.intrinsic_reject_error ||
                    "#{node.name}() is not valid for #{first_arg.resolved_type}"
-          error!(node, :INTRINSIC_REJECTED, message: reason)
+          error!(node, :INTRINSIC_REJECTED, detail: reason)
           return
         end
 

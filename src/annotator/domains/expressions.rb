@@ -157,7 +157,7 @@ module Annotator
         result = Type.binary_op(node.op, left_type, right_type)
 
         if result.error
-          error!(node, :TYPE_ERROR_GENERIC, message: result.error)
+          error!(node, :TYPE_ERROR_GENERIC, detail: result.error)
         end
 
         stamp_type!(node, result.type)

@@ -250,7 +250,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
     a.define_singleton_method(:error!) { |node, code, **kwargs| errors << [node, code, kwargs] }
 
     a.send(:verify_tied_assignment!, AST::Assignment.new(tok, id("dest"), id("borrow")))
-    expect(errors.dig(0, 2, :message)).to include("scope depth 3")
+    expect(errors.dig(0, 2, :detail)).to include("scope depth 3")
 
     a.define_singleton_method(:dest_scope_depth_for_target) { |_target| 4 }
     a.send(:verify_tied_assignment!, AST::Assignment.new(tok, id("dest"), id("borrow")))

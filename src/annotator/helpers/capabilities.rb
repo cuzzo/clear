@@ -170,11 +170,12 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@locked",
-              description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)."
+              description_code: :WITH_ADD_LOCKED
             ),
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@writeLocked",
-              description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)."
+              description_code: :WITH_ADD_WRITE_LOCKED,
+              description_params: { reader: "can coexist via WITH READ" }
             ),
           ],
           confidence: :interactive,
@@ -209,8 +210,7 @@ module CapabilityHelper
           emit_view_not_observable_finding!(node, fact, t)
         else
           name = fact.target_label
-          error!(node, :CAPABILITY_VIOLATION_FIXABLE,
-            message: "WITH VIEW requires an `@observable` source, but '#{name}' has type #{t.resolved}.")
+          error!(node, :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: t.resolved)
         end
       end
 
@@ -244,11 +244,11 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@versioned",
-              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)."
+              description_code: :WITH_ADD_VERSIONED
             ),
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@indirect:atomic",
-              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)."
+              description_code: :WITH_ADD_INDIRECT_ATOMIC
             ),
           ],
           confidence: :interactive,
@@ -262,7 +262,8 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@multiowned",
-              description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)."
+              description_code: :WITH_ADD_MULTIOWNED,
+              description_params: { suffix: " via WITH" }
             ),
           ],
           confidence: :auto,
@@ -276,7 +277,8 @@ module CapabilityHelper
           [
             FixableHelper::CapabilityFixCandidate.new(
               sigil: "@shared",
-              description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)."
+              description_code: :WITH_ADD_SHARED,
+              description_params: { suffix: "to clone across fibers" }
             ),
           ],
           confidence: :auto,
@@ -297,7 +299,7 @@ module CapabilityHelper
             [
               FixableHelper::CapabilityFixCandidate.new(
                 sigil: "@shared:atomic",
-                description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)."
+                description_code: :WITH_ADD_SHARED_ATOMIC
               ),
             ],
             confidence: :auto,
@@ -335,7 +337,7 @@ module CapabilityHelper
     fixes = []
     if view_tok
       fixes << Fix.new(
-        description: "Replace `VIEW` with `MATERIALIZED VIEW` (owned O(N) snapshot, works on any `~T` aggregate).",
+        description: fix_description(:WITH_VIEW_TO_MATERIALIZED),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: view_tok.line, col: view_tok.column, length: 'VIEW'.length),
@@ -344,8 +346,9 @@ module CapabilityHelper
       )
     end
 
-    return error!(node, :CAPABILITY_VIOLATION_FIXABLE, message: msg) if fixes.empty?
-    fixable!(node, message: msg, category: :capability, level: :error,
+    return error!(node, :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: var_type.resolved) if fixes.empty?
+    fixable!(node, code: :WITH_VIEW_NEEDS_OBSERVABLE, name: name, got: var_type.resolved,
+             category: :capability, level: :error,
              fixes: fixes, raise_in_collector: false)
   end
 
@@ -572,27 +575,23 @@ module CapabilityHelper
     return if pre_clauses.empty?
 
     unless fn_node.explicit_return_type
-      message = "Function '#{fn_node.name}' has PRE clauses but no explicit return type. " \
-                "PRE clauses can fail at runtime, so the function must declare an error-union " \
-                "return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) " \
-                "to the signature."
-
       arrow_tok = fn_node.arrow_token
       if arrow_tok
         # Auto-fix: insert `RETURNS !Void ` immediately before the
         # `->` arrow. The body is implicit-Void (no RETURNS clause
         # was given), so !Void is the correct error-union widening.
         fixes = [Fix.new(
-          description: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
+          description: fix_description(:INSERT_RETURNS_FALLIBLE_VOID),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: arrow_tok.line, col: arrow_tok.column, length: 0),
             replacement: 'RETURNS !Void ',
           )],
         )]
-        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+        fixable!(fn_node, code: :PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN,
+                 fn: fn_node.name, category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, :PURITY_VIOLATION, message: message)
+        error!(fn_node, :PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN, fn: fn_node.name)
       end
     end
 

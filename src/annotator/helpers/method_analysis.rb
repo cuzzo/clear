@@ -35,7 +35,6 @@ module MethodAnalysis
     return unless matched_def.intrinsic_contract.behavior.narrows_collection && args.size >= 2
 
     list_arg = args[0]
-    val_arg  = args[1]
     return unless list_arg.is_a?(AST::Identifier)
 
     scope_entry = list_arg.symbol
@@ -44,6 +43,7 @@ module MethodAnalysis
     return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
+    val_arg = args[1]
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.copy_collection_shape_from!(ti)

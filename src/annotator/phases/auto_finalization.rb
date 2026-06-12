@@ -188,7 +188,7 @@ module Annotator
         right_type = auto_finalization_node_type(node.right)
         return false if stale_auto_node_type?(left_type) || stale_auto_node_type?(right_type)
         result = Type.binary_op(node.op, left_type, right_type)
-        error!(node, :TYPE_ERROR_GENERIC, message: result.error) if result.error
+        error!(node, :TYPE_ERROR_GENERIC, detail: result.error) if result.error
         result_type = T.cast(result.type, Type)
         return false if stale_auto_node_type?(result_type)
         stamp_type!(node, Type.new(result_type))

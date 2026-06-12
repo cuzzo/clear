@@ -695,10 +695,11 @@ module Annotator
           # have an equivalent @shared:locked repair.
           fix = build_atomic_escape_migration_fix(source, source_name)
           if fix
-            fixable!(assign_node, message: msg, category: :escape,
+            fixable!(assign_node, code: :ATOMIC_ESCAPE_ASSIGN, detail: msg,
+                     category: :escape,
                      level: :error, fixes: [fix], raise_in_collector: true)
           else
-            error!(assign_node, :ATOMIC_ESCAPE_ASSIGN, message: msg)
+            error!(assign_node, :ATOMIC_ESCAPE_ASSIGN, detail: msg)
           end
         end
       end
@@ -763,10 +764,11 @@ module Annotator
         end
 
         if atomic_fix
-          fixable!(return_node, message: msg, category: :escape,
+          fixable!(return_node, code: :ATOMIC_ESCAPE_RETURN, detail: msg,
+                   category: :escape,
                    level: :error, fixes: [atomic_fix], raise_in_collector: true)
         else
-          error!(return_node, :ATOMIC_ESCAPE_RETURN, message: msg)
+          error!(return_node, :ATOMIC_ESCAPE_RETURN, detail: msg)
         end
       end
 

@@ -1,6 +1,7 @@
 require "rspec"
 require_relative "../src/ast/diagnostic_registry"
 require_relative "../src/ast/source_error"
+require_relative "../src/ast/fixable_error"
 
 # DiagnosticRegistry is the unified compile-time diagnostic catalog
 # (Layer 2). Existing call sites that pass `error!(node, :CODE, ...)`
@@ -95,6 +96,68 @@ RSpec.describe DiagnosticRegistry do
     it "formats REQUIRE importer guidance without ad-hoc hint kwargs" do
       out = DiagnosticRegistry.format(:REQUIRE_NEEDS_IMPORTER)
       expect(out).to include("Pass importer: and source_dir:")
+    end
+
+    it "formats parser insertion fixables from registry context only" do
+      out = DiagnosticRegistry.format(
+        :PARSER_EXPECTED_BEFORE_TOKEN,
+        expected: "THEN",
+        got: "RETURN",
+        line: 12,
+      )
+      expect(out).to eq("Expected `THEN`, got 'RETURN' (line 12).")
+    end
+
+    it "formats syntax typo fixables from registry context only" do
+      out = DiagnosticRegistry.format(:OPERATOR_TYPO_SUGGESTION, match: "s>", replace: "|>")
+      expect(out).to eq("Unknown operator `s>` -- did you mean `|>`?")
+    end
+  end
+
+  describe ".fix_description" do
+    it "formats a registered fix template against named args" do
+      out = DiagnosticRegistry.fix_description(
+        :INSERT_EXPECTED_BEFORE_TOKEN,
+        expected: "THEN",
+        got: "RETURN",
+        line: 12,
+      )
+
+      expect(out).to eq("Insert `THEN` before 'RETURN' at line 12.")
+    end
+
+    it "raises for unknown fix description codes" do
+      expect {
+        DiagnosticRegistry.fix_description(:NOT_A_FIX)
+      }.to raise_error(RuntimeError, /Unknown fix description code/)
+    end
+  end
+
+  describe ErrorHelper do
+    class FixableDiagnosticHarness
+      include ErrorHelper
+    end
+
+    before { FixCollector.enable! }
+    after { FixCollector.disable! }
+
+    it "renders fixable findings from a registry code and params" do
+      token = Struct.new(:line, :column).new(3, 5)
+
+      FixableDiagnosticHarness.new.fixable!(
+        token,
+        code: :PARSER_EXPECTED_BEFORE_TOKEN,
+        expected: "DO",
+        got: "RETURN",
+        line: 3,
+        category: :type,
+        level: :warning,
+        fixes: [],
+      )
+
+      finding = FixCollector.drain.first
+      expect(finding.message).to eq("Expected `DO`, got 'RETURN' (line 3).")
+      expect(finding.category).to eq(:type)
     end
   end
 

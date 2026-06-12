@@ -17,24 +17,18 @@ require 'set'
 RSpec.describe "DiagnosticRegistry — call-site audit" do
   # File-level budgets. The structural patterns covered:
   #
-  #   1. fixable! fallback — `msg` is built once, passed to fixable!
-  #      AND used as a string fallback when no fix is available. The
-  #      msg variable is the single source of truth for both paths.
-  #      Migrating requires fixable! to accept a code+kwargs (a
-  #      31-call-site API change for marginal gain).
-  #
-  #   2. Callback wrapper — `err = ->(n, msg) { error!(n, msg) }`
+  #   1. Callback wrapper — `err = ->(n, msg) { error!(n, msg) }`
   #      lambdas passed to validators (Capabilities, EffectInference,
   #      LockHelper). The validator builds the msg; the lambda is glue.
   #      Migrating requires the validator to know about codes, which
   #      is the wrong layering.
   #
-  #   3. Helper that takes `message:` parameter — `emit_typo_suggestion!`,
+  #   2. Helper that takes a message parameter — `emit_typo_suggestion!`,
   #      `emit_registry_mismatch!`, etc. The message comes from the
   #      caller's context. Migrating requires every caller to be
   #      converted, which would defeat the helper.
   #
-  #   4. Stdlib-data string — `matched_def[:reject_error]` and
+  #   3. Stdlib-data string — `matched_def[:reject_error]` and
   #      `coerce!` returns a string from a data structure / method.
   #      Migrating requires those producers to switch to codes too.
   # Tranche 8 closed every exception by stamping an umbrella code on
@@ -171,5 +165,124 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
       leaks.map { |f, n| "  #{f}: #{n}" }.join("\n") + "\n\n" \
       "Migrate to a registry code, or add the file + budget to EXCEPTIONS " \
       "in #{__FILE__}."
+  end
+
+  it "does not pass ad-hoc messages into annotator or AST fixable diagnostics" do
+    offenders = []
+    Dir.glob(File.expand_path('../src/{annotator,ast}/**/*.rb', __dir__)).each do |path|
+      rel = path.sub(File.expand_path('..', __dir__) + '/', '')
+      next if rel == 'src/ast/source_error.rb'
+
+      content = File.read(path)
+      i = 0
+      while (idx = content.index('fixable!(', i))
+        line_start = content.rindex("\n", idx) || -1
+        if content[line_start + 1...idx].include?('#')
+          i = idx + 1
+          next
+        end
+
+        j = idx + 'fixable!('.length
+        depth = 1
+        in_str = nil
+        while j < content.length && depth > 0
+          c = content[j]
+          if in_str
+            if c == '\\'
+              j += 2
+              next
+            elsif c == in_str
+              in_str = nil
+            end
+          elsif c == '"' || c == "'"
+            in_str = c
+          elsif c == '('
+            depth += 1
+          elsif c == ')'
+            depth -= 1
+          end
+          j += 1
+        end
+
+        body = content[idx + 'fixable!('.length...j - 1]
+        offenders << "#{rel}:#{content[0...idx].count("\n") + 1}" if body.match?(/\bmessage:/)
+        i = j
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "fixable! diagnostics should pass code: plus registry params:\n  #{offenders.join("\n  ")}"
+  end
+
+  it "does not embed ad-hoc prose in annotator or AST fix descriptions" do
+    offenders = []
+    Dir.glob(File.expand_path('../src/{annotator,ast}/**/*.rb', __dir__)).each do |path|
+      rel = path.sub(File.expand_path('..', __dir__) + '/', '')
+
+      content = File.read(path)
+      i = 0
+      while (idx = content.index('Fix.new(', i))
+        line_start = content.rindex("\n", idx) || -1
+        if content[line_start + 1...idx].include?('#')
+          i = idx + 1
+          next
+        end
+
+        j = idx + 'Fix.new('.length
+        depth = 1
+        in_str = nil
+        while j < content.length && depth > 0
+          c = content[j]
+          if in_str
+            if c == '\\'
+              j += 2
+              next
+            elsif c == in_str
+              in_str = nil
+            end
+          elsif c == '"' || c == "'"
+            in_str = c
+          elsif c == '('
+            depth += 1
+          elsif c == ')'
+            depth -= 1
+          end
+          j += 1
+        end
+
+        body = content[idx + 'Fix.new('.length...j - 1]
+        desc_idx = body.index('description:')
+        if desc_idx.nil?
+          offenders << "#{rel}:#{content[0...idx].count("\n") + 1} missing description:"
+        else
+          desc_expr = body[(desc_idx + 'description:'.length)..].strip
+          unless desc_expr.start_with?('fix_description(') ||
+                 desc_expr.start_with?('fix_description_from_hash(') ||
+                 desc_expr.start_with?('DiagnosticRegistry.fix_description(')
+            offenders << "#{rel}:#{content[0...idx].count("\n") + 1}"
+          end
+        end
+        i = j
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Fix descriptions should use DiagnosticRegistry fix-description keys:\n  #{offenders.join("\n  ")}"
+  end
+
+  it "keeps fix_hint prose centralized in DiagnosticRegistry" do
+    offenders = []
+    Dir.glob(File.expand_path('../src/{annotator,ast}/**/*.rb', __dir__)).each do |path|
+      rel = path.sub(File.expand_path('..', __dir__) + '/', '')
+      next if rel == 'src/ast/diagnostic_registry.rb'
+
+      File.readlines(path).each_with_index do |line, idx|
+        next if line.lstrip.start_with?('#')
+        offenders << "#{rel}:#{idx + 1}" if line.match?(/\bfix_hints?:\s*["']/)
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Diagnostic fix_hints should live in DiagnosticRegistry:\n  #{offenders.join("\n  ")}"
   end
 end

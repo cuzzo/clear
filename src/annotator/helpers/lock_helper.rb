@@ -457,12 +457,8 @@ module LockHelper
 
     types_str = scc.map { |t| ":#{t}" }.join(", ")
     kind = scc.length == 1 ? "self-loop (same-type nested acquire)" : "lock cycle (graph SCC)"
-    msg = "Potential #{kind} over [#{types_str}]. " \
-          "Sites contributing to the cycle:\n#{site_lines}\n" \
-          "Fix: acquire in a consistent order everywhere, or mark individual sites " \
-          "POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE if the ordering is programmer-enforced."
     anchor = sample&.site_token
-    error!(anchor || semantic_program, :LOCK_CYCLE_DETECTED, message: msg)
+    error!(anchor || semantic_program, :LOCK_CYCLE_DETECTED, kind: kind, types: types_str, sites: site_lines)
   end
 
   private :check_lock_handler_reachability!

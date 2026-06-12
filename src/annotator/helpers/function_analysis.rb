@@ -1211,7 +1211,6 @@ module FunctionAnalysis
     lifetime_paths = current_fn_ctx!.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
-    is_wildcard = lifetime_paths == [:wildcard]
     schema_resolver = ->(t) { lookup_type_schema(t) }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
     fn_type_params = current_fn_ctx&.type_params || []
@@ -1224,6 +1223,7 @@ module FunctionAnalysis
     return true unless has_lifetime
     # Wildcard accepts any return-derivation path -- the diagnostic at
     # the declaration site already warned about it.
+    is_wildcard = lifetime_paths == [:wildcard]
     return true if is_wildcard
 
     # Lifetime path validation applies to direct field/index access only.

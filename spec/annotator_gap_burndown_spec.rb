@@ -1622,7 +1622,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(codes).to include(
       :WITH_CAP_BAD_TARGET,
       :WITH_READ_NEEDS_WRITE_LOCK,
-      :CAPABILITY_VIOLATION_FIXABLE,
+      :WITH_VIEW_NEEDS_OBSERVABLE,
       :WITH_GUARD_NOT_ON_SNAPSHOT,
       :WITH_CANNOT_INFER_CAP,
       :UNKNOWN_WITH_CAP_TYPE
@@ -2008,7 +2008,7 @@ RSpec.describe "annotator branch gap burndown" do
     fn.arrow_token = nil
     pre_ann.define_singleton_method(:visit) { |_node| nil }
     pre_ann.send(:visit_pre_clauses!, fn)
-    expect(direct_errors(pre_ann).map { |e| e[1] }).to include(:PURITY_VIOLATION)
+    expect(direct_errors(pre_ann).map { |e| e[1] }).to include(:PRE_CLAUSES_NEED_EXPLICIT_FALLIBLE_RETURN)
 
     index_ann = quiet_annotator
     index_ann.define_singleton_method(:visit) { |_node| nil }
@@ -3608,7 +3608,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.send(:enforce_fallible_returns!)
 
     codes = direct_errors(ann).map { |e| e[1] }
-    expect(codes).to include(:fixable, :PURITY_VIOLATION)
+    expect(codes).to include(:fixable, :FALLIBLE_RETURN_NEEDS_ERROR_UNION)
   end
 
   it "covers remaining helper guard and fallback branch matrix directly" do

@@ -93,30 +93,36 @@ module ReentranceBridge
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
 
-    suggestion = nil
+    suggestion_reason = T.let(nil, T.nilable(T::Array[String]))
     if thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
-      suggestion = "EFFECTS REENTRANT:TAIL_CALL"
-      reason = "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"
+      suggestion_reason = [
+        "EFFECTS REENTRANT:TAIL_CALL",
+        "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"
+      ]
     elsif ThunkTransform::RecursiveSplitter.split(fn_node.body, fn_node.name, self)
-      suggestion = "EFFECTS REENTRANT:THUNK"
-      reason = "the body matches the simple-recurrence shape; heap CPS keeps the fiber stack at depth=1"
+      suggestion_reason = [
+        "EFFECTS REENTRANT:THUNK",
+        "the body matches the simple-recurrence shape; heap CPS keeps the fiber stack at depth=1"
+      ]
     end
-    return if suggestion.nil?
+    return if suggestion_reason.nil?
 
+    suggestion = T.must(suggestion_reason[0])
     edits = effects_clause_edits(fn_node, suggestion)
     return if edits.empty?
 
     span = fn_node.effects_span
-    msg = "'#{fn_node.name}' is plain `EFFECTS REENTRANT` (forces callers onto `@service` / OS thread). " \
-          "#{reason} -- migrating to `#{suggestion}` lets callers stay on the regular fiber stack. " \
-          "(Phase 5 audit; opt-in via `clear fix`.)"
+    reason = T.must(suggestion_reason[1])
 
     fixable!(span[:start_tok],
       level: :info,
       category: :reentrance,
-      message: msg,
+      code: :PLAIN_REENTRANT_VARIANT_SUGGESTION,
+      fn: fn_node.name,
+      reason: reason,
+      suggestion: suggestion,
       fixes: [Fix.new(
-        description: "Replace `EFFECTS REENTRANT` with `#{suggestion}` (#{reason}).",
+        description: fix_description(:REPLACE_REENTRANT_WITH_VARIANT, suggestion: suggestion, reason: reason),
         confidence: :auto,
         edits: edits,
       )])
@@ -277,13 +283,12 @@ module ReentranceBridge
   sig { params(node: EffectTracker::AsyncValidationNode, reentrant_fn: String, user_size: T.nilable(Symbol)).void }
   def emit_service_required_error!(node, reentrant_fn, user_size)
     T.bind(self, SemanticAnnotator) rescue nil
-    message = T.must(DiagnosticRegistry.format(:STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn))
-
     fix = service_required_fix(node, user_size)
 
     return error!(node, :STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn) unless fix
 
-    fixable!(node, message: message, category: :reentrance, level: :error,
+    fixable!(node, code: :STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn,
+             category: :reentrance, level: :error,
              fixes: [fix], raise_in_collector: false)
   end
 
@@ -304,7 +309,7 @@ module ReentranceBridge
   sig { params(token: Lexer::Token, user_size: T.nilable(Symbol)).returns(Fix) }
   def replace_stack_sigil_with_service_fix(token, user_size)
     Fix.new(
-      description: "Replace `@#{user_size}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
+      description: DiagnosticRegistry.fix_description(:REPLACE_STACK_SIGIL_WITH_SERVICE, stack: user_size),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: token.line, col: token.column, length: token.value.to_s.length),
@@ -316,7 +321,7 @@ module ReentranceBridge
   sig { params(token: Lexer::Token).returns(Fix) }
   def insert_service_after_open_brace_fix(token)
     Fix.new(
-      description: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",
+      description: DiagnosticRegistry.fix_description(:INSERT_SERVICE_AFTER_OPEN_BRACE),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: token.line, col: token.column + 1, length: 0),
@@ -395,37 +400,25 @@ module ReentranceBridge
 
       cycle_members = thunk_cycle_members(name).sort
 
-      msg = "EFFECTS REENTRANT:MAX_DEPTH(#{fn_node.max_depth_n}) on '#{name}' " \
-            "is silently demoted to ':unbounded' stack tier (4 MB :service " \
-            "OS thread per fiber) because the function is part of a mutual " \
-            "cycle (#{cycle_members.join(', ')}) and the compiler can't " \
-            "bound the SCC's interleaved-counter product (Phase 5+ work). " \
-            "The MAX_DEPTH(N) bound on this fn alone does NOT cap the " \
-            "cycle's stack depth -- a bounce between members can still grow " \
-            "the fiber stack arbitrarily."
-
-      msg += " To fix: refactor the cycle into ONE directly-self-recursive fn " \
-             "(inline the partner's body or pass a state tag in a single combined " \
-             "fn) so the MAX_DEPTH counter actually bounds it; or accept ':unbounded' " \
-             "explicitly via the auto-fix below."
-
       fixes = []
       drop_edits = effects_clause_edits(fn_node, "EFFECTS REENTRANT")
       if drop_edits.any?
         fixes << Fix.new(
-          description: "Drop ':MAX_DEPTH(#{fn_node.max_depth_n})' and accept the " \
-                       "':unbounded' tier explicitly. Same runtime cost as today " \
-                       "but the choice is now in the source.",
+          description: fix_description(:DROP_MAX_DEPTH_MUTUAL, max_depth: fn_node.max_depth_n),
           confidence: :auto,
           edits: drop_edits,
         )
       end
 
       if fixes.empty?
-        fixable!(fn_node, message: msg, category: :reentrance, level: :warning,
+        fixable!(fn_node, code: :REENTRANT_MAX_DEPTH_MUTUAL_DEMOTED,
+                 fn: name, max_depth: fn_node.max_depth_n, cycle: cycle_members.join(', '),
+                 category: :reentrance, level: :warning,
                  raise_in_collector: false, fixes:)
       else
-        fixable!(fn_node, message: msg, category: :reentrance, level: :warning,
+        fixable!(fn_node, code: :REENTRANT_MAX_DEPTH_MUTUAL_DEMOTED,
+                 fn: name, max_depth: fn_node.max_depth_n, cycle: cycle_members.join(', '),
+                 category: :reentrance, level: :warning,
                  fixes: fixes, raise_in_collector: false)
       end
     end
@@ -540,23 +533,12 @@ module ReentranceBridge
     cycle_names = thunk_cycle_members(name)
     cycle_thunk_fns = cycle_names.filter_map { |n| fn_nodes[n] }
                                   .select { |f| f.reentrance_kind == :reentrant_thunk }
-    msg = "EFFECTS REENTRANT:THUNK on '#{name}' is mutually recursive (cycle through " \
-          "other functions: #{cycle_names.sort.join(', ')}) and the cycle's body shape " \
-          "isn't supported by the current tagged-union codegen (only IF base cases + a " \
-          "RETURN partner(args) tail call). Pick one: declare 'EFFECTS REENTRANT' on every " \
-          "cycle member (callers run on @service / OS thread); declare 'EFFECTS REENTRANT:" \
-          "NOT_LOGICAL' on every cycle member (return type changes from `T` to `!T`; runtime " \
-          "StackGuard raises System UnexpectedRecursion on actual re-entry); or declare " \
-          "'EFFECTS REENTRANT:MAX_DEPTH(N)' on every cycle member (also `T` -> `!T`; runtime " \
-          "depth counter raises System MaxDepthExceeded above N -- pick N tight, this is " \
-          "NOT a workaround for being forced onto OS threads. If depth is unknown or " \
-          "unbounded, prefer ':THUNK' (heap CPS) or plain 'EFFECTS REENTRANT' + OS threads)."
 
     fixes = []
     edits_plain = cycle_thunk_fns.flat_map { |f| effects_clause_edits(f, "EFFECTS REENTRANT") }
     if edits_plain.length == cycle_thunk_fns.length && !edits_plain.empty?
       fixes << Fix.new(
-        description: "Drop ':THUNK' on every cycle member; use plain 'EFFECTS REENTRANT' (callers run on @service).",
+        description: fix_description(:DROP_THUNK_CYCLE),
         confidence: :interactive,
         edits: edits_plain,
       )
@@ -585,9 +567,7 @@ module ReentranceBridge
     end
     if nl_ok
       fixes << Fix.new(
-        description: "Declare every cycle member ':NOT_LOGICAL' and change each return type from `T` to `!T`. " \
-                     "Runtime StackGuard raises System UnexpectedRecursion if the cycle actually re-enters; " \
-                     "callers must handle (or propagate via `!T`) that error.",
+        description: fix_description(:DECLARE_NOT_LOGICAL_CYCLE),
         confidence: :interactive,
         edits: edits_nl,
       )
@@ -623,18 +603,24 @@ module ReentranceBridge
     end
     if md_ok
       fixes << Fix.new(
-        description: "Declare every cycle member ':MAX_DEPTH(#{default_n})' and change each return type from `T` to `!T`. " \
-                     "Runtime depth counter raises System MaxDepthExceeded above #{default_n} entries. " \
-                     "PICK N TIGHT: large N is not a workaround for being forced onto OS threads -- " \
-                     "if depth is unknown/unbounded, prefer ':THUNK' (heap CPS) or plain 'EFFECTS REENTRANT' (OS threads).",
+        description: fix_description(:DECLARE_MAX_DEPTH_CYCLE, depth: default_n),
         confidence: :interactive,
         edits: edits_md,
       )
     end
 
-    return error!(fn_node, :REENTRANT_MUTUAL_THUNK_UNSUPPORTED, message: msg) if fixes.empty?
+    return error!(
+      fn_node,
+      :REENTRANT_MUTUAL_THUNK_UNSUPPORTED,
+      name: name,
+      cycle: cycle_names.sort.join(', ')
+    ) if fixes.empty?
 
-    fixable!(fn_node, message: msg, category: :reentrance, level: :error,
+    fixable!(fn_node,
+             code: :REENTRANT_MUTUAL_THUNK_UNSUPPORTED,
+             name: name,
+             cycle: cycle_names.sort.join(', '),
+             category: :reentrance, level: :error,
              fixes: fixes, raise_in_collector: false)
   end
 
@@ -794,8 +780,9 @@ module ReentranceBridge
 
     arrow = fn_node.arrow_token
     requires_insert = candidates.map { |n| "REQUIRES #{n}: NON_REENTRANT " }.join
+    requires_desc = candidates.map { |n| "REQUIRES #{n}: NON_REENTRANT" }.join(' + ')
     constrain_fix = Fix.new(
-      description: "Add #{candidates.map { |n| "REQUIRES #{n}: NON_REENTRANT" }.join(' + ')} (rejects reentrant callbacks).",
+      description: fix_description(:ADD_NON_REENTRANT_REQUIRES, requires: requires_desc),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 2),
@@ -803,7 +790,7 @@ module ReentranceBridge
       )],
     )
     propagate_fix = Fix.new(
-      description: "Declare '#{fn_node.name}' as 'EFFECTS REENTRANT' (propagates the cost; caller runs on @service).",
+      description: fix_description(:DECLARE_FN_REENTRANT, fn: fn_node.name),
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 2),
@@ -817,7 +804,10 @@ module ReentranceBridge
     fixable!(arrow,
       level: :warning,
       category: :lint,
-      message: "Function '#{fn_node.name}' has #{msg_subject} (#{candidates.join(', ')}). Add 'REQUIRES <name>: NON_REENTRANT' (rejects reentrant callbacks) or 'EFFECTS REENTRANT' on '#{fn_node.name}' (propagates the cost).",
+      code: :UNCONSTRAINED_FN_PARAM_REENTRANCE,
+      fn: fn_node.name,
+      subject: msg_subject,
+      candidates: candidates.join(', '),
       fixes: [constrain_fix, propagate_fix])
   end
 

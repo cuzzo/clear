@@ -76,7 +76,7 @@ module Annotator
 
         key = node.is_a?(AST::ExternFnDecl) && node.owner_type ? "#{node.owner_type}.#{node.name}" : node.name
         if seen.key?(key)
-          error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate #{label} declaration '#{key}'")
+          error!(node, :DUPLICATE_DECLARATION, label: label, name: key)
         end
         seen[key] = node
       end
@@ -87,7 +87,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         return unless duplicate_signature_binding?(current_scope.local_entry(node.name))
-        error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate function declaration '#{node.name}'")
+        error!(node, :DUPLICATE_FUNCTION_DECLARATION, name: node.name)
       end
       private :reject_duplicate_function_binding!
 
@@ -96,7 +96,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         return unless duplicate_signature_binding?(current_scope.local_entry(node.name))
-        error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate function declaration '#{node.name}'")
+        error!(node, :DUPLICATE_FUNCTION_DECLARATION, name: node.name)
       end
       private :reject_duplicate_extern_function!
 
@@ -117,7 +117,7 @@ module Annotator
 
         return unless type_schema.methods.key?(node.name)
         owner = node.owner_type || "<unknown>"
-        error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate extern method declaration '#{owner}.#{node.name}'")
+        error!(node, :DUPLICATE_EXTERN_METHOD_DECLARATION, owner: owner, name: node.name)
       end
       private :reject_duplicate_extern_method!
           private :register_extern_function_signature

@@ -129,7 +129,7 @@ module Annotator
         T.bind(self, SemanticAnnotator)
 
         if current_scope.resolve_type_entry(name)
-          error!(node, :TYPE_ERROR_GENERIC, message: "Duplicate type declaration '#{name}'")
+          error!(node, :DUPLICATE_DECLARATION, label: "type", name: name)
         end
         current_scope.declare_type(name, schema)
       end

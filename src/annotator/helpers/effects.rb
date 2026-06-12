@@ -712,12 +712,7 @@ module EffectTracker
 
       # Find at least one source of fallibility for the diagnostic.
       hint = fallibility_hint_for(name)
-      message = "Function '#{name}' can fail (#{hint}) but its return type " \
-                "doesn't declare it. Change `RETURNS #{ret_t.resolved}` to " \
-                "`RETURNS !#{ret_t.resolved}` so callers can see the error " \
-                "union and handle it (Zig-style discipline). Add a CATCH at " \
-                "the call site, propagate via `try`, or mark the call's result " \
-                "with `OR <action>`."
+      return_type = ret_t.resolved
 
       # Auto-fix: insert `!` immediately before the return-type token.
       # The token's column points at the start of the type identifier;
@@ -725,17 +720,19 @@ module EffectTracker
       tok = fn_node.respond_to?(:return_type_token) ? fn_node.return_type_token : nil
       if tok
         fixes = [Fix.new(
-          description: "Add `!` to the return type to declare the error union " \
-                       "(Zig-style fallible signature).",
+          description: fix_description(:ADD_ERROR_UNION_TO_RETURN),
           confidence: :auto,
           edits: [Edit.new(
             span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
             replacement: '!',
           )],
         )]
-        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+        fixable!(fn_node, code: :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
+                 fn: name, hint: hint, return_type: return_type,
+                 category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, :PURITY_VIOLATION, message: message)
+        error!(fn_node, :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
+               fn: name, hint: hint, return_type: return_type)
       end
     end
   end
@@ -1227,7 +1224,7 @@ module EffectTracker
           arrow = node.arrow_token
           if arrow
             fix = Fix.new(
-              description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+              description: fix_description(:ADD_EFFECTS_REENTRANT),
               confidence: :auto,
               edits: [Edit.new(
                 span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
@@ -1235,7 +1232,8 @@ module EffectTracker
               )]
             )
             fixable!(node,
-              message: T.must(DiagnosticRegistry.format(:REENTRANCY_MUTUAL_CYCLE, name: fn_name)),
+              code: :REENTRANCY_MUTUAL_CYCLE,
+              name: fn_name,
               category: :reentrance,
               level: :error,
               fixes: [fix])

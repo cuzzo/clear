@@ -636,7 +636,7 @@ class Parser
     leader     = (expected_value == ';') ? '' : ' '
 
     fix = Fix.new(
-      description: "Insert `#{expected_value}` at end of line #{prev_tok.line}.",
+      description: fix_description(:INSERT_EXPECTED_AT_END_OF_LINE, expected: expected_value, line: prev_tok.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: prev_tok.line, col: insert_col, length: 0),
@@ -644,8 +644,13 @@ class Parser
       )]
     )
 
-    message = "Expected `#{expected_value}` at end of line #{prev_tok.line}; got '#{next_tok.value}' on line #{next_tok.line}."
-    fixable!(next_tok, message: message, category: :type, level: :error,
+    fixable!(next_tok,
+             code: :PARSER_EXPECTED_AT_END_OF_LINE,
+             expected: expected_value,
+             expected_line: prev_tok.line,
+             got: next_tok.value,
+             got_line: next_tok.line,
+             category: :type, level: :error,
              fixes: [fix], raise_in_collector: true)
   end
 
@@ -655,7 +660,7 @@ class Parser
   sig { params(token: Lexer::Token, expected_value: String).returns(T.untyped) }
   def emit_syntax_insert_before_token!(token, expected_value)
     fix = Fix.new(
-      description: "Insert `#{expected_value}` before '#{token.value}' at line #{token.line}.",
+      description: fix_description(:INSERT_EXPECTED_BEFORE_TOKEN, expected: expected_value, got: token.value, line: token.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: token.line, col: token.column, length: 0),
@@ -663,7 +668,10 @@ class Parser
       )]
     )
     fixable!(token,
-      message: "Expected `#{expected_value}`, got '#{token.value}' (line #{token.line}).",
+      code: :PARSER_EXPECTED_BEFORE_TOKEN,
+      expected: expected_value,
+      got: token.value,
+      line: token.line,
       category: :type, level: :error,
       fixes: [fix], raise_in_collector: true)
   end

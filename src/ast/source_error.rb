@@ -30,11 +30,7 @@ module ErrorHelper
   sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: String, kwargs: T.untyped).returns(T.untyped) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
-    # 1. Extract the Token (works for AST Node or raw Token)
-    # node_or_token is either an AST::Locatable node (has .token method)
-    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
-    # respond_to?(:token) distinguishes them — both token shapes lack it.
-    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    token = diagnostic_token(node_or_token)
 
     # 2. Determine Message
     if code_or_message.is_a?(Symbol)
@@ -76,14 +72,29 @@ module ErrorHelper
     end
   end
 
+  sig { params(code: Symbol, args: String, kwargs: T.untyped).returns(String) }
+  def diagnostic_message(code, *args, **kwargs)
+    template = MESSAGES[code]
+    Kernel.raise "Internal Compiler Error: Unknown error code :#{code}" unless template
+
+    format_diagnostic_template(template, args, kwargs)
+  end
+
+  sig { params(code: Symbol, kwargs: T.untyped).returns(String) }
+  def fix_description(code, **kwargs)
+    DiagnosticRegistry.fix_description(code, **kwargs)
+  end
+
+  sig { params(code: Symbol, kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
+  def fix_description_from_hash(code, kwargs)
+    DiagnosticRegistry.fix_description_from_hash(code, kwargs)
+  end
+
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
   sig { params(node_or_token: T.untyped, message: String).returns(T.nilable(T::Array[String])) }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
-    # node_or_token is either an AST::Locatable node (has .token method)
-    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
-    # respond_to?(:token) distinguishes them — both token shapes lack it.
-    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    token = diagnostic_token(node_or_token)
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
@@ -91,10 +102,7 @@ module ErrorHelper
   sig { params(node_or_token: T.untyped, message: String).returns(NilClass) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
-    # node_or_token is either an AST::Locatable node (has .token method)
-    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
-    # respond_to?(:token) distinguishes them — both token shapes lack it.
-    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    token = diagnostic_token(node_or_token)
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
     nil
@@ -118,15 +126,24 @@ module ErrorHelper
   # `node.full_type` and cascades on nil). The finding is still
   # captured; the annotator then raises so the collector gets a clean
   # snapshot of what was diagnosed before the cascade would start.
-  sig { params(node_or_token: T.untyped, message: String, category: Symbol, fixes: T::Array[Fix], level: Symbol, raise_in_collector: T.untyped).returns(T.untyped) }
-  def fixable!(node_or_token, message:, category:, fixes:, level: :warning, raise_in_collector: false)
+  sig do
+    params(
+      node_or_token: T.untyped,
+      category: Symbol,
+      fixes: T::Array[Fix],
+      message: T.nilable(String),
+      code: T.nilable(Symbol),
+      level: Symbol,
+      raise_in_collector: T.untyped,
+      kwargs: T.untyped
+    ).returns(T.untyped)
+  end
+  def fixable!(node_or_token, category:, fixes:, message: nil, code: nil, level: :warning, raise_in_collector: false, **kwargs)
     T.bind(self, T.untyped) rescue nil
-    # node_or_token is either an AST::Locatable node (has .token method)
-    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
-    # respond_to?(:token) distinguishes them — both token shapes lack it.
-    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    rendered_message = message || diagnostic_message(T.must(code), **kwargs)
+    token = diagnostic_token(node_or_token)
     finding = FixableFinding.new(
-      level: level, message: message, token: token,
+      level: level, message: rendered_message, token: token,
       category: category, fixes: fixes
     )
 
@@ -134,20 +151,25 @@ module ErrorHelper
       FixCollector.push(finding)
       return unless raise_in_collector
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
+      raise err_class.new(token, rendered_message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
     end
 
     case level
     when :hint, :info, :warning
       loc = token ? " (line #{token.line})" : ""
       tag = level == :warning ? "\e[33m[Warning]\e[0m" : "\e[36m[#{level.to_s.capitalize}]\e[0m"
-      $stderr.puts "#{tag} #{message}#{loc}"
+      $stderr.puts "#{tag} #{rendered_message}#{loc}"
     when :error
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
+      raise err_class.new(token, rendered_message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
     end
   end
-  private :format_diagnostic_template
+  sig { params(node_or_token: T.untyped).returns(T.untyped) }
+  def diagnostic_token(node_or_token)
+    node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+  end
+
+  private :format_diagnostic_template, :diagnostic_token
 
 end
 
