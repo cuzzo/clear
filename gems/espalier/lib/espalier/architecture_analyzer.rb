@@ -19,6 +19,7 @@ module Espalier
       session state
     ].freeze
     ROLE_PATTERN = /(?:Analysis|Analyzer|Builder|Checker|Classifier|Collector|Coordinator|Context|Emit|Emitter|Environment|Facade|Frontend|Helper|Host|Importer|Manager|Mediator|Registry|Resolver|Rewriter|Schemas?|Server|Service|Session|State)\z/
+    LIFECYCLE_ROLE_PATTERN = /(?:Collector|Context|Index|Manager|Registry|Resolver|Session|State|Store|Tracker)\z/
     CORE_TYPES = %w[
       Array BasicObject Boolean Class FalseClass Float Hash Integer NilClass
       Object Proc Set String Symbol T TrueClass
@@ -43,6 +44,10 @@ module Espalier
 
     def self.owner_state_cohesion(manifest, threshold: DEFAULT_COHESION_THRESHOLD)
       new(manifest).owner_state_cohesion(threshold: threshold)
+    end
+
+    def self.cohesive_value_facade_profiles(manifest)
+      new(manifest).cohesive_value_facade_profiles
     end
 
     def initialize(manifest)
@@ -96,6 +101,13 @@ module Espalier
       @owner_edges ||= build_owner_edges
     end
 
+    def cohesive_value_facade_profiles
+      @cohesive_value_facade_profiles ||= @manifest.each_with_object({}) do |mod, out|
+        profile = cohesive_value_facade_profile(mod)
+        out[profile[:owner]] = profile if profile
+      end
+    end
+
     private
 
     def build_owner_by_simple
@@ -124,6 +136,7 @@ module Espalier
       candidate_names = Array(privacy_candidates_by_owner[owner]).map { |row| row[:name].to_s }
       lifecycle_slots = lifecycle_slot_count(mod)
       fan_out = owner_fan_out(owner)
+      facade_profile = cohesive_value_facade_profile(mod)
       data_carrier = data_carrier?(
         state_count: state_names.size,
         public_methods: public_funcs.size,
@@ -144,6 +157,7 @@ module Espalier
         fan_out: fan_out,
         data_carrier: data_carrier
       )
+      score -= facade_profile[:encapsulation_discount] if facade_profile
 
       {
         owner: owner,
@@ -161,6 +175,7 @@ module Espalier
         fan_out: fan_out,
         delegations: delegation_count(funcs),
         data_carrier: data_carrier,
+        cohesive_value_facade: facade_profile,
         score: round(score),
         flags: encapsulation_flags(
           state_count: state_names.size,
@@ -169,7 +184,8 @@ module Espalier
           public_mutators: public_mutators,
           privacy_candidates: candidate_names.size,
           lifecycle_slots: lifecycle_slots,
-          fan_out: fan_out
+          fan_out: fan_out,
+          cohesive_value_facade: !facade_profile.nil?
         )
       }
     end
@@ -227,7 +243,8 @@ module Espalier
       public_mutators:,
       privacy_candidates:,
       lifecycle_slots:,
-      fan_out:
+      fan_out:,
+      cohesive_value_facade:
     )
       flags = []
       flags << "state-heavy" if state_count >= 5
@@ -237,7 +254,159 @@ module Espalier
       flags << "internal-public-helpers" if privacy_candidates.positive?
       flags << "lifecycle-state" if lifecycle_slots >= 2
       flags << "stateful-fanout" if fan_out >= 6 && state_count.positive?
+      flags << "cohesive-value-facade" if cohesive_value_facade
       flags
+    end
+
+    def cohesive_value_facade_profile(mod)
+      owner = mod[:module].to_s
+      funcs = functions(mod)
+      state_rows = states(mod)
+      return nil if state_rows.size < 2 || funcs.size < 8
+      return nil if heavily_mutable_public_facade?(funcs)
+      return nil if state_fragmentation_problem?(mod)
+
+      state_targets = value_state_targets(mod)
+      return nil if state_targets.size < 2
+
+      edges = raw_facade_target_edges(mod)
+      return nil if edges.size < 3
+
+      discountable_targets = discountable_facade_targets(owner, state_targets, edges)
+      reverse_edges = owner_edges.count { |edge| edge[:target] == owner && discountable_targets.include?(edge[:source]) }
+      return nil if reverse_edges.positive?
+
+      discountable_edges = edges.select { |edge| discountable_targets.include?(edge[:target]) }
+      total_calls = edges.sum { |edge| edge[:count] }
+      discountable_calls = discountable_edges.sum { |edge| edge[:count] }
+      return nil if total_calls.zero?
+
+      ratio = discountable_calls.to_f / total_calls
+      return nil if ratio < 0.55 || discountable_calls < 6
+
+      raw_delegations = delegation_count(funcs)
+      delegation_discount = [(raw_delegations * ratio * 0.3).round, 350].min
+      fan_out_discount = [edges.size * ratio * 1.2, 18.0].min
+
+      {
+        owner: owner,
+        state_targets: state_targets.sort,
+        discountable_targets: discountable_targets.sort,
+        discountable_call_ratio: round(ratio),
+        total_owner_calls: total_calls,
+        discountable_owner_calls: discountable_calls,
+        delegation_discount: delegation_discount,
+        encapsulation_discount: round(fan_out_discount)
+      }
+    end
+
+    def value_state_targets(mod)
+      owner = mod[:module].to_s
+      state_type_index(mod).values.filter_map do |type_text|
+        target = owner_for_type(type_text)
+        next if target.nil? || target == owner
+        next unless value_like_owner?(target)
+
+        target
+      end.uniq
+    end
+
+    def discountable_facade_targets(_owner, state_targets, edges)
+      edges.filter_map do |edge|
+        target = edge[:target]
+        if state_targets.include?(target) || stateless_collaborator?(target)
+          target
+        end
+      end.uniq
+    end
+
+    def value_like_owner?(owner)
+      mod = @module_by_owner[owner]
+      return false unless mod
+      return false if lifecycle_role_owner?(owner)
+
+      funcs = functions(mod)
+      write_methods = funcs.count { |fn| effect_list(fn, :writes).any? }
+      state_count = states(mod).size
+      simple = owner.split("::").last
+
+      return true if state_count.zero? && write_methods.zero? && funcs.size <= 12
+
+      value_suffix = simple.match?(/(?:Capabilities|Descriptor|Id|Placement|Plan|Record|Result|Shape|Spec|State|Suffix)\z/)
+      state_count.zero? && write_methods.zero? && value_suffix && funcs.size <= 24
+    end
+
+    def stateless_collaborator?(owner)
+      mod = @module_by_owner[owner]
+      return false unless mod
+      return false if lifecycle_role_owner?(owner)
+
+      funcs = functions(mod)
+      return false unless states(mod).empty?
+      return false if funcs.any? { |fn| effect_list(fn, :writes).any? }
+      return false if owner_edges.any? { |edge| edge[:source] == owner && edge[:target] != owner }
+
+      funcs.size <= 16
+    end
+
+    def state_fragmentation_problem?(mod)
+      state_names = states(mod).map { |state| state[:name].to_s }.to_set
+      return false if state_names.size < 2
+
+      method_touches = direct_method_state_touches(mod, state_names)
+      return false if method_touches.size < 6
+
+      components = state_components(method_touches)
+      return false if components.size < 3
+
+      method_count = components.sum { |component| component[:methods].size }
+      largest = components.map { |component| component[:methods].size }.max
+      fragmentation = 1.0 - (largest.to_f / method_count)
+
+      fragmentation >= 0.35
+    end
+
+    def heavily_mutable_public_facade?(funcs)
+      public_funcs = funcs.select { |fn| visibility_for(fn) == :public }
+      return false if public_funcs.empty?
+
+      public_mutators = public_funcs.count { |fn| mutating_public_method?(fn) }
+      public_mutators > 8 && public_mutators.to_f / public_funcs.size > 0.08
+    end
+
+    def lifecycle_role_owner?(owner)
+      owner.split("::").last.match?(LIFECYCLE_ROLE_PATTERN)
+    end
+
+    def raw_facade_target_edges(mod)
+      owner = mod[:module].to_s
+      state_types = state_type_index(mod)
+      grouped = {}
+
+      functions(mod).each do |fn|
+        calls_for(fn).each do |call|
+          target = target_owner_for(call[:name], owner, state_types)
+          next unless target
+          next if target == owner
+
+          row = grouped[target] ||= {
+            source: owner,
+            target: target,
+            count: 0,
+            conditional_count: 0,
+            stateful_count: 0,
+            methods: Set.new
+          }
+          row[:count] += 1
+          row[:conditional_count] += 1 if call[:conditional]
+          row[:stateful_count] += 1 if state_touch_count(fn).positive?
+          row[:methods] << fn[:name].to_s
+        end
+      end
+
+      grouped.values.map do |row|
+        row.merge(methods: row[:methods].to_a.sort)
+      end
     end
 
     def lifecycle_slot_count(mod)
@@ -442,6 +611,8 @@ module Espalier
         stateful_calls: stateful_calls,
         conditional_calls: conditional_calls
       )
+      facade_profile = cohesive_value_facade_profiles[driver]
+      score -= facade_profile[:encapsulation_discount] if kind == :hub && facade_profile
 
       {
         kind: kind,
@@ -457,6 +628,7 @@ module Espalier
         conditional_calls: conditional_calls,
         common_terms: common_terms_for(owners),
         top_edges: top_edge_labels(edges),
+        cohesive_value_facade: facade_profile,
         score: round(score)
       }
     end

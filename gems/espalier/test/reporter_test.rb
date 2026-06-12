@@ -156,6 +156,57 @@ class ReporterTest < Minitest::Test
     assert_includes report, "many-mutators"
   end
 
+  def test_state_owner_pressure_marks_cohesive_value_facades
+    manifest = [
+      {
+        module: "PartShape",
+        file: "src/part_shape.rb",
+        type: :class,
+        state: [],
+        functions: %w[raw resolved with].map { |name| mini_fn(name) }
+      },
+      {
+        module: "PartCaps",
+        file: "src/part_caps.rb",
+        type: :class,
+        state: [],
+        functions: %w[ownership sync with].map { |name| mini_fn(name) }
+      },
+      {
+        module: "PartPlace",
+        file: "src/part_place.rb",
+        type: :class,
+        state: [],
+        functions: %w[provenance with].map { |name| mini_fn(name) }
+      },
+      {
+        module: "ValueFacade",
+        file: "src/value_facade.rb",
+        type: :class,
+        state: [
+          { name: "@shape", type: "PartShape", properties: [] },
+          { name: "@caps", type: "PartCaps", properties: [] },
+          { name: "@place", type: "PartPlace", properties: [] }
+        ],
+        functions: [
+          mini_fn("initialize", writes: %w[@shape @caps @place], calls: %w[PartShape.raw PartCaps.ownership PartPlace.provenance]),
+          mini_fn("raw", reads: %w[@shape @caps], calls: %w[PartShape.raw PartCaps.ownership]),
+          mini_fn("resolved", reads: %w[@shape], calls: %w[PartShape.resolved]),
+          mini_fn("ownership", reads: %w[@caps], calls: %w[PartCaps.ownership]),
+          mini_fn("sync", reads: %w[@caps @place], calls: %w[PartCaps.sync PartPlace.provenance]),
+          mini_fn("provenance", reads: %w[@place @shape], calls: %w[PartPlace.provenance PartShape.resolved]),
+          mini_fn("with_caps", reads: %w[@caps], writes: %w[@caps], calls: %w[PartCaps.with]),
+          mini_fn("with_place", reads: %w[@place], writes: %w[@place], calls: %w[PartPlace.with])
+        ]
+      }
+    ]
+
+    report = Espalier::Reporter.new(manifest, root: Dir.pwd).to_markdown
+
+    assert_includes report, "cohesive-value-facade"
+    assert_includes report, "delegation is mostly value facade"
+  end
+
   def test_report_lists_owner_state_cohesion_candidates
     manifest = [
       {
@@ -281,5 +332,17 @@ class ReporterTest < Minitest::Test
       assert_includes report, "public but only has same-owner callers"
       refute_includes report, "`CompilerPhase#validate`"
     end
+  end
+
+  private
+
+  def mini_fn(name, reads: [], writes: [], calls: [])
+    {
+      name: name,
+      visibility: :public,
+      EFFECTS: { reads: reads, writes: writes },
+      DELEGATIONS: { always_calls: calls },
+      CALL_GRAPH: {}
+    }
   end
 end

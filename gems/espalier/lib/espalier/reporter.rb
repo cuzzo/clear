@@ -315,8 +315,10 @@ module Espalier
         method_count = method_rows.size
         state_touches = method_rows.sum { |row| row[:reads] + row[:writes] }
         delegations = method_rows.sum { |row| row[:always_calls] + row[:conditional_calls] }
+        facade = cohesive_value_facade_profiles[mod[:module].to_s]
+        effective_delegations = facade ? [delegations - facade[:delegation_discount], 0].max : delegations
         write_methods = method_rows.count { |row| row[:writes].positive? }
-        score = state_count * 3.0 + method_count * 0.6 + state_touches * 1.2 + delegations * 0.35 + write_methods
+        score = state_count * 3.0 + method_count * 0.6 + state_touches * 1.2 + effective_delegations * 0.35 + write_methods
         {
           module: mod[:module],
           file: mod[:file],
@@ -324,7 +326,9 @@ module Espalier
           method_count: method_count,
           state_touches: state_touches,
           delegations: delegations,
+          effective_delegations: effective_delegations,
           write_methods: write_methods,
+          cohesive_value_facade: facade,
           score: score
         }
       end.sort_by { |row| [-row[:score], row[:file].to_s, row[:module].to_s] }
@@ -565,6 +569,10 @@ module Espalier
     end
 
     def owner_refactor(row)
+      if row[:cohesive_value_facade]
+        return "review remaining public API breadth; delegation is mostly value facade"
+      end
+
       if row[:state_count] >= 20
         "extract phase-state records and split lifecycle ownership"
       elsif row[:delegations] >= 100
@@ -575,6 +583,10 @@ module Espalier
     end
 
     def encapsulation_refactor(row)
+      if row[:cohesive_value_facade]
+        return "review public behavior breadth; composed value delegation is cohesive"
+      end
+
       if row[:public_mutators] >= 5 && row[:state_count] >= 5
         "split mutable lifecycle state from the public facade"
       elsif row[:state_count] >= 8 && row[:public_state_methods] >= 5
@@ -591,6 +603,10 @@ module Espalier
     end
 
     def collaboration_refactor(row)
+      if row[:cohesive_value_facade]
+        return "facade fan-out is mostly value/stateless collaboration; review remaining breadth"
+      end
+
       if row[:kind] == :dense_cycle
         "review bidirectional responsibilities and extract a boundary protocol"
       elsif row[:stateful_calls].positive?
@@ -664,7 +680,12 @@ module Espalier
       flags << "many-mutators" if row[:write_methods] >= 5
       flags << "broad-delegator" if row[:delegations] >= 100
       flags << "low-cohesion-candidate" if row[:state_count] >= 5 && row[:state_touches] < row[:state_count] * 2
+      flags << "cohesive-value-facade" if row[:cohesive_value_facade]
       flags.empty? ? "-" : flags.join(", ")
+    end
+
+    def cohesive_value_facade_profiles
+      @cohesive_value_facade_profiles ||= architecture_analyzer.cohesive_value_facade_profiles
     end
 
     def method_refactor(row)
