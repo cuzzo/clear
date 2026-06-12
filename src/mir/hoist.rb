@@ -762,7 +762,7 @@ module MIRHoistLowering
 
   sig do
     params(expr: T.untyped, transfer_on_success: T::Boolean,
-           type_info: T.nilable(Type), cleanup_entry: T.nilable(CleanupEntry)).returns([T::Array[T.untyped], MIR::Ident])
+           type_info: T.nilable(Type), cleanup_entry: T.nilable(CleanupEntry)).returns([T::Array[MIR::Node], MIR::Ident])
   end
   def hoist_normalized_alloc_expr(expr, transfer_on_success: false, type_info: nil, cleanup_entry: nil)
     plan = allocating_hoist_plan(
@@ -839,9 +839,9 @@ module MIRHoistLowering
     out
   end
 
-  sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(stmt: T.untyped).returns(T::Array[MIR::Node]) }
   def normalize_allocating_mir_stmt!(stmt)
-    prefix = T.let([], T::Array[T.untyped])
+    prefix = T.let([], T::Array[MIR::Node])
     case stmt
     when MIR::Let
       prefix.concat(normalize_allocating_result_expr!(stmt.init, owned_position: true))
@@ -908,9 +908,9 @@ module MIRHoistLowering
     prefix
   end
 
-  sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(stmt: T.untyped).returns(T::Array[MIR::Node]) }
   def normalize_stmt_child_exprs!(stmt)
-    prefix = T.let([], T::Array[T.untyped])
+    prefix = T.let([], T::Array[MIR::Node])
     return prefix unless stmt.respond_to?(:child_exprs)
 
     stmt.child_exprs.each do |child|
@@ -921,7 +921,7 @@ module MIRHoistLowering
     prefix
   end
 
-  sig { params(stmt: T.untyped, attr: Symbol, transfer_on_success: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(stmt: T.untyped, attr: Symbol, transfer_on_success: T::Boolean).returns(T::Array[MIR::Node]) }
   def normalize_used_expr_attr!(stmt, attr, transfer_on_success: false)
     value = stmt.public_send(attr)
     prefix, normalized = normalize_allocating_used_expr(value, transfer_on_success: transfer_on_success)
@@ -947,19 +947,17 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(expr: T.untyped, transfer_on_success: T::Boolean, owned_position: T::Boolean).returns(T::Array[T.untyped]) }
+  sig { params(expr: T.untyped, transfer_on_success: T::Boolean, owned_position: T::Boolean).returns(T::Array[MIR::Node]) }
   def normalize_allocating_result_expr!(expr, transfer_on_success: false, owned_position: false)
-    prefix = T.let([], T::Array[T.untyped])
+    prefix = T.let([], T::Array[MIR::Node])
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
     if expr.is_a?(MIR::IfOptional)
-      optional_pair = normalize_allocating_used_expr(
+      optional_prefix, optional_normalized = normalize_allocating_used_expr(
         expr.optional,
         transfer_on_success: false,
       )
-      optional_prefix = T.let(optional_pair[0], T::Array[T.untyped])
-      optional_normalized = optional_pair[1]
       replace_mir_expr_child!(expr, expr.optional, optional_normalized)
       prefix.concat(optional_prefix)
       return prefix
@@ -977,12 +975,10 @@ module MIRHoistLowering
         next
       end
       if mir_produces_owned_result?(child)
-        owned_pair = normalize_allocating_used_expr(
+        owned_prefix, owned_normalized = normalize_allocating_used_expr(
           child,
           transfer_on_success: consumes_owned_children?(expr),
         )
-        owned_prefix = T.let(owned_pair[0], T::Array[T.untyped])
-        owned_normalized = owned_pair[1]
         replace_mir_expr_child!(expr, child, owned_normalized)
         prefix.concat(owned_prefix)
         next
@@ -991,33 +987,29 @@ module MIRHoistLowering
         prefix.concat(normalize_allocating_result_expr!(child, transfer_on_success: transfer_on_success))
         next
       end
-      used_pair = normalize_allocating_used_expr(
+      child_prefix, child_normalized = normalize_allocating_used_expr(
         child,
         transfer_on_success: consumes_owned_children?(expr),
       )
-      child_prefix = T.let(used_pair[0], T::Array[T.untyped])
-      child_normalized = used_pair[1]
       replace_mir_expr_child!(expr, child, child_normalized)
       prefix.concat(child_prefix)
     end
     each_mir_expr_child(expr) do |child|
       next if result_children.any? { |result_child| result_child.equal?(child) }
 
-      child_pair = normalize_allocating_used_expr(
+      other_prefix, other_normalized = normalize_allocating_used_expr(
         child,
         transfer_on_success: consumes_owned_children?(expr),
       )
-      other_prefix = T.let(child_pair[0], T::Array[T.untyped])
-      other_normalized = child_pair[1]
       replace_mir_expr_child!(expr, child, other_normalized)
       prefix.concat(other_prefix)
     end
     prefix
   end
 
-  sig { params(expr: T.untyped, transfer_on_success: T::Boolean).returns([T::Array[T.untyped], T.untyped]) }
+  sig { params(expr: T.untyped, transfer_on_success: T::Boolean).returns([T::Array[MIR::Node], T.untyped]) }
   def normalize_allocating_used_expr(expr, transfer_on_success: false)
-    prefix = T.let([], T::Array[T.untyped])
+    prefix = T.let([], T::Array[MIR::Node])
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
     return [prefix, expr] if expr.is_a?(MIR::Ident)
     return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
