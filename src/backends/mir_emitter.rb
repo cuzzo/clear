@@ -30,6 +30,7 @@ require_relative "zig_type"
 class MIREmitter
     extend T::Sig
 
+  sig { returns(String) }
   attr_accessor :rt_name
 
   THUNK_COMBINE_OPERATOR = T.let({

@@ -176,17 +176,9 @@ end
 
 class AST::ExternFnDecl
   sig { returns(T.untyped) }
-  def fn_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def fn_type_params=(value); end
-  sig { returns(T.untyped) }
   def owner_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def owner_type=(value); end
-  sig { returns(T.untyped) }
-  def owner_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def owner_type_params=(value); end
 end
 
 class AST::ExternStructDecl
@@ -198,10 +190,6 @@ class AST::ExternStructDecl
   def close_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def close_method=(value); end
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
 end
 
 class AST::ForEach
@@ -407,10 +395,6 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def tight_reentrance=(value); end
   sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
-  sig { returns(T.untyped) }
   def uses_alloc; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def uses_alloc=(value); end
@@ -576,10 +560,6 @@ class AST::UnionDef
   def methods; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def methods=(value); end
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
 end
 
 class AST::VarDecl
@@ -915,17 +895,9 @@ end
 
 class ExternFnDecl
   sig { returns(T.untyped) }
-  def fn_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def fn_type_params=(value); end
-  sig { returns(T.untyped) }
   def owner_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def owner_type=(value); end
-  sig { returns(T.untyped) }
-  def owner_type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def owner_type_params=(value); end
 end
 
 class ExternStructDecl
@@ -937,10 +909,6 @@ class ExternStructDecl
   def close_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def close_method=(value); end
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
 end
 
 class FieldDef
@@ -1086,10 +1054,8 @@ class FunctionContext
   def stack_vars_bytes; end
   sig { params(value: Integer).returns(Integer) }
   def stack_vars_bytes=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[Symbol]) }
   def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
   sig { returns(T::Boolean) }
   def uses_rt; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -1238,10 +1204,6 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def tight_reentrance=(value); end
   sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
-  sig { returns(T.untyped) }
   def uses_alloc; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def uses_alloc=(value); end
@@ -1267,9 +1229,9 @@ class FunctionSignature::Contract
   def extern_effects; end
   sig { params(value: FunctionSignature::ExternEffects).returns(FunctionSignature::ExternEffects) }
   def extern_effects=(value); end
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def fn_type_params; end
-  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(value: T::Array[Symbol]).returns(T::Array[Symbol]) }
   def fn_type_params=(value); end
   sig { returns(T::Boolean) }
   def intrinsic; end
@@ -1279,9 +1241,9 @@ class FunctionSignature::Contract
   def module_alias=(value); end
   sig { returns(T.nilable(String)) }
   def owner_type; end
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def owner_type_params; end
-  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(value: T::Array[Symbol]).returns(T::Array[Symbol]) }
   def owner_type_params=(value); end
   sig { returns(T::Array[AST::Param]) }
   def params; end
@@ -1297,9 +1259,9 @@ class FunctionSignature::Contract
   def return_type; end
   sig { params(value: Type).returns(Type) }
   def return_type=(value); end
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def type_params; end
-  sig { params(value: T.nilable(T::Array[Symbol])).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(value: T::Array[Symbol]).returns(T::Array[Symbol]) }
   def type_params=(value); end
   sig { returns(T.nilable(Symbol)) }
   def visibility; end
@@ -1374,11 +1336,6 @@ class MIR::FieldDef
   def boxed_capture; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def boxed_capture=(value); end
-end
-
-class MIR::InlineAllocMetadata
-  sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
-  def placeholders; end
 end
 
 class MIR::OwnershipContract
@@ -1578,10 +1535,6 @@ class Schemas::EnumSchema
 end
 
 class Schemas::InlineStructVariant
-  sig { returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
-  def deinit_entries; end
-  sig { params(value: T.nilable(T::Array[Schemas::InlineStructDeinitEntry])).returns(T.nilable(T::Array[Schemas::InlineStructDeinitEntry])) }
-  def deinit_entries=(value); end
   sig { returns(Schemas::InlineStructVariant::FieldMap) }
   def fields; end
 end
@@ -1599,8 +1552,6 @@ class Schemas::ResourceSchema
   def methods; end
   sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
-  sig { returns(T.nilable(T::Array[Symbol])) }
-  def type_params; end
   sig { returns(Symbol) }
   def visibility; end
 end
@@ -1615,14 +1566,10 @@ class Schemas::StructSchema
   sig { returns(T.untyped) }
   def methods; end
   sig { returns(T.untyped) }
-  def type_params; end
-  sig { returns(T.untyped) }
   def visibility; end
 end
 
 class Schemas::UnionSchema
-  sig { returns(T.untyped) }
-  def type_params; end
   sig { returns(Schemas::UnionSchema::VariantMap) }
   def variants; end
   sig { returns(T.untyped) }
@@ -1832,7 +1779,7 @@ class TestBlock
 end
 
 class TestLowering::TestBlockCtx
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T::Array[T.untyped]) }
   def setup_mir; end
   sig { returns(T::Array[T.untyped]) }
   def test_after_each_mir; end
@@ -1875,10 +1822,6 @@ class UnionDef
   def methods; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def methods=(value); end
-  sig { returns(T.untyped) }
-  def type_params; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type_params=(value); end
 end
 
 class UseAfterMoveChecker

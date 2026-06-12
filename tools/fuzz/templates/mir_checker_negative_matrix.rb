@@ -168,7 +168,7 @@ def mir_checker_negative_case(case_name)
         :frame,
         "items",
         ownership_contract: contract,
-        allocs: MIR.inline_alloc_metadata(alloc: :frame, val_alloc: :frame),
+        allocs: MIR::InlineAllocMetadata.new(alloc: :frame, val_alloc: :frame),
       )
       [
         alloc_mark("child", :heap),
@@ -224,7 +224,7 @@ def mir_checker_negative_case(case_name)
   when :inline_alloc_mismatch_value
     <<~RUBY
       iz = registry_call(nil, "map")
-      iz.allocs = MIR.inline_alloc_metadata(key_alloc: :heap, val_alloc: :frame)
+      iz.allocs = MIR::InlineAllocMetadata.new(key_alloc: :heap, val_alloc: :frame)
       [
         alloc_mark("map", :heap),
         MIR::ExprStmt.new(iz, false),
@@ -418,7 +418,7 @@ def mir_checker_negative_source(case_name, error_code)
         args: [],
         reason: "inline_contract",
         ownership_contract: ownership_contract,
-        allocs: allocs || (alloc ? MIR.inline_alloc_metadata(alloc: alloc) : MIR.inline_alloc_metadata),
+        allocs: allocs || (alloc ? MIR::InlineAllocMetadata.new(alloc: alloc) : MIR::InlineAllocMetadata.new),
         target_var: target,
       )
     end
