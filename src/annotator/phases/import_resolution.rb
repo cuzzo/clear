@@ -82,7 +82,7 @@ module Annotator
       def clone_struct_schema(schema)
         Schemas::StructSchema.new(
           fields: clone_struct_fields(schema.fields),
-          type_params: schema.type_params&.dup,
+          type_params: schema.type_params.dup,
           methods: clone_struct_methods(schema.methods),
           visibility: schema.visibility,
           extern_module: schema.extern_module,
@@ -97,7 +97,7 @@ module Annotator
           close_plan: clone_resource_close_plan(schema.close_plan),
           static_methods: clone_static_methods(schema.static_methods),
           fields: clone_struct_fields(schema.fields),
-          type_params: schema.type_params&.dup,
+          type_params: schema.type_params.dup,
           extern_module: schema.extern_module,
           as_type: schema.as_type,
           visibility: schema.visibility,
@@ -114,7 +114,7 @@ module Annotator
         end
         Schemas::UnionSchema.new(
           variants: variants,
-          type_params: schema.type_params&.dup,
+          type_params: schema.type_params.dup,
           visibility: schema.visibility
         )
       end

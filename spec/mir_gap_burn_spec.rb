@@ -3326,7 +3326,7 @@ RSpec.describe "MIR gap-burn characterization" do
     )
     expect(low.send(:index_collection_value, MIR::Ident.new("set"), MIR::Ident.new("item"), set_plan)).to be_a(MIR::RegistryCall)
 
-    blank_schema = Schemas::StructSchema.new(fields: {}, type_params: nil)
+    blank_schema = Schemas::StructSchema.new(fields: {}, type_params: [])
     expect(low.send(:struct_lit_field_types, AST::StructLit.new(tok, "Missing", {}, nil, []))).to eq({})
     low.replace_mir_schema_lookup!(->(_name) { blank_schema })
     expect(low.send(:struct_lit_field_types, AST::StructLit.new(tok, "Blank", {}, nil, []))).to eq({})

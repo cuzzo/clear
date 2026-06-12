@@ -75,11 +75,13 @@ module Annotator
       def finalize_decl_node!(node, mutable_flag)
         T.bind(self, SemanticAnnotator)
 
+        value = T.must(node.value)
         verify_unrestricted!(node)
         handle_assign_move(node)
         handle_assign_borrow(node)
 
-        validate_type_annotation!(node, node.type) if node.type
+        declared_type = node.type
+        validate_type_annotation!(node, declared_type) if declared_type
         validate_stream_type!(node)
 
         promote_pipe_to_observable_dest!(node)
@@ -98,17 +100,17 @@ module Annotator
         # tense source; any other shape leaves it false.
         return unless validate_observable_binding_initializer!(node)
 
-        final_type, error = node.value.coerce!(node.type)
+        final_type, error = value.coerce!(node.type)
         error!(node, :TYPE_COERCION_FAILED, detail: error) if error
 
         # Empty collection literals annotated as Auto need a permissive
         # container type in scope so method dispatch works during the body walk;
         # the declaration annotation remains Auto for the later constraint pass.
         if AST.empty_auto_collection_literal_decl?(node)
-          final_type = node.value.type_object
+          final_type = value.type_object
         end
 
-        check_prefixed_int_range!(node.value, node.value.coerced_type || final_type)
+        check_prefixed_int_range!(value, value.coerced_type || final_type)
         propagate_declared_type_to_value!(node, final_type)
 
         storage = finalize_decl_storage!(node, final_type)
@@ -153,11 +155,11 @@ module Annotator
         record_capture_local!(node.name.to_s)
         node.symbol = current_scope.local_entry!(node.name)
         sym = T.must(node.symbol)
-        sym.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
+        sym.async_result_shape = value.async_result_shape if value.is_a?(AST::BgBlock)
         # (The late-provenance fold now happens BEFORE declare, above, so the
         # symbol is born with the correct storage -- no post-declare write.)
         # Propagate @link_source from the value type to the scope entry.
-        val_ti = node.value&.full_type!(context: "declaration link source value")
+        val_ti = value.full_type!(context: "declaration link source value")
         if val_ti&.link?
           link_src = val_ti.link_source
           sym.link_source = link_src if link_src
@@ -179,7 +181,7 @@ module Annotator
         # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
         # cannot be reached from another thread, so suggest the shared form.
         if node_type.versioned? && node_type.ownership == :affine
-          cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
+          cap_tok = value.is_a?(AST::CapabilityWrap) ? value.token : nil
           fixes = []
           if cap_tok && cap_tok.value.to_s == "@versioned"
             fixes << Fix.new(
@@ -199,15 +201,14 @@ module Annotator
           end
         end
         classify_ownership!(sym)
-        og_declare(node.name, node, node.full_type!(context: "var declaration"))
+        og_declare(node.name, node, node_type)
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
-        ti = node.full_type!(context: "var declaration ownership")
-        if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) }
+        if !node_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_fn_ctx&.record_heap_use!
         end
         accumulate_stack_bytes(storage, node)
-        track_union_alias(node.name, node.value)
+        track_union_alias(node.name, value)
         record_capability_binding(node.name, node, final_type, storage)
         nil
       end

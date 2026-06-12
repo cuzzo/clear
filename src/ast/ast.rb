@@ -1342,6 +1342,7 @@ module AST
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
+      @type_params = T.let([], T::Array[String])
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
@@ -1374,7 +1375,21 @@ module AST
       self[:params] = val
     end
 
-    attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
+    sig { returns(T::Array[String]) }
+    def type_params
+      @type_params
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
+
+    sig { returns(T::Boolean) }
+    def generic?
+      !type_params.empty?
+    end
+
     # True when the user wrote RETURNS explicitly; fallible-signature checks
     # only enforce on user-authored return types.
     attr_accessor :explicit_return_type
@@ -1546,8 +1561,25 @@ module AST
   StructDef    = Struct.new(:token, :name, :field_decls, :visibility, :type_params) do
     extend T::Sig
     include Locatable
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:type_params] ||= []
+    end
+
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
+
+    sig { returns(T::Array[String]) }
+    def type_params
+      self[:type_params] ||= []
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      self[:type_params] = value.dup
+    end
   end
 	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     extend T::Sig
@@ -2281,8 +2313,17 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
-    attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
-    attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
+    # [:T, :U] for TypeName<T, U>.method
+    sig { returns(T::Array[Symbol]) }
+    def owner_type_params
+      @owner_type_params
+    end
+
+    # [:T] for fnName<T>(...)
+    sig { returns(T::Array[Symbol]) }
+    def fn_type_params
+      @fn_type_params
+    end
 
     sig { params(args: T.untyped).void }
     def initialize(*args)
@@ -2290,6 +2331,18 @@ module AST
       self[:params] = self[:params] || []
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil?
+      @owner_type_params = T.let([], T::Array[Symbol])
+      @fn_type_params = T.let([], T::Array[Symbol])
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def owner_type_params=(value)
+      @owner_type_params = value.dup
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def fn_type_params=(value)
+      @fn_type_params = value.dup
     end
 
     sig { params(val: T.untyped).returns(T.untyped) }
@@ -2313,9 +2366,25 @@ module AST
   ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module) do
     extend T::Sig
     include Locatable
-    attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
+    # [:T, :U] for EXTERN STRUCT Name<T, U>
+    sig { returns(T::Array[Symbol]) }
+    def type_params
+      @type_params
+    end
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      @type_params = T.let([], T::Array[Symbol])
+    end
+
+    sig { params(value: T::Array[Symbol]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
+
     sig { returns(T::Hash[String, AST::StructField]) }
     def field_decls; self[:field_decls]; end
   end
@@ -2352,9 +2421,25 @@ module AST
   # methods (optional): Array of UnionMethodRequirement records.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
+    extend T::Sig
     include Locatable
-    attr_accessor :type_params   # Array of type param name strings, e.g. ["T"], or nil
+    # Array of type param name strings, e.g. ["T"]
+    sig { returns(T::Array[String]) }
+    def type_params
+      @type_params
+    end
     attr_accessor :methods       # Array of UnionMethodRequirement records, or nil
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      @type_params = T.let([], T::Array[String])
+    end
+
+    sig { params(value: T::Array[String]).void }
+    def type_params=(value)
+      @type_params = value.dup
+    end
   end
 
   # UnionVariantLit: TypeName.VariantName{ field: val, ... }

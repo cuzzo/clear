@@ -11,10 +11,12 @@ class FunctionContext
   attr_reader :name
 
   sig { returns(T.untyped) }
-  attr_accessor :type_params,
-                :frame_count, :heap_count, :alloc_count,
+  attr_accessor :frame_count, :heap_count, :alloc_count,
                 :loop_depth, :conditional_depth,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
+
+  sig { returns(T::Array[Symbol]) }
+  attr_reader :type_params
 
   sig { returns(T::Array[AST::ReturnFact]) }
   attr_accessor :returns
@@ -88,7 +90,7 @@ class FunctionContext
     @return_type = T.let(Type.new(:Void), Type)
     self.return_type = return_type
     @lifetime = T.let(lifetime, T::Array[LifetimeSource])
-    @type_params = type_params
+    @type_params = T.let(type_params.dup, T::Array[Symbol])
     @frame_count = T.let(0, Integer)
     @heap_count = T.let(0, Integer)
     @alloc_count = T.let(0, Integer)

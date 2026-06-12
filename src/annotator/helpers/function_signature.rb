@@ -30,7 +30,7 @@ class FunctionSignature
     attr_accessor :return_lifetime
     sig { returns(T.nilable(Symbol)) }
     attr_reader :visibility
-    sig { returns(T.nilable(T::Array[Symbol])) }
+    sig { returns(T::Array[Symbol]) }
     attr_accessor :type_params
     sig { returns(T::Boolean) }
     attr_reader :reentrant
@@ -40,11 +40,11 @@ class FunctionSignature
     attr_accessor :module_alias
     sig { returns(ExternEffects) }
     attr_accessor :extern_effects
-    sig { returns(T.nilable(T::Array[Symbol])) }
+    sig { returns(T::Array[Symbol]) }
     attr_accessor :fn_type_params
     sig { returns(T.nilable(String)) }
     attr_reader :owner_type
-    sig { returns(T.nilable(T::Array[Symbol])) }
+    sig { returns(T::Array[Symbol]) }
     attr_accessor :owner_type_params
     sig { returns(T::Boolean) }
     attr_reader :intrinsic
@@ -53,33 +53,33 @@ class FunctionSignature
       params(
         params: T::Array[AST::Param],
         visibility: T.nilable(Symbol),
-        type_params: T.nilable(T::Array[Symbol]),
+        type_params: T::Array[Symbol],
         reentrant: T::Boolean,
         extern: T::Boolean,
         module_alias: T.nilable(String),
         extern_effects: ExternEffects,
-        fn_type_params: T.nilable(T::Array[Symbol]),
+        fn_type_params: T::Array[Symbol],
         owner_type: T.nilable(String),
-        owner_type_params: T.nilable(T::Array[Symbol]),
+        owner_type_params: T::Array[Symbol],
         intrinsic: T::Boolean
       ).void
     end
-    def initialize(params:, visibility: nil, type_params: nil, reentrant: false,
+    def initialize(params:, visibility: nil, type_params: [], reentrant: false,
                    extern: false, module_alias: nil, extern_effects: {},
-                   fn_type_params: nil, owner_type: nil, owner_type_params: nil,
+                   fn_type_params: [], owner_type: nil, owner_type_params: [],
                    intrinsic: false)
       @params = T.let(params, T::Array[AST::Param])
       @return_type = T.let(Type.new(:Void), Type)
       @return_lifetime = T.let([], T::Array[LifetimeSource])
       @visibility = T.let(visibility, T.nilable(Symbol))
-      @type_params = T.let(type_params, T.nilable(T::Array[Symbol]))
+      @type_params = T.let(type_params.dup, T::Array[Symbol])
       @reentrant = T.let(reentrant, T::Boolean)
       @extern = T.let(extern, T::Boolean)
       @module_alias = T.let(module_alias, T.nilable(String))
       @extern_effects = T.let(extern_effects, ExternEffects)
-      @fn_type_params = T.let(fn_type_params, T.nilable(T::Array[Symbol]))
+      @fn_type_params = T.let(fn_type_params.dup, T::Array[Symbol])
       @owner_type = T.let(owner_type, T.nilable(String))
-      @owner_type_params = T.let(owner_type_params, T.nilable(T::Array[Symbol]))
+      @owner_type_params = T.let(owner_type_params.dup, T::Array[Symbol])
       @intrinsic = T.let(intrinsic, T::Boolean)
     end
   end
@@ -134,7 +134,7 @@ class FunctionSignature
   sig { returns(T.nilable(Symbol)) }
   def visibility = @contract.visibility
 
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def type_params = @contract.type_params
 
   sig { returns(T::Boolean) }
@@ -167,13 +167,13 @@ class FunctionSignature
   sig { returns(ExternEffects) }
   def extern_effects = @contract.extern_effects
 
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def fn_type_params = @contract.fn_type_params
 
   sig { returns(T.nilable(String)) }
   def owner_type = @contract.owner_type
 
-  sig { returns(T.nilable(T::Array[Symbol])) }
+  sig { returns(T::Array[Symbol]) }
   def owner_type_params = @contract.owner_type_params
 
   sig { returns(T::Boolean) }
@@ -295,7 +295,7 @@ class FunctionSignature
         return_type: fn.annotation_return_type,
         return_lifetime: fn.return_lifetime,
         visibility: fn.visibility,
-        type_params: fn.type_params&.map(&:to_sym),
+        type_params: fn.type_params.map(&:to_sym),
         reentrant: fn.declared_plain_reentrant?
       )
     end
@@ -348,14 +348,14 @@ class FunctionSignature
       return_type: T.nilable(Type::TypeInput),
       return_lifetime: LifetimeInput,
       visibility: T.nilable(Symbol),
-      type_params: T.nilable(T::Array[Symbol]),
+      type_params: T::Array[Symbol],
       reentrant: T::Boolean,
       extern: T::Boolean,
       module_alias: T.nilable(String),
       extern_effects: T.nilable(ExternEffects),
-      fn_type_params: T.nilable(T::Array[Symbol]),
+      fn_type_params: T::Array[Symbol],
       owner_type: T.nilable(String),
-      owner_type_params: T.nilable(T::Array[Symbol]),
+      owner_type_params: T::Array[Symbol],
       intrinsic: T::Boolean,
       needs_rt: T.nilable(T::Boolean),
       can_fail: T.nilable(T::Boolean),
@@ -375,9 +375,9 @@ class FunctionSignature
     ).void
   end
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
-                 type_params: nil, reentrant: false, extern: false,
+                 type_params: [], reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
-                 fn_type_params: nil, owner_type: nil, owner_type_params: nil,
+                 fn_type_params: [], owner_type: nil, owner_type_params: [],
                  intrinsic: false, needs_rt: nil, can_fail: nil,
                  alloc_fault: nil, error_fallible: nil, effects: nil,
                  return_strategy: nil, stack_tier: nil, requires: nil,
@@ -621,11 +621,11 @@ class FunctionSignature
   sig { params(module_alias: T.nilable(String)).returns(FunctionSignature) }
   def replace_import_mutable_state!(module_alias:)
     @contract.params = self.class.copy_params_for_import(@contract.params)
-    @contract.type_params = @contract.type_params&.dup
+    @contract.type_params = @contract.type_params.dup
     @contract.module_alias = module_alias
     @contract.extern_effects = @contract.extern_effects.dup
-    @contract.fn_type_params = @contract.fn_type_params&.dup
-    @contract.owner_type_params = @contract.owner_type_params&.dup
+    @contract.fn_type_params = @contract.fn_type_params.dup
+    @contract.owner_type_params = @contract.owner_type_params.dup
     @facts.effects = @facts.effects&.dup
     @facts.requires = self.class.copy_requires_for_import(@facts.requires)
     @facts.heap_carry_return_vars = @facts.heap_carry_return_vars&.dup

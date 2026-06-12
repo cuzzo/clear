@@ -205,7 +205,7 @@ module FunctionAnalysis
     node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
     declared_return = node.annotation_return_type
     lifetime_paths = get_lifetime_paths(node)
-    fn_type_params = (node.type_params || []).map(&:to_sym)
+    fn_type_params = node.type_params.map(&:to_sym)
     fn_ctx = FunctionContext.new(
       name: node.name, return_type: node.annotation_return_type,
       lifetime: lifetime_paths, type_params: fn_type_params
@@ -231,7 +231,7 @@ module FunctionAnalysis
         )},
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
-        type_params: fn_type_params.any? ? fn_type_params : nil,
+        type_params: fn_type_params,
         reentrant: node.declared_plain_reentrant?,
         requires: node.requires
       )
@@ -416,7 +416,7 @@ module FunctionAnalysis
       end
 
       type_params = signature.type_params
-      if type_params&.any?
+      if type_params.any?
         # For EXTERN FN with comptime params, the type bindings come directly from
         # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
         comptime_type_args ||= []
@@ -1213,8 +1213,7 @@ module FunctionAnalysis
     has_lifetime = !lifetime_paths.empty?
     schema_resolver = ->(t) { lookup_type_schema(t) }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
-    fn_type_params = current_fn_ctx&.type_params || []
-    is_type_param = fn_type_params.include?(type_info&.resolved)
+    is_type_param = current_function_type_param?(type_info&.resolved)
 
     unless has_lifetime || is_copyable || is_type_param
       emit_return_borrowed_no_copy_error!(node)

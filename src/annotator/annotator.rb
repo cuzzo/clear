@@ -235,6 +235,21 @@ class SemanticAnnotator
     T.must(current_fn_ctx)
   end
 
+  sig { returns(T::Array[Symbol]) }
+  def current_function_type_params
+    ctx = current_fn_ctx
+    ctx ? ctx.type_params : []
+  end
+  private :current_function_type_params
+
+  sig { params(type_name: T.nilable(Symbol)).returns(T::Boolean) }
+  def current_function_type_param?(type_name)
+    return false unless type_name
+
+    current_function_type_params.include?(type_name)
+  end
+  private :current_function_type_param?
+
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
     @receiver_state.function_contexts << ctx

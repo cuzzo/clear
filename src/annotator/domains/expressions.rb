@@ -11,7 +11,7 @@ module Annotator
       def infer_implicit_type_params(fn_node)
         T.bind(self, SemanticAnnotator)
 
-        explicit = (fn_node.type_params || []).map(&:to_s)
+        explicit = fn_node.type_params.map(&:to_s)
         return explicit unless explicit.empty?
         inferred = []
         ([fn_node.return_type] + fn_node.params.map { |p| p.type }).each do |type|

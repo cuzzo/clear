@@ -325,7 +325,7 @@ module MIRLoweringFunctions
     end
 
     # Comptime params
-    comptime_params = (node.type_params || []).map { |tp| "comptime #{tp}: type" }
+    comptime_params = node.type_params.map { |tp| "comptime #{tp}: type" }
 
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).

@@ -331,14 +331,14 @@ module Annotator
         type_params = schema.type_params
         subst = {}
         if node.type_args&.any?
-          if type_params.nil? || type_params.empty?
+          if type_params.empty?
             error!(node, :GENERIC_NOT_GENERIC, type: node.name)
           end
           if node.type_args.length != type_params.length
             error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
           end
           type_params.zip(node.type_args).each { |param, arg| subst[param] = arg.to_sym }
-        elsif type_params&.any?
+        elsif type_params.any?
           params_hint = type_params.map(&:to_s).join(', ')
           error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
         end
@@ -382,11 +382,15 @@ module Annotator
         return {} unless expr_t.generic_instance?
 
         union_schema = T.cast(schema, Schemas::UnionSchema)
-        type_params = union_schema.type_params || []
+        type_params = union_schema.type_params
         return {} if type_params.empty?
 
         subst = T.let({}, T::Hash[Symbol, Symbol])
-        type_params.zip(expr_t.generic_args).each { |p, a| subst[p] = a.resolved }
+        type_params.zip(expr_t.generic_args).each do |p, a|
+          next unless a
+
+          subst[p] = a.resolved
+        end
         subst
       end
 

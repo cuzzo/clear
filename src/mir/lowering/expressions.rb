@@ -1382,9 +1382,9 @@ module MIRLoweringExpressions
 
   sig { params(schema: T.any(Schemas::StructSchema, Schemas::InlineStructVariant), node: AST::StructLit).returns(StructLitTypeSubst) }
   def struct_lit_type_subst(schema, node)
-    params = schema.is_a?(Schemas::StructSchema) ? schema.type_params : nil
+    params = schema.is_a?(Schemas::StructSchema) ? schema.type_params : []
     args = node.type_args || []
-    return {} unless params&.any? && args.any?
+    return {} unless params.any? && args.any?
     out = T.let({}, StructLitTypeSubst)
     params.zip(args).each do |param, arg|
       next unless param

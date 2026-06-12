@@ -95,7 +95,7 @@ class CompilerFrontend
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
       when AST::UnionDef  then union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(
         variants: stmt.variants,
-        type_params: stmt.type_params&.any? ? stmt.type_params.map(&:to_sym) : nil,
+        type_params: stmt.type_params.map(&:to_sym),
         visibility: stmt.visibility || :package,
       )
       end

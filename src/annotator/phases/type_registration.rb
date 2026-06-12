@@ -58,7 +58,7 @@ module Annotator
       sig { params(node: AST::StructDef).void }
       def register_struct_declaration(node)
         T.bind(self, SemanticAnnotator)
-        validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
+        validate_type_param_list!(node, node.type_params, "struct") if node.type_params.any?
         stamp_field_defaults!(node.field_decls)
 
         declare_type_schema!(node, node.name.to_sym, Schemas::StructSchema.new(
@@ -82,8 +82,8 @@ module Annotator
       sig { params(node: AST::UnionDef).void }
       def register_union_declaration(node)
         T.bind(self, SemanticAnnotator)
-        validate_type_param_list!(node, node.type_params, "union") if node.type_params&.any?
-        if node.type_params&.any? && node.variants.any? { |_, variant| Schemas.inline_struct?(variant) }
+        validate_type_param_list!(node, node.type_params, "union") if node.type_params.any?
+        if node.type_params.any? && node.variants.any? { |_, variant| Schemas.inline_struct?(variant) }
           error!(node, :UNION_INLINE_IN_GENERIC)
         end
 
@@ -156,9 +156,9 @@ module Annotator
       end
       private :inline_struct_deinit_entries
 
-      sig { params(params: T.nilable(T::Array[String])).returns(T.nilable(T::Array[Symbol])) }
+      sig { params(params: T::Array[T.any(String, Symbol)]).returns(T::Array[Symbol]) }
       def type_params(params)
-        params&.any? ? params.map(&:to_sym) : nil
+        params.map(&:to_sym)
       end
       private :type_params
           private :register_enum_declaration

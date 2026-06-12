@@ -1108,8 +1108,8 @@ class Parser
     match!(:CHAR, ';')
     node = AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
     node.owner_type = owner_type if owner_type
-    node.owner_type_params = owner_type_params if owner_type_params.any?
-    node.fn_type_params = fn_type_params if fn_type_params.any?
+    node.owner_type_params = owner_type_params
+    node.fn_type_params = fn_type_params
     node
   end
 
@@ -1142,7 +1142,7 @@ class Parser
     end
     match!(:CHAR, ';')
     node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
-    node.type_params = type_params if type_params.any?
+    node.type_params = type_params
     node.close_method = close_method
     node.as_type = as_type
     node
@@ -1247,7 +1247,7 @@ class Parser
     end
     consume(:CHAR, '}')
     node = AST::UnionDef.new(tok, name, variants, visibility)
-    node.type_params = type_params unless type_params.empty?
+    node.type_params = type_params
     node.methods = method_reqs unless method_reqs.empty?
     node
   end
@@ -1496,7 +1496,7 @@ class Parser
     node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body,
       catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
     node.explicit_return_type = explicit_return  # post-#335: enforce-fallible-returns gate
-    node.type_params = type_params unless type_params.empty?
+    node.type_params = type_params
     node.tail_call = effects_decl == :reentrant_tail_call
     node.requires = requires_clause
     node.arrow_token = arrow_token

@@ -2119,7 +2119,7 @@ RSpec.describe MIRLowering do
   describe "function definitions" do
     def make_fn(name, params: [], return_type: :Void, body: [], visibility: nil,
                 needs_rt: true, can_fail: true, uses_frame: false, uses_alloc: false,
-                type_params: nil, catch_clauses: nil, default_catch: nil)
+                type_params: [], catch_clauses: nil, default_catch: nil)
       fn = AST::FunctionDef.new(tok, name, params, nil, return_type, nil, body,
                                  catch_clauses, default_catch, visibility, nil, uses_frame)
       fn.full_type = return_type

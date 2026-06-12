@@ -24,8 +24,9 @@ module Annotator
           acquire_capability!(node, cap, capability_expansion)
         end
         node.capability_plan = capability_expansion
-        expanded_capabilities = CapabilityPlan.require_for(node).all
-        lock_capabilities = CapabilityPlan.require_for(node).locks
+        capability_plan = CapabilityPlan.require_for(node)
+        expanded_capabilities = capability_plan.all
+        lock_capabilities = capability_plan.locks
         validate_with_match_source_shape!(node, capability_expansion)
 
         check_nested_lock_reacquire!(node, lock_capabilities)

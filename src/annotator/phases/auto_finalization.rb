@@ -102,7 +102,7 @@ module Annotator
           return_type: fn.return_type,
           return_lifetime: fn.return_lifetime,
           visibility: fn.visibility,
-          type_params: fn.type_params&.map(&:to_sym),
+          type_params: fn.type_params.map(&:to_sym),
           reentrant: fn.declared_plain_reentrant?
         )
         FunctionSignature.sync_from_function_def!(signature, fn)

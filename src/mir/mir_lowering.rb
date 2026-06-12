@@ -2781,7 +2781,7 @@ class MIRLowering
   def lower_struct_def(node)
     lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(fields: node.field_decls))
 
-    if node.type_params&.any?
+    if node.type_params.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
       comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
       fields_mir = node.field_decls.map { |name, fd|
@@ -2883,7 +2883,7 @@ class MIRLowering
     # Build variant list
     variants = variant_facts.map { |fact| MIR::UnionTypeVariant.new(name: fact.name, zig_type: fact.zig_type) }
 
-    if node.type_params&.any?
+    if node.type_params.any?
       # Generic union: fn Name(comptime T: type) type { return union(enum) { ... }; }
       comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
       inner_union = MIR::UnionTypeDef.new(nil, variants, nil)

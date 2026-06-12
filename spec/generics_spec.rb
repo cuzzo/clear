@@ -49,7 +49,7 @@ RSpec.describe SemanticAnnotator do
 
       it "a non-generic struct has empty type_params" do
         ast = run("STRUCT User { id: Float64 }")
-        expect(ast.statements.first.type_params).to be_nil.or(be_empty)
+        expect(ast.statements.first.type_params).to eq([])
       end
     end
 

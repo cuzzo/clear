@@ -123,9 +123,11 @@ module Annotator
         # Handles compound types like T[], ?T, !T via apply_type_subst.
         # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
         type_obj = Type.new(type)
-        if type_obj.generic_instance? && struct_schema.type_params
+        if type_obj.generic_instance? && struct_schema.type_params.any?
           subst = {}
           struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
+            next unless arg
+
             subst[param] = arg.resolved
           end
           field_type = apply_type_subst(field_type, subst)

@@ -82,13 +82,13 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.params.first.comptime).to eq(true)
   end
 
-  it "keeps extern type params nil when no generic params are declared" do
+  it "keeps extern type params empty when no generic params are declared" do
     node = AST::ExternFnDecl.new(tok("puts"), "puts", [], Type.new(:Void), "c", nil)
 
     signature = described_class.extern_function_signature(node)
 
     expect(signature.fn_type_params).to eq([])
-    expect(signature.type_params).to be_nil
+    expect(signature.type_params).to eq([])
     expect(signature.extern_effects).to eq({})
     expect(signature.owner_type_params).to eq([])
   end

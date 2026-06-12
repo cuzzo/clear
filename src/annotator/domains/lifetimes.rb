@@ -1159,7 +1159,7 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "move candidate")
-        return if current_fn_ctx&.type_params&.include?(vt.resolved)
+        return if current_function_type_param?(vt.resolved)
         return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
         existing = ownership_graph.nodes[node.name]
         if existing&.specific_move_action?
@@ -1185,7 +1185,7 @@ module Annotator
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "TAKES ownership candidate")
-        return if current_fn_ctx&.type_params&.include?(vt.resolved)
+        return if current_function_type_param?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 
         existing = ownership_graph.nodes[node.name]
@@ -1215,7 +1215,7 @@ module Annotator
         return if vti&.primitive?
         return if vti&.generic_instance?
         # Skip generic type parameters - can't determine borrowability at annotation time.
-        return if current_fn_ctx&.type_params&.include?(vti&.resolved)
+        return if current_function_type_param?(vti&.resolved)
         has_pointer = vti&.heap_ptr?
         return if !has_pointer && !vti&.struct?
         error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)

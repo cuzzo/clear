@@ -2710,7 +2710,7 @@ class Type
     schema = resolver.call(resolved)
     return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
     return 1 if (Schemas.enum?(schema) || Schemas.union?(schema) || Schemas.resource?(schema))
-    return 1 if schema.respond_to?(:type_params) && schema.type_params
+    return 1 if schema.respond_to?(:type_params) && schema.type_params.any?
 
     schema.fields.values.sum { |f| f.type.slot_size(resolver) }
   end
@@ -3155,9 +3155,9 @@ class Type
   sig { params(field_type: Type, schema: T.untyped).returns(Type) }
   def substitute_generic_schema_field_type(field_type, schema)
     return field_type unless generic_instance?
-    params = schema.respond_to?(:type_params) ? schema.type_params : nil
+    params = schema.respond_to?(:type_params) ? schema.type_params : []
     args = generic_args
-    return field_type unless params.respond_to?(:zip) && args
+    return field_type unless params.any? && args
 
     subst = T.let({}, T::Hash[Symbol, Type])
     params.zip(args).each do |param, arg|

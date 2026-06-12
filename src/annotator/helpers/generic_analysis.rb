@@ -12,7 +12,7 @@ require_relative "../../ast/ast"
 # Requires host class to provide:
 #   error!(node, msg, *args)       — raise CompilerError
 #   lookup_type_schema(name)       — resolve a type name to its schema Hash
-#   current_fn_ctx&.type_params        — Array<Symbol> of active fn type params
+#   current_function_type_params      — Array<Symbol> of active fn type params
 #
 module GenericAnalysis
     extend T::Sig
@@ -74,7 +74,7 @@ module GenericAnalysis
   #   3. Non-generic type with args: Int64<Number> — error
   #   4. Type param used as arg: Cache<T> — skip validation (resolved at monomorphization)
   #
-  # Respects current_fn_ctx&.type_params so that Cache<T> in a generic function
+  # Respects current_function_type_params so that Cache<T> in a generic function
   # does not raise "unknown type argument T".
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
@@ -96,14 +96,13 @@ module GenericAnalysis
   sig { params(node: Object, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
   def type_annotation_facts(node, type_obj, is_param)
     T.bind(self, SemanticAnnotator)
-    fn_tps = current_fn_ctx&.type_params || []
     TypeAnnotationFacts.new(
       node: node,
       type_obj: type_obj,
       is_param: is_param,
       inner: type_annotation_inner(type_obj),
       inner_array: type_obj.tense? && type_obj.tense_type&.array? == true,
-      fn_type_params: fn_tps,
+      fn_type_params: current_function_type_params,
     )
   end
 
@@ -269,7 +268,7 @@ module GenericAnalysis
   def schema_type_params(schema)
     return [] unless schema.respond_to?(:type_params)
 
-    T.cast(T.unsafe(schema).type_params || [], T::Array[Symbol])
+    T.cast(T.unsafe(schema).type_params, T::Array[Symbol])
   end
 
   # ----------------------------------------
