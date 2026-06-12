@@ -52,8 +52,8 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
                   test_mode: test_mode, strict_test: strict_test,
@@ -62,8 +62,8 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[Integer, Symbol]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @default_stack_size = default_stack unless default_stack.nil?
@@ -72,7 +72,7 @@ class ZigTranspiler
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
 
     # Apply exact stack tier overrides (from post-build binary analysis).
-    if exact_tiers && !exact_tiers.empty?
+    if !exact_tiers.empty?
       bg_nodes = T.let([], T::Array[AST::BgBlock])
       T.must(result).ast.statements.each do |stmt|
         next unless stmt.is_a?(AST::FunctionDef)
@@ -333,7 +333,7 @@ if __FILE__ == $0
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 use_c_allocator: !!options[:use_c_allocator],
                                 use_debug_allocator: !!options[:use_debug_allocator],
-                                exact_tiers: options[:exact_tiers],
+                                exact_tiers: options[:exact_tiers] || {},
                                 main_tier: options[:main_tier],
                                 default_stack: options[:default_stack])
     end

@@ -522,7 +522,7 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[String, SymbolEntry])) }
+      sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).void }
       def finalize_scope(node, branch: nil)
         T.bind(self, SemanticAnnotator)
 

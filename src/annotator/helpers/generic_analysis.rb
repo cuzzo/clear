@@ -282,7 +282,7 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T::Hash[Symbol, T.untyped]) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     subst = {}

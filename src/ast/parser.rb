@@ -1539,7 +1539,7 @@ class Parser
   # into `requires_clauses` so they don't pollute the capability-family hash.
   REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
-  sig { returns(T.nilable(T::Hash[String, T::Set[Symbol]])) }
+  sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def parse_requires_clause
     requires_hash = {}
     @last_requires_clauses = {}
@@ -1554,10 +1554,14 @@ class Parser
       families = Set.new
       reentrance_kinds = []
       first = parse_requires_family_or_reentrance
-      T.must(first)[:family] ? (families << T.must(first)[:family]) : reentrance_kinds << T.must(first)[:reentrance]
+      first_family = first[:family]
+      first_reentrance = first[:reentrance]
+      first_family ? (families << first_family) : reentrance_kinds << first_reentrance if first_family || first_reentrance
       while match!(:CHAR, '|')
         nxt = parse_requires_family_or_reentrance
-        T.must(nxt)[:family] ? (families << T.must(nxt)[:family]) : reentrance_kinds << T.must(nxt)[:reentrance]
+        next_family = nxt[:family]
+        next_reentrance = nxt[:reentrance]
+        next_family ? (families << next_family) : reentrance_kinds << next_reentrance if next_family || next_reentrance
       end
 
       names.each do |n|
@@ -1574,7 +1578,7 @@ class Parser
   # Returns { family: Symbol } or { reentrance: Symbol } based on the
   # token. Family kinds go into the capability `requires` hash; reentrance
   # kinds are forwarded into `requires_clauses`.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T::Hash[Symbol, T.nilable(Symbol)]) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
     if REQUIRES_VALID_FAMILIES.include?(T.must(tok).value)
@@ -1592,6 +1596,7 @@ class Parser
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
+      {}
     end
   end
 
@@ -1599,8 +1604,9 @@ class Parser
   sig { returns(Symbol) }
   def parse_requires_family
     res = parse_requires_family_or_reentrance
-    error!(current, :EXPECTED_CAP_FAMILY) unless T.must(res)[:family]
-    T.must(res)[:family]
+    family = res[:family]
+    error!(current, :EXPECTED_CAP_FAMILY) unless family
+    T.must(family)
   end
 
   # Legacy reentrance REQUIRES clauses can appear between the function header
@@ -2427,7 +2433,7 @@ class Parser
     AST::WhileLoop.new(tok, condition, body)
   end
 
-  sig { returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
+  sig { returns(T::Hash[String, AST::StructField]) }
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)

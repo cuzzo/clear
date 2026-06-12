@@ -34,6 +34,7 @@ require_relative '../annotator'
 
 module LintFixRewriter
   extend T::Sig
+  Edit = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   module_function
 
@@ -224,7 +225,7 @@ module LintFixRewriter
   # whenever the declared and inferred types don't match exactly, OR
   # when the declared type carries any decoration (sigil, capability,
   # array, optional, error union, generic instance).
-  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(T.nilable(Hash)) }
+  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(T.nilable(Edit)) }
   def compute_redundant_type_edit(node, source)
     declared = node.type
     inferred = node.value && node.value.respond_to?(:full_type) ? node.value.full_type : nil

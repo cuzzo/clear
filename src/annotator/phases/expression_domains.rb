@@ -32,7 +32,7 @@ module Annotator
         nil
       end
 
-      sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+      sig { params(node: AST::MethodCall).void }
       def visit_MethodCall(node)
         T.bind(self, SemanticAnnotator)
 

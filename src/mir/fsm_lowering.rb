@@ -157,7 +157,7 @@ module FsmLowering
           last_expr = last_step.expr
           if last_expr.is_a?(AST::Identifier)
             guard_map = capture_state.current_fsm_owned_result_guards
-            guard_name = guard_map&.[](last_expr.name.to_s)
+            guard_name = guard_map[last_expr.name.to_s]
             if guard_name
               result_mir << MIR::Set.new(
                 MIR::FieldGet.new(ctx_ident, guard_name),
@@ -367,27 +367,27 @@ module FsmLowering
         pointer_captures: T::Set[String],
         inherited_alloc_names: T::Set[String],
         inherited_guard_names: T::Set[String],
-        owned_result_guards: T.nilable(T::Hash[String, String]),
+        owned_result_guards: T::Hash[String, String],
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
   def with_fsm_segment_lowering_context(pointer_captures:, inherited_alloc_names:, inherited_guard_names:, owned_result_guards:, &blk)
     T.bind(self, MIRLowering)
-    prev_alloc_names = T.let(nil, T.nilable(T::Set[String]))
-    prev_guard_names = T.let(nil, T.nilable(T::Set[String]))
     prev_result_guards = capture_state.current_fsm_owned_result_guards
     prev_alloc_names = capture_state.current_fsm_inherited_alloc_names
     prev_guard_names = capture_state.current_fsm_inherited_guarded_names
 
-    capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names
-    capture_state.current_fsm_inherited_guarded_names = inherited_guard_names
-    capture_state.current_fsm_owned_result_guards = owned_result_guards
-    with_bg_fiber_body_context(pointer_captures, &blk)
-  ensure
-    capture_state.current_fsm_owned_result_guards = prev_result_guards
-    capture_state.current_fsm_inherited_guarded_names = T.must(prev_guard_names)
-    capture_state.current_fsm_inherited_alloc_names = T.must(prev_alloc_names)
+    begin
+      capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names
+      capture_state.current_fsm_inherited_guarded_names = inherited_guard_names
+      capture_state.current_fsm_owned_result_guards = owned_result_guards
+      with_bg_fiber_body_context(pointer_captures, &blk)
+    ensure
+      capture_state.current_fsm_owned_result_guards = prev_result_guards
+      capture_state.current_fsm_inherited_guarded_names = prev_guard_names
+      capture_state.current_fsm_inherited_alloc_names = prev_alloc_names
+    end
   end
 
   # Resolve ONE capability's lock-acquire metadata. Returns

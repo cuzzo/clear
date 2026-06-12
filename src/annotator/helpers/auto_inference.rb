@@ -161,7 +161,7 @@ class AutoConstraintCollector
     # slot. Without this, only the initializer would constrain the
     # slot and re-binding ambiguity (`MUTABLE x: Auto = 0_i64; x =
     # "hello";`) would slip through unification.
-    @local_decls = T.let(nil, T.nilable(T::Hash[String, LocalDeclEntry]))
+    @local_decls = T.let({}, T::Hash[String, LocalDeclEntry])
   end
 
   # Walk the program. Populates @slots with one entry per Auto slot
@@ -224,10 +224,10 @@ class AutoConstraintCollector
     else
       record_constraint(node, current_fn)
       next_fn = node.is_a?(AST::FunctionDef) ? node : current_fn
-      saved_local_decls = nil
+      saved_local_decls = T.let({}, T::Hash[String, LocalDeclEntry])
       if node.is_a?(AST::FunctionDef)
         saved_local_decls = @local_decls
-        @local_decls = T.let({}, T.nilable(T::Hash[String, LocalDeclEntry]))
+        @local_decls = {}
       end
       if node.respond_to?(:each_pair)
         node.each_pair { |_, v| walk(v, current_fn: next_fn) }
@@ -313,8 +313,8 @@ class AutoConstraintCollector
       )
       T.must(@slots[slot_id]).sources << T.cast(decl_node.value, AST::Locatable) if decl_node.value
       # Remember this name so later reassignments can find the slot.
-      @local_decls[decl_node.name] = slot_id if @local_decls
-    elsif decl_node.type.nil? && @local_decls && decl_node.respond_to?(:name)
+      @local_decls[decl_node.name] = slot_id
+    elsif decl_node.type.nil? && decl_node.respond_to?(:name)
       # Untyped BindExpr — possibly a reassignment of an earlier
       # Auto local in the same function. If we recognize the name,
       # extend the existing slot with this RHS.
@@ -388,7 +388,7 @@ class AutoConstraintCollector
       decl_node: decl_node, sources: [], shape: :list_element,
       auto_token: decl_node.type.auto_token,
     )
-    @local_decls[decl_node.name] = slot_id if @local_decls
+    @local_decls[decl_node.name] = slot_id
   end
 
   sig { params(decl_node: DeclarationNode).void }
@@ -408,7 +408,7 @@ class AutoConstraintCollector
     )
     # Register the binding name with both shape slot ids so later
     # reassignments can deliver evidence to both halves.
-    @local_decls[decl_node.name] = AutoMapShapeEntry.new(key: key_id, value: val_id) if @local_decls
+    @local_decls[decl_node.name] = AutoMapShapeEntry.new(key: key_id, value: val_id)
   end
 end
 

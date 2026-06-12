@@ -8,6 +8,7 @@ require_relative "../../ast/ast"
 # statements. Mixed into SemanticAnnotator.
 module MethodAnalysis
     extend T::Sig
+  IndexOpDefinition = T.type_alias { T::Hash[T.untyped, T.untyped] }
 
   # Attempt to resolve a method call on a collection type (Pool, Set, or HashMap).
   # Returns true if handled, false if the caller should fall through to UFCS.
@@ -167,7 +168,7 @@ module MethodAnalysis
   # Look up the INDEX_OPS entry for a container type.
   # Returns the :get or :set sub-entry, or nil.
   # Dispatch is driven by Type#dispatch_key — add new indexable types there.
-  sig { params(type_info: Type, op: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(type_info: Type, op: Symbol).returns(T.nilable(IndexOpDefinition)) }
   def resolve_index_op(type_info, op)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil if type_info.promise_list?

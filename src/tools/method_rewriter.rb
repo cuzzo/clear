@@ -23,6 +23,7 @@ require_relative '../ast/std_lib'
 # rewrite inside-out to method chains (`xs.filter(p).length()`).
 module MethodRewriter
   extend T::Sig
+  Edit = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   module_function
 
@@ -165,7 +166,7 @@ module MethodRewriter
   # (e.g., contains a comment we'd rather not move). Source span is
   # the byte range from the start of the callee name to the closing
   # `)`, inclusive.
-  sig { params(call: AST::FuncCall, source: String).returns(T.nilable(Hash)) }
+  sig { params(call: AST::FuncCall, source: String).returns(T.nilable(Edit)) }
   def compute_edit(call, source)
     start_off = offset_for(source, call.token.line, call.token.column)
     return nil unless start_off

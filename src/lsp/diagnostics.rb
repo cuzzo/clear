@@ -30,6 +30,8 @@ module LSP
     }.freeze, T::Hash[Symbol, Integer])
 
     SOURCE_NAME = T.let("clear".freeze, String)
+    TemplateRegexCache = T.type_alias { T::Hash[String, Regexp] }
+    TEMPLATE_REGEX_CACHE = T.let({}, TemplateRegexCache)
 
     module_function
 
@@ -155,9 +157,8 @@ module LSP
     # `'doesNotExist'`).
     sig { params(template: T.untyped).returns(Regexp) }
     def template_regex(template)
-      @template_regex_cache = T.let(@template_regex_cache, T.nilable(T::Hash[String, Regexp]))
-      @template_regex_cache ||= {}
-      @template_regex_cache[template] ||= begin
+      cache = TEMPLATE_REGEX_CACHE
+      cache[template] ||= begin
         parts = template.split(/(%\{[^}]+\})/)
         body = parts.map { |p| p.start_with?('%{') ? '.+?' : Regexp.escape(p) }.join
         body = body.sub(/(?:\\\.|\\!|\\\?|\s)+\z/, '')

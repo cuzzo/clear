@@ -450,6 +450,11 @@ class Type
     const :publish, T.nilable(ObservablePublishSpec), default: nil
   end
 
+  ObservableTerminalRegistry = T.type_alias { T::Hash[Symbol, ObservableTerminalSpec] }
+  ObservableWrapperRegistry = T.type_alias { T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)] }
+  OBSERVABLE_TERMINALS_CACHE = T.let({}, ObservableTerminalRegistry)
+  OBSERVABLE_WRAPPERS_CACHE = T.let({}, ObservableWrapperRegistry)
+
   sig { params(value: Object).returns(T::Boolean) }
   def self.indirect_type?(value)
     return false unless value.is_a?(Type)
@@ -2408,9 +2413,11 @@ class Type
   # class references resolve at first-call time, after src/ast/ast.rb
   # has finished loading. type.rb is required from inside ast.rb, so
   # AST::SumOp is not yet defined while type.rb's class body evaluates.
-  sig { returns(T::Hash[Symbol, ObservableTerminalSpec]) }
+  sig { returns(ObservableTerminalRegistry) }
   def self.observable_terminals
-    @observable_terminals ||= T.let({
+    return OBSERVABLE_TERMINALS_CACHE unless OBSERVABLE_TERMINALS_CACHE.empty?
+
+    OBSERVABLE_TERMINALS_CACHE.merge!(
       sum: ObservableTerminalSpec.new(
         wrapper: ->(type_info) { "ObservableSum(#{type_info.zig_type})" },
         ast_class: AST::SumOp,
@@ -2474,7 +2481,8 @@ class Type
           end
         },
       ),
-    }.freeze, T.nilable(T::Hash[Symbol, ObservableTerminalSpec]))
+    )
+    OBSERVABLE_TERMINALS_CACHE.freeze
   end
 
   # Backwards-compat shim: pre-A3 callers indexed `OBSERVABLE_WRAPPERS[sym]`
@@ -2482,9 +2490,12 @@ class Type
   # (and the existing observable_wrapper_zig method) can continue to
   # work without rewriting. Lazy via class method for the same load-order
   # reason as observable_terminals.
-  sig { returns(T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)]) }
+  sig { returns(ObservableWrapperRegistry) }
   def self.observable_wrappers
-    T.must(@observable_wrappers = T.let(observable_terminals.transform_values(&:wrapper).freeze, T.nilable(T::Hash[Symbol, T.proc.params(type_info: Type).returns(String)])))
+    return OBSERVABLE_WRAPPERS_CACHE unless OBSERVABLE_WRAPPERS_CACHE.empty?
+
+    OBSERVABLE_WRAPPERS_CACHE.merge!(observable_terminals.transform_values(&:wrapper))
+    OBSERVABLE_WRAPPERS_CACHE.freeze
   end
 
   private

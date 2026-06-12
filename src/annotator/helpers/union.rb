@@ -180,7 +180,7 @@ module UnionAnalysis
 
   # Validate fields of an inline struct union variant: check for unknown fields,
   # missing required fields, and type-check each field value.
-  sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).void }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
     node.fields.each_key do |fname|

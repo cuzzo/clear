@@ -1599,12 +1599,12 @@ module MIR
     sig do
       params(
         code: BgBlockPlan,
-        captures: T.nilable(T::Hash[String, Type]),
+        captures: T::Hash[String, Type],
         run_body: T::Array[Emittable],
         fsm_structure: Object,
       ).void
     end
-    def initialize(code, captures = nil, run_body = [], fsm_structure = nil)
+    def initialize(code, captures = {}, run_body = [], fsm_structure = nil)
       unless MIR.structural_bg_block_plan?(code)
         raise TypeError, "MIR::BgBlock code must be a structural emission plan, got #{code.class}"
       end

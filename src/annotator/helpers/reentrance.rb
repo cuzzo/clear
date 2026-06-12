@@ -354,7 +354,7 @@ module ReentranceBridge
   # (`:THUNK` if you want to fold it; `:MAX_DEPTH(N)` if you want a
   # bounded depth). Runs after `check_indirect_reentrancy!` so the
   # call-graph is settled and transitive cycles are visible.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { void }
   def validate_not_logical_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -424,7 +424,7 @@ module ReentranceBridge
     end
   end
 
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { void }
   def validate_thunk_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -811,7 +811,7 @@ module ReentranceBridge
       fixes: [constrain_fix, propagate_fix])
   end
 
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Hash[String, Symbol])) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def validate_requires_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?

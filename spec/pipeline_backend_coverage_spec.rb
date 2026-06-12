@@ -1538,7 +1538,7 @@ RSpec.describe "pipeline backend coverage" do
       expect(bridge.pipeline_index_insert_with_ownership(insert, MIR::Ident.new("v"), false, target_alloc: :heap)).to equal(insert)
 
       expect(bridge.with_runtime_binding_name("__rt2") { lowering.runtime_binding_name }).to eq("__rt2")
-      expect(bridge.with_fiber_capture_map({}, capture_symbols: nil, rt_override: "__rt3") { :ok }).to eq(:ok)
+      expect(bridge.with_fiber_capture_map({}, capture_symbols: {}, rt_override: "__rt3") { :ok }).to eq(:ok)
     end
 
     it "normalizes observable type names and rewrites body identifiers on token boundaries" do

@@ -22,7 +22,7 @@ module MultiStatementLinter
 
   module_function
 
-  sig { params(source: String).returns(T.nilable(Hash)) }
+  sig { params(source: String).void }
   def lint!(source)
     return unless FixCollector.enabled?
 

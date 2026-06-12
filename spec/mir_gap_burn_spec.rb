@@ -1651,11 +1651,11 @@ RSpec.describe "MIR gap-burn characterization" do
     low.function_state.fn_name_rename_map = { "renamed" => "renamed_L2" }
     expect(low.send(:stub_local_idents, id("renamed", type: :String))).to eq(["renamed_L2"])
 
-    low.instance_variable_set(:@active_stubs, {
+    low.test_state.active_stubs = {
       "getData" => { kind: :returns, var: "__stub_getData" },
       "nextData" => { kind: :sequence, var: "__stub_nextData" },
       "makeData" => { kind: :with, var: "__stub_makeData" },
-    })
+    }
     ret_stub = low.send(:stub_intercept_for, "getData", nil, [mapped])
     expect(ret_stub).to be_a(MIR::BlockExpr)
     expect(ret_stub.body).to include(an_instance_of(MIR::Suppress), an_instance_of(MIR::BreakStmt))

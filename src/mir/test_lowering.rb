@@ -19,7 +19,7 @@ require "sorbet-runtime"
 #                                 Zig flags them as unused).
 #
 # All methods rely on MIRLowering typed state (runtime name,
-# @active_stubs, function_state.current_bindings, function_state.decl_zig_name_map, etc.) and
+# test_state.active_stubs, function_state.current_bindings, function_state.decl_zig_name_map, etc.) and
 # call into shared lowering helpers (lower, lower_body, emit_expr).
 # This module is purely organizational — zero behavior change from
 # the inline definitions it replaces.
@@ -44,15 +44,15 @@ module TestLowering
 
   # Emits all MIR::TestDef entries for a single WHEN block (its
   # BEFORE ALL hooks, then each TEST THAT, then benchmarks, then
-  # AFTER ALL hooks). Mutates @active_stubs around the body so
+  # AFTER ALL hooks). Mutates test_state.active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
   sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
   def lower_when_block(when_block, ctx, tests)
     T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
 
-    prev_stubs = (@active_stubs || {}).dup
-    @active_stubs = prev_stubs.dup
+    prev_stubs = test_state.active_stubs.dup
+    test_state.active_stubs = prev_stubs.dup
     begin
       stubs, non_stub_setup = when_block.setup.partition { |s| s.is_a?(AST::StubDecl) }
       when_setup_mir = lower_body(non_stub_setup)
@@ -100,7 +100,7 @@ module TestLowering
 
       ctx.emit_all_hooks(when_block.after_all || [], "__after_all", "#{when_desc}: ", tests)
     ensure
-      @active_stubs = prev_stubs
+      test_state.active_stubs = prev_stubs
     end
   end
 
@@ -324,16 +324,15 @@ module TestLowering
   sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
-    stub_info = (@active_stubs || {})[fn_name]
+    stub_info = test_state.active_stubs[fn_name]
     return nil unless stub_info
 
     call_inputs = [receiver, *args].compact
     suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
     suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
 
-    @stub_label_counter ||= T.let(0, T.nilable(Integer))
-    @stub_label_counter += 1
-    counter = @stub_label_counter
+    counter = test_state.stub_label_counter + 1
+    test_state.stub_label_counter = counter
 
     case stub_info[:kind]
     when :returns
@@ -394,16 +393,14 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name
     stub_var = "__stub_#{fn_name}"
-    @active_stubs ||= T.let({}, T.nilable(T::Hash[T.untyped, T.untyped]))
-
     case node.kind
     when :returns
       val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :returns, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :returns, var: stub_var }
       MIR::Let.new(stub_var, val, false, nil, nil)
     when :captures
       cap_name = node.value
-      @active_stubs[fn_name] = { kind: :captures, var: cap_name }
+      test_state.active_stubs[fn_name] = { kind: :captures, var: cap_name }
       MIR::Let.new(cap_name, MIR::Lit.new("0"), true, Type.new("i64"), "_ = &#{cap_name};")
     when :sequence
       values = node.value
@@ -412,7 +409,7 @@ module TestLowering
       else
         [lower(values)]
       end
-      @active_stubs[fn_name] = { kind: :sequence, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :sequence, var: stub_var }
       [
         MIR::Let.new(
           "#{stub_var}_seq",
@@ -427,7 +424,7 @@ module TestLowering
       ]
     when :with
       val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :with, var: stub_var }
+      test_state.active_stubs[fn_name] = { kind: :with, var: stub_var }
       MIR::Let.new(stub_var, val, false, nil, nil)
     else
       raise "MIRLowering: unhandled StubDecl kind: #{node.kind} for #{fn_name}"

@@ -23,11 +23,13 @@ module LSP
   # the highest-value case first.
   module Hover
     extend T::Sig
+    HoverResponse = T.type_alias { T::Hash[T.untyped, T.untyped] }
+
     module_function
 
     # Build a hover response for the document at `position`. Returns
     # nil when no diagnostic overlaps the cursor.
-    sig { params(document: T.untyped, position: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+    sig { params(document: T.untyped, position: T.untyped).returns(T.nilable(HoverResponse)) }
     def render(document, position)
       return nil unless document
       result = document.cached_findings

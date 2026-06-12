@@ -504,13 +504,13 @@ class PipelineHost
     type_parameters(:U)
       .params(
         new_entries: T::Hash[String, String],
-        capture_symbols: T.nilable(T::Hash[String, SymbolEntry]),
+        capture_symbols: T::Hash[String, SymbolEntry],
         rt_override: String,
         blk: T.proc.returns(T.type_parameter(:U)),
       )
       .returns(T.type_parameter(:U))
   end
-  def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
+  def with_fiber_capture_map(new_entries, capture_symbols: {}, rt_override: "__rt", &blk)
     @lowering_bridge.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 

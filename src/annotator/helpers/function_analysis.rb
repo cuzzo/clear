@@ -426,8 +426,8 @@ module FunctionAnalysis
         else
           subst = infer_generic_type_args!(node, signature, args, type_params)
         end
-        node.generic_type_args = type_params.map { |tp| T.must(subst)[tp] } if node.respond_to?(:generic_type_args=)
-        substituted = substitute_type_params(signature, T.must(subst))
+        node.generic_type_args = type_params.map { |tp| subst[tp] } if node.respond_to?(:generic_type_args=)
+        substituted = substitute_type_params(signature, subst)
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         stamp_type!(node, substituted.return_type)
@@ -1010,7 +1010,7 @@ module FunctionAnalysis
   sig { params(node: RoutineNode).void }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires : nil, T.nilable(T::Hash[String, T::Set[Symbol]]))
+    requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires || {} : {}, T::Hash[String, T::Set[Symbol]])
     node.params.each do |param|
       # Validate Defaults
       if param.default

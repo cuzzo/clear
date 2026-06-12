@@ -167,8 +167,8 @@ module EscapeAnalysis
     [result.heap_fns, result.bg_heap]
   end
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: T.nilable(BodySummaries), hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
-  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = nil, hoist_bindings = nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: BodySummaries, hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
+  def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = {}, hoist_bindings = nil)
     validate_escape_sink_handlers!
     validate_derived_placement_handlers!
     validate_escape_sinks!
@@ -178,7 +178,7 @@ module EscapeAnalysis
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
 
     fn_nodes.each do |name, fn|
-      facts_by_name[name] = function_facts(fn, body_summaries&.[](name), hoist_bindings&.[](name) || []) if fn.body
+      facts_by_name[name] = function_facts(fn, body_summaries[name], hoist_bindings&.[](name) || []) if fn.body
     end
 
     facts_by_name.each_value do |facts|
@@ -1094,15 +1094,15 @@ module EscapeAnalysis
     false
   end
 
-  sig { params(value: AST::Node, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T.nilable(T::Hash[String, FunctionFacts])).returns(T::Boolean) }
-  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: nil)
+  sig { params(value: AST::Node, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), facts_by_name: T::Hash[String, FunctionFacts]).returns(T::Boolean) }
+  private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name: {})
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
     return false unless AST.call?(call)
     call = T.cast(call, T.any(AST::FuncCall, AST::MethodCall))
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
-    callee_facts = facts_by_name&.[](call.name.to_s)
+    callee_facts = facts_by_name[call.name.to_s]
     return call_result_is_heap_for_callee?(call, callee, schema_lookup, facts: callee_facts) if callee
 
     sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil

@@ -249,7 +249,7 @@ class ModuleImporter
     )
   end
 
-  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator).void }
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)

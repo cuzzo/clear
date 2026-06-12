@@ -417,6 +417,7 @@ class MIRLowering
         capture: MIRLoweringCaptureState.new,
         capabilities: MIRLoweringCapabilityState.new,
         ownership: MIRLoweringOwnershipState.new,
+        test: MIRLoweringTestState.new,
       ),
       MIRLoweringState,
     )
@@ -455,6 +456,11 @@ class MIRLowering
   sig { returns(MIRLoweringOwnershipState) }
   def ownership_state
     lowering_state.ownership
+  end
+
+  sig { returns(MIRLoweringTestState) }
+  def test_state
+    lowering_state.test
   end
 
   sig { returns(MIRLoweringSchemas::SchemaLookup) }
@@ -3087,10 +3093,14 @@ class MIRLowering
 
   sig { params(mod: ModuleImporter::CompiledModule).void }
   def merge_module_schemas!(mod)
+    struct_schemas = mod.struct_schemas || {}
+    enum_schemas = T.cast(mod.enum_schemas || {}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
+    union_schemas = mod.union_schemas || {}
+
     lowering_schemas.merge!(
-      struct_schemas: mod.struct_schemas,
-      enum_schemas: mod.enum_schemas,
-      union_schemas: mod.union_schemas,
+      struct_schemas: struct_schemas,
+      enum_schemas: enum_schemas,
+      union_schemas: union_schemas,
     )
   end
 
@@ -3474,7 +3484,7 @@ class MIRLowering
   # Temporarily installs a fiber capture map and rt alias, runs the block, then restores.
   # Used by DoBlock, BgBlock, and PipelineHost (for concurrent pipeline operators).
   #
-  # `capture_symbols` (optional Hash<name => SymbolEntry>) carries the LIVE
+  # `capture_symbols` carries the LIVE
   # SymbolEntry for each captured name so body-lowering passes that need
   # current sync/storage (especially WITH EXCLUSIVE's Arc-vs-bare dispatch)
   # read post-`propagate_caller_sync!` state, not the AST-snapshot state
@@ -3488,18 +3498,18 @@ class MIRLowering
     type_parameters(:U)
       .params(
         new_entries: T::Hash[String, String],
-        capture_symbols: T.nilable(T::Hash[String, SymbolEntry]),
+        capture_symbols: T::Hash[String, SymbolEntry],
         rt_override: String,
         blk: T.proc.returns(T.type_parameter(:U)),
       )
       .returns(T.type_parameter(:U))
   end
-  def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
+  def with_fiber_capture_map(new_entries, capture_symbols: {}, rt_override: "__rt", &blk)
     prev_map = capture_state.do_capture_map || {}
-    prev_syms = capture_state.current_fiber_capture_symbols || {}
+    prev_syms = capture_state.current_fiber_capture_symbols
     prev_rt = runtime_binding_name
     capture_state.do_capture_map = prev_map.merge(new_entries)
-    capture_state.current_fiber_capture_symbols = prev_syms.merge(capture_symbols || {})
+    capture_state.current_fiber_capture_symbols = prev_syms.merge(capture_symbols)
     runtime_state.rt_name = rt_override
     result = blk.call
     capture_state.do_capture_map = prev_map

@@ -66,11 +66,11 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]), hoist_bindings: T.nilable(HoistBindings)).void }
-  def initialize(fn_nodes:, schema_lookup:, body_summaries: nil, hoist_bindings: nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
+  def initialize(fn_nodes:, schema_lookup:, body_summaries: {}, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
-    @body_summaries = T.let(body_summaries, T.nilable(T::Hash[String, Annotator::Phases::FunctionBodySummary]))
+    @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
     @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
@@ -100,7 +100,7 @@ class MIRPass
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Hoist has already lifted anonymous allocating expressions into bindings.
   # Escape analysis writes final binding storage; this pass inserts MIR markers.
-  sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(ast: AST::Program).void }
   def transform!(ast)
     pass_state = MIRPassState.for!(ast)
     pass_state.require!(:premir_type_checked, consumer: "MIRPass")
@@ -386,7 +386,7 @@ class MIRPass
     end
   end
 
-  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
+  sig { params(fn: AST::FunctionDef).void }
   def transform_function!(fn)
     plan = ownership_preparation_plan(fn)
     return unless plan.cleanup_bindings?
@@ -788,7 +788,7 @@ class MIRPass
 
 
   # Build moved_guard_info: { var_name => bool } for all bindings.
-  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(T.nilable(T::Hash[String, TrueClass])) }
+  sig { params(fn: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_moved_guard_info!(fn, facts)
     info = {}
     facts.bindings.each do |name, entry|

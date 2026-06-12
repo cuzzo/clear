@@ -250,7 +250,7 @@ module LSP
     # an active diagnostic, render the registry entry + spec example
     # as markdown. Returns nil to dismiss the hover popup when there's
     # nothing relevant.
-    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(Hover::HoverResponse)) }
     def handle_hover(params)
       uri = params["textDocument"]["uri"]
       pos = params["position"]

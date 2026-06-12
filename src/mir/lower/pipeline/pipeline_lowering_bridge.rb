@@ -165,7 +165,7 @@ class PipelineLoweringBridge
     type_parameters(:U)
       .params(
         new_entries: T::Hash[String, String],
-        capture_symbols: T.nilable(T::Hash[String, SymbolEntry]),
+        capture_symbols: T::Hash[String, SymbolEntry],
         rt_override: String,
         blk: T.proc.returns(T.type_parameter(:U)),
       )

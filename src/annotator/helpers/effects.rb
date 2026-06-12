@@ -210,7 +210,7 @@ module EffectTracker
 
   # Record a call site's context so transitive propagation can promote the
   # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
-  sig { params(callee_name: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+  sig { params(callee_name: String).void }
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fn_ctx = current_fn_ctx
@@ -222,7 +222,7 @@ module EffectTracker
     existing = effect_call_site_context_for(caller_name, callee_name)
     existing[:loop] = existing[:loop] || in_loop
     existing[:cond] = existing[:cond] || in_cond
-    existing
+    nil
   end
 
   # Record the per-arg family Sets at this call site.
@@ -371,11 +371,11 @@ module EffectTracker
 
   # Merge callee's effects into caller, applying context-sensitive
   # SUSPENDS promotion based on the call site's loop/cond bits.
-  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: T.nilable(T::Hash[Symbol, T::Boolean])).returns(T::Set[Symbol]) }
+  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: CallContext).returns(T::Set[Symbol]) }
   def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
     T.bind(self, SemanticAnnotator) rescue {}
-    in_loop = site_ctx && site_ctx[:loop]
-    in_cond = site_ctx && site_ctx[:cond]
+    in_loop = site_ctx[:loop]
+    in_cond = site_ctx[:cond]
     callee_set.each do |eff|
       if SUSPENDS_FAMILY.include?(eff)
         has_loop = (eff == SUSPENDS_LOOP) || in_loop
@@ -660,7 +660,7 @@ module EffectTracker
   #   - constructor / destructor / methods auto-synthesized for unions:
   #     their signatures are stamped by the annotator; user code can't
   #     change them.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { void }
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map
@@ -1201,7 +1201,7 @@ module EffectTracker
   # Post-pass: detect indirect mutual recursion in the call graph.
   # DFS reachability: for each function F, walk F's callees transitively
   # and report an error if F is reachable from itself.
-  sig { returns(T.nilable(T::Hash[String, T::Set[String]])) }
+  sig { void }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
     fn_nodes = function_node_map

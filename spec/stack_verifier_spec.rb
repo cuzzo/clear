@@ -330,9 +330,9 @@ RSpec.describe StackVerifier do
       expect(err[:message]).to include("(test.cht:42)")
     end
 
-    it "treats fn_nodes as empty when nil (covers `&.` nil branch)" do
+    it "treats omitted fn_nodes as empty" do
       v = stub_verifier(BASIC_OBJDUMP)
-      report = v.analyze(fn_nodes: nil)
+      report = v.analyze
       report[:functions].each { |f| expect(f[:tier]).to eq(:unknown) }
     end
 

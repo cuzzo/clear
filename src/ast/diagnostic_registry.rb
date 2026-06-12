@@ -2947,7 +2947,9 @@ module DiagnosticRegistry
 
   module_function
 
-  sig { params(code: Symbol).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  DiagnosticEntry = T.type_alias { T::Hash[Symbol, T.untyped] }
+
+  sig { params(code: Symbol).returns(T.nilable(DiagnosticEntry)) }
   def lookup(code)
     DIAGNOSTICS[code]
   end
