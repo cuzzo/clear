@@ -10,15 +10,8 @@ module Annotator
       def visit_VarDecl(node)
         T.bind(self, SemanticAnnotator)
 
-        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
-          node.value.storage = :stack
-        end
-        visit(node.value)
-        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
-        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
-        finalize_decl_node!(node, node.mutable)
-        stamp_init_contents_heap!(node)
-        stamp_bg_handle_lifetime!(node)
+        visit_declaration_value!(node)
+        finalize_var_declaration!(node)
       end
 
       # Shared declaration body used by visit_VarDecl and the declaration path of
@@ -275,69 +268,132 @@ module Annotator
       def visit_BindExpr(node)
         T.bind(self, SemanticAnnotator)
 
-        # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
-        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
-          node.value.storage = :stack
-        end
-        visit(node.value)
+        visit_declaration_value!(node)
 
         scope = current_scope
         # `_` is a discard sink: every `_ = expr;` is an independent
         # declaration, never a reassignment.
-        if !scope.entry?(node.name) || node.name == "_"
-          # Declaration path
-          promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
-          promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
-          node.mode = :decl
-          finalize_decl_node!(node, false)
-          if node.value.instance_variable_get(:@has_borrowed_fields)
-            sym = T.must(node.symbol)
-            sym.mark_non_escaping!
-            sym.mark_borrowed_alias!
-          end
-          stamp_init_contents_heap!(node)
-          stamp_bg_handle_lifetime!(node)
-
+        if bind_declares_new_symbol?(node, scope)
+          finalize_bind_declaration!(node)
         elsif scope.is_immutable?(node.name)
-          node.symbol = scope.resolve_entry(node.name)
-          stamp_type!(node, scope.resolve_type(node.name))
-          emit_immutable_assignment_error!(node, scope)
-
+          reject_immutable_bind_assignment!(node, scope)
         else
-          # Assignment path
-          node.mode = :assign
+          finalize_bind_assignment!(node, scope)
+        end
+      end
 
-          verify_unrestricted!(node)
-          node.symbol = scope.entry_for_write(node.name)
-          validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
-          stamp_type!(node, scope.resolve_type(node.name))
+      sig { params(node: DeclarationNode).void }
+      def visit_declaration_value!(node)
+        T.bind(self, SemanticAnnotator)
 
-          handle_assign_move(node)
-          handle_assign_borrow(node)
+        # Fixed-array list literals must be storage-stamped before visiting so
+        # downstream list analysis sees the intended stack placement.
+        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
+          node.value.storage = :stack
+        end
+        visit(node.value)
+      end
 
-          mark_var_mutated(node.name)
-          og_set_live(node.name)
+      sig { params(node: AST::VarDecl).void }
+      def finalize_var_declaration!(node)
+        T.bind(self, SemanticAnnotator)
 
-          # Atomic compound assignments must become fetch ops; load+add+store
-          # would lose atomicity.
-          target_sync = scope.resolve_entry(node.name)&.sync
-          if target_sync == :atomic
-            op = case node.compound_op
-                 when nil  then :store
-                 when :ADD then :fetchAdd
-                 when :SUB then :fetchSub
-                 when :MUL, :DIV
-                   op_str = node.compound_op == :MUL ? "*=" : "/="
-                   error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND,
-                     op: op_str)
-                   nil
-                 else
-                   error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
-                   nil
-                 end
-            node.auto_atomic_op = op if op
-            record_effect(EffectTracker::CONTENTION)
-          end
+        promote_declaration_value!(node)
+        finalize_decl_node!(node, node.mutable)
+        stamp_init_contents_heap!(node)
+        stamp_bg_handle_lifetime!(node)
+      end
+
+      sig { params(node: DeclarationNode).void }
+      def promote_declaration_value!(node)
+        T.bind(self, SemanticAnnotator)
+
+        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+        promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).returns(T::Boolean) }
+      def bind_declares_new_symbol?(node, scope)
+        !scope.entry?(node.name) || node.name == "_"
+      end
+
+      sig { params(node: AST::BindExpr).void }
+      def finalize_bind_declaration!(node)
+        T.bind(self, SemanticAnnotator)
+
+        promote_declaration_value!(node)
+        node.mode = :decl
+        finalize_decl_node!(node, false)
+        mark_borrowed_field_bind_alias!(node)
+        stamp_init_contents_heap!(node)
+        stamp_bg_handle_lifetime!(node)
+      end
+
+      sig { params(node: AST::BindExpr).void }
+      def mark_borrowed_field_bind_alias!(node)
+        return unless node.value.instance_variable_get(:@has_borrowed_fields)
+
+        sym = T.must(node.symbol)
+        sym.mark_non_escaping!
+        sym.mark_borrowed_alias!
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).void }
+      def reject_immutable_bind_assignment!(node, scope)
+        T.bind(self, SemanticAnnotator)
+
+        node.symbol = scope.resolve_entry(node.name)
+        stamp_type!(node, scope.resolve_type(node.name))
+        emit_immutable_assignment_error!(node, scope)
+      end
+
+      sig { params(node: AST::BindExpr, scope: Scope).void }
+      def finalize_bind_assignment!(node, scope)
+        T.bind(self, SemanticAnnotator)
+
+        node.mode = :assign
+        verify_unrestricted!(node)
+        node.symbol = scope.entry_for_write(node.name)
+        target_type = scope.resolve_type(node.name)
+        validate_assignment_type(node, target_type, node.value.resolved_type)
+        stamp_type!(node, target_type)
+
+        handle_assign_move(node)
+        handle_assign_borrow(node)
+
+        mark_var_mutated(node.name)
+        og_set_live(node.name)
+        stamp_atomic_bind_assignment!(node, scope.resolve_entry(node.name)&.sync)
+      end
+
+      sig { params(node: AST::BindExpr, target_sync: T.nilable(Symbol)).void }
+      def stamp_atomic_bind_assignment!(node, target_sync)
+        T.bind(self, SemanticAnnotator)
+
+        return unless target_sync == :atomic
+
+        op = atomic_bind_operation(node)
+        node.auto_atomic_op = op if op
+        record_effect(EffectTracker::CONTENTION)
+      end
+
+      sig { params(node: AST::BindExpr).returns(T.nilable(Symbol)) }
+      def atomic_bind_operation(node)
+        T.bind(self, SemanticAnnotator)
+
+        # Atomic compound assignments must become fetch ops; load+add+store
+        # would lose atomicity.
+        case node.compound_op
+        when nil  then :store
+        when :ADD then :fetchAdd
+        when :SUB then :fetchSub
+        when :MUL, :DIV
+          op_str = node.compound_op == :MUL ? "*=" : "/="
+          error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND, op: op_str)
+          nil
+        else
+          error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
+          nil
         end
       end
 
@@ -732,14 +788,24 @@ module Annotator
       # ==========================================
       private :finalize_decl_node!
       private :accumulate_stack_bytes
-  private :classify_ownership!
-  private :mark_var_mutated
-  private :promote_pipe_to_observable_dest!
-  private :track_union_alias
-  private :validate_assignment_type
-  private :visit_assignment_field
-  private :visit_assignment_index
-  private :visit_assignment_variable
+      private :atomic_bind_operation
+      private :bind_declares_new_symbol?
+      private :classify_ownership!
+      private :finalize_bind_assignment!
+      private :finalize_bind_declaration!
+      private :finalize_var_declaration!
+      private :mark_borrowed_field_bind_alias!
+      private :mark_var_mutated
+      private :promote_declaration_value!
+      private :promote_pipe_to_observable_dest!
+      private :reject_immutable_bind_assignment!
+      private :stamp_atomic_bind_assignment!
+      private :track_union_alias
+      private :validate_assignment_type
+      private :visit_declaration_value!
+      private :visit_assignment_field
+      private :visit_assignment_index
+      private :visit_assignment_variable
 
 end
   end
