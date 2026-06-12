@@ -3,7 +3,7 @@ require "sorbet-runtime"
 require "set"
 
 require_relative "../mir"
-require_relative "../mir_emitter"
+require_relative "../../backends/mir_emitter"
 require_relative "../lower/pipeline/pipeline_host"
 require_relative "../../ast/ast"
 require_relative "../../ast/symbol_entry"

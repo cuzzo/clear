@@ -28,7 +28,7 @@ require_relative "../mir/control_flow"
 require_relative "./compiler_frontend"
 require_relative "../mir/mir"
 require_relative "../mir/mir_lowering"
-require_relative "../mir/mir_emitter"
+require_relative "mir_emitter"
 require_relative "../mir/mir_checker"
 
 class ZigTranspiler

@@ -1,5 +1,5 @@
 # typed: strict
-# src/mir_emitter.rb -- MIR -> Zig template engine.
+# src/backends/mir_emitter.rb -- MIR -> Zig template engine.
 #
 # CONTRACT: This file is a pure template engine. Each MIR node type maps to
 # exactly one fixed Zig text fragment. There is no ownership logic, no
@@ -22,10 +22,10 @@
 
 require "sorbet-runtime"
 
-require_relative "mir"
-require_relative "cleanup_entry"
-require_relative "placement"
-require_relative "../backends/zig_type"
+require_relative "../mir/mir"
+require_relative "../mir/cleanup_entry"
+require_relative "../mir/placement"
+require_relative "zig_type"
 
 class MIREmitter
     extend T::Sig

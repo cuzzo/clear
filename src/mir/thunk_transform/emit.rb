@@ -58,7 +58,6 @@ require_relative "../../backends/zig_type"
 
 require "sorbet-runtime"
 require "set"
-require_relative "../mir_emitter"
 
 module ThunkTransform
   module Emit

@@ -171,7 +171,7 @@ class ModuleImporter
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
-    require_relative "../mir/mir_emitter"
+    require_relative "mir_emitter"
     require_relative "../mir/hoist"
     require_relative "../semantic/pass_state"
     require_relative "../mir/pre_mir_type_check"

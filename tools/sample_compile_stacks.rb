@@ -46,7 +46,7 @@ require "mir/pre_mir_type_check"
 require "mir/mir_pass"
 require "mir_lowering"
 require "mir_checker"
-require "mir_emitter"
+require "backends/mir_emitter"
 
 T::Private::Methods.run_all_sig_blocks if !options[:checked] && defined?(T::Private::Methods)
 

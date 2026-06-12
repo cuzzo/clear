@@ -1988,7 +1988,7 @@ module MIR
   #
   # The types below replace that heredoc with explicit MIR nodes.
   # The lowering builds an `MIR::FsmIoBody` tree; the renderer in
-  # `src/mir/fsm_wrapper_emitter.rb` walks the tree and produces
+  # `src/backends/fsm_wrapper_emitter.rb` walks the tree and produces
   # the same Zig text — but now every structural piece is named,
   # typed, and inspectable. `FsmIoBody` lives inside an
   # `MIR::BgBlock.code` field for emitter compatibility, but the
@@ -2238,7 +2238,7 @@ module MIR
   #                       arms; structurally distinct from a flat
   #                       switch and remains template-driven for now.
   #
-  # The renderer is in src/mir/fsm_wrapper_emitter.rb#render_dispatch.
+  # The renderer is in src/backends/fsm_wrapper_emitter.rb#render_dispatch.
   # Tail variants are the entirety of "what happens after the arm's
   # member fn returns ok"; adding a new suspend kind = new tail
   # variant + new arm in `render_tail`. NEVER a new dispatcher.
@@ -3068,7 +3068,7 @@ module MIR
   #
   # These replace what used to be hand-emitted opaque blobs in
   # mir_lowering.rb's :SNAPSHOT branch + emit_snapshot_mutable_call +
-  # lower_with_match_block. The emitter (mir_emitter.rb) maps each
+  # lower_with_match_block. The backend emitter maps each
   # structured node 1:1 to the same Zig text we used to generate, BUT
   # the construct is now visible to MIRChecker. Specifically:
   #

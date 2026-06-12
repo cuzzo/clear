@@ -990,7 +990,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
 
   it "does not keep the old MIR::Alloc allocation marker path" do
     offenders = (Dir[File.join(ARCH_ROOT, "src/**/*.rb")] -
-                 [File.join(ARCH_ROOT, "src/mir/mir_emitter.rb")]).sort.flat_map do |path|
+                 [File.join(ARCH_ROOT, "src/backends/mir_emitter.rb")]).sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
       File.readlines(path).each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")

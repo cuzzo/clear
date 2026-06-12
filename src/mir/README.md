@@ -556,7 +556,7 @@ re-infer compiler intent from source syntax.
 pass state: :mir_checked
 ```
 
-### 12. MIR Emission (`mir_emitter.rb`)
+### 12. MIR Emission (`../backends/mir_emitter.rb`)
 
 The emitter is a renderer/printer. It maps MIR nodes to Zig text and does not
 perform ownership analysis, allocator selection, type inference, or schema
@@ -633,10 +633,10 @@ The MIR directory is split by responsibility:
 * [`fiber_ctx_builder.rb`](fiber_ctx_builder.rb): shared capture-context builder for BG, DO, stream, concurrent, and FSM-adjacent lowering.
 * [`test_lowering.rb`](test_lowering.rb): TEST/WHEN/STUB/BENCHMARK lowering support.
 * [`mir_checker.rb`](mir_checker.rb): ownership and lifecycle verification over MIR.
-* [`mir_emitter.rb`](mir_emitter.rb): MIR-to-Zig emission.
+* [`../backends/mir_emitter.rb`](../backends/mir_emitter.rb): MIR-to-Zig emission.
 * [`fsm_transform.rb`](fsm_transform.rb), [`fsm_transform/`](fsm_transform),
   [`fsm_lowering.rb`](fsm_lowering.rb), [`fsm_ops.rb`](fsm_ops.rb), and
-  [`fsm_wrapper_emitter.rb`](fsm_wrapper_emitter.rb): async/background FSM
+  [`../backends/fsm_wrapper_emitter.rb`](../backends/fsm_wrapper_emitter.rb): async/background FSM
   lowering and emission support, including structural `FsmOps` operation trees
   for std-lib FSM behavior.
 * [`thunk_transform.rb`](thunk_transform.rb) and

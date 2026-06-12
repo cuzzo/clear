@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/mir/fsm_transform"
 require_relative "../src/mir/fsm_transform/emit"
 require_relative "../src/mir/fsm_transform/segments"
-require_relative "../src/mir/fsm_wrapper_emitter"
+require_relative "../src/backends/fsm_wrapper_emitter"
 
 RSpec.describe FsmTransform::Emit do
   def fsm_body_items(stmts)

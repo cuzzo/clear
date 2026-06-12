@@ -9,7 +9,7 @@ require_relative "../../../ast/type"
 require_relative "../../cleanup_entry"
 require_relative "../../lowering/schema_registry"
 require_relative "../../mir"
-require_relative "../../mir_emitter"
+require_relative "../../../backends/mir_emitter"
 
 class PipelineLowerHeadResult < T::Struct
   const :value, MIR::Node

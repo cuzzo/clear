@@ -3,7 +3,6 @@ require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative '../semantic/capability_plan'
 require_relative 'fsm_ops'
-require_relative 'fsm_wrapper_emitter'
 
 # FSM lowering support helpers. Mixed into MIRLowering as a module
 # so the helpers share the lowering's explicit function/capture state and

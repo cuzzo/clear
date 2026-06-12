@@ -61,8 +61,6 @@
 # longer a gatekeeper -- it is ad-hoc patch code that gives false confidence.
 # Every new check must be justified by one of these invariants.
 #
-require_relative "mir_emitter"
-
 # Structural encoding (no flag inspection):
 #   MIR::Cleanup    -> always-defer cleanup (freed on both success and error)
 #   MIR::ErrCleanup -> errdefer-only cleanup (freed only on error; success
@@ -1680,7 +1678,7 @@ class MIRChecker
     end
 
     expected_target = "__ctx_#{ctx_id}.#{action.name}"
-    target_text = fsm_destroy_expr_text(action.target)
+    target_text = fsm_destroy_expr_label(action.target)
     unless fsm_ctx_field_target?(action.target, ctx_id, action.name)
       raise FsmStructureError, format_fsm_error(
         "INV-FSM-DESTROY-TARGET",
@@ -1802,19 +1800,64 @@ class MIRChecker
 
   sig { params(kind: String, name: String, value: MIR::Emittable, source: T.nilable(AST::Node)).void }
   def self.check_fsm_destroy_required_expr!(kind, name, value, source)
-    text = fsm_destroy_expr_text(value)
-    if text.strip.empty? || text.include?("\n") || text.include?(";")
+    unless fsm_destroy_field_path?(value)
       raise FsmStructureError, format_fsm_error(
         "INV-FSM-DESTROY-ZIG-FIELD",
-        "destroy #{kind} for '#{name}' must be a single expression field, got #{text.inspect}.",
+        "destroy #{kind} for '#{name}' must be a single expression field, got #{fsm_destroy_expr_label(value).inspect}.",
         source,
       )
     end
   end
 
+  sig { params(expr: MIR::Emittable).returns(T::Boolean) }
+  def self.fsm_destroy_field_path?(expr)
+    !fsm_destroy_expr_path(expr).nil?
+  end
+
   sig { params(expr: MIR::Emittable).returns(String) }
-  def self.fsm_destroy_expr_text(expr)
-    T.must(MIREmitter.new.emit(expr))
+  def self.fsm_destroy_expr_label(expr)
+    fsm_destroy_expr_path(expr) || expr.class.name.to_s
+  end
+
+  sig { params(expr: MIR::Emittable).returns(T.nilable(String)) }
+  def self.fsm_destroy_expr_path(expr)
+    case expr
+    when MIR::Ident
+      segment = expr.name.to_s
+      fsm_destroy_field_segment?(segment) ? segment : nil
+    when MIR::FieldGet
+      object = expr.object
+      return nil unless object.is_a?(MIR::Emittable)
+
+      object_path = fsm_destroy_expr_path(object)
+      field = expr.field.to_s
+      return nil unless object_path && fsm_destroy_field_segment?(field)
+
+      "#{object_path}.#{field}"
+    else
+      nil
+    end
+  end
+
+  sig { params(segment: String).returns(T::Boolean) }
+  def self.fsm_destroy_field_segment?(segment)
+    return false if segment.empty?
+
+    bytes = T.let(segment.bytes, T::Array[Integer])
+    first = bytes.fetch(0)
+    return false unless fsm_destroy_field_segment_head_byte?(first)
+
+    bytes.drop(1).all? { |byte| fsm_destroy_field_segment_tail_byte?(byte) }
+  end
+
+  sig { params(byte: Integer).returns(T::Boolean) }
+  def self.fsm_destroy_field_segment_head_byte?(byte)
+    byte == 95 || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+  end
+
+  sig { params(byte: Integer).returns(T::Boolean) }
+  def self.fsm_destroy_field_segment_tail_byte?(byte)
+    fsm_destroy_field_segment_head_byte?(byte) || (byte >= 48 && byte <= 57)
   end
 
   sig { params(expr: MIR::Emittable, ctx_id: Integer, field: String).returns(T::Boolean) }

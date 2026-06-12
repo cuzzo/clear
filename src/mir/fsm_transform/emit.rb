@@ -17,7 +17,6 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "../mir"
-require_relative "../fsm_wrapper_emitter"
 require_relative "context"
 require_relative "segments"
 require_relative "recursive_splitter"

@@ -11,7 +11,7 @@ require_relative "../src/mir/control_flow"
 require_relative "../src/mir/fsm_transform/recursive_splitter"
 require_relative "../src/mir/mir"
 require_relative "../src/mir/mir_checker"
-require_relative "../src/mir/mir_emitter"
+require_relative "../src/backends/mir_emitter"
 require_relative "../src/mir/mir_lowering"
 require_relative "../src/mir/mir_pass"
 

@@ -17,7 +17,7 @@ require "backends/compiler_frontend"
 require "backends/importer"
 require "mir_lowering"
 require "mir_checker"
-require "mir_emitter"
+require "backends/mir_emitter"
 
 options = {
   phase: "frontend",

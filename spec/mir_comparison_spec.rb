@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/backends/transpiler"
 require_relative "../src/mir/mir"
 require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_emitter"
+require_relative "../src/backends/mir_emitter"
 require_relative "../src/ast/ast"
 
 # Comparison test harness: verifies MIR pipeline produces equivalent Zig

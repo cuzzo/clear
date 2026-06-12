@@ -40,7 +40,7 @@ require "mir/hoist"
 require "mir/control_flow"
 require "mir/mir_lowering"
 require "mir/mir_checker"
-require "mir/mir_emitter"
+require "backends/mir_emitter"
 require "mir/pre_mir_type_check"
 require "semantic/pass_state"
 

@@ -27,9 +27,9 @@
 # may emit fixed Zig templates, but it must not accept pre-rendered
 # body or field strings from MIR.
 
-require_relative "mir"
+require_relative "../mir/mir"
 require_relative "mir_emitter"
-require_relative "fsm_ops"
+require_relative "../mir/fsm_ops"
 
 module FsmWrapperEmitter
   extend T::Sig

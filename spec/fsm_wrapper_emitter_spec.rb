@@ -1,7 +1,7 @@
 require 'bundler/setup'
 require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
-require_relative '../src/mir/fsm_wrapper_emitter'
+require_relative '../src/backends/fsm_wrapper_emitter'
 
 # Tests for the FSM-IO state-machine wrapper renderer that
 # replaces the heredoc previously inlined in

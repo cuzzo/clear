@@ -7,7 +7,7 @@ require_relative "../src/ast/symbol_entry"
 require_relative "../src/ast/type"
 require_relative "../src/mir/lower/pipeline/pipeline_host"
 require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_emitter"
+require_relative "../src/backends/mir_emitter"
 require_relative "../src/mir/mir_lowering"
 
 PipelineMaterializerCoverageState = Struct.new(
