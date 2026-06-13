@@ -181,7 +181,13 @@ module FsmOps
     def self.defer_free_field(field);             DeferFreeField.new(field); end
     sig { params(fn: FsmOps::FunctionPath, args: T::Array[FsmOps::Expr], is_try: T::Boolean).returns(FsmOps::StmtCall) }
     def self.stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
-    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[FsmOps::Expr]).returns(FsmOps::IoSubmit) }
+    sig do
+      params(
+        verb: Symbol,
+        waiter: T.any(String, FsmOps::StateField),
+        extra_args: T::Array[FsmOps::Expr]
+      ).returns(FsmOps::IoSubmit)
+    end
     def self.io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
@@ -246,7 +252,6 @@ module FsmOps
   #
   # Constructor takes the same context as Emitter:
   #   ctx_id     Integer — for __ctx_<id>.X field references
-  #   bg_rt      String  — current BG runtime variable name
   #   arg_mirs   [MIR::*] — MIR expressions for the {N} template
   #                         arg slots; produced by lowering the
   #                         AST args (not their rendered Zig).
@@ -279,17 +284,15 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[Object]).void }
-    def initialize(ctx_id:, bg_rt:, arg_mirs:)
+    sig { params(ctx_id: Integer, arg_mirs: T::Array[Object]).void }
+    def initialize(ctx_id:, arg_mirs:)
       @ctx_id = ctx_id
-      @bg_rt = bg_rt
       @arg_mirs = arg_mirs
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
     sig { params(ops: T::Array[Stmt]).returns(T::Array[Object]) }
     def lower_stmts(ops)
-      return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 
@@ -346,8 +349,8 @@ module FsmOps
       case expr
       when ArgRef
         idx = expr.idx
-        unless @arg_mirs && idx < @arg_mirs.length
-          raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_mirs&.length || 0} args)"
+        unless idx >= 0 && idx < @arg_mirs.length
+          raise ArgumentError, "FsmOps arg index #{idx} out of range (#{@arg_mirs.length} args)"
         end
         @arg_mirs[idx]
       when StateField
@@ -447,9 +450,9 @@ end
   end
 
     sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
-    def self.alloc_state_fields(ops)
+  def self.alloc_state_fields(ops)
     out = []
-    Array(ops).each do |op|
+    ops.each do |op|
       if op.is_a?(AssignField) && op.value.is_a?(AllocExpr)
         out << op.field
       end
@@ -460,7 +463,7 @@ end
   sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
   def self.free_state_fields(ops)
     out = []
-    Array(ops).each do |op|
+    ops.each do |op|
       case op
       when ErrDeferFreeField, DeferFreeField
         out << op.field

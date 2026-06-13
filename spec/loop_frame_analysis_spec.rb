@@ -29,6 +29,23 @@ RSpec.describe LoopFrameAnalysis do
       ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
   end
 
+  def function_nodes(ast)
+    ast.statements
+      .select { |s| s.is_a?(AST::FunctionDef) }
+      .to_h { |fn| [fn.name, fn] }
+  end
+
+  def first_concurrent_with_shard_context(ast)
+    found = nil
+    AST.each_locatable(ast.statements, descend_functions: true) do |node|
+      next unless node.is_a?(AST::ConcurrentOp) && node.shard_context
+
+      found = node
+      break
+    end
+    found
+  end
+
   # ===========================================================================
   # Group A: mark_per_iter = true
   # ===========================================================================
@@ -836,6 +853,263 @@ RSpec.describe LoopFrameAnalysis do
       # which is always an Array. nil must NOT be silently accepted --
       # that was the band-aid. Callers must never pass nil.
       expect { MIR::LocalBindingAnalysis.each_direct_loop_node(nil) { |_| } }.to raise_error(TypeError)
+    end
+
+    it "classifies direct loop expression boundary node kinds" do
+      token = Lexer::Token.new(:VAR_ID, "x", 1, 1)
+      function = AST::FunctionDef.new(
+        token,
+        "nested",
+        [],
+        [],
+        Type.new(:Void),
+        nil,
+        [],
+        [],
+        nil,
+        :public,
+        [],
+        false,
+      )
+      boundary_nodes = [
+        AST::WhileLoop.new(token, AST::Literal.new(token, :BOOL, true, :stack), [], nil),
+        AST::WhileBindLoop.new(token, AST::Literal.new(token, :NIL, nil, :stack), "item", token, [], nil),
+        AST::ForRange.new(token, "i", AST::Literal.new(token, :INT64, 0, :stack), AST::Literal.new(token, :INT64, 1, :stack), false, [], nil, false),
+        AST::ForEach.new(token, "item", AST::Identifier.new(token, "items"), [], nil, false),
+        function,
+        AST::LambdaLit.new(token, [], [], [], nil, nil),
+        AST::BgBlock.new(token, [], nil, :standard, false, false, nil, false),
+        AST::BgStreamBlock.new(token, [], nil, :standard),
+      ]
+      expression = AST::FuncCall.new(token, "make", [])
+
+      expect(boundary_nodes.map { |node| LoopFrameAnalysis.direct_loop_expression_boundary?(node) })
+        .to all(be(true))
+      expect(LoopFrameAnalysis.direct_loop_expression_boundary?(expression)).to be(false)
+      expect(LoopFrameAnalysis.direct_loop_expression_boundary?(Object.new)).to be(false)
+    end
+
+    it "uses loop-local names when scanning receiver-mutating frame expressions" do
+      token = Lexer::Token.new(:VAR_ID, "local", 1, 1)
+      local_type = Type.new(:"String[]", collection: :list)
+      receiver = AST::Identifier.new(token, "local")
+      receiver.full_type = local_type
+      receiver.symbol = SymbolEntry.new(reg: "local", type: local_type, mutable: true, storage: :frame)
+      allocating_arg = AST::FuncCall.new(token, "makeFrame", [])
+      allocating_arg.full_type = Type.new(:Int64)
+      mutating_call = AST::MethodCall.new(token, receiver, "append", [allocating_arg])
+      mutating_call.full_type = Type.new(:Void)
+      mutating_call.matched_signature = FunctionSignature.new(
+        params: [],
+        return_type: Type.new(:Void),
+        intrinsic: true,
+        emit: IntrinsicEmit.new(mutates_receiver: true),
+      )
+      callee = AST::FunctionDef.new(
+        token,
+        "makeFrame",
+        [],
+        [],
+        Type.new(:Int64),
+        nil,
+        [],
+        [],
+        nil,
+        :public,
+        [],
+        true,
+      )
+
+      expect(
+        LoopFrameAnalysis.direct_loop_expression_frame_alloc?(
+          [mutating_call],
+          { "makeFrame" => callee },
+          Set["local"],
+        ),
+      ).to be(true)
+      expect(
+        LoopFrameAnalysis.direct_loop_expression_frame_alloc?(
+          [mutating_call],
+          { "makeFrame" => callee },
+          Set.new,
+        ),
+      ).to be(false)
+      expect(
+        LoopFrameAnalysis.direct_loop_expression_frame_alloc?(
+          [mutating_call],
+          { "makeFrame" => callee },
+        ),
+      ).to be(false)
+    end
+
+    it "skips nested loop boundaries while scanning later frame-allocating siblings" do
+      token = Lexer::Token.new(:VAR_ID, "makeFrame", 1, 1)
+      nested_loop = AST::WhileLoop.new(
+        token,
+        AST::Literal.new(token, :BOOL, true, :stack),
+        [],
+        nil,
+      )
+      allocating_call = AST::FuncCall.new(token, "makeFrame", [])
+      allocating_call.full_type = Type.new(:Int64)
+      callee = AST::FunctionDef.new(
+        token,
+        "makeFrame",
+        [],
+        [],
+        Type.new(:Int64),
+        nil,
+        [],
+        [],
+        nil,
+        :public,
+        [],
+        true,
+      )
+
+      expect(
+        LoopFrameAnalysis.direct_loop_expression_frame_alloc?(
+          [nested_loop, allocating_call],
+          { "makeFrame" => callee },
+        ),
+      ).to be(true)
+    end
+
+    it "short-circuits after finding a frame allocation" do
+      token = Lexer::Token.new(:VAR_ID, "makeFrame", 1, 1)
+      allocating_call = AST::FuncCall.new(token, "makeFrame", [])
+      allocating_call.full_type = Type.new(:Int64)
+      untyped_later_call = AST::FuncCall.new(token, "needsNoScan", [])
+      callee = AST::FunctionDef.new(
+        token,
+        "makeFrame",
+        [],
+        [],
+        Type.new(:Int64),
+        nil,
+        [],
+        [],
+        nil,
+        :public,
+        [],
+        true,
+      )
+
+      expect(
+        LoopFrameAnalysis.direct_loop_expression_frame_alloc?(
+          [allocating_call, untyped_later_call],
+          { "makeFrame" => callee },
+        ),
+      ).to be(true)
+    end
+
+    it "analyze! skips declarations without stopping later function analysis" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 5 DO
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileLoop) }
+      loop.mark_per_iter = false
+      declaration = AST::FunctionDef.new(
+        Lexer::Token.new(:VAR_ID, "declared", 1, 1),
+        "declared",
+        [],
+        [],
+        Type.new(:Void),
+        nil,
+        nil,
+        [],
+        nil,
+        :public,
+        [],
+        false,
+      )
+
+      LoopFrameAnalysis.analyze!({ "declared" => declaration, "main" => main_fn(ast) })
+
+      expect(loop.mark_per_iter).to be(true)
+    end
+
+    it "analyze! passes schema lookup into while-bind loop-capture frame checks" do
+      ast = run_mir(<<~CLEAR)
+        STRUCT Box { parts: Int64[]@list }
+        FN maybe() RETURNS ?Box -> RETURN NIL; END
+        FN main() RETURNS Void ->
+          WHILE maybe() AS box DO
+          END
+          RETURN;
+        END
+      CLEAR
+      loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileBindLoop) }
+      loop.mark_per_iter = false
+      box_schema = Schemas::StructSchema.new(fields: {
+        "parts" => AST::StructField.new(type: Type.new(:"Int64[]", collection: :list), default: nil, borrowed: false),
+      })
+
+      LoopFrameAnalysis.analyze!(
+        function_nodes(ast),
+        ->(name) { name.to_sym == :Box ? box_schema : nil },
+      )
+
+      expect(loop.mark_per_iter).to be(true)
+    end
+
+    it "analyze! passes function nodes into loop expression frame allocation checks" do
+      ast = run_mir(<<~CLEAR)
+        FN scratch(n: Int64) RETURNS Int64 ->
+          MUTABLE parts: Int64[]@list = [];
+          parts.append(n);
+          RETURN n;
+        END
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 3_i64 DO
+            x = scratch(i);
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileLoop) }
+      loop.mark_per_iter = false
+
+      LoopFrameAnalysis.analyze!(function_nodes(ast))
+
+      expect(loop.mark_per_iter).to be(true)
+    end
+
+    it "analyze! updates shard contexts through the public entrypoint" do
+      ast = run_mir(<<~CLEAR)
+        FN makeKey(n: Int64) RETURNS !String ->
+          RETURN "k:${toString(n)}";
+        END
+        FN main() RETURNS Void ->
+          MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+          (0_i64 ..< 4_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
+            counts[_] = 1_i64;
+          };
+          RETURN;
+        END
+      CLEAR
+      concurrent = T.must(first_concurrent_with_shard_context(ast))
+      reset_context = T.must(concurrent.shard_context).with_frame_allocations(
+        key_allocates_frame: false,
+        body_allocates_frame: false,
+      )
+      concurrent.shard_context = reset_context
+
+      LoopFrameAnalysis.analyze!(function_nodes(ast))
+
+      context = T.must(concurrent.shard_context)
+      expect(context.key_allocates_frame).to be(true)
+      expect(context.body_allocates_frame).to be(false)
     end
   end
 

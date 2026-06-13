@@ -18,7 +18,7 @@ require_relative '../src/mir/fsm_transform/emit' unless defined?(FsmTransform::E
 # concatenate setup/bind into the right segment bodies, build the
 # dispatch from segment tails, and wrap in FsmGenericBody.
 
-RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
+RSpec.describe FsmTransform::Emit do
   def fsm_body_items(stmts)
     stmts.map do |stmt|
       FsmTransform::Emit.fsm_body_mir_item(stmt)
@@ -61,14 +61,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       ctx, fsm_specs(specs), promoted_field_decls, lowering)
   end
 
-  let(:lowering_double) {
-    Class.new {
-      def capture_inits_fsm(_); ""; end
-    }.new
-  }
-
-  let(:base_ctx) {
-    FsmTransform::Emit::FsmEmitContext.new(
+  def fsm_context(overrides = {})
+    defaults = {
       id: 0,
       bg_rt: "__rt_bg0",
       blk_label: "__bg0",
@@ -94,8 +88,17 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
       profile_site_id: nil,
       profile_line: nil,
       profile_column: nil,
-    )
+    }
+    FsmTransform::Emit::FsmEmitContext.new(**defaults.merge(overrides))
+  end
+
+  let(:lowering_double) {
+    Class.new {
+      def capture_inits_fsm(_); ""; end
+    }.new
   }
+
+  let(:base_ctx) { fsm_context }
 
   it "rejects unexpanded lock tails in dispatch assembly" do
     spec = {
@@ -107,8 +110,45 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
 
     expect {
       typed_spec = fsm_spec(spec)
-      FsmTransform::Emit.send(:build_dispatch_tail, typed_spec, 0, [typed_spec], 0)
+      FsmTransform::Emit.send(:build_dispatch_tail, typed_spec)
     }.to raise_error(ArgumentError, /Unsupported segment tail/)
+  end
+
+  it "does not materialize inert segments for empty descriptor binds" do
+    descriptor = MIR::SuspendDescriptor.new(
+      [],
+      [],
+      MIR::FsmTailYield.new(1, "WaitForLock"),
+      [],
+      nil,
+      nil,
+      false,
+    )
+    result = build_unified(
+      base_ctx,
+      [
+        {
+          index: 0,
+          body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("beforeEmptyBind()"), false)],
+          tail: FsmTransform::Segments::IoSuspend.new(Struct.new(:args).new([]), {}, nil, 1),
+          descriptor: descriptor,
+          fn_name: "runBefore",
+        },
+        {
+          index: 1,
+          body_stmts: [],
+          tail: FsmTransform::Segments::Done.new(nil),
+          descriptor: nil,
+          fn_name: nil,
+        },
+      ],
+      [],
+      lowering_double,
+    )
+
+    expect(result.body.ctx_struct.member_fns.map(&:fn_name)).to eq(["runBefore"])
+    done_arm = result.body.ctx_struct.dispatch.arms.last
+    expect(done_arm.body_fn_name).to be_nil
   end
 
   it "routes descriptor binds through prebuilt MIR jump tail next_step values" do
@@ -143,6 +183,76 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     run_after = out[/fn runLegacy2.*?fn resumeFn/m]
     expect(run_after).to include("bindLegacy()")
     expect(run_after).to include("afterLegacy()")
+  end
+
+  it "preserves structural generic body metadata" do
+    capture_field = ctx_decl("captured", "i64", MIR::Lit.new("9"))
+    ctx = fsm_context(
+      capture_fields: [capture_field],
+      extra_ctx_fields: [
+        ctx_decl("captured", "i64", MIR::Lit.new("4")),
+        ctx_decl("promoted", "i64", MIR::Lit.new("1")),
+        ctx_decl("promoted", "i64", MIR::Lit.new("3")),
+      ],
+    )
+    prologue_stmt = MIR::Comment.new("extra prologue")
+    pre_body_skip = MIR::FsmTailCondSkip.new(MIR::Ident.new("skip_now"), 7)
+    pre_body_stmt = MIR::ExprStmt.new(MIR::Lit.new("beforeArm()"), false)
+    err_cleanup = MIR::ExprStmt.new(MIR::Lit.new("cleanupArm()"), false)
+    cleanup_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+    destroy_action = MIR::FsmDestroyCleanup.new(
+      source_kind: :body,
+      name: "payload",
+      target: MIR::FieldGet.new(MIR::Ident.new("__ctx_0"), "payload"),
+      cleanup_entry: cleanup_entry,
+    )
+    FsmTransform::Emit.send(:fsm_destroy_actions, ctx) << destroy_action
+    result = build_unified(
+      ctx,
+      [
+        {
+          index: 0,
+          body_stmts: [MIR::ExprStmt.new(MIR::Lit.new("body()"), false)],
+          structure_stmts: [
+            MIR::TransferMark.new("__ctx_0.payload", :return, :heap),
+          ],
+          tail: FsmTransform::Segments::Done.new(nil),
+          descriptor: nil,
+          fn_name: "runBody",
+          pre_body_skip: pre_body_skip,
+          pre_body_stmts: [pre_body_stmt],
+          err_cleanups: [err_cleanup],
+          extra_prologue_stmts: [prologue_stmt],
+        },
+      ],
+      [
+        ctx_decl("promoted", "i64", MIR::Lit.new("0")),
+        ctx_decl("kept", "i64", MIR::Lit.new("2")),
+      ],
+      lowering_double,
+    )
+
+    ctx_struct = result.body.ctx_struct
+    member_fn = ctx_struct.member_fns.first
+    arm = ctx_struct.dispatch.arms.first
+    step_field = ctx_struct.extra_field_decls.find { |decl| decl.name == "step" }
+    expect(result.structure.ctx_id).to eq(0)
+    expect(ctx_struct.type_name).to eq("__BgCtx0")
+    expect(ctx_struct.promise_zig).to eq("CheatLib.Promise(i64)")
+    expect(ctx_struct.dispatch.ctx_id).to eq(0)
+    expect(ctx_struct.dispatch.uses_loop_label).to eq(true)
+    expect(ctx_struct.destroy_actions).to eq([destroy_action])
+    expect(ctx_struct.extra_field_decls.map(&:name)).to eq(["step", "promoted"])
+    expect(step_field.type_zig).to eq("u8")
+    expect(step_field.default_value).to eq(MIR::Lit.new("0"))
+    expect(ctx_struct.promoted_field_decls.map(&:name)).to eq(["kept"])
+    expect(arm.pre_body_skip).to eq(pre_body_skip)
+    expect(arm.pre_body_stmts).to eq([pre_body_stmt])
+    expect(arm.err_cleanups).to eq([err_cleanup])
+    expect(result.structure.required_move_guards).to eq(["payload"])
+    expect(member_fn.ctx_id).to eq(0)
+    expect(member_fn.bg_rt).to eq("__rt_bg0")
+    expect(member_fn.extra_prologue_stmts).to eq([prologue_stmt])
   end
 
   it "runs incoming descriptor binds before structural lock-try tails" do

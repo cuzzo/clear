@@ -127,8 +127,8 @@ module FmtVerifier
   # first ~40 lines of context — enough to see what shifted, not so
   # much that a sweep of N files spams the terminal.
   def self.diff_excerpt(before, after, max_lines: 40)
-    Tempfile.create('before') do |bf|
-      Tempfile.create('after') do |af|
+    Tempfile.create do |bf|
+      Tempfile.create do |af|
         bf.write(before); bf.flush
         af.write(after);  af.flush
         out = `diff -u #{bf.path} #{af.path} 2>&1`

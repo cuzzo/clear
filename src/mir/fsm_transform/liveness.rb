@@ -48,11 +48,11 @@ module FsmTransform
     # fields are added by the emitter, not the body).
     sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, Object]).returns(Result) }
     def self.analyze(segments, ctx)
-      captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
-      capture_names = captured.keys.to_set
+      captured = T.cast(ctx.fetch(:captured, {}), T::Hash[String, Object])
+      capture_names = T.let(captured.keys.to_set, T::Set[String])
 
-      defs_by_seg = {}   # seg_index -> { name => type }
-      uses_by_seg = {}   # seg_index -> Set<name>
+      defs_by_seg = T.let({}, T::Hash[Integer, T::Hash[String, T.nilable(Type)]])
+      uses_by_seg = T.let({}, T::Hash[Integer, T::Set[String]])
 
       segments.each do |seg|
         defs_by_seg[seg.index] = {}
@@ -74,25 +74,24 @@ module FsmTransform
           # Type info comes from the call's full_type; the
           # emitter resolves it via the AST node when emitting
           # the state field decl.
-          defs_by_seg[seg.index][seg.tail.result_var] = nil
+          T.must(defs_by_seg[seg.index])[seg.tail.result_var] = nil
         end
       end
 
-      first_def = {}
-      last_use  = {}
+      first_def = T.let({}, T::Hash[String, Integer])
+      last_use = T.let({}, T::Hash[String, Integer])
+      type_by_name = T.let({}, T::Hash[String, Type])
       defs_by_seg.each do |seg_idx, defs|
         defs.each do |name, type|
-          next if capture_names.include?(name)
-          first_def[name] = [first_def[name], seg_idx].compact.min
+          first_def[name] ||= seg_idx
           # type may have been recorded twice; preserve the first
           # non-nil typing.
-          first_def[:"#{name}__type"] ||= type if type
+          type_by_name[name] ||= type if type
         end
       end
       uses_by_seg.each do |seg_idx, uses|
         uses.each do |name|
-          next if capture_names.include?(name)
-          last_use[name] = [last_use[name], seg_idx].compact.max
+          last_use[name] = seg_idx
         end
       end
 
@@ -103,9 +102,10 @@ module FsmTransform
       # linear scan.
       cyclic_segs = compute_cyclic_segments(segments)
 
-      cross = {}
+      cross = T.let({}, T::Hash[String, CrossSegmentVarFact])
       first_def.each do |name, def_seg|
-        next if name.is_a?(Symbol) && name.to_s.end_with?("__type")
+        next if capture_names.include?(name)
+
         use_seg = last_use[name]
         next if use_seg.nil?         # defined but never read
         unless use_seg > def_seg
@@ -115,7 +115,7 @@ module FsmTransform
           next unless cyclic_segs.include?(def_seg)
         end
         cross[name] = CrossSegmentVarFact.new(
-          type_info: first_def[:"#{name}__type"],
+          type_info: type_by_name[name],
           first_def_seg: def_seg,
           last_use_seg: use_seg,
         )

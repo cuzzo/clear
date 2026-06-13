@@ -53,7 +53,6 @@ module PredicateRewriter
     ast = ::ClearParser.new(tokens, source).parse
     edits = []
     walk(ast, source, edits)
-    return source if edits.empty?
     apply_edits(source, edits)
   end
 

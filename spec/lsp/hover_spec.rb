@@ -12,7 +12,7 @@ RSpec.describe LSP::Hover do
     store = LSP::DocumentStore.new
     store.open("file:///t.cht", text, 1)
     doc = store.get("file:///t.cht")
-    doc.cached_findings = LSP::Analyzer::Result.new(findings: findings, fatal_error: fatal)
+    doc.cached_findings = LSP::AnalysisResult.new(findings: findings, fatal_error: fatal)
     doc
   end
 

@@ -1,7 +1,7 @@
 require "rspec"
 require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
-RSpec.describe "binary operator type checking" do
+RSpec.describe Type, "binary operator type checking" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
     ast = ClearParser.new(tokens, source).parse
@@ -93,23 +93,26 @@ RSpec.describe "binary operator type checking" do
     auto = Type.new(:Auto, auto: true)
 
     expect(Type.binary_op(:EQ, auto, Type.new(:Int64)).type.resolved).to eq(:Bool)
+    expect(Type.binary_op(:AND, auto, Type.new(:Bool)).type.resolved).to eq(:Bool)
+    expect(Type.binary_op(:OR, Type.new(:Bool), auto).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:ADD, auto, Type.new(:Int64)).type.auto?).to be(true)
-    expect(Type.binary_op(:UNKNOWN, Type.new(:Int64), Type.new(:Int64)).error).to include("Unknown")
+    expect(Type.binary_op(:MUL, Type.new(:Int64), auto).type.auto?).to be(true)
+    expect(Type.binary_op(:UNKNOWN, Type.new(:Int64), Type.new(:Int64)).error).to eq("Unknown operator: UNKNOWN")
 
     expect(Type.binary_op(:AND, Type.new(:Bool), Type.new(:Bool)).type.resolved).to eq(:Bool)
-    expect(Type.binary_op(:AND, Type.new(:Bool), Type.new(:Int64)).error).to include("Bool")
+    expect(Type.binary_op(:AND, Type.new(:Bool), Type.new(:Int64)).error).to eq("Operator AND requires Bool operands, got Bool and Int64")
 
     expect(Type.binary_op(:EQ, Type.new(:Direction), Type.new(:Direction)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:EQ, Type.new(:Int64), Type.new(:Float64)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:EQ, Type.new(:String), Type.new(:"Byte[1]")).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:EQ, Type.new(:"?Float64"), Type.new(:NIL)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:NEQ, Type.new(:NIL), Type.new(:"?Float64")).type.resolved).to eq(:Bool)
-    expect(Type.binary_op(:EQ, Type.new(:String), Type.new(:Int64)).error).to include("cannot compare")
+    expect(Type.binary_op(:EQ, Type.new(:String), Type.new(:Int64)).error).to eq("Operator EQ cannot compare String with Int64")
     expect(Type.binary_op(:EQ, Type.new(:Int64), Type.new(:NIL)).error).to include("cannot compare")
 
     expect(Type.binary_op(:LT, Type.new(:Int64), Type.new(:Float64)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:LT, Type.new(:String), Type.new(:"Byte[1]")).type.resolved).to eq(:Bool)
-    expect(Type.binary_op(:LT, Type.new(:Bool), Type.new(:Int64)).error).to include("ordered")
+    expect(Type.binary_op(:LT, Type.new(:Bool), Type.new(:Int64)).error).to eq("Operator LT requires ordered operands, got Bool and Int64")
     expect(Type.binary_op(:LT, Type.new(:"?Int64"), Type.new(:Int64)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:EQ, Type.new(:"?Int64"), Type.new(:Int64)).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:EQ, Type.new(:Int64), Type.new(:"?Int64")).type.resolved).to eq(:Bool)
@@ -117,6 +120,8 @@ RSpec.describe "binary operator type checking" do
     expect(Type.binary_op(:LTE, Type.new(:T), Type.new(:T)).type.resolved).to eq(:Bool)
 
     expect(Type.binary_op(:SUB, Type.new(:Int64), Type.new(:Int64)).type.resolved).to eq(:Int64)
+    expect(Type.binary_op(:WRAP_ADD, Type.new(:Int64), Type.new(:Int64)).type.resolved).to eq(:Int64)
+    expect(Type.binary_op(:CHECK_ADD, Type.new(:Int64), Type.new(:Int64)).type.resolved).to eq(:Int64)
     expect(Type.binary_op(:SUB, Type.new(:T), Type.new(:T)).type.resolved).to eq(:T)
     expect(Type.binary_op(:ADD, Type.new(:T), Type.new(:T)).type.resolved).to eq(:T)
     expect(Type.binary_op(:SUB, Type.new(:Int8), Type.new(:Int64)).type.resolved).to eq(:Int64)
@@ -127,5 +132,6 @@ RSpec.describe "binary operator type checking" do
     expect(Type.binary_op(:SUB, Type.new(:Float64), Type.new(:Int64)).type.resolved).to eq(:Float64)
     expect(Type.binary_op(:MUL, Type.new(:Any), Type.new(:Any)).type.resolved).to eq(:Any)
     expect(Type.binary_op(:SUB, Type.new(:String), Type.new(:String)).error).to include("numeric")
+    expect(Type.binary_op(:ADD, Type.new(:Bool), Type.new(:Counter)).error).to eq("Cannot add types: Bool and Counter")
   end
 end

@@ -3,7 +3,7 @@ require_relative "../src/ast/lexer" unless defined?(Lexer)
 require_relative "../src/ast/parser" unless defined?(ClearParser)
 require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
-RSpec.describe "Wildcard Borrows" do
+RSpec.describe BorrowChecker do
   def run(source)
     tokens = Lexer.new(source).tokenize
     ast = ClearParser.new(tokens, source).parse

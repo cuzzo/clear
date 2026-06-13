@@ -1,4 +1,5 @@
 # typed: strict
+require "set"
 require "sorbet-runtime"
 require_relative "diagnostic_registry"
 
@@ -504,17 +505,25 @@ module DiagnosticBuckets
     },
   ].freeze, T::Array[T::Hash[Symbol, T.untyped]])
 
+  COVERED_CODES = T.let(BUCKETS.flat_map { |bucket|
+    T.cast(bucket[:codes], T::Array[Symbol])
+  }.to_set.freeze, T::Set[Symbol])
+
+  BUCKETS_BY_CATEGORY = T.let(BUCKETS.group_by { |bucket|
+    T.cast(bucket[:category], Symbol)
+  }.transform_values { |buckets| buckets.freeze }.freeze, T::Hash[Symbol, T::Array[T::Hash[Symbol, T.untyped]]])
+
   # All codes referenced by any bucket — used by the audit to confirm
   # bucket assignments are exhaustive for their category.
   sig { returns(T::Set[Symbol]) }
   def self.covered_codes
-    @covered ||= T.let(BUCKETS.flat_map { |b| b[:codes] }.to_set, T.nilable(T::Set[Symbol]))
+    COVERED_CODES
   end
 
   # Buckets for a specific category (e.g. `:type`).
   sig { params(cat: Symbol).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def self.for_category(cat)
-    BUCKETS.select { |b| b[:category] == cat }
+    BUCKETS_BY_CATEGORY.fetch(cat, [])
   end
 
   # Status of a single code:
@@ -549,5 +558,3 @@ module DiagnosticBuckets
     end
   end
 end
-
-require "set"

@@ -43,7 +43,6 @@ module FsmWrapperEmitter
   # types -- the emitter is the single source of truth.
   sig { params(body: T.untyped).returns(String) }
   def self.render(body)
-    T.bind(self, T.untyped) rescue nil
     case body
     when MIR::FsmIoBody      then render_io_body(body)
     when MIR::FsmB1Body      then render_b1_body(body)

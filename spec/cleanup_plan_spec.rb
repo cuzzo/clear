@@ -101,6 +101,100 @@ RSpec.describe CleanupClassifier do
       expect(empty_plan.empty?).to be(true)
     end
 
+    it "classifies declaration-only functions as empty plans" do
+      fn = AST::FunctionDef.new(
+        tok,
+        "declared",
+        [],
+        [],
+        Type.new(:Void),
+        nil,
+        nil,
+        [],
+        nil,
+        :public,
+        [],
+        false,
+      )
+
+      plan = CleanupClassifier.classify_plan(fn, schema_lookup: schema_lookup_for)
+
+      expect(plan.function_name).to eq("declared")
+      expect(plan.empty?).to eq(true)
+      expect(plan.bindings).to eq({})
+      expect(plan.facts.entry_for("anything")).to equal(CleanupEntry::NONE)
+    end
+
+    it "runs capture binding classification through the public plan entrypoint" do
+      weak_value = cleanup_identifier("weak", type: Type.new(:"?String[]"))
+      resolve = AST::ResolveNode.new(tok, weak_value)
+      resolve.full_type = Type.new(:"?String[]")
+      if_bind = AST::IfBind.new(
+        tok,
+        [AST::Binding.new(expr: resolve, name: "items", name_token: tok)],
+        [],
+        nil,
+      )
+      box_schema = Schemas::StructSchema.new(fields: {
+        "name" => AST::StructField.new(type: Type.new(:String), default: nil, borrowed: false),
+      })
+      weak_box = cleanup_identifier("weak_box", type: Type.new(:"?Box"))
+      resolve_box = AST::ResolveNode.new(tok, weak_box)
+      resolve_box.full_type = Type.new(:"?Box")
+      box_bind = AST::IfBind.new(
+        tok,
+        [AST::Binding.new(expr: resolve_box, name: "box", name_token: tok)],
+        [],
+        nil,
+      )
+      fn = AST::FunctionDef.new(
+        tok,
+        "captures",
+        [],
+        [],
+        Type.new(:Void),
+        nil,
+        [if_bind, box_bind],
+        [],
+        nil,
+        :public,
+        [],
+        false,
+      )
+
+      plan = CleanupClassifier.classify_plan(fn, schema_lookup: schema_lookup_for(Box: box_schema))
+      entry = plan.facts.entry_for("items")
+      box_entry = plan.facts.entry_for("box")
+
+      expect(entry).not_to equal(CleanupEntry::NONE)
+      expect(entry.kind).to eq(:uniform)
+      expect(entry.alloc).to eq(:heap)
+      expect(entry.has_moved_guard?).to eq(true)
+      expect(entry[:elem_zig_type]).to eq(Type.new(:String).zig_type)
+      expect(box_entry).not_to equal(CleanupEntry::NONE)
+      expect(box_entry.kind).to eq(:uniform)
+      expect(box_entry.alloc).to eq(:heap)
+      expect(box_entry.has_moved_guard?).to eq(true)
+    end
+
+    it "stamps loop-local cleanup scopes through the public plan entrypoint" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 1_i64 DO
+            MUTABLE vals: Int64[]@list = List[];
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      entry = plan.facts.entry_for("vals")
+      expect(entry).not_to equal(CleanupEntry::NONE)
+      expect(entry.alloc).to eq(:frame)
+      expect(entry.scope).to eq(:iteration)
+    end
+
     it "returns the non-nil cleanup sentinel for missing and inactive facts" do
       inactive = CleanupEntry.no_cleanup(alloc: :frame, scope: :function)
       facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("inactive" => inactive)
@@ -216,6 +310,22 @@ RSpec.describe CleanupClassifier do
       CleanupClassifier.send(:walk_moved_source_guards, [call], bindings)
 
       expect(bindings.fetch("owned").has_moved_guard?).to be(true)
+    end
+
+    it "marks moved source guards through the public plan entrypoint" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        STRUCT Pt { x: Float64, y: Float64 }
+        FN consume(TAKES p: Pt[10]@pool) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          MUTABLE pool: Pt[10]@pool = [];
+          consume(GIVE pool);
+          RETURN;
+        END
+      CLEAR
+
+      entry = plan.facts.entry_for("pool")
+      expect(entry).not_to equal(CleanupEntry::NONE)
+      expect(entry.has_moved_guard?).to be(true)
     end
   end
 

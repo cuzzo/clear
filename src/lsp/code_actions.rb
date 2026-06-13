@@ -46,7 +46,7 @@ module LSP
         next unless ranges_overlap?(diag[:range], request_range)
 
         finding.fixes.each do |fix|
-          out << build_action(fix, finding, diag, document, source)
+          out << build_action(fix, diag, document, source)
         end
       end
 
@@ -55,8 +55,8 @@ module LSP
 
     # ---- internals ----
 
-    sig { params(fix: T.untyped, _finding: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
-    def self.build_action(fix, _finding, diag, document, source)
+    sig { params(fix: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    def self.build_action(fix, diag, document, source)
       kind = fix.confidence == :auto ? KIND_QUICKFIX : KIND_REFACTOR
       edits = fix.edits.map { |e| build_text_edit(e, source) }
 

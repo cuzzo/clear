@@ -13,8 +13,9 @@
 - subject: LSP::Position
   require: lsp/position
   spec: spec/lsp/position_spec.rb
-  baseline: 88.51
+  baseline: 96.62
   hard_gate: true
+  max_timeouts: 0
 - subject: LSP::RPC
   require: lsp/rpc
   spec: spec/lsp/rpc_spec.rb
@@ -38,28 +39,37 @@
 - subject: Pprof
   require: tools/pprof
   spec: spec/pprof_spec.rb
-  baseline: 69.94
-  hard_gate: false
+  baseline: 92.73
+  hard_gate: true
+  max_timeouts: 20
 - subject: LSP::Analyzer
   require: lsp/analyzer
-  spec: spec/lsp/analyzer_spec.rb
-  baseline: 61.88
-  hard_gate: false
+  specs:
+    - spec/lsp/analyzer_spec.rb
+    - spec/lsp/diagnostics_spec.rb
+    - spec/lsp/hover_spec.rb
+    - spec/lsp/code_actions_spec.rb
+  baseline: 97.44
+  hard_gate: true
+  max_timeouts: 0
 - subject: IntrinsicRegistry
   require: annotator/helpers/intrinsic_registry
   spec: spec/intrinsic_registry_spec.rb
-  baseline: 55.58
-  hard_gate: false
+  baseline: 92.81
+  hard_gate: true
+  max_timeouts: 0
 - subject: LSP::CodeActions
   require: lsp/analyzer -r lsp/document_store -r lsp/code_actions
   spec: spec/lsp/code_actions_spec.rb
-  baseline: 94.64
+  baseline: 98.97
   hard_gate: true
+  max_timeouts: 0
 - subject: LSP::DocumentStore
   require: lsp/analyzer -r lsp/document_store
   spec: spec/lsp/document_store_spec.rb
-  baseline: 91.87
+  baseline: 96.87
   hard_gate: true
+  max_timeouts: 0
 - subject: SyntaxTypoScanner
   require: ast/syntax_typo_scanner
   spec: spec/syntax_typo_scanner_unit_spec.rb
@@ -73,18 +83,21 @@
 - subject: FmtVerifier
   require: tools/fmt_verifier
   spec: spec/fmt_verifier_spec.rb
-  baseline: 63.78
-  hard_gate: false
+  baseline: 98.93
+  hard_gate: true
+  max_timeouts: 0
 - subject: DiagnosticRegistry
   require: ast/diagnostic_registry
   spec: spec/diagnostic_registry_spec.rb
-  baseline: 53.0
-  hard_gate: false
+  baseline: 98.14
+  hard_gate: true
+  max_timeouts: 0
 - subject: DiagnosticBuckets
   require: ast/diagnostic_buckets
   spec: spec/diagnostic_buckets_spec.rb
-  baseline: 14.51
-  hard_gate: false
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: OwnershipGraph
   require: ast/lexer -r ast/ast -r ast/type -r semantic/ownership_graph
   spec: spec/ownership_graph_spec.rb
@@ -92,29 +105,62 @@
   hard_gate: true
 - subject: LintFixRewriter
   require: tools/lint_fix_rewriter
-  spec: spec/lint_fix_rewriter_spec.rb
-  baseline: 55.98
+  specs:
+    - spec/lint_fix_rewriter_spec.rb
+    - spec/clear_fmt_spec.rb
+  baseline: 85.15
   hard_gate: false
+  max_timeouts: 20
+- subject: LintFixRewriter.rewrite
+  expression: LintFixRewriter.rewrite
+  require: tools/lint_fix_rewriter
+  specs:
+    - spec/lint_fix_rewriter_spec.rb
+    - spec/clear_fmt_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: StringConcatRewriter
   require: mir/rewriters/string_concat_rewriter
   spec: spec/string_concat_rewriter_spec.rb
-  baseline: 48.21
-  hard_gate: false
+  baseline: 97.56
+  hard_gate: true
+  max_timeouts: 0
 - subject: SymbolEntry
   require: ast/symbol_entry
   spec: spec/symbol_entry_spec.rb
-  baseline: 38.78
-  hard_gate: false
+  baseline: 95.07
+  hard_gate: true
+  max_timeouts: 0
 - subject: LockHelper
   require: annotator/annotator
-  spec: spec/lock_helper_spec.rb
-  baseline: 15.32
+  specs:
+    - spec/lock_helper_spec.rb
+    - spec/observable_lockdown_spec.rb
+    - spec/thunks_with_lock_yield_spec.rb
+  baseline: 80.17
   hard_gate: false
+  max_timeouts: 120
+- subject: LockHelper#tarjan_scc
+  expression: LockHelper#tarjan_scc
+  require: annotator/annotator
+  spec: spec/lock_helper_spec.rb
+  baseline: 88.91
+  hard_gate: true
+  max_timeouts: 0
 - subject: PprofConverter
   require: tools/pprof_converter
   spec: spec/pprof_spec.rb
-  baseline: 57.83
+  baseline: 81.22
   hard_gate: false
+  max_timeouts: 0
+- subject: PprofConverter.convert_all
+  expression: PprofConverter.convert_all
+  require: tools/pprof_converter
+  spec: spec/pprof_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: OwnershipDataflow
   require: backends/transpiler
   spec: spec/ownership_dataflow_spec.rb
@@ -122,24 +168,78 @@
   hard_gate: true
 - subject: BorrowChecker
   require: backends/transpiler
-  spec: spec/borrow_checker_spec.rb
-  baseline: 55.37
+  specs:
+    - spec/borrow_checker_spec.rb
+    - spec/borrowed_escape_spec.rb
+    - spec/wildcard_borrow_spec.rb
+  baseline: 70.2
   hard_gate: false
+  max_timeouts: 20
+- subject: BorrowChecker.check
+  expression: BorrowChecker.check
+  require: backends/transpiler
+  specs:
+    - spec/borrow_checker_spec.rb
+    - spec/borrowed_escape_spec.rb
+    - spec/wildcard_borrow_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: UseAfterMoveChecker
   require: backends/transpiler
-  spec: spec/use_after_move_dataflow_spec.rb
-  baseline: 46.04
+  specs:
+    - spec/use_after_move_dataflow_spec.rb
+    - spec/use_after_move_spec.rb
+    - spec/fixable_use_after_move_clone_spec.rb
+    - spec/fixable_use_after_move_takes_spec.rb
+  baseline: 80.74
   hard_gate: false
+  max_timeouts: 10
+- subject: UseAfterMoveChecker.check
+  expression: UseAfterMoveChecker.check
+  require: backends/transpiler
+  specs:
+    - spec/use_after_move_dataflow_spec.rb
+    - spec/use_after_move_spec.rb
+    - spec/fixable_use_after_move_clone_spec.rb
+    - spec/fixable_use_after_move_takes_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: CaptureStrategy
   require: ast/lexer -r ast/ast -r ast/type -r semantic/capture_strategy
   spec: spec/capture_strategy_spec.rb
-  baseline: 40.95
+  baseline: 77.63
   hard_gate: false
+  max_timeouts: 0
+- subject: CaptureStrategy.classify
+  expression: CaptureStrategy.classify
+  require: ast/lexer -r ast/ast -r ast/type -r semantic/capture_strategy
+  spec: spec/capture_strategy_spec.rb
+  baseline: 98.19
+  hard_gate: true
+  max_timeouts: 0
 - subject: FsmTransform::Liveness
   require: backends/transpiler
-  spec: spec/fsm_liveness_spec.rb
-  baseline: 67.3
+  specs:
+    - spec/fsm_liveness_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_segments_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 69.87
   hard_gate: false
+  max_timeouts: 20
+- subject: FsmTransform::Liveness.analyze
+  expression: FsmTransform::Liveness.analyze
+  require: backends/transpiler
+  specs:
+    - spec/fsm_liveness_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_segments_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 92.9
+  hard_gate: true
+  max_timeouts: 0
 - subject: MIRChecker
   require: backends/transpiler
   spec: spec/mir_checker_spec.rb
@@ -147,39 +247,157 @@
   hard_gate: true
 - subject: FsmTransform::SuspendResolvers
   require: backends/transpiler
-  spec: spec/fsm_suspend_resolvers_spec.rb
-  baseline: 48.49
+  specs:
+    - spec/fsm_suspend_resolvers_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 89.29
   hard_gate: false
+  max_timeouts: 0
+- subject: FsmTransform::SuspendResolvers.resolve
+  expression: FsmTransform::SuspendResolvers.resolve
+  require: backends/transpiler
+  specs:
+    - spec/fsm_suspend_resolvers_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: FsmOps
   require: backends/transpiler
-  spec: spec/fsm_ops_spec.rb
-  baseline: 45.83
-  hard_gate: false
+  specs:
+    - spec/fsm_ops_spec.rb
+    - spec/fsm_classifier_spec.rb
+    - spec/fsm_segments_spec.rb
+    - spec/fsm_transform_emit_spec.rb
+  baseline: 97.17
+  hard_gate: true
+  max_timeouts: 0
 - subject: FsmTransform::RecursiveSplitter
   require: backends/transpiler
-  spec: spec/fsm_recursive_splitter_spec.rb
-  baseline: 42.25
+  specs:
+    - spec/fsm_recursive_splitter_spec.rb
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 56.15
   hard_gate: false
+  max_timeouts: 0
+- subject: FsmTransform::RecursiveSplitter.split
+  expression: FsmTransform::RecursiveSplitter.split
+  require: backends/transpiler
+  specs:
+    - spec/fsm_recursive_splitter_spec.rb
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: MIREmitter
   require: backends/transpiler
-  spec: spec/mir_emitter_spec.rb
+  specs:
+    - spec/mir_emitter_spec.rb
+    - spec/mir_comparison_spec.rb
+    - spec/mir_lowering_spec.rb
   baseline: 39.56
   hard_gate: false
+- subject: MIREmitter#emit
+  expression: MIREmitter#emit
+  require: backends/transpiler
+  specs:
+    - spec/mir_emitter_spec.rb
+    - spec/mir_comparison_spec.rb
+    - spec/mir_lowering_spec.rb
+  baseline: 99.73
+  hard_gate: true
+  max_timeouts: 0
 - subject: FsmWrapperEmitter
   require: backends/fsm_wrapper_emitter
-  spec: spec/fsm_wrapper_emitter_spec.rb
-  baseline: 36.19
+  specs:
+    - spec/fsm_wrapper_emitter_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 49.13
   hard_gate: false
+  max_timeouts: 0
+- subject: FsmWrapperEmitter.render
+  expression: FsmWrapperEmitter.render
+  require: backends/fsm_wrapper_emitter
+  specs:
+    - spec/fsm_wrapper_emitter_spec.rb
+    - spec/fsm_lowering_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: FsmTransform::Emit
   require: backends/transpiler
-  spec: spec/fsm_transform_emit_spec.rb
+  specs:
+  - spec/fsm_classifier_spec.rb
+  - spec/fsm_cleanup_invariant_spec.rb
+  - spec/fsm_lowering_spec.rb
+  - spec/fsm_segments_spec.rb
+  - spec/fsm_transform_emit_spec.rb
+  - spec/fsm_unified_emit_spec.rb
   baseline: 1.33
   hard_gate: false
+- subject: FsmTransform::Emit.build_recursive
+  expression: FsmTransform::Emit.build_recursive
+  require: backends/transpiler
+  specs:
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+    - spec/fsm_lowering_spec.rb
+  baseline: 85.60
+  hard_gate: true
+  max_timeouts: 0
+- subject: FsmTransform::Emit.build_fsm_unified
+  expression: FsmTransform::Emit.build_fsm_unified
+  require: backends/transpiler
+  specs:
+    - spec/fsm_transform_emit_spec.rb
+    - spec/fsm_unified_emit_spec.rb
+    - spec/fsm_lowering_spec.rb
+  baseline: 97.65
+  hard_gate: true
+  max_timeouts: 0
 - subject: EscapeAnalysis
   require: backends/transpiler -r semantic/escape_analysis
-  spec: spec/propagate_caller_sync_spec.rb
-  baseline: 44.66
+  specs:
+    - spec/escape_analysis_spec.rb
+    - spec/propagate_caller_sync_spec.rb
+  baseline: 32.58
   hard_gate: false
+  max_timeouts: 50
+- subject: EscapeAnalysis.apply!
+  expression: EscapeAnalysis.apply!
+  require: semantic/escape_analysis
+  specs:
+    - spec/escape_analysis_spec.rb
+    - spec/propagate_caller_sync_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.apply_with_facts!
+  expression: EscapeAnalysis.apply_with_facts!
+  require: semantic/escape_analysis
+  specs:
+    - spec/escape_analysis_spec.rb
+    - spec/propagate_caller_sync_spec.rb
+  baseline: 98.96
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.propagate_caller_sync!
+  expression: EscapeAnalysis.propagate_caller_sync!
+  require: semantic/escape_analysis
+  specs:
+    - spec/escape_analysis_spec.rb
+    - spec/propagate_caller_sync_spec.rb
+  baseline: 91.48
+  hard_gate: true
+  max_timeouts: 0
 - subject: MIRLowering#alloc_expr
   require: backends/transpiler
   spec: spec/mir_lowering_spec.rb
@@ -642,26 +860,113 @@
   hard_gate: true
 - subject: PredicateRewriter
   require: tools/predicate_rewriter -r tools/formatter
-  spec: spec/predicate_rewriter_spec.rb
-  baseline: 53.1
+  specs:
+    - spec/predicate_rewriter_spec.rb
+    - spec/predicate_linter_spec.rb
+  baseline: 73.48
   hard_gate: false
+  max_timeouts: 20
+- subject: PredicateRewriter.rewrite
+  expression: PredicateRewriter.rewrite
+  require: tools/predicate_rewriter -r tools/formatter
+  specs:
+    - spec/predicate_rewriter_spec.rb
+    - spec/predicate_linter_spec.rb
+  baseline: 92.68
+  hard_gate: true
+  max_timeouts: 0
+- subject: PredicateRewriter.lint!
+  expression: PredicateRewriter.lint!
+  require: tools/predicate_rewriter -r tools/formatter
+  specs:
+    - spec/predicate_rewriter_spec.rb
+    - spec/predicate_linter_spec.rb
+  baseline: 92.5
+  hard_gate: true
+  max_timeouts: 0
 - subject: LoopFrameAnalysis
   require: backends/transpiler
   spec: spec/loop_frame_analysis_spec.rb
-  baseline: 49.8
+  baseline: 51.12
   hard_gate: false
+  max_timeouts: 10
+- subject: LoopFrameAnalysis.analyze!
+  expression: LoopFrameAnalysis.analyze!
+  require: backends/transpiler
+  spec: spec/loop_frame_analysis_spec.rb
+  baseline: 97.72
+  hard_gate: true
+  max_timeouts: 0
+- subject: LoopFrameAnalysis.direct_loop_expression_boundary?
+  expression: LoopFrameAnalysis.direct_loop_expression_boundary?
+  require: backends/transpiler
+  spec: spec/loop_frame_analysis_spec.rb
+  baseline: 88.75
+  hard_gate: true
+  max_timeouts: 0
+- subject: LoopFrameAnalysis.direct_loop_expression_frame_alloc?
+  expression: LoopFrameAnalysis.direct_loop_expression_frame_alloc?
+  require: backends/transpiler
+  spec: spec/loop_frame_analysis_spec.rb
+  baseline: 98.52
+  hard_gate: true
+  max_timeouts: 0
+- subject: CleanupClassifier.classify_plan
+  expression: CleanupClassifier.classify_plan
+  require: backends/transpiler
+  specs:
+    - spec/cleanup_plan_spec.rb
+    - spec/caller_cleanup_spec.rb
+    - spec/fsm_cleanup_invariant_spec.rb
+    - spec/observable_cleanup_codegen_spec.rb
+  baseline: 94.92
+  hard_gate: true
+  max_timeouts: 0
 - subject: CleanupClassifier
   require: backends/transpiler
-  spec: spec/cleanup_plan_spec.rb
+  specs:
+    - spec/cleanup_plan_spec.rb
+    - spec/caller_cleanup_spec.rb
+    - spec/fsm_cleanup_invariant_spec.rb
+    - spec/observable_cleanup_codegen_spec.rb
   baseline: 31.97
   hard_gate: false
 - subject: PipelineRewriter
   require: backends/transpiler
-  spec: spec/pipeline_rewriter_spec.rb
+  specs:
+    - spec/pipeline_rewriter_spec.rb
+    - spec/pipeline_backend_coverage_spec.rb
+    - spec/pipeline_legacy_matrix_spec.rb
+    - spec/minivm_register_pipeline_spec.rb
   baseline: 33.01
   hard_gate: false
+- subject: PipelineRewriter#rewrite!
+  expression: PipelineRewriter#rewrite!
+  require: mir/rewriters/pipeline_rewriter
+  specs:
+    - spec/pipeline_rewriter_spec.rb
+    - spec/pipeline_backend_coverage_spec.rb
+    - spec/pipeline_legacy_matrix_spec.rb
+    - spec/minivm_register_pipeline_spec.rb
+  baseline: 97.43
+  hard_gate: true
+  max_timeouts: 0
 - subject: Type
   require: ast/lexer -r ast/ast -r ast/type
-  spec: spec/type_provenance_spec.rb
-  baseline: 5.38
+  specs:
+  - spec/atomic_ptr_type_spec.rb
+  - spec/atomic_type_spec.rb
+  - spec/observable_type_spec.rb
+  - spec/type_promotion_spec.rb
+  - spec/type_provenance_spec.rb
+  - spec/type_zig_type_gap_spec.rb
+  - spec/versioned_type_spec.rb
+  baseline: 24.86
   hard_gate: false
+- subject: Type.binary_op
+  expression: Type.binary_op
+  require: backends/transpiler
+  spec: spec/binary_operator_type_check_spec.rb
+  baseline: 96.05
+  hard_gate: true
+  max_timeouts: 0

@@ -538,8 +538,7 @@ class Type
     #   * arithmetic / numeric ops produce Auto (depends on operands)
     #     — the AutoUnifier resolves it after observing concrete
     #     types at the constraint sources.
-    auto_present = (left_type.respond_to?(:auto?) && left_type.auto?) ||
-                   (right_type.respond_to?(:auto?) && right_type.auto?)
+    auto_present = left_type.auto? || right_type.auto?
     if auto_present
       case op
       when :AND, :OR, *BOOL_RESULT_OPS
@@ -1499,7 +1498,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def primitive?
-    AST::PRIMITIVE_TYPES.include?(resolved)
+    PRIMITIVE_TYPES.include?(resolved)
   end
 
   # ----------------------------------------------
@@ -1565,6 +1564,7 @@ class Type
   INT_TYPES          = T.let((SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze, T::Array[Symbol])
   FLOAT_TYPES        = [:Float32, :Float64].freeze
   NUMERIC_TYPES      = T.let((INT_TYPES + FLOAT_TYPES).freeze, T::Array[Symbol])
+  PRIMITIVE_TYPES    = T.let(([:Number, :Bool] + NUMERIC_TYPES).freeze, T::Array[Symbol])
 
   INT_TYPE_MAX = T.let({
     Byte: 255, UInt8: 255, UInt16: 65_535, UInt32: 4_294_967_295,

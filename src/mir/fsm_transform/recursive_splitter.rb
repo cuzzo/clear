@@ -192,9 +192,8 @@ end
     # Public entry. Returns [Segment, ...] on success, nil if the
     # body contains a shape we don't yet recognize (try/catch, etc.).
     #
-    sig { params(body: T::Array[AST::Node], lowering: MIRLowering, ctx: T.nilable(SplitContext)).returns(T.nilable(SegmentList)) }
+    sig { params(body: T::Array[AST::Node], lowering: T.untyped, ctx: T.nilable(SplitContext)).returns(T.nilable(SegmentList)) }
     def self.split(body, lowering, ctx: nil)
-      T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
 
       builder = Builder.new
@@ -204,30 +203,20 @@ end
       rescue UnsupportedShape
         return nil
       end
-      return nil if entry.nil?
 
       # The Done segment has no body; it's the final exit.
-      builder.fill(done_idx, [], Segments::Done.new(nil))
+      builder.fill(done_idx, [], Segments::Done.new)
 
       # Entry is the first segment to execute; it MUST be index 0
-      # for the dispatch to enter cleanly. Reorder if needed.
+      # for the dispatch to enter cleanly.
       finalized = builder.finalize
-      segments = finalized.segments
       pre_renumber_overrides = finalized.alias_overrides_by_index
-      mapping = nil
-      if entry != 0
-        segments, mapping = renumber_with_entry(segments, entry)
-      end
-      synth = T.let(builder.synthetic_fields.dup, T::Array[MIR::ContextFieldDecl])
-      alias_table =
-        if mapping
-          pre_renumber_overrides.each_with_object({}) { |(orig, ov), h|
-            new_idx = mapping.fetch(orig)
-            h[new_idx] = ov
-          }
-        else
-          pre_renumber_overrides
-        end
+      segments, mapping = renumber_with_entry(finalized.segments, entry)
+      synth = builder.synthetic_fields
+      alias_table = pre_renumber_overrides.each_with_object({}) { |(orig, ov), h|
+        new_idx = mapping.fetch(orig)
+        h[new_idx] = ov
+      }
       SegmentList.new(
         segments: segments,
         synthetic_fields: synth,
@@ -241,7 +230,7 @@ end
     # `after_idx`. Returns the entry index of the first segment
     # produced (or `after_idx` if `stmts` is empty / has no
     # control-flow that needs splitting).
-    sig { params(stmts: T::Array[SegmentStmt], after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(stmts: T::Array[SegmentStmt], after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_stmts(stmts, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       return after_idx if stmts.nil? || stmts.empty?
@@ -403,7 +392,7 @@ end
     end
 
     # Dispatch to the appropriate fragment emitter.
-    sig { params(stmt: SegmentStmt, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(stmt: SegmentStmt, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_pivot(stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
@@ -439,21 +428,21 @@ end
       idx
     end
 
-    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_while_fragment(while_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [while_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "WhileLoop recursive FSM lowering requires structural MIR conditions"
     end
 
-    sig { params(for_stmt: AST::ForRange, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(for_stmt: AST::ForRange, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_for_range_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [for_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "ForRange recursive FSM lowering requires structural MIR loop state"
     end
 
-    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_for_each_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [for_stmt, after_idx, builder, lowering, ctx]
@@ -461,7 +450,7 @@ end
     end
 
 
-    sig { params(if_stmt: AST::IfStatement, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(if_stmt: AST::IfStatement, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_if_fragment(if_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [if_stmt, after_idx, builder, lowering, ctx]
@@ -494,7 +483,7 @@ end
     # all caps' meta via lowering.fsm_cap_metadata and wrap the
     # recursive emit_stmts in a with_fiber_capture_map that adds
     # alias_name -> alias_data_ref entries.
-    sig { params(with_stmt: AST::WithBlock, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
+    sig { params(with_stmt: AST::WithBlock, after_idx: Integer, builder: Builder, lowering: T.untyped, ctx: SplitContext).returns(Integer) }
     def self.emit_with_fragment(with_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       caps = CapabilityPlan.require_for(with_stmt).locks
@@ -514,7 +503,7 @@ end
       caps.each do |c|
         m = lowering.fsm_cap_metadata(c, with_stmt, ctx_id, captured)
         raise UnsupportedShape, "fsm_cap_metadata failed" if m.nil?
-        caps_meta << T.must(m)
+        caps_meta << T.cast(m, FsmLowering::FsmCapMetadata)
       end
 
       cap_indices = caps.map { builder.reserve_index }

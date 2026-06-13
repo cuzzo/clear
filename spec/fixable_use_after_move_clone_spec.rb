@@ -10,7 +10,7 @@ require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 # refcounted ones (`@shared`, `@multiowned`, `@split`). Capability
 # upgrades that the binding already carries are skipped (offering
 # `@shared` on an already-`@shared` binding is a no-op).
-RSpec.describe "USE-AFTER-MOVE fix dropdown — COPY vs CLONE picker" do
+RSpec.describe UseAfterMoveChecker do
   before { FixCollector.enable! }
   after  { FixCollector.disable! }
 

@@ -18,6 +18,26 @@ RSpec.describe PipelineRewriter do
     ast
   end
 
+  it "traverses ordinary binary operators without treating them as pipelines" do
+    source = AST::Identifier.new(nil, "items")
+    source.full_type = Type.new(:"Int64[]", collection: :list)
+    binary = AST::BinaryOp.new(
+      nil,
+      source,
+      :PLUS,
+      AST::WhereOp.new(nil, AST::Literal.new(nil, :Bool, true, nil)),
+    )
+
+    expect(PipelineRewriter.new.rewrite!(binary)).to equal(binary)
+  end
+
+  it "rewrites block expressions with no result expression" do
+    block = AST::BlockExpr.new(nil, [], nil)
+
+    expect(PipelineRewriter.new.rewrite!(block)).to equal(block)
+    expect(block.result).to be_nil
+  end
+
   it "rewrites simple function pipelines into FuncCall" do
     ast = parse_and_rewrite(<<~CLEAR)
       FN double(n: Float64) RETURNS Float64 -> RETURN n * 2.0; END

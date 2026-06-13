@@ -13,10 +13,12 @@ module IntrinsicRegistry
 
   LookupResult = T.type_alias { T.nilable(T.any(FunctionSignature, T::Array[FunctionSignature])) }
   SigsCache = T.type_alias { T::Hash[Integer, T::Hash[T.untyped, LookupResult]] }
-  RegistriesCache = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   SIGS_CACHE = T.let({}, SigsCache)
-  REGISTRIES_CACHE = T.let({}, RegistriesCache)
+  REGISTRY_CONSTANTS = T.let(
+    %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS INDEX_OPS BUILTIN_OPS].freeze,
+    T::Array[Symbol]
+  )
 
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
   FS_KEYS = %i[args arity validate return return_type can_fail needs_rt].freeze
@@ -87,7 +89,10 @@ module IntrinsicRegistry
   sig { params(rdef: T.untyped).returns(Type) }
   def self.to_return_type(rdef)
     if rdef.fixed?
-      rdef.fixed || Type.new(:Void)
+      fixed = rdef.fixed
+      Kernel.raise "IntrinsicRegistry: fixed return descriptor missing Type" unless fixed.is_a?(Type)
+
+      fixed
     else
       Type.new(:Any)
     end
@@ -164,7 +169,6 @@ module IntrinsicRegistry
   sig { params(spec: T.untyped, h: T.untyped).returns(T.untyped) }
   def self.params_from_arg_spec(spec, h)
     arg_specs = IntrinsicArgSpec.list_from_registry(spec)
-    return [] if arg_specs.empty?
 
     takes_args = Kernel.Array(h[:takes_args])
     mutates_receiver = h[:mutates_receiver] == true
@@ -199,18 +203,13 @@ module IntrinsicRegistry
       end
   end
 
-  # Memoized registry map (built lazily from the std_lib constants so
-  # there is no load-order coupling). Used by `fs` so call sites need
-  # not thread the map.
+  # Registry map built from loaded std_lib constants so there is no
+  # load-order coupling. Used by `fs` so call sites need not thread the map.
   sig { returns(T.untyped) }
   def self.registries
-    if REGISTRIES_CACHE.empty?
-      %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS
-         INDEX_OPS BUILTIN_OPS].each do |constant_name|
-        REGISTRIES_CACHE[constant_name] = Object.const_get(constant_name) if Object.const_defined?(constant_name)
-      end
+    REGISTRY_CONSTANTS.each_with_object({}) do |constant_name, out|
+      out[constant_name] = Object.const_get(constant_name) if Object.const_defined?(constant_name)
     end
-    REGISTRIES_CACHE
   end
 
   # Idempotent normalizer for the flag-day migration: returns a

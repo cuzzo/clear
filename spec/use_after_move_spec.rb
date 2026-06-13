@@ -6,7 +6,7 @@ require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 # Tests that the annotator raises a compile error when a non-Copy variable
 # is used after being moved. This is the core borrow checker rule.
 
-RSpec.describe "Use-after-move detection" do
+RSpec.describe UseAfterMoveChecker do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
     ast = ClearParser.new(tokens, src).parse

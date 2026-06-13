@@ -172,14 +172,13 @@ module CaptureStrategy
   # name           : String          -- capture name (for diagnostics + marker naming)
   # type           : Type            -- the capture's static type (unwrapped)
   # site_info      : CaptureSiteInfo -- what the user wrote at the BG site
-  # rt_name        : String          -- runtime reference (for FreshHeapCopy's allocator)
   # is_resource    : Boolean         -- true when escape-analysis already
   #                                     flagged this capture as a resource
   #                                     (File, TCPClient, etc.); the
   #                                     existing resource_captures machinery
   #                                     handles the ownership transfer.
-  sig { params(name: String, type: Type, site_info: CaptureStrategy::CaptureSiteInfo, rt_name: String, is_resource: T::Boolean, schema_lookup: T.nilable(Proc)).returns(Strategy) }
-  def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false, schema_lookup: nil)
+  sig { params(name: String, type: Type, site_info: CaptureStrategy::CaptureSiteInfo, is_resource: T::Boolean, schema_lookup: T.nilable(Proc)).returns(Strategy) }
+  def self.classify(name:, type:, site_info:, is_resource: false, schema_lookup: nil)
     zig_t = field_zig_type(type)
 
     # 1. Explicit user annotation wins: COPY/GIVE apply regardless of

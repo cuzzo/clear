@@ -54,7 +54,7 @@ RSpec.describe RubySpecMutants do
       name: "sample",
       expression: "Sample*",
       requires: ["sample", "dependency"],
-      spec: "spec/mutant_tools_spec.rb",
+      specs: ["spec/mutant_tools_spec.rb"],
       min_coverage: 90.0,
       max_timeouts: 0,
       hard_gate: hard_gate
@@ -85,6 +85,23 @@ RSpec.describe RubySpecMutants do
     expect(argv).to include("--since", "origin/main", "Sample*")
   end
 
+  it "passes every mapped spec file to the rspec integration" do
+    subject = RubySpecMutants::Subject.new(
+      name: "multi",
+      expression: "Multi*",
+      requires: [],
+      specs: ["spec/a_spec.rb", "spec/b_spec.rb"],
+      min_coverage: 100.0,
+      max_timeouts: 0,
+      hard_gate: true
+    )
+
+    argv = described_class.mutant_argv(subject, nil)
+
+    spec_args = argv.each_index.select { |index| argv[index] == "--integration-argument" }
+    expect(spec_args.map { |index| argv.fetch(index + 1) }).to eq(["spec/a_spec.rb", "spec/b_spec.rb"])
+  end
+
   it "parses multi-require subject entries" do
     expect(described_class.parse_requires("ast/lexer -r ast/ast -r ast/type")).to eq(
       ["ast/lexer", "ast/ast", "ast/type"]
@@ -94,6 +111,30 @@ RSpec.describe RubySpecMutants do
   it "does not append wildcards to method subjects" do
     expect(described_class.subject_expression("MIRLowering#lower")).to eq("MIRLowering#lower")
     expect(described_class.subject_expression("Lexer")).to eq("Lexer*")
+  end
+
+  it "honors explicit subject matcher expressions from the registry" do
+    subject = described_class.subject_from_entry(
+      "subject" => "Emitter.render_step",
+      "expression" => "Emitter.render_step",
+      "require" => "backends/emitter",
+      "spec" => "spec/mutant_tools_spec.rb",
+      "baseline" => 100.0
+    )
+
+    expect(subject.name).to eq("emitter-render-step")
+    expect(subject.expression).to eq("Emitter.render_step")
+  end
+
+  it "selects class subjects by raw source name as well as slug" do
+    opts = RubySpecMutants::Options.new(
+      subject: "Lexer",
+      since: nil,
+      out: "/tmp/unused",
+      list: false
+    )
+
+    expect(described_class.selected_subjects(opts).map(&:expression)).to include("Lexer*")
   end
 
   it "blocks failing hard-gate subjects" do
@@ -118,7 +159,7 @@ RSpec.describe RubySpecMutants do
   end
 
   it "keeps subject specs present on disk" do
-    missing = described_class::SUBJECTS.reject { |subject| File.file?(subject.spec) }
+    missing = described_class::SUBJECTS.reject { |subject| subject.specs.all? { |spec| File.file?(spec) } }
 
     expect(missing).to be_empty
   end

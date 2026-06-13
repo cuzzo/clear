@@ -13,7 +13,7 @@ require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 # "expected" Zig, then run the annotated AST through MIRLowering + MIREmitter
 # and compare the "user code" section per-statement.
 
-RSpec.describe "MIR pipeline comparison" do
+RSpec.describe MIREmitter do
   # Run full old pipeline, return the transpiled Zig.
   def old_transpile(src)
     ZigTranspiler.new.transpile(src)

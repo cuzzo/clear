@@ -52,9 +52,31 @@ RSpec.describe BorrowChecker do
     BorrowChecker.check(fn_node, schema_lookup: schema_lookup)
   end
 
+  def empty_function_node(name = "main")
+    token = Lexer::Token.new(:FN, "FN", 1, 1)
+    AST::FunctionDef.new(token, name, [], [], :Void, nil, [], [], nil, :private, [], false)
+  end
+
   def expect_no_error(src, fn_name = "main")
     errors = check_errors(src, fn_name)
     expect(errors).to be_empty, "Expected no errors but got: #{errors.inspect}"
+  end
+
+  describe ".check public entrypoint" do
+    it "runs the checker and returns the collected errors" do
+      expect(BorrowChecker.check(empty_function_node, schema_lookup: ->(_name) { nil })).to eq([])
+    end
+
+    it "forwards schema lookup context into ownership transfer collection" do
+      fn_node = empty_function_node
+      schema_lookup = ->(_name) { nil }
+
+      expect(BorrowChecker).to receive(:new)
+        .with(fn_node, schema_lookup: schema_lookup)
+        .and_call_original
+
+      expect(BorrowChecker.check(fn_node, schema_lookup: schema_lookup)).to eq([])
+    end
   end
 
   # =========================================================================

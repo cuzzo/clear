@@ -26,7 +26,6 @@ module FsmTransform
     # caller's capture-map context (set up via with_fiber_capture_map).
     sig { params(seg: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: T.nilable(Integer)).returns(MIR::SuspendDescriptor) }
     def self.resolve(seg, ctx, lowering, susp_idx: nil)
-      T.bind(self, T.untyped) rescue nil
       case seg.tail
       when Segments::IoSuspend
         resolve_io(seg.tail, ctx, lowering)
@@ -58,8 +57,6 @@ module FsmTransform
       raise ArgumentError, "IoSuspend missing stdlib_def" unless stdlib_def
 
       id = ctx.id
-      bg_rt = ctx.bg_rt
-
       em             = stdlib_def.emit
       setup_ops      = em&.fsm_setup || []
       finish_block   = em&.fsm_finish_block || []
@@ -71,7 +68,7 @@ module FsmTransform
       arg_mirs = (io_tail.call_node.respond_to?(:args) ?
                     (io_tail.call_node.args || []) : []).map { |a| lowering.lower(a) }
 
-      lowerer = FsmOps::Lowerer.new(ctx_id: id, bg_rt: bg_rt, arg_mirs: arg_mirs)
+      lowerer = FsmOps::Lowerer.new(ctx_id: id, arg_mirs: arg_mirs)
       setup_mir         = lowerer.lower_stmts(setup_ops)
       state_finalize_m  = lowerer.lower_stmts(state_finalize)
       finish_block_mir  = lowerer.lower_stmts(finish_block)

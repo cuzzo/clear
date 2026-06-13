@@ -123,6 +123,8 @@ RSpec.describe IntrinsicRegistry do
     expect(overloads).not_to be_empty
     expect(overloads).to all(be_a(FunctionSignature))
     expect(overloads.map(&:intrinsic_args_label)).to eq(["(String)", "(Any[])"])
+    expect(IntrinsicRegistry.overloads(STD_LIB, "timestampMs"))
+      .to eq([IntrinsicRegistry.lookup(STD_LIB, "timestampMs")])
     expect(IntrinsicRegistry.overloads(STD_LIB, "missingIntrinsic")).to eq([])
   end
 
@@ -181,16 +183,63 @@ RSpec.describe IntrinsicRegistry do
   end
 
   it "classifies registry-backed collection ownership predicates from typed contracts" do
+    expect(IntrinsicRegistry.collection_element_evidence_method?("append", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_element_evidence_method?(:push, 1)).to be(true)
+    expect(IntrinsicRegistry.collection_element_evidence_method?("insert", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_element_evidence_method?("append", 2)).to be(false)
+    expect(IntrinsicRegistry.collection_element_evidence_method?("contains?", 1)).to be(false)
+    expect(IntrinsicRegistry.collection_element_evidence_method?("missing", 1)).to be(false)
+
     expect(IntrinsicRegistry.map_pair_evidence_method?("put", 2)).to be(true)
+    expect(IntrinsicRegistry.map_pair_evidence_method?(:put, 2)).to be(true)
     expect(IntrinsicRegistry.map_pair_evidence_method?("contains?", 2)).to be(false)
     expect(IntrinsicRegistry.map_pair_evidence_method?("missing", 2)).to be(false)
     expect(IntrinsicRegistry.map_pair_evidence_method?("put", 1)).to be(false)
 
     expect(IntrinsicRegistry.collection_value_store_method?("append", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?(:append, 1)).to be(true)
     expect(IntrinsicRegistry.collection_value_store_method?("insert", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("put", 2)).to be(true)
     expect(IntrinsicRegistry.collection_value_store_method?("contains?", 1)).to be(false)
     expect(IntrinsicRegistry.collection_value_store_method?("pop", 0)).to be(false)
     expect(IntrinsicRegistry.collection_value_store_method?("missing", 1)).to be(false)
+  end
+
+  it "requires each collection value-store predicate, not just matching method names" do
+    true_store = {
+      args: [:List, :Int64],
+      is_method: true,
+      mutates_receiver: true,
+      takes_args: [0],
+      return: :Void,
+    }
+    not_mutating = true_store.merge(mutates_receiver: false)
+    not_taking = true_store.merge(takes_args: [])
+    not_method = true_store.merge(is_method: false)
+
+    stub_const("STD_LIB", { "store" => true_store, "read" => not_mutating })
+    stub_const("POOL_METHODS", { "poolStore" => true_store, "borrow" => not_taking })
+    stub_const("SET_METHODS", { "setStore" => true_store, "free" => not_method })
+    stub_const("MAP_METHODS", { "mapStore" => true_store.merge(arity: 2) })
+
+    expect(IntrinsicRegistry.collection_value_store_method?("store", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("poolStore", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("setStore", 1)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("mapStore", 2)).to be(true)
+    expect(IntrinsicRegistry.collection_value_store_method?("mapStore", 1)).to be(false)
+    expect(IntrinsicRegistry.collection_value_store_method?("read", 1)).to be(false)
+    expect(IntrinsicRegistry.collection_value_store_method?("borrow", 1)).to be(false)
+    expect(IntrinsicRegistry.collection_value_store_method?("free", 1)).to be(false)
+  end
+
+  it "resolves typed map aliases only through the map-method registry" do
+    put = IntrinsicRegistry.lookup(MAP_METHODS, "put")
+    aliased_insert = IntrinsicRegistry.lookup(MAP_METHODS, "insert")
+
+    expect(aliased_insert).to be_a(FunctionSignature)
+    expect(aliased_insert).to equal(put)
+    expect(IntrinsicRegistry.lookup(POOL_METHODS, "insert")).not_to equal(put)
+    expect(IntrinsicRegistry.lookup(MAP_METHODS, "unknownAlias")).to be_nil
   end
 
   it "keeps indexed assignment set intrinsics value-consuming" do
@@ -264,6 +313,228 @@ RSpec.describe IntrinsicRegistry do
     expect(IntrinsicContract.normalized_takes_indices(no_takes, [receiver_param])).to be_empty
     expect(IntrinsicContract.normalized_argument_takes_indices(no_takes)).to be_empty
     expect(IntrinsicContract.from_emit(no_takes, []).behavior.fsm_setup_present).to be(false)
+  end
+
+  it "covers raw emit conversion branches on synthetic entries" do
+    child_registry = { "child" => { return: :Void, args: [] } }
+    registries = { CHILD: child_registry }
+
+    emit = IntrinsicRegistry.send(:build_emit, {
+      bc: 1,
+      zig: :identity,
+      reject_error: :bad,
+      tag: "custom",
+      takes_args: "2",
+      lifetime: :current_scope,
+      fsm_setup: [:prepare],
+      fsm_state_decls: [:state_decl],
+      fsm_finish_block: [:finish_block],
+      fsm_state_finalize: [:state_finalize],
+      cleanup: { registry: child_registry },
+      eql: { zig: "eq({0}, {1})", return: :Bool },
+    }, registries)
+
+    expect(emit.bc).to be(true)
+    expect(emit.zig).to eq(:identity)
+    expect(emit.reject_error).to eq("bad")
+    expect(emit.tag).to eq(:custom)
+    expect(emit.takes_args).to eq([2])
+    expect(emit.lifetime).to eq(["current_scope"])
+    expect(emit.fsm_setup).to eq([:prepare])
+    expect(emit.fsm_setup_present).to be(true)
+    expect(emit.fsm_state_decls).to eq([:state_decl])
+    expect(emit.fsm_state_decls_present).to be(true)
+    expect(emit.fsm_finish_block).to eq([:finish_block])
+    expect(emit.fsm_finish_block_present).to be(true)
+    expect(emit.fsm_state_finalize).to eq([:state_finalize])
+    expect(emit.fsm_state_finalize_present).to be(true)
+    expect(emit.cleanup.registry).to eq(:CHILD)
+    expect(emit.eql.zig).to eq("eq({0}, {1})")
+
+    expect(IntrinsicRegistry.send(:build_emit, nil, registries)).to be_nil
+    expect(IntrinsicRegistry.send(:build_emit, :not_hash, registries)).to be_nil
+    expect {
+      IntrinsicRegistry.send(:build_emit, { unknown_key: true }, registries)
+    }.to raise_error(RuntimeError, /unmapped registry key/)
+  end
+
+  it "covers nested emit registry pointer and fallback branches" do
+    registry = { "x" => { return: :Void, args: [] } }
+    registries = { KNOWN: registry }
+
+    expect(IntrinsicRegistry.send(:nested_emit, nil, registries)).to be_nil
+    expect(IntrinsicRegistry.send(:nested_emit, { registry: registry }, registries).registry).to eq(:KNOWN)
+    expect(IntrinsicRegistry.send(:nested_emit, { registry: {} }, registries).registry).to eq(:unknown)
+    expect(IntrinsicRegistry.send(:nested_emit, registry, registries).registry).to eq(:KNOWN)
+    expect(IntrinsicRegistry.send(:nested_emit, { zig: "nested({0})" }, registries).zig).to eq("nested({0})")
+  end
+
+  it "covers declarative return descriptor conversion branches" do
+    type = Type.new(:String)
+
+    expect(IntrinsicRegistry.send(:to_return_def, nil).fixed).to eq(Type.new(:Void))
+    expect(IntrinsicRegistry.send(:to_return_def, type).fixed).to equal(type)
+    expect(IntrinsicRegistry.send(:to_return_def, { type: :Int64, sync: :locked }).fixed.sync).to eq(:locked)
+    expect(IntrinsicRegistry.send(:to_return_def, { type: :Int64, ownership: :borrowed }).fixed.ownership).to eq(:borrowed)
+    expect(IntrinsicRegistry.send(:to_return_def, {}).fixed).to eq(Type.new(:Any))
+    expect(IntrinsicRegistry.send(:to_return_def, :r_key_list).kind).to eq(FunctionReturn::Kind::KeyList)
+    expect(IntrinsicRegistry.send(:to_return_def, :infer_return).kind).to eq(FunctionReturn::Kind::Infer)
+    expect(IntrinsicRegistry.send(:to_return_def, :macro_result).kind).to eq(FunctionReturn::Kind::Infer)
+    expect(IntrinsicRegistry.send(:to_return_def, "infer_return").infer).to eq(:infer_return)
+    expect(IntrinsicRegistry.send(:to_return_def, :Bool).fixed).to eq(Type.new(:Bool))
+    expect {
+      IntrinsicRegistry.send(:to_return_def, proc { :Int64 })
+    }.to raise_error(RuntimeError, /Proc return descriptor/)
+  end
+
+  it "returns concrete static Types from typed return descriptors" do
+    fixed = FunctionReturn.fixed(Type.new(:String))
+    variant = FunctionReturn.variant(:ElementOf)
+
+    expect(IntrinsicRegistry.send(:to_return_type, fixed)).to eq(Type.new(:String))
+    expect(IntrinsicRegistry.send(:to_return_type, variant)).to eq(Type.new(:Any))
+    expect(IntrinsicRegistry.send(:to_return_type, variant)).to be_a(Type)
+    expect {
+      IntrinsicRegistry.send(:to_return_type, FunctionReturn.new(kind: FunctionReturn::Kind::Fixed))
+    }.to raise_error(RuntimeError, /fixed return descriptor missing Type/)
+  end
+
+  it "covers lifetime, params, fs, and lookup fallback branches" do
+    expect(IntrinsicRegistry.send(:normalize_lifetime, nil)).to eq([])
+    expect(IntrinsicRegistry.send(:normalize_lifetime, [:a, :b])).to eq([:a, :b])
+    expect(IntrinsicRegistry.send(:normalize_lifetime, :a)).to eq([:a])
+
+    method_sig = IntrinsicRegistry.send(:convert_entry, "method", {
+      args: [{ name: "receiver", type: :List }, { name: "value", type: :Int64 }],
+      is_method: true,
+      mutates_receiver: true,
+      takes_args: [0],
+      return: :Void,
+    }, REGISTRIES)
+    expect(method_sig.params.map(&:name)).to eq(%w[receiver value])
+    expect(method_sig.params[0].mutable).to be(true)
+    expect(method_sig.params[1].takes).to be(true)
+
+    method_takes_sig = IntrinsicRegistry.send(:convert_entry, "method_takes", {
+      args: [:List, :Int64],
+      is_method: true,
+      mutates_receiver: false,
+      takes_args: [0],
+      return: :Void,
+    }, REGISTRIES)
+    expect(method_takes_sig.params.map(&:name)).to eq(%w[arg0 arg1])
+    expect(method_takes_sig.params[0].takes).to be(false)
+    expect(method_takes_sig.params[1].takes).to be(true)
+
+    function_takes_sig = IntrinsicRegistry.send(:convert_entry, "function_takes", {
+      args: [:List, :Int64],
+      is_method: false,
+      mutates_receiver: :truthy_is_not_true,
+      takes_args: [0],
+      return: :Void,
+    }, REGISTRIES)
+    expect(function_takes_sig.params[0].mutable).to be(false)
+    expect(function_takes_sig.params[0].takes).to be(true)
+    expect(function_takes_sig.params[1].takes).to be(false)
+
+    second_arg_takes_sig = IntrinsicRegistry.send(:convert_entry, "second_arg_takes", {
+      args: [:List, :Int64],
+      takes_args: [1],
+      return: :Void,
+    }, REGISTRIES)
+    expect(second_arg_takes_sig.params[0].takes).to be(false)
+    expect(second_arg_takes_sig.params[1].takes).to be(true)
+
+    mutable_arg_sig = IntrinsicRegistry.send(:convert_entry, "mutable_arg", {
+      args: [{ type: :List }, { type: :Int64, mutable: true }],
+      mutates_receiver: true,
+      return: :Void,
+    }, REGISTRIES)
+    expect(mutable_arg_sig.params.map(&:required)).to eq([true, true])
+    expect(mutable_arg_sig.params.map(&:mutable)).to eq([true, true])
+
+    receiver_only_mutation_sig = IntrinsicRegistry.send(:convert_entry, "receiver_only_mutation", {
+      args: [{ type: :List }, { type: :Int64 }],
+      mutates_receiver: true,
+      return: :Void,
+    }, REGISTRIES)
+    expect(receiver_only_mutation_sig.params.map(&:mutable)).to eq([true, false])
+
+    fs = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    expect(IntrinsicRegistry.fs(nil)).to be_nil
+    expect(IntrinsicRegistry.fs(fs)).to equal(fs)
+    expect(IntrinsicRegistry.fs(:not_hash)).to be_nil
+    expect(IntrinsicRegistry.fs({ return: :Bool, args: [] }).return_type).to eq(Type.new(:Bool))
+
+    expect(IntrinsicRegistry.lookup({}, "missing")).to be_nil
+  end
+
+  it "builds the loaded registry map directly from stdlib constants" do
+    registries = IntrinsicRegistry.send(:registries)
+
+    expect(registries.keys).to include(:STD_LIB, :POOL_METHODS, :SET_METHODS, :MAP_METHODS, :INDEX_OPS, :BUILTIN_OPS)
+    expect(registries[:STD_LIB]).to equal(STD_LIB)
+    expect(registries[:POOL_METHODS]).to equal(POOL_METHODS)
+    expect(registries[:SET_METHODS]).to equal(SET_METHODS)
+    expect(registries[:MAP_METHODS]).to equal(MAP_METHODS)
+    expect(registries[:INDEX_OPS]).to equal(INDEX_OPS)
+    expect(registries[:BUILTIN_OPS]).to equal(BUILTIN_OPS)
+  end
+
+  it "tolerates optional registry constants being unloaded" do
+    map_methods = MAP_METHODS
+
+    hide_const("BUILTIN_OPS")
+    expect(IntrinsicRegistry.send(:registries)).not_to have_key(:BUILTIN_OPS)
+
+    hide_const("MAP_METHOD_ALIASES")
+    expect(IntrinsicRegistry.lookup(map_methods, "insert")).to be_nil
+
+    hide_const("MAP_METHODS")
+    expect(IntrinsicRegistry.lookup({}, "insert")).to be_nil
+  end
+
+  it "carries all FunctionSignature fields from synthetic registry entries" do
+    validator = proc { true }
+    signature = IntrinsicRegistry.send(:convert_entry, "synthetic", {
+      args: [{ name: "value", type: :Int64 }],
+      return_type: { type: :String, sync: :locked, ownership: :borrowed },
+      lifetime: :call_scope,
+      validate: validator,
+      arity: 1,
+      can_fail: true,
+      needs_rt: false,
+      allocates: true,
+      return_alloc: :caller,
+    }, REGISTRIES)
+
+    expect(signature.params.map(&:name)).to eq(["value"])
+    expect(signature.return_type).to eq(Type.new(:String, sync: :locked, ownership: :borrowed))
+    expect(signature.return_lifetime).to eq(["call_scope"])
+    expect(signature.arg_validator).to equal(validator)
+    expect(signature.arity).to eq(1)
+    expect(signature.can_fail).to be(true)
+    expect(signature.needs_rt).to be(false)
+    expect(signature.emit.allocates).to be(true)
+    expect(signature.emit.return_alloc).to eq(:caller)
+  end
+
+  it "ignores nil emit fields and accepts Hash subclasses" do
+    hash_class = Class.new(Hash)
+    raw = hash_class[
+      reject_error: nil,
+      tag: nil,
+      fsm_setup: nil,
+      zig: "emit({0})",
+    ]
+
+    emit = IntrinsicRegistry.send(:build_emit, raw, REGISTRIES)
+
+    expect(emit.zig).to eq("emit({0})")
+    expect(emit.reject_error).to be_nil
+    expect(emit.tag).to be_nil
+    expect(emit.fsm_setup).to eq([])
+    expect(emit.fsm_setup_present).to be(false)
   end
 
   it "round-trips representative emit fields incl. recursion" do

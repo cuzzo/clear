@@ -130,8 +130,9 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("break :__bg0 __bg0_promise;")
     end
 
-    it "rejects non-FsmIoBody inputs" do
-      expect { FsmWrapperEmitter.render("oops") }.to raise_error(ArgumentError)
+    it "rejects non-FsmBody inputs with the rejected class" do
+      expect { FsmWrapperEmitter.render("oops") }
+        .to raise_error(ArgumentError, /expected an FsmBody node, got String/)
     end
   end
 

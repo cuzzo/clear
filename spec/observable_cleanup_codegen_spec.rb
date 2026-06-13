@@ -8,7 +8,7 @@ require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 # only surface the bug as a flaky leak/UAF in the DebugAllocator. The
 # codegen-shape assertion makes any regression a deterministic spec
 # failure.
-RSpec.describe ":observable cleanup codegen shape" do
+RSpec.describe CleanupClassifier do
   def transpile(src)
     ZigTranspiler.new.transpile(src)
   end

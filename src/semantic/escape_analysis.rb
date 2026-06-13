@@ -169,10 +169,6 @@ module EscapeAnalysis
 
   sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc), body_summaries: BodySummaries, hoist_bindings: T.nilable(HoistBindings)).returns(Result) }
   def self.apply_with_facts!(fn_nodes, schema_lookup = nil, body_summaries = {}, hoist_bindings = nil)
-    validate_escape_sink_handlers!
-    validate_derived_placement_handlers!
-    validate_escape_sinks!
-
     bg_heap = T.let(Set.new, T::Set[String])
     placements = EscapePlacementFacts.new
     facts_by_name = T.let({}, T::Hash[String, FunctionFacts])
@@ -188,23 +184,21 @@ module EscapeAnalysis
     end
 
     facts_by_name.each_value do |facts|
-      fn = facts.fn
       record_placement_phase!(placements, facts, :receiver_backing_storage) do
-        mark_param_receiver_allocations_heap!(facts.escape_nodes) if fn.body
+        mark_param_receiver_allocations_heap!(facts.escape_nodes)
       end
       record_placement_phase!(placements, facts, :recursive_aggregate_owner) do
-        mark_recursive_aggregate_owners_heap!(facts, schema_lookup) if fn.body
+        mark_recursive_aggregate_owners_heap!(facts, schema_lookup)
       end
     end
 
-    fn_nodes.each do |name, fn|
-      next unless fn.body
-      facts = T.must(facts_by_name[name])
+    facts_by_name.each_value do |facts|
+      body = facts.fn.body
       record_placement_phase!(placements, facts, :escape_sink) do
         mark_body_escapes!(facts, fn_nodes, facts_by_name, bg_heap, schema_lookup)
       end
       record_placement_phase!(placements, facts, :loop_receiver_backing_storage) do
-        mark_loop_receiver_allocations_heap!(fn.body)
+        mark_loop_receiver_allocations_heap!(body)
       end
       record_placement_phase!(placements, facts, :assignment_ownership) do
         propagate_assignment_ownership!(facts, fn_nodes, facts_by_name, schema_lookup)
@@ -279,36 +273,31 @@ module EscapeAnalysis
   # @param body_summaries [Hash] name -> annotated function body facts
   sig { params(fn_nodes: FnNodes, body_summaries: BodySummaries).void }
   def self.propagate_caller_sync!(fn_nodes, body_summaries)
-    return if fn_nodes.empty?
-
     # Index annotated call sites by callee name. These facts are collected once
     # during body analysis and keyed by stable CallSiteId.
-    callsites = T.let(Hash.new { |h, k| h[k] = [] }, CallSitesByCallee)
+    callsites = T.let({}, CallSitesByCallee)
     body_summaries.each_value do |summary|
       summary.call_site_facts.each do |call_site|
         next if call_site.fn_var_call
-        T.must(callsites[call_site.callee_name]) << call_site
+        (callsites[call_site.callee_name] ||= []) << call_site
       end
     end
 
-    max_iters = 8
-    max_iters.times do
+    fn_nodes.length.times do
       changed = T.let(false, T::Boolean)
       fn_nodes.each do |callee_name, callee_fn|
-        next unless callee_fn&.params
-        sites = T.must(callsites[callee_name])
-        next if sites.empty?
+        sites = callsites.fetch(callee_name, [])
 
         callee_fn.params.each_with_index do |param, idx|
           entry = param.symbol
           next unless entry
 
           # ── sync axis ────────────────────────────────────────────────
-          unless entry.sync && param_sync_was_declared?(param)
+          unless param_sync_was_declared?(param)
             unified = unify_caller_attr(sites, idx) do |s|
-              next s.sync if s&.sync
-              t = s&.type
-              t.is_a?(Type) ? t.sync : nil
+              next s.sync if s.sync
+              t = s.type
+              t.sync
             end
             if unified && entry.sync != unified && param_accepts_caller_sync?(callee_fn, param, unified)
               entry.sync = unified
@@ -324,12 +313,10 @@ module EscapeAnalysis
           # @shared:locked + collection to :heap, so the wrapping fact
           # lives on entry.type.ownership instead. Check both axes.
           unified_storage = unify_caller_attr(sites, idx) do |s|
-            next s.storage if s&.rc_stored?
-            t = s&.type
-            if t.is_a?(Type)
-              next :shared     if t.respond_to?(:shared?)     && t.shared?
-              next :multiowned if t.respond_to?(:multiowned?) && t.multiowned?
-            end
+            next s.storage if s.rc_stored?
+            t = s.type
+            next :shared     if t.shared?
+            next :multiowned if t.multiowned?
             nil
           end
           if unified_storage && entry.storage != unified_storage

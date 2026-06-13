@@ -7,7 +7,7 @@ require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 #   Gap 2: WITH BORROWED on @shared/@locked/@multiowned types
 #   Gap 3: Field mutation assignment (s.field = ref)
 
-RSpec.describe "BORROWED escape lockdown" do
+RSpec.describe BorrowChecker do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
     ast = ClearParser.new(tokens, src).parse

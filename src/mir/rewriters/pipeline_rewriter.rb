@@ -18,16 +18,14 @@ class PipelineRewriter
   # OrderByOp, IndexOp, WindowOp, JoinOp: require structural MIR/runtime
   # lowering that the MIR pipeline lowerers own.
 
-  sig { params(annotator: T.nilable(SemanticAnnotator)).void }
+  sig { params(annotator: T.untyped).void }
   def initialize(annotator = nil)
-    @annotator = annotator
+    @annotator = T.let(annotator, T.untyped)
     @var_counter = T.let(0, Integer)
   end
 
   sig { params(node: AST::Node).returns(AST::Node) }
   def rewrite!(node)
-    return node unless node
-
     # Handle SMOOTH nodes BEFORE recursing into children.
     # This preserves pipeline chains (a |> WHERE |> SELECT |> SUM)
     # so collect_chain can discover and fuse them into a single loop.
@@ -36,7 +34,6 @@ class PipelineRewriter
     end
 
     rewrite_children!(node)
-    node
   end
 
   private
@@ -87,7 +84,7 @@ class PipelineRewriter
       node.items.map! { |i| rewrite!(i) }
     when AST::BlockExpr
       node.body.map! { |s| rewrite!(s) }
-      node.result = rewrite!(node.result)
+      node.result = rewrite!(node.result) if node.result
     end
 
     node

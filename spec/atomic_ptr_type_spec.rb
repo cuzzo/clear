@@ -16,7 +16,7 @@ require_relative "../src/ast/type" unless defined?(Type)
 # CapabilityWrap. Annotator combo validation (M3.4) rejects @local /
 # @multiowned with @indirect:atomic, and rejects @indirect:atomic on
 # primitives (use @shared:atomic instead). Runtime AtomicPtr(T) is M3.3.
-RSpec.describe "Type @indirect:atomic axis (AtomicPtr M3.1)" do
+RSpec.describe Type, "@indirect:atomic axis (AtomicPtr M3.1)" do
   describe "predicates" do
     it "indirect? is true when layout == :indirect" do
       t = Type.new(:Counter, sync: :atomic, layout: :indirect)

@@ -16,7 +16,7 @@ module RubySpecMutants
     const :name, String
     const :expression, String
     const :requires, T::Array[String]
-    const :spec, String
+    const :specs, T::Array[String]
     const :min_coverage, Float
     const :max_timeouts, Integer
     const :hard_gate, T::Boolean
@@ -54,9 +54,9 @@ module RubySpecMutants
     subject.requires.each { |req| argv.concat(['-r', req]) }
     argv.concat([
       '--integration', 'rspec',
-      '--integration-argument', subject.spec,
       '--jobs', ENV.fetch('MUTANT_JOBS', '32'),
     ])
+    subject.specs.each { |spec| argv.concat(['--integration-argument', spec]) }
     argv.concat(['--since', since]) if since
     argv << subject.expression
     argv
@@ -101,15 +101,29 @@ module RubySpecMutants
   def self.subject_from_entry(entry)
     subject = String(entry['subject'])
     baseline = Float(entry['baseline'])
+    specs = subject_specs(entry)
+    expression = entry['expression'] ? String(entry['expression']) : subject_expression(subject)
     Subject.new(
       name: slug(subject),
-      expression: subject_expression(subject),
+      expression: expression,
       requires: parse_requires(String(entry['require'])),
-      spec: String(entry['spec']),
+      specs: specs,
       min_coverage: baseline,
       max_timeouts: Integer(entry.fetch('max_timeouts', DEFAULT_MAX_TIMEOUTS)),
       hard_gate: entry.fetch('hard_gate', false) == true
     )
+  end
+
+  sig { params(entry: T::Hash[String, T.untyped]).returns(T::Array[String]) }
+  def self.subject_specs(entry)
+    raw_specs = entry['specs']
+    if raw_specs
+      specs = T.cast(raw_specs, T::Array[T.untyped]).map { |spec| String(spec) }
+      raise "empty specs for mutant subject #{entry['subject']}" if specs.empty?
+      return specs
+    end
+
+    [String(entry.fetch('spec'))]
   end
 
   sig { returns(T::Array[Subject]) }
@@ -121,7 +135,9 @@ module RubySpecMutants
     raise "duplicate ruby mutant subject names: #{duplicate_names.join(', ')}" unless duplicate_names.empty?
 
     subjects.each do |subject|
-      raise "missing mutant spec for #{subject.expression}: #{subject.spec}" unless File.file?(subject.spec)
+      subject.specs.each do |spec|
+        raise "missing mutant spec for #{subject.expression}: #{spec}" unless File.file?(spec)
+      end
     end
     subjects.freeze
   end
@@ -171,7 +187,10 @@ module RubySpecMutants
   def self.selected_subjects(opts)
     return SUBJECTS unless opts.subject
 
-    selected = SUBJECTS.select { |s| s.name == opts.subject || s.expression == opts.subject }
+    wanted_expression = subject_expression(T.must(opts.subject))
+    selected = SUBJECTS.select do |s|
+      s.name == opts.subject || s.expression == opts.subject || s.expression == wanted_expression
+    end
     raise "unknown ruby mutant subject: #{opts.subject}" if selected.empty?
     selected
   end
@@ -182,7 +201,7 @@ module RubySpecMutants
     if opts.list
       SUBJECTS.each do |s|
         gate = s.hard_gate ? 'hard' : 'advisory'
-        puts "#{s.name} #{s.expression} #{gate} min=#{format('%.2f', s.min_coverage)} spec=#{s.spec}"
+        puts "#{s.name} #{s.expression} #{gate} min=#{format('%.2f', s.min_coverage)} specs=#{s.specs.join(',')}"
       end
       return 0
     end

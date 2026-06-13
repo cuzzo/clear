@@ -1391,9 +1391,12 @@ class UseAfterMoveChecker
   sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall), state: OwnershipDataflow::OwnershipState).void }
   def check_call_reads(call_node, state)
     (call_node.args || []).each do |arg|
-      if (arg.is_a?(AST::Identifier) && arg.was_moved) || arg.is_a?(AST::MoveNode)
+      if arg.is_a?(AST::Identifier) && arg.was_moved
         # This is a TAKES/GIVE arg -- the move itself is valid, not a read.
         next
+      elsif arg.is_a?(AST::MoveNode)
+        # Simple GIVE x consumes x. Complex GIVE expr.field still reads expr.
+        check_reads_in_expr(arg, state) unless arg.value.is_a?(AST::Identifier)
       elsif arg.is_a?(AST::ShareNode)
         check_share_reads(arg, state)
       elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode) || arg.is_a?(AST::FreezeNode)
@@ -1456,7 +1459,8 @@ class UseAfterMoveChecker
       node.items.each { |i| check_reads_in_expr(i, state) }
 
     when AST::HashLit
-      node.pairs.each { |_k, v|
+      node.pairs.each { |k, v|
+        check_reads_in_expr(k, state)
         val = v.is_a?(Array) ? v[1] : v
         check_reads_in_expr(val, state)
       }
@@ -1847,9 +1851,7 @@ class BorrowChecker
 
   sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Array[String]) }
   def self.check(fn_node, schema_lookup:)
-    checker = new(fn_node, schema_lookup: schema_lookup)
-    checker.check!
-    checker.errors
+    new(fn_node, schema_lookup: schema_lookup).check!
   end
 
   sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }

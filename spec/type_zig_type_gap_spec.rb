@@ -5,7 +5,7 @@ require_relative "../src/ast/source_error" unless defined?(CompilerError)
 require_relative "../src/ast/type" unless defined?(Type)
 require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
-RSpec.describe "Type#zig_type gap coverage" do
+RSpec.describe Type, "zig_type gap coverage" do
   it "renders generic and stream-style surface names without string re-parsing" do
     expect(Type.surface_name(Type.generic_instance_of(:Box, [Type.new(:Int64)]))).to eq("Box<Int64>")
     expect(Type.array_capacity_suffix(:STREAM_OPEN)).to eq("[?]")

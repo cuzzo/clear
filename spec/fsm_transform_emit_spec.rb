@@ -272,14 +272,14 @@ RSpec.describe FsmTransform::Emit do
     cond = MIR::Ident.new("has_work")
     tail = FsmTransform::Segments::CondBranch.new(cond, 2, 3)
     spec = fsm_spec(index: 1, tail: tail, descriptor: nil)
-    lowered = described_class.send(:build_dispatch_tail, spec, 0, [], 7)
+    lowered = described_class.send(:build_dispatch_tail, spec)
 
     expect(lowered).to be_a(MIR::FsmTailCondJump)
     expect(lowered.condition).to eq(cond)
 
     bad_tail = FsmTransform::Segments::CondBranch.new(Object.new, 2, 3)
     expect {
-      described_class.send(:build_dispatch_tail, fsm_spec(index: 1, tail: bad_tail, descriptor: nil), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 1, tail: bad_tail, descriptor: nil))
     }.to raise_error(ArgumentError, /CondBranch tail condition must be structural MIR/)
   end
 
@@ -290,7 +290,7 @@ RSpec.describe FsmTransform::Emit do
     tail = FsmTransform::Segments::NextSuspend.new(Object.new, nil)
 
     expect {
-      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: descriptor), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: descriptor))
     }.to raise_error(ArgumentError, /Unsupported descriptor tail/)
   end
 
@@ -298,7 +298,7 @@ RSpec.describe FsmTransform::Emit do
     tail = FsmTransform::Segments::NextSuspend.new(Object.new, nil)
 
     expect {
-      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: nil), 0, [], 7)
+      described_class.send(:build_dispatch_tail, fsm_spec(index: 4, tail: tail, descriptor: nil))
     }.to raise_error(ArgumentError, /has no descriptor/)
   end
 
@@ -396,11 +396,6 @@ RSpec.describe FsmTransform::Emit do
   end
 
   it "builds parallel FSM spawn setup with heap allocation" do
-    lowering = Class.new {
-      def capture_inits_fsm(capture_inits)
-        capture_inits
-      end
-    }.new
     ctx = fsm_ctx(
       id: 8,
       ctx_var: "__ctx_8_ptr",
@@ -410,7 +405,7 @@ RSpec.describe FsmTransform::Emit do
       capture_inits: [MIR::StructInitField.new(name: :payload, value: MIR::Ident.new("payload"))],
     )
 
-    setup = described_class.send(:build_spawn_setup, ctx, lowering)
+    setup = described_class.send(:build_spawn_setup, ctx)
 
     expect(FsmWrapperEmitter.send(:render_fsm_spawn_call, setup.spawn_call))
       .to eq("try CheatHeader.spawnFsmBest(__ctx_8_ptr.task);")
@@ -580,6 +575,357 @@ RSpec.describe FsmTransform::Emit do
     expect(FsmWrapperEmitter.render(result.body)).to include("__lock_held_0: bool = false,")
     expect(result.structure.destroy_actions.first).to be_a(MIR::FsmDestroyLockRelease)
     expect(result.structure.destroy_actions.first.guard_field).to eq("__lock_held_0")
+  end
+
+  it "returns nil for an empty recursive segment list" do
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [],
+      synthetic_fields: [],
+      alias_overrides_by_index: {},
+    )
+
+    expect(described_class.build_recursive(
+      fsm_ctx,
+      segment_list,
+      FsmTransform::Liveness::Result.new({}),
+      Object.new,
+    )).to be_nil
+  end
+
+  it "builds recursive FSM structure from captures, liveness, synthetic fields, and AST lowering" do
+    lowering = Class.new {
+      attr_reader :capture_maps, :lower_calls, :contexts
+
+      def initialize
+        @capture_maps = []
+        @lower_calls = []
+        @contexts = []
+        @last_facts = []
+      end
+
+      def with_fsm_segment_lowering_context(**kwargs)
+        @contexts << kwargs
+        yield
+      end
+
+      def with_fiber_capture_map(capture_map, rt_override:)
+        @capture_maps << [capture_map, rt_override]
+        yield
+      end
+
+      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil)
+        @lower_calls << [ast_stmts.map(&:class), ast_stmts.map(&:name), no_result, ctx_id]
+        @last_facts = [
+          MIR::FsmResultTransferFact.new(name: "fact_only", target_alloc: :frame, move_guarded: false),
+        ]
+        if no_result
+          [
+            MIR::Let.new("keep", MIR::Ident.new("input"), true, Type.new(:Int64), nil),
+          ]
+        else
+          [
+            MIR::Set.new(
+              MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_3"), "inner"), "result"),
+              MIR::Ident.new("keep"),
+              false,
+            ),
+          ]
+        end
+      end
+
+      def last_fsm_result_transfer_facts
+        @last_facts
+      end
+    }.new
+    ast_stmt = AST::Identifier.new(tok("input"), "input")
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [
+        FsmTransform::Segments::Segment.new(
+          0,
+          [MIR::Comment.new("mir prelude"), ast_stmt],
+          FsmTransform::Segments::Goto.new(1),
+        ),
+        FsmTransform::Segments::Segment.new(
+          1,
+          [ast_stmt],
+          FsmTransform::Segments::Goto.new(2),
+        ),
+        FsmTransform::Segments::Segment.new(
+          2,
+          [ast_stmt],
+          FsmTransform::Segments::Done.new(nil),
+        ),
+      ],
+      synthetic_fields: [ctx_decl("synthetic", "bool", MIR::Lit.new("false"))],
+      alias_overrides_by_index: {
+        1 => { "input" => "__ctx_3.alias_input" },
+      },
+    )
+    liveness = FsmTransform::Liveness::Result.new({
+      "keep" => FsmTransform::Liveness::CrossSegmentVarFact.new(
+        type_info: Type.new(:Int64),
+        first_def_seg: 0,
+        last_use_seg: 1,
+      ),
+      "hidden" => FsmTransform::Liveness::CrossSegmentVarFact.new(
+        type_info: Type.new(:String),
+        first_def_seg: 0,
+        last_use_seg: 2,
+      ),
+    })
+    ctx = fsm_ctx(
+      id: 3,
+      bg_rt: "__rt_bg3",
+      ctx_type: "__BgCtx3",
+      captured: { "cap" => :stub },
+      capture_fields: [ctx_decl("cap", "[]const u8")],
+      capture_close_plans: { "cap" => Schemas::ResourceClosePlan.method("close") },
+      fresh_heap_cleanup_names: ["fresh"],
+      recursive_promoted_names: ["hidden", "hidden", "solo_recursive"],
+      pointer_captures: Set["ptr"],
+      arena_init_flag: true,
+      is_void: false,
+      extra_ctx_fields: [ctx_decl("extra", "i64", MIR::Lit.new("1"))],
+    )
+
+    result = T.must(described_class.build_recursive(ctx, segment_list, liveness, lowering))
+    body = result.body
+    ctx_struct = body.ctx_struct
+
+    expect(lowering.capture_maps).to include([
+      hash_including(
+        "cap" => "__ctx_3.cap",
+        "keep" => "__ctx_3.keep",
+        "hidden" => "__ctx_3.hidden",
+        "solo_recursive" => "__ctx_3.solo_recursive",
+      ),
+      "__rt_bg3",
+    ])
+    expect(lowering.capture_maps).to include([
+      hash_including(
+        "input" => "__ctx_3.alias_input",
+        "keep" => "__ctx_3.keep",
+      ),
+      "__rt_bg3",
+    ])
+    expect(lowering.lower_calls).to eq([
+      [[AST::Identifier], ["input"], true, nil],
+      [[AST::Identifier], ["input"], false, 3],
+      [[AST::Identifier], ["input"], false, 3],
+    ])
+    expect(lowering.contexts.map { |lower_ctx| lower_ctx[:pointer_captures] }).to eq([Set["ptr"], Set["ptr"], Set["ptr"]])
+    expect(lowering.contexts.first[:inherited_alloc_names]).to include("__ctx_3.cap")
+    expect(lowering.contexts.first[:inherited_guard_names]).to include("__ctx_3.cap")
+    expect(lowering.contexts.first[:owned_result_guards]).to eq({})
+
+    expect(ctx_struct.extra_field_decls.map(&:name)).to include("step", "extra", "synthetic")
+    expect(ctx_struct.promoted_field_decls.map(&:name)).to include("keep", "keep_moved", "hidden_moved", "solo_recursive_moved")
+    expect(ctx_struct.promoted_field_decls.map(&:name)).not_to include("hidden", "solo_recursive")
+    keep_decl = ctx_struct.promoted_field_decls.find { |decl| decl.name == "keep" }
+    hidden_guard = ctx_struct.promoted_field_decls.find { |decl| decl.name == "hidden_moved" }
+    expect(keep_decl&.type_zig).to eq("i64")
+    expect(keep_decl&.default_value).to be_a(MIR::Undef)
+    expect(hidden_guard&.type_zig).to eq("bool")
+    expect(hidden_guard&.default_value&.value).to eq("false")
+    expect(ctx_struct.promoted_field_decls.map(&:name).count("hidden_moved")).to eq(1)
+    expect(ctx_struct.member_fns.map(&:fn_name)).to eq(["runSeg0", "runSeg1", "runSeg2"])
+    arena_stmt = ctx_struct.member_fns.first.body_stmts.first
+    expect(arena_stmt).to be_a(MIR::Set)
+    expect(MIREmitter.new.emit(arena_stmt.target)).to eq("__rt_bg3.arena_mode")
+    expect(arena_stmt.value.value).to eq("true")
+    expect(arena_stmt.needs_field_cleanup).to be(false)
+    expect(ctx_struct.member_fns.first.body_stmts).to include(an_object_having_attributes(text: "mir prelude"))
+    expect(ctx_struct.member_fns.first.suppress_runtime_ref).to be(false)
+    expect(ctx_struct.member_fns.last.suppress_runtime_ref).to be(true)
+    expect(result.structure.destroy_actions.map(&:name)).to include("cap", "fresh")
+    fact_only = result.structure.ownership_facts.find { |fact| fact.name == "fact_only" }
+    expect(fact_only&.target_alloc).to eq(:frame)
+    expect(fact_only&.move_guarded).to be(false)
+  end
+
+  it "appends the void result without an arena prologue for void recursive FSMs" do
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [
+        FsmTransform::Segments::Segment.new(
+          0,
+          [],
+          FsmTransform::Segments::Done.new(nil),
+        ),
+      ],
+      synthetic_fields: [],
+      alias_overrides_by_index: {},
+    )
+
+    result = T.must(described_class.build_recursive(
+      fsm_ctx(id: 8, bg_rt: "__rt_bg8", is_void: true, arena_init_flag: false),
+      segment_list,
+      FsmTransform::Liveness::Result.new({}),
+      Object.new,
+    ))
+
+    body_stmts = result.body.ctx_struct.member_fns.first.body_stmts
+    expect(body_stmts.length).to eq(1)
+    void_assign = body_stmts.first
+    expect(void_assign).to be_a(MIR::Set)
+    expect(MIREmitter.new.emit(void_assign.target)).to eq("__ctx_8.inner.result")
+    expect(void_assign.value).to be_a(MIR::VoidLiteral)
+    expect(void_assign.needs_field_cleanup).to be(false)
+  end
+
+  it "rejects recursive MIR segments that retain cross-segment cleanup defers" do
+    cleanup = MIR::Cleanup.new(
+      "keep",
+      CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+    )
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [
+        FsmTransform::Segments::Segment.new(
+          0,
+          [cleanup],
+          FsmTransform::Segments::Done.new(nil),
+        ),
+      ],
+      synthetic_fields: [],
+      alias_overrides_by_index: {},
+    )
+    liveness = FsmTransform::Liveness::Result.new({
+      "keep" => FsmTransform::Liveness::CrossSegmentVarFact.new(
+        type_info: Type.new(:String),
+        first_def_seg: 0,
+        last_use_seg: 0,
+      ),
+    })
+
+    expect {
+      described_class.build_recursive(fsm_ctx(id: 11), segment_list, liveness, Object.new)
+    }.to raise_error(/FSM cleanup invariant violated: seg 0 emits cleanup for 'keep'/)
+  end
+
+  it "returns nil when recursive AST segment lowering fails" do
+    lowering = Class.new {
+      def with_fsm_segment_lowering_context(**_kwargs)
+        yield
+      end
+
+      def with_fiber_capture_map(_capture_map, rt_override:)
+        yield
+      end
+
+      def lower_finalized_fsm_step_mir(_ast_stmts, no_result:, ctx_id: nil)
+        _ = no_result
+        _ = ctx_id
+        nil
+      end
+
+      def last_fsm_result_transfer_facts
+        []
+      end
+    }.new
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [
+        FsmTransform::Segments::Segment.new(
+          0,
+          [AST::Identifier.new(tok("input"), "input")],
+          FsmTransform::Segments::Done.new(nil),
+        ),
+      ],
+      synthetic_fields: [],
+      alias_overrides_by_index: {},
+    )
+
+    expect(described_class.build_recursive(
+      fsm_ctx(id: 12),
+      segment_list,
+      FsmTransform::Liveness::Result.new({}),
+      lowering,
+    )).to be_nil
+  end
+
+  it "threads owned suspend result guards through recursive NEXT lowering" do
+    lowering = Class.new {
+      attr_reader :contexts, :capture_maps, :bg_pointer_captures
+
+      def initialize
+        @contexts = []
+        @capture_maps = []
+        @bg_pointer_captures = []
+        @last_facts = []
+      end
+
+      def with_bg_fiber_body_context(pointer_captures)
+        @bg_pointer_captures << pointer_captures
+        yield
+      end
+
+      def with_fsm_segment_lowering_context(**kwargs)
+        @contexts << kwargs
+        yield
+      end
+
+      def with_fiber_capture_map(capture_map, rt_override:)
+        @capture_maps << [capture_map, rt_override]
+        yield
+      end
+
+      def lower(_node)
+        MIR::Ident.new("future")
+      end
+
+      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil)
+        @last_facts = []
+        [
+          MIR::ExprStmt.new(
+            MIR::Lit.new("#{ast_stmts.first.name}:#{no_result}:#{ctx_id || 0}"),
+            false,
+          ),
+        ]
+      end
+
+      def last_fsm_result_transfer_facts
+        @last_facts
+      end
+
+      def mir_schema_lookup
+        nil
+      end
+    }.new
+    promise = AST::Identifier.new(tok("future"), "future")
+    promise.full_type = Type.new(:"~String")
+    use_answer = AST::Identifier.new(tok("answer"), "answer")
+    segment_list = FsmTransform::RecursiveSplitter::SegmentList.new(
+      segments: [
+        FsmTransform::Segments::Segment.new(
+          0,
+          [],
+          FsmTransform::Segments::NextSuspend.new(promise, "answer", 1),
+        ),
+        FsmTransform::Segments::Segment.new(
+          1,
+          [use_answer],
+          FsmTransform::Segments::Done.new(nil),
+        ),
+      ],
+      synthetic_fields: [],
+      alias_overrides_by_index: {},
+    )
+
+    result = T.must(described_class.build_recursive(
+      fsm_ctx(id: 10, bg_rt: "__rt_bg10", pointer_captures: Set["future"], is_void: false),
+      segment_list,
+      FsmTransform::Liveness::Result.new({}),
+      lowering,
+    ))
+
+    ctx_struct = result.body.ctx_struct
+    expect(lowering.bg_pointer_captures).to eq([Set["future"]])
+    expect(lowering.contexts.first[:pointer_captures]).to eq(Set["future"])
+    expect(lowering.contexts.first[:owned_result_guards]).to eq("answer" => "__owned_answer_init")
+    expect(lowering.capture_maps.last.first).to include("answer" => "__ctx_10.answer")
+    expect(ctx_struct.extra_field_decls.map(&:name)).to include("sp_1", "answer", "__owned_answer_init")
+    expect(ctx_struct.promoted_field_decls.map(&:name)).not_to include("answer")
+    destroy_action = result.structure.destroy_actions.find { |action| action.respond_to?(:name) && action.name == "answer" }
+    expect(destroy_action).to be_a(MIR::FsmDestroyCleanup)
+    expect(MIREmitter.new.emit(destroy_action.guard)).to eq("__ctx_10.__owned_answer_init")
   end
 
   it "routes top-level FSM transform through a typed emit context" do

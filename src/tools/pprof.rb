@@ -111,16 +111,13 @@ module Pprof
     # to display the binary name in the header (silences "Main binary
     # filename not available") and to set has_functions/has_filenames/
     # has_line_numbers flags so its UI knows symbolization is already
-    # done. memory_start/limit are 0 because we do not require pprof
-    # to load the binary itself — addr2line resolved everything at
+    # done. Address-range fields are omitted because we do not require
+    # pprof to load the binary itself; addr2line resolved everything at
     # convert time. Returns the mapping id; the first call also sets
     # the primary mapping that all Locations attach to by default.
     def add_mapping(binary:, build_id: '')
       mapping = {
         id: @next_mapping_id,
-        memory_start: 0,
-        memory_limit: 0,
-        file_offset: 0,
         filename_idx: intern(binary),
         build_id_idx: intern(build_id),
         has_functions: true,
@@ -174,9 +171,10 @@ module Pprof
     # order/length of `add_sample_type` calls. `labels` is a hash of
     # string key -> string-or-int (str labels are interned; int labels
     # render as numeric).
-    sig { params(location_ids: Array, values: Array, labels: Hash).returns(String) }
+    sig { params(location_ids: T::Array[Integer], values: T::Array[Integer], labels: T::Hash[T.untyped, T.untyped]).void }
     def add_sample(location_ids, values, labels = {})
       @samples << { location_ids: location_ids, values: values, labels: labels }
+      nil
     end
 
     def encode
@@ -275,15 +273,11 @@ module Pprof
 
     def encode_mapping(m)
       buf = Wire.field_varint(1, m[:id])
-      buf += Wire.field_varint(2, m[:memory_start]) if m[:memory_start].positive?
-      buf += Wire.field_varint(3, m[:memory_limit]) if m[:memory_limit].positive?
-      buf += Wire.field_varint(4, m[:file_offset]) if m[:file_offset].positive?
       buf += Wire.field_varint(5, m[:filename_idx])
       buf += Wire.field_varint(6, m[:build_id_idx]) if m[:build_id_idx].positive?
       buf += Wire.field_varint(7, 1) if m[:has_functions]
       buf += Wire.field_varint(8, 1) if m[:has_filenames]
       buf += Wire.field_varint(9, 1) if m[:has_line_numbers]
-      buf += Wire.field_varint(10, 1) if m[:has_inline_frames]
       buf
     end
 

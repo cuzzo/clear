@@ -62,6 +62,11 @@ module LockHelper
     const :edges, T::Array[LockEdge]
   end
 
+  class LockSccFrame < T::Struct
+    const :node, Symbol
+    const :expanded, T::Boolean
+  end
+
   DirectEdges = T.type_alias { T::Hash[String, T::Array[LockEdge]] }
   DirectAcquires = T.type_alias { T::Hash[String, T::Set[Symbol]] }
   HeldCallSites = T.type_alias { T::Hash[String, T::Array[LockHeldCallSite]] }
@@ -282,55 +287,53 @@ module LockHelper
     LockGraph.new(nodes: nodes, adj: adj, edges: live)
   end
 
-  # Iterative Tarjan SCC. Returns array of SCCs (each an array of nodes).
+  # Iterative SCC pass. Returns array of SCCs (each an array of nodes).
   sig { params(nodes: T::Set[Symbol], adj: T::Hash[Symbol, T::Set[Symbol]]).returns(T::Array[T::Array[Symbol]]) }
   def tarjan_scc(nodes, adj)
-    T.bind(self, SemanticAnnotator) rescue nil
-    index = {}
-    lowlink = {}
-    on_stack = {}
-    stack = []
-    sccs = []
-    next_index = 0
-    w = T.let(nil, T.untyped)
+    empty = T.let(Set.new, T::Set[Symbol])
+    reverse_adj = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[Symbol, T::Set[Symbol]])
+    adj.each do |from, targets|
+      targets.each { |to| T.must(reverse_adj[to]) << from }
+    end
 
+    visited = T.let(Set.new, T::Set[Symbol])
+    finish_order = T.let([], T::Array[Symbol])
     nodes.each do |root|
-      next if index.key?(root)
-      work = [[root, adj[root].to_a.dup, :enter]]
-      until work.empty?
-        v, neighbors, phase = work.last
-        case phase
-        when :enter
-          index[v] = next_index
-          lowlink[v] = next_index
-          next_index += 1
-          stack.push(v)
-          on_stack[v] = true
-          work[-1][2] = :resume
-        when :resume
-          if neighbors.any?
-            w = T.must(neighbors.shift)
-            if !index.key?(w)
-              work.push([w, T.must(adj[w]).to_a.dup, :enter])
-            elsif on_stack[w]
-              lowlink[v] = [lowlink[v], index[w]].min
-            end
-          else
-            if lowlink[v] == index[v]
-              component = []
-              loop do
-                w = stack.pop
-                on_stack[w] = false
-                component << w
-                break if w == v
-              end
-              sccs << component
-            end
-            work.pop
-            lowlink[work.last[0]] = [lowlink[work.last[0]], lowlink[v]].min unless work.empty?
-          end
+      next if visited.include?(root)
+      stack = T.let([LockSccFrame.new(node: root, expanded: false)], T::Array[LockSccFrame])
+      until stack.empty?
+        frame = T.must(stack.pop)
+        node = frame.node
+        if frame.expanded
+          finish_order << node
+          next
+        end
+
+        next if visited.include?(node)
+        visited << node
+        stack << LockSccFrame.new(node: node, expanded: true)
+        adj.fetch(node, empty).each do |neighbor|
+          stack << LockSccFrame.new(node: neighbor, expanded: false) unless visited.include?(neighbor)
         end
       end
+    end
+
+    assigned = T.let(Set.new, T::Set[Symbol])
+    sccs = T.let([], T::Array[T::Array[Symbol]])
+    finish_order.reverse_each do |root|
+      next if assigned.include?(root)
+      component = T.let([], T::Array[Symbol])
+      stack = T.let([root], T::Array[Symbol])
+      until stack.empty?
+        node = T.must(stack.pop)
+        next if assigned.include?(node)
+        assigned << node
+        component << node
+        reverse_adj.fetch(node, empty).each do |neighbor|
+          stack << neighbor unless assigned.include?(neighbor)
+        end
+      end
+      sccs << component
     end
     sccs
   end

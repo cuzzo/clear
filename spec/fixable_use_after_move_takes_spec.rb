@@ -11,7 +11,7 @@ require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 # declaration to a refcounted handle won't help — `someFn` still
 # demands a plain owned value and the use-after-move re-fires after
 # the upgrade. The fix-dropdown skips the upgrade fixes in that case.
-RSpec.describe "USE-AFTER-MOVE fix dropdown — TAKES-into-plain consumer filter" do
+RSpec.describe UseAfterMoveChecker do
   before { FixCollector.enable! }
   after  { FixCollector.disable! }
 

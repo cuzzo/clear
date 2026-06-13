@@ -11,7 +11,7 @@ require_relative "../src/ast/type" unless defined?(Type)
 # Struct fields typed as T[] are slices in Zig; ArrayList variables are promoted
 # separately by mark_escaping_collections!.
 
-RSpec.describe "Type promotion/cleanup analysis" do
+RSpec.describe Type, "promotion/cleanup analysis" do
   let(:schemas) do
     {
       Point: Schemas::StructSchema.new(fields: { "x" => :Float64, "y" => :Float64 }),

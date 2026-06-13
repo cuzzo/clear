@@ -66,6 +66,66 @@ RSpec.describe UseAfterMoveChecker do
     AST::FunctionDef.new(token, name, [], [], :Void, nil, [], [], nil, :private, [], false)
   end
 
+  def direct_checker(name = "main")
+    checker = UseAfterMoveChecker.allocate
+    checker.instance_variable_set(:@fn_node, empty_function_node(name))
+    checker.instance_variable_set(:@errors, [])
+    checker
+  end
+
+  def moved_state(*names)
+    entries = names.each_with_object({}) do |name, out|
+      out[name] = OwnershipDataflow::OwnerEntry.new(
+        state: OwnershipDataflow::MOVED,
+        allocator: :heap,
+        needs_cleanup: true,
+      )
+    end
+    OwnershipDataflow.state_from_names(entries)
+  end
+
+  def id_node(name, line: 1)
+    AST::Identifier.new(Lexer::Token.new(:IDENTIFIER, name, line, 3), name)
+  end
+
+  describe ".check public entrypoint" do
+    it "runs with default analysis context" do
+      expect(UseAfterMoveChecker.check(empty_function_node)).to eq([])
+    end
+
+    it "reports errors after running the checker" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT Box { id: Int64 }
+        FN main() RETURNS Void ->
+          a: Box @indirect = Box{ id: 1 };
+          b = a;
+          c = a.id;
+          RETURN;
+        END
+      CLEAR
+
+      expect(errors).to include("[USE_AFTER_MOVE] main::a -- used after being moved (line 5)")
+    end
+
+    it "forwards fallibility and schema lookup context into ownership analysis" do
+      fn_node = empty_function_node
+      can_fail_fns = { "helper" => true }
+      schema_lookup = ->(_name) { nil }
+
+      expect(OwnershipDataflow).to receive(:analyze)
+        .with(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
+        .and_call_original
+
+      expect(
+        UseAfterMoveChecker.check(
+          fn_node,
+          can_fail_fns: can_fail_fns,
+          schema_lookup: schema_lookup,
+        ),
+      ).to eq([])
+    end
+  end
+
   # =========================================================================
   # No false positives on valid programs
   # =========================================================================
@@ -340,7 +400,330 @@ RSpec.describe UseAfterMoveChecker do
     end
   end
 
+  describe "direct read-walker coverage" do
+    it "checks hash literal keys as reads, not only values" do
+      checker = direct_checker
+      state = moved_state("moved_key", "moved_value")
+      hash = AST::HashLit.new(
+        Lexer::Token.new(:CHAR, "{", 4, 7),
+        { id_node("moved_key", line: 4) => id_node("moved_value", line: 4) },
+        :stack,
+      )
+
+      checker.send(:check_reads_in_expr, hash, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::moved_key -- used after being moved (line 4)",
+        "[USE_AFTER_MOVE] main::moved_value -- used after being moved (line 4)",
+      )
+    end
+
+    it "walks nested list, struct, index, unary, and binary expression reads" do
+      checker = direct_checker
+      state = moved_state("left", "field_owner", "index", "list_item")
+      expr = AST::BinaryOp.new(
+        Lexer::Token.new(:OP, "+", 8, 10),
+        id_node("left", line: 8),
+        :ADD,
+        AST::ListLit.new(
+          Lexer::Token.new(:CHAR, "[", 8, 15),
+          [
+            AST::StructLit.new(
+              Lexer::Token.new(:TYPE_ID, "Box", 8, 16),
+              "Box",
+              {
+                "value" => AST::UnaryOp.new(
+                  Lexer::Token.new(:OP, "-", 8, 23),
+                  :NEG,
+                  AST::GetIndex.new(
+                    Lexer::Token.new(:CHAR, "[", 8, 30),
+                    AST::GetField.new(
+                      Lexer::Token.new(:CHAR, ".", 8, 27),
+                      id_node("field_owner", line: 8),
+                      "items",
+                    ),
+                    id_node("index", line: 8),
+                  ),
+                ),
+              },
+              :stack,
+              [],
+            ),
+            id_node("list_item", line: 8),
+          ],
+          :stack,
+        ),
+      )
+
+      checker.send(:check_reads_in_expr, expr, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::left -- used after being moved (line 8)",
+        "[USE_AFTER_MOVE] main::field_owner -- used after being moved (line 8)",
+        "[USE_AFTER_MOVE] main::index -- used after being moved (line 8)",
+        "[USE_AFTER_MOVE] main::list_item -- used after being moved (line 8)",
+      )
+    end
+
+    it "treats simple GIVE arguments as moves while checking complex GIVE receivers" do
+      checker = direct_checker
+      state = moved_state("simple", "owner")
+      simple_move = AST::FuncCall.new(
+        Lexer::Token.new(:IDENTIFIER, "take", 12, 3),
+        "take",
+        [AST::MoveNode.new(Lexer::Token.new(:GIVE, "GIVE", 12, 8), id_node("simple", line: 12))],
+      )
+      complex_move = AST::FuncCall.new(
+        Lexer::Token.new(:IDENTIFIER, "take", 13, 3),
+        "take",
+        [
+          AST::MoveNode.new(
+            Lexer::Token.new(:GIVE, "GIVE", 13, 8),
+            AST::GetField.new(
+              Lexer::Token.new(:CHAR, ".", 13, 18),
+              id_node("owner", line: 13),
+              "field",
+            ),
+          ),
+        ],
+      )
+
+      checker.send(:check_reads_in_expr, simple_move, state)
+      expect(checker.errors).to be_empty
+
+      checker.send(:check_reads_in_expr, complex_move, state)
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::owner -- used after being moved (line 13)",
+      )
+    end
+
+    it "checks copy-like wrappers, string concat parts, and call receivers/args" do
+      checker = direct_checker
+      state = moved_state(
+        "copy_source",
+        "clone_source",
+        "freeze_source",
+        "concat_part",
+        "fn_arg",
+        "method_receiver",
+        "method_arg",
+      )
+      expressions = [
+        AST::CopyNode.new(Lexer::Token.new(:COPY, "COPY", 36, 3), id_node("copy_source", line: 36)),
+        AST::CloneNode.new(Lexer::Token.new(:CLONE, "CLONE", 37, 3), id_node("clone_source", line: 37)),
+        AST::FreezeNode.new(Lexer::Token.new(:FREEZE, "FREEZE", 38, 3), id_node("freeze_source", line: 38)),
+        AST::StringConcat.new(
+          Lexer::Token.new(:STRING, '"#{concat_part}"', 39, 3),
+          [AST::Literal.new(Lexer::Token.new(:STRING, '"prefix"', 39, 3), :STRING, "prefix", :rodata),
+           id_node("concat_part", line: 39)],
+        ),
+        AST::FuncCall.new(
+          Lexer::Token.new(:IDENTIFIER, "use", 40, 3),
+          "use",
+          [id_node("fn_arg", line: 40)],
+        ),
+        AST::MethodCall.new(
+          Lexer::Token.new(:IDENTIFIER, "push", 41, 19),
+          id_node("method_receiver", line: 41),
+          "push",
+          [id_node("method_arg", line: 41)],
+        ),
+      ]
+
+      expressions.each { |expr| checker.send(:check_reads_in_expr, expr, state) }
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::copy_source -- used after being moved (line 36)",
+        "[USE_AFTER_MOVE] main::clone_source -- used after being moved (line 37)",
+        "[USE_AFTER_MOVE] main::freeze_source -- used after being moved (line 38)",
+        "[USE_AFTER_MOVE] main::concat_part -- used after being moved (line 39)",
+        "[USE_AFTER_MOVE] main::fn_arg -- used after being moved (line 40)",
+        "[USE_AFTER_MOVE] main::method_receiver -- used after being moved (line 41)",
+        "[USE_AFTER_MOVE] main::method_arg -- used after being moved (line 41)",
+      )
+    end
+  end
+
+  describe "direct statement read dispatch" do
+    it "checks declaration and return values as reads" do
+      checker = direct_checker
+      state = moved_state("decl_value", "return_value")
+      decl = AST::VarDecl.new(
+        Lexer::Token.new(:IDENTIFIER, "x", 16, 3),
+        "x",
+        nil,
+        id_node("decl_value", line: 16),
+        false,
+      )
+      ret = AST::ReturnNode.new(
+        Lexer::Token.new(:RETURN, "RETURN", 17, 3),
+        id_node("return_value", line: 17),
+      )
+
+      checker.send(:check_stmt_reads, decl, state)
+      checker.send(:check_stmt_reads, ret, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::decl_value -- used after being moved (line 16)",
+        "[USE_AFTER_MOVE] main::return_value -- used after being moved (line 17)",
+      )
+    end
+
+    it "does not read simple assignment targets but checks field/index assignment targets" do
+      checker = direct_checker
+      state = moved_state("lhs", "rhs", "field_owner", "index_owner", "index_key")
+      simple = AST::Assignment.new(
+        Lexer::Token.new(:IDENTIFIER, "lhs", 20, 3),
+        id_node("lhs", line: 20),
+        id_node("rhs", line: 20),
+      )
+      field_assign = AST::Assignment.new(
+        Lexer::Token.new(:IDENTIFIER, "field_owner", 21, 3),
+        AST::GetField.new(
+          Lexer::Token.new(:CHAR, ".", 21, 14),
+          id_node("field_owner", line: 21),
+          "value",
+        ),
+        AST::Literal.new(Lexer::Token.new(:INT, "1", 21, 23), :INT64, 1, :stack),
+      )
+      index_assign = AST::Assignment.new(
+        Lexer::Token.new(:IDENTIFIER, "index_owner", 22, 3),
+        AST::GetIndex.new(
+          Lexer::Token.new(:CHAR, "[", 22, 14),
+          id_node("index_owner", line: 22),
+          id_node("index_key", line: 22),
+        ),
+        AST::Literal.new(Lexer::Token.new(:INT, "1", 22, 29), :INT64, 1, :stack),
+      )
+
+      checker.send(:check_stmt_reads, simple, state)
+      checker.send(:check_stmt_reads, field_assign, state)
+      checker.send(:check_stmt_reads, index_assign, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::rhs -- used after being moved (line 20)",
+        "[USE_AFTER_MOVE] main::field_owner -- used after being moved (line 21)",
+        "[USE_AFTER_MOVE] main::index_owner -- used after being moved (line 22)",
+        "[USE_AFTER_MOVE] main::index_key -- used after being moved (line 22)",
+      )
+    end
+
+    it "checks control-flow header expressions" do
+      checker = direct_checker
+      state = moved_state("if_cond", "while_cond", "match_expr", "each_collection")
+      stmts = [
+        AST::IfStatement.new(
+          Lexer::Token.new(:IF, "IF", 26, 3),
+          id_node("if_cond", line: 26),
+          [],
+          [],
+          nil,
+          nil,
+        ),
+        AST::WhileLoop.new(
+          Lexer::Token.new(:WHILE, "WHILE", 27, 3),
+          id_node("while_cond", line: 27),
+          [],
+          nil,
+        ),
+        AST::MatchStatement.new(
+          Lexer::Token.new(:MATCH, "MATCH", 28, 3),
+          id_node("match_expr", line: 28),
+          [],
+          nil,
+          nil,
+          nil,
+          false,
+          false,
+        ),
+        AST::ForEach.new(
+          Lexer::Token.new(:FOR, "FOR", 29, 3),
+          "item",
+          id_node("each_collection", line: 29),
+          [],
+          nil,
+          false,
+        ),
+      ]
+
+      stmts.each { |stmt| checker.send(:check_stmt_reads, stmt, state) }
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::if_cond -- used after being moved (line 26)",
+        "[USE_AFTER_MOVE] main::while_cond -- used after being moved (line 27)",
+        "[USE_AFTER_MOVE] main::match_expr -- used after being moved (line 28)",
+        "[USE_AFTER_MOVE] main::each_collection -- used after being moved (line 29)",
+      )
+    end
+
+    it "checks non-resource BG captures and skips resource captures" do
+      checker = direct_checker
+      state = moved_state("borrowed_capture", "resource_capture")
+      bg = AST::BgBlock.new(
+        Lexer::Token.new(:BG, "BG", 33, 3),
+        [],
+        [],
+        nil,
+        false,
+        false,
+        nil,
+        false,
+      )
+      bg.capture_analysis = CapabilityHelper::CaptureAnalysis.new(
+        captures: {
+          "borrowed_capture" => Type.new(:String),
+          "resource_capture" => Type.new(:String),
+        },
+        resource_captures: Set["resource_capture"],
+      )
+
+      checker.send(:check_stmt_reads, bg, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::borrowed_capture -- used after being moved (line 33)",
+      )
+    end
+  end
+
   describe "SHARE read checks" do
+    it "routes call arguments by ownership wrapper shape" do
+      checker = direct_checker
+      state = moved_state(
+        "already_moved_arg",
+        "simple_give_arg",
+        "copy_arg",
+        "clone_arg",
+        "freeze_arg",
+        "share_copy_arg",
+      )
+      already_moved = id_node("already_moved_arg", line: 44)
+      already_moved.was_moved = true
+      call = AST::FuncCall.new(
+        Lexer::Token.new(:IDENTIFIER, "use", 44, 3),
+        "use",
+        [
+          already_moved,
+          AST::MoveNode.new(Lexer::Token.new(:GIVE, "GIVE", 45, 3), id_node("simple_give_arg", line: 45)),
+          AST::CopyNode.new(Lexer::Token.new(:COPY, "COPY", 46, 3), id_node("copy_arg", line: 46)),
+          AST::CloneNode.new(Lexer::Token.new(:CLONE, "CLONE", 47, 3), id_node("clone_arg", line: 47)),
+          AST::FreezeNode.new(Lexer::Token.new(:FREEZE, "FREEZE", 48, 3), id_node("freeze_arg", line: 48)),
+          AST::ShareNode.new(
+            Lexer::Token.new(:SHARE, "SHARE", 49, 3),
+            AST::CopyNode.new(Lexer::Token.new(:COPY, "COPY", 49, 9), id_node("share_copy_arg", line: 49)),
+          ),
+        ],
+      )
+
+      checker.send(:check_call_reads, call, state)
+
+      expect(checker.errors).to contain_exactly(
+        "[USE_AFTER_MOVE] main::copy_arg -- used after being moved (line 46)",
+        "[USE_AFTER_MOVE] main::clone_arg -- used after being moved (line 47)",
+        "[USE_AFTER_MOVE] main::freeze_arg -- used after being moved (line 48)",
+        "[USE_AFTER_MOVE] main::share_copy_arg -- used after being moved (line 49)",
+      )
+    end
+
     it "reports SHARE COPY reads of already moved values in call arguments" do
       errors = check_errors(<<~CLEAR)
         STRUCT Box { value: Int64 }

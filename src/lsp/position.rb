@@ -29,7 +29,7 @@ module LSP
       col_start_byte = token.column - 1
       col_end_byte   = col_start_byte + length
 
-      line_text = line_at(source, line) if source
+      line_text = line_at(source, line)
       start_char = byte_to_utf16(line_text, col_start_byte)
       end_char   = byte_to_utf16(line_text, col_end_byte)
 
@@ -49,20 +49,13 @@ module LSP
       start_byte = span.col - 1
       end_byte   = span.end_col - 1
 
-      if start_line == end_line
-        line_text = line_at(source, start_line) if source
-        {
-          start: { line: start_line, character: byte_to_utf16(line_text, start_byte) },
-          end:   { line: start_line, character: byte_to_utf16(line_text, end_byte) },
-        }
-      else
-        start_text = line_at(source, start_line) if source
-        end_text   = line_at(source, end_line) if source
-        {
-          start: { line: start_line, character: byte_to_utf16(start_text, start_byte) },
-          end:   { line: end_line,   character: byte_to_utf16(end_text,   end_byte) },
-        }
-      end
+      start_text = line_at(source, start_line)
+      end_text = start_line == end_line ? start_text : line_at(source, end_line)
+
+      {
+        start: { line: start_line, character: byte_to_utf16(start_text, start_byte) },
+        end:   { line: end_line,   character: byte_to_utf16(end_text,   end_byte) },
+      }
     end
 
     # Test whether an LSP position falls within an LSP range.
@@ -87,7 +80,7 @@ module LSP
       return nil unless source
       lines = source.lines
       return nil if line_idx < 0 || line_idx >= lines.size
-      T.must(lines[line_idx]).chomp
+      lines.fetch(line_idx).chomp
     end
 
     # Given a line of text and a byte offset, return the UTF-16 code

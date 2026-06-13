@@ -653,7 +653,7 @@ class Formatter::Emitter
   # INDENT_OPEN/CLOSE phantoms to neutralize its OUTDENT_LEADING render
   # rule. Multi-line arms emit body on its own lines at +1 indent and
   # close the indent before the separator.
-  sig { params(out: Array, toks: Array, arm: Hash).returns(Array) }
+  sig { params(out: Array, toks: Array, arm: Hash).void }
   def emit_match_arm(out, toks, arm)
     s, e, body_end, arrow, sep, multi =
       arm[:start], arm[:end], arm[:body_end], arm[:arrow], arm[:sep], arm[:multi]
@@ -683,6 +683,7 @@ class Formatter::Emitter
     end
 
     insert_nl(out)
+    nil
   end
 
   sig { params(toks: Array, s: Integer, e: Integer).returns(Formatter::FormatLexer::Token) }

@@ -46,7 +46,6 @@ module LintFixRewriter
     edits = []
     edits.concat(mutable_unused_edits(findings, bg_names, mutation_sensitive_names))
     edits.concat(redundant_type_annotation_edits(ast, source))
-    return source if edits.empty?
     apply_edits(source, edits)
   end
 
@@ -282,7 +281,7 @@ module LintFixRewriter
   # well-formed declaration the formatter can re-space. Span starts
   # at the `:` and ends just before the `=` (after stripping trailing
   # whitespace), so the surrounding spacing is left to the formatter.
-  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(Hash) }
+  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(T.nilable(Edit)) }
   def self.locate_type_annotation_span(node, source)
     return nil unless node.token
     name_off = offset_for(source, node.token.line, node.token.column)
@@ -357,7 +356,7 @@ module LintFixRewriter
 
   # ---- Source-offset helpers ----
 
-  sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
+  sig { params(source: String, line: Integer, col: Integer).returns(T.nilable(Integer)) }
   def self.offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0

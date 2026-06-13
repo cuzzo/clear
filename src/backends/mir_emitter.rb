@@ -22,6 +22,7 @@
 
 require "sorbet-runtime"
 
+require_relative "../ast/error_registry"
 require_relative "../mir/mir"
 require_relative "../mir/cleanup_entry"
 require_relative "../mir/placement"
@@ -115,7 +116,7 @@ class MIREmitter
     when MIR::AllocSlice       then emit_alloc_slice(node)
     when MIR::FreeSlice        then emit_free_slice(node)
     when MIR::DestroyPtr       then emit_destroy_ptr(node)
-    when MIR::Cleanup          then emit_cleanup(node, errdefer: false)
+    when MIR::Cleanup          then emit_cleanup(node)
     when MIR::ErrCleanup       then emit_cleanup(node, errdefer: true)
     when MIR::MoveMark         then emit_move_mark(node)
     when MIR::DeepCopy         then emit_deep_copy(node)

@@ -78,10 +78,6 @@ module FsmTransform
         fact_node_value
       end
 
-      sig { returns(T::Boolean) }
-      def blank?
-        false
-      end
     end
 
     class FsmSegmentFacts < T::Struct
@@ -232,10 +228,10 @@ module FsmTransform
       #    segment graphs -- a suspend at position K can resume to
       #    any position M, and M's body must run K's bind.
       bind_for_index = T.let({}, T::Hash[Integer, T::Array[FsmBodyItem]])
-      segment_specs.each do |s|
+      segment_specs.each_with_index do |s, index|
         d = s.descriptor
-        next unless d && d.bind_stmts && !d.bind_stmts.empty?
-        target = tail_resume_target(s.tail) || (segment_specs.index(s) || 0) + 1
+        next unless d && !d.bind_stmts.empty?
+        target = tail_resume_target(s.tail) || index + 1
         bind_for_index[target] = fsm_body_mir_items(d.bind_stmts)
       end
 
@@ -253,10 +249,8 @@ module FsmTransform
         body_fn_names_by_index[spec.index] = fn_name
         body.concat(spec.body_stmts)
         if (d = spec.descriptor)
-          body.concat(fsm_body_mir_items(d.setup_stmts || []))
+          body.concat(fsm_body_mir_items(d.setup_stmts))
         end
-        body.compact!
-        body.reject!(&:blank?)
 
         MIR::FsmMemberFn.new(
           fn_name, id, bg_rt, spec.suppress_runtime_ref, fsm_body_emit_values(body),
@@ -269,8 +263,8 @@ module FsmTransform
       #    variants (FsmTailLockTry / FsmTailWokenCheck /
       #    FsmTailRetryOrError for the LOCK fan-out, etc.) -- no
       #    more per-shape dispatch overrides.
-      arms = segment_specs.map.with_index do |spec, k|
-        tail = build_dispatch_tail(spec, k, segment_specs, id)
+      arms = segment_specs.map do |spec|
+        tail = build_dispatch_tail(spec)
         MIR::FsmStateArm.new(
           spec.index,
           spec.pre_body_skip,
@@ -290,27 +284,29 @@ module FsmTransform
       segment_specs.each do |spec|
         d = spec.descriptor
         next unless d
-        extra_field_decls.concat(d.ctx_field_decls || [])
+        extra_field_decls.concat(d.ctx_field_decls)
       end
       extra_field_decls.concat(ctx.extra_ctx_fields)
-      seen_extra_names = T.let({}, T::Hash[String, T::Boolean])
+      seen_extra_names = T.let(Set.new, T::Set[String])
       extra_field_decls = extra_field_decls.reject do |decl|
         name = decl.name
-        duplicate = seen_extra_names[name] == true
-        seen_extra_names[name] = true
+        duplicate = seen_extra_names.include?(name)
+        seen_extra_names << name
         duplicate
       end
-      capture_field_names = ctx.capture_fields.each_with_object({}) do |field, names|
-        names[field.name] = true
-      end
+      capture_field_names = T.let(
+        ctx.capture_fields.map(&:name).to_set,
+        T::Set[String],
+      )
       extra_field_decls = extra_field_decls.reject do |decl|
-        capture_field_names[decl.name]
+        capture_field_names.include?(decl.name)
       end
-      extra_field_names = extra_field_decls.each_with_object(capture_field_names.dup) do |decl, names|
-        names[decl.name] = true unless decl.name.empty?
+      extra_field_names = T.let(capture_field_names.dup, T::Set[String])
+      extra_field_decls.each do |decl|
+        extra_field_names << decl.name
       end
       promoted_field_decls = promoted_field_decls.reject do |decl|
-        extra_field_names[decl.name]
+        extra_field_names.include?(decl.name)
       end
 
       # 4. Wrap in FsmGenericCtxStruct + spawn_setup + FsmGenericBody.
@@ -322,7 +318,7 @@ module FsmTransform
         extra_field_decls, promoted_field_decls,
         member_fns, dispatch, destroy_actions,
       )
-      spawn_setup = build_spawn_setup(ctx, lowering)
+      spawn_setup = build_spawn_setup(ctx)
       fsm_body = MIR::FsmGenericBody.new(ctx.blk_label, ctx_struct, spawn_setup)
       MIR::FsmLoweringResult.new(
         body: fsm_body,
@@ -603,10 +599,8 @@ module FsmTransform
     # tails consult the descriptor for the kind-specific tail variant
     # (Yield / RegisterYield); non-suspend tails (Goto / LoopBack /
     # CondBranch / Done) map to the structural tail variants directly.
-    sig { params(spec: FsmSegmentSpec, k: Integer, all_specs: T::Array[FsmSegmentSpec], id: Integer).returns(FsmTail) }
-    def self.build_dispatch_tail(spec, k, all_specs, id)
-      _ = k
-      _ = all_specs
+    sig { params(spec: FsmSegmentSpec).returns(FsmTail) }
+    def self.build_dispatch_tail(spec)
       tail = spec.tail
       desc = spec.descriptor
       index = spec.index
@@ -683,7 +677,6 @@ module FsmTransform
     # are derived from cross_segment_vars.
     sig { params(ctx: FsmEmitContext, segment_list: RecursiveSplitter::SegmentList, liveness: Liveness::Result, lowering: Object).returns(T.nilable(MIR::FsmLoweringResult)) }
     def self.build_recursive(ctx, segment_list, liveness, lowering)
-      T.bind(self, T.untyped) rescue nil
       segment_nodes = segment_list.segments
       return nil if segment_nodes.empty?
 
@@ -699,7 +692,7 @@ module FsmTransform
       # ctx fields. NEXT/IO result vars are added separately by their
       # descriptors, so exclude them here.
       fsm_promoted_names = (liveness.cross_segment_vars.keys +
-                            recursive_promoted_names).compact.uniq
+                            recursive_promoted_names).uniq
 
       # capture_map: outer captures + promoted locals (liveness +
       # conservative) + suspend result vars. All names that resolve
@@ -774,7 +767,7 @@ module FsmTransform
           eff_capture_map = seg_overrides ?
                               capture_map.merge(seg_overrides) : capture_map
           lowered_mir = lowering_api.with_fsm_segment_lowering_context(
-            pointer_captures: pointer_captures || Set.new,
+            pointer_captures: pointer_captures,
             inherited_alloc_names: inherited_capture_names,
             inherited_guard_names: inherited_capture_names,
             owned_result_guards: owned_result_guards,
@@ -874,7 +867,6 @@ module FsmTransform
           index:           seg.index,
           prologue_stmts:  prologue_stmts,
           body_stmts:      body_stmts,
-          structure_stmts: seg_mir_codes[i] || [],
           tail:            seg.tail,
           descriptor:      descriptor,
           fsm_result_transfer_facts: seg_result_facts[seg.index] || [],
@@ -1356,7 +1348,7 @@ module FsmTransform
 
       bg_rt = ctx.bg_rt
       pointer_captures = ctx.pointer_captures
-      result = lowering_api.with_bg_fiber_body_context(pointer_captures || Set.new) do
+      result = lowering_api.with_bg_fiber_body_context(pointer_captures) do
         lowering_api.with_fiber_capture_map(capture_map, rt_override: bg_rt) do
           # Caller-supplied sp_idx (allocated by compute_sp_indices in
           # dispatch order) takes precedence so sp_<N> labels track
@@ -1413,8 +1405,8 @@ module FsmTransform
 
     # Shared spawn/init/break setup. Identical across all FSM
     # body shapes.
-    sig { params(ctx: FsmEmitContext, lowering: Object).returns(MIR::FsmSpawnSetup) }
-    def self.build_spawn_setup(ctx, lowering)
+    sig { params(ctx: FsmEmitContext).returns(MIR::FsmSpawnSetup) }
+    def self.build_spawn_setup(ctx)
       is_local_pin = (ctx.pin_mode == true || ctx.pin_mode == :local)
       is_default_local = (ctx.pin_mode.nil? || ctx.pin_mode == false) && !ctx.parallel
       is_local_dispatch = is_local_pin || is_default_local

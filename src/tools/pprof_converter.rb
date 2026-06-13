@@ -21,10 +21,10 @@ module PprofConverter
   # a hash of {name => path} for files actually written. Missing input
   # files are silently skipped.
   def self.convert_all(profile_dir)
-    return {} unless profile_dir && Dir.exist?(profile_dir)
+    return {} unless profile_dir
 
-    binary = profile_dir.chomp('/').sub(/\.profile$/, '')
-    binary = nil unless File.exist?(binary.to_s)
+    binary = profile_dir.chomp('/').delete_suffix('.profile')
+    binary = nil unless File.exist?(binary)
 
     out = {}
     if (path = convert_alloc(profile_dir, binary))
@@ -39,7 +39,7 @@ module PprofConverter
     if (path = convert_channels(profile_dir, binary))
       out[:channels] = path
     end
-    if (path = convert_perf(profile_dir, binary))
+    if (path = convert_perf(profile_dir))
       out[:cpu] = path
     end
     out
@@ -118,7 +118,6 @@ module PprofConverter
         bytes: f[2].to_i,
         frees: f[3].to_i,
         free_bytes: f[4].to_i,
-        live: f[5].to_i,
       }
     end
     return nil if sites.empty?
@@ -201,10 +200,10 @@ module PprofConverter
       caller_trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
-        total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
-        total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
+        total_wait_ns: f[3].to_i,
+        total_hold_ns: f[5].to_i,
         read_acquires: f[7].to_i, read_contended: f[8].to_i,
-        read_total_wait_ns: f[9].to_i, read_max_wait_ns: f[10].to_i,
+        read_total_wait_ns: f[9].to_i,
         caller_trace: caller_trace,
       }
     end.reject { |l| l[:acquires].zero? && l[:read_acquires].zero? }
@@ -264,8 +263,6 @@ module PprofConverter
       {
         addr: f[0], struct_size: f[1].to_i, reads: f[2].to_i,
         commits: f[3].to_i, retries: f[4].to_i,
-        update_failures: f[5].to_i,
-        multi_commits: (f[6] || 0).to_i,
         caller_trace: caller_trace,
       }
     end.reject { |c| c[:reads].zero? && c[:commits].zero? }
@@ -307,7 +304,7 @@ module PprofConverter
   # `go install github.com/google/perf_data_converter/src/cmd/perf_to_profile`).
   # If the tool is not on PATH we leave perf.data in place and return
   # nil; the caller surfaces a one-line install hint.
-  def self.convert_perf(profile_dir, _binary)
+  def self.convert_perf(profile_dir)
     src = File.join(profile_dir, 'perf.data')
     return nil unless File.exist?(src)
     return nil unless system('which perf_to_profile > /dev/null 2>&1')
