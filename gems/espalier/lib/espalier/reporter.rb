@@ -309,10 +309,12 @@ module Espalier
     end
 
     def module_scores
-      @module_scores ||= @manifest.map do |mod|
+      @module_scores ||= @manifest.filter_map do |mod|
         method_rows = functions(mod).map { |fn| method_row(mod, fn) }
         state_count = states(mod).size
         method_count = method_rows.size
+        next if method_count.zero?
+
         state_touches = method_rows.sum { |row| row[:reads] + row[:writes] }
         delegations = method_rows.sum { |row| row[:always_calls] + row[:conditional_calls] }
         facade = cohesive_value_facade_profiles[mod[:module].to_s]
@@ -376,7 +378,7 @@ module Espalier
 
     def privatization_candidates
       @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest).map do |row|
-        row.merge(line: method_line(row[:file], row[:name]))
+        row.merge(line: row[:line] || method_line(row[:file], row[:name]))
       end
     end
 
@@ -410,7 +412,7 @@ module Espalier
         module: mod[:module],
         file: mod[:file],
         name: fn[:name],
-        line: method_line(mod[:file], fn[:name]),
+        line: fn[:line] || method_line(mod[:file], fn[:name]),
         reads: reads.size,
         writes: writes.size,
         always_calls: always.size,
@@ -516,7 +518,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /`(?<file>src\/[^`]+\.rb):\d+`\s+\((?<method>[^)]+)\).*?\*\*(?<detectors>\d+) detectors\*\* \[score (?<score>\d+)/
+        next unless line =~ /`(?<file>[^`]+\.[A-Za-z0-9]+):\d+`\s+\((?<method>[^)]+)\).*?\*\*(?<detectors>\d+) detectors\*\* \[score (?<score>\d+)/
 
         index[[Regexp.last_match[:file], Regexp.last_match[:method]]] = {
           detectors: Regexp.last_match[:detectors],
@@ -530,7 +532,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*\[`(?<file>src\/[^`]+\.rb):\d+`\][^|]*\|\s*`(?<method>[^`]+)`/
+        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*\[`(?<file>[^`]+\.[A-Za-z0-9]+):\d+`\][^|]*\|\s*`(?<method>[^`]+)`/
 
         index[[Regexp.last_match[:file], Regexp.last_match[:method]]] ||= {
           rank: Regexp.last_match[:rank]
@@ -543,7 +545,7 @@ module Espalier
       return {} unless File.file?(path)
 
       File.readlines(path).each_with_object({}) do |line, index|
-        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*`(?<file>src\/[^`]+\.rb)`\s*\|\s*(?<hotspot>[\d.]+)\s*\|/
+        next unless line =~ /^\|\s*(?<rank>\d+)\s*\|\s*`(?<file>[^`]+\.[A-Za-z0-9]+)`\s*\|\s*(?<hotspot>[\d.]+)\s*\|/
 
         index[Regexp.last_match[:file]] = {
           rank: Regexp.last_match[:rank],
@@ -735,7 +737,10 @@ module Espalier
     end
 
     def source_files
-      @source_files ||= Dir.glob(File.join(@root, "src/**/*.rb"))
+      @source_files ||= @manifest.filter_map { |mod| mod[:file] }
+                                 .uniq
+                                 .map { |file| File.expand_path(file, @root) }
+                                 .select { |path| File.file?(path) }
     end
 
     def fmt(value)

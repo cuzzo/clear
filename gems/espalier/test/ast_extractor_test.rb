@@ -15,6 +15,16 @@ class AstExtractorTest < Minitest::Test
     f&.unlink
   end
 
+  def parse_zig(code)
+    f = Tempfile.new(["espalier", ".zig"])
+    f.write(code)
+    f.close
+    extractor = Espalier::AstExtractor.new(f.path)
+    extractor.extract
+  ensure
+    f&.unlink
+  end
+
   def test_extracts_static_ivar_t_let_types
     r = parse_ruby(<<~RB)
       class TypeChecker
@@ -120,5 +130,43 @@ class AstExtractorTest < Minitest::Test
     assert_equal :public, vis["helper"]
     assert_equal :protected, vis["guarded"]
     assert_equal :private, vis["inline_helper"]
+  end
+
+  def test_extracts_zig_tree_sitter_owners_state_and_delegations
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter extractor test" unless grammar && File.file?(grammar)
+
+    mods = parse_zig(<<~ZIG)
+      pub fn Box(comptime T: type) type {
+          return struct {
+              value: T,
+              count: usize = 0,
+              const Self = @This();
+              pub fn init(value: T) Self {
+                  return .{ .value = value, .count = 1 };
+              }
+              pub fn get(self: *Self) T {
+                  self.count = self.count + 1;
+                  self.bump();
+                  return self.value;
+              }
+              fn bump(self: *Self) void {
+                  self.count = self.count + 1;
+              }
+          };
+      }
+    ZIG
+
+    box = mods.find { |mod| mod[:name] == "Box" }
+    refute_nil box
+    assert_equal :struct, box[:type]
+    assert_equal :zig, box[:language]
+    assert_equal %w[count value].to_set, box[:states]
+
+    get = box[:methods].find { |method| method[:name] == "get" }
+    assert_includes get[:effects][:reads], "value"
+    assert_includes get[:effects][:writes], "count"
+    assert_includes get[:delegations], { receiver: "self", message: "bump", type: :always }
+    assert get[:line].positive?
   end
 end

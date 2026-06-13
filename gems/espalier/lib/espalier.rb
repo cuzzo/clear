@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "espalier/ast_extractor"
+require_relative "espalier/nil_kill_evidence"
 begin
   require "decomplex/ruby_topology"
 rescue LoadError

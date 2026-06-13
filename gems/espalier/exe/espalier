@@ -4,6 +4,8 @@
 require "optparse"
 require_relative "../lib/espalier"
 
+TREE_SITTER_EXTS = Decomplex::Syntax.supported_exts(parser: "tree_sitter").freeze
+
 options = {
   format: :markdown,
   output: nil,
@@ -73,16 +75,18 @@ end
 targets = []
 ARGV.each do |arg|
   if File.directory?(arg)
-    targets.concat(Dir.glob(File.join(arg, "**/*.rb")))
+    targets.concat(Dir.glob(File.join(arg, "**", "*")).select do |path|
+      File.file?(path) && !File.basename(path).start_with?(".") && TREE_SITTER_EXTS.include?(File.extname(path).downcase)
+    end)
   elsif File.file?(arg)
-    targets << arg
+    targets << arg if !File.basename(arg).start_with?(".") && TREE_SITTER_EXTS.include?(File.extname(arg).downcase)
   end
 end
 
 targets.uniq!
 
 if targets.empty?
-  puts "No Ruby files found."
+  puts "No supported source files found."
   exit 0
 end
 
@@ -97,95 +101,8 @@ if options[:decomplex] && File.exist?(options[:decomplex])
   end
 end
 
-nil_kill_data = {}
-ivars_types = {} # class_name => { ivar_name => type }
-ivars_param_transit = {} # class_name => { ivar_name => array_of_params }
-ivars_protocols = {} # class_name => { ivar_name => array_of_methods }
-
-if options[:nil_kill] && File.exist?(options[:nil_kill])
-  if options[:nil_kill].end_with?(".json")
-    require "json"
-    begin
-      data = JSON.parse(File.read(options[:nil_kill]))
-      if data["methods"]
-        data["methods"].each do |m_entry|
-          key_parts = m_entry["key"]
-          next unless key_parts && key_parts.size >= 3
-          
-          class_name = key_parts[0]
-          method_name = key_parts[1]
-          kind = key_parts[2] # "class" or "instance"
-          
-          # Map class methods to self.method_name style
-          full_method_name = kind == "class" ? "self.#{method_name}" : method_name
-          agg_key = "#{class_name}##{full_method_name}"
-          
-          # Extract the signature
-          if m_entry["source"] && m_entry["source"]["sig"]
-            nil_kill_data[agg_key] = m_entry["source"]["sig"]
-          end
-        end
-      end
-      
-      # Now let's extract dynamic ivar types!
-      if data["facts"] && data["facts"]["ivar_runtime"]
-        data["facts"]["ivar_runtime"].each do |entry|
-          c_name = entry["class"]
-          i_name = entry["name"]
-          classes = entry["classes"] || []
-          next unless c_name && i_name
-          next if classes.empty?
-          
-          type_str = if classes.size == 1
-                       classes.first
-                     elsif classes.include?("NilClass")
-                       non_nil = classes - ["NilClass"]
-                       if non_nil.size == 1
-                         "T.nilable(#{non_nil.first})"
-                       else
-                         "T.nilable(T.any(#{non_nil.join(', ')}))"
-                       end
-                     else
-                       "T.any(#{classes.join(', ')})"
-                     end
-          
-          ivars_types[c_name] ||= {}
-          ivars_types[c_name][i_name] = type_str
-        end
-      end
-
-      # Pull inter-procedural data transit (param origins)
-      if data["facts"] && data["facts"]["ivar_param_origins"]
-        data["facts"]["ivar_param_origins"].each do |composite_key, params|
-          parts = composite_key.split("\u0000")
-          next unless parts.size == 2
-          c_name, i_name = parts
-          ivars_param_transit[c_name] ||= {}
-          ivars_param_transit[c_name][i_name] = params
-        end
-      end
-
-      # Pull dynamic method protocol lists calling on state ivars
-      if data["facts"] && data["facts"]["ivar_protocols"]
-        data["facts"]["ivar_protocols"].each do |composite_key, methods|
-          parts = composite_key.split("\u0000")
-          next unless parts.size == 2
-          c_name, i_name = parts
-          ivars_protocols[c_name] ||= {}
-          ivars_protocols[c_name][i_name] = methods
-        end
-      end
-    rescue => e
-      puts "Warning: Failed to parse nil-kill JSON: #{e.message}"
-    end
-  else
-    File.readlines(options[:nil_kill]).each do |line|
-      if line =~ /#\s+signature:\s+([\w:]+##\w+)\s+(.+)/
-        nil_kill_data[$1] = $2.strip
-      end
-    end
-  end
-end
+nil_kill_evidence = Espalier::NilKillEvidence.load(options[:nil_kill])
+nil_kill_data = nil_kill_evidence.method_signatures
 
 risk_data = {}
 if options[:risk] && File.exist?(options[:risk])
@@ -211,30 +128,7 @@ aggregator = Espalier::Aggregator.new(
   risk_data: risk_data
 )
 
-# Merge back dynamically inferred ivar_types, param transits, and protocols from nil-kill into modules
-modules.each do |mod|
-  c_name = mod[:name]
-  mod[:ivar_types] ||= {}
-  mod[:ivar_properties] ||= {}
-
-  if ivars_types[c_name]
-    ivars_types[c_name].each do |i_name, type_str|
-      mod[:ivar_types][i_name] = type_str
-    end
-  end
-
-  # Map additional properties: transit origins and protocols calls
-  mod[:states].each do |state_var|
-    props = []
-    if transit = ivars_param_transit[c_name]&.[](state_var)
-      props << "loaded from param: #{transit.join(', ')}"
-    end
-    if protos = ivars_protocols[c_name]&.[](state_var)
-      props << "protocol interfaces: #{protos.join(', ')}"
-    end
-    mod[:ivar_properties][state_var] = props unless props.empty?
-  end
-end
+nil_kill_evidence.apply!(modules)
 
 manifest = aggregator.aggregate(modules)
 

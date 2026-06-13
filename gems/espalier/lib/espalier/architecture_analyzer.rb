@@ -509,6 +509,13 @@ module Espalier
         state_name = receiver.split(".").first
         return owner_for_type(state_types[state_name])
       end
+      if receiver.start_with?("self.", "this.")
+        state_name = receiver.split(".")[1]
+        return owner_for_type(state_types[state_name])
+      end
+      if state_types.key?(receiver)
+        return owner_for_type(state_types[receiver])
+      end
 
       return nil unless receiver.match?(/\A[A-Z]/)
 
@@ -518,7 +525,8 @@ module Espalier
     def receiver_for(call_name)
       return nil unless call_name.include?(".")
 
-      call_name.split(".", 2).first
+      parts = call_name.split(".")
+      parts[0...-1].join(".")
     end
 
     def owner_for_type(type_text)

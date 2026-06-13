@@ -216,4 +216,38 @@ class SyntaxTest < Minitest::Test
       end
     end
   end
+
+  def test_tree_sitter_zig_adapter_extracts_structural_facts_when_grammar_is_available
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~ZIG, ".zig") do |path|
+      pub fn Box(comptime T: type) type {
+          return struct {
+              value: T,
+              count: usize = 0,
+              const Self = @This();
+              pub fn init(value: T) Self {
+                  return .{ .value = value, .count = 1 };
+              }
+              pub fn get(self: *Self) T {
+                  self.count = self.count + 1;
+                  self.bump();
+                  return self.value;
+              }
+              fn bump(self: *Self) void {
+                  self.count = self.count + 1;
+              }
+          };
+      }
+    ZIG
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :zig)
+
+      assert_includes doc.owner_defs.map(&:name), "Box"
+      assert_includes doc.function_defs.map { |fn| [fn.owner, fn.name] }, ["Box", "get"]
+      assert_includes doc.state_declarations.map { |state| [state.owner, state.field, state.type] }, ["Box", "value", "T"]
+      assert_includes doc.state_param_origins.map { |origin| [origin.owner, origin.field, origin.param] }, ["Box", "value", "value"]
+      assert_includes doc.call_sites.map { |call| [call.owner, call.function, call.receiver, call.message] }, ["Box", "get", "self", "bump"]
+    end
+  end
 end

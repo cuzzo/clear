@@ -81,6 +81,7 @@ module Espalier
             module: mod[:module],
             file: mod[:file],
             name: fn[:name].to_s,
+            line: fn[:line],
             visibility: visibility_for(fn),
             callers: Array(graph[:internal_callers]).map(&:to_s).uniq.sort,
             callees: Array(graph[:internal_calls]).map(&:to_s).uniq.sort,

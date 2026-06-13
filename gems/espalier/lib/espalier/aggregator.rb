@@ -94,6 +94,9 @@ module Espalier
             name: m[:name],
             signature: sig,
             visibility: m[:visibility] || :public,
+            line: m[:line],
+            span: m[:span],
+            language: mod[:language],
             EFFECTS: {
               reads: m[:effects][:reads].to_a.sort,
               writes: m[:effects][:writes].to_a.sort
@@ -107,6 +110,7 @@ module Espalier
         mod_row = {
           module: mod[:name],
           file: mod[:file],
+          language: mod[:language],
           type: mod[:type],
           state: aggregated_states.empty? ? nil : aggregated_states,
           functions: aggregated_methods
@@ -122,7 +126,9 @@ module Espalier
     def ruby_topology_for(modules)
       return @ruby_topology if @ruby_topology
 
-      files = modules.filter_map { |mod| mod[:file] }.uniq.select { |file| File.file?(file) }
+      files = modules.filter_map { |mod| mod[:file] }.uniq.select do |file|
+        File.file?(file) && File.extname(file).downcase == ".rb"
+      end
       return nil if files.empty?
 
       @ruby_topology = Decomplex::RubyTopology.scan(files)

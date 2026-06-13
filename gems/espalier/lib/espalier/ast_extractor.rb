@@ -3,6 +3,12 @@
 require "prism"
 require "set"
 
+begin
+  require "decomplex/syntax"
+rescue LoadError
+  require_relative "../../../decomplex/lib/decomplex/syntax"
+end
+
 module Espalier
   # Extracts the structural skeleton, state instance variables, and call delegation
   # nodes from Ruby source files, using modern compiler-grade Prism AST.
@@ -15,12 +21,168 @@ module Espalier
 
     # Return structure: List of classes/modules with states & methods.
     def extract
+      return TreeSitterStructuralExtractor.new(file_path).extract if tree_sitter_source?
+
       result = Prism.parse_file(file_path)
       return [] unless result.success?
 
       visitor = StructuralVisitor.new(file_path)
       result.value.accept(visitor)
       visitor.modules
+    end
+
+    private
+
+    def tree_sitter_source?
+      parser = ENV.fetch("ESPALIER_PARSER", ENV.fetch("DECOMPLEX_PARSER", "")).to_s.tr("-", "_")
+      return true if %w[tree_sitter treesitter].include?(parser)
+      return false if File.extname(file_path).downcase == ".rb"
+
+      Decomplex::Syntax.supported_source?(file_path, parser: "tree_sitter")
+    end
+
+    class TreeSitterStructuralExtractor
+      STATE_RECEIVER_PATTERN = /\A@[A-Za-z_]\w*(?:\.|\z)/
+
+      def initialize(file_path)
+        @file_path = file_path
+      end
+
+      def extract
+        doc = Decomplex::Syntax.parse(@file_path, parser: "tree_sitter")
+        facts = doc.adapter.structural_facts(doc)
+        modules = build_modules(doc, facts)
+        modules.values.sort_by { |mod| [mod[:file].to_s, mod[:name].to_s] }
+      end
+
+      private
+
+      def build_modules(doc, facts)
+        modules = {}
+        owner_kinds = facts[:owner_defs].to_h { |owner| [owner.name.to_s, owner.kind] }
+        method_names = facts[:function_defs].each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |fn, index|
+          index[owner_name(doc, fn.owner)].add(fn.name.to_s)
+        end
+        declared_states = facts[:state_declarations].each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |state, index|
+          index[state.owner.to_s].add(state.field.to_s)
+        end
+
+        facts[:function_defs].each do |fn|
+          owner = owner_name(doc, fn.owner)
+          mod = module_for(modules, owner, doc, owner_kinds[owner])
+          method = {
+            name: fn.name.to_s,
+            signature: fn.signature.to_s.empty? ? fn.name.to_s : fn.signature.to_s,
+            parameters: Array(fn.params).map(&:to_s),
+            visibility: fn.visibility || :public,
+            line: fn.line,
+            span: fn.span,
+            effects: { reads: Set.new, writes: Set.new },
+            delegations: []
+          }
+          mod[:methods] << method
+        end
+
+        facts[:state_declarations].each do |state|
+          mod = module_for(modules, state.owner.to_s, doc, owner_kinds[state.owner.to_s])
+          mod[:states] << state.field.to_s
+          mod[:ivar_types][state.field.to_s] = state.type.to_s unless state.type.to_s.empty?
+        end
+
+        methods_by_owner_name = modules.transform_values do |mod|
+          mod[:methods].to_h { |method| [method[:name].to_s, method] }
+        end
+
+        facts[:state_reads].each do |read|
+          owner = owner_name(doc, read.owner)
+          next unless state_fact?(read, declared_states[owner])
+          next if method_names[owner].include?(read.field.to_s) && receiver_self_like?(read.receiver)
+
+          mod = module_for(modules, owner, doc, owner_kinds[owner])
+          method = methods_by_owner_name.dig(owner, read.function.to_s)
+          next unless method
+
+          mod[:states] << read.field.to_s
+          method[:effects][:reads] << read.field.to_s
+        end
+
+        facts[:state_writes].each do |write|
+          owner = owner_name(doc, write.owner)
+          next unless state_fact?(write, declared_states[owner])
+
+          mod = module_for(modules, owner, doc, owner_kinds[owner])
+          method = methods_by_owner_name.dig(owner, write.function.to_s)
+          next unless method
+
+          mod[:states] << write.field.to_s
+          method[:effects][:writes] << write.field.to_s
+        end
+
+        facts[:call_sites].each do |call|
+          owner = owner_name(doc, call.owner)
+          method = methods_by_owner_name.dig(owner, call.function.to_s)
+          next unless method
+
+          method[:delegations] << {
+            receiver: delegation_receiver(call.receiver),
+            message: call.message.to_s,
+            type: call.conditional ? :conditional : :always
+          }
+        end
+
+        modules.each_value do |mod|
+          mod[:states] = mod[:states].to_set
+          mod[:methods].each do |method|
+            method[:delegations].uniq!
+          end
+        end
+        modules
+      end
+
+      def module_for(modules, owner, doc, kind)
+        modules[owner] ||= {
+          type: module_type(kind, owner, doc),
+          name: owner,
+          file: @file_path,
+          language: doc.language,
+          states: Set.new,
+          ivar_types: {},
+          methods: []
+        }
+      end
+
+      def owner_name(doc, owner)
+        text = owner.to_s
+        text.empty? ? File.basename(doc.file, File.extname(doc.file)) : text
+      end
+
+      def module_type(kind, owner, doc)
+        return kind if kind && kind != :owner
+        return :file if owner == File.basename(doc.file, File.extname(doc.file))
+
+        :container
+      end
+
+      def state_fact?(fact, declared)
+        receiver = fact.receiver.to_s
+        return declared.include?(fact.field.to_s) if receiver == ".literal"
+        return true if receiver_self_like?(receiver)
+        return true if receiver.match?(STATE_RECEIVER_PATTERN)
+        return false if receiver.start_with?("self.", "this.")
+
+        false
+      end
+
+      def receiver_self_like?(receiver)
+        %w[self this].include?(receiver.to_s)
+      end
+
+      def delegation_receiver(receiver)
+        text = receiver.to_s.sub(/\A\*/, "")
+        return "self" if text == "this"
+
+        text.empty? ? "self" : text
+      end
     end
 
     class StructuralVisitor < Prism::Visitor
