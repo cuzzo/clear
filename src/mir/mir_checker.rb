@@ -47,6 +47,12 @@
 #     a primitive or Id<T> (with no sync/rc capability) is a compiler bug:
 #     value types that never own heap memory must not receive cleanup nodes.
 #
+#   INV-CLEANUP-REQUIRED-FINALIZER: Any AllocMark whose concrete Type says
+#     the binding needs cleanup must have a Cleanup, ErrCleanup, TransferMark,
+#     or other structural finalizer. This closes the gap where frame
+#     allocations were considered arena-rewound even when the value itself
+#     owns cleanup-bearing internals.
+#
 #   INV-CROSS-FRAME-PARAM-ALLOC: When an allocator-bearing structural op targets a parameter
 #     that was pointer-passed into this function (MUTABLE collection param
 #     or any param whose Zig type is `*T`), its resolved allocator must
@@ -341,9 +347,10 @@ class MIRChecker
     const :alloc, T.nilable(Symbol)
   end
 
-  sig { params(fn_name: T.untyped).void }
-  def initialize(fn_name: nil)
+  sig { params(fn_name: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  def initialize(fn_name: nil, schema_lookup: nil)
     @fn_name = fn_name
+    @schema_lookup = T.let(schema_lookup, T.nilable(Proc))
     @errors = T.let([], T::Array[T.untyped])
   end
 
@@ -409,7 +416,7 @@ class MIRChecker
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
       when MIR::LambdaExpr
         if node.fn_def
-          sub = MIRChecker.new
+          sub = MIRChecker.new(schema_lookup: @schema_lookup)
           @errors.concat(sub.check_fn!(node.fn_def, strict: strict))
         end
       end
@@ -428,6 +435,7 @@ class MIRChecker
     verify_allocating_lets_marked!(nodes, allocs)
     verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
+    verify_cleanup_required_finalizers!(allocs, cleanups, errdefer_destroy_names, transfers)
     verify_ownership_consumption_operands!(structural_ownership_nodes)
     verify_call_contracts!(nodes, transfers, allocs)
     verify_structural_ownership_contracts!(structural_ownership_nodes, transfers, allocs)
@@ -2218,6 +2226,47 @@ class MIRChecker
     end
   end
 
+  # CLEANUP_REQUIRED_WITHOUT_FINALIZER: `ALLOC_WITHOUT_CLEANUP` deliberately
+  # allows frame AllocMarks with no Cleanup because plain frame allocations are
+  # arena-rewound. That is not enough for values whose Type owns cleanup-bearing
+  # internals (collections, resources, RC handles, sync wrappers, recursive
+  # cleanup shapes). For those, a checker-visible finalizer or transfer is
+  # required regardless of allocator.
+  sig do
+    params(
+      allocs: AllocMarksByName,
+      cleanups: CleanupMarksByName,
+      errdefer_destroy_names: NameSet,
+      transfers: NameSet,
+    ).void
+  end
+  def verify_cleanup_required_finalizers!(allocs, cleanups, errdefer_destroy_names, transfers)
+    allocs.each do |name, marks|
+      next if cleanups.key?(name)
+      next if errdefer_destroy_names.include?(name)
+      next if transfers.include?(name)
+
+      required_mark = marks.find { |mark| alloc_mark_type_requires_finalizer?(mark) }
+      next unless required_mark
+
+      @errors << error(:CLEANUP_REQUIRED_WITHOUT_FINALIZER, name,
+        "AllocMark type #{required_mark.type_info} requires cleanup, but no Cleanup, ErrCleanup, " \
+        "ErrDeferStmt(DestroyPtr), or TransferMark closes the ownership path")
+    end
+    nil
+  end
+
+  sig { params(mark: MIR::AllocMark).returns(T::Boolean) }
+  def alloc_mark_type_requires_finalizer?(mark)
+    ti = mark.type_info
+    return false if ti.untyped?
+    return false if ti.rodata? || ti.borrowed_reference?
+
+    ti.needs_cleanup?(@schema_lookup)
+  rescue StandardError
+    false
+  end
+
   sig { params(nodes: T::Array[MIR::Node], transfers: T::Set[String], allocs: AllocMarksByName).void }
   def verify_call_contracts!(nodes, transfers, allocs)
     nodes.each do |node|
@@ -2884,11 +2933,13 @@ class MIRChecker
     :linear_require_same_state!,
     :linear_transfer!,
     :prune_scope_locals!,
+    :alloc_mark_type_requires_finalizer?,
     :stdlib_owned_fixed_return?,
     :structural_consumed_names,
     :verify_aggregate_owned_children!,
     :verify_alloc_marks_typed!,
     :verify_allocating_lets_marked!,
+    :verify_cleanup_required_finalizers!,
     :verify_cleanup_sources_in_scope!,
     :verify_cleanup_sources_own_values!,
     :verify_err_cleanup_transfers!,

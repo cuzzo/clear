@@ -85,22 +85,23 @@ class ZigTranspiler
       end
     end
 
+    compiled = T.must(result)
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
-      struct_schemas: T.must(result).struct_schemas,
-      enum_schemas: T.must(result).enum_schemas,
-      union_schemas: T.must(result).union_schemas,
-      fn_sigs: T.must(result).fn_sigs,
-      moved_guard_info: T.must(result).moved_guard_info,
+      struct_schemas: compiled.struct_schemas,
+      enum_schemas: compiled.enum_schemas,
+      union_schemas: compiled.union_schemas,
+      fn_sigs: compiled.fn_sigs,
+      moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir,
       debug_mode: @default_stack_size == "Large"
     ))
 
     needs_c_alloc = use_c_allocator
-    program = lowering.lower_program(T.must(result).ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
+    program = lowering.lower_program(compiled.ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
 
     # Post-MIR verification: check the ACTUAL code that will be emitted.
-    checker = MIRChecker.new
+    checker = MIRChecker.new(schema_lookup: ->(name) { compiled.annotator.lookup_type_schema(name) })
     mir_errors = checker.check_program!(T.must(program), strict: true)
     unless mir_errors.empty?
       raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
@@ -110,7 +111,7 @@ class ZigTranspiler
     body = emitter.emit(program)
     error_name_enum = emit_error_name_enum
 
-    main_variant = main_stack_variant(T.must(result).fn_nodes["main"], override: main_tier)
+    main_variant = main_stack_variant(compiled.fn_nodes["main"], override: main_tier)
     footer = File.read(File.join(File.dirname(__FILE__), '..', '..', 'zig', 'runtime', 'runtime-footer.zig'))
     footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
                          ".{ .stack_size = .#{main_variant}, .pinned = true }")
@@ -164,20 +165,21 @@ class ZigTranspiler
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir)
 
+    compiled = T.must(result)
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
-      struct_schemas: T.must(result).struct_schemas,
-      enum_schemas: T.must(result).enum_schemas,
-      union_schemas: T.must(result).union_schemas,
-      fn_sigs: T.must(result).fn_sigs,
-      moved_guard_info: T.must(result).moved_guard_info,
+      struct_schemas: compiled.struct_schemas,
+      enum_schemas: compiled.enum_schemas,
+      union_schemas: compiled.union_schemas,
+      fn_sigs: compiled.fn_sigs,
+      moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir
     ))
 
-    mod_result = lowering.lower_module(T.must(result).ast)
+    mod_result = lowering.lower_module(compiled.ast)
 
     # Post-MIR verification on module functions.
-    checker = MIRChecker.new
+    checker = MIRChecker.new(schema_lookup: ->(name) { compiled.annotator.lookup_type_schema(name) })
     mod_result[:items].flatten.each do |item|
       next unless item.is_a?(MIR::FnDef)
       mir_errors = checker.check_fn!(item, strict: true)

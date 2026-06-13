@@ -13,6 +13,7 @@
 COLLECTION_SHAPE_SMOKE_CELLS = [
   { shape: :dynamic_array },
   { shape: :list },
+  { shape: :string_list },
   { shape: :pool },
   { shape: :set },
   { shape: :hash_map },
@@ -47,6 +48,18 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
           vals.append(3_i64);
           ASSERT vals.length() == 3_i64, "list length";
           ASSERT vals[2_i64] == 3_i64, "list index";
+          RETURN;
+      END
+    CHT
+
+  when :string_list
+    <<~CHT
+      FN main() RETURNS Void ->
+          MUTABLE vals: String[]@list = List[];
+          vals.append(COPY "alpha");
+          vals.append(COPY "beta");
+          ASSERT vals.length() == 2_i64, "string list length";
+          ASSERT vals[1_i64] == "beta", "string list index";
           RETURN;
       END
     CHT

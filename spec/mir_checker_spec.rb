@@ -1020,6 +1020,58 @@ RSpec.describe MIRChecker do
     end
   end
 
+  describe "CLEANUP_REQUIRED_WITHOUT_FINALIZER" do
+    it "rejects frame AllocMark for a cleanup-bearing collection when no finalizer closes it" do
+      list_type = Type.new(:"String[]", collection: :list, location: :frame)
+      body = [
+        alloc_mark("parts", :frame, list_type),
+        MIR::Let.new(
+          "parts",
+          MIR::ContainerInit.new("std.ArrayListUnmanaged([]const u8)", :array_list_empty, :frame, nil),
+          true,
+          nil,
+          nil,
+        ),
+      ]
+
+      errors = checker.check_fn!(fn_def("missing_collection_cleanup", body))
+
+      expect(errors.any? { |e|
+        e.include?("CLEANUP_REQUIRED_WITHOUT_FINALIZER") && e.include?("parts")
+      }).to be true
+    end
+
+    it "allows cleanup-bearing frame allocations when a Cleanup is present" do
+      list_type = Type.new(:"String[]", collection: :list, location: :frame)
+      body = [
+        alloc_mark("parts", :frame, list_type),
+        MIR::Let.new(
+          "parts",
+          MIR::ContainerInit.new("std.ArrayListUnmanaged([]const u8)", :array_list_empty, :frame, nil),
+          true,
+          nil,
+          nil,
+        ),
+        MIR::Cleanup.new("parts", CleanupEntry.from({ kind: :uniform, alloc: :frame, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("collection_cleanup_present", body))
+
+      expect(errors.none? { |e| e.include?("CLEANUP_REQUIRED_WITHOUT_FINALIZER") }).to be true
+    end
+
+    it "allows frame AllocMark without cleanup for plain value types" do
+      body = [
+        alloc_mark("n", :frame, Type.new(:Int64)),
+        MIR::Let.new("n", MIR::Lit.new("1"), false, nil, nil),
+      ]
+
+      errors = checker.check_fn!(fn_def("plain_frame_alloc", body))
+
+      expect(errors.none? { |e| e.include?("CLEANUP_REQUIRED_WITHOUT_FINALIZER") }).to be true
+    end
+  end
+
   # ===========================================================================
   # UNHOISTED_ALLOC -- allocating expressions must appear only as Let.init
   # ===========================================================================

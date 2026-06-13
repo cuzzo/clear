@@ -65,6 +65,16 @@ module FuzzMutants
       templates: [:loop_local_method_temp],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),
+    Mutant.new(
+      name: :cleanup_required_finalizer,
+      description: 'Disable MIRChecker cleanup-required finalizer validation. ' \
+                   'A frame AllocMark whose Type owns cleanup-bearing data can ' \
+                   'then pass without Cleanup/ErrCleanup/TransferMark.',
+      invariant: :cleanup_required_finalizer,
+      patch: File.join(PATCH_DIR, 'cleanup_required_finalizer.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
   ].freeze
 
   def self.find(name)

@@ -92,7 +92,7 @@ expected hard error is absent.
 | `loop_carry_collection`     | 8            | E2 :loop_carry_string + frame-rewind invariant |
 | `mutable_collection_param`  | 8            | E2 :mutable_list_param_escape, INV-CROSS-FRAME-PARAM-ALLOC |
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
-| `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
+| `collection_shape_smoke`    | 14           | Shape/admission smoke coverage for every collection form named in the surface registry, including direct `String[]@list` cleanup coverage. |
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
 | `escape_mechanism_matrix`   | 25           | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM/DO capture, enclosing assignment, field/index stores, collection/aggregate stores, recursive aggregate returns, TAKES/GIVE, loop carry, and call-return receiver stores. |
 | `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
@@ -126,7 +126,7 @@ expected hard error is absent.
 | `bind_capture_cleanup`      | 2               | Bind-expression capture cleanup for optional/list payloads. |
 | `cleanup_classifier_shapes` | 20              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads. |
 | `cross_fiber_consumer`      | 6               | BG STREAM / observable producer values consumed across fiber boundaries. |
-| `loop_local_cleanup_alloc`  | 4               | Loop-local allocation forms that must be cleaned or promoted consistently. |
+| `loop_local_cleanup_alloc`  | 16              | Loop-local allocation forms that must be cleaned or promoted consistently, including direct `String[]@list` locals. |
 | `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
 | `thunk_recursion_matrix`    | 43              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes, including owned accumulators and struct payloads. |
 | `fsm_suspension_matrix`     | 38              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, BG STREAM YIELD, owned suspend results, lock segments, and stream cleanup. |
@@ -135,14 +135,14 @@ expected hard error is absent.
 | `diagnostic_policy_matrix`  | 14              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `pipeline_gap_matrix`        | 7            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
-| `call_ownership_contract_matrix` | 40         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts. |
+| `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
-| `mir_checker_negative_matrix` | 45            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
-| `or_heap_destination_matrix` | 96             | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations. |
-| `owned_sink_destination_matrix` | 108         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks. |
+| `mir_checker_negative_matrix` | 44            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, missing cleanup finalizers, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
+| `or_heap_destination_matrix` | 168            | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations across string/list/struct/union/nested owned shapes. |
+| `owned_sink_destination_matrix` | 240         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks across string/list/struct/union/nested owned shapes. |
 | `union_lowering_cleanup_matrix` | 36         | Union helper lowering and recursive cleanup for string/list/map/inline-struct/nested payload variants. |
 | `builtin_emit_matrix`       | 16              | Source-level builtin emission through strings, collections, union active tags, and pipeline terminals. |
-| `bg_capture_transfer_matrix` | 72             | BG / DO / BG STREAM capture-transfer roots across borrow/copy/give/call/nested/field-copy/list-index/returned-handle shapes. |
+| `bg_capture_transfer_matrix` | 144            | BG / DO / BG STREAM capture-transfer roots across string/list/struct/union/nested owned shapes and borrow/COPY/GIVE/call/member/index/returned-handle modes. |
 | `cast_lowering_matrix`      | 30              | Annotation-driven MIR cast/coercion lowering across var, return, call, list, and branch contexts. |
 | `hoist_edge_matrix`          | 43              | Nested allocating expressions in return, local, field, list, call, branch, OR fallback, loop, match, collection literal, and nested aggregate contexts. |
 | `access_path_expression_matrix` | 30          | Field/index/optional/map/nested access paths through local, return, call, branch, and loop contexts. |

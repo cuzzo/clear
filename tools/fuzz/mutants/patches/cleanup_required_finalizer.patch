@@ -1,0 +1,11 @@
+diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+--- a/src/mir/mir_checker.rb
++++ b/src/mir/mir_checker.rb
+@@ -433,7 +433,6 @@ class MIRChecker
+     verify_allocating_lets_marked!(nodes, allocs)
+     verify_aggregate_owned_children!(fn_def.body, allocs)
+     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
+-    verify_cleanup_required_finalizers!(allocs, cleanups, errdefer_destroy_names, transfers)
+     verify_ownership_consumption_operands!(structural_ownership_nodes)
+     verify_call_contracts!(nodes, transfers, allocs)
+     verify_structural_ownership_contracts!(structural_ownership_nodes, transfers, allocs)

@@ -19,6 +19,11 @@ const TestValue = union(enum) {
     Map: CheatLib.StringMap(TestValue),
 };
 
+const StringListValue = union(enum) {
+    Empty: void,
+    Items: std.ArrayListUnmanaged([]const u8),
+};
+
 // `ebr` is taken as a pointer parameter so the caller owns its
 // lifetime (the EbrContext is stored by-pointer inside Runtime via
 // ThreadLocalEbr.context). The previous version returned the
@@ -522,6 +527,29 @@ test "dupeUnionValue deep-copies string variant independently" {
     CheatLib.cleanup(TestValue, alloc, &orig_mut);
     var copy_mut = copied;
     CheatLib.cleanup(TestValue, alloc, &copy_mut);
+}
+
+test "dupeValue deep-copies union ArrayList string payload elements independently" {
+    const alloc = std.testing.allocator;
+
+    var items = std.ArrayListUnmanaged([]const u8).empty;
+    try items.append(alloc, try alloc.dupe(u8, "a"));
+    try items.append(alloc, try alloc.dupe(u8, "b"));
+
+    const original = StringListValue{ .Items = items };
+    const copied = try CheatLib.dupeValue(StringListValue, original, alloc);
+
+    try std.testing.expectEqual(@as(usize, 2), copied.Items.items.len);
+    try std.testing.expectEqualStrings("a", copied.Items.items[0]);
+    try std.testing.expectEqualStrings("b", copied.Items.items[1]);
+    try std.testing.expect(copied.Items.items.ptr != original.Items.items.ptr);
+    try std.testing.expect(copied.Items.items[0].ptr != original.Items.items[0].ptr);
+    try std.testing.expect(copied.Items.items[1].ptr != original.Items.items[1].ptr);
+
+    var original_mut = original;
+    CheatLib.cleanup(StringListValue, alloc, &original_mut);
+    var copied_mut = copied;
+    CheatLib.cleanup(StringListValue, alloc, &copied_mut);
 }
 
 // Recursive union type similar to the interpreter's Value (17 variants,

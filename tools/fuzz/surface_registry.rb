@@ -46,6 +46,7 @@ module FuzzSurfaceRegistry
     collection_shapes: [
       :dynamic_array,
       :list,
+      :string_list,
       :pool,
       :set,
       :hash_map,
@@ -55,6 +56,7 @@ module FuzzSurfaceRegistry
       :sharded_hash_map,
       :soa_list,
       :soa_pool,
+      :constructor_modifiers,
       :nested_collection,
     ],
 
@@ -245,6 +247,7 @@ module FuzzSurfaceRegistry
       collection_shapes: [
         :dynamic_array,
         :list,
+        :string_list,
         :pool,
         :set,
         :hash_map,
@@ -254,6 +257,7 @@ module FuzzSurfaceRegistry
         :sharded_hash_map,
         :soa_list,
         :soa_pool,
+        :constructor_modifiers,
         :nested_collection,
       ],
     },
@@ -387,7 +391,7 @@ module FuzzSurfaceRegistry
     },
 
     call_ownership_contract_matrix: {
-      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :nested_container],
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload, :nested_container],
       escape_sources: [:function_param, :bg_capture, :stream_next],
       escape_sinks: [:function_arg, :takes_arg, :give_arg, :return_value, :bg_capture],
       execution_boundaries: [:bg, :stream_pipeline],
@@ -436,14 +440,14 @@ module FuzzSurfaceRegistry
     },
 
     or_heap_destination_matrix: {
-      cleanup_value_shapes: [:string, :frame_string_concat, :heap_list, :struct_owned_fields],
+      cleanup_value_shapes: [:string, :frame_string_concat, :heap_list, :struct_owned_fields, :union_owned_payload, :nested_container],
       escape_sources: [:or_expression],
       escape_sinks: [:return_value, :struct_field_store, :list_append, :function_arg],
       mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :error_path_allocator_identity],
     },
 
     owned_sink_destination_matrix: {
-      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload, :nested_container],
       escape_sinks: [:return_value, :struct_field_store, :list_append, :map_put, :takes_arg, :function_arg],
       mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths],
     },
@@ -464,7 +468,7 @@ module FuzzSurfaceRegistry
     },
 
     bg_capture_transfer_matrix: {
-      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload, :nested_container],
       escape_sources: [:bg_capture, :do_capture, :bg_stream_capture],
       escape_sinks: [:bg_capture, :do_capture, :bg_stream_capture, :bg_handle_return],
       execution_boundaries: [:bg, :do, :bg_stream],

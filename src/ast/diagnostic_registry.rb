@@ -1929,6 +1929,13 @@ module DiagnosticRegistry
       cause: "Every heap allocation must have a matching cleanup on every control-flow path, including error paths and early returns. The checker found a path where the AllocMark is reachable but no Cleanup/ErrCleanup is.",
       fix_hint: "Usually a lowering bug — the cleanup classifier should have inserted the cleanup. Check src/mir/cleanup_classifier.rb. If your code has an unusual control-flow shape (early RETURN inside a complex block), that path may need explicit attention.",
     },
+    CLEANUP_REQUIRED_WITHOUT_FINALIZER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Cleanup-bearing AllocMark has no checker-visible finalizer or transfer.",
+      cause: "The MIR carries an AllocMark whose concrete Type says the binding owns cleanup-bearing data, but no Cleanup, ErrCleanup, DestroyPtr errdefer, or TransferMark closes the ownership path. Frame arena rewind is not sufficient for values that own internal resources or collection storage requiring deinit.",
+      fix_hint: "Lowering bug — make cleanup classification emit a Cleanup/ErrCleanup for the binding, or emit a TransferMark when ownership leaves the current scope. Do not rely on frame allocation alone as the cleanup story for cleanup-bearing types.",
+    },
     CLEANUP_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",

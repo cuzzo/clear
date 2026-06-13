@@ -25,12 +25,12 @@
 #   END
 #
 # Axes:
-#   carrier       ∈ {struct_with_list, struct_with_optional_string, struct_with_map}
+#   carrier       ∈ {direct_list, struct_with_list, struct_with_optional_string, struct_with_map}
 #   loop_kind     ∈ {while, for_range}
 #   element_shape ∈ {string_elems, int_elems}
 
 LLCA_CELLS = []
-%i[struct_with_list struct_with_optional_string struct_with_map].each do |c|
+%i[direct_list struct_with_list struct_with_optional_string struct_with_map].each do |c|
   %i[while for_range].each do |l|
     %i[string_elems int_elems].each do |e|
       LLCA_CELLS << { carrier: c, loop_kind: l, element_shape: e }
@@ -42,30 +42,34 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
   elem_zig = p[:element_shape] == :string_elems ? "String" : "Int64"
   elem_val = p[:element_shape] == :string_elems ? 'COPY "x"' : "1_i64"
 
-  carrier_decl, carrier_init, carrier_peek = case p[:carrier]
+  carrier_decl, inner = case p[:carrier]
+  when :direct_list
+    [
+      "",
+      "MUTABLE holder: #{elem_zig}[]@list = List[];\n            holder.append(#{elem_val});\n            IF holder.length() < 0_i64 THEN RAISE \"unreached\"; END",
+    ]
   when :struct_with_list
+    carrier_init = "Holder{ items: [#{elem_val}], tag: COPY \"t\" }"
+    carrier_peek = "holder.items.length()"
     [
       "STRUCT Holder { items: #{elem_zig}[], tag: String }",
-      "Holder{ items: [#{elem_val}], tag: COPY \"t\" }",
-      "holder.items.length()",
+      "holder = #{carrier_init};\n            IF #{carrier_peek} < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   when :struct_with_optional_string
     item_peek = p[:element_shape] == :string_elems ? "holder.tag.length()" : "(holder.item OR 1_i64).toString().length()"
+    carrier_init = "Holder{ item: #{elem_val}, tag: COPY \"t\" }"
     [
       "STRUCT Holder { item: ?#{elem_zig}, tag: String }",
-      "Holder{ item: #{elem_val}, tag: COPY \"t\" }",
-      item_peek,
+      "holder = #{carrier_init};\n            IF #{item_peek} < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   when :struct_with_map
     map_peek = p[:element_shape] == :string_elems ? "holder.items.count()" : "(holder.items[\"k\"] OR 1_i64).toString().length()"
+    carrier_init = "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }"
     [
       "STRUCT Holder { items: HashMap<#{elem_zig}>, tag: String }",
-      "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }",
-      map_peek,
+      "holder = #{carrier_init};\n            IF #{map_peek} < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   end
-
-  inner = "holder = #{carrier_init};\n            IF #{carrier_peek} < 0_i64 THEN RAISE \"unreached\"; END"
 
   loop_block = case p[:loop_kind]
   when :while

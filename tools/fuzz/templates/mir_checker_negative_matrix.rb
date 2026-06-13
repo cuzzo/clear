@@ -34,6 +34,7 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :transfer_without_alloc, error_code: :TRANSFER_WITHOUT_ALLOC },
   { case_name: :cleanup_without_alloc, error_code: :CLEANUP_WITHOUT_ALLOC },
   { case_name: :alloc_without_cleanup, error_code: :ALLOC_WITHOUT_CLEANUP },
+  { case_name: :cleanup_required_without_finalizer, error_code: :CLEANUP_REQUIRED_WITHOUT_FINALIZER },
   { case_name: :errcleanup_without_transfer, error_code: :ERRCLEANUP_WITHOUT_TRANSFER },
   { case_name: :alloc_cleanup_mismatch, error_code: :ALLOC_CLEANUP_MISMATCH },
   { case_name: :invalid_allocmark_allocator, error_code: :INVALID_ALLOCATOR_MARK },
@@ -275,6 +276,13 @@ def mir_checker_negative_case(case_name)
     <<~RUBY
       [
         alloc_mark("x", :heap),
+      ]
+    RUBY
+  when :cleanup_required_without_finalizer
+    <<~RUBY
+      [
+        alloc_mark("parts", :frame, Type.new(:"String[]", collection: :list, location: :frame)),
+        MIR::Let.new("parts", MIR::ContainerInit.new("std.ArrayListUnmanaged([]const u8)", :array_list_empty, :frame, nil), true, nil, nil),
       ]
     RUBY
   when :errcleanup_without_transfer
