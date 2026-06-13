@@ -374,12 +374,12 @@ Question: did a pasted block rename most identifiers but miss one?
 This catches the classic copy/paste bug where `cart` became
 `trial_cart` everywhere except one stale reference.
 
-### Flay Similarity
+### Structural Similarity
 
 Question: are there large structural clones?
 
-Flay is a broad clone signal. Decomplex consumes it as supporting
-evidence; it is not by itself a bug report.
+Tree-sitter structural similarity is a broad clone signal. Decomplex
+uses it as supporting evidence; it is not by itself a bug report.
 
 ## Shape Metrics
 

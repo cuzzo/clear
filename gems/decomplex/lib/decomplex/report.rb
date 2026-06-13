@@ -38,8 +38,10 @@ module Decomplex
       @rename_clones = InconsistentRenameClone.scan(@files)
       @similarity = FlaySimilarity.scan(
         @files,
-        mass: Integer(ENV.fetch("DECOMPLEX_FLAY_MASS", FlaySimilarity::DEFAULT_MASS)),
-        fuzzy: Integer(ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY))
+        mass: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_MASS",
+                                ENV.fetch("DECOMPLEX_FLAY_MASS", FlaySimilarity::DEFAULT_MASS))),
+        fuzzy: Integer(ENV.fetch("DECOMPLEX_SIMILARITY_FUZZY",
+                                 ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY)))
       )
       @pressure = DecisionPressure.scan(@files).ranked
       @redundant_nil = RedundantNilGuard.scan(@files)
@@ -152,7 +154,7 @@ module Decomplex
       ["Semantic Predicate Aliases", :@salias, 1, "one decision, multiple names (receiver/polarity folded)"],
       ["Exact Predicate Aliases", :@palias, 1, "identical one-line predicate body under >=2 names"],
       ["Inconsistent Rename Clones", :@rename_clones, 2, "pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug"],
-      ["Flay Similarity (Type-2/3)", :@similarity, 2, "Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict"],
+      ["Structural Similarity (Type-2/3)", :@similarity, 2, "Tree-sitter structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict"],
       ["Neglected Updates",      :@negu,   2, "co-written state, one write missing -- *POSSIBLE* redundant-state desync"],
       ["Derived-State Staleness", :@derived, 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug"],
       ["Neglected Conditions",   :@negc,   2, "dispatch/conjunction minus one element -- *POSSIBLE* bug"],
@@ -335,8 +337,8 @@ module Decomplex
       total = SECTIONS.sum { |_, iv, _| instance_variable_get(iv).size }
       out << "- Total candidates: #{total}\n"
       out << "- Method: stdlib AST only, intra-procedural, zero deps, " \
-             "no CFG / no points-to; Flay similarity is an optional " \
-             "external signal consumed read-only (see docs/agents/design.md)\n"
+             "no CFG / no points-to; Type-2/3 similarity uses " \
+             "Tree-sitter structural fingerprints (see docs/agents/design.md)\n"
       out
     end
 
@@ -508,7 +510,7 @@ module Decomplex
                when "Inconsistent Rename Clones"
                  "- *POSSIBLE* #{nav(h[:at])} clone of #{nav(h[:ref_at])}: ref var " \
                  "`#{h[:ref_name]}` spelled #{h[:divergent].inspect} here\n"
-               when "Flay Similarity (Type-2/3)"
+               when "Structural Similarity (Type-2/3)"
                  "- *POSSIBLE* [#{h[:clone_type]}] mass=#{h[:mass]} node=`#{h[:node]}` " \
                  "#{h[:sites].first(4).map { |s| nav(s) }.join(' ; ')}" \
                  "#{h[:sites].size > 4 ? " (+#{h[:sites].size - 4} more)" : ''}\n"

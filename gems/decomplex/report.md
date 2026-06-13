@@ -21,7 +21,7 @@
 - [Semantic Predicate Aliases (3)](#semantic-predicate-aliases-3)
 - [Exact Predicate Aliases (4)](#exact-predicate-aliases-4)
 - [Inconsistent Rename Clones (0)](#inconsistent-rename-clones-0)
-- [Flay Similarity (Type-2/3) (0)](#flay-similarity-type23-0)
+- [Structural Similarity (Type-2/3) (0)](#structural-similarity-type23-0)
 - [Neglected Updates (169)](#neglected-updates-169)
 - [Derived-State Staleness (15)](#derivedstate-staleness-15)
 - [Neglected Conditions (0)](#neglected-conditions-0)
@@ -494,8 +494,8 @@ _pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename b
 
 None.
 
-## Flay Similarity (Type-2/3) (0)
-_Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict_
+## Structural Similarity (Type-2/3) (0)
+_Tree-sitter structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict_
 
 None.
 
@@ -858,4 +858,4 @@ _case dispatch over class consts whose arms read mostly variant-invariant member
 - Convergence: 653 unit(s) flagged by >=2 independent detectors
 - Root-cause clusters: 207 (one fix collapses each)
 - Total candidates: 2256
-- Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to; Flay similarity is an optional external signal consumed read-only (see docs/agents/design.md)
+- Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to; Type-2/3 similarity uses Tree-sitter structural fingerprints (see docs/agents/design.md)

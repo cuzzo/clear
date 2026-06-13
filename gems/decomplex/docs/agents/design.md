@@ -60,7 +60,7 @@ alias rather than as a standalone report.
 | **polarity canonicalization** — `if x..else` / `unless x` / `if !x` folded before mining | 1,2,3 | normalization pre-pass in all spec miners | [x] |
 | **derived-state def-use** — `b = f(a)`, both feed decisions; flag when only one is refreshed | 1 | program slicing; DynaMine | [x] |
 | **inconsistent rename clone** — pasted block, one variable inconsistently renamed/dropped | 3 | CP-Miner (Li et al. OSDI'04); DECKARD; CCFinder | [x] |
-| **Flay similarity adapter** — external Type-2/Type-3 clone pressure, consumed read-only and published as decomplex spans for correlation | 2,3 | Flay | [x] |
+| **Tree-sitter similarity** — Type-2/Type-3 clone pressure from language-neutral structural fingerprints, published as decomplex spans for correlation | 2,3 | Tree-sitter | [x] |
 | **false simplicity** — local syntax understating non-local behaviour: hidden dispatch/mutation/context/IO, callback inversion, metaprogramming, monkeypatch/reopen; one category, support×scatter | 2,3 | Engler "Bugs as Deviant Behavior" (the #8 protocol pair is Broken Protocols above); shallow triggers vs RuboCop/Reek catalogued in [false-simplicity.md](../false-simplicity.md) | [x] |
 | **fat union (product-vs-sum)** — `case <disc> when ClassA…` whose arms read mostly variant-invariant members (or members used outside the dispatch); the common core should be a struct + a small union. Measures+ranks the cohesion evidence; **extraction routes to nil-kill** | 1,2 | Fowler "Replace Conditional with Polymorphism"; sum-vs-product / data-clump; nil-kill owns the rewrite | [x] |
 | ~~data-clump → value object~~ — **DROPPED**, owned by `nil-kill` (see below) | 1,2 | — | ⊘ |
@@ -69,15 +69,13 @@ alias rather than as a standalone report.
 
 ### Ruby ecosystem (what is already in this repo's toolchain)
 
-- **Flay** — structural code clones at the *node-sequence* level. Sees
-  duplicated *code*, not duplicated *decisions*: it will not tell you
-  that `{FuncCall, MethodCall}` dispatch is open-coded in 5 methods, or
-  that `.storage` is written without `.provenance`. Decomplex consumes
-  Flay as an external similarity signal; it does not reimplement broad
-  Type-2/Type-3 clone detection. The separate inconsistent-rename
-  detector is narrower: it looks for a specific missed-rename bug that
-  can fall out of Flay's clone clusters because the buggy copy is the
-  deviant member.
+- **Tree-sitter structural similarity** — structural code clones at the
+  node-sequence level. Sees duplicated *code*, not duplicated
+  *decisions*: it will not tell you that `{FuncCall, MethodCall}`
+  dispatch is open-coded in 5 methods, or that `.storage` is written
+  without `.provenance`. The separate inconsistent-rename detector is
+  narrower: it looks for a specific missed-rename bug that can fall out
+  of clean clone clusters because the buggy copy is the deviant member.
 - **Reek** — smell heuristics (DataClump, FeatureEnvy, ControlCouple).
   Closest is DataClump, but it keys on *parameter lists*, not on
   *fields co-occurring in guards/writes*, and emits no scatter ranking

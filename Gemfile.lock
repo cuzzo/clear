@@ -283,7 +283,6 @@ DEPENDENCIES
   csv
   debride
   decomplex!
-  flay
   flog
   msgpack (~> 1.7, >= 1.7.2)
   mutant

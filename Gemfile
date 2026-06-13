@@ -15,7 +15,6 @@ group :development do
   gem 'rubycritic', require: false
   gem 'reek', require: false
   gem 'flog', require: false
-  gem 'flay', require: false
   gem 'debride', require: false
   gem 'simplecov', require: false
   # Cobertura XML output for Codecov / coveralls / GitLab integration

@@ -321,7 +321,7 @@ These should run only where the profile declares support:
 | RedundantNilGuard | Generalize to null/nil/None checks only where the profile exposes null facts and local dominance can be approximated. |
 | FalseSimplicity | Split into universal sub-signals and language-specific lexicons. Hidden IO, globals, mutation, callbacks, and dynamic dispatch are portable; monkeypatch/reopen is mostly Ruby/Python/JavaScript. |
 | FatUnion | Generalize from Ruby class constants to variant/type-discriminator dispatch. Rust/Swift/TypeScript should get different profile treatment because sum types are first-class. |
-| FlaySimilarity | Flay is Ruby-only. Keep it Ruby-only initially, then consider a Tree-sitter structural fingerprint detector as a separate replacement. Do not pretend Flay results exist for other languages. |
+| FlaySimilarity | Replace the old Flay adapter with a Tree-sitter structural fingerprint detector. Keep the published finding shape stable while enabling Type-2/Type-3 clone pressure for every language with a configured Tree-sitter grammar. |
 
 ### Phase 6: Add non-Ruby language profiles
 

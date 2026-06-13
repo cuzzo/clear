@@ -5,7 +5,8 @@ require_relative "ast"
 module Decomplex
   # Narrow clone bug detector: a pasted block was renamed, but one
   # occurrence kept the old spelling. This is intentionally not a
-  # general Type-2/Type-3 clone detector; Flay owns that broader signal.
+  # general Type-2/Type-3 clone detector; the structural similarity
+  # scanner owns that broader signal.
   #
   # The important false-positive guard is cross-method evidence. Local
   # branch symmetry inside one method often has the same skeleton with
