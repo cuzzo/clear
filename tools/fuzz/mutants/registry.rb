@@ -126,6 +126,46 @@ module FuzzMutants
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(
+      name: :hold_lock_across_yield_policy,
+      description: 'Disable the front-end hold-lock-across-yield policy. ' \
+                   'The diagnostic policy matrix must reject suspending work ' \
+                   'inside WITH lock bodies.',
+      invariant: :hold_lock_across_yield,
+      patch: File.join(PATCH_DIR, 'concurrency_skip_hold_yield.patch'),
+      templates: [:diagnostic_policy_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :fn_type_reentrant_constraint,
+      description: 'Accept incompatible function-value reentrancy contracts. ' \
+                   'Plain reentrant callbacks must not satisfy ' \
+                   'REQUIRES cb: NON_REENTRANT parameters.',
+      invariant: :fn_type_reentrant_constraint,
+      patch: File.join(PATCH_DIR, 'fn_type_reentrant_constraint_accept.patch'),
+      templates: [:diagnostic_policy_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :tight_loop_admission_policy,
+      description: 'Disable TIGHT-loop body validation. TIGHT loops must ' \
+                   'reject plain reentrant calls that may need scheduler ' \
+                   'yield checks.',
+      invariant: :tight_loop_admission,
+      patch: File.join(PATCH_DIR, 'tight_loop_validation_skip.patch'),
+      templates: [:diagnostic_policy_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :move_mark_emission,
+      description: 'Disable MIREmitter MoveMark output. GIVE/TAKES transfer ' \
+                   'paths must still set the moved guard that prevents source ' \
+                   'cleanup after transfer.',
+      invariant: :move_mark_emission,
+      patch: File.join(PATCH_DIR, 'mir_emitter_move_mark_noop.patch'),
+      templates: [:call_ownership_contract_matrix, :takes_move_modality, :cleanup_control_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :capture_promise_handle_by_value,
       description: 'Stop classifying affine promise handles as moved into BG ' \
                    'captures. Reusing the handle after capture must be rejected.',

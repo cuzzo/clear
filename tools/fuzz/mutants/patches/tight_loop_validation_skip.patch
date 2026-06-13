@@ -1,0 +1,11 @@
+diff --git a/src/annotator/helpers/effects.rb b/src/annotator/helpers/effects.rb
+--- a/src/annotator/helpers/effects.rb
++++ b/src/annotator/helpers/effects.rb
+@@ -1156,6 +1156,7 @@ module EffectTracker
+   sig { params(stmts: AstScanInput, loop_node: TightLoopNode).void }
+   def validate_tight_body!(stmts, loop_node)
+     T.bind(self, SemanticAnnotator) rescue nil
++    return # MUTANT: skip TIGHT-loop body admission checks.
+     fn_nodes = function_node_map
+     Array(stmts).each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
+   end

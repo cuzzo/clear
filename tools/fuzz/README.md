@@ -80,6 +80,10 @@ Active mutants:
 | `mir_checker_aggregate_child_alloc` | `mir_checker_negative_matrix` | unexpected pass |
 | `mir_checker_cleanup_source_owns` | `mir_checker_negative_matrix` | unexpected pass |
 | `mir_checker_call_contracts` | `mir_checker_negative_matrix` | unexpected pass |
+| `hold_lock_across_yield_policy` | `diagnostic_policy_matrix` | unexpected pass |
+| `fn_type_reentrant_constraint` | `diagnostic_policy_matrix` | unexpected pass |
+| `tight_loop_admission_policy` | `diagnostic_policy_matrix` | unexpected pass |
+| `move_mark_emission` | `call_ownership_contract_matrix`, `takes_move_modality`, `cleanup_control_matrix` | fail |
 | `capture_promise_handle_by_value` | `promise_handle_capture` | mir-error |
 | `bg_lifetime_all_captures_independent` | `lifetimed_return` | unexpected pass |
 | `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |

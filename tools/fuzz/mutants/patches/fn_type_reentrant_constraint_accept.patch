@@ -1,0 +1,11 @@
+diff --git a/src/annotator/helpers/function_analysis.rb b/src/annotator/helpers/function_analysis.rb
+--- a/src/annotator/helpers/function_analysis.rb
++++ b/src/annotator/helpers/function_analysis.rb
+@@ -698,6 +698,7 @@ module FunctionAnalysis
+ 
+     actual_type = facts.arg_node.full_type!(context: "fn-typed argument")
+     return true if facts.expected_type.accepts?(actual_type)
++    return true # MUTANT: accept incompatible function reentrancy contracts.
+     return true if reentrant_fn_argument_allowed_by_callee?(facts)
+     return false unless reentrant_fn_argument_rejected?(facts)
+ 

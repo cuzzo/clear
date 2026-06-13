@@ -22,9 +22,9 @@ Current matrix:
 
 | group | count |
 |---|---:|
-| total `src/` subjects | 133 |
-| hard gates | 106 |
-| advisory gates | 27 |
+| total `src/` subjects | 157 |
+| hard gates | 139 |
+| advisory gates | 18 |
 | `MIRLowering#method` subjects | 89 |
 
 Important implementation details:
@@ -53,10 +53,13 @@ Notable current advisory weak spots:
 
 | subject | current ratchet | reason |
 |---|---:|---|
-| `IntrinsicRegistry*` | 55.58% | current implementation no longer supports the stale 98.97% hard-gate claim |
-| `Pprof*` | 69.94% | just below the 70% hard-gate floor |
-| `LSP::Analyzer*` | 61.88% | below the 70% hard-gate floor |
-| `FsmTransform::Emit*` | 51.13% on this branch | improved from a stale 1.33% baseline but still advisory |
+| `Type*` | 24.86% | broad value-object facade; exact high-risk methods should be promoted separately |
+| `CleanupClassifier*` | 31.97% | broad classifier module; exact cleanup methods need stronger focused gates |
+| `EscapeAnalysis*` | 32.58% | broad analysis module; key entrypoints are already hard-gated |
+| `PipelineRewriter*` | 33.01% | broad rewriter surface; needs focused method gates before hard promotion |
+| `MIREmitter*` | 39.56% | broad emitter surface; `MIREmitter#emit` is hard-gated at 99.73% |
+| `FsmWrapperEmitter*` | 49.13% | broad emitter surface; `FsmWrapperEmitter.render` is hard-gated at 100% |
+| `FsmTransform::Emit*` | 1.33% | broad module subject is too coarse; focused emit methods are hard-gated |
 
 ## Transpile Tests
 
@@ -82,7 +85,9 @@ bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty --out /tmp
 ```
 
 Result: all five mutants were killed. Every baseline transpile-test passed; every
-mutated run failed.
+mutated run failed. This is a useful integration mutation gate, but it is not
+yet A-level corpus mutation coverage because the active registry is still small
+and hand-targeted.
 
 ## Fuzz
 
@@ -91,6 +96,12 @@ The fuzz gate keeps the targeted patch-fixture model. Patch files under
 patches. Each one disables one compiler safety rule, runs the relevant fuzz
 template before and after the mutation, and requires the mutated compiler to
 produce the configured failure delta while the baseline remains clean.
+
+This is now A- quality for the current compiler phase: it covers parser/
+annotator policy, escape analysis, MIR ownership verification, lifetime facts,
+lowering order, FSM suspension, union payload binding, and runtime/codegen move
+guard emission. It is still not A+ because it is a curated invariant registry,
+not native language-level mutation over every `.cht` program.
 
 Active mutants:
 
@@ -106,6 +117,10 @@ Active mutants:
 | `mir_checker_aggregate_child_alloc` | `mir_checker_negative_matrix` | unexpected pass |
 | `mir_checker_cleanup_source_owns` | `mir_checker_negative_matrix` | unexpected pass |
 | `mir_checker_call_contracts` | `mir_checker_negative_matrix` | unexpected pass |
+| `hold_lock_across_yield_policy` | `diagnostic_policy_matrix` | unexpected pass |
+| `fn_type_reentrant_constraint` | `diagnostic_policy_matrix` | unexpected pass |
+| `tight_loop_admission_policy` | `diagnostic_policy_matrix` | unexpected pass |
+| `move_mark_emission` | `call_ownership_contract_matrix`, `takes_move_modality`, `cleanup_control_matrix` | fail |
 | `capture_promise_handle_by_value` | `promise_handle_capture` | mir-error |
 | `bg_lifetime_all_captures_independent` | `lifetimed_return` | unexpected pass |
 | `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |
@@ -114,11 +129,48 @@ Active mutants:
 Current local validation:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --allow-dirty --out /tmp/clear-fuzz-mutants-a-level-2
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/clear-fuzz-mutants-a-level-4
 ```
 
-Result: all fourteen mutants were killed. Every baseline fuzz run reported zero
+Result: all eighteen mutants were killed. Every baseline fuzz run reported zero
 failures, leaks, MIR errors, and unexpected passes.
+
+## Transpile Tests To A-Level
+
+The current transpile mutant gate is useful but still C+/B- quality: it proves
+five hand-picked compiler patch mutants against five `.cht` files. That is too
+small to validate the transpile corpus as a whole.
+
+The easiest credible path to A-level is native CLEAR-source mutation tooling:
+
+1. Add a `clear mutant` runner that operates on `.cht` source programs.
+2. Start with deterministic source/AST mutation operators:
+   - boolean and comparison operator flips;
+   - arithmetic operator flips;
+   - branch condition negation;
+   - assertion literal/value perturbation;
+   - `OR` fallback/raise action swaps;
+   - ownership marker changes around `COPY`, `GIVE`, `TAKES`, and bare args;
+   - effect/reentrancy annotation changes;
+   - sync/storage qualifier perturbations;
+   - type annotation weakening/removal where syntax remains valid.
+3. For each transpile-test file, generate a small bounded mutant set, run the
+   existing transpile-test path, and require each non-equivalent mutant to fail
+   by compile error, assertion failure, runtime failure, leak, or MIR error.
+4. Record equivalent mutants explicitly with file/operator/reason; do not hide
+   them in broad baseline percentages.
+
+Native CLEAR mutation would not eliminate the need to mutation-test
+`transpile-tests/`; it would make that mutation test meaningful. The
+`transpile-tests/` corpus remains the integration oracle. Native mutation also
+does not replace compiler-internal patch mutants for fuzz, because source-level
+mutants cannot prove that a specific MIRChecker rule, escape-analysis invariant,
+or emitter marker is load-bearing. The two layers should coexist:
+
+- CLEAR-source mutants: prove corpus assertions and expected failures are
+  load-bearing.
+- Compiler patch mutants: prove internal compiler safety checks are
+  load-bearing.
 
 ## Validation
 
