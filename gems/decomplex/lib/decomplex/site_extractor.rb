@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "syntax"
+
 module Decomplex
   # A single decision site mined from one source file.
   #
@@ -26,9 +28,16 @@ module Decomplex
   #     together many times".
   class SiteExtractor
     def self.extract(file)
-      src = File.read(file)
-      root = RubyVM::AbstractSyntaxTree.parse(src, keep_script_lines: true)
-      new(file, src.lines).tap { |e| e.walk(root, []) }.sites
+      Syntax.parse(file).decision_sites.map do |site|
+        Site.new(
+          kind: site.kind,
+          members: site.members,
+          file: site.file,
+          defn: site.function,
+          line: site.line,
+          span: site.span
+        )
+      end
     end
 
     attr_reader :sites

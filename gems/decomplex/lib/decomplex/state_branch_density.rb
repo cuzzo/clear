@@ -2,6 +2,7 @@
 
 require "set"
 require_relative "ast"
+require_relative "syntax"
 
 module Decomplex
   # StateBranchDensity -- branches whose predicate reads mutable or
@@ -15,33 +16,34 @@ module Decomplex
 
     def self.scan(files)
       decisions = []
-      parsed_files = files.map do |file|
-        root, lines = Ast.parse(file)
-        [file, root, lines]
-      end
+      documents = files.map { |file| Syntax.parse(file) }
       global_immutable_readers = Hash.new { |h, k| h[k] = Set.new }
       global_immutable_reader_types = Hash.new { |h, k| h[k] = {} }
       global_type_aliases = {}
-      parsed_files.each do |file, _root, lines|
-        scanner = new(file, lines)
-        scanner.send(:immutable_struct_readers, lines).each do |name, readers|
+      documents.each do |document|
+        document.immutable_struct_readers.each do |name, readers|
           global_immutable_readers[name].merge(readers)
         end
-        scanner.send(:immutable_struct_reader_types, lines).each do |name, readers|
+        document.immutable_struct_reader_types.each do |name, readers|
           global_immutable_reader_types[name].merge!(readers)
         end
-        global_type_aliases.merge!(scanner.send(:type_aliases, lines))
+        global_type_aliases.merge!(document.type_aliases)
       end
-      parsed_files.each do |file, root, lines|
-        scanner = new(
-          file,
-          lines,
+      documents.each do |document|
+        document.branch_decisions(
           immutable_readers: global_immutable_readers,
           immutable_reader_types: global_immutable_reader_types,
-          type_aliases: global_type_aliases,
-        )
-        scanner.walk(root, [])
-        decisions.concat(scanner.decisions)
+          type_aliases: global_type_aliases
+        ).each do |decision|
+          decisions << Decision.new(
+            file: decision.file,
+            defn: decision.function,
+            line: decision.line,
+            span: decision.span,
+            predicate: decision.predicate,
+            state_refs: decision.state_refs
+          )
+        end
       end
       Report.new(decisions)
     end

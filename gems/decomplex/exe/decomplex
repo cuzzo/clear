@@ -3,10 +3,23 @@
 
 require_relative "../lib/decomplex"
 
+def tree_sitter_parser?
+  ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+end
+
+def supported_exts
+  tree_sitter_parser? ? %w[.rb .py .js .jsx .mjs .cjs .ts .tsx .go .rs .zig] : %w[.rb]
+end
+
+def no_files_message
+  tree_sitter_parser? ? "no supported source files" : "no .rb files"
+end
+
 def collect_files(args)
+  exts = supported_exts
   args.flat_map do |a|
-    File.directory?(a) ? Dir.glob(File.join(a, "**", "*.rb")) : [a]
-  end.select { |f| File.file?(f) }
+    File.directory?(a) ? Dir.glob(File.join(a, "**", "*")) : [a]
+  end.select { |f| File.file?(f) && exts.include?(File.extname(f).downcase) }
 end
 
 # decomplex delta BASELINE.json FILE_OR_DIR...
@@ -18,7 +31,7 @@ if ARGV[0] == "delta"
   abort "usage: decomplex delta BASELINE.json FILE..." unless baseline && File.file?(baseline)
 
   files = collect_files(ARGV[2..])
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rep = Decomplex::Report.new(files)
   head = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
   base = JSON.parse(File.read(baseline))
@@ -32,7 +45,7 @@ if ARGV[0] == "state-mesh"
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   sm = Decomplex::StateMesh.scan(files)
   sm.run
   json = JSON.pretty_generate(sm.to_json_graph)
@@ -50,7 +63,7 @@ if ARGV[0] == "state-branches"
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rows = Decomplex::StateBranchDensity.scan(files).findings
   md = +"# Decomplex State-Based Branch Density\n\n"
   md << "| # | method | state branches | refs | score |\n"
@@ -73,7 +86,7 @@ if ARGV[0] == "temporal-ordering"
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rows = Decomplex::TemporalOrderingPressure.scan(files)
   md = +"# Decomplex Temporal Ordering Pressure\n\n"
   md << "| # | owner | score | public | state methods | writers | shared fields | flows | states |\n"
@@ -97,7 +110,7 @@ if ["implicit-control-flow", "ordered-protocols"].include?(ARGV[0])
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rows = Decomplex::ImplicitControlFlow.scan(files).ordered_protocols
   md = +"# Decomplex Implicit Control Flow\n\n"
   md << "| # | first site | kind | support | protocol | dependency | state |\n"
@@ -121,7 +134,7 @@ if ["weighted-inlined-complexity", "wicc"].include?(ARGV[0])
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rows = Decomplex::WeightedInlinedCognitiveComplexity.scan(files)
   md = +"# Decomplex Weighted Inlined Cognitive Complexity\n\n"
   md << "| # | method | inlined | local | hidden | depth | single-caller helpers | chain |\n"
@@ -145,7 +158,7 @@ if ["locality-drag", "dormant-locals"].include?(ARGV[0])
   out_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rows = Decomplex::LocalityDrag.scan(files)
   md = +"# Decomplex Locality Drag\n\n"
   md << "| # | method | local | score | gap | unrelated | setup ignored | boundaries | first use |\n"
@@ -172,7 +185,7 @@ if ARGV[0] == "report"
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
   args = args.reject { |a| a =~ /\A--emit-json=(.+)/ && (json_path = Regexp.last_match(1)) }
   files = collect_files(args)
-  abort "no .rb files" if files.empty?
+  abort no_files_message if files.empty?
   rep = Decomplex::Report.new(files)
   if json_path
     snap = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
@@ -231,13 +244,8 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
   exit 1
 end
 
-files = ARGV.flat_map do |a|
-  if File.directory?(a)
-    Dir.glob(File.join(a, "**", "*.rb"))
-  else
-    [a]
-  end
-end.select { |f| File.file?(f) }
+files = collect_files(ARGV)
+abort no_files_message if files.empty?
 
 miner = Decomplex::Miner.scan(files)
 
