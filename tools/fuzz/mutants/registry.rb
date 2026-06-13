@@ -27,19 +27,6 @@ module FuzzMutants
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(
-      name: :escape_struct_field_walker,
-      description: 'Revert StructLit/UnionVariantLit/ListLit recursion in ' \
-                   'LoopFrameAnalysis.escapes_to_outer?. A frame-local ' \
-                   'wrapped in a struct field initialiser then stops ' \
-                   'looking like an escape; the wrap_kind=:struct_field ' \
-                   'cells in nested_loop_escape fail (double-free at ' \
-                   'runtime).',
-      invariant: :inv_5_frame_escape,
-      patch: File.join(PATCH_DIR, 'escape_struct_field_walker.patch'),
-      templates: [:nested_loop_escape],
-      kill: { bucket: :fail, min_delta: 1 }
-    ),
-    Mutant.new(
       name: :lower_if_cond_pending_leak,
       description: 'Stop lower_if draining the condition\'s @pending_stmts ' \
                    'before lowering the then-body. Hoisted temps from a ' \
@@ -51,19 +38,6 @@ module FuzzMutants
       patch: File.join(PATCH_DIR, 'lower_if_cond_pending_leak.patch'),
       templates: [:cond_or_fallback],
       kill: { bucket: :fail, min_delta: 1 }
-    ),
-    Mutant.new(
-      name: :local_frame_decls_frame_predicate,
-      description: 'Revert frame_local_collection? to the old ' \
-                   'never-stamped `ti.frame?` check. A loop-local ' \
-                   '`temp = haystack.split(" ")` (provenance left nil) ' \
-                   'stops being seen as a frame decl, mark_per_iter is ' \
-                   'never set, and the MIR checker fires FRAME_NO_REWIND ' \
-                   'on loop_local_method_temp\'s :split cells.',
-      invariant: :bug2_frame_no_rewind,
-      patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
-      templates: [:loop_local_method_temp],
-      kill: { bucket: :mir_error, min_delta: 1 }
     ),
     Mutant.new(
       name: :cleanup_required_finalizer,

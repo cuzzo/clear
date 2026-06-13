@@ -11,7 +11,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -209,7 +209,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       expect(finds).not_to be_empty
@@ -233,7 +233,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first

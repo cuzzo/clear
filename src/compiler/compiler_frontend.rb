@@ -41,7 +41,7 @@ class CompilerFrontend
   sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false)
     tokens = Lexer.new(cheat_code).tokenize
-    ast    = Parser.new(tokens, cheat_code).parse
+    ast    = ClearParser.new(tokens, cheat_code).parse
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))

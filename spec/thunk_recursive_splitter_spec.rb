@@ -16,7 +16,7 @@ require_relative "../src/mir/thunk_transform"
 RSpec.describe "ThunkTransform::RecursiveSplitter.split" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def fn(ast, name)
@@ -140,7 +140,7 @@ RSpec.describe "Phase 4c detection-aware error message" do
   def annotate(source)
     require_relative "../src/backends/transpiler"
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

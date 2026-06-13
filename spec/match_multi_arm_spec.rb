@@ -19,7 +19,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "MATCH multi-pattern arm" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)
@@ -42,7 +42,7 @@ RSpec.describe "MATCH multi-pattern arm" do
   end
 
   # ============================================================================
-  # Parser
+  # ClearParser
   # ============================================================================
 
   describe "parser — statement-position" do

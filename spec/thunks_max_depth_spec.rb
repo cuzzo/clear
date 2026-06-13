@@ -15,7 +15,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)
@@ -124,7 +124,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
     it "now offers three interactive migrations" do
       FixCollector.enable!
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first
@@ -137,7 +137,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
     it ":MAX_DEPTH fix message warns against using N as an OS-thread workaround" do
       FixCollector.enable!
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       finds = FixCollector.drain.select { |f| f.category == :reentrance }
       finding = finds.first

@@ -135,7 +135,7 @@ module LintFixRewriter
     FixCollector.enable!
     begin
       tokens = ::Lexer.new(source).tokenize
-      ast = ::Parser.new(tokens, source).parse
+      ast = ::ClearParser.new(tokens, source).parse
       annotator = SemanticAnnotator.new
       annotator.source_code = source if annotator.respond_to?(:source_code=)
       annotator.annotate!(ast)

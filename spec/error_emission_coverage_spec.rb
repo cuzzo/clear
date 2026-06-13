@@ -34,7 +34,7 @@ require_relative "../src/ast/diagnostic_registry"
 RSpec.describe "error emission coverage" do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

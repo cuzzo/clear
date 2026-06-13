@@ -9,7 +9,7 @@ require_relative "../src/ast/ast"
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -647,7 +647,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @shared:locked type" do
       subject(:t) {
         tokens = Lexer.new("Counter @shared:locked").tokenize
-        Parser.new(tokens, "Counter @shared:locked").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @shared:locked").send(:parse_type_annotation)
       }
 
       it "sets ownership to :shared" do
@@ -662,7 +662,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @locked:multiowned type (reverse order)" do
       subject(:t) {
         tokens = Lexer.new("Counter @locked:multiowned").tokenize
-        Parser.new(tokens, "Counter @locked:multiowned").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @locked:multiowned").send(:parse_type_annotation)
       }
 
       it "sets ownership to :multiowned" do
@@ -677,7 +677,7 @@ RSpec.describe SemanticAnnotator do
     context "Counter @writeLocked:shared type" do
       subject(:t) {
         tokens = Lexer.new("Counter @writeLocked:shared").tokenize
-        Parser.new(tokens, "Counter @writeLocked:shared").send(:parse_type_annotation)
+        ClearParser.new(tokens, "Counter @writeLocked:shared").send(:parse_type_annotation)
       }
 
       it "sets ownership to :shared" do
@@ -967,7 +967,7 @@ RSpec.describe SemanticAnnotator do
         END
       FLUX
       tokens = Lexer.new(src).tokenize
-      ast    = Parser.new(tokens, src).parse
+      ast    = ClearParser.new(tokens, src).parse
       ann    = SemanticAnnotator.new
       ann.source_code = src
       FixCollector.enable!
@@ -1188,7 +1188,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: EFFECTS REENTRANT parsing and legacy rejection
+    # ClearParser: EFFECTS REENTRANT parsing and legacy rejection
     # -------------------------------------------------------------------------
     describe "parser" do
       it "parses EFFECTS REENTRANT on FunctionDef without RETURNS" do
@@ -1304,7 +1304,7 @@ RSpec.describe SemanticAnnotator do
   describe "WITH EXCLUSIVE error-clause parsing" do
     def parse_only(source)
       tokens = Lexer.new(source).tokenize
-      Parser.new(tokens, source).parse
+      ClearParser.new(tokens, source).parse
     end
 
     def with_block(ast)

@@ -17,7 +17,7 @@ require_relative "../src/annotator"
 RSpec.describe "EFFECTS REENTRANT:NOT_LOGICAL static-recursion validation" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

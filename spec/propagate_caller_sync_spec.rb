@@ -16,7 +16,7 @@ require_relative "../src/semantic/escape_analysis"
 RSpec.describe "P1.4 caller-sync propagation" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     [ast, annotator]
@@ -201,7 +201,7 @@ end
 RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     [ast, annotator]

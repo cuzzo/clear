@@ -13,7 +13,7 @@ require_relative "hover"
 module LSP
   # CLEAR Language Server. The lifecycle pieces (initialize, shutdown,
   # exit) handle protocol setup; the textDocument/* handlers run the
-  # canonical Lexer→Parser→SemanticAnnotator pipeline against open
+  # canonical Lexer→ClearParser→SemanticAnnotator pipeline against open
   # documents and publish diagnostics back to the client.
   class Server
       extend T::Sig

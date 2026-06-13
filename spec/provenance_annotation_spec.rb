@@ -9,7 +9,7 @@ require_relative "../src/semantic/escape_analysis"
 RSpec.describe "Provenance annotation" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     a = SemanticAnnotator.new
     a.annotate!(ast)
     fn_nodes = ast.statements.each_with_object({}) do |s, h|

@@ -10,7 +10,7 @@ require_relative "../src/semantic/effect_inference"
 
 RSpec.describe "P3 effect inference + correctness checks" do
   def annotate(src)
-    ast = Parser.new(Lexer.new(src).tokenize, src).parse
+    ast = ClearParser.new(Lexer.new(src).tokenize, src).parse
     ann = SemanticAnnotator.new
     ann.annotate!(ast)
     [ast, ann]

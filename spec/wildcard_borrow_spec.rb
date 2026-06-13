@@ -6,7 +6,7 @@ require_relative "../src/annotator"
 RSpec.describe "Wildcard Borrows" do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast.full_type.resolved

@@ -5,7 +5,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Stack Tier Recommendations" do
   def analyze(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     fn_nodes = annotator.semantic_function_nodes

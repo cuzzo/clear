@@ -10,7 +10,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "BORROWED escape lockdown" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     SemanticAnnotator.new.annotate!(ast)
   end

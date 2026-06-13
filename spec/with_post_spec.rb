@@ -7,7 +7,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "DEBUG_POST clauses on function signatures" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)

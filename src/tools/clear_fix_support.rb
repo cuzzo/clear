@@ -142,7 +142,7 @@ module ClearFixSupport
       MultiStatementLinter.lint!(source)
       begin
         tokens = Lexer.new(source).tokenize
-        ast = Parser.new(tokens, source).parse
+        ast = ClearParser.new(tokens, source).parse
         annotator = SemanticAnnotator.new
         annotator.source_code = source
         annotator.annotate!(ast)

@@ -26,7 +26,7 @@ require_relative "../src/annotator"
 RSpec.describe "MVCC L7: WITH MATCH @versioned arm" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)

@@ -57,12 +57,12 @@ RSpec.describe "String@symbol" do
   end
 
   # =========================================================================
-  # Parser
+  # ClearParser
   # =========================================================================
-  describe "Parser" do
+  describe "ClearParser" do
     def parse(src)
       tokens = Lexer.new(src).tokenize
-      Parser.new(tokens, src).parse
+      ClearParser.new(tokens, src).parse
     end
 
     def main_body(src)
@@ -173,7 +173,7 @@ RSpec.describe "String@symbol" do
   describe "Annotator" do
     def run(src)
       tokens = Lexer.new(src).tokenize
-      ast    = Parser.new(tokens, src).parse
+      ast    = ClearParser.new(tokens, src).parse
       SemanticAnnotator.new.annotate!(ast)
       ast
     end

@@ -11,7 +11,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "@observable type flag" do
   def parse_type(src)
     tokens = Lexer.new(src).tokenize
-    parser = Parser.new(tokens, src)
+    parser = ClearParser.new(tokens, src)
     parser.send(:parse_type_annotation)
   end
 

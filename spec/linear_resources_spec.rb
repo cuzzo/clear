@@ -9,7 +9,7 @@ require_relative "../src/ast/ast"
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -47,12 +47,12 @@ RSpec.describe SemanticAnnotator do
     end
 
     # ------------------------------------------------------------------
-    # Parser
+    # ClearParser
     # ------------------------------------------------------------------
-    describe "Parser: StaticCall AST node" do
+    describe "ClearParser: StaticCall AST node" do
       it "parses TypeName::method(args) as a StaticCall" do
         tokens = Lexer.new('File::open("data.txt")').tokenize
-        parser = Parser.new(tokens, 'File::open("data.txt")')
+        parser = ClearParser.new(tokens, 'File::open("data.txt")')
         node   = parser.send(:parse_primary)
         expect(node).to be_a(AST::StaticCall)
         expect(node.type_name.name).to eq("File")
@@ -63,7 +63,7 @@ RSpec.describe SemanticAnnotator do
       it "parses a StaticCall as RHS of a bind expression" do
         src    = 'FN f() RETURNS !Void -> f = File::open("x"); RETURN; END'
         tokens = Lexer.new(src).tokenize
-        ast    = Parser.new(tokens, src).parse
+        ast    = ClearParser.new(tokens, src).parse
         fn     = ast.statements.first
         bind   = fn.body.first
         expect(bind.value).to be_a(AST::StaticCall)

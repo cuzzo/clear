@@ -98,7 +98,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
   describe "warn integration in the annotator" do
     def annotate_capturing_notes(src)
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       capture = StringIO.new
       orig = $stderr
       $stderr = capture

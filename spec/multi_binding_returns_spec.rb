@@ -18,7 +18,7 @@ require_relative "../src/ast/ast"
 # value actually comes from).
 RSpec.describe "RETURNS (a b ...):T multi-binding lifetimes (M2.4 + M2.5)" do
   def parse(src)
-    Parser.new(Lexer.new(src).tokenize, src).parse
+    ClearParser.new(Lexer.new(src).tokenize, src).parse
   end
 
   def annotate(src)

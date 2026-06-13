@@ -12,7 +12,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Recursion co-op yield + :TIGHT opt-out" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)

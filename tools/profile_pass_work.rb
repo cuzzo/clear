@@ -664,7 +664,7 @@ module PassWorkProfilerTool
       token_count = T.must(tokens).length
 
       @profiler.measure("parser.parse", token_count: token_count) do
-        ast = Parser.new(T.must(tokens), @source).parse
+        ast = ClearParser.new(T.must(tokens), @source).parse
       end
       ast = T.must(ast)
       parsed_ast_nodes = PassWorkProfiler.count_ast_nodes(ast)

@@ -20,7 +20,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH SNAPSHOT MATCH annotator validation (M3.8)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

@@ -18,7 +18,7 @@ RSpec.describe "Immutable param auto-fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -109,7 +109,7 @@ RSpec.describe "Immutable param auto-fix" do
     it "ASSIGN_VAR_IMMUTABLE — falls back to plain error! when no fix is locatable" do
       src = "FN bump(p: Int64) RETURNS Int64 ->\n  p = p + 1;\n  RETURN p;\nEND\nFN main() RETURNS Void -> END"
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       ann = SemanticAnnotator.new
       allow(ann).to receive(:build_declare_mutable_fix).and_return(nil)
       FixCollector.disable!

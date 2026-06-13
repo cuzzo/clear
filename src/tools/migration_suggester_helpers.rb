@@ -35,7 +35,7 @@ module MigrationSuggesterHelpers
   sig { params(source: String).returns(T::Array[Hash]) }
   def run_analyze(source)
     tokens = Lexer.new(source).tokenize
-    ast    = Parser.new(tokens, source).parse
+    ast    = ClearParser.new(tokens, source).parse
     ann    = SemanticAnnotator.new
     ann.source_code = source
     ann.annotate!(ast)

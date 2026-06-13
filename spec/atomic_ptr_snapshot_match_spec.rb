@@ -14,7 +14,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     ast.statements.first
   end
 

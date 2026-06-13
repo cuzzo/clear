@@ -39,7 +39,7 @@ RSpec.describe BorrowChecker do
 
   def check_errors(src, fn_name = "main")
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)

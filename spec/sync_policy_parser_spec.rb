@@ -16,7 +16,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "True-Sync-Polymorphism parser (step 1)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def parse_first_stmt(src)

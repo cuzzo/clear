@@ -62,11 +62,11 @@ def run_phase(phase, source, source_dir, importer)
   case phase
   when "annotate"
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source).annotate!(ast)
   when "mir_pass"
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source)
     annotator.annotate!(ast)
     PipelineRewriter.new(annotator).rewrite!(ast)

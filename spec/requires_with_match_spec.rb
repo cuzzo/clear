@@ -15,7 +15,7 @@ require_relative "../src/backends/transpiler"
 
 RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
   def parse(src)
-    Parser.new(Lexer.new(src).tokenize, src).parse
+    ClearParser.new(Lexer.new(src).tokenize, src).parse
   end
 
   def annotate(src)

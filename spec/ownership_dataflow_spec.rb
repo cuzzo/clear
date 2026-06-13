@@ -4,7 +4,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe OwnershipDataflow do
   def analyze(src, fn_name)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
@@ -18,7 +18,7 @@ RSpec.describe OwnershipDataflow do
 
   def annotated_function(src, fn_name)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     PipelineRewriter.new.rewrite!(ast)
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
@@ -209,7 +209,7 @@ RSpec.describe OwnershipDataflow do
         END
       SRC
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       PipelineRewriter.new.rewrite!(ast)
       annotator = SemanticAnnotator.new
       annotator.annotate!(ast)
@@ -281,7 +281,7 @@ RSpec.describe OwnershipDataflow do
         begin
           code = File.read(f)
           tokens = Lexer.new(code).tokenize
-          ast = Parser.new(tokens, code).parse
+          ast = ClearParser.new(tokens, code).parse
           PipelineRewriter.new.rewrite!(ast)
           ann = SemanticAnnotator.new
           ann.annotate!(ast)

@@ -15,7 +15,7 @@ RSpec.describe "Thunk Phase 5 -- plain :reentrant variant audit" do
 
   def annotated(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

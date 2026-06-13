@@ -17,7 +17,7 @@ require_relative "../src/ast/fixable_error"
 RSpec.describe "Atomic-escape fixable finding (M2.8)" do
   def collect_findings(src)
     tokens = Lexer.new(src).tokenize
-    ast    = Parser.new(tokens, src).parse
+    ast    = ClearParser.new(tokens, src).parse
     ann    = SemanticAnnotator.new
     ann.source_code = src
     FixCollector.enable!
@@ -132,7 +132,7 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
         END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast    = Parser.new(tokens, src).parse
+      ast    = ClearParser.new(tokens, src).parse
       ann    = SemanticAnnotator.new
       ann.source_code = src
       FixCollector.enable!

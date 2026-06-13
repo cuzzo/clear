@@ -11,10 +11,10 @@ require_relative "../src/ast/ast"
 # tier, propagation, NON_REENTRANT constraint solving) are out of
 # scope here.
 
-RSpec.describe "Parser: EFFECTS REENTRANT clause" do
+RSpec.describe "ClearParser: EFFECTS REENTRANT clause" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def fn(ast, name = "main")
@@ -135,10 +135,10 @@ end
 # happens in the annotator (Phase 1.3); the parser is purely syntactic
 # here.
 
-RSpec.describe "Parser: REQUIRES NON_REENTRANT clause" do
+RSpec.describe "ClearParser: REQUIRES NON_REENTRANT clause" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def fn(ast, name = "main")

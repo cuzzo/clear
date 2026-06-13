@@ -1,5 +1,5 @@
 # typed: strict
-require_relative "../backends/transpiler"  # loads Lexer, Parser, SemanticAnnotator, FixCollector
+require_relative "../backends/transpiler"  # loads Lexer, ClearParser, SemanticAnnotator, FixCollector
 
 module LSP
   # Runs the canonical CLEAR compiler frontend on a source string and
@@ -41,7 +41,7 @@ module LSP
       fatal = nil
       begin
         tokens    = Lexer.new(source).tokenize
-        ast       = Parser.new(tokens, source).parse
+        ast       = ClearParser.new(tokens, source).parse
         annotator = SemanticAnnotator.new
         annotator.source_code = source
         annotator.annotate!(T.must(ast))

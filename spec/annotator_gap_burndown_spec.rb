@@ -5,7 +5,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "annotator branch gap burndown" do
   def annotate_source(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end
@@ -39,7 +39,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def parse_source(source)
-    Parser.new(Lexer.new(source).tokenize, source).parse
+    ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
   def function_from(source, name)

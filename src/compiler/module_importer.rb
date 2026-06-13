@@ -106,13 +106,13 @@ class ModuleImporter
     # imported module's parse so `--gradual` from the top-level build
     # never propagates across module boundaries. Explicit `Auto` in
     # source still tokenizes; the post-parse check below catches it.
-    saved_gradual = Parser.gradual_mode
-    Parser.gradual_mode = false
+    saved_gradual = ClearParser.gradual_mode
+    ClearParser.gradual_mode = false
     begin
       tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(tokens, source).parse
+      ast    = ClearParser.new(tokens, source).parse
     ensure
-      Parser.gradual_mode = saved_gradual
+      ClearParser.gradual_mode = saved_gradual
     end
 
     reject_auto_in_public_signatures!(T.must(ast), abs_path)

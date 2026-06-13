@@ -9,7 +9,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

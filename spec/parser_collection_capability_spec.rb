@@ -2,13 +2,13 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 
-RSpec.describe "Parser collection capability chains" do
+RSpec.describe "ClearParser collection capability chains" do
   def parse_expr(source)
-    Parser.new(Lexer.new(source).tokenize, source).send(:parse_expression)
+    ClearParser.new(Lexer.new(source).tokenize, source).send(:parse_expression)
   end
 
   def parse_type(source)
-    Parser.new(Lexer.new(source).tokenize, source).send(:parse_type_annotation)
+    ClearParser.new(Lexer.new(source).tokenize, source).send(:parse_type_annotation)
   end
 
   it "parses constructor collection modifiers through the unified capability parser" do
@@ -58,7 +58,7 @@ RSpec.describe "Parser collection capability chains" do
   end
 
   it "round-trips polymorphic SHARED annotations without keeping the marker on the inner type" do
-    parser = Parser.new(Lexer.new("").tokenize, "")
+    parser = ClearParser.new(Lexer.new("").tokenize, "")
     type = Type.new(:Counter)
     type.apply_reference_ownership!(:shared)
     type.mark_polymorphic_shared!

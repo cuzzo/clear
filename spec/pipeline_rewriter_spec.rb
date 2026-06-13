@@ -11,7 +11,7 @@ RSpec.describe PipelineRewriter do
   # skipped annotation, an unrealistic path that masked the contract.
   def parse_and_rewrite(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     annotator = SemanticAnnotator.new(source_code: src)
     annotator.annotate!(ast)
     PipelineRewriter.new(annotator).rewrite!(ast)

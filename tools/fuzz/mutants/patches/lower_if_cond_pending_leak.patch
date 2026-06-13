@@ -1,19 +1,18 @@
-diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
-index 30ed5224f..f82912676 100644
---- a/src/mir/mir_lowering.rb
-+++ b/src/mir/mir_lowering.rb
-@@ -138,12 +138,8 @@ class MIRLowering
-   # per-construct flush discipline to forget.
+diff --git a/src/mir/hoist.rb b/src/mir/hoist.rb
+--- a/src/mir/hoist.rb
++++ b/src/mir/hoist.rb
+@@ -510,12 +510,8 @@ module Hoist
    sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
    def lower_head(&blk)
--    prev = @pending_stmts
--    @pending_stmts = []
+     T.bind(self, MIRLowering) rescue nil
+-    prev = function_state.pending_stmts
+-    function_state.pending_stmts = []
 -    result = blk.call
--    produced = @pending_stmts
--    @pending_stmts = prev
+-    produced = function_state.pending_stmts
+-    function_state.pending_stmts = prev
 -    [result, produced]
 +    result = blk.call  # MUTANT: no isolation — head pending leaks into the construct body
 +    [result, []]
    end
  
-   # Attach head pending (from lower_head) to a finished control-flow MIR
+   sig { params(pending: T::Array[T.untyped], node: T.untyped).returns(T.untyped) }

@@ -15,7 +15,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "@atomic parser" do
   def parse_type(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).send(:parse_type_annotation)
+    ClearParser.new(tokens, src).send(:parse_type_annotation)
   end
 
   describe "type-level `T@atomic`" do

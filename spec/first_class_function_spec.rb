@@ -9,7 +9,7 @@ require_relative "../src/ast/ast"
 RSpec.describe SemanticAnnotator do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast
@@ -32,9 +32,9 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: parse_fn_type_annotation
+    # ClearParser: parse_fn_type_annotation
     # -------------------------------------------------------------------------
-    describe "Parser" do
+    describe "ClearParser" do
       context "FN(Int64) -> Bool in a type annotation position" do
         let(:code) { "cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;" }
         it "parses without error" do
@@ -83,7 +83,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type#fn_type?" do
       it "returns true for a parsed FN type annotation" do
         tokens = Lexer.new("cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;").tokenize
-        ast    = Parser.new(tokens, "").parse
+        ast    = ClearParser.new(tokens, "").parse
         bind   = ast.statements.first
         expect(bind.type.fn_type?).to be true
       end
@@ -100,7 +100,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type#zig_type for fn_type" do
       def fn_type_for(source)
         tokens = Lexer.new(source).tokenize
-        ast    = Parser.new(tokens, "").parse
+        ast    = ClearParser.new(tokens, "").parse
         ast.statements.first.type
       end
 
@@ -533,7 +533,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # -------------------------------------------------------------------------
-    # Parser: fn-type annotation has no legacy reentrance marker
+    # ClearParser: fn-type annotation has no legacy reentrance marker
     # -------------------------------------------------------------------------
     describe "parser" do
       it "rejects @reentrant on a fn-type param annotation" do

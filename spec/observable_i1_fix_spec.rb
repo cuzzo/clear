@@ -17,7 +17,7 @@ RSpec.describe "A20: I1 fixable error (drop @observable)" do
 
   def annotated(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast) rescue nil
     ast
   end

@@ -18,7 +18,7 @@ RSpec.describe "BG / branch / type typo auto-fixes" do
 
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)

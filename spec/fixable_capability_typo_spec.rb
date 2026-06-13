@@ -14,7 +14,7 @@ RSpec.describe "Capability typo auto-fixes" do
 
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   describe "UNKNOWN_CAPABILITY_SIGIL — `@shared:lokced` typo" do

@@ -18,7 +18,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

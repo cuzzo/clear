@@ -6,7 +6,7 @@ require_relative "../src/annotator/helpers/effects"
 RSpec.describe "Effect Tracking" do
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

@@ -23,7 +23,7 @@ require_relative "../src/annotator/helpers/with_match_check"
 RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -175,7 +175,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
           RETURN;
         END
       CLEAR
-      ast = Parser.new(tokens, "").parse
+      ast = ClearParser.new(tokens, "").parse
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
       expect(fn.requires["c"]).to eq(Set[:SNAPSHOTTED])
     end

@@ -9,7 +9,7 @@ require_relative "../src/annotator"
 RSpec.describe "Use-after-move detection" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

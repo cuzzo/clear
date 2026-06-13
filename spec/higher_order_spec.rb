@@ -10,7 +10,7 @@ RSpec.describe SemanticAnnotator do
   # Helper to Lex -> Parse -> Annotate
   def run(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     return ast

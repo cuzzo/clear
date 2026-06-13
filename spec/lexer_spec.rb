@@ -354,7 +354,7 @@ RSpec.describe Lexer do
         FN main() RETURNS Void -> result = 5.0 |> check?; RETURN; END
       CLEAR
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
       bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
       expect(bind.value).to be_a(AST::BinaryOp)

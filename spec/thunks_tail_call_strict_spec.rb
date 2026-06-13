@@ -13,7 +13,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "TAIL_CALL strictness" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

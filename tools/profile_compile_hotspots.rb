@@ -247,13 +247,13 @@ timings = {}
 
 if phase == "annotate"
   tokens = Lexer.new(source).tokenize
-  ast = Parser.new(tokens, source).parse
+  ast = ClearParser.new(tokens, source).parse
   timings["annotate"] = Benchmark.realtime do
     SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source).annotate!(ast)
   end
 elsif phase == "mir_pass"
   tokens = Lexer.new(source).tokenize
-  ast = Parser.new(tokens, source).parse
+  ast = ClearParser.new(tokens, source).parse
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, source_code: source)
   annotator.annotate!(ast)
   PipelineRewriter.new(annotator).rewrite!(ast)

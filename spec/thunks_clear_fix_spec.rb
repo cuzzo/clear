@@ -18,7 +18,7 @@ RSpec.describe "ReentranceBridge clear-fix findings" do
 
   def annotated(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

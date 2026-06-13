@@ -126,7 +126,7 @@ class Formatter
   sig { returns(T.nilable(AST::Program)) }
   def validate_parse!
     ts = ::Lexer.new(@source).tokenize
-    ::Parser.new(ts, @source).parse
+    ::ClearParser.new(ts, @source).parse
   rescue => e
     raise Error, "parse error: #{e.message}"
   end

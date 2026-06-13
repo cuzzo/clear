@@ -401,7 +401,7 @@ end
 RSpec.describe "EFFECTS REENTRANT:THUNK validation" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast
@@ -454,7 +454,7 @@ end
 RSpec.describe "Phase 4b: tail-recursive :THUNK routing" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     ast

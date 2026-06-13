@@ -14,7 +14,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "Thunk Phase 4.1/4.2 -- call-site override (parser-only)" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)

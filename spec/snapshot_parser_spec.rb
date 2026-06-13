@@ -19,7 +19,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
   def parse_block(src)
     full = "FN main() RETURNS Void -> #{src} END"
     tokens = Lexer.new(full).tokenize
-    ast = Parser.new(tokens, full).parse
+    ast = ClearParser.new(tokens, full).parse
     fn = ast.statements.first
     fn.body.find { |s| s.is_a?(AST::WithBlock) }
   end

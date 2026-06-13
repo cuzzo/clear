@@ -13,7 +13,7 @@ require_relative "../src/compiler/module_importer"
 RSpec.describe "Gradual typing — Auto placeholder (parser)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   describe "explicit Auto in type positions" do
@@ -102,10 +102,10 @@ RSpec.describe "Gradual typing — Auto placeholder (parser)" do
 
   describe "implicit Auto under --gradual" do
     around do |example|
-      saved = Parser.gradual_mode
-      Parser.gradual_mode = true
+      saved = ClearParser.gradual_mode
+      ClearParser.gradual_mode = true
       example.run
-      Parser.gradual_mode = saved
+      ClearParser.gradual_mode = saved
     end
 
     it "treats omitted parameter type as implicit Auto" do
@@ -156,7 +156,7 @@ RSpec.describe "Gradual typing — Auto placeholder (parser)" do
 
   describe "without --gradual" do
     it "leaves omitted parameter type as :Any (existing behavior)" do
-      Parser.gradual_mode = false
+      ClearParser.gradual_mode = false
       ast = parse(<<~CLEAR)
         FN double(x) RETURNS Int64 ->
           RETURN x + x;
@@ -167,7 +167,7 @@ RSpec.describe "Gradual typing — Auto placeholder (parser)" do
     end
 
     it "leaves omitted RETURNS as nil (existing behavior)" do
-      Parser.gradual_mode = false
+      ClearParser.gradual_mode = false
       ast = parse(<<~CLEAR)
         FN main(x: Int64) ->
           RETURN;
@@ -214,7 +214,7 @@ end
 RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   # Build the {name => FunctionDef} registry exactly as the annotator
@@ -428,7 +428,7 @@ end
 RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def fn_nodes_of(ast)
@@ -696,7 +696,7 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
 
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def fn_nodes_of(ast)
@@ -772,14 +772,14 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
     it "emits a finding without :auto fix when the slot has no Auto token (implicit Auto)" do
       # Implicit Auto under --gradual: param has Type.new(:Auto, auto: true)
       # but no auto_token because there was no source token to capture.
-      saved = Parser.gradual_mode
-      Parser.gradual_mode = true
+      saved = ClearParser.gradual_mode
+      ClearParser.gradual_mode = true
       ast = parse(<<~CLEAR)
         FN double(x) RETURNS Int64 ->
           RETURN x + x;
         END
       CLEAR
-      Parser.gradual_mode = saved
+      ClearParser.gradual_mode = saved
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
       slot  = slots[AutoSlotId.param("double", 0)]
@@ -936,7 +936,7 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
       # is silent on PRIVATE.
       expect {
         c.send(:reject_auto_in_public_signatures!,
-               Parser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse,
+               ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse,
                File.join(dir, "helper.cht"))
       }.not_to raise_error
     end
@@ -947,8 +947,8 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
     # parse so `--gradual` does NOT propagate across module
     # boundaries. After compile_file returns, the caller's mode must
     # be exactly what it was before the call.
-    saved = Parser.gradual_mode
-    Parser.gradual_mode = true
+    saved = ClearParser.gradual_mode
+    ClearParser.gradual_mode = true
     begin
       import(<<~MAIN, "helper.cht" => <<~HELPER) do |c, dir|
         REQUIRE "helper.cht";
@@ -960,12 +960,12 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
           RETURN x + y;
         END
       HELPER
-        expect(Parser.gradual_mode).to be true
+        expect(ClearParser.gradual_mode).to be true
         c.compile_file("helper.cht", caller_dir: dir)
-        expect(Parser.gradual_mode).to be true
+        expect(ClearParser.gradual_mode).to be true
       end
     ensure
-      Parser.gradual_mode = saved
+      ClearParser.gradual_mode = saved
     end
   end
 
@@ -980,7 +980,7 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
         RETURN x + y;
       END
     HELPER
-      ast = Parser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse
+      ast = ClearParser.new(Lexer.new(File.read(File.join(dir, "helper.cht"))).tokenize, "").parse
       expect {
         c.send(:reject_auto_in_public_signatures!, ast, File.join(dir, "helper.cht"))
       }.not_to raise_error
@@ -997,7 +997,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
 
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -1072,7 +1072,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
       id(1);
     CLEAR
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     annotator = SemanticAnnotator.new(source_code: src)
 
     annotator.annotate!(ast)
@@ -1095,7 +1095,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
       id(1);
     CLEAR
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     annotator = SemanticAnnotator.new(source_code: src)
 
     annotator.annotate!(ast)
@@ -1118,7 +1118,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
       END
     CLEAR
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
 
     SemanticAnnotator.new(source_code: src).annotate!(ast)
 
@@ -1130,8 +1130,8 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
   end
 
   it "runs implicit gradual Auto inference even when source text omits Auto" do
-    saved = Parser.gradual_mode
-    Parser.gradual_mode = true
+    saved = ClearParser.gradual_mode
+    ClearParser.gradual_mode = true
     src = <<~CLEAR
       FN id(x) RETURNS Int64 ->
         RETURN x;
@@ -1139,7 +1139,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
       id(1);
     CLEAR
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     annotator = SemanticAnnotator.new(source_code: src)
 
     annotator.annotate!(ast)
@@ -1150,7 +1150,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
     expect(fn.params.first.symbol.type.resolved).to eq(:Int64)
     expect(sig.params.first.type.resolved).to eq(:Int64)
   ensure
-    Parser.gradual_mode = saved
+    ClearParser.gradual_mode = saved
   end
 
   it "handles defensive Auto restamp paths without stale fact rewrites" do
@@ -1245,7 +1245,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
 
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def fn_nodes_of(ast)
@@ -1256,7 +1256,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
 
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -1496,7 +1496,7 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
 
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def fn_nodes_of(ast)
@@ -1507,7 +1507,7 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
 
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -1908,7 +1908,7 @@ end
 RSpec.describe "Gradual typing — Auto in STRUCT fields (M2.3)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   it "rejects `field: Auto` with a parser error" do

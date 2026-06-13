@@ -19,7 +19,7 @@ RSpec.describe "Effect / REQUIRES / reentrant typo auto-fixes" do
 
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   describe "UNKNOWN_EFFECT — `:saf` typo for `:safe`" do

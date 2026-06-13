@@ -13,7 +13,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "predicate-impurity rejection" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -148,7 +148,7 @@ end
 RSpec.describe "WITH GUARD structural errors" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -188,7 +188,7 @@ RSpec.describe "WITH GUARD parser errors" do
     CLEAR
     expect {
       tokens = Lexer.new(src).tokenize
-      Parser.new(tokens, src).parse
+      ClearParser.new(tokens, src).parse
     }.to raise_error(ParserError, /WITH GUARD requires an AS alias/)
   end
 end

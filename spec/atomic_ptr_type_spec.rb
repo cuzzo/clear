@@ -12,7 +12,7 @@ require_relative "../src/ast/type"
 # CAS-able machine word; AtomicPtr(T) is atomic pointer swap on a
 # refcounted heap-allocated T.
 #
-# Parser sigil work (M3.2) wires `@indirect:atomic` from source through
+# ClearParser sigil work (M3.2) wires `@indirect:atomic` from source through
 # CapabilityWrap. Annotator combo validation (M3.4) rejects @local /
 # @multiowned with @indirect:atomic, and rejects @indirect:atomic on
 # primitives (use @shared:atomic instead). Runtime AtomicPtr(T) is M3.3.

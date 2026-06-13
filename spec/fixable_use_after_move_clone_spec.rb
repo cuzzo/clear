@@ -16,7 +16,7 @@ RSpec.describe "USE-AFTER-MOVE fix dropdown — COPY vs CLONE picker" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end

@@ -21,14 +21,14 @@ RSpec.describe "EFFECTS REENTRANT:MAX_DEPTH(N) mutual-cycle warning" do
 
   def annotate_collecting(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast) rescue nil
     FixCollector.drain.select { |f| f.category == :reentrance }
   end
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

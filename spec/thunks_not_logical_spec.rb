@@ -17,7 +17,7 @@ require_relative "../src/ast/fixable_error"
 RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
   def parse(source)
     tokens = Lexer.new(source).tokenize
-    Parser.new(tokens, source).parse
+    ClearParser.new(tokens, source).parse
   end
 
   def annotate(source)
@@ -138,7 +138,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
     def collect_findings(source)
       FixCollector.enable!
       tokens = Lexer.new(source).tokenize
-      ast = Parser.new(tokens, source).parse
+      ast = ClearParser.new(tokens, source).parse
       SemanticAnnotator.new.annotate!(ast) rescue nil
       FixCollector.drain
     end

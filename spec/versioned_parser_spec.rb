@@ -14,12 +14,12 @@ require_relative "../src/ast/ast"
 RSpec.describe "@versioned parser" do
   def parse_type(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).send(:parse_type_annotation)
+    ClearParser.new(tokens, src).send(:parse_type_annotation)
   end
 
   def parse_full(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   describe "type-level `T@versioned`" do

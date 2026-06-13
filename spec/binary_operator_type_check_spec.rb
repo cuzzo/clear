@@ -4,7 +4,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "binary operator type checking" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end

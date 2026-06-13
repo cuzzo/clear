@@ -159,7 +159,7 @@ items = nil
 begin
   importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
   tokens = timed_phase("lex", sampler, timings) { Lexer.new(source).tokenize }
-  ast = timed_phase("parse", sampler, timings) { Parser.new(tokens, source).parse }
+  ast = timed_phase("parse", sampler, timings) { ClearParser.new(tokens, source).parse }
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: false, source_code: source)
   timed_phase("annotate", sampler, timings) { annotator.annotate!(ast) }
   timed_phase("pipeline_rewrite", sampler, timings) do

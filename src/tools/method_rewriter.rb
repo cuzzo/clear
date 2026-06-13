@@ -30,7 +30,7 @@ module MethodRewriter
   sig { params(source: String).returns(String) }
   def rewrite(source)
     tokens = ::Lexer.new(source).tokenize
-    ast = ::Parser.new(tokens, source).parse
+    ast = ::ClearParser.new(tokens, source).parse
     methods = collect_method_names(ast)
     return source if methods.empty?
 

@@ -47,7 +47,7 @@ end
 
 def try_compile(code)
   tokens = Lexer.new(code).tokenize
-  ast = Parser.new(tokens, code).parse
+  ast = ClearParser.new(tokens, code).parse
   annotator = SemanticAnnotator.new
   annotator.annotate!(ast)
   true

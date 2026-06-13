@@ -12,7 +12,7 @@ require_relative "../src/annotator/helpers/effects"
 RSpec.describe "FSM classifier (Phase A)" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

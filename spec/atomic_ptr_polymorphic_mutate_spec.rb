@@ -16,7 +16,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
+    ast = ClearParser.new(tokens, src).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

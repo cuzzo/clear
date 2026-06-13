@@ -12,7 +12,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "WITH VIEW (Phase 2.3)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def annotate(src)
@@ -224,7 +224,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
           END
         CLEAR
         tokens = Lexer.new(src).tokenize
-        ast = Parser.new(tokens, src).parse
+        ast = ClearParser.new(tokens, src).parse
         SemanticAnnotator.new(source_code: src).annotate!(ast) rescue nil
         finding = FixCollector.drain.find { |f| f.message =~ /MATERIALIZED VIEW requires/ }
         expect(finding).not_to be_nil

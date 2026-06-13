@@ -1429,7 +1429,7 @@ RSpec.describe Formatter do
       CLEAR
       out = Formatter.format(src)
       # Output must still parse.
-      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      expect { ClearParser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
       # And the comment must remain on its own line (not folded with `->`).
       expect(out).not_to match(/->\s+#\s*HALT\b.*RETURN/)
       expect(out).to include("# HALT\n")
@@ -1452,7 +1452,7 @@ RSpec.describe Formatter do
         END
       CLEAR
       out = Formatter.format(src)
-      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      expect { ClearParser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
       expect(out).to include("# the only arm\n")
     end
   end
@@ -1489,7 +1489,7 @@ RSpec.describe Formatter do
       CLEAR
       out = Formatter.format(src)
       # Output must parse round-trip.
-      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      expect { ClearParser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
       # Symmetric expansion: every THEN must be followed by a NL --
       # never by `PARTIAL` on the *same* line. (Use `[ \t]` so the
       # regex doesn't span newlines.)
@@ -1523,7 +1523,7 @@ RSpec.describe Formatter do
         END
       CLEAR
       out = Formatter.format(src)
-      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      expect { ClearParser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
       # Same shape as the standalone case once the recursion lands:
       # no `THEN PARTIAL` collocations, every ELSE_IF line ending at THEN.
       expect(out).not_to match(/\bTHEN[ \t]+PARTIAL\b/)

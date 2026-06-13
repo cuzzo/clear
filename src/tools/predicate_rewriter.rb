@@ -51,7 +51,7 @@ module PredicateRewriter
   sig { params(source: String).returns(String) }
   def rewrite(source)
     tokens = ::Lexer.new(source).tokenize
-    ast = ::Parser.new(tokens, source).parse
+    ast = ::ClearParser.new(tokens, source).parse
     edits = []
     walk(ast, source, edits)
     return source if edits.empty?
@@ -66,7 +66,7 @@ module PredicateRewriter
   def lint!(source)
     return unless FixCollector.enabled?
     tokens = ::Lexer.new(source).tokenize
-    ast = ::Parser.new(tokens, source).parse
+    ast = ::ClearParser.new(tokens, source).parse
     walk_lint(ast)
   rescue CompilerError, ParserError
     # Lint is best-effort; a malformed file just yields no findings.

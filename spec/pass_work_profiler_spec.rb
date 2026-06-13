@@ -135,7 +135,7 @@ RSpec.describe PassWorkProfiler do
   it "uses token count as the work-ratio denominator when no node input exists" do
     profiler = described_class::Profiler.new
     profiler.measure("parser.parse", token_count: 10) do
-      profiler.record_walk("Parser.step", 5, 0.01)
+      profiler.record_walk("ClearParser.step", 5, 0.01)
     end
 
     expect(profiler.records.fetch(0).walk_yields_per_input).to eq(0.5)

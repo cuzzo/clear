@@ -66,7 +66,7 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
       { alloc: :heap }
     )
     node.fn_type_params = [:T]
-    node.owner_type = "Parser"
+    node.owner_type = "ClearParser"
     node.owner_type_params = [:T]
 
     signature = described_class.extern_function_signature(node)
@@ -76,7 +76,7 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
     expect(signature.extern_effects).to eq({ alloc: :heap })
     expect(signature.fn_type_params).to eq([:T])
     expect(signature.type_params).to eq([:T])
-    expect(signature.owner_type).to eq("Parser")
+    expect(signature.owner_type).to eq("ClearParser")
     expect(signature.owner_type_params).to eq([:T])
     expect(signature.params.first.mutable).to eq(false)
     expect(signature.params.first.comptime).to eq(true)

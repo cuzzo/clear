@@ -27,7 +27,7 @@ require_relative "../src/backends/transpiler"
 RSpec.describe "LET fixtures" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
-    Parser.new(tokens, src).parse
+    ClearParser.new(tokens, src).parse
   end
 
   def transpile(src)

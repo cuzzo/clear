@@ -20,7 +20,7 @@ RSpec.describe "AST coverage burndown" do
   end
 
   def parser_for(source)
-    Parser.new(Lexer.new(source).tokenize, source)
+    ClearParser.new(Lexer.new(source).tokenize, source)
   end
 
   def parse_expr(source)
@@ -372,9 +372,9 @@ RSpec.describe "AST coverage burndown" do
     end
   end
 
-  describe Parser do
+  describe ClearParser do
     it "covers token-level parser helpers and parser-only predicate suffixes" do
-      underscore = Parser.new([
+      underscore = ClearParser.new([
         token(:UNDERSCORE, "_"),
         token(:EOF, nil),
       ], "_").send(:consume_literal, "_")
@@ -394,7 +394,7 @@ RSpec.describe "AST coverage burndown" do
         token(:CHAR, ")"),
         token(:EOF, nil),
       ]
-      method_call = Parser.new(manual_tokens, "obj.check?()").send(:parse_expression)
+      method_call = ClearParser.new(manual_tokens, "obj.check?()").send(:parse_expression)
       expect(method_call).to be_a(AST::MethodCall)
       expect(method_call.name).to eq("check?")
 
@@ -405,7 +405,7 @@ RSpec.describe "AST coverage burndown" do
         token(:CHAR, ")"),
         token(:EOF, nil),
       ]
-      func_call = Parser.new(call_tokens, "check?()").send(:parse_expression)
+      func_call = ClearParser.new(call_tokens, "check?()").send(:parse_expression)
       expect(func_call).to be_a(AST::FuncCall)
       expect(func_call.name).to eq("check?")
     end
@@ -456,7 +456,7 @@ RSpec.describe "AST coverage burndown" do
 
       lhs = AST::Identifier.new(token, "value")
       op_tok = token(:KEYWORD, "AS")
-      bad_rhs_parser = Parser.new([
+      bad_rhs_parser = ClearParser.new([
         token(:VAR_ID, "fn"),
         token(:CHAR, "("),
         token(:CHAR, ")"),
@@ -552,7 +552,7 @@ RSpec.describe "AST coverage burndown" do
       expect(parser_for("PASS").send(:parse_lock_action).action).to eq(:pass)
 
       expect {
-        Parser.new([
+        ClearParser.new([
           token(:CHAR, ":"),
           token(:KEYWORD, "RETURN"),
           token(:EOF, nil),

@@ -12,7 +12,7 @@ require_relative "../src/annotator/helpers/with_match_check"
 # requires_with_match_spec coverage for LOCKED / VERSIONED.
 RSpec.describe "Atomics M1.4: REQUIRES c: ATOMIC" do
   def parse(src)
-    Parser.new(Lexer.new(src).tokenize, src).parse
+    ClearParser.new(Lexer.new(src).tokenize, src).parse
   end
 
   def annotate(src)

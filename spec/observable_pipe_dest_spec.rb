@@ -14,7 +14,7 @@ require_relative "../src/ast/ast"
 RSpec.describe "observable pipe destination (Commit 3)" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end

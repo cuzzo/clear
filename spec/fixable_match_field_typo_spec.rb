@@ -15,7 +15,7 @@ RSpec.describe "MATCH-pattern field typo auto-fix" do
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize
-    ast = Parser.new(tokens, source).parse
+    ast = ClearParser.new(tokens, source).parse
     SemanticAnnotator.new.annotate!(ast)
     ast
   end
@@ -122,7 +122,7 @@ RSpec.describe "MATCH-pattern field typo auto-fix" do
     it "raises plain CompilerError when no candidate is within Levenshtein threshold" do
       ann = SemanticAnnotator.new
       tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
+      ast = ClearParser.new(tokens, src).parse
       FixCollector.disable!
       expect { ann.annotate!(ast) }.to raise_error(CompilerError, /does not exist on type|TYPO_SUGGESTION_REJECTED|somethingDifferent/i)
     end

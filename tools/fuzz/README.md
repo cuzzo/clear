@@ -38,16 +38,17 @@ and reports zero leaks.
 
 ## Mutant Harness
 
-`tools/fuzz/mutants/run.rb` is a manual-only safety check for the fuzz suite
-itself. It deliberately applies a small patch that disables one ownership rule,
-runs the relevant fuzz templates before and after the patch, then reports
-whether the mutated compiler produced new failures relative to baseline.
+`tools/fuzz/mutants/run.rb` is the targeted safety check for the fuzz suite.
+CI runs every active entry. It deliberately applies a small patch that disables
+one ownership rule, runs the relevant fuzz templates before and after the patch,
+then reports whether the mutated compiler produced new failures relative to
+baseline.
 
-This is intentionally not a default CI job: it is slower than normal fuzz
-generation and mutates the working tree while it runs. The runner checks that
-the patch applies, refuses to touch target files that already have local edits,
-and reverses the patch before exiting. Use `--allow-dirty` only when you
-intentionally want to test a mutant against WIP.
+This is intentionally separate from the normal fuzz matrix because it is slower
+than generation-only fuzzing and mutates the working tree while it runs. The
+runner checks that the patch applies, refuses to touch target files that already
+have local edits, and reverses the patch before exiting. Use `--allow-dirty`
+only when you intentionally want to test a mutant against WIP.
 
     # List available mutants
     ruby tools/fuzz/mutants/run.rb --list

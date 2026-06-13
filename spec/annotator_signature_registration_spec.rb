@@ -102,9 +102,9 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
   end
 
   it "registers extern methods on known type schemas and ignores unknown owners" do
-    struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
+    struct = AST::StructDef.new(tok("ClearParser"), "ClearParser", {}, :pub, [])
     known = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
-    known.owner_type = "Parser"
+    known.owner_type = "ClearParser"
     unknown = AST::ExternFnDecl.new(tok("skip"), "skip", [], Type.new(:Void), "native", nil)
     unknown.owner_type = "Missing"
     annotator = SemanticAnnotator.new
@@ -113,7 +113,7 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator.register_type_declarations(index)
     annotator.register_program_signatures(index)
 
-    parser_schema = annotator.send(:current_scope).types.fetch(:Parser).schema
+    parser_schema = annotator.send(:current_scope).types.fetch(:ClearParser).schema
     expect(parser_schema.methods.fetch("parse")).to be_a(FunctionSignature)
     expect(annotator.send(:current_scope).entry?("parse")).to eq(false)
     expect(annotator.send(:current_scope).entry?("skip")).to eq(false)
@@ -122,11 +122,11 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
   end
 
   it "rejects duplicate extern methods on the same owner type" do
-    struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
+    struct = AST::StructDef.new(tok("ClearParser"), "ClearParser", {}, :pub, [])
     first = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
-    first.owner_type = "Parser"
+    first.owner_type = "ClearParser"
     second = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
-    second.owner_type = "Parser"
+    second.owner_type = "ClearParser"
     annotator = SemanticAnnotator.new
     index = index_for(struct, first, second)
 
@@ -134,22 +134,22 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
 
     expect {
       annotator.register_program_signatures(index)
-    }.to raise_error(CompilerError, /Duplicate extern method declaration 'Parser.parse'/)
+    }.to raise_error(CompilerError, /Duplicate extern method declaration 'ClearParser.parse'/)
   end
 
   it "rejects extern methods that collide with existing schema methods" do
-    struct = AST::StructDef.new(tok("Parser"), "Parser", {}, :pub, [])
+    struct = AST::StructDef.new(tok("ClearParser"), "ClearParser", {}, :pub, [])
     method = AST::ExternFnDecl.new(tok("parse"), "parse", [], Type.new(:Bool), "native", nil)
-    method.owner_type = "Parser"
+    method.owner_type = "ClearParser"
     annotator = SemanticAnnotator.new
     index = index_for(struct)
     annotator.register_type_declarations(index)
-    parser_schema = annotator.send(:current_scope).types.fetch(:Parser).schema
+    parser_schema = annotator.send(:current_scope).types.fetch(:ClearParser).schema
     parser_schema.methods["parse"] = FunctionSignature.new(params: [], return_type: Type.new(:Bool))
 
     expect {
       annotator.register_program_signatures(index_for(method))
-    }.to raise_error(CompilerError, /Duplicate extern method declaration 'Parser.parse'/)
+    }.to raise_error(CompilerError, /Duplicate extern method declaration 'ClearParser.parse'/)
   end
 
   it "registers synthesized union default method signatures after declared functions" do

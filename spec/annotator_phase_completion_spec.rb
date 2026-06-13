@@ -9,7 +9,7 @@ RSpec.describe "annotator completion phases" do
   end
 
   def parse(source)
-    Parser.new(Lexer.new(source).tokenize, source).parse
+    ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
   it "initializes builtin environment during annotator construction" do
