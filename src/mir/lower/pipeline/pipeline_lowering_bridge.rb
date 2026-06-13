@@ -174,4 +174,20 @@ class PipelineLoweringBridge
   def with_fiber_capture_map(new_entries, capture_symbols:, rt_override:, &blk)
     @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
+
+  sig do
+    type_parameters(:U)
+      .params(
+        context: T.nilable(T::Hash[Symbol, String]),
+        blk: T.proc.returns(T.type_parameter(:U)),
+      )
+      .returns(T.type_parameter(:U))
+  end
+  def with_shard_context(context, &blk)
+    previous = @lowering.shard_context
+    @lowering.shard_context = context
+    blk.call
+  ensure
+    @lowering.shard_context = previous
+  end
 end

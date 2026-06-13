@@ -494,9 +494,7 @@ module EscapeAnalysis
     return false if t.rodata? || t.borrowed_reference?
 
     if t.collection_value?
-      elem = t.element_type
-      return false unless elem
-      return elem.ownership_bearing?(schema_lookup)
+      return t.needs_explicit_cleanup?(:frame, schema_lookup)
     end
 
     return false if t.string? || t.heap_ptr?
@@ -517,8 +515,10 @@ module EscapeAnalysis
 
   sig { params(body: T::Array[T.untyped]).void }
   private_class_method def self.mark_receiver_allocations_in_loop!(body)
-    local_names = MIR::LocalBindingAnalysis.direct_loop_body_facts(body).names
-    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
+    return unless loop_body_has_frame_allocation_candidate?(body)
+
+    declared_names = loop_body_declared_names(body)
+    each_loop_body_node(body) do |node|
       case node
       when AST::MethodCall
         sig = FunctionSignature.unwrap(node.matched_signature)
@@ -536,7 +536,7 @@ module EscapeAnalysis
         next
       end
       next unless root&.symbol
-      next if local_names.include?(root.name.to_s)
+      next if declared_names.include?(root.name.to_s)
       mark_symbol_heap!(root.symbol)
       if node.is_a?(AST::MethodCall)
         value_params.each_with_index do |param, idx|
@@ -682,6 +682,60 @@ module EscapeAnalysis
       mark_symbol_heap!(receiver_sym)
       return
     end
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  private_class_method def self.loop_body_has_frame_allocation_candidate?(body)
+    found = T.let(false, T::Boolean)
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
+      next if found
+      found = true if loop_binding_frame_allocation_candidate?(node)
+    end
+    found
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  private_class_method def self.loop_binding_frame_allocation_candidate?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return false if node.respond_to?(:symbol) && node.symbol&.heap_storage?
+
+    value = node.respond_to?(:value) ? node.value : nil
+    return true if string_concat_expr?(unwrap_value(value))
+
+    entry = MIR::LocalBindingAnalysis.binding_entry(node)
+    return true if entry&.present? && entry.frame?
+
+    ti = node.full_type!(context: "loop receiver heap promotion")
+    ti.needs_cleanup? && ti.cleanup_allocator == :frame
+  rescue StandardError
+    false
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  private_class_method def self.loop_body_declared_names(body)
+    names = T.let(Set.new, T::Set[String])
+    each_loop_body_node(body) do |node|
+      name = MIR::LocalBindingAnalysis.binding_decl_name(node)
+      names << name if name
+    end
+    names
+  end
+
+  sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: AST::Node).void).void }
+  private_class_method def self.each_loop_body_node(body, &block)
+    stack = T.let(body.reverse, T::Array[T.untyped])
+    until stack.empty?
+      node = stack.pop
+      next unless node.is_a?(AST::Locatable)
+      yield node
+      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
+              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock)
+
+      AST.child_bodies(node).reverse_each do |child_body|
+        child_body.reverse_each { |child| stack << child }
+      end
+    end
+    nil
   end
 
   sig { params(arg: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }

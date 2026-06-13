@@ -188,10 +188,37 @@ RSpec.describe FsmTransform::SuspendResolvers do
       field = field_named(d.ctx_field_decls, "content")
       expect(field&.type_zig).to eq("[]const u8")
       expect(field&.default_value).to be_a(MIR::Undef)
+      expect(d.result_needs_cleanup).to eq(true)
       expect(d.bind_stmts).to include(an_instance_of(MIR::Set))
       set = d.bind_stmts.grep(MIR::Set).first
       expect(set.target).to be_a(MIR::FieldGet)
       expect(set.target.field).to eq("content")
+    end
+
+    it "does not add owned-result cleanup for IO finish values that alias finalized state" do
+      read_def = IntrinsicRegistry.fs({
+        suspends: true,
+        fsm_setup: [],
+        fsm_finish_value: FsmOps::SliceUntilIntCast.new(
+          FsmOps::StateField.new("rf_buf"),
+          FsmOps::SubField.new(FsmOps::StateField.new("rf_waiter"), "result"),
+        ),
+        fsm_state_finalize: [FsmOps::DeferFreeField.new("rf_buf")],
+      })
+      value_call = Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
+        [], nil, read_def, :String
+      )
+      tail = FsmTransform::Segments::IoSuspend.new(value_call, read_def, "content")
+
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
+
+      expect(d.result_needs_cleanup).to eq(false)
+      expect(field_named(d.ctx_field_decls, "__owned_content_init")).to be_nil
+      guard_writes = d.bind_stmts.grep(MIR::Set).select { |stmt|
+        stmt.target.is_a?(MIR::FieldGet) && stmt.target.field == "__owned_content_init"
+      }
+      expect(guard_writes).to be_empty
     end
   end
 

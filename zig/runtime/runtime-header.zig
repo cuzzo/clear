@@ -2187,20 +2187,38 @@ pub const CheatLib = struct {
     // loops -- the kernel handles the wait internally.
     // -----------------------------------------------------------------------
 
-    // Write `data` to a socket via io_uring IORING_OP_SEND.
-    // Loops on short sends (resubmits remainder), yielding between each.
+    // Write `data` to a non-blocking socket.
+    //
+    // Fast path: try direct write first. Hot loopback workloads often have
+    // send-buffer capacity already available, and paying an io_uring
+    // submission + fiber yield for every ready write is far more expensive
+    // than the syscall itself.
+    //
+    // Slow path: if the fd would block, submit IORING_OP_SEND and yield.
+    // Loops on short sends until every byte is written.
     // Returns the total bytes sent (== data.len on success).
     pub noinline fn socketWrite(fd: i32, data: []const u8) !usize {
-        const sched = fp.active_scheduler;
-        const task = sched.getCurrent();
         var sent: usize = 0;
         while (sent < data.len) {
-            var waiter = fp.Scheduler.IoWaiter{ .task = task };
-            try sched.submitSend(&waiter, fd, data[sent..]);
-            task.base.yield();
-            if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
-            if (waiter.result == 0) return sent;
-            sent += @intCast(waiter.result);
+            const rc = std.c.write(fd, data.ptr + sent, data.len - sent);
+            const n: usize = switch (std.posix.errno(rc)) {
+                .SUCCESS => @intCast(rc),
+                .INTR => continue,
+                .AGAIN => blk: {
+                    if (!fp.scheduler_running) return error.WouldBlock;
+
+                    const sched = fp.active_scheduler;
+                    const task = sched.getCurrent();
+                    var waiter = fp.Scheduler.IoWaiter{ .task = task };
+                    try sched.submitSend(&waiter, fd, data[sent..]);
+                    task.base.yield();
+                    if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
+                    break :blk @intCast(waiter.result);
+                },
+                else => return error.Unexpected,
+            };
+            if (n == 0) return sent;
+            sent += n;
         }
         return sent;
     }

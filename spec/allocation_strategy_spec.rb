@@ -216,6 +216,29 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(d.storage).to eq(:frame)
     end
 
+    it "local String @list → storage :frame, cleanup :frame" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE parts: String[]@list = List[];
+          parts.append("hello");
+          RETURN;
+        END
+      CLEAR
+      ast = run_mir(src)
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "parts")
+      entry = cleanup_entry(fn, "parts")
+      zig = ZigTranspiler.new.transpile(src)
+
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:frame)
+      expect(d.storage).to eq(:frame)
+      expect(d.symbol.storage).to eq(:frame)
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(parts), rt.frameAlloc(), &parts);")
+      expect(zig).to include("try parts.append(rt.frameAlloc(),")
+      expect(zig).not_to include("try parts.append(rt.heapAlloc(),")
+    end
+
     it "local String built by concat → no heap allocation (not over-promoted)" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->

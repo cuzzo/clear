@@ -77,6 +77,7 @@ module FsmTransform
       state_finalize_m  = lowerer.lower_stmts(state_finalize)
       finish_block_mir  = lowerer.lower_stmts(finish_block)
       finish_value_mir  = finish_value ? lowerer.lower_expr(finish_value) : nil
+      finish_value_template_owned = FsmOps.finish_value_aliases_finalized_state?(finish_value, state_finalize)
 
       bind_stmts = []
       bind_stmts.concat(state_finalize_m)
@@ -97,7 +98,7 @@ module FsmTransform
           finish_value_mir,
           false,
         )
-        result_needs_cleanup = ownership_bearing_result_type?(ft, lowering)
+        result_needs_cleanup = ownership_bearing_result_type?(ft, lowering) && !finish_value_template_owned
       elsif finish_value_mir
         bind_stmts << MIR::ExprStmt.new(finish_value_mir, true)
       end

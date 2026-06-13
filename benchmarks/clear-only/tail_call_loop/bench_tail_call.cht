@@ -8,7 +8,7 @@
 # Polynomial hash: `acc = acc * 31 + i`. LLVM has no closed form,
 # so the loop body actually runs N times.
 FN hash_tc(n: Int64, acc: Int64) RETURNS Int64
-  EFFECTS REENTRANT:TAIL_CALL ->
+  EFFECTS REENTRANT:TIGHT:TAIL_CALL ->
   IF n <= 0 -> RETURN acc;
   RETURN hash_tc(n - 1, (acc %* 31_i64) %+ n);
 END

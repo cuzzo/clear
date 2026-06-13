@@ -122,8 +122,21 @@ module BgCaptureClassifier
     base = Type.new(type_obj)
     return base unless sym
     base.apply_bg_capture_symbol!(storage: sym.storage, sync: sym.sync)
+    apply_capture_storage_provenance!(base, sym.storage)
     base.mark_borrowed_reference! if sym.borrowed_alias
     base
+  end
+
+  sig { params(type: Type, storage: Symbol).void }
+  def self.apply_capture_storage_provenance!(type, storage)
+    case storage
+    when :heap
+      type.mark_heap_allocated!
+    when :frame
+      type.mark_frame_allocated!
+    when :borrow
+      type.mark_borrowed_reference!
+    end
   end
 
 end

@@ -55,10 +55,9 @@ module CaptureStrategy
   MarkerPlanEntry = T.type_alias { T.any(AllocMarkPlan, CleanupPlan, MoveMarkPlan) }
 
   # A capture that can be byte-copied into the ctx struct: primitives,
-  # strings (CLEAR treats []const u8 as copyable), enums, small
-  # all-primitive structs. No markers required; no runtime ownership
-  # transfer; the fiber sees a value equal to but independent of the
-  # outer binding.
+  # rodata strings, enums, small all-primitive structs. No markers
+  # required; no runtime ownership transfer; the fiber sees a value
+  # equal to but independent of the outer binding.
   class ByValue < T::Struct
     extend T::Sig
     const :zig_type, String
@@ -221,8 +220,8 @@ module CaptureStrategy
     #     and must fall through to FiberCtxBuilder's pointer-capture path.
     return ByValue.new(zig_type: zig_t, ctx_init_name: name) if pinned_sync_collection?(type)
 
-    # 5. Value-like captures are always safe: primitives, strings
-    #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
+    # 5. Value-like captures are always safe: primitives, rodata
+    #    strings, enums, plus structs
     #    whose fields are all themselves value-like (resolved via
     #    schema_lookup).
     return ByValue.new(zig_type: zig_t, ctx_init_name: name) if value_like?(type, schema_lookup)
@@ -259,7 +258,8 @@ module CaptureStrategy
   sig { params(type: Type, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.value_like?(type, schema_lookup = nil)
     return true if type.primitive?
-    return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
+    return true if type.respond_to?(:string?) && type.string? && type.rodata?
+    return false if type.respond_to?(:string?) && type.string?
     # Id<T> handles are opaque u64 indices into a pool — the pool owns the
     # data; the Id is just a key. Byte-copy is always safe.
     if type.respond_to?(:id_handle?) && type.id_handle?
@@ -269,7 +269,9 @@ module CaptureStrategy
     # implicitly-Copy: byte-copying the value into the fiber's ctx
     # struct is safe (no heap aliasing). Requires the program's
     # schema lookup; without it, fall back to the schema-less
-    # `copyable?` (which only succeeds for primitives/strings).
+    # `copyable?` (which only succeeds for primitive-like values here;
+    # managed strings are handled above so they cannot slip through as
+    # slice-header copies).
     if schema_lookup && type.respond_to?(:implicitly_copyable?)
       return true if type.implicitly_copyable?(schema_lookup)
     end

@@ -5,6 +5,7 @@
 # so regressions show up immediately.
 
 require "tempfile"
+require "tmpdir"
 require "open3"
 
 PROJECT_ROOT = File.expand_path("..", __dir__)
@@ -14,7 +15,7 @@ def compile(src_text)
   Tempfile.open(["vmbug", ".cht"]) do |src|
     src.write(src_text); src.close
     out_path = src.path.sub(/\.cht\z/, "")
-    stdout, status = Open3.capture2e(CLEAR_BIN, "build", src.path, "-o", out_path)
+    stdout, status = Open3.capture2e(CLEAR_BIN, "build", "--no-cache", src.path, "-o", out_path)
     { ok: status.success?, output: stdout, out_path: out_path }
   end
 end
@@ -23,8 +24,8 @@ def compile_and_run(src_text)
   Tempfile.open(["vmbug", ".cht"]) do |src|
     src.write(src_text); src.close
     out_path = src.path.sub(/\.cht\z/, "")
-    _, bstatus = Open3.capture2e(CLEAR_BIN, "build", src.path, "-o", out_path)
-    return { ok: false, phase: :compile } unless bstatus.success?
+    build_output, bstatus = Open3.capture2e(CLEAR_BIN, "build", "--no-cache", src.path, "-o", out_path)
+    return { ok: false, phase: :compile, output: build_output } unless bstatus.success?
     stdout, rstatus = Open3.capture2e(out_path)
     { ok: rstatus.success?, phase: :run, output: stdout }
   end
@@ -80,6 +81,31 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     it "compiles and runs with a verifier-visible owned capture" do
       result = compile_and_run(src)
       expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
+    end
+  end
+
+  describe "Bug #3b (FIXED): managed String capture into suspending BG" do
+    let(:path_prefix) { File.join(Dir.tmpdir, "clear-bg-string-capture-#{Process.pid}") }
+    let(:src) { <<~CHT }
+      FN main() RETURNS !Void ->
+          base = "#{path_prefix}";
+          path = base + ".txt";
+          writeFile(path, "hello");
+          p: ~Int64 = BG {
+              content = readFile(path);
+              content.length();
+          };
+          n: Int64 = NEXT p;
+          ASSERT n == 5, "managed String capture into BG must be fiber-owned";
+          RETURN;
+      END
+    CHT
+
+    it "compiles and runs without aliasing the parent string storage" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
+    ensure
+      File.delete("#{path_prefix}.txt") if File.exist?("#{path_prefix}.txt")
     end
   end
 

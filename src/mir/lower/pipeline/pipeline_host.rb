@@ -308,6 +308,15 @@ class PipelineHost
           }
         }
       },
+      callback_body_mir_with_shard: ->(body_stmts, placeholder, capture_map, capture_symbols, rt_override, shard_context) {
+        with_pipeline_context(placeholder: placeholder) {
+          with_fiber_capture_map(capture_map, capture_symbols: capture_symbols, rt_override: rt_override) {
+            @lowering_bridge.with_shard_context(shard_context) {
+              visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
+            }
+          }
+        }
+      },
       pipeline_alloc_mark_fact: ->(value, name, fallback_alloc, type_info, ast_node, accept_owned_call, include_cleanup) {
         fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value,

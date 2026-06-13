@@ -15,9 +15,9 @@ RSpec.describe CaptureStrategy do
   end
 
   # ----------------------------------------------------------------
-  # ByValue — primitives and string ([]const u8)
+  # ByValue — primitives and rodata string slices
   # ----------------------------------------------------------------
-  describe "ByValue: primitives and strings" do
+  describe "ByValue: primitives and rodata strings" do
     %i[Int64 Float64 Bool Int8 Int16 Int32 UInt8 UInt16 UInt32 UInt64].each do |raw|
       it "classifies #{raw} as ByValue" do
         strat = classify(type: t(raw))
@@ -27,8 +27,8 @@ RSpec.describe CaptureStrategy do
       end
     end
 
-    it "classifies String as ByValue (CLEAR treats []const u8 as Copy)" do
-      strat = classify(type: t(:String))
+    it "classifies rodata String as ByValue" do
+      strat = classify(type: t(:String, location: :rodata))
       expect(strat).to be_a(CaptureStrategy::ByValue)
     end
   end
@@ -53,6 +53,12 @@ RSpec.describe CaptureStrategy do
   # FreshHeapCopy — owned aggregate captures get a fiber-owned duplicate
   # ----------------------------------------------------------------
   describe "FreshHeapCopy: owned aggregate captures" do
+    it "classifies managed String capture as FreshHeapCopy" do
+      strat = classify(type: t(:String))
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.alloc_sym).to eq(:heap)
+    end
+
     it "classifies @list local capture as FreshHeapCopy" do
       strat = classify(type: t(:"Int64[]", collection: :list))
       expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
@@ -160,6 +166,7 @@ RSpec.describe CaptureStrategy do
         t(:Float64),
         t(:Bool),
         t(:String),
+        t(:String, location: :rodata),
         t(:Counter, ownership: :multiowned),
         t(:Counter, ownership: :shared),
         t(:"Int64[]", collection: :list),
@@ -183,6 +190,7 @@ RSpec.describe CaptureStrategy do
       heap_backed = [
         t(:"Int64[]", collection: :list),
         t(:"Value[]", collection: :list),
+        t(:String),
         t(:"Env[100]", collection: :pool),
         t(:"HashMap<Int64>"),
         t(:"Int64[]"),  # slice — borrow of some owner

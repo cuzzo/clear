@@ -8,7 +8,7 @@ require_relative "../../../ast/type"
 require_relative "../../mir"
 
 PipelineTypeInput = T.type_alias { T.any(Type, Symbol, String) }
-PipelineLoweringResult = T.type_alias { T.nilable(T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock)) }
+PipelineLoweringResult = T.type_alias { T.nilable(T.any(MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock, MIR::ShardConcurrentEach)) }
 
 class PipelineSite < T::Struct
   const :list, AST::Node

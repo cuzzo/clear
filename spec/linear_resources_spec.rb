@@ -304,6 +304,14 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include('CheatLib.socketRead(')
       end
 
+      it "binds tcpRead's owned frame result without an immediate duplicate" do
+        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        out = transpile_fn(src)
+
+        expect(out).to include('const d: []const u8 = try CheatLib.socketRead(rt.frameAlloc(), c);')
+        expect(out).not_to match(/dupe\(u8,\s*__tmp_\d+\)/)
+      end
+
       it "emits CheatLib.socketWriteVoid for tcpWrite()" do
         src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, "hi"); RETURN; END'
         out = transpile_fn(src)

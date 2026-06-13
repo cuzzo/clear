@@ -4572,6 +4572,52 @@ module MIR
     end
   end
 
+  class ShardConcurrentEach < T::Struct
+    extend T::Sig
+
+    include Stmt
+
+    const :id, Integer
+    const :map_expr, Emittable
+    const :map_var_name, String
+    const :map_type, Type
+    const :key_type, Type
+    const :shard_count, Integer
+    const :start_expr, Emittable
+    const :finish_expr, Emittable
+    const :inclusive, T::Boolean
+    const :capacity_expr, Emittable
+    const :batch_size_expr, Emittable
+    const :task_config_variant, String
+    prop :producer_key_body, T::Array[Emittable]
+    const :capture_fields, T::Array[ContextFieldDecl], factory: -> { [] }
+    const :capture_inits, T::Array[StructInitField], factory: -> { [] }
+    prop :capture_setup, T::Array[Emittable], factory: -> { [] }
+    prop :body, T::Array[Emittable]
+    const :key_allocates_frame, T::Boolean
+    const :body_allocates_frame, T::Boolean
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs(T.unsafe([
+        map_expr,
+        start_expr,
+        finish_expr,
+        capacity_expr,
+        batch_size_expr,
+      ]))
+    end
+
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      [
+        body_slot(:producer_key_body, producer_key_body, ->(new_body) { self.producer_key_body = new_body }),
+        body_slot(:capture_setup, capture_setup, ->(new_body) { self.capture_setup = new_body }),
+        body_slot(:body, body, ->(new_body) { self.body = new_body }),
+      ]
+    end
+  end
+
   # Inline bytecode. Consumed only by bc_emitter (the
   # VM backend). Emitted by MIR lowering when target == :bc AND the stdlib
   # registry entry opts into bc (entry[:bc] == true). Carries the op symbol

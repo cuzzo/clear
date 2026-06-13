@@ -40,6 +40,7 @@ module AST
     :@storage_override,
     :@var_used,
     :@slot_size,
+    :@container_borrow,
   ].freeze, T::Array[Symbol])
   PipelineRewriteCallMetadataIvars = T.let([
     :@zig_pattern,

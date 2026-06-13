@@ -124,7 +124,7 @@ class MIRLowering
       when :string_or
         lowering.place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
       when :string
-        lowering.place_string_value_for_heap_destination(mir, ast_node)
+        lowering.place_string_value_for_destination(mir, ast_node, T.must(dest_alloc))
       else
         raise "unknown destination placement action #{action.inspect}"
       end
@@ -565,6 +565,7 @@ class MIRLowering
     ti = destination_type(ast_node, dest_type)
     return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if MIR::Placement.heap?(dest_alloc) && heap_indirect_destination?(mir, ast_node, ti)
     return DestinationPlacementPlan.new(action: :cast_wrapped_or, type_info: ti, dest_alloc: dest_alloc) if cast_wrapped_or?(mir, ast_node)
+    return destination_keep_plan(dest_alloc) if borrowed_string_destination?(ast_node, ti, dest_alloc)
     return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::Orelse)
     return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::TryCatch)
     source_alloc = mir_owned_alloc(mir)
@@ -643,6 +644,11 @@ class MIRLowering
   sig { params(mir: MIR::Node, ast_node: AST::Node, ti: Type, mir_class: T.untyped).returns(T::Boolean) }
   def owned_or_destination?(mir, ast_node, ti, mir_class)
     or_binary?(ast_node) && ownership_bearing_type?(ti) && mir.is_a?(mir_class)
+  end
+
+  sig { params(ast_node: AST::Node, ti: Type, dest_alloc: T.nilable(Symbol)).returns(T::Boolean) }
+  def borrowed_string_destination?(ast_node, ti, dest_alloc)
+    ti.string? && !MIR::Placement.heap?(dest_alloc) && AST.container_borrow?(ast_node)
   end
 
   sig { params(mir: MIR::Node, ti: Type).returns(MIR::Node) }
@@ -794,6 +800,21 @@ class MIRLowering
 
     mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "heap destination placement").error_union?
     MIR::DupeSlice.new(mir, :heap)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol).returns(MIR::Node) }
+  def place_string_value_for_destination(mir, ast_node, dest_alloc)
+    effect = MIR::OwnershipEffect.of(mir)
+    if effect.produces_owned
+      source_alloc = effect.alloc
+      return mir if source_alloc == dest_alloc
+      return place_owned_alloc_mismatch_for_destination(mir, Type.from_node!(ast_node, context: "string destination placement"), dest_alloc, source_alloc) if source_alloc
+    end
+
+    return place_string_value_for_heap_destination(mir, ast_node) if MIR::Placement.heap?(dest_alloc)
+
+    mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "string destination placement").error_union?
+    MIR::DupeSlice.new(mir, dest_alloc)
   end
 
   sig { params(type_info: T.nilable(Type)).returns(T.nilable(Symbol)) }
@@ -2221,6 +2242,7 @@ class MIRLowering
     end
 
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if rodata_ownership_ast?(ast_value)
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
 
     if borrowed_ownership_ast?(ast_value)
@@ -2272,6 +2294,13 @@ class MIRLowering
       value_mir.is_a?(MIR::RcRetain) ||
       value_mir.is_a?(MIR::RcDowngrade) ||
       value_mir.is_a?(MIR::WeakUpgrade)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def rodata_ownership_ast?(node)
+    ast_node = node.is_a?(AST::MoveNode) ? node.value : node
+    return true if ast_node.is_a?(AST::Literal) && ast_node.type == :STRING
+    !!(ast_node.respond_to?(:rodata_provenance?) && ast_node.rodata_provenance?)
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -3737,6 +3766,7 @@ class MIRLowering
   private :append_pending_packet_nodes!
   private :append_transfer_marks_to_body!
   private :borrowed_destination_node?
+  private :borrowed_string_destination?
   private :borrowed_ownership_ast?
   private :cast_wrapped_or?
   private :cleanup_entry_moved_guard?
@@ -3792,6 +3822,7 @@ class MIRLowering
   private :ownership_operands_for_value
   private :ownership_owned_result_fact_relevant?
   private :ownership_root_name
+  private :rodata_ownership_ast?
   private :ownership_scanner
   private :ownership_state
   private :ownership_transfer_contract_relevant?

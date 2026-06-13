@@ -24,11 +24,12 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
 
     zig = ZigTranspiler.new.transpile(src)
 
-    expect(zig).to include("for (0..16) |____sh1_i_usize|")
-    expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
-    expect(zig).to include("try counts.put(")
-    expect(zig).not_to include("CheatLib.BoundedChannel(__ShWork")
-    expect(zig).not_to include("__ShWorker")
+    expect(zig).to include("CheatLib.BoundedChannel(__ShWork")
+    expect(zig).to include("__ShWorker")
+    expect(zig).to include("try CheatHeader.spawnBest")
+    expect(zig).to include("putDirect(ctx.shard")
+    expect(zig).to include("getDirect(ctx.shard")
+    expect(zig).not_to include("try counts.put(")
   end
 
   it "auto-detects a single @sharded map in list-backed CONCURRENT EACH" do

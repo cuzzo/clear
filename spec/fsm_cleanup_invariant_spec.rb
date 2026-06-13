@@ -4,6 +4,7 @@ require_relative '../src/mir/fsm_transform/emit'
 require_relative '../src/mir/fsm_transform'
 require_relative '../src/mir/fsm_transform/liveness'
 require_relative '../src/mir/fsm_transform/recursive_splitter'
+require_relative '../src/backends/fsm_wrapper_emitter'
 
 # Tests for the FSM cleanup invariant: in any FSM-eligible BG body,
 # `defer NAME.<method>(...)` may NEVER appear in a segment fn where

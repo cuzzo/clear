@@ -1032,7 +1032,7 @@ module MIRLoweringVariables
     # Map put takes ownership of the stored value on success. If the value
     # expression produces owned children, expose that temporary to MIRChecker
     # with error-only cleanup: normal cleanup would double-free after the map owns it.
-    val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
+    val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct && rodata_ownership_ast?(node.value)
     val = hoist_alloc(val, node.value, err_cleanup: true)
 
     if !bc_target? && receiver_type.rc_map?

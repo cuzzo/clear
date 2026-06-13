@@ -318,8 +318,6 @@ RSpec.describe ZigTranspiler do
   # SHARD pipeline producer loop frame marks
   # ===========================================================================
   describe "SHARD pipeline producer loop frame marks" do
-    # Phase 2 (LoopFrameAnalysis): SHARD key/body frame-alloc flags are computed
-    # in Pass 2. This test will pass when LoopFrameAnalysis sets them correctly.
     it "Phase 2: emits saveLoopMark in SHARD producer when key expression allocates from frame" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
@@ -355,11 +353,11 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("try counts.put(")
-      expect(zig).to include("defer if (!__sh1_key_moved) CheatLib.cleanup")
+      expect(zig).to include("CheatLib.BoundedChannel(__ShWork")
+      expect(zig).to include("putDirect(ctx.shard")
     end
 
-    it "lowers SHARD map reads structurally in the verifier-visible loop" do
+    it "lowers SHARD map reads structurally in the verifier-visible worker body" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
@@ -375,9 +373,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("(counts.get(__sh1_key) orelse @as(i64, 0))")
-      expect(zig).to include("for (0..100) |____sh1_i_usize|")
-      expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
+      expect(zig).to include("(ctx.__shard_map.*.getDirect(ctx.shard, __sh1_key) orelse @as(i64, 0))")
+      expect(zig).to include("var __sh1_i: i64 = 0")
+      expect(zig).to include("while ((__sh1_i < __sh1_end)")
     end
 
     it "structural SHARD put owns the value through explicit transfer markers" do
@@ -391,8 +389,24 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("try map.put(")
-      expect(zig).to include("__tmp_2_moved = true")
+      expect(zig).to include("try ctx.__shard_map.*.putDirect(ctx.shard")
+      expect(zig).to include(%(@as([]const u8, "value")))
+      expect(zig).not_to include(%(dupe(u8, @as([]const u8, "value"))))
+    end
+
+    it "keeps borrowed SHARD string map reads borrowed through OR fallback" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            MUTABLE map: HashMap<String>@sharded(4) = {};
+            (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
+                got = map[_] OR "";
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("ctx.__shard_map.*.getDirect(ctx.shard, __sh1_key) orelse")
+      expect(zig).not_to include("frameAlloc().dupe(u8")
     end
 
     it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
@@ -1452,7 +1466,7 @@ RSpec.describe ZigTranspiler do
   # BG string capture: do not free non-duped captures
   # ===========================================================================
   describe "BG string capture defer free" do
-    it "captures an already-owned heap string without promotion-era dup/free glue" do
+    it "captures an already-owned heap string as a fiber-owned duplicate" do
       src = <<~CLEAR
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN main() RETURNS Void ->
@@ -1464,9 +1478,9 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       user_code = zig.split("// 3. Main Entry").first
-      expect(user_code).to include(".msg = msg")
-      expect(user_code).not_to include("dupe(u8, msg)")
-      expect(user_code).not_to match(/free.*msg/)
+      expect(user_code).to include("CheatLib.dupeCaptured(@TypeOf(msg), msg")
+      expect(user_code).to include(".msg = __fc_")
+      expect(user_code).to include("CheatLib.cleanup(@TypeOf(__ctx_")
     end
 
     it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do

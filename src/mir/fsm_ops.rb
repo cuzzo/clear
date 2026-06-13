@@ -458,8 +458,8 @@ end
     out.uniq
   end
 
-    sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
-    def self.free_state_fields(ops)
+  sig { params(ops: T::Array[Stmt]).returns(T::Array[String]) }
+  def self.free_state_fields(ops)
     out = []
     Array(ops).each do |op|
       case op
@@ -468,6 +468,17 @@ end
       end
     end
     out.uniq
+  end
+
+  sig { params(expr: T.nilable(Expr), finalize_ops: T::Array[Stmt]).returns(T::Boolean) }
+  def self.finish_value_aliases_finalized_state?(expr, finalize_ops)
+    return false unless expr
+
+    finalized = free_state_fields(finalize_ops)
+    return false if finalized.empty?
+
+    refs = referenced_state_fields([expr])
+    refs.any? { |name| finalized.include?(name) }
   end
 
   sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }

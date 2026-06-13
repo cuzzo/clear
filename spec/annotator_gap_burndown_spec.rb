@@ -2932,6 +2932,25 @@ RSpec.describe "annotator branch gap burndown" do
     expect(parent.alloc_mark_entries["inner"]).to eq(:heap)
   end
 
+  it "classifies captures from live storage instead of stale rodata snapshots" do
+    literal_snapshot = Type.new(:"Byte[49]", location: :rodata)
+    promoted_symbol = SymbolEntry.new(
+      reg: "filepath",
+      type: Type.new(:"Byte[49]"),
+      mutable: false,
+      storage: :heap
+    )
+    analysis = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "filepath" => literal_snapshot },
+      capture_symbols: { "filepath" => promoted_symbol }
+    )
+
+    strategies = BgCaptureClassifier.classify_one!(analysis)
+
+    expect(strategies["filepath"]).to be_a(CaptureStrategy::FreshHeapCopy)
+    expect(analysis.alloc_mark_entries["filepath"]).to eq(:heap)
+  end
+
   it "applies capture fact helpers only when their local predicate is active" do
     ann = quiet_annotator
     names = Set.new

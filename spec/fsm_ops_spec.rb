@@ -206,6 +206,16 @@ RSpec.describe FsmOps do
     it "identifies freed state fields (errdefer + defer)" do
       expect(FsmOps.free_state_fields(setup_ops + finalize_ops).sort).to eq(["rf_buf"])
     end
+
+    it "detects finish values that alias finalized state fields" do
+      finish_value = FO.slice_intcast(
+        FO.state("rf_buf"),
+        FO.subf(FO.state("rf_waiter"), "result"),
+      )
+
+      expect(FsmOps.finish_value_aliases_finalized_state?(finish_value, finalize_ops)).to eq(true)
+      expect(FsmOps.finish_value_aliases_finalized_state?(FO.local("__finished"), finalize_ops)).to eq(false)
+    end
   end
 
   describe "complete readFile setup lowering" do

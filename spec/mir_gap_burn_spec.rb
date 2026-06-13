@@ -939,6 +939,13 @@ RSpec.describe "MIR gap-burn characterization" do
     EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [pure_call])
     expect(T.must(receiver.symbol).heap_storage?).to be(false)
     EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [mutating_call])
+    expect(T.must(receiver.symbol).heap_storage?).to be(false)
+
+    local_type = Type.new(:"Int64[]", collection: :list)
+    local_decl = AST::VarDecl.new(tok, "scratch", local_type, AST::ListLit.new(tok, [], :stack), false)
+    local_decl.full_type = local_type
+    local_decl.symbol = SymbolEntry.new(reg: local_decl, type: local_type, mutable: true, storage: :frame)
+    EscapeAnalysis.send(:mark_receiver_allocations_in_loop!, [local_decl, mutating_call])
 
     expect(T.must(receiver.symbol).heap_storage?).to be(true)
 
