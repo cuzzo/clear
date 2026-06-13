@@ -16,6 +16,11 @@ ZIG = [
 RUN_TIMEOUT = (ENV['BENCH_TIMEOUT'] || 2).to_i
 
 $bencher_metrics = nil
+$benchmark_failures = []
+
+def record_benchmark_failure(message)
+  $benchmark_failures << message
+end
 
 def bencher_benchmark_name(dir, label = nil)
   return dir unless label
@@ -60,6 +65,67 @@ def leak_sources(dir)
   else
     Dir.glob("#{dir}/bench*.cht").sort
   end
+end
+
+LEAK_DIRECTIVE_RE = /^\s*(?:#|--)\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/
+COMMENT_LINE_RE = /^\s*(?:#|--)/
+
+def leak_directives(src)
+  src.scan(LEAK_DIRECTIVE_RE).map { |old, new_value| [old.strip, new_value.strip] }
+end
+
+def comment_line?(line)
+  line.match?(COMMENT_LINE_RE)
+end
+
+def underscore_tolerant_literal_regex(literal)
+  pattern = +""
+  i = 0
+
+  while i < literal.length
+    char = literal[i]
+    if char.match?(/\d/)
+      digits = +""
+      while i < literal.length && literal[i].match?(/[\d_]/)
+        digits << literal[i]
+        i += 1
+      end
+      pattern << digits.delete("_").chars.map { |digit| Regexp.escape(digit) }.join("_?")
+    else
+      pattern << Regexp.escape(char)
+      i += 1
+    end
+  end
+
+  Regexp.new(pattern)
+end
+
+def apply_leak_substitutions(src, source_path: nil)
+  directives = leak_directives(src)
+  return src if directives.empty?
+
+  matched = Array.new(directives.length, false)
+  patched = src.each_line.map do |line|
+    next line if comment_line?(line)
+
+    directives.each_with_index do |(old, new_value), index|
+      next_line = line.gsub(old, new_value)
+      next_line = next_line.gsub(underscore_tolerant_literal_regex(old), new_value)
+      matched[index] = true if next_line != line
+      line = next_line
+    end
+
+    line
+  end.join
+
+  directives.each_with_index do |(old, _), index|
+    next if matched[index]
+
+    where = source_path ? " in #{source_path}" : ""
+    warn "WARNING: @leak substitution did not match #{old.inspect}#{where}"
+  end
+
+  patched
 end
 
 def apply_shard(dirs, shard_spec)
@@ -327,19 +393,11 @@ def run_bench(dir)
 
         # @leak: old -> new  (reduce iteration counts for debug mode)
         build_src = source_path
-        subs = src.scan(/^--\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/)
-        if subs.any?
-          # Split into comment and code lines so sub! doesn't match the @leak comment itself
-          comment_lines = []
-          code_lines = []
-          src.each_line { |l| (l.match?(/^\s*--/) ? comment_lines : code_lines) << l }
-          code_text = code_lines.join
-          # gsub!, not sub!: the same iteration count usually appears in BOTH
-          # the producer loop and the consumer loop (e.g. spawn N futures /
-          # await N futures), and replacing only the first leaves the
-          # consumer indexing past the producer's reduced length.
-          subs.each { |old, new_val| code_text.gsub!(old.strip, new_val.strip) }
-          patched = comment_lines.join + code_text
+        if leak_directives(src).any?
+          # Replace every matching code occurrence, not just the first:
+          # producer/consumer loops often share the same bound, and changing
+          # only one side indexes past the reduced producer output.
+          patched = apply_leak_substitutions(src, source_path: source_path)
           build_src = "/tmp/bench_leak_#{File.basename(dir)}_#{label}.cht"
           File.write(build_src, patched)
         end
@@ -359,10 +417,14 @@ def run_bench(dir)
             timeout_s: is_server ? 1 : 60,
             timeout_ok: is_server,
           )
+          unless [:clean, :started].include?(leak_result[:status])
+            record_benchmark_failure("#{dir}/#{label}: leak check #{leak_result[:status]}")
+          end
           bencher_record(metric_name, "leak-run-ms", leak_result[:elapsed_ms])
           bencher_record(metric_name, "leak-count", leak_result[:leak_count])
         else
           puts "    WARNING: debug build failed: #{output.lines.last&.strip}"
+          record_benchmark_failure("#{dir}/#{label}: debug leak build failed")
         end
         FileUtils.rm_f(build_src) if build_src != source_path
         FileUtils.rm_f(bench_bin)
@@ -857,4 +919,9 @@ if __FILE__ == $0
   $bencher_metrics = {} if bencher_json_path
   dirs.each { |d| run_bench(d); puts }
   write_bencher_json(bencher_json_path) if bencher_json_path
+  if $benchmark_failures.any?
+    warn "Benchmark failures:"
+    $benchmark_failures.each { |failure| warn "  - #{failure}" }
+    exit 1
+  end
 end

@@ -3410,19 +3410,8 @@ pub const CheatLib = struct {
             return try T.init(alloc, inner);
         }
 
-        if (info == .@"struct" and @hasDecl(T, "dupe")) {
+        if (comptime hasAllocatorDupe(T)) {
             return try value.dupe(alloc);
-        }
-
-        if (info == .@"struct" and !@hasDecl(T, "deinit")) {
-            var result = value;
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                if (comptime needsCleanup(FT)) {
-                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
-                }
-            }
-            return result;
         }
 
         // ArrayList: allocate a fresh buffer of the same length and deep-copy
@@ -3587,7 +3576,26 @@ pub const CheatLib = struct {
             return result;
         }
 
+        if (info == .@"struct" and !@hasDecl(T, "deinit")) {
+            var result = value;
+            inline for (info.@"struct".fields) |field| {
+                const FT = field.type;
+                if (comptime needsCleanup(FT)) {
+                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
+                }
+            }
+            return result;
+        }
+
         return value;
+    }
+
+    fn hasAllocatorDupe(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct" or !@hasDecl(T, "dupe")) return false;
+
+        const dupe_info = @typeInfo(@TypeOf(T.dupe));
+        return dupe_info == .@"fn" and dupe_info.@"fn".params.len == 2;
     }
 
     /// The owned type a COPY-captured binding becomes in the fiber.

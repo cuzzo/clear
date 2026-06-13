@@ -20,6 +20,9 @@
 #   CLEAR:  ruby src/transpiler.rb bench.cht > zig/bench.zig
 #           zig build-exe zig/bench.zig zig/switch.S zig/onRoot.S \
 #               --name bench_clear -O ReleaseFast -lc
+#
+# @leak: n = files.length() -> n = 64
+# @leak: batch_size = 128 -> batch_size = 8
 
 STRUCT SearchResult {
   file_idx: Int64,

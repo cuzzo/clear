@@ -47,6 +47,9 @@ class PipelineConcurrentCoverageHost
       callback_body_mir: ->(_body_stmts, placeholder, _capture_map, _capture_symbols, _rt_override) {
         [MIR::Suppress.new(placeholder)]
       },
+      callback_body_mir_with_shard: ->(_body_stmts, placeholder, _capture_map, _capture_symbols, _rt_override, _shard_context) {
+        [MIR::Suppress.new(placeholder)]
+      },
       pipeline_alloc_mark_fact: ->(_value, _name, _fallback_alloc, _type_info, _ast_node, _accept_owned_call, _include_cleanup) { nil },
       append_ownership_transfers: ->(body) {
         mark(:shard)
@@ -695,9 +698,14 @@ RSpec.describe "pipeline backend coverage" do
       scoped = owning.append_owned_value_stmt("items", :heap, deep_copy)
       expect(scoped).to be_a(MIR::ScopeBlock)
       expect(scoped.body[0]).to be_a(MIR::AllocMark)
+      expect(scoped.body[0].scope).to eq(:heap)
       expect(scoped.body[2]).to be_a(MIR::ErrCleanup)
       expect(scoped.body[2].cleanup_entry[:zig_type]).to eq("Payload")
       expect(scoped.body.last).to be_a(MIR::MoveMark)
+
+      frame_copy = MIR::DeepCopy.new(MIR::Ident.new("value"), "Payload", nil, :full_value, :frame)
+      frame_scoped = owning.append_owned_value_stmt("items", :frame, frame_copy)
+      expect(frame_scoped.body[0].scope).to eq(:function)
     end
 
     it "normalizes zig type metadata for append cleanup entries" do
@@ -767,7 +775,7 @@ RSpec.describe "pipeline backend coverage" do
       shard.shard_context = AST::PipelineShardContext.new(
         auto_detected: true,
         key_expr: id("_"),
-        map_var: id("counts"),
+        map_var: id("counts", type: Type.new(:"HashMap<Int64>", shard_count: 3)),
       )
       concurrent_lowerer.lower(concurrent_smooth(range, shard), shard)
       expect(concurrent_host.calls.last).to eq(:shard)

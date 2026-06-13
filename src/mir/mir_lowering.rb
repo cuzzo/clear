@@ -2908,7 +2908,44 @@ class MIRLowering
           deinit_stmts,
           :pub
         )
-        [deinit_fn]
+
+        result_ref = MIR::Ident.new("result")
+        dupe_stmts = T.let([
+          MIR::Let.new("result", MIR::Ident.new("self"), true, nil, nil, nil)
+        ], T::Array[MIR::Stmt])
+
+        deinit_entries.each do |de|
+          tmp_name = "__dupe_#{de.field}"
+          field_source = "self.#{de.field}"
+          dupe_stmts << MIR::Let.new(
+            tmp_name,
+            MIR::Lit.new("try CheatLib.dupeValue(@TypeOf(#{field_source}), #{field_source}, alloc)"),
+            false,
+            nil,
+            nil,
+            nil
+          )
+          dupe_stmts << MIR::ExprStmt.new(
+            MIR::Lit.new("errdefer CheatLib.cleanup(@TypeOf(#{tmp_name}), alloc, &#{tmp_name})"),
+            false
+          )
+          dupe_stmts << MIR::Set.new(
+            MIR::FieldGet.new(result_ref, de.field),
+            MIR::Ident.new(tmp_name),
+            false
+          )
+        end
+
+        dupe_stmts << MIR::ReturnStmt.new(result_ref)
+
+        dupe_fn = MIR::FnDef.new(
+          "dupe",
+          [MIR::Param.new("self", "@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+          "!@This()",
+          dupe_stmts,
+          :pub
+        )
+        [deinit_fn, dupe_fn]
       end
 
       MIR::StructDef.new(fact.helper_name, fields, methods, nil)

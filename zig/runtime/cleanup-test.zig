@@ -552,6 +552,52 @@ test "dupeValue deep-copies union ArrayList string payload elements independentl
     CheatLib.cleanup(StringListValue, alloc, &copied_mut);
 }
 
+const StructPayloadWithDeinit = struct {
+    msg: []const u8,
+    kind: []const u8,
+
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        CheatLib.cleanup([]const u8, alloc, &self.msg);
+        CheatLib.cleanup([]const u8, alloc, &self.kind);
+    }
+
+    pub fn dupe(self: @This(), alloc: std.mem.Allocator) !@This() {
+        const msg = try CheatLib.dupeValue([]const u8, self.msg, alloc);
+        errdefer CheatLib.cleanup([]const u8, alloc, &msg);
+        const kind = try CheatLib.dupeValue([]const u8, self.kind, alloc);
+        errdefer CheatLib.cleanup([]const u8, alloc, &kind);
+        return .{
+            .msg = msg,
+            .kind = kind,
+        };
+    }
+};
+
+const StructPayloadValue = union(enum) {
+    Nil: void,
+    Error: StructPayloadWithDeinit,
+};
+
+test "dupeValue deep-copies cleanup-bearing struct union payload fields independently" {
+    const alloc = std.testing.allocator;
+
+    const original = StructPayloadValue{ .Error = .{
+        .msg = try alloc.dupe(u8, "x"),
+        .kind = try alloc.dupe(u8, "E"),
+    } };
+    const copied = try CheatLib.dupeValue(StructPayloadValue, original, alloc);
+
+    try std.testing.expectEqualStrings("x", copied.Error.msg);
+    try std.testing.expectEqualStrings("E", copied.Error.kind);
+    try std.testing.expect(copied.Error.msg.ptr != original.Error.msg.ptr);
+    try std.testing.expect(copied.Error.kind.ptr != original.Error.kind.ptr);
+
+    var original_mut = original;
+    CheatLib.cleanup(StructPayloadValue, alloc, &original_mut);
+    var copied_mut = copied;
+    CheatLib.cleanup(StructPayloadValue, alloc, &copied_mut);
+}
+
 // Recursive union type similar to the interpreter's Value (17 variants,
 // @indirect pointers, slices of self). needsCleanup must handle this
 // without exceeding comptime branch limits.

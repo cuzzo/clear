@@ -1,5 +1,5 @@
-# A nested-field op's allocator must match its root container's
-# AllocMark; divergence is INLINE_ALLOC_MISMATCH or a UAF.
+# A nested-field op's allocator must match its root container's AllocMark;
+# divergence is INLINE_ALLOC_MISMATCH or a UAF.
 
 require "rspec"
 require "stringio"
@@ -89,8 +89,8 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       end
     end
     expect(alloc_marks["handles"]).not_to be_nil
-    expect(alloc_marks["handles"].alloc).to eq(:heap),
-      "root container placement must come from escape/storage, not loop rewinds"
+    expect(alloc_marks["handles"].scope).to eq(:function),
+      "root container placement must stay function-scoped, not loop rewound"
     expect(ops_targeting_handles.any? { |op| op.allocs&.primary }).to be(true)
   end
 

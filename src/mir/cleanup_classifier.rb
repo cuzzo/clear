@@ -663,7 +663,8 @@ module CleanupClassifier
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
       e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
       next unless e
-      e.set_alloc!(:heap) if capture_expr_heap?(expr, schema_lookup)
+      capture_alloc = capture_expr_owned_alloc(expr, schema_lookup)
+      e.set_alloc!(capture_alloc) if capture_alloc
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
         e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
@@ -679,21 +680,33 @@ module CleanupClassifier
 
   sig { params(expr: AST::Node, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.capture_expr_heap?(expr, schema_lookup)
+    capture_expr_owned_alloc(expr, schema_lookup) == :heap
+  end
+
+  sig { params(expr: AST::Node, schema_lookup: Proc).returns(T.nilable(Symbol)) }
+  private_class_method def self.capture_expr_owned_alloc(expr, schema_lookup)
     case expr
     when AST::ResolveNode
-      true
+      :heap
     when AST::FuncCall
-      return false if call_has_return_lifetime?(expr)
-      call_returns_heap_owned?(expr, schema_lookup) ||
-        (expr.respond_to?(:heap_storage?) && expr.heap_storage?)
+      return nil if call_has_return_lifetime?(expr)
+      return :heap if call_returns_heap_owned?(expr, schema_lookup)
+      return :frame if call_returns_frame_owned?(expr)
+      return :heap if expr.respond_to?(:heap_storage?) && expr.heap_storage?
+
+      nil
     when AST::MethodCall
-      return false if call_has_return_lifetime?(expr)
-      return true if call_returns_heap_owned?(expr, schema_lookup)
-      return true if expr.respond_to?(:heap_storage?) && expr.heap_storage?
+      return nil if call_has_return_lifetime?(expr)
+      return :heap if call_returns_heap_owned?(expr, schema_lookup)
+      return :frame if call_returns_frame_owned?(expr)
+      return receiver_storage_alloc(expr) if call_returns_receiver_owned?(expr)
+      return :heap if expr.respond_to?(:heap_storage?) && expr.heap_storage?
       receiver = expr.object
-      !!(receiver.respond_to?(:symbol) && receiver.symbol&.heap_storage?)
+      return :heap if receiver.respond_to?(:symbol) && receiver.symbol&.heap_storage?
+
+      nil
     else
-      false
+      nil
     end
   end
 
@@ -709,6 +722,35 @@ module CleanupClassifier
     ret = Type.new(sig.return_type)
     ret = ret.success_type || ret
     !!ret && ret.needs_explicit_cleanup?(:heap, schema_lookup)
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  private_class_method def self.call_returns_frame_owned?(expr)
+    sig = expr.respond_to?(:matched_signature) ? FunctionSignature.unwrap(expr.matched_signature) : nil
+    !!sig&.frame_return_alloc?
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  private_class_method def self.call_returns_receiver_owned?(expr)
+    sig = expr.respond_to?(:matched_signature) ? FunctionSignature.unwrap(expr.matched_signature) : nil
+    sig&.return_alloc == :receiver_storage
+  end
+
+  sig { params(expr: AST::MethodCall).returns(T.nilable(Symbol)) }
+  private_class_method def self.receiver_storage_alloc(expr)
+    receiver = expr.object
+    symbol = receiver.respond_to?(:symbol) ? receiver.symbol : nil
+    storage = symbol&.storage
+    return :heap if storage == :heap
+    return :frame if storage == :frame
+
+    root = AST.root_identifier(receiver) rescue nil
+    root_symbol = root&.symbol
+    root_storage = root_symbol&.storage
+    return :heap if root_storage == :heap
+    return :frame if root_storage == :frame
+
+    nil
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }

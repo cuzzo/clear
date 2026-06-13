@@ -9,6 +9,97 @@ RSpec.describe ZigTranspiler do
     ZigTranspiler.new.transpile(src)
   end
 
+  def function_body(zig, name)
+    zig[/fn #{Regexp.escape(name)}\b.*?\n(.*?)^}/m, 1] || ""
+  end
+
+  describe "collection ownership regressions" do
+    it "cleans popped frame-list string captures with the receiver allocator" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE src: String[]@list = [];
+          src.append(COPY "a");
+          src.append(COPY "b");
+          IF src.pop() AS v THEN
+            ASSERT v.length() >= 0_i64, "captured string";
+          ELSE
+            ASSERT FALSE, "expected a popped value";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+    end
+
+    it "cleans popped frame-list struct captures with the receiver allocator" do
+      zig = transpile(<<~CLEAR)
+        STRUCT Item { name: String }
+
+        FN main() RETURNS Void ->
+          MUTABLE src: Item[]@list = [];
+          src.append(Item{ name: COPY "a" });
+          WHILE src.pop() AS v DO
+            ASSERT v.name.length() >= 0_i64, "captured struct";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+    end
+
+    it "lets heap return destinations override frame-default intrinsic return allocation" do
+      src = <<~CLEAR
+        UNION Val {
+          Nil,
+          Str: String,
+          Num: Float64
+        }
+
+        FN convert!(token: String) RETURNS !Val ->
+          IF token == "nil" THEN RETURN Val.Nil; END
+          IF charAt(token, 0) == "\\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
+          n = toNumber(token) OR (0.0 - 999999.0);
+          IF n != 0.0 - 999999.0 THEN RETURN Val{ Num: n }; END
+          RETURN Val{ Str: COPY token };
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "does not require ownership facts for primitive receiver-storage pop fallbacks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE stack: Int64[]@list = [];
+          stack.append(1_i64);
+          v = stack.pop() OR 0_i64;
+          ASSERT v == 1_i64, "primitive pop fallback";
+          RETURN;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "keeps owned receiver-storage pop fallbacks checker-clean" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE src: String[]@list = [];
+          src.append(COPY "a");
+          v = src.pop() OR COPY "fallback";
+          ASSERT v.length() > 0_i64, "owned pop fallback";
+          RETURN;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+  end
+
   describe "BG promise capture regressions" do
     it "allows footguns/06-style consumer BG to NEXT a producer promise captured from the same scope" do
       src = <<~CLEAR
@@ -846,7 +937,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("restoreFrameMark")
     end
 
     it "emits saveFrameMark for frame-owned split results with borrowed string return" do
@@ -861,8 +953,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
-        expect(zig).not_to include("restoreFrameMark")
+      expect(function_body(zig, "f")).to include("saveFrameMark")
+      expect(function_body(zig, "f")).to include("restoreFrameMark")
       expect(zig).not_to include("preserveAndRewind")
       expect(zig).not_to include("__pr_body")
     end
@@ -880,7 +972,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-        expect(zig).not_to include("saveFrameMark")
+      expect(function_body(zig, "check")).to include("saveFrameMark")
+      expect(function_body(zig, "check")).to include("restoreFrameMark")
     end
   end
 
@@ -1116,6 +1209,23 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
+    end
+
+    it "emits a dupe method for cleanup-bearing inline struct variant fields" do
+      src = <<~CLEAR
+        UNION Value { Nil, Error { errMsg: String, errKind: String } }
+        FN main() RETURNS Void ->
+            err = Value.Error{ errMsg: "x", errKind: "E" };
+            copied = COPY err;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+
+      expect(zig).to include("pub fn dupe(self: @This(), alloc: std.mem.Allocator) !@This()")
+      expect(zig).to include("try CheatLib.dupeValue(@TypeOf(self.errMsg), self.errMsg, alloc)")
+      expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__dupe_errMsg), alloc, &__dupe_errMsg)")
+      expect(zig).to include("result.errKind = __dupe_errKind")
     end
   end
 
@@ -1480,7 +1590,31 @@ RSpec.describe ZigTranspiler do
       user_code = zig.split("// 3. Main Entry").first
       expect(user_code).to include("CheatLib.dupeCaptured(@TypeOf(msg), msg")
       expect(user_code).to include(".msg = __fc_")
-      expect(user_code).to include("CheatLib.cleanup(@TypeOf(__ctx_")
+      expect(user_code).to include("msg_moved: bool = false,")
+      expect(user_code).to include("errdefer CheatLib.cleanup(@TypeOf(__fc_0_msg), __bg0_alloc, &__fc_0_msg);")
+      expect(user_code).to include(
+        "if (!__ctx_0.msg_moved) CheatLib.cleanup(@TypeOf(__ctx_0.msg), __ctx_0.alloc, &__ctx_0.msg);"
+      )
+    end
+
+    it "cleans duplicated FSM captures even when the source string starts as rodata" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            greeting: String = "world";
+            p: ~String = BG { greeting + "!"; };
+            result: String = NEXT p;
+            ASSERT result == "world!", "BG string capture";
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include("CheatLib.dupeCaptured(@TypeOf(greeting), greeting, __bg0_alloc)")
+      expect(user_code).to include("greeting_moved: bool = false,")
+      expect(user_code).to include("errdefer CheatLib.cleanup(@TypeOf(__fc_0_greeting), __bg0_alloc, &__fc_0_greeting);")
+      expect(user_code).to include(
+        "if (!__ctx_0.greeting_moved) CheatLib.cleanup(@TypeOf(__ctx_0.greeting), __ctx_0.alloc, &__ctx_0.greeting);"
+      )
     end
 
     it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do

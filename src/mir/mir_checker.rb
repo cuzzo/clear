@@ -2544,6 +2544,7 @@ class MIRChecker
 
     contract = node.ownership_contract
     return true if contract.is_a?(MIR::OwnershipContract) && !contract.empty?
+    return true if node.respond_to?(:owned_result_alloc) && T.unsafe(node).owned_result_alloc
 
     return false if node.mutating_receiver_allocator_op?
 

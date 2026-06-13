@@ -1688,7 +1688,9 @@ module MIRLoweringFunctions
     end
 
     result_type = Type.from_node!(node, context: "intrinsic result")
+    result_ownership_bearing = intrinsic_result_ownership_bearing?(result_type)
     alloc_metadata = MIR::InlineAllocMetadata.new(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
+    owned_result_alloc = intrinsic_owned_result_alloc(entry, node, alloc_metadata, result_ownership_bearing)
     ownership_contract = MIR::OwnershipContract.empty
     if ownership_facts.takes_any?
       operands = consumed_operands.empty? ? consumed_names.map { |name|
@@ -1709,9 +1711,10 @@ module MIRLoweringFunctions
       reason: "intrinsic",
       ownership_contract: ownership_contract,
       allocs: alloc_metadata.empty? ? nil : alloc_metadata,
+      owned_result_alloc: owned_result_alloc,
       target_var: target_var,
       result_type: result_type,
-      result_ownership_bearing: intrinsic_result_ownership_bearing?(result_type),
+      result_ownership_bearing: result_ownership_bearing,
       key_type: receiver_type&.key_type,
       value_type: receiver_type&.value_type,
     )
@@ -1820,6 +1823,26 @@ module MIRLoweringFunctions
     ti = type_info.success_type || type_info
     ti = ti.wrapped_type || ti if ti.optional?
     ti.ownership_bearing?(mir_schema_lookup)
+  end
+
+  sig do
+    params(
+      entry: FunctionSignature,
+      node: T.any(AST::FuncCall, AST::MethodCall),
+      alloc_metadata: MIR::InlineAllocMetadata,
+      result_ownership_bearing: T::Boolean
+    ).returns(T.nilable(Symbol))
+  end
+  def intrinsic_owned_result_alloc(entry, node, alloc_metadata, result_ownership_bearing)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless result_ownership_bearing
+
+    alloc = entry.return_alloc
+    return nil unless alloc
+    return alloc_metadata.primary if entry.emits_allocating? && alloc_metadata.primary
+    return alloc if alloc == :heap || alloc == :frame
+
+    resolve_alloc_sym(alloc, nil, node)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(Type)) }
@@ -2040,6 +2063,7 @@ module MIRLoweringFunctions
   private :has_default_catch?
   private :infer_catch_value_allocator
   private :intrinsic_ast_arg
+  private :intrinsic_owned_result_alloc
   private :intrinsic_result_ownership_bearing?
   private :lower_extern_call
   private :lower_extern_direct_call

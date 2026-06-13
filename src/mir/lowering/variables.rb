@@ -531,6 +531,7 @@ module MIRLoweringVariables
   def type_requires_alloc_cleanup?(ft, alloc)
     T.bind(self, MIRLowering) rescue nil
     return false if ft.primitive? || ft.void? || ft.any? || ft.id_handle?
+    return true if ft.needs_cleanup?(mir_schema_lookup)
     return true if ft.needs_explicit_cleanup?(alloc, mir_schema_lookup)
 
     MIR::Placement.explicit_heap?(alloc) && (ft.string? || ft.heap_ptr? || ft.collection_value? ||

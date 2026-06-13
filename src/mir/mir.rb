@@ -4349,6 +4349,7 @@ module MIR
     const :reason, String
     const :ownership_contract, OwnershipContract, default: OwnershipContract.empty
     prop :allocs, T.nilable(InlineAllocMetadata), default: nil
+    const :owned_result_alloc, T.nilable(Symbol), default: nil
     prop :target_var, T.nilable(String), default: nil
     const :result_type, T.nilable(Type), default: nil
     const :result_ownership_bearing, T.nilable(T::Boolean), default: nil
@@ -4391,10 +4392,10 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      heap_return = entry.heap_return_alloc? == true
+      result_alloc = owned_result_alloc || (entry.heap_return_alloc? ? :heap : nil)
       metadata = allocs
-      alloc = if heap_return
-        :heap
+      alloc = if result_alloc
+        result_alloc
       elsif metadata.is_a?(InlineAllocMetadata)
         metadata.single_alloc
       else
@@ -4405,9 +4406,9 @@ module MIR
                       !has_alloc_metadata?)
       OwnershipEffect.from_callable_facts(
         emits_allocating: entry.emits_allocating? == true,
-        heap_return_alloc: heap_return,
+        heap_return_alloc: !result_alloc.nil?,
         fixed_void_without_alloc_metadata: fixed_void,
-        mutates_receiver_without_heap_return: entry.mutates_receiver? && !heap_return,
+        mutates_receiver_without_heap_return: entry.mutates_receiver? && result_alloc.nil?,
         result_owns: result_ownership_bearing,
         result_type: result_type,
         alloc: alloc,
@@ -4423,6 +4424,7 @@ module MIR
         reason: reason,
         ownership_contract: ownership_contract,
         allocs: allocs,
+        owned_result_alloc: owned_result_alloc,
         target_var: target_var,
         result_type: result_type,
         result_ownership_bearing: result_ownership_bearing,

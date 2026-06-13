@@ -28,13 +28,14 @@ RSpec.describe "MIR gap-burn characterization" do
     )
   end
 
-  def registry_call(reason, sig, allocs: nil, target_var: nil, ownership_contract: MIR::OwnershipContract.empty)
+  def registry_call(reason, sig, allocs: nil, target_var: nil, ownership_contract: MIR::OwnershipContract.empty, owned_result_alloc: nil)
     MIR::RegistryCall.new(
       entry: sig,
       args: [],
       reason: reason,
       ownership_contract: ownership_contract,
       allocs: allocs,
+      owned_result_alloc: owned_result_alloc,
       target_var: target_var,
     )
   end
@@ -127,6 +128,31 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(fresh.specs.first.setup_mir.map(&:class)).to include(MIR::Let, MIR::ErrDeferStmt)
     expect(fresh.specs.first.cleanup_plan.captured_value?).to eq(true)
     expect(fresh.specs.first.cleanup_mir_for("ctx")).to be_a(MIR::DeferStmt)
+
+    rodata_string = Type.new(:String)
+    rodata_string.send(:mark_rodata!)
+    rodata_analysis = CapabilityHelper::CaptureAnalysis.new(
+      captures: { "literal" => rodata_string },
+      strategies: {
+        "literal" => CaptureStrategy::FreshHeapCopy.new(
+          zig_type: "[]const u8",
+          ctx_init_name: "literal",
+          alloc_sym: :heap,
+        )
+      },
+      pointer_captures: Set.new,
+      capture_symbols: {},
+    )
+    rodata_fresh = FiberCtxBuilder.build(
+      rodata_analysis,
+      body_access_prefix: "ctx",
+      fresh_heap_alloc: "rt.heapAlloc()",
+      fresh_heap_id: 8,
+    )
+    expect(FiberCtxBuilder.needs_capture_value_cleanup?(rodata_string)).to eq(false)
+    expect(rodata_fresh.specs.first.setup_mir.map(&:class)).to include(MIR::Let, MIR::ErrDeferStmt)
+    expect(rodata_fresh.specs.first.cleanup_plan.captured_value?).to eq(true)
+    expect(rodata_fresh.specs.first.cleanup_mir_for("ctx")).to be_a(MIR::DeferStmt)
 
     atomic_type = Type.new(:Int64)
     atomic_sym = SymbolEntry.new(reg: "cell", type: atomic_type, mutable: true, storage: :heap, sync: :atomic)
@@ -833,6 +859,15 @@ RSpec.describe "MIR gap-burn characterization" do
     inline_effect = inline.ownership_effect
     expect(inline_effect.produces_owned).to be(true)
     expect(inline_effect.alloc).to eq(:heap)
+
+    receiver_return_sig = FunctionSignature.intrinsic_contract(
+      return_type: Type.new(:String),
+      return_alloc: :receiver_storage,
+    )
+    receiver_return = registry_call("pop", receiver_return_sig, owned_result_alloc: :frame)
+    receiver_effect = receiver_return.ownership_effect
+    expect(receiver_effect.produces_owned).to be(true)
+    expect(receiver_effect.alloc).to eq(:frame)
   end
 
   it "assembles typed indexed-assignment allocator metadata without hash protocol fallbacks" do
@@ -2639,7 +2674,7 @@ RSpec.describe "MIR gap-burn characterization" do
     missing_owned_operand = low.send(
       :ownership_operands_for_sink_value,
       MIR::Call.new("make", [], false, false),
-      lit("hidden", type: :String),
+      id("hidden", type: :String),
       Type.new(:String),
       "spec",
       :heap,
@@ -2663,9 +2698,10 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.send(:ownership_operands_for_sink_value,
       MIR::Ident.new("borrowed"), owner_field,
       Type.new(:String), "spec", :heap, require_visible_owned: true).first.borrowed).to eq(true)
-    expect(low.send(:ownership_operands_for_sink_value,
+    missing_literal_operand = low.send(:ownership_operands_for_sink_value,
       MIR::Ident.new("missing"), lit("missing", type: :String),
-      Type.new(:String), "spec", :heap, require_visible_owned: false)).to eq([])
+      Type.new(:String), "spec", :heap, require_visible_owned: false)
+    expect(missing_literal_operand.first.kind).to eq(:non_owning)
     rooted = id("rooted", type: :String)
     low.function_state.current_bindings = {
       "rooted" => CleanupEntry.build(:uniform, alloc: :heap),
@@ -2675,9 +2711,10 @@ RSpec.describe "MIR gap-burn characterization" do
       Type.new(:String), "spec", :heap, require_visible_owned: false)
     expect(rooted_operand.first.name).to eq("rooted")
     no_fact_call = MIR::Call.new("read", [], false, false)
-    expect(low.send(:ownership_operands_for_sink_value,
+    no_fact_operand = low.send(:ownership_operands_for_sink_value,
       no_fact_call, lit("missing", type: :String),
-      Type.new(:String), "spec", :heap, require_visible_owned: false)).to eq([])
+      Type.new(:String), "spec", :heap, require_visible_owned: false)
+    expect(no_fact_operand.first.kind).to eq(:non_owning)
 
     expect(low.send(:strip_try, MIR::Ident.new("plain")).name).to eq("plain")
     expect(low.send(:strip_try, MIR::Call.new("fallible", [], true, false)).try_wrap).to eq(false)

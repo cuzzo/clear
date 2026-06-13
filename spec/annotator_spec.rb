@@ -3967,7 +3967,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapKeys(i64, rt.heapAlloc(), m.inner)")
+        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m.inner)")
       end
 
       it "raises when keys receives arguments" do
