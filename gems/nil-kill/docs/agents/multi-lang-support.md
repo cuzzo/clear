@@ -67,6 +67,36 @@ Core rules:
 - Reporters consume normalized evidence and actions, not language-specific trace files.
 - Auto-fix providers are optional per language and consume actions plus source metadata.
 
+## Implemented Language Provider Boundary
+
+Nil-Kill now has a small provider registry under `lib/nil_kill/languages/`.
+Each provider publishes capabilities and owns the language-specific pieces that
+should not leak into the shared normalizer, analyzer, or reporter:
+
+```ruby
+provider = NilKill::Languages.provider_for("python")
+provider.capability
+provider.collect_runtime(argv:, root:, output:, targets:, append:)
+provider.canonical_state_field(field, receiver:)
+provider.owned_state_origin?(origin, known_states)
+provider.receiver_state_field(receiver, known_states)
+```
+
+Initial providers:
+
+- `ruby`: existing static/runtime/autofix path; runtime collection remains the
+  legacy `nil-kill collect` flow.
+- `python`: Tree-sitter static policy plus the `sitecustomize`/`sys.settrace`
+  tracer; `collect-python` is now a compatibility wrapper around
+  `collect-runtime --language python`.
+- `zig`: Tree-sitter static policy only; the provider explicitly reports that
+  runtime tracing is unsupported.
+
+The raw trace and normalized evidence schemas stay language-neutral. Provider
+capabilities are emitted by `nil-kill trace-spec` and preserved in static v2
+evidence so reports can distinguish "unsupported by this language" from
+"supported but no runtime was collected".
+
 ## Stable Identity Model
 
 Nil-Kill needs stable-enough identifiers that work across languages and runs.

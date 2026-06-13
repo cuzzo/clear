@@ -684,10 +684,17 @@ module Decomplex
       end
 
       def record_state_param_origin(document, node, stack, out)
-        return unless %w[assignment assignment_expression augmented_assignment assignment_statement].include?(node.kind)
+        lhs = nil
+        rhs = nil
+        if %w[assignment assignment_expression augmented_assignment assignment_statement].include?(node.kind)
+          lhs = named_field(node, "left") || node.named_children.first
+          rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
+        elsif assignment_lhs?(node)
+          lhs = node
+          rhs = next_sibling(next_sibling(node))
+        end
+        return unless lhs && rhs
 
-        lhs = named_field(node, "left") || node.named_children.first
-        rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
         target = state_target(lhs)
         return unless target && rhs
 
@@ -978,6 +985,8 @@ module Decomplex
           ruby_call_target(node)
         when "call_expression", "method_invocation", "invocation_expression"
           generic_call_target(node)
+        when "attribute"
+          hidden_attribute_call_target(node)
         end
       end
 
@@ -1000,6 +1009,14 @@ module Decomplex
         return nil if callee.kind == "builtin_function" || callee.text.to_s.start_with?("@")
 
         target_from_callee(callee).merge(arguments: [])
+      rescue NoMethodError
+        nil
+      end
+
+      def hidden_attribute_call_target(node)
+        return nil unless next_sibling(node)&.kind == "argument_list"
+
+        target_from_callee(node).merge(arguments: [])
       rescue NoMethodError
         nil
       end

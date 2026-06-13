@@ -46,6 +46,7 @@ module NilKill
           "nil_guards" => Array(raw["nil_guards"]),
           "type_assertions" => Array(raw["type_assertions"]),
           "collections" => Array(raw["collections"]),
+          "language_capabilities" => Hash(raw["language_capabilities"] || {}),
           "language_extensions" => Hash(raw["language_extensions"] || {}),
         }.tap do |out|
           if raw["kind"] == "espalier_static_evidence"
@@ -53,6 +54,7 @@ module NilKill
             out["language_extensions"]["nil_kill_static_evidence"] = {
               "facts" => raw["facts"] || {},
               "summary" => raw["summary"] || {},
+              "language_capabilities" => raw["language_capabilities"] || {},
             }
           end
         end

@@ -3,6 +3,91 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
+  it "publishes language provider capabilities for Ruby, Python, and Zig" do
+    ruby = NilKill::Languages.capability_for("ruby")
+    python = NilKill::Languages.capability_for("python")
+    zig = NilKill::Languages.capability_for("zig")
+
+    expect(ruby).to include("runtime_tracing" => true, "autofix" => true)
+    expect(python).to include("runtime_tracing" => true, "autofix" => false)
+    expect(python.dig("runtime_capabilities", "params")).to be(true)
+    expect(python.dig("runtime_capabilities", "line_coverage")).to be(true)
+    expect(zig).to include("static_analysis" => true, "runtime_tracing" => false)
+    expect(zig["notes"].join).to include("runtime tracing is not implemented")
+  end
+
+  it "keeps Zig runtime collection explicitly unsupported behind the provider API" do
+    provider = NilKill::Languages.provider_for("zig")
+
+    expect {
+      provider.collect_runtime(argv: ["--", "zig", "test", "sample.zig"], root: NilKill::ROOT,
+        output: NilKill::RUNTIME_DIR, targets: ["zig"], append: false)
+    }.to raise_error(NilKill::Languages::UnsupportedRuntimeTracer, /Zig/)
+  end
+
+  it "canonicalizes Python instance fields through the language provider" do
+    provider = NilKill::Languages.provider_for("python")
+    origin = Decomplex::Syntax::StateParamOrigin.new(
+      field: "items",
+      receiver: "self",
+      owner: "Worker",
+      param: "items",
+      file: "src/demo.py",
+      function: "__init__",
+      line: 2,
+      span: nil
+    )
+
+    expect(provider.owned_state_origin?(origin, Set.new)).to be(true)
+    expect(provider.canonical_state_field("items", receiver: "self")).to eq("@items")
+    expect(provider.receiver_state_field("self.items", Set.new)).to eq("@items")
+  end
+
+  it "uses Python provider field policy when building Tree-sitter static evidence" do
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-python-static", NilKill::ROOT) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "worker.py"), <<~PY)
+        class Worker:
+            def __init__(self, items):
+                self.items = items
+
+            def call(self):
+                self.items.append("x")
+      PY
+
+      evidence = NilKill::StaticEvidence.build([src], root: dir)
+
+      expect(evidence.dig("facts", "state_param_origins", "Worker\u0000@items")).to eq(["items"])
+      expect(evidence.dig("facts", "state_protocols", "Worker\u0000@items")).to include("append")
+      expect(evidence.dig("language_capabilities", "python", "runtime_tracing")).to be(true)
+    end
+  end
+
+  it "exposes provider capabilities from trace-spec" do
+    spec = NilKill::Commands::TraceSpecCommand.new([]).spec
+    languages = spec.fetch("language_capabilities").to_h { |cap| [cap.fetch("language"), cap] }
+
+    expect(languages.fetch("python")).to include("runtime_tracing" => true)
+    expect(languages.fetch("zig")).to include("runtime_tracing" => false)
+  end
+
+  it "preserves static language capabilities during v2 canonicalization" do
+    canonical = NilKill::Schema::EvidenceBundle.canonical_static(
+      "kind" => "espalier_static_evidence",
+      "methods" => [],
+      "facts" => {},
+      "summary" => {},
+      "language_capabilities" => {"zig" => NilKill::Languages.capability_for("zig")}
+    )
+
+    expect(canonical.dig("language_capabilities", "zig", "runtime_tracing")).to be(false)
+    expect(canonical.dig("language_extensions", "nil_kill_static_evidence", "language_capabilities", "zig", "runtime_tracing")).to be(false)
+  end
+
   it "collects Python raw trace events through sitecustomize" do
     Dir.mktmpdir("nil-kill-python-tracer", NilKill::ROOT) do |dir|
       src = File.join(dir, "src")

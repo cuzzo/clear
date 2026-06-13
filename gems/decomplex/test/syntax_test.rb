@@ -217,6 +217,28 @@ class SyntaxTest < Minitest::Test
     end
   end
 
+  def test_tree_sitter_python_adapter_extracts_hidden_assignment_and_call_facts
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python structural facts test" unless grammar && File.file?(grammar)
+
+    with_file(<<~PY, ".py") do |path|
+      class Worker:
+          def __init__(self, items):
+              self.items = items
+
+          def call(self):
+              self.items.append("x")
+    PY
+      doc = Decomplex::Syntax.parse(path, parser: "tree_sitter", language: :python)
+
+      assert_includes doc.state_writes.map { |write| [write.receiver, write.field] }, ["self", "items"]
+      assert_includes doc.state_param_origins.map { |origin| [origin.owner, origin.function, origin.receiver, origin.field, origin.param] },
+        ["Worker", "__init__", "self", "items", "items"]
+      assert_includes doc.call_sites.map { |call| [call.owner, call.function, call.receiver, call.message] },
+        ["Worker", "call", "self.items", "append"]
+    end
+  end
+
   def test_tree_sitter_zig_adapter_extracts_structural_facts_when_grammar_is_available
     grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
     skip "set DECOMPLEX_TS_ZIG_PATH to run Zig structural facts test" unless grammar && File.file?(grammar)

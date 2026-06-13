@@ -26,6 +26,7 @@ module NilKill
             "fields" => %w[name kind nullable language display confidence members],
             "kinds" => %w[primitive class struct interface union array map record function null unknown],
           },
+          "language_capabilities" => Languages.capabilities,
         }
       end
     end

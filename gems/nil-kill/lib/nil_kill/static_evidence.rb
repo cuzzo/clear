@@ -23,6 +23,7 @@ module NilKill
 
     def build
       methods = []
+      fields = []
       state_types = {}
       state_protocols = Hash.new { |h, k| h[k] = Set.new }
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
@@ -31,6 +32,7 @@ module NilKill
 
       files.each do |file|
         doc = Decomplex::Syntax.parse(file, parser: "tree_sitter")
+        provider = Languages.provider_for(doc.language)
         facts = doc.adapter.structural_facts(doc)
         rel_path = rel(file)
 
@@ -55,22 +57,25 @@ module NilKill
           signatures[[owner, name].join("\u0000")] = signature unless signature.empty?
         end
 
-        known_states = declared_states_by_owner(facts)
+        known_states = declared_states_by_owner(facts, provider)
         facts[:state_declarations].each do |state|
+          field = provider.declared_state_field(state.field)
+          fields << field_record(doc, rel_path, state, field)
           next if state.type.to_s.empty?
 
-          state_types[state_key(state.owner, state.field)] = state.type.to_s
+          state_types[state_key(state.owner, field)] = state.type.to_s
         end
 
         facts[:state_param_origins].each do |origin|
-          next unless owned_state_origin?(origin, known_states[origin.owner.to_s])
+          next unless provider.owned_state_origin?(origin, known_states[origin.owner.to_s])
           next if %w[self this].include?(origin.param.to_s)
 
-          state_param_origins[state_key(origin.owner, origin.field)].add(origin.param.to_s)
+          field = provider.canonical_state_field(origin.field, receiver: origin.receiver)
+          state_param_origins[state_key(origin.owner, field)].add(origin.param.to_s)
         end
 
         facts[:call_sites].each do |call|
-          state = receiver_state_field(call.receiver, known_states[call.owner.to_s])
+          state = provider.receiver_state_field(call.receiver, known_states[call.owner.to_s])
           next unless state
 
           state_protocols[state_key(call.owner, state)].add(call.message.to_s)
@@ -91,6 +96,7 @@ module NilKill
         "target_exclude_dirs" => NilKill.target_exclude_dirs.map { |dir| rel(dir) },
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
+        "fields" => fields.uniq { |field| field["id"] }.sort_by { |field| [field["path"], field["owner"], field["name"]] },
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "state_types" => Hash[state_types.sort],
@@ -104,6 +110,7 @@ module NilKill
         "summary" => {
           "files" => files.size,
           "methods" => methods.size,
+          "fields" => fields.uniq { |field| field["id"] }.size,
           "signatures" => methods.count { |method| !method.dig("source", "sig").to_s.empty? },
           "state_types" => state_types.size,
           "state_protocols" => state_protocols.size,
@@ -111,6 +118,9 @@ module NilKill
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },
+        "language_capabilities" => languages_for(files).to_h do |language|
+          [language, Languages.capability_for(language)]
+        end,
       }
     end
 
@@ -151,35 +161,32 @@ module NilKill
       }
     end
 
-    def declared_states_by_owner(facts)
+    def declared_states_by_owner(facts, provider)
       index = Hash.new { |h, k| h[k] = Set.new }
-      facts[:state_declarations].each { |state| index[state.owner.to_s].add(state.field.to_s) }
+      facts[:state_declarations].each { |state| index[state.owner.to_s].add(provider.declared_state_field(state.field)) }
       index
-    end
-
-    def owned_state_origin?(origin, known_states)
-      known_states ||= Set.new
-      return true if known_states.include?(origin.field.to_s)
-
-      receiver = origin.receiver.to_s
-      return false if receiver == ".literal"
-
-      receiver == "self" || receiver == "this" || receiver.match?(/\A@[A-Za-z_]\w*(?:\.|\z)/) || receiver.start_with?("self.", "this.")
-    end
-
-    def receiver_state_field(receiver, known_states)
-      known_states ||= Set.new
-      text = receiver.to_s.sub(/\A\*/, "")
-      return nil if text.empty? || text == "self" || text == "this"
-      return text.split(".").first if text.match?(/\A@[A-Za-z_]\w*(?:\.|\z)/)
-      return text.split(".")[1] if text.start_with?("self.") || text.start_with?("this.")
-
-      first = text.split(".").first
-      known_states.include?(first) ? first : nil
     end
 
     def state_key(owner, field)
       [owner.to_s, field.to_s].join("\u0000")
+    end
+
+    def field_record(doc, rel_path, state, field)
+      {
+        "id" => [doc.language, rel_path, state.owner, "field", field].map(&:to_s).join("\u0000"),
+        "language" => doc.language.to_s,
+        "path" => rel_path,
+        "owner" => state.owner.to_s,
+        "name" => field.to_s,
+        "line" => state.line,
+        "span" => state.span,
+        "declared_type" => state.type.to_s.empty? ? nil : state.type.to_s,
+        "static_origin" => "state_declaration",
+      }
+    end
+
+    def languages_for(files)
+      files.map { |file| Decomplex::Syntax.language_for(file).to_s }.uniq.sort
     end
 
     def stringify_set_map(map)
