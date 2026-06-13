@@ -24,6 +24,32 @@ module Decomplex
     module_function
 
     def parse(file, language: nil, parser: ENV.fetch("DECOMPLEX_PARSER", "rubyvm"))
+      normalized_parser = parser.to_s.tr("-", "_")
+      lang = (language || language_for(file)).to_sym
+      key = document_cache_key(file, lang, normalized_parser)
+      document_cache.fetch(key) do
+        document_cache[key] =
+          case normalized_parser
+          when "", "rubyvm", "ruby_vm"
+            RubyVMAdapter.new.parse(file, language: lang)
+          when "tree_sitter", "treesitter"
+            TreeSitterAdapter.new.parse(file, language: lang)
+          else
+            raise ArgumentError, "unknown decomplex parser #{parser.inspect}"
+          end
+      end
+    end
+
+    def document_cache
+      @document_cache ||= {}
+    end
+
+    def document_cache_key(file, language, parser)
+      stat = File.stat(file)
+      [File.expand_path(file), language, parser, stat.size, stat.mtime.to_f]
+    end
+
+    def parse_uncached(file, language: nil, parser: ENV.fetch("DECOMPLEX_PARSER", "rubyvm"))
       case parser.to_s.tr("-", "_")
       when "", "rubyvm", "ruby_vm"
         RubyVMAdapter.new.parse(file, language: language)
@@ -194,12 +220,13 @@ module Decomplex
             document,
             node,
             stack,
-            out,
-            immutable_readers: immutable_readers,
-            immutable_reader_types: immutable_reader_types,
-            type_aliases: type_aliases
-          )
-        end
+          out,
+          immutable_readers: immutable_readers,
+          immutable_reader_types: immutable_reader_types,
+          type_aliases: type_aliases,
+          method_param_types: method_param_types(document.lines)
+        )
+      end
         out
       end
 
@@ -473,6 +500,21 @@ module Decomplex
             span: span(node),
             predicate: decision_predicate(node)
           )
+        when "body_statement"
+          return unless hidden_case?(node)
+
+          patterns = case_patterns(node)
+          return if patterns.size < 2
+
+          out << DecisionSite.new(
+            kind: :case_dispatch,
+            members: patterns,
+            file: document.file,
+            function: current_function(stack),
+            line: line(node),
+            span: span(node),
+            predicate: decision_predicate(node)
+          )
         when "expression_statement"
           return unless hidden_match?(node)
 
@@ -620,6 +662,8 @@ module Decomplex
       end
 
       def decision_predicate(node)
+        return normalize_text(modifier_condition(node).text) if hidden_modifier_if?(node) && modifier_condition(node)
+
         target = named_field(node, "value") || named_field(node, "subject") ||
                  named_field(node, "condition") ||
                  node.named_children.find do |child|
@@ -715,15 +759,28 @@ module Decomplex
         end
       end
 
-      def record_branch_decision(document, node, stack, out, immutable_readers:, immutable_reader_types:, type_aliases:)
+      def record_branch_decision(document, node, stack, out, immutable_readers:, immutable_reader_types:, type_aliases:,
+                                 method_param_types:)
         return unless branch_node?(node)
 
-        cond = named_field(node, "condition") || named_field(node, "value") ||
-               named_field(node, "subject") || node.named_children.first
+        cond = if hidden_modifier_if?(node)
+                 modifier_condition(node)
+               else
+                 named_field(node, "condition") || named_field(node, "value") ||
+                   named_field(node, "subject") || node.named_children.first
+               end
         return unless cond
 
         refs = []
-        collect_state_refs(cond, refs)
+        collect_state_refs(
+          cond,
+          refs,
+          defn: current_function(stack),
+          immutable_readers: immutable_readers,
+          immutable_reader_types: immutable_reader_types,
+          type_aliases: type_aliases,
+          method_param_types: method_param_types
+        )
         refs.uniq!
         refs.sort!
         return if refs.empty?
@@ -747,8 +804,10 @@ module Decomplex
         case node.kind
         when "while", "until", "while_statement", "for", "for_statement"
           record_loop_arm(document, node, stack, out)
-        when "case", "switch_statement", "expression_switch_statement", "switch_expression",
+        when "case", "body_statement", "switch_statement", "expression_switch_statement", "switch_expression",
              "match_statement", "match_expression"
+          return if node.kind == "body_statement" && !hidden_case?(node)
+
           record_case_arms(document, node, stack, out)
         end
       end
@@ -823,12 +882,13 @@ module Decomplex
       end
 
       def branch_node?(node)
-        BRANCH_KINDS.include?(node.kind) || hidden_match?(node) || hidden_if?(node)
+        BRANCH_KINDS.include?(node.kind) || hidden_match?(node) || hidden_if?(node) ||
+          hidden_modifier_if?(node) || hidden_case?(node)
       end
 
       def if_node?(node)
         %w[if unless if_statement if_expression if_modifier unless_modifier].include?(node.kind) ||
-          hidden_if?(node)
+          hidden_if?(node) || hidden_modifier_if?(node)
       end
 
       def hidden_if?(node)
@@ -838,19 +898,131 @@ module Decomplex
         first_token_kind(node) == "if"
       end
 
+      def hidden_modifier_if?(node)
+        return false unless ts_node?(node)
+        return false unless node.kind == "body_statement"
+
+        seen_named = false
+        node.children.any? do |child|
+          seen_named ||= child.named?
+          seen_named && !child.named? && %w[if unless].include?(child.kind)
+        end
+      end
+
+      def modifier_condition(node)
+        node.named_children.last
+      end
+
+      def hidden_case?(node)
+        return false unless ts_node?(node)
+        return false unless node.kind == "body_statement"
+
+        first_token_kind(node) == "case"
+      end
+
       def first_token_kind(node)
         node.children.first&.kind.to_s
       end
 
-      def collect_state_refs(node, refs)
+      def collect_state_refs(node, refs, defn:, immutable_readers:, immutable_reader_types:, type_aliases:,
+                             method_param_types:)
         if node.kind == "instance_variable" || node.kind == "global_variable"
           refs << node.text
         elsif (target = state_read_target(node))
           unless namespace_receiver?(target[:receiver])
-            refs << (target[:receiver] == "self" ? target[:field] : "#{target[:receiver]}.#{target[:field]}")
+            unless immutable_state_read?(target, defn, immutable_readers, immutable_reader_types, type_aliases, method_param_types)
+              refs << (target[:receiver] == "self" ? target[:field] : "#{target[:receiver]}.#{target[:field]}")
+            end
           end
         end
-        node.children.each { |child| collect_state_refs(child, refs) if ts_node?(child) }
+        node.children.each do |child|
+          collect_state_refs(
+            child,
+            refs,
+            defn: defn,
+            immutable_readers: immutable_readers,
+            immutable_reader_types: immutable_reader_types,
+            type_aliases: type_aliases,
+            method_param_types: method_param_types
+          ) if ts_node?(child)
+        end
+      end
+
+      def immutable_state_read?(target, defn, immutable_readers, immutable_reader_types, type_aliases, method_param_types)
+        receiver = target[:receiver].to_s
+        field = target[:field].to_sym
+        return false if receiver.empty? || receiver == "self"
+
+        parts = receiver.split(".")
+        param = parts.shift
+        type = method_param_types.fetch(defn, {})[param]
+        return false unless type
+
+        parts.each do |reader|
+          type = immutable_reader_result_type(type, reader.to_sym, immutable_reader_types, type_aliases)
+          return false unless type
+        end
+        immutable_reader?(type, field, immutable_readers, type_aliases)
+      end
+
+      def immutable_reader?(type_name, field, immutable_readers, type_aliases)
+        resolved = resolve_type_alias(type_name, type_aliases)
+        short = resolved.to_s.split("::").last
+        readers = if immutable_readers.key?(resolved)
+                    immutable_readers[resolved]
+                  else
+                    immutable_readers[short]
+                  end
+        readers&.include?(field) || false
+      end
+
+      def immutable_reader_result_type(type_name, field, immutable_reader_types, type_aliases)
+        resolved = resolve_type_alias(type_name, type_aliases)
+        short = resolved.to_s.split("::").last
+        reader_types = if immutable_reader_types.key?(resolved)
+                         immutable_reader_types[resolved]
+                       else
+                         immutable_reader_types[short]
+                       end
+        reader_types && reader_types[field]
+      end
+
+      def resolve_type_alias(type_name, type_aliases)
+        seen = Set.new
+        current = type_name.to_s
+        loop do
+          break current if seen.include?(current)
+
+          seen.add(current)
+          target = type_aliases[current] || type_aliases[current.split("::").last]
+          break current unless target
+
+          current = target
+        end
+      end
+
+      def method_param_types(lines)
+        types_by_method = {}
+        pending_sig = +""
+        lines.each do |line|
+          pending_sig << line if pending_sig_active?(line, pending_sig)
+          if (match = line.match(/\A\s*def\s+([A-Za-z_]\w*[!?=]?)(?:\s|\(|$)/))
+            types_by_method[match[1]] = sig_param_types(pending_sig)
+            pending_sig = +""
+          end
+        end
+        types_by_method
+      end
+
+      def pending_sig_active?(line, pending_sig)
+        !pending_sig.empty? || line.match?(/\A\s*sig\b/)
+      end
+
+      def sig_param_types(sig_source)
+        match = sig_source.match(/params\s*\((.*?)\)/m)
+        return {} unless match
+
+        match[1].scan(/([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)/).to_h
       end
 
       def current_params(stack)

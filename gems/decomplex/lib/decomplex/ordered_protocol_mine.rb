@@ -338,11 +338,14 @@ module Decomplex
         case node.type
         when :IASGN
           writes << normalize_state(node.children[0].to_s)
+        when :LASGN
+          collect_index_write(node, writes)
         when :IVAR
           reads << normalize_state(node.children[0].to_s)
         when :ATTRASGN
           collect_attr_write(node, writes)
         when :CALL, :OPCALL
+          collect_bare_reader_comparison(node, reads)
           collect_receiver_mutation(node, writes)
           collect_self_reader(node, reads)
         when :VCALL, :FCALL
@@ -362,6 +365,21 @@ module Decomplex
         elsif (receiver_token = state_receiver_token(receiver))
           writes << "#{receiver_token}.#{attr}"
         end
+      end
+
+      def collect_index_write(node, writes)
+        name = node.children[0].to_s
+        return unless name.match?(/\A@?[A-Za-z_]\w*\[/)
+
+        writes << normalize_state(name.sub(/\[.*\]\z/, ""))
+      end
+
+      def collect_bare_reader_comparison(node, reads)
+        receiver, mid = node.children
+        return unless %w[== != === < <= > >=].include?(mid.to_s)
+        return unless Ast.node?(receiver) && receiver.type == :LVAR
+
+        reads << normalize_state(receiver.children[0].to_s)
       end
 
       def collect_receiver_mutation(node, writes)
@@ -411,6 +429,8 @@ module Decomplex
         when :SELF
           "self"
         when :VCALL, :FCALL
+          normalize_state(node.children[0].to_s)
+        when :LVAR
           normalize_state(node.children[0].to_s)
         when :CALL
           return nil unless no_args?(node)
