@@ -153,4 +153,40 @@ class CoverageGapTest < Minitest::Test
       end
     end
   end
+
+  def test_coverage_py_json_uses_python_branch_arcs
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/worker.py", <<~PY)
+        def choose(x):
+            if x:
+                return 1
+            else:
+                return 2
+      PY
+      coverage = "#{dir}/coverage.json"
+      File.write(coverage, JSON.dump(
+        "meta" => { "format" => 2, "branch_coverage" => true },
+        "files" => {
+          "src/worker.py" => {
+            "executed_lines" => [1, 2, 3],
+            "missing_lines" => [5],
+            "executed_branches" => [[2, 3]],
+            "missing_branches" => [[2, 5]]
+          }
+        }
+      ))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        gap = Boobytrap::CoverageGap.from_resultset(coverage, root: dir).fetch("src/worker.py")
+
+        assert_equal 2, gap.total
+        assert_equal 1, gap.uncovered
+        assert_in_delta 0.5, gap.gap, 1e-9
+      end
+    end
+  end
 end

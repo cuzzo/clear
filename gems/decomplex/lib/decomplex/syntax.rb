@@ -826,7 +826,7 @@ module Decomplex
 
       def hidden_if?(node)
         return false unless ts_node?(node)
-        return false unless node.kind == "expression_statement"
+        return false unless %w[expression_statement block].include?(node.kind)
 
         first_token_kind(node) == "if"
       end

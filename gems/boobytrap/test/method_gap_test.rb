@@ -233,4 +233,45 @@ class MethodGapTest < Minitest::Test
       end
     end
   end
+
+  def test_coverage_py_json_python_method_dark_branches
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/worker.py", <<~PY)
+        def choose(x):
+            value = 0
+            if x:
+                value = 1
+            else:
+                value = 2
+            return value
+      PY
+      coverage = "#{dir}/coverage.json"
+      File.write(coverage, JSON.dump(
+        "meta" => { "format" => 2, "branch_coverage" => true },
+        "files" => {
+          "src/worker.py" => {
+            "executed_lines" => [1, 2, 3, 4, 7],
+            "missing_lines" => [6],
+            "executed_branches" => [[3, 4]],
+            "missing_branches" => [[3, 6]]
+          }
+        }
+      ))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        rows = Boobytrap::MethodGap.from_resultset(coverage, root: dir, min_lines: 1)
+        choose = rows.find { |row| row.name == "choose" }
+
+        refute_nil choose
+        assert_equal "src/worker.py", choose.file
+        assert_operator choose.covered_lines, :>, 0
+        assert_operator choose.missed_lines, :>, 0
+        assert_equal 1, choose.uncovered_branches
+      end
+    end
+  end
 end

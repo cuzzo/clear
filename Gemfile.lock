@@ -1,7 +1,14 @@
 PATH
+  remote: gems/decomplex
+  specs:
+    decomplex (0.0.1)
+      tree_sitter (~> 0.1)
+
+PATH
   remote: gems/nil-kill
   specs:
     nil-kill (0.1.0)
+      decomplex (= 0.0.1)
       parlour
       prism (>= 1.6)
       rbs-trace
@@ -245,6 +252,7 @@ GEM
       tsort
     thor (1.5.0)
     thread_safe (0.3.6)
+    tree_sitter (0.1.0-x86_64-linux)
     tsort (0.2.0)
     tty-cursor (0.7.1)
     tty-reader (0.9.0)
@@ -274,6 +282,7 @@ DEPENDENCIES
   byebug (~> 12.0)
   csv
   debride
+  decomplex!
   flay
   flog
   msgpack (~> 1.7, >= 1.7.2)

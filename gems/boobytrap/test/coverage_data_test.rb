@@ -183,4 +183,88 @@ class CoverageDataTest < Minitest::Test
       assert_equal 0, coverage.line_hits(2)
     end
   end
+
+  def test_provider_capabilities_advertise_zig_branch_gap
+    zig = Boobytrap::CoverageProviders.capability_for("zig")
+    python = Boobytrap::CoverageProviders.capability_for("python")
+
+    assert_equal "zig", zig.language
+    assert_equal true, zig.line_coverage
+    assert_equal false, zig.branch_coverage
+    assert_includes zig.notes, "Exact branch-arm coverage needs"
+
+    assert_equal "python", python.language
+    assert_equal true, python.line_coverage
+    assert_equal true, python.branch_coverage
+  end
+
+  def test_zig_provider_owns_runtime_path_fallback_for_kcov_codecov
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/zig/runtime")
+      FileUtils.mkdir_p("#{dir}/coverage")
+      file = "#{dir}/zig/runtime/a.zig"
+      File.write(file, "fn a() void {\n    return;\n}\n")
+      File.write("#{dir}/coverage/codecov.json", JSON.dump(
+        "coverage" => { "runtime/a.zig" => { "1" => 1, "2" => 0 } }
+      ))
+
+      dataset = Boobytrap::CoverageData.load("#{dir}/coverage/codecov.json", root: dir)
+      coverage = dataset[file]
+
+      assert_equal "kcov codecov", dataset.label
+      assert_equal ["zig/runtime/a.zig"], dataset.covered_files(root: dir)
+      assert_equal "zig", coverage.language
+      assert_equal 1, coverage.line_hits(1)
+      assert_equal 0, coverage.line_hits(2)
+    end
+  end
+
+  def test_loads_coverage_py_json_with_branch_arcs_when_tree_sitter_grammar_is_available
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.py"
+      File.write(file, <<~PY)
+        def choose(x):
+            if x:
+                return 1
+            else:
+                return 2
+      PY
+      coverage_path = "#{dir}/coverage.json"
+      File.write(coverage_path, JSON.dump(
+        "meta" => {
+          "format" => 2,
+          "branch_coverage" => true,
+          "version" => "7.0"
+        },
+        "files" => {
+          "src/worker.py" => {
+            "executed_lines" => [1, 2, 3],
+            "missing_lines" => [5],
+            "executed_branches" => [[2, 3]],
+            "missing_branches" => [[2, 5]]
+          }
+        }
+      ))
+
+      dataset = Boobytrap::CoverageData.load(coverage_path, root: dir)
+      coverage = dataset[file]
+      assert Boobytrap::CoverageData.load_decomplex_syntax
+      doc = Decomplex::Syntax.parse(file, parser: "tree_sitter")
+      arms = Boobytrap::CoverageData.branch_arm_coverage(coverage, doc.branch_arms)
+
+      assert_equal "coverage.py JSON", dataset.label
+      assert_equal ["src/worker.py"], dataset.covered_files(root: dir)
+      assert_equal "python", coverage.language
+      assert coverage.branch_arm_coverage?
+      assert_equal 1, coverage.line_hits(1)
+      assert_equal 0, coverage.line_hits(5)
+      assert_equal 2, arms.size
+      assert_equal ["else"], arms.reject(&:covered).map { |arm| arm.arm.member }
+      assert arms.all? { |arm| arm.source == :coverage_py }
+    end
+  end
 end

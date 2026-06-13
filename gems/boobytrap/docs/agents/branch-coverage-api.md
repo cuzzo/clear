@@ -26,6 +26,34 @@ matching when the language grammar is configured. The global
 `DECOMPLEX_PARSER=tree_sitter` switch is still used for static fallback
 analysis when no coverage file is present.
 
+## Provider Boundary
+
+Coverage inputs are normalized by provider plugins under
+`boobytrap/coverage_providers/`. `Boobytrap::CoverageData.load` remains
+the public entry point, but internally it asks the registry which
+provider owns the artifact.
+
+Format providers parse concrete coverage files:
+
+- `simplecov.rb`: Ruby SimpleCov `.resultset.json`.
+- `kcov.rb`: kcov Cobertura XML and codecov JSON line coverage.
+- `native_branch_json.rb`: already-normalized `nil-kill.branch-coverage`.
+- `python.rb`: coverage.py JSON, including branch arcs.
+
+Language providers advertise support levels and language-specific path
+quirks:
+
+- `python.rb`: line coverage plus branch coverage via coverage.py arcs.
+- `zig.rb`: line coverage via kcov/DWARF only; exact branch-arm coverage
+  is intentionally marked unsupported until a Zig instrumentation
+  provider exists.
+
+Adding a language should start with a small provider that declares
+capability. It is valid for a provider to support line coverage while
+returning `branch_coverage: false`; SlopCop and Boobytrap will still use
+Tree-sitter line projection where possible, but reports must not present
+that as exact native branch coverage.
+
 ## Branch Catalog
 
 Providers should first read a static branch catalog:
@@ -102,9 +130,17 @@ by `kind`, `label`, `decision_span`, and `arm_span`.
 
 ## Zig Status
 
-Zig now works through this API when a runner can emit exact arm hits.
-The implemented tests generate a Zig Tree-sitter branch catalog, mark one
-arm covered and one arm dark, then verify:
+Zig has a provider, but exact source branch coverage is not yet
+implemented. The provider advertises:
+
+- `line_coverage: true`
+- `branch_coverage: false`
+- `native_branch_coverage: false`
+
+Zig line coverage works through kcov. Exact branch-arm coverage works
+only if an external tool emits the generic `nil-kill.branch-coverage`
+JSON. The implemented tests generate a Zig Tree-sitter branch catalog,
+mark one arm covered and one arm dark, then verify:
 
 - Boobytrap file branch gaps use the native arm counts.
 - Boobytrap method gaps report the dark Zig branch.
@@ -118,16 +154,15 @@ unset.
 This does not create a Zig runtime instrumentation tool. It defines the
 small contract that such a tool needs to emit.
 
-## Adding Python
+## Python Status
 
-Python should be straightforward because `coverage.py --branch` already
-collects branch/arcs. A Python provider would:
+Python has a provider backed by coverage.py JSON. coverage.py branch
+coverage records source-line to destination-line arcs; the provider maps
+an arc to a Tree-sitter branch arm when:
 
-1. Generate the Tree-sitter branch catalog for the target files.
-2. Run tests with `coverage.py --branch`.
-3. Map coverage arcs to catalog arms.
-4. Emit `nil-kill.branch-coverage` JSON.
+1. The arc source line is the Tree-sitter decision line.
+2. The arc destination line falls inside that arm's source span.
 
-The hard part is arc-to-arm mapping, not SlopCop or Boobytrap
-integration. Once the JSON is emitted, both gems use it through the same
-normalization layer as Zig.
+The provider emits normalized branch-arm hits in memory, so SlopCop and
+Boobytrap consume Python branch gaps through the same
+`CoverageData.branch_arm_coverage` path as any native branch provider.

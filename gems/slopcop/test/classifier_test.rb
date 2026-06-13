@@ -323,6 +323,45 @@ class ClassifierTest < Minitest::Test
     end
   end
 
+  def test_coverage_py_json_python_classification_uses_branch_arcs
+    grammar = ENV["DECOMPLEX_TS_PYTHON_PATH"]
+    skip "set DECOMPLEX_TS_PYTHON_PATH to run Python branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.py"
+      File.write(file, <<~PY)
+        def choose(x):
+            if x:
+                return 1
+            else:
+                return 2
+      PY
+      coverage = "#{dir}/coverage.json"
+      File.write(coverage, JSON.dump(
+        "meta" => { "format" => 2, "branch_coverage" => true },
+        "files" => {
+          "src/worker.py" => {
+            "executed_lines" => [1, 2, 3],
+            "missing_lines" => [5],
+            "executed_branches" => [[2, 3]],
+            "missing_branches" => [[2, 5]]
+          }
+        }
+      ))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        arms = C.classify_file(coverage, file, root: dir)
+
+        refute_empty arms
+        assert arms.all? { |arm| arm.source == :coverage_py }
+        assert_equal ["choose"], arms.map(&:defn)
+        assert_equal [:genuine], arms.map(&:category)
+        assert_equal [4], arms.map(&:line)
+      end
+    end
+  end
+
   def test_kcov_covered_zig_file_does_not_fall_back_to_static
     grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
     skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)

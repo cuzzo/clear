@@ -83,35 +83,20 @@ module Boobytrap
     module_function
 
     def load(path, root:)
-      resolved = resolve(path)
-      return Dataset.new(path: path, files: {}) unless resolved && ::File.file?(resolved)
+      resolved, provider = CoverageProviders.resolve(path, root: root)
+      return empty_dataset(path) unless resolved && provider && ::File.file?(resolved)
 
       root = ::File.expand_path(root)
       cache_key = [realish_path(resolved), root]
-      cache[cache_key] ||= load_uncached(resolved, root: root)
+      cache[cache_key] ||= provider.load(resolved, root: root)
+    end
+
+    def empty_dataset(path)
+      Dataset.new(path: path, files: {})
     end
 
     def resolve(path)
-      return nil if path.nil? || path.to_s.empty?
-
-      expanded = ::File.expand_path(path)
-      return expanded unless ::File.directory?(expanded)
-
-      candidates = [
-        "branch-coverage.json",
-        "nil-kill-branch-coverage.json",
-        "merged/kcov-merged/cobertura.xml",
-        "kcov-merged/cobertura.xml",
-        "cobertura.xml",
-        "cov.xml",
-        "merged/kcov-merged/codecov.json",
-        "kcov-merged/codecov.json",
-        "codecov.json"
-      ]
-      candidates.map { |rel| ::File.join(expanded, rel) }.find { |candidate| ::File.file?(candidate) } ||
-        Dir[::File.join(expanded, "**", "kcov-merged", "cobertura.xml")].sort.first ||
-        Dir[::File.join(expanded, "**", "cobertura.xml")].sort.first ||
-        Dir[::File.join(expanded, "**", "codecov.json")].sort.first
+      CoverageProviders.resolve(path, root: Dir.pwd).first
     end
 
     def relpath(abs, root)
@@ -126,6 +111,7 @@ module Boobytrap
       when :kcov_cobertura then "kcov Cobertura"
       when :kcov_codecov then "kcov codecov"
       when :nil_kill_branch then "Nil-Kill branch coverage"
+      when :coverage_py then "coverage.py JSON"
       else format.to_s
       end
     end
@@ -133,6 +119,7 @@ module Boobytrap
     def branch_source(format)
       case format
       when :nil_kill_branch then :native_branch
+      when :coverage_py then :coverage_py
       when :kcov_cobertura, :kcov_codecov then :kcov
       when :simplecov then :coverage
       else format
@@ -452,7 +439,12 @@ module Boobytrap
       candidates = []
       source_roots.each { |source_root| candidates << ::File.expand_path(file, source_root) }
       candidates << ::File.expand_path(file, root)
-      candidates << ::File.expand_path(::File.join("zig", file), root)
+      candidates.concat(CoverageProviders.path_candidates(
+                          file,
+                          root: root,
+                          source_roots: source_roots,
+                          summary: summary
+                        ))
       found = candidates.find { |candidate| ::File.file?(candidate) }
       return found if found
 
@@ -601,3 +593,5 @@ module Boobytrap
     end
   end
 end
+
+require_relative "coverage_providers"

@@ -1,11 +1,16 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require "bundler/setup"
 require "tempfile"
 require_relative "../lib/decomplex"
 
 class FlaySimilarityTest < Minitest::Test
+  def setup
+    require "flay"
+  rescue LoadError
+    skip "flay gem is not available"
+  end
+
   def scan(ruby, mass: 8, fuzzy: 1)
     f = Tempfile.new(["flay-sim", ".rb"])
     f.write(ruby)

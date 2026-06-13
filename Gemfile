@@ -32,6 +32,7 @@ group :development do
   gem 'tapioca', require: false
 
   # Local path while nil-kill is extracted as a standalone gem.
+  gem 'decomplex', path: 'gems/decomplex', require: false
   gem 'nil-kill', path: 'gems/nil-kill', require: false
 
   # Rubocop with the rubocop-sorbet plugin. We don't run general
