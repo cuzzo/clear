@@ -1,0 +1,20 @@
+diff --git a/src/backends/fsm_wrapper_emitter.rb b/src/backends/fsm_wrapper_emitter.rb
+index 000000000..000000000 100644
+--- a/src/backends/fsm_wrapper_emitter.rb
++++ b/src/backends/fsm_wrapper_emitter.rb
+@@ -414,13 +414,13 @@ module FsmWrapperEmitter
+     when MIR::FsmTailYield
+       [
+         "__ctx_#{ctx_id}.step = #{t.next_step};",
+-        "return .{ .#{t.yield_reason} = {} };",
++        "return .{ .Done = {} };",
+       ].join("\n")
+     when MIR::FsmTailRegisterYield
+       [
+         "if (#{render_fsm_expr(t.register_expr)}) {",
+         "    __ctx_#{ctx_id}.step = #{t.next_step};",
+-        "    return .{ .#{t.yield_reason} = {} };",
++        "    return .{ .Done = {} };",
+         "}",
+         "__ctx_#{ctx_id}.step = #{t.next_step};",
+         "continue :__sw;",

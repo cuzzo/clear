@@ -75,6 +75,15 @@ Active mutants:
 | `lower_if_cond_pending_leak` | `cond_or_fallback` | fail |
 | `cleanup_required_finalizer` | `mir_checker_negative_matrix` | unexpected pass |
 | `loop_frame_scope_stamp` | `loop_local_method_temp` | mir-error |
+| `mir_checker_linear_use_after_transfer` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_inline_alloc_mismatch` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_aggregate_child_alloc` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_cleanup_source_owns` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_call_contracts` | `mir_checker_negative_matrix` | unexpected pass |
+| `capture_promise_handle_by_value` | `promise_handle_capture` | mir-error |
+| `bg_lifetime_all_captures_independent` | `lifetimed_return` | unexpected pass |
+| `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |
+| `fsm_suspend_returns_done` | `fsm_suspension_matrix` | fail |
 
 ## Layout
 

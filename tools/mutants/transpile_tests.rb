@@ -27,6 +27,30 @@ module TranspileTestMutants
       patch: File.join(PATCH_DIR, 'lower_if_cond_pending_leak.patch'),
       files: ['transpile-tests/or_fallback_in_if_condition_hoist.cht']
     ),
+    Mutant.new(
+      name: :escape_struct_field_walker,
+      description: 'Disable receiver-escape walkers for wrapped loop-local collection sinks.',
+      patch: File.join(PATCH_DIR, 'escape_struct_field_walker.patch'),
+      files: ['transpile-tests/200_escape_callee_string_to_list.cht']
+    ),
+    Mutant.new(
+      name: :loop_frame_scope_stamp,
+      description: 'Force loop-local frame allocations to lower as function-scoped.',
+      patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
+      files: ['transpile-tests/while_loop_with_local_split_no_rewind.cht']
+    ),
+    Mutant.new(
+      name: :union_match_drops_payload_capture,
+      description: 'Render union match arms without payload captures.',
+      patch: File.join(PATCH_DIR, 'union_match_drops_payload_capture.patch'),
+      files: ['transpile-tests/174_union_match_struct_fields.cht']
+    ),
+    Mutant.new(
+      name: :fsm_suspend_returns_done,
+      description: 'Return Done instead of yielding from FSM suspend tails.',
+      patch: File.join(PATCH_DIR, 'fsm_suspend_returns_done.patch'),
+      files: ['transpile-tests/256_sleep_int_literal.cht']
+    ),
   ].freeze, T::Array[Mutant])
 
   class Options < T::Struct

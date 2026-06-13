@@ -65,19 +65,24 @@ The transpile gate applies targeted compiler mutations and runs the precise
 `zig/` so `@import("runtime/...")` resolves the same way as normal
 transpile-tests.
 
-Current active mutant:
+Current active mutants:
 
 | mutant | killed by |
 |---|---|
 | `lower_if_cond_pending_leak` | `transpile-tests/or_fallback_in_if_condition_hoist.cht` |
+| `escape_struct_field_walker` | `transpile-tests/200_escape_callee_string_to_list.cht` |
+| `loop_frame_scope_stamp` | `transpile-tests/while_loop_with_local_split_no_rewind.cht` |
+| `union_match_drops_payload_capture` | `transpile-tests/174_union_match_struct_fields.cht` |
+| `fsm_suspend_returns_done` | `transpile-tests/256_sleep_int_literal.cht` |
 
 Current local validation:
 
 ```sh
-bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty --out /tmp/clear-transpile-mutants-final
+bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty --out /tmp/clear-transpile-mutants-a-level-3
 ```
 
-Result: baseline passed, mutated run failed, mutant killed.
+Result: all five mutants were killed. Every baseline transpile-test passed; every
+mutated run failed.
 
 ## Fuzz
 
@@ -96,14 +101,23 @@ Active mutants:
 | `lower_if_cond_pending_leak` | `cond_or_fallback` | fail |
 | `cleanup_required_finalizer` | `mir_checker_negative_matrix` | unexpected pass |
 | `loop_frame_scope_stamp` | `loop_local_method_temp` | mir-error |
+| `mir_checker_linear_use_after_transfer` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_inline_alloc_mismatch` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_aggregate_child_alloc` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_cleanup_source_owns` | `mir_checker_negative_matrix` | unexpected pass |
+| `mir_checker_call_contracts` | `mir_checker_negative_matrix` | unexpected pass |
+| `capture_promise_handle_by_value` | `promise_handle_capture` | mir-error |
+| `bg_lifetime_all_captures_independent` | `lifetimed_return` | unexpected pass |
+| `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |
+| `fsm_suspend_returns_done` | `fsm_suspension_matrix` | fail |
 
 Current local validation:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --allow-dirty --out /tmp/clear-fuzz-mutants-final
+bundle exec ruby tools/fuzz/mutants/run.rb --all --allow-dirty --out /tmp/clear-fuzz-mutants-a-level-2
 ```
 
-Result: all five mutants were killed. Every baseline fuzz run reported zero
+Result: all fourteen mutants were killed. Every baseline fuzz run reported zero
 failures, leaks, MIR errors, and unexpected passes.
 
 ## Validation

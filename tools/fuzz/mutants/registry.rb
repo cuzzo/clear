@@ -1,23 +1,29 @@
+# typed: strict
 # Targeted safety mutants for the fuzz harness.
 #
 # These are not broad source-level mutations. Each entry deliberately disables
 # one ownership-safety rule and names the fuzz templates that should notice.
 
+require 'sorbet-runtime'
+
 module FuzzMutants
-  ROOT = File.expand_path('../../..', __dir__)
-  PATCH_DIR = File.expand_path('patches', __dir__)
+  extend T::Sig
 
-  Mutant = Struct.new(
-    :name,
-    :description,
-    :invariant,
-    :patch,
-    :templates,
-    :kill,
-    keyword_init: true
-  )
+  KillSpec = T.type_alias { T::Hash[Symbol, T.any(Symbol, Integer)] }
 
-  REGISTRY = [
+  class Mutant < T::Struct
+    const :name, Symbol
+    const :description, String
+    const :invariant, Symbol
+    const :patch, String
+    const :templates, T::Array[Symbol]
+    const :kill, KillSpec
+  end
+
+  ROOT = T.let(File.expand_path('../../..', __dir__), String)
+  PATCH_DIR = T.let(File.expand_path('patches', __dir__), String)
+
+  REGISTRY = T.let([
     Mutant.new(
       name: :allow_with_alias_return,
       description: 'Disable RETURN rejection for WITH-scoped aliases.',
@@ -70,8 +76,95 @@ module FuzzMutants
       templates: [:loop_local_method_temp],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),
-  ].freeze
+    Mutant.new(
+      name: :mir_checker_linear_use_after_transfer,
+      description: 'Disable MIRChecker linear read-after-transfer detection. ' \
+                   'Malformed MIR that reads a binding after TransferMark must ' \
+                   'be rejected by the negative MIR matrix.',
+      invariant: :ownership_use_after_transfer,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_linear_use_after_transfer.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :mir_checker_inline_alloc_mismatch,
+      description: 'Disable MIRChecker inline allocator mismatch detection. ' \
+                   'Allocator-bearing structural operations must match the ' \
+                   'target binding placement.',
+      invariant: :inline_alloc_mismatch,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_inline_alloc_mismatch.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :mir_checker_aggregate_child_alloc,
+      description: 'Disable aggregate child allocator mismatch detection. ' \
+                   'Owned children cannot be stored into aggregates with an ' \
+                   'incoherent allocator story.',
+      invariant: :aggregate_child_alloc_mismatch,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_aggregate_child_alloc_mismatch.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :mir_checker_cleanup_source_owns,
+      description: 'Treat borrowed/non-owning MIR lets as cleanup owners. ' \
+                   'The negative matrix must reject cleanup emitted for ' \
+                   'borrowed field/index values.',
+      invariant: :cleanup_source_owns_value,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_cleanup_source_owns.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :mir_checker_call_contracts,
+      description: 'Disable MIRChecker callable-contract validation. Calls ' \
+                   'without typed ownership/effect contracts must not pass.',
+      invariant: :mir_call_contracts,
+      patch: File.join(PATCH_DIR, 'mir_checker_skip_call_contracts.patch'),
+      templates: [:mir_checker_negative_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :capture_promise_handle_by_value,
+      description: 'Stop classifying affine promise handles as moved into BG ' \
+                   'captures. Reusing the handle after capture must be rejected.',
+      invariant: :promise_handle_capture_consumes,
+      patch: File.join(PATCH_DIR, 'capture_promise_handle_by_value.patch'),
+      templates: [:promise_handle_capture],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :bg_lifetime_all_captures_independent,
+      description: 'Erase BG-handle lifetime sources. Handles tied to local, ' \
+                   'locked, atomic, or multiowned captures must not be returned ' \
+                   'or stored past their source scope.',
+      invariant: :bg_handle_lifetime_escape,
+      patch: File.join(PATCH_DIR, 'bg_lifetime_all_captures_independent.patch'),
+      templates: [:lifetimed_return],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :union_match_drops_payload_capture,
+      description: 'Render union match arms without payload captures. The union ' \
+                   'cleanup/match matrix must fail if payload values are not bound.',
+      invariant: :union_payload_match_binding,
+      patch: File.join(PATCH_DIR, 'union_match_drops_payload_capture.patch'),
+      templates: [:union_lowering_cleanup_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :fsm_suspend_returns_done,
+      description: 'Return Done instead of yielding from FSM suspend tails. ' \
+                   'FSM suspension cells must fail if suspend/resume state is lost.',
+      invariant: :fsm_suspend_resume,
+      patch: File.join(PATCH_DIR, 'fsm_suspend_returns_done.patch'),
+      templates: [:fsm_suspension_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+  ].freeze, T::Array[Mutant])
 
+  sig { params(name: T.any(String, Symbol)).returns(T.nilable(Mutant)) }
   def self.find(name)
     REGISTRY.find { |m| m.name == name.to_sym }
   end
