@@ -32,7 +32,7 @@ module Boobytrap
       has_coverage = coverage && !coverage.empty?
       covered_files = if has_coverage
                         filter_paths(coverage.covered_files(root: @repo).to_h { |rel| [rel, true] }).keys.select do |rel|
-                          DecomplexRisk.supported_source?(::File.join(@repo, rel))
+                          DecomplexRisk.tree_sitter_supported_source?(::File.join(@repo, rel))
                         end
                       else
                         []
@@ -304,7 +304,7 @@ module Boobytrap
               end
       files = files.select do |rel|
         in_scope?(rel) && current_file?(rel) &&
-          DecomplexRisk.supported_source?(::File.join(@repo, rel))
+          DecomplexRisk.tree_sitter_supported_source?(::File.join(@repo, rel))
       end
       files = current_source_files if DecomplexRisk.tree_sitter? && files.empty?
       findings = DecomplexRisk.state_branch_density(

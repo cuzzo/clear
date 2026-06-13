@@ -191,9 +191,7 @@ module Boobytrap
     end
 
     def method_ranges_for_file(abs, lines)
-      return method_ranges(lines) unless Boobytrap::DecomplexRisk.tree_sitter?
-      return method_ranges(lines) unless Boobytrap::DecomplexRisk.load_decomplex_syntax
-      return method_ranges(lines) unless Boobytrap::DecomplexRisk.supported_source?(abs)
+      return method_ranges(lines) unless tree_sitter_source_for_coverage?(abs)
 
       doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
       ranges = doc.function_defs.map do |fn|
@@ -252,10 +250,8 @@ module Boobytrap
     end
 
     def tree_sitter_branch_misses_by_line(abs, coverage)
-      return {} unless coverage.line_coverage?
-      return {} unless Boobytrap::DecomplexRisk.tree_sitter?
-      return {} unless Boobytrap::DecomplexRisk.load_decomplex_syntax
-      return {} unless Boobytrap::DecomplexRisk.supported_source?(abs)
+      return {} unless coverage.line_coverage? || coverage.branch_arm_coverage?
+      return {} unless tree_sitter_source_for_coverage?(abs)
 
       doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
       CoverageData.dark_branch_misses_by_line(coverage, doc.branch_arms)
@@ -278,6 +274,13 @@ module Boobytrap
       doc.branch_arms.each_with_object(Hash.new(0)) { |arm, out| out[arm.line] += 1 }
     rescue LoadError, StandardError
       {}
+    end
+
+    def tree_sitter_source_for_coverage?(abs)
+      return false unless Boobytrap::DecomplexRisk.load_decomplex_syntax
+      return false unless Boobytrap::DecomplexRisk.tree_sitter_supported_source?(abs)
+
+      Boobytrap::DecomplexRisk.tree_sitter? || ::File.extname(abs).downcase != ".rb"
     end
 
     def executable_source_line?(line)

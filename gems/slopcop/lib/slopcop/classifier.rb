@@ -123,7 +123,7 @@ module SlopCop
       file_coverage = coverage_for(resultset, abspath, root: root)
       branches = file_coverage&.branches || {}
       if branches.empty?
-        if tree_sitter? && file_coverage&.line_coverage?
+        if tree_sitter_coverage_file?(abspath, file_coverage)
           return classify_line_coverage_file(
             abspath,
             file_coverage,
@@ -376,6 +376,16 @@ module SlopCop
 
     def tree_sitter?
       ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+    end
+
+    def tree_sitter_coverage_file?(abspath, file_coverage)
+      return false unless file_coverage&.line_coverage? || file_coverage&.branch_arm_coverage?
+      return false unless load_decomplex_syntax
+      return false unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+
+      tree_sitter? || ::File.extname(abspath).downcase != ".rb"
+    rescue LoadError, StandardError
+      false
     end
 
     def load_decomplex_syntax

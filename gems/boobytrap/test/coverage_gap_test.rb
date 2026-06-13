@@ -119,4 +119,38 @@ class CoverageGapTest < Minitest::Test
       end
     end
   end
+
+  def test_nil_kill_branch_coverage_uses_native_zig_arm_hits
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig native branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/worker.zig", <<~ZIG)
+        fn run(x: i32) bool {
+            if (x > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+      ZIG
+      catalog = Boobytrap::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
+      file = catalog.fetch("files").first
+      file["lines"] = { "1" => 1, "2" => 1, "3" => 1, "5" => 0 }
+      file["arms"] = file.fetch("arms").map do |arm|
+        arm.merge("hits" => (arm["label"] == "then" ? 1 : 0))
+      end
+      coverage = "#{dir}/branch-coverage.json"
+      File.write(coverage, JSON.dump(catalog.merge("format" => "nil-kill.branch-coverage")))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        gap = Boobytrap::CoverageGap.from_resultset(coverage, root: dir).fetch("src/worker.zig")
+
+        assert_equal file["arms"].size, gap.total
+        assert_equal 1, gap.uncovered
+        assert_in_delta 0.5, gap.gap, 1e-9
+      end
+    end
+  end
 end

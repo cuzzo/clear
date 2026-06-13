@@ -13,10 +13,13 @@ module Boobytrap
       return {} if files.empty?
       return {} unless load_decomplex
 
-      from_sections(Decomplex::Report.new(files).sections_data, root: root)
+      sections = with_tree_sitter_for_non_ruby(files) do
+        Decomplex::Report.new(files).sections_data
+      end
+      from_sections(sections, root: root)
     rescue ArgumentError
       raise
-    rescue StandardError => e
+    rescue SyntaxError, StandardError => e
       warn "boobytrap: decomplex risk unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       {}
     end
@@ -25,10 +28,13 @@ module Boobytrap
       return [] if files.empty?
       return [] unless load_decomplex
 
-      Decomplex::StateBranchDensity.scan(files).findings.map do |h|
+      findings = with_tree_sitter_for_non_ruby(files) do
+        Decomplex::StateBranchDensity.scan(files).findings
+      end
+      findings.map do |h|
         h.merge(file: relpath(h[:file], root))
       end
-    rescue StandardError => e
+    rescue SyntaxError, StandardError => e
       warn "boobytrap: decomplex state-branch density unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       []
     end
@@ -75,16 +81,35 @@ module Boobytrap
       ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
     end
 
-    def supported_exts
+    def supported_exts(parser: nil)
       if load_decomplex_syntax
-        Decomplex::Syntax.supported_exts(parser: tree_sitter? ? "tree_sitter" : "rubyvm")
+        selected = parser || (tree_sitter? ? "tree_sitter" : "rubyvm")
+        Decomplex::Syntax.supported_exts(parser: selected)
       else
         [".rb"]
       end
     end
 
-    def supported_source?(file)
-      supported_exts.include?(::File.extname(file).downcase)
+    def supported_source?(file, parser: nil)
+      supported_exts(parser: parser).include?(::File.extname(file).downcase)
+    end
+
+    def tree_sitter_supported_source?(file)
+      supported_source?(file, parser: "tree_sitter")
+    end
+
+    def with_tree_sitter_for_non_ruby(files)
+      changed = false
+      return yield unless files.any? { |file| ::File.extname(file).downcase != ".rb" }
+
+      previous = ENV["DECOMPLEX_PARSER"]
+      ENV["DECOMPLEX_PARSER"] = "tree_sitter"
+      changed = true
+      yield
+    ensure
+      if changed
+        previous.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous
+      end
     end
 
     def relpath(file, root)

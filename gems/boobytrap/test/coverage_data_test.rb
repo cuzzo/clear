@@ -7,6 +7,14 @@ require "fileutils"
 require_relative "../lib/boobytrap"
 
 class CoverageDataTest < Minitest::Test
+  def with_env(key, value)
+    old = ENV[key]
+    value.nil? ? ENV.delete(key) : ENV[key] = value
+    yield
+  ensure
+    old.nil? ? ENV.delete(key) : ENV[key] = old
+  end
+
   def test_loads_simplecov_resultset_and_merges_entries
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
@@ -78,6 +86,78 @@ class CoverageDataTest < Minitest::Test
       assert_equal ["src/a.zig"], dataset.covered_files(root: dir)
       assert_equal 1, coverage.line_hits(1)
       assert_equal 0, coverage.line_hits(2)
+    end
+  end
+
+  def test_loads_nil_kill_branch_coverage_json
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/a.zig"
+      File.write(file, "fn a(x: bool) bool { return x; }\n")
+      path = "#{dir}/branch-coverage.json"
+      File.write(path, JSON.dump(
+        "schema_version" => 1,
+        "format" => "nil-kill.branch-coverage",
+        "root" => dir,
+        "files" => [
+          {
+            "path" => "src/a.zig",
+            "language" => "zig",
+            "lines" => { "1" => 1 },
+            "arms" => [
+              {
+                "branch_id" => "b1",
+                "arm_id" => "a1",
+                "kind" => "if",
+                "label" => "then",
+                "decision_span" => [1, 0, 1, 20],
+                "arm_span" => [1, 12, 1, 18],
+                "hits" => 0
+              }
+            ]
+          }
+        ]
+      ))
+
+      dataset = Boobytrap::CoverageData.load(path, root: dir)
+      coverage = dataset[file]
+
+      assert_equal "Nil-Kill branch coverage", dataset.label
+      assert_equal ["src/a.zig"], dataset.covered_files(root: dir)
+      assert coverage.branch_arm_coverage?
+      assert_equal 1, coverage.line_hits(1)
+      assert_equal :native_branch, Boobytrap::CoverageData.branch_source(coverage.format)
+      assert_equal "a1", coverage.branch_arms.first.arm_id
+      assert_equal 0, coverage.branch_arms.first.hits
+    end
+  end
+
+  def test_builds_zig_branch_catalog_when_tree_sitter_grammar_is_available
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig branch catalog test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/worker.zig", <<~ZIG)
+        fn run(x: i32) bool {
+            if (x > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+      ZIG
+
+      catalog = with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        Boobytrap::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
+      end
+      file = catalog.fetch("files").first
+
+      assert_equal "nil-kill.branch-catalog", catalog["format"]
+      assert_equal "src/worker.zig", file["path"]
+      assert_equal "zig", file["language"]
+      assert_operator file.fetch("arms").size, :>=, 2
+      assert file.fetch("arms").all? { |arm| arm["arm_id"].to_s.include?("\0") }
     end
   end
 

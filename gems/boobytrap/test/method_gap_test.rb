@@ -191,4 +191,46 @@ class MethodGapTest < Minitest::Test
       end
     end
   end
+
+  def test_nil_kill_branch_coverage_zig_method_dark_branches
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig native branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/worker.zig", <<~ZIG)
+        const Worker = struct {
+            count: i32 = 0,
+
+            fn run(self: *Worker, x: i32) bool {
+                if (x > 0) {
+                    return true;
+                } else {
+                    self.count += 1;
+                    return false;
+                }
+            }
+        };
+      ZIG
+      catalog = Boobytrap::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
+      file = catalog.fetch("files").first
+      file["lines"] = { "4" => 1, "5" => 1, "6" => 1, "8" => 0, "9" => 0 }
+      file["arms"] = file.fetch("arms").map do |arm|
+        arm.merge("hits" => (arm["label"] == "then" ? 1 : 0))
+      end
+      coverage = "#{dir}/branch-coverage.json"
+      File.write(coverage, JSON.dump(catalog.merge("format" => "nil-kill.branch-coverage")))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        rows = Boobytrap::MethodGap.from_resultset(coverage, root: dir, min_lines: 1)
+        run = rows.find { |row| row.name == "run" }
+
+        refute_nil run
+        assert_equal "src/worker.zig", run.file
+        assert_operator run.covered_lines, :>, 0
+        assert_operator run.missed_lines, :>, 0
+        assert_equal 1, run.uncovered_branches
+      end
+    end
+  end
 end

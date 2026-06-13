@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "rexml/document"
 require "rexml/xpath"
@@ -11,18 +12,28 @@ module Boobytrap
   # - SimpleCov .resultset.json: line hits plus Ruby branch tuples.
   # - kcov Cobertura XML: line hits, including zero-hit executable lines.
   # - kcov codecov.json: line hits keyed by source-relative path.
+  # - Nil-Kill branch coverage JSON: language-neutral Tree-sitter branch
+  #   arm hit counts keyed by source spans / branch arm ids.
   #
   # kcov does not provide SimpleCov's Ruby branch tuple shape. Consumers
   # that need branch semantics can pass Tree-sitter branch arms to
-  # branch_arm_coverage; this layer owns the line-hit interpretation.
+  # branch_arm_coverage. If the input provides native arm hits, those
+  # are used directly; otherwise this layer falls back to line-hit
+  # inference.
   module CoverageData
-    FileCoverage = Struct.new(:file, :lines, :branches, :format, keyword_init: true) do
+    FileCoverage = Struct.new(:file, :lines, :branches, :format, :branch_arms,
+                              :source_path, :language,
+                              keyword_init: true) do
       def line_coverage?
         lines.any? { |hit| !hit.nil? }
       end
 
       def branch_coverage?
         !branches.empty?
+      end
+
+      def branch_arm_coverage?
+        !branch_arms.to_a.empty?
       end
 
       def line_known?(line)
@@ -65,6 +76,9 @@ module Boobytrap
 
     ArmCoverage = Struct.new(:arm, :covered, :hits, :executable_lines, :source,
                              keyword_init: true)
+    NativeBranchArm = Struct.new(:branch_id, :arm_id, :kind, :member,
+                                 :decision_span, :arm_span, :hits,
+                                 keyword_init: true)
 
     module_function
 
@@ -84,6 +98,8 @@ module Boobytrap
       return expanded unless ::File.directory?(expanded)
 
       candidates = [
+        "branch-coverage.json",
+        "nil-kill-branch-coverage.json",
         "merged/kcov-merged/cobertura.xml",
         "kcov-merged/cobertura.xml",
         "cobertura.xml",
@@ -109,19 +125,90 @@ module Boobytrap
       when :simplecov then "SimpleCov"
       when :kcov_cobertura then "kcov Cobertura"
       when :kcov_codecov then "kcov codecov"
+      when :nil_kill_branch then "Nil-Kill branch coverage"
       else format.to_s
       end
     end
 
     def branch_source(format)
       case format
+      when :nil_kill_branch then :native_branch
       when :kcov_cobertura, :kcov_codecov then :kcov
       when :simplecov then :coverage
       else format
       end
     end
 
+    def branch_catalog(files, root:)
+      return empty_branch_catalog(root) unless load_decomplex_syntax
+
+      root = ::File.expand_path(root)
+      entries = Array(files).filter_map do |file|
+        abs = ::File.expand_path(file.to_s.start_with?("/") ? file : ::File.join(root, file))
+        next unless ::File.file?(abs)
+
+        branch_catalog_file(abs, root: root)
+      end
+      empty_branch_catalog(root).merge("files" => entries)
+    end
+
+    def branch_catalog_file(file, root:)
+      doc = Decomplex::Syntax.parse(file, parser: "tree_sitter")
+      rel = relpath(file, root)
+      language = doc.language.to_s
+      {
+        "path" => rel,
+        "language" => language,
+        "digest" => "sha256:#{Digest::SHA256.file(file).hexdigest}",
+        "arms" => doc.branch_arms.map { |arm| branch_catalog_arm(rel, language, arm) }
+      }
+    end
+
+    def branch_catalog_arm(path, language, arm)
+      branch_id = branch_id(path: path, language: language, arm: arm)
+      {
+        "branch_id" => branch_id,
+        "arm_id" => arm_id(branch_id: branch_id, arm: arm),
+        "kind" => arm.kind.to_s,
+        "label" => arm.member.to_s,
+        "decision_line" => arm.decision_line,
+        "decision_span" => arm.decision_span,
+        "arm_line" => arm.line,
+        "arm_span" => arm.span
+      }
+    end
+
+    def empty_branch_catalog(root)
+      {
+        "schema_version" => 1,
+        "format" => "nil-kill.branch-catalog",
+        "root" => ::File.expand_path(root),
+        "files" => []
+      }
+    end
+
+    def branch_id(path:, language:, arm:)
+      [
+        language.to_s,
+        path.to_s,
+        span_key(arm.decision_span),
+        arm.kind
+      ].join("\0")
+    end
+
+    def arm_id(branch_id:, arm:)
+      [
+        branch_id,
+        arm.member,
+        span_key(arm.span)
+      ].join("\0")
+    end
+
     def branch_arm_coverage(file_coverage, branch_arms)
+      if file_coverage&.branch_arm_coverage?
+        return native_branch_arm_coverage(file_coverage, branch_arms)
+      end
+
       return [] unless file_coverage&.line_coverage?
 
       branch_arms.filter_map do |arm|
@@ -156,6 +243,30 @@ module Boobytrap
       (first..last).select { |line| file_coverage.line_known?(line) }
     end
 
+    def native_branch_arm_coverage(file_coverage, branch_arms)
+      index = native_branch_arm_index(file_coverage)
+      branch_arms.filter_map do |arm|
+        native = index[native_arm_signature(arm)] ||
+                 index[static_arm_id(file_coverage, arm)]
+        next unless native
+
+        ArmCoverage.new(
+          arm: arm,
+          covered: native.hits.to_i.positive?,
+          hits: native.hits.to_i,
+          executable_lines: [arm.line],
+          source: branch_source(file_coverage.format)
+        )
+      end
+    end
+
+    def native_branch_arm_index(file_coverage)
+      file_coverage.branch_arms.each_with_object({}) do |native, index|
+        index[native_arm_signature(native)] = native
+        index[native.arm_id] = native unless native.arm_id.to_s.empty?
+      end
+    end
+
     def load_uncached(path, root:)
       case ::File.extname(path).downcase
       when ".xml"
@@ -173,6 +284,8 @@ module Boobytrap
       data = JSON.parse(::File.read(path))
       if simplecov_resultset?(data)
         load_simplecov(path, data, root: root)
+      elsif nil_kill_branch_coverage?(data)
+        load_nil_kill_branch_coverage(path, data, root: root)
       elsif kcov_codecov?(data)
         load_kcov_codecov(path, data, root: root)
       else
@@ -191,6 +304,12 @@ module Boobytrap
         data["coverage"].values.all? { |lines| lines.is_a?(Hash) }
     end
 
+    def nil_kill_branch_coverage?(data)
+      data.is_a?(Hash) &&
+        data["format"].to_s == "nil-kill.branch-coverage" &&
+        data["files"].is_a?(Array)
+    end
+
     def load_simplecov(path, data, root:)
       files = {}
       data.each_value do |entry|
@@ -202,6 +321,9 @@ module Boobytrap
             file: abs,
             lines: [],
             branches: {},
+            branch_arms: [],
+            source_path: CoverageData.relpath(abs, root),
+            language: language_for(abs),
             format: :simplecov
           ))
           merge_lines!(dst.lines, cov["lines"] || [])
@@ -236,7 +358,36 @@ module Boobytrap
           file: abs,
           lines: lines,
           branches: {},
+          branch_arms: [],
+          source_path: CoverageData.relpath(abs, root),
+          language: language_for(abs),
           format: :kcov_cobertura
+        )
+      end
+      Dataset.new(path: path, files: files)
+    end
+
+    def load_nil_kill_branch_coverage(path, data, root:)
+      coverage_root = data["root"].to_s.empty? ? root : ::File.expand_path(data["root"])
+      files = {}
+      Array(data["files"]).each do |entry|
+        rel = (entry["path"] || entry["file"] || entry["filename"]).to_s
+        next if rel.empty?
+
+        abs = normalize_file(rel, root: root, source_roots: [coverage_root])
+        native_arms = Array(entry["arms"] || entry["branch_arms"]).filter_map do |arm|
+          normalize_native_branch_arm(arm)
+        end
+        next if native_arms.empty?
+
+        files[abs] = FileCoverage.new(
+          file: abs,
+          lines: normalize_native_lines(entry["lines"]),
+          branches: {},
+          branch_arms: native_arms,
+          source_path: rel,
+          language: (entry["language"] || language_for(abs)).to_s,
+          format: :nil_kill_branch
         )
       end
       Dataset.new(path: path, files: files)
@@ -260,6 +411,9 @@ module Boobytrap
           file: abs,
           lines: lines,
           branches: {},
+          branch_arms: [],
+          source_path: CoverageData.relpath(abs, root),
+          language: language_for(abs),
           format: :kcov_codecov
         )
       end
@@ -329,6 +483,100 @@ module Boobytrap
       end
     end
 
+    def normalize_native_lines(value)
+      case value
+      when Array
+        value.map { |hit| hit.nil? ? nil : normalized_hit_count(hit) }
+      when Hash
+        lines = []
+        value.each do |line, hit|
+          number = line.to_i
+          next unless number.positive?
+
+          lines[number - 1] = normalized_hit_count(hit)
+        end
+        lines
+      else
+        []
+      end
+    end
+
+    def normalize_native_branch_arm(arm)
+      return nil unless arm.is_a?(Hash)
+
+      arm_span = normalize_span(arm["arm_span"] || arm["span"])
+      decision_span = normalize_span(arm["decision_span"])
+      return nil unless arm_span && decision_span
+
+      NativeBranchArm.new(
+        branch_id: arm["branch_id"].to_s,
+        arm_id: arm["arm_id"].to_s,
+        kind: (arm["kind"] || "branch").to_s,
+        member: (arm["member"] || arm["label"] || arm["arm"]).to_s,
+        decision_span: decision_span,
+        arm_span: arm_span,
+        hits: normalized_hit_count(arm["hits"] || arm["count"] || arm["sample_count"])
+      )
+    end
+
+    def normalize_span(value)
+      span = Array(value).map(&:to_i)
+      return nil unless span.size == 4
+      return nil unless span[0].positive? && span[2] >= span[0]
+
+      span
+    end
+
+    def native_arm_signature(arm)
+      [
+        arm.kind.to_s,
+        (arm.respond_to?(:member) ? arm.member : nil).to_s,
+        Array(arm.decision_span).map(&:to_i),
+        Array(arm.respond_to?(:arm_span) ? arm.arm_span : arm.span).map(&:to_i)
+      ]
+    end
+
+    def static_arm_id(file_coverage, arm)
+      rel = file_coverage.source_path.to_s
+      rel = ::File.basename(file_coverage.file) if rel.empty?
+      branch_id = branch_id(
+        path: rel,
+        language: file_coverage.language.to_s.empty? ? arm_language(arm) : file_coverage.language,
+        arm: arm
+      )
+      arm_id(branch_id: branch_id, arm: arm)
+    end
+
+    def arm_language(arm)
+      case ::File.extname(arm.file.to_s).downcase
+      when ".zig" then "zig"
+      when ".py" then "python"
+      when ".js", ".jsx", ".mjs", ".cjs" then "javascript"
+      when ".ts", ".tsx" then "typescript"
+      when ".go" then "go"
+      when ".rs" then "rust"
+      when ".rb" then "ruby"
+      else "unknown"
+      end
+    end
+
+    def language_for(file)
+      case ::File.extname(file.to_s).downcase
+      when ".zig" then "zig"
+      when ".py" then "python"
+      when ".js", ".jsx", ".mjs", ".cjs" then "javascript"
+      when ".ts", ".tsx" then "typescript"
+      when ".go" then "go"
+      when ".rs" then "rust"
+      when ".rb" then "ruby"
+      else "unknown"
+      end
+    end
+
+    def span_key(span)
+      Array(span).map(&:to_i).join(":")
+    end
+
     def realish_path(path)
       ::File.realpath(path)
     rescue Errno::ENOENT
@@ -337,6 +585,19 @@ module Boobytrap
 
     def cache
       @cache ||= {}
+    end
+
+    def load_decomplex_syntax
+      return true if defined?(Decomplex::Syntax)
+
+      require "decomplex/syntax"
+      true
+    rescue LoadError
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      return false unless ::File.file?("#{sibling}.rb")
+
+      require sibling
+      true
     end
   end
 end

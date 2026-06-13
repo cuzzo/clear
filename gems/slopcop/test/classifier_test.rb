@@ -280,6 +280,49 @@ class ClassifierTest < Minitest::Test
     end
   end
 
+  def test_nil_kill_branch_coverage_zig_classification_uses_native_dark_arms
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig native branch coverage test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        const Worker = struct {
+            count: i32 = 0,
+
+            fn run(self: *Worker, x: i32) bool {
+                if (x > 0) {
+                    return true;
+                } else {
+                    self.count += 1;
+                    return false;
+                }
+            }
+        };
+      ZIG
+      catalog = Boobytrap::CoverageData.branch_catalog(["src/worker.zig"], root: dir)
+      file_entry = catalog.fetch("files").first
+      file_entry["lines"] = { "4" => 1, "5" => 1, "6" => 1, "8" => 0, "9" => 0 }
+      file_entry["arms"] = file_entry.fetch("arms").map do |arm|
+        arm.merge("hits" => (arm["label"] == "then" ? 1 : 0))
+      end
+      else_line = file_entry.fetch("arms").find { |arm| arm["label"] == "else" }.fetch("arm_line")
+      coverage = "#{dir}/branch-coverage.json"
+      File.write(coverage, JSON.dump(catalog.merge("format" => "nil-kill.branch-coverage")))
+
+      with_env("DECOMPLEX_PARSER", nil) do
+        arms = C.classify_file(coverage, file, root: dir)
+
+        refute_empty arms
+        assert arms.all? { |arm| arm.source == :native_branch }
+        assert_includes arms.map(&:defn), "run"
+        assert_includes arms.map(&:category), :genuine
+        assert_equal [else_line], arms.map(&:line)
+      end
+    end
+  end
+
   def test_kcov_covered_zig_file_does_not_fall_back_to_static
     grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
     skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
