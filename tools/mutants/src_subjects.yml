@@ -172,8 +172,8 @@
     - spec/borrow_checker_spec.rb
     - spec/borrowed_escape_spec.rb
     - spec/wildcard_borrow_spec.rb
-  baseline: 70.2
-  hard_gate: false
+  baseline: 86.0
+  hard_gate: true
   max_timeouts: 20
 - subject: BorrowChecker.check
   expression: BorrowChecker.check
@@ -396,6 +396,15 @@
     - spec/escape_analysis_spec.rb
     - spec/propagate_caller_sync_spec.rb
   baseline: 91.48
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.mark_takes_args_heap!
+  expression: EscapeAnalysis.mark_takes_args_heap!
+  require: semantic/escape_analysis
+  specs:
+    - spec/escape_analysis_spec.rb
+    - spec/propagate_caller_sync_spec.rb
+  baseline: 87.6
   hard_gate: true
   max_timeouts: 0
 - subject: MIRLowering#alloc_expr
@@ -922,6 +931,39 @@
   baseline: 94.92
   hard_gate: true
   max_timeouts: 0
+- subject: CleanupClassifier.binding_cleanup_facts
+  expression: CleanupClassifier.binding_cleanup_facts
+  require: backends/transpiler
+  specs:
+    - spec/cleanup_plan_spec.rb
+    - spec/caller_cleanup_spec.rb
+    - spec/fsm_cleanup_invariant_spec.rb
+    - spec/observable_cleanup_codegen_spec.rb
+  baseline: 86.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: CleanupClassifier.stamp_field_pre_cleanups!
+  expression: CleanupClassifier.stamp_field_pre_cleanups!
+  require: backends/transpiler
+  specs:
+    - spec/cleanup_plan_spec.rb
+    - spec/caller_cleanup_spec.rb
+    - spec/fsm_cleanup_invariant_spec.rb
+    - spec/observable_cleanup_codegen_spec.rb
+  baseline: 86.9
+  hard_gate: true
+  max_timeouts: 0
+- subject: CleanupClassifier.walk_moved_source_guards
+  expression: CleanupClassifier.walk_moved_source_guards
+  require: backends/transpiler
+  specs:
+    - spec/cleanup_plan_spec.rb
+    - spec/caller_cleanup_spec.rb
+    - spec/fsm_cleanup_invariant_spec.rb
+    - spec/observable_cleanup_codegen_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
 - subject: CleanupClassifier
   require: backends/transpiler
   specs:
@@ -958,6 +1000,7 @@
   - spec/atomic_type_spec.rb
   - spec/observable_type_spec.rb
   - spec/type_promotion_spec.rb
+  - spec/type_ownership_contract_spec.rb
   - spec/type_provenance_spec.rb
   - spec/type_zig_type_gap_spec.rb
   - spec/versioned_type_spec.rb
@@ -968,5 +1011,33 @@
   require: backends/transpiler
   spec: spec/binary_operator_type_check_spec.rb
   baseline: 96.05
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#heap_ptr?
+  expression: Type#heap_ptr?
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 98.3
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#needs_escape_promotion?
+  expression: Type#needs_escape_promotion?
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#success_type
+  expression: Type#success_type
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#value_payload_type
+  expression: Type#value_payload_type
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 88.4
   hard_gate: true
   max_timeouts: 0

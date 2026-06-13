@@ -75,6 +75,13 @@ RSpec.describe CleanupClassifier do
     type
   end
 
+  def field_type_with_cleanup(needs_cleanup:, recursive_cleanup:)
+    type = Type.new(:Blob)
+    type.define_singleton_method(:needs_cleanup?) { |_lookup| needs_cleanup }
+    type.define_singleton_method(:recursive_cleanup_shape?) { |_lookup| recursive_cleanup }
+    type
+  end
+
   def heap_storage_node(value = nil)
     node = OpenStruct.new(value: value)
     node.define_singleton_method(:heap_storage?) { true }
@@ -574,6 +581,75 @@ RSpec.describe CleanupClassifier do
         schema_lookup: schema_lookup_for,
       )
       expect(heap_assign.field_pre_cleanup).to eq(:heap)
+    end
+
+    it "stamps cleanup-bearing fields with the owner allocator and ignores non-field statements" do
+      literal = AST::Literal.new(tok, :STRING, "next", :rodata)
+      plain_assign = AST::Assignment.new(tok, cleanup_identifier("plain"), literal)
+      frame_field = AST::GetField.new(tok, cleanup_identifier("frame_box", storage: :frame), "label")
+      frame_field.full_type = Type.new(:String)
+      frame_assign = AST::Assignment.new(tok, frame_field, literal)
+      heap_field = AST::GetField.new(tok, cleanup_identifier("heap_box", storage: :heap), "label")
+      heap_field.full_type = Type.new(:String)
+      heap_assign = AST::Assignment.new(tok, heap_field, literal)
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        "frame_box" => CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: false),
+        "heap_box" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      )
+
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [literal, plain_assign, frame_assign, heap_assign],
+        facts,
+        schema_lookup: schema_lookup_for,
+      )
+
+      expect(plain_assign.field_pre_cleanup).to be_nil
+      expect(frame_assign.field_pre_cleanup).to eq(:frame)
+      expect(heap_assign.field_pre_cleanup).to eq(:heap)
+    end
+
+    it "does not treat auto-lock alone as cleanup for non-string fields" do
+      field = AST::GetField.new(tok, cleanup_identifier("locked_box"), "count")
+      field.full_type = Type.new(:Int64)
+      assign = AST::Assignment.new(tok, field, AST::Literal.new(tok, :INT64, 1, nil))
+      assign.auto_lock = true
+
+      CleanupClassifier.stamp_field_pre_cleanups!(
+        [assign],
+        CleanupClassifier::FrozenCleanupFacts.from_bindings({}),
+        schema_lookup: schema_lookup_for,
+      )
+
+      expect(assign.field_pre_cleanup).to be_nil
+    end
+
+    it "uses owner cleanup when the field directly needs cleanup without recursive shape" do
+      field = AST::GetField.new(tok, cleanup_identifier("box", storage: :frame), "payload")
+      field.full_type = field_type_with_cleanup(needs_cleanup: true, recursive_cleanup: false)
+      assign = AST::Assignment.new(tok, field, AST::Literal.new(tok, :INT64, 1, nil))
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        "box" => CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: false),
+      )
+
+      CleanupClassifier.stamp_field_pre_cleanups!([assign], facts, schema_lookup: schema_lookup_for)
+
+      expect(assign.field_pre_cleanup).to eq(:frame)
+    end
+
+    it "walks nested bodies when stamping field pre-cleanups" do
+      literal = AST::Literal.new(tok, :STRING, "next", :rodata)
+      field = AST::GetField.new(tok, cleanup_identifier("box", storage: :heap), "label")
+      field.full_type = Type.new(:String)
+      assign = AST::Assignment.new(tok, field, literal)
+      condition = AST::Literal.new(tok, :TRUE, true, nil)
+      branch = AST::IfStatement.new(tok, condition, [assign], [], [], [])
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        "box" => CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false),
+      )
+
+      CleanupClassifier.stamp_field_pre_cleanups!([branch], facts, schema_lookup: schema_lookup_for)
+
+      expect(assign.field_pre_cleanup).to eq(:heap)
     end
 
     it "covers defensive no-cleanup fallback and transferred payload recipes" do

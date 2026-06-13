@@ -632,7 +632,6 @@ module EscapeAnalysis
   private_class_method def self.mark_takes_args_heap!(args, params, schema_lookup)
     params.each_with_index do |param, idx|
       arg = args[idx]
-      next unless arg
       next unless param.takes || symbol_heap?(param.symbol)
       arg_type = arg.is_a?(AST::Locatable) ? arg.full_type!(context: "TAKES argument") : nil
       next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||

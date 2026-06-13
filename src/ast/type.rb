@@ -1938,8 +1938,9 @@ class Type
   # outlive its allocator region.
   sig { returns(T::Boolean) }
   def heap_ptr?
-    return !!(wrapped_type&.heap_ptr?) if optional?
-    string? || indirect? || tense_observable? || collection? || (array? && !fixed? && !string?)
+    return T.must(wrapped_type).heap_ptr? if optional?
+
+    string? || indirect? || tense_observable? || collection? || (array? && !fixed?)
   end
 
   sig { returns(T::Boolean) }

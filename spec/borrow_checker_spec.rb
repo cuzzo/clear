@@ -23,10 +23,10 @@ RSpec.describe BorrowChecker do
     node
   end
 
-  def direct_borrow_errors(body)
+  def direct_borrow_errors(body, source_node: borrowed_identifier("u"), capability: :BORROWED)
     cap = AST::Capability.new(
-      capability: :BORROWED,
-      var_node: borrowed_identifier("u"),
+      capability: capability,
+      var_node: source_node,
       alias: "ref",
       alias_mutable: false,
       guard_expr: nil,
@@ -76,6 +76,28 @@ RSpec.describe BorrowChecker do
         .and_call_original
 
       expect(BorrowChecker.check(fn_node, schema_lookup: schema_lookup)).to eq([])
+    end
+  end
+
+  describe BorrowChecker::BorrowState do
+    it "tracks stacked immutable and mutable borrows per root without leaking to other roots" do
+      empty = described_class.empty
+      one_shared = empty.add("u", :immutable)
+      two_shared = one_shared.add("u", :immutable)
+      mutable_other = two_shared.add("v", :mutable)
+
+      expect(empty).to be_empty
+      expect(one_shared).not_to be_empty
+      expect(two_shared.kind_for("u")).to eq(:immutable)
+      expect(two_shared.mutable?("u")).to eq(false)
+      expect(two_shared.conflicts_with?("u", :immutable)).to eq(false)
+      expect(two_shared.conflicts_with?("u", :mutable)).to eq(true)
+      expect(mutable_other.kind_for("v")).to eq(:mutable)
+      expect(mutable_other.mutable?("v")).to eq(true)
+      expect(mutable_other.conflicts_with?("v", :immutable)).to eq(true)
+      expect(mutable_other.kind_for("missing")).to be_nil
+      expect(mutable_other.mutable?("missing")).to eq(false)
+      expect(mutable_other.conflicts_with?("missing", :mutable)).to eq(false)
     end
   end
 
@@ -291,6 +313,7 @@ RSpec.describe BorrowChecker do
       expect(errors.length).to eq(1)
       expect(errors.first).to include("MOVE_WHILE_BORROWED")
       expect(errors.first).to include("u")
+      expect(errors.first).to end_with("(line 1)")
     end
 
     it "catches standalone GIVE while the source is borrowed" do
@@ -299,6 +322,16 @@ RSpec.describe BorrowChecker do
       expect(errors.length).to eq(1)
       expect(errors.first).to include("MOVE_WHILE_BORROWED")
       expect(errors.first).to include("u")
+      expect(errors.first).to end_with("(line 1)")
+    end
+
+    it "omits line information when the source token has no line" do
+      no_line_token = Lexer::Token.new(:VAR_ID, "u", nil, 1)
+      move = AST::MoveNode.new(no_line_token, borrowed_identifier("u"))
+
+      errors = direct_borrow_errors([move])
+      expect(errors.length).to eq(1)
+      expect(errors.first).not_to include("(line")
     end
 
     it "catches BG resource captures while the source is borrowed" do
@@ -306,6 +339,25 @@ RSpec.describe BorrowChecker do
       bg.capture_analysis = double(resource_captures: Set["u"])
 
       errors = direct_borrow_errors([bg])
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
+    it "catches a bare function-call GIVE statement while the source is borrowed" do
+      errors = check_errors(<<~CLEAR)
+        FN consume(TAKES u: User @indirect) RETURNS Void ->
+          RETURN;
+        END
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          u: User @indirect = User{ id: 1 };
+          WITH BORROWED u AS ref {
+            consume(GIVE u);
+          }
+          RETURN;
+        END
+      CLEAR
       expect(errors.length).to eq(1)
       expect(errors.first).to include("MOVE_WHILE_BORROWED")
       expect(errors.first).to include("u")
@@ -379,20 +431,6 @@ RSpec.describe BorrowChecker do
       expect(errors.first).to include("u")
     end
 
-    it "walks SHARE nodes while looking for explicit moved identifiers" do
-      token = Lexer::Token.new(:VAR_ID, "u", 9, 7)
-      ident = AST::Identifier.new(token, "u")
-      ident.full_type = Type.new(:User)
-      ident.was_moved = true
-      share = AST::ShareNode.new(token, ident)
-      fn = AST::FunctionDef.new(token, "main", [], [], Type.new(:Void), nil, [], [], nil, :private, [], false)
-      checker = BorrowChecker.new(fn, schema_lookup: nil)
-      seen = []
-
-      checker.send(:walk_for_was_moved, share) { |node| seen << node.name.to_s }
-      expect(seen).to eq(["u"])
-    end
-
     it "allows GIVE on @list inside WITH BORROWED (CopyNode - frame stays alive)" do
       errors = check_errors(<<~CLEAR)
         FN consume(TAKES items: Int64[]) RETURNS Int64 ->
@@ -430,6 +468,23 @@ RSpec.describe BorrowChecker do
       CLEAR
       expect(errors.length).to eq(1)
       expect(errors.first).to include("MOVE_WHILE_BORROWED")
+    end
+
+    it "treats field borrows as active borrows of the root owner" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        STRUCT Box { user: User }
+        FN main() RETURNS Void ->
+          b = Box{ user: User{ id: 1 } };
+          WITH BORROWED b.user AS ref {
+            moved = b;
+          }
+          RETURN;
+        END
+      CLEAR
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("b")
     end
   end
 

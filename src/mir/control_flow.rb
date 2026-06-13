@@ -1871,9 +1871,9 @@ class BorrowChecker
   private
 
   # Extract the root variable name from a capability's var_node.
-  sig { params(var_node: AST::Identifier).returns(T.nilable(String)) }
+  sig { params(var_node: AST::Node).returns(T.nilable(String)) }
   def cap_source_name(var_node)
-    AST.root_identifier(var_node)&.name&.to_s
+    AST.root_identifier(var_node)&.name
   end
 
   sig { params(token: Lexer::Token).returns(String) }
@@ -1923,7 +1923,7 @@ class BorrowChecker
 
     CapabilityPlan.require_for(stmt).all.each do |cap|
       var_node = cap.var_node
-      source = var_node.is_a?(AST::Identifier) ? cap_source_name(var_node) : nil
+      source = cap_source_name(var_node)
       next unless source
 
       # Only RESTRICT and BORROWED create compile-time borrows.
@@ -1946,28 +1946,23 @@ class BorrowChecker
     end
 
     check_stmts(stmt.body, body_state)
-    nil
   end
 
   # Check if any identifier being moved in a binding RHS is currently borrowed.
   # Mirrors OwnershipDataflow#collect_binding_move_places.
-  sig { params(expr: AST::Node, token: Lexer::Token, state: BorrowState).void }
+  sig { params(expr: T.nilable(AST::Node), token: Lexer::Token, state: BorrowState).void }
   def check_binding_moves(expr, token, state)
-    return if state.empty?
     return unless expr
     collect_moved_names(expr).each { |name| check_borrowed_move(name, token, state) }
-    nil
   end
 
   # Check explicit moves (was_moved) in function/method call arguments.
   sig { params(stmt: AST::Node, token: Lexer::Token, state: BorrowState).void }
   def check_explicit_moves(stmt, token, state)
-    return if state.empty?
     owner_state = synthetic_owner_state
     transfer_collector.send(:collect_explicit_move_places, stmt, owner_state).each do |place|
       check_borrowed_move(place.path, token, state)
     end
-    nil
   end
 
   sig { params(name: String, token: Lexer::Token, state: BorrowState).void }
@@ -1976,7 +1971,6 @@ class BorrowChecker
     return unless borrow_kind
     @errors << "[MOVE_WHILE_BORROWED] #{@fn_name}::#{name} -- " \
                "cannot move while #{borrow_kind} borrow is active#{line_info(token)}"
-    nil
   end
 
   # Collect variable names being moved by an expression (binding RHS context).
@@ -1988,14 +1982,8 @@ class BorrowChecker
 
   sig { returns(OwnershipDataflow) }
   def transfer_collector
-    fn_node = if @fn_node.is_a?(AST::FunctionDef)
-      @fn_node
-    else
-      token = Lexer::Token.new(:VAR_ID, @fn_name, 1, 1)
-      AST::FunctionDef.new(token, @fn_name, [], [], :Void, nil, @fn_node.respond_to?(:body) ? @fn_node.body : [], [], nil, :private, [], false)
-    end
     @transfer_collector ||= T.let(
-      OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node, schema_lookup: @schema_lookup),
+      OwnershipDataflow.new(FunctionCFG.build(@fn_node), @fn_node, schema_lookup: @schema_lookup),
       T.nilable(OwnershipDataflow),
     )
   end
@@ -2004,14 +1992,6 @@ class BorrowChecker
   def synthetic_owner_state
     default_entry = OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)
     T.let(Hash.new(default_entry), OwnershipDataflow::OwnershipState)
-  end
-
-  sig { params(node: T.untyped, blk: T.proc.params(node: T.untyped).void).void }
-  def walk_for_was_moved(node, &blk)
-    moved = transfer_collector.send(:collect_explicit_move_places, node, synthetic_owner_state).map(&:path).to_set
-    AST.each_locatable(node) do |expr|
-      blk.call(expr) if expr.is_a?(AST::Identifier) && moved.include?(expr.name.to_s)
-    end
   end
 
 end

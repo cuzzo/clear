@@ -498,6 +498,73 @@ RSpec.describe EscapeAnalysis do
     expect(param_receiver.symbol.heap_storage?).to eq(true)
   end
 
+  it "marks owning TAKES arguments as heap and leaves non-owning args alone" do
+    owned_arg = id("owned", type: :String, storage: :frame)
+    move = AST::MoveNode.new(tok, owned_arg)
+    move.full_type = Type.new(:String)
+    primitive_arg = id("count", type: :Int64, storage: :frame)
+    takes_string = param("value", type: :String, takes: true)
+    takes_string.symbol.storage = :frame
+    takes_int = param("count", type: :Int64, takes: true)
+    takes_int.symbol.storage = :frame
+
+    EscapeAnalysis.send(
+      :mark_takes_args_heap!,
+      [move, primitive_arg],
+      [takes_string, takes_int],
+      nil,
+    )
+
+    expect(owned_arg.symbol.storage).to eq(:heap)
+    expect(primitive_arg.symbol.storage).to eq(:frame)
+  end
+
+  it "marks args for heap-backed mutable params and skips missing args" do
+    heap_param = param("slot", type: :String)
+    heap_param.symbol.storage = :heap
+    missing_param = param("missing", type: :String, takes: true)
+    arg = id("arg", type: :String, storage: :frame)
+
+    expect {
+      EscapeAnalysis.send(:mark_takes_args_heap!, [arg], [heap_param, missing_param], nil)
+    }.not_to raise_error
+
+    expect(arg.symbol.storage).to eq(:heap)
+  end
+
+  it "does not promote ordinary non-TAKES params" do
+    ordinary_param = param("value", type: :String)
+    ordinary_param.symbol.storage = :frame
+    arg = id("arg", type: :String, storage: :frame)
+
+    EscapeAnalysis.send(:mark_takes_args_heap!, [arg], [ordinary_param], nil)
+
+    expect(arg.symbol.storage).to eq(:frame)
+  end
+
+  it "promotes heap-owned transfer sources even when the value type is primitive" do
+    takes_int = param("value", type: :Int64, takes: true)
+    takes_int.symbol.storage = :frame
+    arg = id("arg", type: :Int64, storage: :heap)
+
+    EscapeAnalysis.send(:mark_takes_args_heap!, [arg], [takes_int], nil)
+
+    expect(arg.symbol.storage).to eq(:heap)
+  end
+
+  it "uses schema lookup when deciding whether TAKES aggregate args need owned storage" do
+    takes_box = param("value", type: :Box, takes: true)
+    takes_box.symbol.storage = :frame
+    arg = id("arg", type: :Box, storage: :frame)
+    schema_lookup = proc do |name|
+      name == :Box ? Schemas::StructSchema.new(fields: { "field" => Type.new(:String) }) : nil
+    end
+
+    EscapeAnalysis.send(:mark_takes_args_heap!, [arg], [takes_box], schema_lookup)
+
+    expect(arg.symbol.storage).to eq(:heap)
+  end
+
   it "records receiver backing storage placement through apply_with_facts!" do
     receiver_type = Type.new(:"Int64[]", collection: :list)
     receiver = id("items", type: receiver_type, storage: :frame)
