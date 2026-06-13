@@ -37,7 +37,7 @@ module Boobytrap
         branch_misses = branch_misses_by_line(cov["branches"] || {})
         source_lines = ::File.readlines(abs, chomp: true)
 
-        method_ranges(source_lines).each do |m|
+        method_ranges_for_file(abs, source_lines).each do |m|
           exec = covered = 0
           (m[:first_line]..m[:last_line]).each do |ln|
             v = lines[ln - 1]
@@ -71,6 +71,50 @@ module Boobytrap
             state_writes: state_writes,
             uncovered_branches: dark_branches,
             risk: risk_score(missed, gap, decomplex.score, state_writes, dark_branches)
+          )
+        end
+      end
+
+      rows.sort_by { |r| [-r.risk, -r.missed_lines, r.file, r.first_line] }
+    end
+
+    def from_static(files, root:, min_lines: 5, decomplex_scores: {})
+      rows = []
+      rootp = root.chomp("/") + "/"
+      files.each do |file|
+        abs = ::File.expand_path(file.start_with?("/") ? file : ::File.join(root, file))
+        next unless ::File.file?(abs)
+        next unless Boobytrap::DecomplexRisk.supported_source?(abs)
+
+        rel = abs.start_with?(rootp) ? abs[rootp.length..] : abs
+        source_lines = ::File.readlines(abs, chomp: true)
+        branch_misses = static_branch_misses_by_line(abs)
+
+        method_ranges_for_file(abs, source_lines).each do |m|
+          exec = (m[:first_line]..m[:last_line]).count do |ln|
+            executable_source_line?(source_lines[ln - 1])
+          end
+          next if exec < min_lines
+
+          body = source_lines[(m[:first_line] - 1)...m[:last_line]] || []
+          state_writes = state_write_count(body)
+          dark_branches = branch_misses.sum { |ln, n| m[:first_line] <= ln && ln <= m[:last_line] ? n : 0 }
+          decomplex = decomplex_scores.fetch([rel, m[:name]], default_score)
+          rows << Row.new(
+            file: rel,
+            name: m[:name] || "(anonymous)",
+            first_line: m[:first_line],
+            last_line: m[:last_line],
+            executable_lines: exec,
+            covered_lines: 0,
+            missed_lines: exec,
+            line_gap: 1.0,
+            decomplex_score: decomplex.score,
+            decomplex_findings: decomplex.findings,
+            decomplex_detectors: decomplex.detectors,
+            state_writes: state_writes,
+            uncovered_branches: dark_branches,
+            risk: risk_score(exec, 1.0, decomplex.score, state_writes, dark_branches)
           )
         end
       end
@@ -141,6 +185,53 @@ module Boobytrap
       ranges
     end
 
+    def method_ranges_for_file(abs, lines)
+      return method_ranges(lines) unless Boobytrap::DecomplexRisk.tree_sitter?
+      return method_ranges(lines) unless Boobytrap::DecomplexRisk.load_decomplex_syntax
+      return method_ranges(lines) unless Boobytrap::DecomplexRisk.supported_source?(abs)
+
+      doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
+      ranges = doc.function_defs.map do |fn|
+        {
+          first_line: fn.span[0],
+          last_line: fn.span[2],
+          name: fn.name
+        }
+      end
+      ranges.empty? ? fallback_function_ranges(lines) : ranges
+    rescue LoadError, StandardError
+      method_ranges(lines)
+    end
+
+    def fallback_function_ranges(lines)
+      ranges = []
+      lines.each_with_index do |raw, i|
+        next unless (match = raw.match(/\bfn\s+([A-Za-z_]\w*)\s*\(/))
+
+        first = i + 1
+        last = find_brace_end(lines, i) || first
+        ranges << { first_line: first, last_line: last, name: match[1] }
+      end
+      ranges
+    end
+
+    def find_brace_end(lines, start_idx)
+      depth = 0
+      opened = false
+      lines[start_idx..].each_with_index do |raw, offset|
+        raw.each_char do |ch|
+          if ch == "{"
+            depth += 1
+            opened = true
+          elsif ch == "}" && opened
+            depth -= 1
+            return start_idx + offset + 1 if depth <= 0
+          end
+        end
+      end
+      nil
+    end
+
     def branch_misses_by_line(branches)
       out = Hash.new(0)
       branches.each_value do |arms|
@@ -158,8 +249,27 @@ module Boobytrap
     def state_write_count(lines)
       lines.count do |line|
         line.match?(/@\w+\s*(?:[+\-*\/%|&^]?=|<<)/) ||
-          line.match?(/@\w+\.\w+!?[=(]/)
+          line.match?(/@\w+\.\w+!?[=(]/) ||
+          line.match?(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\s*(?:[+\-*\/%|&^]?=|<<)/)
       end
+    end
+
+    def static_branch_misses_by_line(abs)
+      return {} unless Boobytrap::DecomplexRisk.load_decomplex_syntax
+
+      doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
+      doc.branch_arms.each_with_object(Hash.new(0)) { |arm, out| out[arm.line] += 1 }
+    rescue LoadError, StandardError
+      {}
+    end
+
+    def executable_source_line?(line)
+      stripped = line.to_s.strip
+      return false if stripped.empty?
+      return false if stripped.start_with?("#", "//", "/*", "*")
+      return false if %w[end } { ) (].include?(stripped)
+
+      true
     end
 
     def risk_score(missed, gap, decomplex_score, state_writes, dark_branches)

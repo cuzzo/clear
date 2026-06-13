@@ -10,6 +10,9 @@ module Decomplex
     StateRead = Struct.new(:field, :receiver, :file, :function, :line, :span, keyword_init: true)
     StateWrite = Struct.new(:field, :receiver, :file, :function, :line, :span, keyword_init: true)
     BranchDecision = Struct.new(:file, :function, :line, :span, :predicate, :state_refs, keyword_init: true)
+    BranchArm = Struct.new(:file, :function, :kind, :line, :span,
+                           :decision_line, :decision_span, :predicate,
+                           :member, :body, keyword_init: true)
 
     module_function
 
@@ -45,6 +48,19 @@ module Decomplex
       end
     end
 
+    def supported_exts(parser: self.parser)
+      case parser.to_s.tr("-", "_")
+      when "tree_sitter", "treesitter"
+        %w[.rb .py .js .jsx .mjs .cjs .ts .tsx .go .rs .zig]
+      else
+        %w[.rb]
+      end
+    end
+
+    def supported_source?(file, parser: self.parser)
+      supported_exts(parser: parser).include?(File.extname(file).downcase)
+    end
+
     class Document
       attr_reader :file, :language, :source, :lines, :root, :adapter
 
@@ -76,6 +92,14 @@ module Decomplex
           immutable_reader_types: immutable_reader_types,
           type_aliases: type_aliases
         )
+      end
+
+      def function_defs
+        @function_defs ||= adapter.function_defs(self)
+      end
+
+      def branch_arms
+        @branch_arms ||= adapter.branch_arms(self)
       end
 
       def immutable_struct_readers
@@ -160,6 +184,33 @@ module Decomplex
             immutable_reader_types: immutable_reader_types,
             type_aliases: type_aliases
           )
+        end
+        out
+      end
+
+      def function_defs(document)
+        out = []
+        walk(document.root, []) do |node, _stack|
+          name = function_name(node)
+          next unless name
+
+          out << FunctionDef.new(
+            file: document.file,
+            name: name,
+            owner: nil,
+            line: line(node),
+            span: span(node),
+            body: node,
+            visibility: nil
+          )
+        end
+        out
+      end
+
+      def branch_arms(document)
+        out = []
+        walk(document.root, []) do |node, stack|
+          record_branch_arm(document, node, stack, out)
         end
         out
       end
@@ -313,23 +364,30 @@ module Decomplex
 
       def case_patterns(node)
         case_arms(node).filter_map do |child|
-          case child.kind
-          when "when"
-            pattern = named_field(child, "pattern") || child.named_children.first
-            normalized = normalize_text(pattern.text) if pattern
-            normalized unless default_case_pattern?(normalized)
-          when "switch_case", "case_clause", "expression_case"
-            next if child.text.to_s.lstrip.start_with?("else")
-
-            value = named_field(child, "value") || child.named_children.first
-            normalized = normalize_text(value.text) if value && value.kind !~ /statement|block/
-            normalized unless default_case_pattern?(normalized)
-          when "match_arm"
-            pattern = named_field(child, "pattern") || child.named_children.first
-            normalized = normalize_text(pattern.text) if pattern
-            normalized unless default_case_pattern?(normalized)
-          end
+          normalized = case_arm_pattern(child)
+          normalized unless default_case_pattern?(normalized)
         end.uniq.sort
+      end
+
+      def case_arm_pattern(child)
+        case child.kind
+        when "when", "match_arm"
+          pattern = named_field(child, "pattern") || child.named_children.first
+          normalize_text(pattern.text) if pattern
+        when "switch_case", "case_clause", "expression_case"
+          return nil if child.text.to_s.lstrip.start_with?("else")
+
+          value = named_field(child, "value") || child.named_children.first
+          normalize_text(value.text) if value && value.kind !~ /statement|block/
+        end
+      end
+
+      def case_arm_body(child)
+        pattern = named_field(child, "pattern") || named_field(child, "value") || child.named_children.first
+        members = child.named_children
+        body = members.drop_while { |node| node == pattern }.drop(1)
+        body = members[1..] if body.empty?
+        Array(body).map(&:text).join(" ")
       end
 
       def case_arms(node)
@@ -435,8 +493,105 @@ module Decomplex
         )
       end
 
+      def record_branch_arm(document, node, stack, out)
+        if if_node?(node)
+          record_if_arms(document, node, stack, out)
+          return
+        end
+
+        case node.kind
+        when "while", "until", "while_statement", "for", "for_statement"
+          record_loop_arm(document, node, stack, out)
+        when "case", "switch_statement", "expression_switch_statement", "switch_expression",
+             "match_statement", "match_expression"
+          record_case_arms(document, node, stack, out)
+        end
+      end
+
+      def record_if_arms(document, node, stack, out)
+        predicate = decision_predicate(node)
+        dspan = span(node)
+        dline = line(node)
+        consequence = named_field(node, "consequence") || named_field(node, "body") ||
+                      node.named_children[1]
+        alternative = named_field(node, "alternative") ||
+                      node.named_children.find { |child| child.kind.match?(/else|elsif|alternative/) }
+        alternative ||= node.named_children[2] if node.named_children[2] != consequence
+
+        [[consequence, "then"], [alternative, "else"]].each do |arm_node, member|
+          next unless ts_node?(arm_node)
+
+          out << BranchArm.new(
+            file: document.file,
+            function: current_function(stack),
+            kind: :if,
+            line: line(arm_node),
+            span: span(arm_node),
+            decision_line: dline,
+            decision_span: dspan,
+            predicate: predicate,
+            member: member,
+            body: normalize_text(arm_node.text)
+          )
+        end
+      end
+
+      def record_loop_arm(document, node, stack, out)
+        body = named_field(node, "body") || node.named_children[1]
+        return unless ts_node?(body)
+
+        out << BranchArm.new(
+          file: document.file,
+          function: current_function(stack),
+          kind: :loop,
+          line: line(body),
+          span: span(body),
+          decision_line: line(node),
+          decision_span: span(node),
+          predicate: decision_predicate(node),
+          member: "body",
+          body: normalize_text(body.text)
+        )
+      end
+
+      def record_case_arms(document, node, stack, out)
+        predicate = decision_predicate(node)
+        dspan = span(node)
+        dline = line(node)
+        case_arms(node).each do |arm|
+          pattern = case_arm_pattern(arm)
+          next if default_case_pattern?(pattern)
+
+          out << BranchArm.new(
+            file: document.file,
+            function: current_function(stack),
+            kind: :case,
+            line: line(arm),
+            span: span(arm),
+            decision_line: dline,
+            decision_span: dspan,
+            predicate: predicate,
+            member: pattern,
+            body: normalize_text(case_arm_body(arm))
+          )
+        end
+      end
+
       def branch_node?(node)
-        BRANCH_KINDS.include?(node.kind) || hidden_match?(node)
+        BRANCH_KINDS.include?(node.kind) || hidden_match?(node) || hidden_if?(node)
+      end
+
+      def if_node?(node)
+        %w[if unless if_statement if_expression if_modifier unless_modifier].include?(node.kind) ||
+          hidden_if?(node)
+      end
+
+      def hidden_if?(node)
+        return false unless ts_node?(node)
+        return false unless node.text.to_s.lstrip.start_with?("if ")
+
+        first = node.children.find { |child| child.text.to_s.strip != "" }
+        first&.kind == "if"
       end
 
       def collect_state_refs(node, refs)
@@ -611,6 +766,14 @@ module Decomplex
           type_aliases: type_aliases
         )
         scanner.scan
+      end
+
+      def function_defs(_document)
+        []
+      end
+
+      def branch_arms(_document)
+        []
       end
 
       def immutable_struct_readers(lines)

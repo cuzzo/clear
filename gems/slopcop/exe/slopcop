@@ -12,7 +12,9 @@ def usage
                    [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
                    [--top=N]
 
-    --files  repo-relative .rb to triage (default: app/lib/src Ruby files)
+    --files  repo-relative source files to triage (default: app/lib/src;
+             .rb in RubyVM mode, Decomplex Tree-sitter extensions in
+             DECOMPLEX_PARSER=tree_sitter mode)
     --ffi    project external-boundary method names (the per-project
              lexicon; the gem ships none -- it is general)
     --diagnostic
@@ -25,7 +27,17 @@ end
 usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
 usage unless ARGV[0] == "report"
 
-DEFAULT_FILE_GLOBS = %w[app/**/*.rb lib/**/*.rb src/**/*.rb].freeze
+TREE_SITTER_EXTS = %w[rb py js jsx mjs cjs ts tsx go rs zig].freeze
+
+def tree_sitter_parser?
+  ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+end
+
+def default_file_globs
+  exts = tree_sitter_parser? ? TREE_SITTER_EXTS : %w[rb]
+  roots = %w[app lib src]
+  roots.product(exts).map { |root, ext| "#{root}/**/*.#{ext}" }
+end
 
 opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
          top: 50, ffi: [], diagnostic: [], files: nil }
@@ -42,7 +54,7 @@ ARGV[1..].each do |a|
   end
 end
 
-opts[:files] ||= DEFAULT_FILE_GLOBS.flat_map { |g| Dir.chdir(opts[:repo]) { Dir[g] } }.uniq.sort
+opts[:files] ||= default_file_globs.flat_map { |g| Dir.chdir(opts[:repo]) { Dir[g] } }.uniq.sort
 
 md = SlopCop::Report.new(
   files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],

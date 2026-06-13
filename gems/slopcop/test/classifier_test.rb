@@ -9,6 +9,14 @@ require_relative "../lib/slopcop"
 class ClassifierTest < Minitest::Test
   C = SlopCop::Classifier
 
+  def with_env(key, value)
+    old = ENV[key]
+    value.nil? ? ENV.delete(key) : ENV[key] = value
+    yield
+  ensure
+    old.nil? ? ENV.delete(key) : ENV[key] = old
+  end
+
   def node(expr)
     RubyVM::AbstractSyntaxTree.parse(expr).children.last
   end
@@ -178,5 +186,44 @@ class ClassifierTest < Minitest::Test
   ensure
     f&.unlink
     rsf&.unlink
+  end
+
+  def test_tree_sitter_static_zig_classification_when_coverage_is_absent
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter static test" unless grammar && File.file?(grammar)
+
+    src = <<~ZIG
+      const Worker = struct {
+          count: i32 = 0,
+
+          fn run(self: *Worker, x: i32) bool {
+              if (x > 0) {
+                  self.count += 1;
+                  return true;
+              } else {
+                  return false;
+              }
+              switch (x) {
+                  1 => return true,
+                  2 => return false,
+                  else => return false,
+              }
+          }
+      };
+    ZIG
+    f = Tempfile.new(["slopcop-zig", ".zig"])
+    f.write(src)
+    f.close
+
+    with_env("DECOMPLEX_PARSER", "tree_sitter") do
+      arms = C.classify_file("/missing-resultset.json", f.path)
+
+      refute_empty arms
+      assert arms.all? { |arm| arm.source == :tree_sitter_static }
+      assert_includes arms.map(&:defn), "run"
+      assert_includes arms.map(&:category), :genuine
+    end
+  ensure
+    f&.unlink
   end
 end

@@ -55,6 +55,7 @@ module SlopCop
 
       per_file = {}
       gaps = []
+      sources = Hash.new(0)
       abs_for.each do |rel, abs|
         arms = Classifier.classify_file(resultset, abs,
                                         ffi_boundary: ffi_boundary,
@@ -81,6 +82,7 @@ module SlopCop
                   a.category
                 end
           counts[cat] += 1
+          sources[a.source || :coverage] += 1
           next unless cat == :genuine
 
           gaps << { file: rel, line: a.line, method: a.defn, churn: cn,
@@ -117,7 +119,8 @@ module SlopCop
         # deviance, then -churn / file / line for stable order.
         top_gaps: gaps.sort_by do |g|
           [-g[:priority], -g[:churn], g[:file], g[:line]]
-        end
+        end,
+        sources: sources
       }
     end
   end

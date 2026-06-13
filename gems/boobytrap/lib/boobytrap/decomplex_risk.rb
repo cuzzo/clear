@@ -58,6 +58,35 @@ module Boobytrap
       true
     end
 
+    def load_decomplex_syntax
+      return true if defined?(Decomplex::Syntax)
+
+      require "decomplex/syntax"
+      true
+    rescue LoadError
+      sibling = ::File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      return false unless ::File.file?("#{sibling}.rb")
+
+      require sibling
+      true
+    end
+
+    def tree_sitter?
+      ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+    end
+
+    def supported_exts
+      if load_decomplex_syntax
+        Decomplex::Syntax.supported_exts(parser: tree_sitter? ? "tree_sitter" : "rubyvm")
+      else
+        [".rb"]
+      end
+    end
+
+    def supported_source?(file)
+      supported_exts.include?(::File.extname(file).downcase)
+    end
+
     def relpath(file, root)
       rootp = ::File.realpath(root).chomp("/") + "/"
       real = ::File.realpath(file)

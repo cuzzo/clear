@@ -116,6 +116,10 @@ module SlopCop
       o << "- Repo: `#{@repo}`\n"
       o << "- Files: #{@r[:per_file].size}; dark arms: #{g}; " \
            "genuine gaps: #{gaps.size}\n"
+      unless @r[:sources].to_h.empty?
+        source_bits = @r[:sources].sort.map { |source, count| "#{source}=#{count}" }.join(", ")
+        o << "- Branch source: #{source_bits}\n"
+      end
       o << "- General engine: categorizes uncovered branches, ranks " \
            "genuine gaps by consumed boobytrap churn x optional " \
            "decomplex structural deviance. Project lexicons " \

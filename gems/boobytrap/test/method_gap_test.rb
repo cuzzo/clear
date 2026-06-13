@@ -7,6 +7,14 @@ require "fileutils"
 require_relative "../lib/boobytrap"
 
 class MethodGapTest < Minitest::Test
+  def with_env(key, value)
+    old = ENV[key]
+    value.nil? ? ENV.delete(key) : ENV[key] = value
+    yield
+  ensure
+    old.nil? ? ENV.delete(key) : ENV[key] = old
+  end
+
   def test_ranks_mostly_dark_stateful_methods
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p("#{dir}/src")
@@ -75,6 +83,58 @@ class MethodGapTest < Minitest::Test
       assert_operator dark.risk, :>, 0
       refute_includes dark.members, :complexity
       refute rows.any? { |r| r.name == "covered" }
+    end
+  end
+
+  def test_tree_sitter_static_zig_method_gaps_when_coverage_is_absent
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter static test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        const Worker = struct {
+            count: i32 = 0,
+
+            fn run(self: *Worker, x: i32) bool {
+                if (x > 0) {
+                    self.count += 1;
+                    return true;
+                } else {
+                    return false;
+                }
+                switch (x) {
+                    1 => return true,
+                    2 => return false,
+                    else => return false,
+                }
+            }
+        };
+      ZIG
+
+      score = Boobytrap::DecomplexRisk::Score.new(
+        score: 5,
+        findings: 2,
+        detectors: ["State-Based Branch Density"]
+      )
+
+      with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        rows = Boobytrap::MethodGap.from_static(
+          ["src/worker.zig"],
+          root: dir,
+          decomplex_scores: { ["src/worker.zig", "run"] => score }
+        )
+        run = rows.find { |row| row.name == "run" }
+
+        refute_nil run
+        assert_equal "src/worker.zig", run.file
+        assert_equal 1.0, run.line_gap
+        assert_operator run.executable_lines, :>=, 5
+        assert_operator run.uncovered_branches, :>=, 2
+        assert_operator run.state_writes, :>=, 1
+        assert_equal 5, run.decomplex_score
+      end
     end
   end
 end

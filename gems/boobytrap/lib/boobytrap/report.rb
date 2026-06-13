@@ -26,29 +26,51 @@ module Boobytrap
       @fix_scores = scores
       @fix_max = [scores.values.max || 0.0, 1.0].max
       @blast_radius = filter_blast(Bugspots.blast_radius(events))
+      source_files = current_source_files
       gaps =
         if resultset && ::File.exist?(resultset)
           filter_paths(CoverageGap.from_resultset(resultset, root: @repo))
         else
           {}
         end
+      if DecomplexRisk.tree_sitter?
+        static_gaps = filter_paths(CoverageGap.from_static(source_files, root: @repo))
+        gaps = static_gaps.merge(gaps)
+      end
       @gaps = gaps
       @have_cov = !gaps.empty?
+      @coverage_mode = coverage_mode(resultset, source_files, gaps)
       @ranked, @unmeasured = Hotspot.rank(scores, gaps)
       @method_gaps =
-        if resultset && ::File.exist?(resultset)
-          method_files = filter_paths(
-            MethodGap.covered_files(resultset, root: @repo).to_h { |rel| [rel, true] }
-          ).keys
+        if (resultset && ::File.exist?(resultset)) || DecomplexRisk.tree_sitter?
+          covered_files = if resultset && ::File.exist?(resultset)
+                            filter_paths(
+                              MethodGap.covered_files(resultset, root: @repo).to_h { |rel| [rel, true] }
+                            ).keys
+                          else
+                            []
+                          end
+          static_files = DecomplexRisk.tree_sitter? ? (source_files - covered_files) : []
+          method_files = (covered_files + static_files).uniq
           decomplex_scores = DecomplexRisk.score(
             method_files.map { |rel| ::File.join(@repo, rel) },
             root: @repo
           )
-          filter_paths(MethodGap.from_resultset(
-            resultset,
+          result_rows = if resultset && ::File.exist?(resultset)
+                          MethodGap.from_resultset(
+                            resultset,
+                            root: @repo,
+                            decomplex_scores: decomplex_scores
+                          )
+                        else
+                          []
+                        end
+          static_rows = MethodGap.from_static(
+            static_files,
             root: @repo,
             decomplex_scores: decomplex_scores
-          ).group_by(&:file)).values.flatten
+          )
+          filter_paths((result_rows + static_rows).group_by(&:file)).values.flatten
         else
           []
         end
@@ -71,6 +93,37 @@ module Boobytrap
 
     def current_file?(rel)
       ::File.file?(::File.join(@repo, rel))
+    end
+
+    def current_source_files
+      files = []
+      IO.popen(["git", "-C", @repo, "ls-files"], &:read).to_s.each_line do |line|
+        rel = line.strip
+        next if rel.empty?
+        next unless in_scope?(rel) && current_file?(rel)
+        next unless DecomplexRisk.supported_source?(::File.join(@repo, rel))
+
+        files << rel
+      end
+      files
+    rescue StandardError
+      exts = DecomplexRisk.supported_exts
+      Dir.chdir(@repo) do
+        Dir["**/*"].select do |rel|
+          in_scope?(rel) && ::File.file?(rel) && exts.include?(::File.extname(rel).downcase)
+        end
+      end
+    end
+
+    def coverage_mode(resultset, source_files, gaps)
+      has_resultset = resultset && ::File.exist?(resultset)
+      static = DecomplexRisk.tree_sitter? && source_files.any?
+      return "resultset + tree-sitter static fallback" if has_resultset && static
+      return "tree-sitter static fallback" if static && !has_resultset
+      return "resultset" if has_resultset
+      return "absent" if gaps.empty?
+
+      "unknown"
     end
 
     def to_markdown
@@ -228,7 +281,7 @@ module Boobytrap
       o << "- State-based branch hotspots: #{@state_branch_hotspots.size}; " \
            "multi-file fix blast rows: #{@blast_radius.size}\n"
       o << "- Branch-coverage resultset: " \
-           "#{@have_cov ? 'present' : 'ABSENT (fix-churn only)'}\n"
+           "#{@have_cov ? @coverage_mode : 'ABSENT (fix-churn only)'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
            "x SimpleCov branch gap; method gaps use Decomplex detector scores " \
@@ -252,6 +305,7 @@ module Boobytrap
                 @fix_scores.keys
               end
       files = files.select { |rel| in_scope?(rel) && current_file?(rel) }
+      files = current_source_files if DecomplexRisk.tree_sitter? && files.empty?
       findings = DecomplexRisk.state_branch_density(
         files.map { |rel| ::File.join(@repo, rel) },
         root: @repo

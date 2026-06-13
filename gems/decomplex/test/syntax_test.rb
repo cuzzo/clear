@@ -181,6 +181,7 @@ class SyntaxTest < Minitest::Test
         assert_includes doc.decision_sites.map(&:kind), :case_dispatch, language
         assert_includes doc.decision_sites.map(&:kind), :conjunction, language
         assert_includes doc.state_writes.map(&:field), "storage", language
+        refute_empty doc.branch_arms, language
       end
     end
   end

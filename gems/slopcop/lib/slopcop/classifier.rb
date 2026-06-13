@@ -32,11 +32,13 @@ module SlopCop
     DIAGNOSTIC_MIDS = %i[raise fail abort].freeze # general Ruby
     GUARD_MIDS = %i[is_a? kind_of? instance_of? nil? respond_to?].freeze
 
-    Arm = Struct.new(:file, :defn, :line, :category, keyword_init: true)
+    Arm = Struct.new(:file, :defn, :line, :category, :source, keyword_init: true)
 
     module_function
 
     def merged_branches(resultset, abspath)
+      return {} unless resultset && File.file?(resultset)
+
       m = {}
       JSON.parse(File.read(resultset)).each_value do |e|
         (e["coverage"] || {}).each do |p, c|
@@ -49,6 +51,8 @@ module SlopCop
         end
       end
       m
+    rescue JSON::ParserError, Errno::ENOENT
+      {}
     end
 
     def method_index(lines)
@@ -132,7 +136,13 @@ module SlopCop
     # -> [Arm, ...] for every dark arm in abspath.
     def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [])
       branches = merged_branches(resultset, abspath)
-      return [] if branches.empty?
+      if branches.empty?
+        return classify_static_file(abspath,
+                                    ffi_boundary: ffi_boundary,
+                                    diagnostic_mids: diagnostic_mids) if tree_sitter?
+
+        return []
+      end
 
       lines = File.readlines(abspath)
       midx = method_index(lines)
@@ -165,10 +175,35 @@ module SlopCop
                            noise_lines.include?(sl), diagnostic_mids)
           next if cat.nil?
 
-          out << Arm.new(file: abspath, defn: meth, line: sl, category: cat)
+          out << Arm.new(file: abspath, defn: meth, line: sl, category: cat,
+                         source: :coverage)
         end
       end
       out
+    end
+
+    def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [])
+      return [] unless load_decomplex_syntax
+      return [] unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+
+      doc = Decomplex::Syntax.parse(abspath, parser: "tree_sitter")
+      doc.branch_arms.filter_map do |arm|
+        cat = categorize_text(
+          arm.function,
+          arm.kind,
+          arm.body,
+          true,
+          arm.predicate,
+          ffi_boundary,
+          diagnostic_mids
+        )
+        next if cat.nil?
+
+        Arm.new(file: abspath, defn: arm.function, line: arm.line,
+                category: cat, source: :tree_sitter_static)
+      end
+    rescue LoadError, StandardError
+      []
     end
 
     def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil, declaration_noise = false, diagnostic_mids = [])
@@ -253,6 +288,62 @@ module SlopCop
         n.children.each { |c| st << c }
       end
       false
+    end
+
+    def categorize_text(method, pkind, body, sibling_taken, predicate = nil,
+                        ffi_boundary = [], diagnostic_mids = [])
+      return :ffi if ffi_boundary.include?(method)
+      return :diagnostic if diagnostic_text?(body, diagnostic_mids)
+      return :type_norm if type_guard_text?(predicate) || type_guard_text?(body)
+      return :dead unless sibling_taken
+      return :defensive if trivial_text?(body)
+
+      if %i[case if unless ternary while until for loop].include?(pkind)
+        :genuine
+      else
+        :defensive
+      end
+    end
+
+    def diagnostic_text?(text, diagnostic_mids = [])
+      names = DIAGNOSTIC_MIDS.map(&:to_s) + diagnostic_mids.map(&:to_s)
+      source = text.to_s
+      names.any? { |name| source.match?(/(?:\A|[^\w!?])#{Regexp.escape(name)}[!?]?(?:\s*\(|\b)/) } ||
+        source.match?(/\b(?:panic|unreachable|throw)\b/) ||
+        source.match?(/\breturn\s+error[.\w]*/)
+    end
+
+    def type_guard_text?(text)
+      source = text.to_s
+      source.match?(/\b(?:nil|null|none|undefined)\b/i) ||
+        source.match?(/\b(?:is_a\?|kind_of\?|instance_of\?|respond_to\?|isinstance|typeof|typeid)\b/) ||
+        source.match?(/@typeInfo\b/) ||
+        source.match?(/\bkind\s*(?:==|!=)/)
+    end
+
+    def trivial_text?(text)
+      stripped = text.to_s.strip
+      return true if stripped.empty?
+
+      stripped.match?(/\A(?:nil|null|None|undefined|true|false|0|1|break|continue|unreachable)\s*;?\z/) ||
+        stripped.match?(/\Areturn\s+(?:nil|null|None|undefined|true|false|0|1)\s*;?\z/)
+    end
+
+    def tree_sitter?
+      ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+    end
+
+    def load_decomplex_syntax
+      return true if defined?(Decomplex::Syntax)
+
+      require "decomplex/syntax"
+      true
+    rescue LoadError
+      sibling = File.expand_path("../../../decomplex/lib/decomplex/syntax", __dir__)
+      return false unless File.file?("#{sibling}.rb")
+
+      require sibling
+      true
     end
   end
 end
