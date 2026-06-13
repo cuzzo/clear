@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "digest"
 require "json"
 require "open3"
 require "pathname"
@@ -29,6 +30,15 @@ module NilKill
 end
 
 require_relative "nil_kill/util"
+require_relative "nil_kill/schema/runtime_type"
+require_relative "nil_kill/schema/evidence_bundle"
+require_relative "nil_kill/actions/record"
+require_relative "nil_kill/runtime/static_index"
+require_relative "nil_kill/runtime/trace_loader"
+require_relative "nil_kill/runtime/normalizer"
+require_relative "nil_kill/analyzers/runtime_evidence_analyzer"
+require_relative "nil_kill/reporting/multi_language_report"
+require_relative "nil_kill/autofix/provider"
 require_relative "nil_kill/spec_dependency_index"
 require_relative "nil_kill/hash_shape_ops"
 require_relative "nil_kill/rbi_return_index"
@@ -51,6 +61,11 @@ require_relative "nil_kill/report"
 require_relative "nil_kill/struct_rbi"
 require_relative "nil_kill/guarded_autocorrect"
 require_relative "nil_kill/doctor"
+require_relative "nil_kill/commands/static_command"
+require_relative "nil_kill/commands/collect_python_command"
+require_relative "nil_kill/commands/normalize_command"
+require_relative "nil_kill/commands/analyze_command"
+require_relative "nil_kill/commands/trace_spec_command"
 require_relative "nil_kill/cli"
 
 NilKill::CLI.new(ARGV).run if $PROGRAM_NAME == __FILE__

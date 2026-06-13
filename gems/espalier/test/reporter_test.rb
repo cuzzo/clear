@@ -88,6 +88,42 @@ class ReporterTest < Minitest::Test
     refute_includes report, "#L"
   end
 
+  def test_report_links_absolute_sources_from_configured_link_base
+    Dir.mktmpdir do |dir|
+      src_dir = File.join(dir, "src")
+      report_dir = File.join(dir, "reports")
+      FileUtils.mkdir_p(src_dir)
+      FileUtils.mkdir_p(report_dir)
+      source = File.join(src_dir, "compiler_phase.rb")
+      File.write(source, <<~RB)
+        class CompilerPhase
+          def coordinate(node)
+          end
+        end
+      RB
+
+      manifest = [
+        {
+          module: "CompilerPhase",
+          file: source,
+          type: :class,
+          functions: [
+            {
+              name: "coordinate",
+              signature: "def coordinate(node)",
+              EFFECTS: { reads: [], writes: [] },
+              DELEGATIONS: { conditionally_calls: Array.new(12) { |idx| "branch_#{idx}" } }
+            }
+          ]
+        }
+      ]
+
+      report = Espalier::Reporter.new(manifest, root: dir, link_base: report_dir).to_markdown
+
+      assert_includes report, "[`#{source}`](../src/compiler_phase.rb#L2)"
+    end
+  end
+
   def test_report_overlays_existing_sibling_reports
     manifest = [
       {

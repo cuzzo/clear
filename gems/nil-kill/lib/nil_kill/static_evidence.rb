@@ -86,9 +86,11 @@ module NilKill
         "kind" => "espalier_static_evidence",
         "parser" => "tree_sitter",
         "generated_at" => Time.now.utc.iso8601,
+        "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => NilKill.target_exclude_dirs.map { |dir| rel(dir) },
         "runtime_fields" => false,
+        "files" => files.map { |file| file_record(file) },
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "state_types" => Hash[state_types.sort],
@@ -138,6 +140,15 @@ module NilKill
         !File.basename(path).start_with?(".") &&
         exts.include?(File.extname(path).downcase) &&
         !NilKill.target_excluded?(path)
+    end
+
+    def file_record(file)
+      {
+        "path" => rel(file),
+        "language" => Decomplex::Syntax.language_for(file).to_s,
+        "digest" => "sha256:#{Digest::SHA256.file(file).hexdigest}",
+        "parser" => "tree_sitter",
+      }
     end
 
     def declared_states_by_owner(facts)

@@ -11,12 +11,20 @@ module NilKill
       @with_links = @argv.delete("--with-links")
       @full = @argv.delete("--full")
       @hygiene_only = @argv.delete("--hygiene")
+      @evidence_path = parse_evidence_path(@argv)
       @report_path = parse_output_path(@argv) || REPORT_PATH
     end
 
     def run
-      evidence = @evidence_override || Store.read
+      evidence = @evidence_override || read_evidence
       @evidence = evidence
+      if Schema::EvidenceBundle.v2?(evidence)
+        report = Reporting::MultiLanguageReport.new(evidence).lines.map { |line| format_report_line(line) }.join("\n") + "\n"
+        FileUtils.mkdir_p(File.dirname(@report_path))
+        File.write(@report_path, report)
+        puts report
+        return
+      end
       actions = evidence["actions"]
       lines = build_header(evidence)
       if @hygiene_only
@@ -100,6 +108,24 @@ module NilKill
 
       path = File.expand_path(value, ROOT)
       output_directory_path?(path) ? File.join(path, "report.md") : path
+    end
+
+    def parse_evidence_path(argv)
+      value = nil
+      if (idx = argv.index("--evidence"))
+        value = argv[idx + 1] || abort("--evidence requires a path")
+        argv.slice!(idx, 2)
+      elsif (arg = argv.find { |item| item.start_with?("--evidence=") })
+        value = arg.split("=", 2).last
+        argv.delete(arg)
+      end
+      value && File.expand_path(value, ROOT)
+    end
+
+    def read_evidence
+      return JSON.parse(File.read(@evidence_path)) if @evidence_path
+
+      Store.read
     end
 
     def output_directory_path?(path)

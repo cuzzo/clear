@@ -16,12 +16,17 @@ module NilKill
       case command
       when "collect" then collect
       when "infer" then guard_fresh_runtime!; Infer.new(@argv).run
+      when "static" then Commands::StaticCommand.new(@argv).run
+      when "collect-python" then Commands::CollectPythonCommand.new(@argv).run
+      when "normalize" then Commands::NormalizeCommand.new(@argv).run
+      when "analyze" then Commands::AnalyzeCommand.new(@argv).run
+      when "trace-spec" then Commands::TraceSpecCommand.new(@argv).run
       when "espalier-evidence" then EspalierEvidence.new(@argv).run
       when "focus-hash-record" then FocusHashRecord.new(@argv).run
       when "apply" then Apply.new(@argv).run
       when "review" then InteractiveReview.new(@argv).run
       when "loop" then Loop.new(@argv).run
-      when "report" then guard_fresh_evidence!; Report.new(@argv).run
+      when "report" then guard_fresh_evidence! unless explicit_evidence_path?(@argv); Report.new(@argv).run
       when "struct-rbi" then StructRBI.new(@argv).run
       when "guarded-autocorrect" then GuardedAutocorrect.new(@argv).run
       when "doctor" then Doctor.new.run
@@ -38,6 +43,10 @@ module NilKill
 
     def collect_meta_path
       File.join(RUNTIME_DIR, "collect-meta.json")
+    end
+
+    def explicit_evidence_path?(argv)
+      argv.any? { |arg| arg == "--evidence" || arg.start_with?("--evidence=") }
     end
 
     def git_capture(*args)
@@ -284,12 +293,17 @@ module NilKill
           bundle exec tools/nil-kill collect --instrument-source -- <command...>
           bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
           bundle exec tools/nil-kill infer [--no-sorbet]
+          bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|javascript|typescript|lua] [--output static.json] [targets...]
+          bundle exec tools/nil-kill collect-python [--root DIR] [--target src] [--output traces/] -- <python test command...>
+          bundle exec tools/nil-kill normalize [--root DIR] --static static.json [--traces traces/] [--output evidence.json]
+          bundle exec tools/nil-kill analyze [--evidence evidence.json] [--output evidence.json]
+          bundle exec tools/nil-kill trace-spec
           bundle exec tools/nil-kill espalier-evidence [--output tmp/nil-kill/espalier-evidence.json]
           bundle exec tools/nil-kill focus-hash-record STRUCT [--targets path[:path...]]
           bundle exec tools/nil-kill apply [--dry-run]
           bundle exec tools/nil-kill review [--kind replace_nil_with_default]
           bundle exec tools/nil-kill loop [--defaults] [--try-levenshtein] [--hash-records] [--signature-backflow] [--return-backflow] [--narrow-generic] [--narrow-tlet] -- <verify command...>
-          bundle exec tools/nil-kill report [--with-links] [--output-path PATH] [--hygiene]
+          bundle exec tools/nil-kill report [--evidence evidence.json] [--with-links] [--output-path PATH] [--hygiene]
           bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
           bundle exec tools/nil-kill guarded-autocorrect [--max-iterations N]
           bundle exec tools/nil-kill doctor

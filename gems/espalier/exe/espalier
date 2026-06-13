@@ -15,6 +15,10 @@ options = {
   manifest: nil
 }
 
+def report_link_base(output)
+  output && File.dirname(File.expand_path(output))
+end
+
 OptionParser.new do |opts|
   opts.banner = "Usage: espalier [options] <files/directories...>"
 
@@ -51,7 +55,10 @@ if options[:manifest]
 
   manifest = YAML.load_file(options[:manifest])
   output_contents = if options[:format] == :report
-                      Espalier::Reporter.new(manifest).to_markdown
+                      Espalier::Reporter.new(
+                        manifest,
+                        link_base: report_link_base(options[:output])
+                      ).to_markdown
                     elsif options[:format] == :yaml
                       Espalier::Formatter.to_yaml(manifest)
                     else
@@ -136,7 +143,10 @@ manifest = aggregator.aggregate(modules)
 output_contents = if options[:format] == :yaml
                     Espalier::Formatter.to_yaml(manifest)
                   elsif options[:format] == :report
-                    Espalier::Reporter.new(manifest).to_markdown
+                    Espalier::Reporter.new(
+                      manifest,
+                      link_base: report_link_base(options[:output])
+                    ).to_markdown
                   else
                     Espalier::Formatter.to_markdown(manifest)
                   end

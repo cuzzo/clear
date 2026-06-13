@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "pathname"
 require "yaml"
 
 module Espalier
@@ -11,10 +12,11 @@ module Espalier
       new(YAML.load_file(path), root: root, limit: limit)
     end
 
-    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT)
+    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT, link_base: nil)
       @manifest = manifest || []
-      @root = root
+      @root = File.expand_path(root)
       @limit = limit
+      @link_base = link_base && File.expand_path(link_base)
     end
 
     def to_markdown
@@ -453,8 +455,29 @@ module Espalier
     def file_link(file, line = nil)
       return "`-`" unless file
 
-      target = line ? "../../#{file}#L#{line}" : "../../#{file}"
-      "[`#{file}`](#{target})"
+      suffix = line ? "#L#{line}" : ""
+      "[`#{file}`](#{link_target(file)}#{suffix})"
+    end
+
+    def link_target(file)
+      return absolute_or_legacy_target(file) unless @link_base
+
+      source = source_path(file)
+      Pathname.new(source).relative_path_from(Pathname.new(@link_base)).to_s
+    rescue ArgumentError
+      source
+    end
+
+    def absolute_or_legacy_target(file)
+      path = file.to_s
+      return path if Pathname.new(path).absolute?
+
+      "../../#{path}"
+    end
+
+    def source_path(file)
+      path = file.to_s
+      Pathname.new(path).absolute? ? path : File.expand_path(path, @root)
     end
 
     def method_line(file, method_name)
@@ -464,7 +487,7 @@ module Espalier
       key = [file, method_name]
       return @method_line_cache[key] if @method_line_cache.key?(key)
 
-      path = File.join(@root, file)
+      path = source_path(file)
       return @method_line_cache[key] = nil unless File.file?(path)
 
       escaped = Regexp.escape(method_name.to_s.sub(/\Aself\./, ""))
