@@ -3,9 +3,19 @@
 require "minitest/autorun"
 require "tempfile"
 require "json"
+require "tmpdir"
+require "fileutils"
 require_relative "../lib/boobytrap"
 
 class CoverageGapTest < Minitest::Test
+  def with_env(key, value)
+    old = ENV[key]
+    value.nil? ? ENV.delete(key) : ENV[key] = value
+    yield
+  ensure
+    old.nil? ? ENV.delete(key) : ENV[key] = old
+  end
+
   def with_resultset(hash)
     f = Tempfile.new(["rs", ".json"])
     f.write(JSON.dump(hash))
@@ -64,6 +74,49 @@ class CoverageGapTest < Minitest::Test
       g = Boobytrap::CoverageGap.from_resultset(p, root: "/root")
       assert g.key?("/elsewhere/a.rb")
       assert_equal 1.0, g["/elsewhere/a.rb"].gap
+    end
+  end
+
+  def test_kcov_cobertura_uses_tree_sitter_branch_arms
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        fn run(x: i32) bool {
+            if (x > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+      ZIG
+      coverage = "#{dir}/cobertura.xml"
+      File.write(coverage, <<~XML)
+        <?xml version="1.0" ?>
+        <coverage>
+          <sources><source>#{dir}</source></sources>
+          <packages><package name=""><classes>
+            <class name="worker" filename="src/worker.zig">
+              <lines>
+                <line number="2" hits="1"/>
+                <line number="3" hits="1"/>
+                <line number="5" hits="0"/>
+              </lines>
+            </class>
+          </classes></package></packages>
+        </coverage>
+      XML
+
+      with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        gap = Boobytrap::CoverageGap.from_resultset(coverage, root: dir).fetch("src/worker.zig")
+
+        assert_operator gap.total, :>=, 2
+        assert_operator gap.uncovered, :>=, 1
+        assert_operator gap.gap, :>, 0.0
+      end
     end
   end
 end

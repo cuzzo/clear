@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "boobytrap/bugspots"
+require_relative "boobytrap/coverage_data"
 require_relative "boobytrap/coverage_gap"
 require_relative "boobytrap/decomplex_risk"
 require_relative "boobytrap/hotspot"

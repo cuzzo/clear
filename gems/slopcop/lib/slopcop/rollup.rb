@@ -42,6 +42,9 @@ module SlopCop
       rescue StandardError
         {}
       end
+      coverage = if resultset
+                   Classifier.coverage_dataset(resultset, root: repo)
+                 end
       mx = churn.values.max
       mx = 1.0 if mx.nil? || mx.zero?
 
@@ -58,6 +61,7 @@ module SlopCop
       sources = Hash.new(0)
       abs_for.each do |rel, abs|
         arms = Classifier.classify_file(resultset, abs,
+                                        root: repo,
                                         ffi_boundary: ffi_boundary,
                                         diagnostic_mids: diagnostic_mids)
         next if arms.empty?
@@ -120,6 +124,7 @@ module SlopCop
         top_gaps: gaps.sort_by do |g|
           [-g[:priority], -g[:churn], g[:file], g[:line]]
         end,
+        coverage_label: coverage && !coverage.empty? ? coverage.label : nil,
         sources: sources
       }
     end

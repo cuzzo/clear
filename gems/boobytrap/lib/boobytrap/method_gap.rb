@@ -2,6 +2,7 @@
 
 require "json"
 require "ripper"
+require_relative "coverage_data"
 require_relative "decomplex_risk"
 
 module Boobytrap
@@ -24,17 +25,28 @@ module Boobytrap
     module_function
 
     def from_resultset(path, root:, min_lines: 5, decomplex_scores: {})
-      data = JSON.parse(::File.read(path))
-      coverage = merge_coverage(data)
-      rootp = root.chomp("/") + "/"
+      from_coverage(
+        CoverageData.load(path, root: root),
+        root: root,
+        min_lines: min_lines,
+        decomplex_scores: decomplex_scores
+      )
+    end
+
+    def from_coverage(dataset, root:, min_lines: 5, decomplex_scores: {})
+      rootp = ::File.expand_path(root).chomp("/") + "/"
       rows = []
 
-      coverage.each do |abs, cov|
+      dataset.files.each do |abs, cov|
         next unless abs.start_with?(rootp) && ::File.file?(abs)
 
         rel = abs[rootp.length..]
-        lines = cov["lines"] || []
-        branch_misses = branch_misses_by_line(cov["branches"] || {})
+        lines = cov.lines || []
+        branch_misses = if cov.branch_coverage?
+                          branch_misses_by_line(cov.branches)
+                        else
+                          tree_sitter_branch_misses_by_line(abs, cov)
+                        end
         source_lines = ::File.readlines(abs, chomp: true)
 
         method_ranges_for_file(abs, source_lines).each do |m|
@@ -123,14 +135,7 @@ module Boobytrap
     end
 
     def covered_files(path, root:)
-      rootp = root.chomp("/") + "/"
-      JSON.parse(::File.read(path)).each_value.flat_map do |entry|
-        (entry["coverage"] || {}).keys
-      end.uniq.filter_map do |abs|
-        next unless abs.start_with?(rootp) && ::File.file?(abs)
-
-        abs[rootp.length..]
-      end
+      CoverageData.load(path, root: root).covered_files(root: root)
     end
 
     def merge_coverage(data)
@@ -244,6 +249,18 @@ module Boobytrap
         end
       end
       out
+    end
+
+    def tree_sitter_branch_misses_by_line(abs, coverage)
+      return {} unless coverage.line_coverage?
+      return {} unless Boobytrap::DecomplexRisk.tree_sitter?
+      return {} unless Boobytrap::DecomplexRisk.load_decomplex_syntax
+      return {} unless Boobytrap::DecomplexRisk.supported_source?(abs)
+
+      doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
+      CoverageData.dark_branch_misses_by_line(coverage, doc.branch_arms)
+    rescue LoadError, StandardError
+      {}
     end
 
     def state_write_count(lines)

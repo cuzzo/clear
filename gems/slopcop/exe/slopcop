@@ -12,6 +12,9 @@ def usage
                    [--ffi=meth1,meth2] [--diagnostic=meth1,meth2] \\
                    [--top=N]
 
+    --coverage
+             SimpleCov .resultset.json, kcov output directory,
+             kcov Cobertura XML, or kcov codecov JSON
     --files  repo-relative source files to triage (default: app/lib/src;
              .rb in RubyVM mode, Decomplex Tree-sitter extensions in
              DECOMPLEX_PARSER=tree_sitter mode)

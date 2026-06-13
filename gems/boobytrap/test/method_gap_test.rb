@@ -137,4 +137,58 @@ class MethodGapTest < Minitest::Test
       end
     end
   end
+
+  def test_kcov_cobertura_zig_method_gaps
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        const Worker = struct {
+            count: i32 = 0,
+
+            fn run(self: *Worker, x: i32) bool {
+                if (x > 0) {
+                    return true;
+                } else {
+                    self.count += 1;
+                    return false;
+                }
+            }
+        };
+      ZIG
+      coverage = "#{dir}/cobertura.xml"
+      File.write(coverage, <<~XML)
+        <?xml version="1.0" ?>
+        <coverage>
+          <sources><source>#{dir}</source></sources>
+          <packages><package name=""><classes>
+            <class name="worker" filename="src/worker.zig">
+              <lines>
+                <line number="4" hits="1"/>
+                <line number="5" hits="1"/>
+                <line number="6" hits="1"/>
+                <line number="8" hits="0"/>
+                <line number="9" hits="0"/>
+              </lines>
+            </class>
+          </classes></package></packages>
+        </coverage>
+      XML
+
+      with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        rows = Boobytrap::MethodGap.from_resultset(coverage, root: dir, min_lines: 1)
+        run = rows.find { |row| row.name == "run" }
+
+        refute_nil run
+        assert_equal "src/worker.zig", run.file
+        assert_operator run.covered_lines, :>, 0
+        assert_operator run.missed_lines, :>, 0
+        assert_operator run.uncovered_branches, :>=, 1
+        assert_operator run.line_gap, :>, 0.0
+      end
+    end
+  end
 end

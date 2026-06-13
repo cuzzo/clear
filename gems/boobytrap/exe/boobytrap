@@ -10,6 +10,8 @@ def usage
       boobytrap report [--repo=.] [--coverage=coverage/.resultset.json] \\
                        [--output=report.md] [--top=40] [--only=PATH ...]
 
+    --coverage   SimpleCov .resultset.json, kcov output directory,
+                 kcov Cobertura XML, or kcov codecov JSON
     --only=PATH  restrict ranking to a repo-relative path prefix
                  (repeatable, e.g. --only=src/ --only=lib/). The fix
                  time-decay baseline stays over the whole history;

@@ -116,6 +116,7 @@ module SlopCop
       o << "- Repo: `#{@repo}`\n"
       o << "- Files: #{@r[:per_file].size}; dark arms: #{g}; " \
            "genuine gaps: #{gaps.size}\n"
+      o << "- Coverage input: #{@r[:coverage_label]}\n" if @r[:coverage_label]
       unless @r[:sources].to_h.empty?
         source_bits = @r[:sources].sort.map { |source, count| "#{source}=#{count}" }.join(", ")
         o << "- Branch source: #{source_bits}\n"

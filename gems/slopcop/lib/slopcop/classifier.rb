@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "json"
 require "set"
+require_relative "../../../boobytrap/lib/boobytrap/coverage_data"
 
 module SlopCop
   # Classifies every never-taken branch arm in a target file into ONE
@@ -36,23 +36,8 @@ module SlopCop
 
     module_function
 
-    def merged_branches(resultset, abspath)
-      return {} unless resultset && File.file?(resultset)
-
-      m = {}
-      JSON.parse(File.read(resultset)).each_value do |e|
-        (e["coverage"] || {}).each do |p, c|
-          next unless p == abspath && c.is_a?(Hash) && c["branches"]
-
-          c["branches"].each do |par, arms|
-            d = (m[par] ||= Hash.new(0))
-            arms.each { |a, n| d[a] = d[a] + (n || 0) }
-          end
-        end
-      end
-      m
-    rescue JSON::ParserError, Errno::ENOENT
-      {}
+    def merged_branches(resultset, abspath, root: nil)
+      coverage_for(resultset, abspath, root: root)&.branches || {}
     end
 
     def method_index(lines)
@@ -134,9 +119,19 @@ module SlopCop
     end
 
     # -> [Arm, ...] for every dark arm in abspath.
-    def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [])
-      branches = merged_branches(resultset, abspath)
+    def classify_file(resultset, abspath, ffi_boundary: [], diagnostic_mids: [], root: nil)
+      file_coverage = coverage_for(resultset, abspath, root: root)
+      branches = file_coverage&.branches || {}
       if branches.empty?
+        if tree_sitter? && file_coverage&.line_coverage?
+          return classify_line_coverage_file(
+            abspath,
+            file_coverage,
+            ffi_boundary: ffi_boundary,
+            diagnostic_mids: diagnostic_mids
+          )
+        end
+
         return classify_static_file(abspath,
                                     ffi_boundary: ffi_boundary,
                                     diagnostic_mids: diagnostic_mids) if tree_sitter?
@@ -182,6 +177,21 @@ module SlopCop
       out
     end
 
+    def coverage_for(resultset, abspath, root: nil)
+      return nil unless resultset
+
+      root ||= File.dirname(abspath)
+      coverage_dataset(resultset, root: root)[abspath]
+    rescue StandardError
+      nil
+    end
+
+    def coverage_dataset(resultset, root:)
+      @coverage_cache ||= {}
+      key = [File.expand_path(resultset), File.expand_path(root)]
+      @coverage_cache[key] ||= Boobytrap::CoverageData.load(resultset, root: root)
+    end
+
     def classify_static_file(abspath, ffi_boundary: [], diagnostic_mids: [])
       return [] unless load_decomplex_syntax
       return [] unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
@@ -201,6 +211,41 @@ module SlopCop
 
         Arm.new(file: abspath, defn: arm.function, line: arm.line,
                 category: cat, source: :tree_sitter_static)
+      end
+    rescue LoadError, StandardError
+      []
+    end
+
+    def classify_line_coverage_file(abspath, file_coverage, ffi_boundary: [], diagnostic_mids: [])
+      return [] unless load_decomplex_syntax
+      return [] unless Decomplex::Syntax.supported_source?(abspath, parser: "tree_sitter")
+
+      doc = Decomplex::Syntax.parse(abspath, parser: "tree_sitter")
+      covered_arms = Boobytrap::CoverageData.branch_arm_coverage(file_coverage, doc.branch_arms)
+      groups = covered_arms.group_by do |arm_cov|
+        arm = arm_cov.arm
+        [arm.kind, arm.decision_line, arm.decision_span]
+      end
+
+      covered_arms.filter_map do |arm_cov|
+        next if arm_cov.covered
+
+        arm = arm_cov.arm
+        group = groups.fetch([arm.kind, arm.decision_line, arm.decision_span], [])
+        sibling_taken = group.any?(&:covered)
+        cat = categorize_text(
+          arm.function,
+          arm.kind,
+          arm.body,
+          sibling_taken,
+          arm.predicate,
+          ffi_boundary,
+          diagnostic_mids
+        )
+        next if cat.nil?
+
+        Arm.new(file: abspath, defn: arm.function, line: arm.line,
+                category: cat, source: arm_cov.source)
       end
     rescue LoadError, StandardError
       []

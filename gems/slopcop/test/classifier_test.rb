@@ -4,6 +4,8 @@ require "minitest/autorun"
 require "tempfile"
 require "json"
 require "coverage"
+require "tmpdir"
+require "fileutils"
 require_relative "../lib/slopcop"
 
 class ClassifierTest < Minitest::Test
@@ -225,5 +227,95 @@ class ClassifierTest < Minitest::Test
     end
   ensure
     f&.unlink
+  end
+
+  def test_kcov_cobertura_zig_classification_uses_normalized_line_hits
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        const Worker = struct {
+            count: i32 = 0,
+
+            fn run(self: *Worker, x: i32) bool {
+                if (x > 0) {
+                    return true;
+                } else {
+                    self.count += 1;
+                    return false;
+                }
+            }
+        };
+      ZIG
+      coverage = "#{dir}/cobertura.xml"
+      File.write(coverage, <<~XML)
+        <?xml version="1.0" ?>
+        <coverage>
+          <sources><source>#{dir}</source></sources>
+          <packages><package name=""><classes>
+            <class name="worker" filename="src/worker.zig">
+              <lines>
+                <line number="4" hits="1"/>
+                <line number="5" hits="1"/>
+                <line number="6" hits="1"/>
+                <line number="8" hits="0"/>
+                <line number="9" hits="0"/>
+              </lines>
+            </class>
+          </classes></package></packages>
+        </coverage>
+      XML
+
+      with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        arms = C.classify_file(coverage, file, root: dir)
+
+        refute_empty arms
+        assert arms.all? { |arm| arm.source == :kcov }
+        assert_includes arms.map(&:defn), "run"
+        assert_includes arms.map(&:category), :genuine
+      end
+    end
+  end
+
+  def test_kcov_covered_zig_file_does_not_fall_back_to_static
+    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
+    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter kcov test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/worker.zig"
+      File.write(file, <<~ZIG)
+        fn run(x: i32) bool {
+            if (x > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+      ZIG
+      coverage = "#{dir}/cobertura.xml"
+      File.write(coverage, <<~XML)
+        <?xml version="1.0" ?>
+        <coverage>
+          <sources><source>#{dir}</source></sources>
+          <packages><package name=""><classes>
+            <class name="worker" filename="src/worker.zig">
+              <lines>
+                <line number="2" hits="1"/>
+                <line number="3" hits="1"/>
+                <line number="5" hits="1"/>
+              </lines>
+            </class>
+          </classes></package></packages>
+        </coverage>
+      XML
+
+      with_env("DECOMPLEX_PARSER", "tree_sitter") do
+        assert_empty C.classify_file(coverage, file, root: dir)
+      end
+    end
   end
 end
