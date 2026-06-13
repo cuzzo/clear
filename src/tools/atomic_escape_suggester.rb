@@ -20,9 +20,8 @@ require_relative "../ast/fixable_error"
 # Empty on parse error too -- the caller falls back to its existing
 # diagnosis stream.
 module AtomicEscapeSuggester
-  module_function
 
-  def analyze(source)
+  def self.analyze(source)
     tokens = Lexer.new(source).tokenize
     ast    = ClearParser.new(tokens, source).parse
     ann    = SemanticAnnotator.new
@@ -50,7 +49,7 @@ module AtomicEscapeSuggester
     []
   end
 
-  def to_hash(finding)
+  def self.to_hash(finding)
     msg = finding.message.to_s
     kind =
       if msg.include?("RETURN")

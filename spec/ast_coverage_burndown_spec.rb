@@ -2,17 +2,17 @@ require "rspec"
 require "set"
 require "tempfile"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/diagnostic_buckets"
-require_relative "../src/ast/diagnostic_examples"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/fixable_error"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/std_lib"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/ast/type"
-require_relative "../src/annotator/helpers/function_signature"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/diagnostic_buckets" unless defined?(DiagnosticBuckets)
+require_relative "../src/ast/diagnostic_examples" unless defined?(DiagnosticExamples::FixScan)
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
 RSpec.describe "AST coverage burndown" do
   def token(type = :VAR_ID, value = "x", line: 1, column: 1)

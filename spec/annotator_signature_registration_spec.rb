@@ -1,10 +1,10 @@
 require "spec_helper"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/annotator/phases/declaration_index"
-require_relative "../src/annotator/phases/signature_registration"
-require_relative "../src/annotator/phases/type_registration"
-require_relative "../src/ast/lexer"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/annotator/phases/declaration_index" unless defined?(Annotator::Phases::DeclarationIndexer)
+require_relative "../src/annotator/phases/signature_registration" unless defined?(Annotator::Phases::SignatureRegistration)
+require_relative "../src/annotator/phases/type_registration" unless defined?(Annotator::Phases::TypeRegistration)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Annotator::Phases::SignatureRegistration do
   def tok(value = "x")

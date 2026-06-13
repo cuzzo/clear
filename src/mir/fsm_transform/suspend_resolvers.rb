@@ -17,7 +17,6 @@ require_relative "context"
 module FsmTransform
   module SuspendResolvers
     extend T::Sig
-    module_function
 
     # Public entry. `seg` is a Segments::Segment whose tail is one of
     # the *Suspend variants. Returns MIR::SuspendDescriptor.
@@ -26,7 +25,7 @@ module FsmTransform
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
     sig { params(seg: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: T.nilable(Integer)).returns(MIR::SuspendDescriptor) }
-    def resolve(seg, ctx, lowering, susp_idx: nil)
+    def self.resolve(seg, ctx, lowering, susp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       case seg.tail
       when Segments::IoSuspend
@@ -53,7 +52,7 @@ module FsmTransform
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
     sig { params(io_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
-    def resolve_io(io_tail, ctx, lowering)
+    def self.resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
       raise ArgumentError, "IoSuspend missing stdlib_def" unless stdlib_def
@@ -154,7 +153,7 @@ module FsmTransform
     # so finishFsmNext consumes the settled result and destroys Inner
     # without blocking the scheduler thread.
     sig { params(next_tail: T.untyped, ctx: Emit::FsmEmitContext, lowering: T.untyped, susp_idx: Integer).returns(MIR::SuspendDescriptor) }
-    def resolve_next(next_tail, ctx, lowering, susp_idx:)
+    def self.resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
       id = ctx.id
       sp_field = "sp_#{susp_idx}"
@@ -259,22 +258,22 @@ module FsmTransform
     end
 
     sig { params(name: String).returns(String) }
-    def fsm_owned_guard_name(name)
+    def self.fsm_owned_guard_name(name)
       "__owned_#{name}_init"
     end
 
     sig { params(name: String).returns(MIR::ContextFieldDecl) }
-    def fsm_owned_guard_decl(name)
+    def self.fsm_owned_guard_decl(name)
       ctx_field_decl(fsm_owned_guard_name(name), "bool", MIR::Lit.new("false"))
     end
 
     sig { params(name: String, type_zig: String, default_value: T.nilable(MIR::Emittable)).returns(MIR::ContextFieldDecl) }
-    def ctx_field_decl(name, type_zig, default_value)
+    def self.ctx_field_decl(name, type_zig, default_value)
       MIR::ContextFieldDecl.new(name: name, type_zig: type_zig, default_value: default_value)
     end
 
     sig { params(decl: FsmOps::StateFieldDecl).returns(MIR::ContextFieldDecl) }
-    def state_field_decl(decl)
+    def self.state_field_decl(decl)
       ctx_field_decl(
         decl.name.to_s,
         decl.zig_type.to_s,
@@ -283,7 +282,7 @@ module FsmTransform
     end
 
     sig { params(type_info: T.nilable(Type), lowering: T.untyped).returns(T::Boolean) }
-    def ownership_bearing_result_type?(type_info, lowering)
+    def self.ownership_bearing_result_type?(type_info, lowering)
       return false unless type_info
       schema_lookup = lowering.respond_to?(:mir_schema_lookup) ? lowering.mir_schema_lookup : nil
       type_info.string? || type_info.heap_ptr? || type_info.collection_value? ||
@@ -292,12 +291,8 @@ module FsmTransform
       false
     end
 
-    private :resolve_io,
-      :resolve_next
     private_class_method :resolve_io,
       :resolve_next
-    private :ctx_field_decl
-  private :state_field_decl
   private_class_method :ctx_field_decl
   private_class_method :state_field_decl
 

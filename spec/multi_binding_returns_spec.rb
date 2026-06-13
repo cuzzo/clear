@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Atomics M2.4 / M2.5: parser + lifetime-checker support for
 # multi-binding `RETURNS (a b c):T` and the wildcard form

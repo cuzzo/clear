@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/analyzer"
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
 
 # Drives the LSP analyzer with real CLEAR snippets and asserts that
 # findings come back as expected. The analyzer is the bridge between

@@ -1,8 +1,8 @@
 require "rspec"
 
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Phase 2.1 — `@observable` flag on Type.
 # Verifies the parser recognizes `@observable` as a capability sigil and the

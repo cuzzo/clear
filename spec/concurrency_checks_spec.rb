@@ -1,9 +1,9 @@
 require "rspec"
 require "set"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/semantic/effect_set"
-require_relative "../src/semantic/effect_inference"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/semantic/effect_set" unless defined?(EffectSet)
+require_relative "../src/semantic/effect_inference" unless defined?(EffectInference)
 
 # P3.7: pin the four Phase 3 compile-time correctness checks plus the
 # EffectSet / EffectInference scaffolding.

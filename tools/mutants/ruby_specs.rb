@@ -4,7 +4,9 @@
 
 require 'optparse'
 require 'fileutils'
+require 'shellwords'
 require 'sorbet-runtime'
+require 'yaml'
 require_relative 'support'
 
 module RubySpecMutants
@@ -17,26 +19,17 @@ module RubySpecMutants
     const :spec, String
     const :min_coverage, Float
     const :max_timeouts, Integer
+    const :hard_gate, T::Boolean
   end
 
-  SUBJECTS = T.let([
-    Subject.new(
-      name: 'mir-inline-alloc-metadata',
-      expression: 'MIR::InlineAllocMetadata*',
-      requires: ['backends/transpiler'],
-      spec: 'spec/mir_gap_burn_spec.rb',
-      min_coverage: 92.0,
-      max_timeouts: 2
-    ),
-    Subject.new(
-      name: 'lexer',
-      expression: 'Lexer*',
-      requires: ['ast/lexer'],
-      spec: 'spec/lexer_spec.rb',
-      min_coverage: 76.0,
-      max_timeouts: 70
-    ),
-  ].freeze, T::Array[Subject])
+  class SubjectResult < T::Struct
+    const :subject, Subject
+    const :ok, T::Boolean
+    const :blocking, T::Boolean
+  end
+
+  SUBJECT_FILE = T.let(File.expand_path('src_subjects.yml', __dir__), String)
+  DEFAULT_MAX_TIMEOUTS = 100
 
   class Options < T::Struct
     prop :subject, T.nilable(String)
@@ -44,6 +37,96 @@ module RubySpecMutants
     prop :out, String
     prop :list, T::Boolean
   end
+
+  sig { params(value: String).returns(String) }
+  def self.slug(value)
+    value.gsub(/[^A-Za-z0-9]+/, '-').gsub(/\A-|-+\z/, '').downcase
+  end
+
+  sig { params(subject: String).returns(String) }
+  def self.subject_expression(subject)
+    subject.include?('#') ? subject : "#{subject}*"
+  end
+
+  sig { params(subject: Subject, since: T.nilable(String)).returns(T::Array[String]) }
+  def self.mutant_argv(subject, since)
+    argv = T.let(['bundle', 'exec', 'mutant', '--zombie', 'run', '--usage', 'opensource', '-I', 'src'], T::Array[String])
+    subject.requires.each { |req| argv.concat(['-r', req]) }
+    argv.concat([
+      '--integration', 'rspec',
+      '--integration-argument', subject.spec,
+      '--jobs', ENV.fetch('MUTANT_JOBS', '32'),
+    ])
+    argv.concat(['--since', since]) if since
+    argv << subject.expression
+    argv
+  end
+
+  sig { params(subject: Subject, summary: MutationTesting::MutantSummary).returns(SubjectResult) }
+  def self.evaluate_summary(subject, summary)
+    if summary.mutations.zero?
+      return SubjectResult.new(subject: subject, ok: true, blocking: false)
+    end
+
+    ok = summary.selected_tests.positive? &&
+      summary.coverage >= subject.min_coverage &&
+      summary.timeouts <= subject.max_timeouts
+    SubjectResult.new(subject: subject, ok: ok, blocking: !ok && subject.hard_gate)
+  end
+
+  sig { params(require_string: String).returns(T::Array[String]) }
+  def self.parse_requires(require_string)
+    tokens = Shellwords.split(require_string)
+    requires = T.let([], T::Array[String])
+    skip_next = T.let(false, T::Boolean)
+    tokens.each_with_index do |token, index|
+      if skip_next
+        skip_next = false
+        next
+      end
+
+      if token == '-r'
+        req = tokens[index + 1]
+        raise "dangling -r in mutant require string: #{require_string}" unless req
+        requires << req
+        skip_next = true
+      else
+        requires << token
+      end
+    end
+    requires
+  end
+
+  sig { params(entry: T::Hash[String, T.untyped]).returns(Subject) }
+  def self.subject_from_entry(entry)
+    subject = String(entry['subject'])
+    baseline = Float(entry['baseline'])
+    Subject.new(
+      name: slug(subject),
+      expression: subject_expression(subject),
+      requires: parse_requires(String(entry['require'])),
+      spec: String(entry['spec']),
+      min_coverage: baseline,
+      max_timeouts: Integer(entry.fetch('max_timeouts', DEFAULT_MAX_TIMEOUTS)),
+      hard_gate: entry.fetch('hard_gate', false) == true
+    )
+  end
+
+  sig { returns(T::Array[Subject]) }
+  def self.load_subjects
+    raw = YAML.safe_load(File.read(SUBJECT_FILE), permitted_classes: [], aliases: false)
+    entries = T.cast(raw, T::Array[T::Hash[String, T.untyped]])
+    subjects = entries.map { |entry| subject_from_entry(entry) }
+    duplicate_names = subjects.group_by(&:name).select { |_name, group| group.length > 1 }.keys
+    raise "duplicate ruby mutant subject names: #{duplicate_names.join(', ')}" unless duplicate_names.empty?
+
+    subjects.each do |subject|
+      raise "missing mutant spec for #{subject.expression}: #{subject.spec}" unless File.file?(subject.spec)
+    end
+    subjects.freeze
+  end
+
+  SUBJECTS = T.let(load_subjects, T::Array[Subject])
 
   sig { params(argv: T::Array[String]).returns(Options) }
   def self.parse_options(argv)
@@ -59,40 +142,29 @@ module RubySpecMutants
     opts
   end
 
-  sig { params(subject: Subject, since: T.nilable(String), log_path: String).returns(T::Boolean) }
+  sig { params(subject: Subject, since: T.nilable(String), log_path: String).returns(SubjectResult) }
   def self.run_subject(subject, since, log_path)
-    argv = T.let(['bundle', 'exec', 'mutant', 'run', '--usage', 'opensource', '-I', 'src'], T::Array[String])
-    subject.requires.each { |req| argv.concat(['-r', req]) }
-    argv.concat([
-      '--integration', 'rspec',
-      '--integration-argument', subject.spec,
-      '--jobs', ENV.fetch('MUTANT_JOBS', '32'),
-    ])
-    argv.concat(['--since', since]) if since
-    argv << subject.expression
-
-    result = MutationTesting.run_cmd(argv, allow_failure: true, log_path: log_path)
+    result = MutationTesting.run_cmd(mutant_argv(subject, since), allow_failure: true, log_path: log_path)
     summary = MutationTesting.parse_mutant_summary(result.output)
     unless summary
       puts "#{subject.name}: FAILED (could not parse mutant output; log #{log_path})"
-      return false
+      return SubjectResult.new(subject: subject, ok: false, blocking: subject.hard_gate)
     end
 
     if summary.mutations.zero?
       puts "#{subject.name}: skipped (0 mutations selected)"
-      return true
+      return SubjectResult.new(subject: subject, ok: true, blocking: false)
     end
 
-    ok = summary.selected_tests.positive? &&
-      summary.coverage >= subject.min_coverage &&
-      summary.timeouts <= subject.max_timeouts
+    evaluated = evaluate_summary(subject, summary)
 
-    status = ok ? 'PASS' : 'FAIL'
+    status = evaluated.ok ? 'PASS' : 'FAIL'
+    gate = subject.hard_gate ? 'hard' : 'advisory'
     puts "#{subject.name}: #{status} coverage=#{format('%.2f', summary.coverage)}% " \
          "mutations=#{summary.mutations} killed=#{summary.kills} alive=#{summary.alive} " \
          "timeouts=#{summary.timeouts} selected_tests=#{summary.selected_tests} " \
-         "min=#{format('%.2f', subject.min_coverage)}% log=#{log_path}"
-    ok
+         "min=#{format('%.2f', subject.min_coverage)}% gate=#{gate} log=#{log_path}"
+    evaluated
   end
 
   sig { params(opts: Options).returns(T::Array[Subject]) }
@@ -109,7 +181,8 @@ module RubySpecMutants
     opts = parse_options(argv)
     if opts.list
       SUBJECTS.each do |s|
-        puts "#{s.name} #{s.expression} min=#{format('%.2f', s.min_coverage)} spec=#{s.spec}"
+        gate = s.hard_gate ? 'hard' : 'advisory'
+        puts "#{s.name} #{s.expression} #{gate} min=#{format('%.2f', s.min_coverage)} spec=#{s.spec}"
       end
       return 0
     end
@@ -119,7 +192,7 @@ module RubySpecMutants
     results = selected_subjects(opts).map do |subject|
       run_subject(subject, opts.since, File.join(opts.out, "#{subject.name}.log"))
     end
-    results.all? ? 0 : 1
+    results.any?(&:blocking) ? 1 : 0
   end
 end
 

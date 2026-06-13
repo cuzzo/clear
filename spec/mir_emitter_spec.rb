@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/ast"
-require_relative "../src/mir/mir"
-require_relative "../src/backends/mir_emitter"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
 
 RSpec.describe MIREmitter do
   let(:e) { MIREmitter.new }

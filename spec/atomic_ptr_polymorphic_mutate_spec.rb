@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.11 -- when a fn declares `REQUIRES c: VERSIONED | ATOMIC`
 # AND the body contains `WITH SNAPSHOT c AS MUTABLE x { ... }` without

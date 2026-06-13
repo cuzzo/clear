@@ -1,4 +1,4 @@
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "SHARD + CONCURRENT EACH lowering" do
   def annotate(src)

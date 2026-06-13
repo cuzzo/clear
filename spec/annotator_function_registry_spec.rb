@@ -1,7 +1,7 @@
 require "rspec"
 require "set"
 
-require_relative "../src/annotator/function_registry"
+require_relative "../src/annotator/function_registry" unless defined?(Annotator::FunctionRegistry)
 
 RSpec.describe Annotator::FunctionRegistry do
   def token(value)

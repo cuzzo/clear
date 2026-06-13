@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Coverage for guard_fail_flow_body action branches (mir_lowering.rb
 # 2992-3006). The existing transpile-tests fixture exercises the

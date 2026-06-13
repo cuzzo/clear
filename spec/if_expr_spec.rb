@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/type"
-require_relative "../src/ast/source_error"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 def compile_if_expr_src(src)
   ZigTranspiler.new.transpile(src, test_mode: true)

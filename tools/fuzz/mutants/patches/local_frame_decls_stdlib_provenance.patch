@@ -1,13 +1,10 @@
-diff --git a/src/mir/control_flow.rb b/src/mir/control_flow.rb
-index 553432423..107097cc1 100644
---- a/src/mir/control_flow.rb
-+++ b/src/mir/control_flow.rb
-@@ -1387,7 +1387,7 @@ module LoopFrameAnalysis
-   def self.frame_local_collection?(ti)
-     return false unless ti
-     collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
--    collection_shaped && !ti.heap? && !ti.rodata?
-+    collection_shaped && ti.frame?  # MUTANT: revert to the never-stamped frame? check
-   end
+diff --git a/src/mir/lowering/control_flow.rb b/src/mir/lowering/control_flow.rb
+--- a/src/mir/lowering/control_flow.rb
++++ b/src/mir/lowering/control_flow.rb
+@@ -243,5 +243,5 @@ module MIRLoweringControlFlow
  
-   sig { params(body: T::Array[T.untyped], _local_names: T::Set[String]).returns(T::Array[T.untyped]) }
+   sig { params(stmts: T::Array[T.untyped], mark_per_iter: T.untyped).void }
+   def finalize_loop_frame_alloc_scopes!(stmts, mark_per_iter)
+-    stamp_loop_frame_alloc_scopes!(stmts, mark_per_iter == true ? :iteration : :function)
++    stamp_loop_frame_alloc_scopes!(stmts, :function) # MUTANT: loop-local frame allocations lose per-iteration scope.
+   end

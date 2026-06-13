@@ -27,6 +27,17 @@ module FuzzMutants
       kill: { bucket: :unexpected_pass, min_delta: 1 }
     ),
     Mutant.new(
+      name: :escape_struct_field_walker,
+      description: 'Disable both current receiver-escape paths for mutation ' \
+                   'sinks. A loop-local collection wrapped in a struct/union ' \
+                   'payload and appended to an outer collection must still ' \
+                   'force the receiver heap-owned.',
+      invariant: :inv_5_frame_escape,
+      patch: File.join(PATCH_DIR, 'escape_struct_field_walker.patch'),
+      templates: [:nested_loop_escape],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :lower_if_cond_pending_leak,
       description: 'Stop lower_if draining the condition\'s @pending_stmts ' \
                    'before lowering the then-body. Hoisted temps from a ' \
@@ -48,6 +59,16 @@ module FuzzMutants
       patch: File.join(PATCH_DIR, 'cleanup_required_finalizer.patch'),
       templates: [:mir_checker_negative_matrix],
       kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :loop_frame_scope_stamp,
+      description: 'Force loop-local frame allocations to lower as function-' \
+                   'scoped. MIRChecker should reject the missing per-' \
+                   'iteration scope under loop-local method-call temps.',
+      invariant: :bug2_frame_no_rewind,
+      patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
+      templates: [:loop_local_method_temp],
+      kill: { bucket: :mir_error, min_delta: 1 }
     ),
   ].freeze
 

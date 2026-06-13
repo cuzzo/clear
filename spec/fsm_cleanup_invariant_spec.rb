@@ -1,10 +1,10 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/mir/fsm_transform/emit'
-require_relative '../src/mir/fsm_transform'
-require_relative '../src/mir/fsm_transform/liveness'
-require_relative '../src/mir/fsm_transform/recursive_splitter'
-require_relative '../src/backends/fsm_wrapper_emitter'
+require_relative '../src/mir/fsm_transform/emit' unless defined?(FsmTransform::Emit::ExpandedLockSegment)
+require_relative '../src/mir/fsm_transform' unless defined?(FsmTransform::PromotedLocalFact)
+require_relative '../src/mir/fsm_transform/liveness' unless defined?(FsmTransform::Liveness::CrossSegmentVarFact)
+require_relative '../src/mir/fsm_transform/recursive_splitter' unless defined?(FsmTransform::RecursiveSplitter::UnsupportedShape)
+require_relative '../src/backends/fsm_wrapper_emitter' unless defined?(FsmWrapperEmitter)
 
 # Tests for the FSM cleanup invariant: in any FSM-eligible BG body,
 # `defer NAME.<method>(...)` may NEVER appear in a segment fn where

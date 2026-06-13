@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests CALLER-side cleanup for heap-promoted return values.
 # When a function with returns_promoted returns data, the caller must

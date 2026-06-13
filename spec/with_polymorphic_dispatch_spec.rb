@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator/helpers/with_match_check"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator/helpers/with_match_check" unless defined?(WithMatchCheck)
 
 # True-Sync-Polymorphism step 4 (#326): annotator validation for the
 # polymorphic-iff rule and the SNAPSHOTTED REQUIRES family.

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/type"
-require_relative "../src/mir/mir"
-require_relative "../src/ast/std_lib"
-require_relative "../src/annotator/helpers/intrinsic_registry"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/annotator/helpers/intrinsic_registry" unless defined?(IntrinsicRegistry)
 
 # Totality + fidelity: every real registry entry must convert without
 # error (T::Struct raises on any mistyped IntrinsicEmit prop, so this

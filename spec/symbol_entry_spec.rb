@@ -1,4 +1,4 @@
-require_relative "../src/ast/symbol_entry"
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
 require "set"
 
 RSpec.describe SymbolEntry do

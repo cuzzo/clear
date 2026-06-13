@@ -1,7 +1,7 @@
 require "rspec"
 require "set"
 
-require_relative "../src/annotator/helpers/lock_helper"
+require_relative "../src/annotator/helpers/lock_helper" unless defined?(LockHelper::LockAnalysisState)
 
 # Unit tests for the Tarjan SCC implementation in LockHelper. The whole
 # Phase 2 cycle-detection story bottoms out on scc_is_cyclic? + tarjan_scc

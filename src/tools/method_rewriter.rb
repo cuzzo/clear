@@ -25,10 +25,9 @@ module MethodRewriter
   extend T::Sig
   Edit = T.type_alias { T::Hash[Symbol, T.untyped] }
 
-  module_function
 
   sig { params(source: String).returns(String) }
-  def rewrite(source)
+  def self.rewrite(source)
     tokens = ::Lexer.new(source).tokenize
     ast = ::ClearParser.new(tokens, source).parse
     methods = collect_method_names(ast)
@@ -52,7 +51,7 @@ module MethodRewriter
   # user wrote `FN length(xs) -> ...`, calls to `length(xs)` stay in
   # prefix form regardless of stdlib's flag.
   sig { params(ast: AST::Program).returns(Set) }
-  def collect_method_names(ast)
+  def self.collect_method_names(ast)
     user_methods = Set.new
     user_fns = Set.new
     walk_collect_user_decls(ast, user_methods, user_fns)
@@ -63,7 +62,7 @@ module MethodRewriter
     set
   end
 
-  def walk_collect_user_decls(node, methods, fns)
+  def self.walk_collect_user_decls(node, methods, fns)
     case node
     when AST::FunctionDef
       if node.is_method
@@ -93,7 +92,7 @@ module MethodRewriter
   ].freeze
 
   sig { returns(Set) }
-  def stdlib_method_names
+  def self.stdlib_method_names
     @stdlib_method_names ||= begin
       names = Set.new
       STDLIB_REGISTRIES.each do |loader|
@@ -128,7 +127,7 @@ module MethodRewriter
   # reads. Either alone wouldn't be enough — `suspends: true` is also
   # set on plain async helpers that don't go through FSM.
   sig { params(defn: FunctionSignature).returns(T::Boolean) }
-  def fsm_lowered?(defn)
+  def self.fsm_lowered?(defn)
     em = defn.emit
     return false unless em&.suspends
     em.fsm_setup_present || em.fsm_state_decls_present ||
@@ -139,7 +138,7 @@ module MethodRewriter
   # Post-order walk: collect edits for inner calls first so outer
   # rewrites see the (logically) rewritten inner. Edits are applied
   # right-to-left on the source so positions don't shift.
-  def walk_collect_edits(node, methods, source, edits)
+  def self.walk_collect_edits(node, methods, source, edits)
     return if node.nil? || AST.scalar_literal_value?(node)
 
     if node.is_a?(Array)
@@ -167,7 +166,7 @@ module MethodRewriter
   # the byte range from the start of the callee name to the closing
   # `)`, inclusive.
   sig { params(call: AST::FuncCall, source: String).returns(T.nilable(Edit)) }
-  def compute_edit(call, source)
+  def self.compute_edit(call, source)
     start_off = offset_for(source, call.token.line, call.token.column)
     return nil unless start_off
     # Sanity-check: the bytes at start_off should be the callee name.
@@ -242,7 +241,7 @@ module MethodRewriter
     :GetIndex, :StructLit, :ListLit, :HashLit, :StringLit
   ].freeze
 
-  def needs_parens?(node, text)
+  def self.needs_parens?(node, text)
     stripped = text.strip
     return false if stripped.start_with?('(') && stripped.end_with?(')')
     return false unless node
@@ -254,7 +253,7 @@ module MethodRewriter
   # ---- Source / span helpers ----
 
   sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
-  def offset_for(source, line, col)
+  def self.offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
     cur_line = 1
@@ -270,7 +269,7 @@ module MethodRewriter
   end
 
   sig { params(source: String, off: Integer).returns(Integer) }
-  def next_non_ws(source, off)
+  def self.next_non_ws(source, off)
     while off < source.length && (source[off] == ' ' || source[off] == "\t")
       off += 1
     end
@@ -281,7 +280,7 @@ module MethodRewriter
   # brackets, braces, and string literals. Returns the byte offset of
   # the matching ')' or nil if unbalanced.
   sig { params(source: String, open_off: Integer).returns(Integer) }
-  def match_paren(source, open_off)
+  def self.match_paren(source, open_off)
     depth = 0
     i = open_off
     in_str = false
@@ -328,7 +327,7 @@ module MethodRewriter
   # Split args_text into [start, end_exclusive] spans by top-level
   # commas. Respects nested parens / brackets / braces and strings.
   sig { params(args_text: String).returns(Array) }
-  def split_args_by_comma(args_text)
+  def self.split_args_by_comma(args_text)
     spans = []
     depth = 0
     cur_start = 0
@@ -384,7 +383,7 @@ module MethodRewriter
   # the chain rewrite (`xs.filter(p).length()`) we apply the inner
   # edit first to the *replacement string* of the outer edit.
   sig { params(source: String, edits: Array).returns(String) }
-  def apply_edits(source, edits)
+  def self.apply_edits(source, edits)
     # Post-order has inner edits first. Group: an inner edit is one
     # whose span is strictly inside an outer edit's span. Process by
     # building a tree, applying inner replacements to outer's
@@ -402,7 +401,7 @@ module MethodRewriter
   # non-overlapping outer edits with replacements that include all
   # inner rewrites embedded.
   sig { params(edits: Array, source: String).returns(Array) }
-  def resolve_nested_edits(edits, source)
+  def self.resolve_nested_edits(edits, source)
     outers = []
     edits.each do |e|
       enclosing = outers.find { |o| o[:start] < e[:start] && (o[:start] + o[:len]) > (e[:start] + e[:len]) }
@@ -422,7 +421,7 @@ module MethodRewriter
   end
 
   sig { params(source: String, edits: Array).returns(String) }
-  def apply_flat_edits(source, edits)
+  def self.apply_flat_edits(source, edits)
     return source if edits.empty?
     # Apply right-to-left so unaffected positions remain valid.
     sorted = edits.sort_by { |e| -e[:start] }
@@ -433,23 +432,9 @@ module MethodRewriter
     out
   end
 
-  private :apply_edits,
-    :collect_method_names,
-    :stdlib_method_names
   private_class_method :apply_edits,
     :collect_method_names,
     :stdlib_method_names
-  private :apply_flat_edits
-  private :compute_edit
-  private :fsm_lowered?
-  private :match_paren
-  private :needs_parens?
-  private :next_non_ws
-  private :offset_for
-  private :resolve_nested_edits
-  private :split_args_by_comma
-  private :walk_collect_edits
-  private :walk_collect_user_decls
   private_class_method :apply_flat_edits
   private_class_method :compute_edit
   private_class_method :fsm_lowered?

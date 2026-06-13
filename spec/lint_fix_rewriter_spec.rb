@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/lint_fix_rewriter"
+require_relative "../src/tools/lint_fix_rewriter" unless defined?(LintFixRewriter)
 
 # Direct unit tests for LintFixRewriter — the source-level pre-pass
 # that drops unused MUTABLE keywords and redundant `: Type`

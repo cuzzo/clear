@@ -1,6 +1,6 @@
 require "spec_helper"
 
-require_relative "../src/annotator/annotator"
+require_relative "../src/annotator/annotator" unless defined?(SemanticAnnotator::ReceiverState)
 
 RSpec.describe "annotator builtin environment" do
   it "registers globals and builtin resource types from stdlib environment data" do

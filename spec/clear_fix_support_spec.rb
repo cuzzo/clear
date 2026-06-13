@@ -3,7 +3,7 @@ require "tmpdir"
 require "fileutils"
 require "stringio"
 
-require_relative "../src/tools/clear_fix_support"
+require_relative "../src/tools/clear_fix_support" unless defined?(ClearFixSupport::LocationToken)
 
 RSpec.describe ClearFixSupport do
   def messages_for(source, only: nil)

@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/mir/thunk_transform"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/transpiler"
+require_relative "../src/mir/thunk_transform" unless defined?(ThunkTransform)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "ThunkTransform module wiring" do
   describe ZigType do

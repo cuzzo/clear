@@ -1,8 +1,8 @@
 require 'bundler/setup'
-require_relative '../src/ast/ast'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/cleanup_entry'
-require_relative '../src/mir/mir_checker'
+require_relative '../src/ast/ast' unless defined?(MIR::ReassignPlan)
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/cleanup_entry' unless defined?(CleanupEntry)
+require_relative '../src/mir/mir_checker' unless defined?(MIRChecker::FsmStructureError)
 
 # Tests the post-lowering MIRChecker -- only two checks remain:
 #   HPT_LEAK              -- heap-returning call result discarded (leak)

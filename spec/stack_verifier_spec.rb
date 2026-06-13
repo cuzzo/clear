@@ -2,7 +2,7 @@ require "rspec"
 require "stringio"
 require "tmpdir"
 require "fileutils"
-require_relative "../src/tools/stack_verifier"
+require_relative "../src/tools/stack_verifier" unless defined?(StackVerifier)
 
 # Most expectations drive a real StackVerifier with canned objdump
 # output (no Zig build needed) -- this contributes coverage for

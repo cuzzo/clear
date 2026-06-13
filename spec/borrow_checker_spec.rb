@@ -1,6 +1,6 @@
 require "rspec"
 require "set"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests the BorrowChecker -- AST-walk verification that borrowed variables
 # (via WITH RESTRICT / WITH BORROWED) are not moved while borrowed, and

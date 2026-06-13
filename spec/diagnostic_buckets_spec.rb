@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/diagnostic_buckets"
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/diagnostic_buckets" unless defined?(DiagnosticBuckets)
 
 RSpec.describe DiagnosticBuckets do
   it "every bucketed code is in the diagnostic registry" do

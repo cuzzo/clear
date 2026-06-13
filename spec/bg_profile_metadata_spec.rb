@@ -1,4 +1,4 @@
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe 'BG profile metadata' do
   def transpile(src)

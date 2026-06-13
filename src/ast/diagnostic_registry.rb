@@ -2952,22 +2952,21 @@ module DiagnosticRegistry
     REPLACE_AUTO_WITH_INFERRED: "Replace `Auto` with the inferred type `%{type}`.",
   }.freeze, T::Hash[Symbol, String])
 
-  module_function
 
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, T.untyped] }
 
   sig { params(code: Symbol).returns(T.nilable(DiagnosticEntry)) }
-  def lookup(code)
+  def self.lookup(code)
     DIAGNOSTICS[code]
   end
 
   sig { params(code: Symbol).returns(T::Boolean) }
-  def known?(code)
+  def self.known?(code)
     DIAGNOSTICS.key?(code)
   end
 
   sig { returns(T::Array[Symbol]) }
-  def codes
+  def self.codes
     DIAGNOSTICS.keys
   end
 
@@ -2976,7 +2975,7 @@ module DiagnosticRegistry
   # tooling skips these — we can't write a bad/good example for an
   # unimplemented compiler check.
   sig { params(code: Symbol).returns(T::Boolean) }
-  def pending?(code)
+  def self.pending?(code)
     entry = DIAGNOSTICS[code]
     !entry.nil? && entry[:pending] == true
   end
@@ -2985,7 +2984,7 @@ module DiagnosticRegistry
   # when the code isn't known. The caller decides what to do with
   # nil — the legacy helper raises an internal-compiler-error there.
   sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
-  def format(code, args = [], **kwargs)
+  def self.format(code, args = [], **kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
     template = entry[:template]
@@ -2999,7 +2998,7 @@ module DiagnosticRegistry
   end
 
   sig { params(code: Symbol, kwargs: T::Hash[Symbol, DiagnosticKwValue]).returns(String) }
-  def fix_description_from_hash(code, kwargs)
+  def self.fix_description_from_hash(code, kwargs)
     template = FIX_DESCRIPTIONS[code]
     Kernel.raise "Internal Compiler Error: Unknown fix description code :#{code}" unless template
 
@@ -3011,7 +3010,7 @@ module DiagnosticRegistry
   end
 
   sig { params(code: Symbol, kwargs: DiagnosticKwValue).returns(String) }
-  def fix_description(code, **kwargs)
+  def self.fix_description(code, **kwargs)
     fix_description_from_hash(code, kwargs)
   end
 
@@ -3019,7 +3018,7 @@ module DiagnosticRegistry
   # error strings; empty == registry is consistent. Run by the
   # spec to make sure new entries don't drift.
   sig { returns(T::Array[String]) }
-  def validate
+  def self.validate
     issues = T.let([], T::Array[String])
     DIAGNOSTICS.each do |code, entry|
       issues << "#{code}: missing :severity"  unless SEVERITIES.include?(entry[:severity])

@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests that BORROWED/RESTRICT aliases (non_escaping bindings) cannot escape
 # their WITH block in any of the three previously unguarded ways:

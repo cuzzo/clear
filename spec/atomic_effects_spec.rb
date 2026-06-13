@@ -1,8 +1,8 @@
 require "rspec"
 require "set"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator/helpers/effects"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator/helpers/effects" unless defined?(EffectTracker::EffectState)
 
 # Atomics M1.6.5 — :CONTENTION / :BLOCKING effect axis for sync capabilities.
 #

@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Atomics M1.3 -- Type axis for `:atomic`.
 #

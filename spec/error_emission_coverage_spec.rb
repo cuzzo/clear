@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/diagnostic_registry"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
 
 # Coverage spec for error sites added/touched by the error-audit branch.
 #

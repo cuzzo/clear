@@ -1,12 +1,12 @@
 require "rspec"
 require "ostruct"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/mir/cleanup_classifier"
-require_relative "../src/mir/control_flow"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_pass"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/mir/cleanup_classifier" unless defined?(CleanupClassifier::CleanupClassificationPlan)
+require_relative "../src/mir/control_flow" unless defined?(BorrowChecker::BorrowState)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_pass" unless defined?(MIRPass::OwnershipPreparationPlan)
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.

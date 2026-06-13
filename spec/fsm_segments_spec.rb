@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/std_lib"
-require_relative "../src/ast/type"
-require_relative "../src/mir/fsm_transform/segments"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/fsm_transform/segments" unless defined?(FsmTransform::Segments::SplitResult)
 
 RSpec.describe FsmTransform::Segments do
   let(:tok) { Lexer::Token.new(:IDENTIFIER, "x", 1, 1) }

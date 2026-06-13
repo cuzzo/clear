@@ -1,5 +1,5 @@
 require 'rspec'
-require_relative '../src/tools/completions'
+require_relative '../src/tools/completions' unless defined?(Completions)
 
 RSpec.describe Completions do
   describe '.script_for' do

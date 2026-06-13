@@ -41,14 +41,13 @@ module FsmTransform
     end
 
     extend T::Sig
-    module_function
 
     # Returns a Result. ctx provides captured-name set + any
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
     # fields are added by the emitter, not the body).
     sig { params(segments: T::Array[FsmTransform::Segments::Segment], ctx: T::Hash[Symbol, Object]).returns(Result) }
-    def analyze(segments, ctx)
+    def self.analyze(segments, ctx)
       captured = T.cast(ctx[:captured] || {}, T::Hash[String, Object])
       capture_names = captured.keys.to_set
 
@@ -130,7 +129,7 @@ module FsmTransform
     # component, or have a self-loop). Used to widen the live-set
     # for back-edge cases like B2-LOOP's cond+loop_pre+loop_post.
     sig { params(segments: T::Array[FsmTransform::Segments::Segment]).returns(T::Set[Integer]) }
-    def compute_cyclic_segments(segments)
+    def self.compute_cyclic_segments(segments)
       adj = {}
       segments.each { |seg| adj[seg.index] = tail_targets(seg) }
       cyclic = Set.new
@@ -154,7 +153,7 @@ module FsmTransform
     # detection). Linear suspends implicitly fall through to
     # seg.index + 1.
     sig { params(seg: T.untyped).returns(T::Array[Integer]) }
-    def tail_targets(seg)
+    def self.tail_targets(seg)
       case seg.tail
       when Segments::Done                          then []
       when Segments::Goto, Segments::LoopBack      then [seg.tail.target_index]
@@ -184,7 +183,7 @@ module FsmTransform
     # reference ctx.sp, not the original identifiers, so no extra
     # tail reads are recorded here.
     sig { params(seg: T.untyped, uses_by_seg: T.untyped).void }
-    def collect_tail_uses(seg, uses_by_seg)
+    def self.collect_tail_uses(seg, uses_by_seg)
       tail = seg.tail
       case tail
       when Segments::IoSuspend
@@ -205,7 +204,7 @@ module FsmTransform
     # fallback chain so consumers (FSM ctx-field decl emission)
     # always have a usable type.
     sig { params(stmt: T.untyped, into: T.untyped).void }
-    def collect_defs(stmt, into)
+    def self.collect_defs(stmt, into)
       case stmt
       when AST::VarDecl, AST::BindExpr
         if stmt.name.is_a?(String)
@@ -226,7 +225,7 @@ module FsmTransform
     end
 
     sig { params(stmt: T.untyped).returns(T.nilable(Type)) }
-    def stmt_decl_type(stmt)
+    def self.stmt_decl_type(stmt)
       candidates = T.let([], T::Array[T.untyped])
       candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << stmt.type                if stmt.respond_to?(:type)
@@ -237,7 +236,7 @@ module FsmTransform
     end
 
     sig { params(value: T.untyped).returns(T.nilable(Type)) }
-    def normalize_decl_type(value)
+    def self.normalize_decl_type(value)
       return nil if value.nil?
 
       Type.new(value)
@@ -245,7 +244,7 @@ module FsmTransform
 
     # Collect identifier reads anywhere in stmt's expressions.
     sig { params(stmt: T.untyped, into: T.untyped).returns(T.untyped) }
-    def collect_uses(stmt, into)
+    def self.collect_uses(stmt, into)
       walk_idents(stmt) { |name| into << name }
     end
 
@@ -255,7 +254,7 @@ module FsmTransform
     # or other unrelated Struct-shaped values that happen to
     # respond to each_pair.
     sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
-    def walk_idents(node, &block)
+    def self.walk_idents(node, &block)
       return if node.nil?
       if node.is_a?(Array)
         node.each { |n| walk_idents(n, &block) }
@@ -271,13 +270,6 @@ module FsmTransform
       return unless node.respond_to?(:each_pair)
       node.each_pair { |_, v| walk_idents(v, &block) }
     end
-      private :collect_defs
-    private :collect_tail_uses
-    private :collect_uses
-    private :compute_cyclic_segments
-    private :normalize_decl_type
-    private :stmt_decl_type
-    private :tail_targets
     private_class_method :collect_defs
     private_class_method :collect_tail_uses
     private_class_method :collect_uses

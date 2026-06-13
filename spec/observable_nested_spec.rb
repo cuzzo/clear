@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # A22: pin the behavior of nested observable pipes. Today the type
 # system rejects every shape that would naturally express a "nested

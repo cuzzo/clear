@@ -80,7 +80,6 @@ module ThunkTransform
       const :own_plan, MutualPlan
     end
 
-    module_function
 
     # Public entry. Given a function body (Array of AST stmts) +
     # the function name, return a Plan if the body matches the
@@ -91,7 +90,7 @@ module ThunkTransform
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
     sig { params(body: T::Array[AST::Node], fn_name: String, lowering: Object).returns(T.nilable(Plan)) }
-    def split(body, fn_name, lowering)
+    def self.split(body, fn_name, lowering)
       _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
       return nil if body.empty?
 
@@ -137,7 +136,7 @@ module ThunkTransform
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
     sig { params(body: T::Array[AST::Node], fn_name: String, partner_names: T::Array[String], lowering: Object).returns(T.nilable(MutualPlan)) }
-    def split_mutual(body, fn_name, partner_names, lowering)
+    def self.split_mutual(body, fn_name, partner_names, lowering)
       _ = lowering
       return nil if body.empty?
       cycle = (partner_names + [fn_name]).map(&:to_s).to_set
@@ -169,7 +168,7 @@ module ThunkTransform
     # where neither cond nor expr contains ANY call to a cycle member
     # (self or partner). The cycle set includes the current fn name.
     sig { params(stmt: AST::Node, cycle_names: T::Set[String]).returns(T.nilable(BaseCase)) }
-    def match_mutual_base_case(stmt, cycle_names)
+    def self.match_mutual_base_case(stmt, cycle_names)
       return nil unless stmt.is_a?(AST::IfStatement)
       return nil if stmt.else_branch && !stmt.else_branch.empty?
       then_b = stmt.then_branch || []
@@ -184,7 +183,7 @@ module ThunkTransform
     # `partner_fn(args...)` directly (not nested), where partner_fn is
     # one of the named partners.
     sig { params(node: AST::Node, partner_names: T::Array[String]).returns(T.nilable(MutualTailCall)) }
-    def match_tail_mutual_call(node, partner_names)
+    def self.match_tail_mutual_call(node, partner_names)
       return nil unless node.is_a?(AST::FuncCall)
       partners = partner_names.map(&:to_s).to_set
       return nil unless partners.include?(node.name.to_s)
@@ -193,7 +192,7 @@ module ThunkTransform
 
     # Like contains_self_call? but for a SET of fn names.
     sig { params(node: T.nilable(Object), names_set: T::Set[String]).returns(T::Boolean) }
-    def contains_any_call?(node, names_set)
+    def self.contains_any_call?(node, names_set)
       return false if node.nil?
       case node
       when Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef, AST::LambdaLit
@@ -213,7 +212,7 @@ module ThunkTransform
     # block IF forms parse to AST::IfStatement; the body is a
     # single-element list with the RETURN.
     sig { params(stmt: AST::Node, fn_name: String).returns(T.nilable(BaseCase)) }
-    def match_base_case(stmt, fn_name)
+    def self.match_base_case(stmt, fn_name)
       return nil unless stmt.is_a?(AST::IfStatement)
       return nil if stmt.else_branch && !stmt.else_branch.empty?
       then_b = stmt.then_branch || []
@@ -235,7 +234,7 @@ module ThunkTransform
     SUPPORTED_OPS = [:ADD, :SUB, :MUL, :DIV].freeze
 
     sig { params(expr: AST::Node, fn_name: String).returns(T.nilable(RecursiveCombine)) }
-    def match_recursive_combine(expr, fn_name)
+    def self.match_recursive_combine(expr, fn_name)
       return nil unless expr.is_a?(AST::BinaryOp)
       return nil unless SUPPORTED_OPS.include?(expr.op)
 
@@ -254,7 +253,7 @@ module ThunkTransform
     # If `node` is exactly `fn_name(args...)`, return the call node.
     # Returns nil otherwise (including for nested self-calls).
     sig { params(node: AST::Node, fn_name: String).returns(T.nilable(AST::FuncCall)) }
-    def direct_self_call(node, fn_name)
+    def self.direct_self_call(node, fn_name)
       return nil unless node.is_a?(AST::FuncCall) && node.name == fn_name
       node
     end
@@ -262,16 +261,9 @@ module ThunkTransform
     # Recursive subtree walk: returns true iff any AST::FuncCall
     # whose name == fn_name appears anywhere under `node`.
     sig { params(node: T.nilable(Object), fn_name: String).returns(T::Boolean) }
-    def contains_self_call?(node, fn_name)
+    def self.contains_self_call?(node, fn_name)
       contains_any_call?(node, Set[fn_name])
     end
-      private :contains_any_call?
-    private :contains_self_call?
-    private :direct_self_call
-    private :match_base_case
-    private :match_mutual_base_case
-    private :match_recursive_combine
-    private :match_tail_mutual_call
     private_class_method :contains_any_call?
     private_class_method :contains_self_call?
     private_class_method :direct_self_call

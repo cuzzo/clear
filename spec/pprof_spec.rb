@@ -3,8 +3,8 @@ require 'tmpdir'
 require 'fileutils'
 require 'zlib'
 require 'stringio'
-require_relative '../src/tools/pprof'
-require_relative '../src/tools/pprof_converter'
+require_relative '../src/tools/pprof' unless defined?(Pprof::Profile)
+require_relative '../src/tools/pprof_converter' unless defined?(PprofConverter)
 
 # Exercises both the pprof wire-format encoder and the converter that
 # turns `clear profile` text dumps into pprof `.pb.gz` files. We do not

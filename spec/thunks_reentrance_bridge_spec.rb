@@ -1,10 +1,10 @@
 require "rspec"
 require "set"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/ast"
-require_relative "../src/backends/transpiler"
-require_relative "../src/annotator/helpers/reentrance"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/annotator/helpers/reentrance" unless defined?(ReentranceBridge)
 
 # Thunk Phase 1.3 — annotator bridge that stamps
 # `EFFECTS REENTRANT[:VARIANT]` into the canonical

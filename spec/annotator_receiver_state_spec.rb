@@ -1,6 +1,6 @@
 require "spec_helper"
 
-require_relative "../src/annotator/annotator"
+require_relative "../src/annotator/annotator" unless defined?(SemanticAnnotator::ReceiverState)
 
 RSpec.describe "annotator receiver state boundaries" do
   def tok(type = :VAR_ID, value = "x")

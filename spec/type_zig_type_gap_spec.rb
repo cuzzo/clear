@@ -1,9 +1,9 @@
 require "rspec"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/source_error"
-require_relative "../src/ast/type"
-require_relative "../src/annotator/helpers/function_signature"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
 RSpec.describe "Type#zig_type gap coverage" do
   it "renders generic and stream-style surface names without string re-parsing" do

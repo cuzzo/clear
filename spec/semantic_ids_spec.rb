@@ -1,6 +1,6 @@
 require "spec_helper"
 
-require_relative "../src/semantic/semantic_ids"
+require_relative "../src/semantic/semantic_ids" unless defined?(Semantic::SemanticIdIndex)
 
 RSpec.describe Semantic::SemanticIdIndex do
   it "looks up stable function definition and body ids by name" do

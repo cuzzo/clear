@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # F1 (Tranche 3): EFFECTS REENTRANT:NOT_LOGICAL on a function that
 # the call-graph proves is statically reachable from itself should

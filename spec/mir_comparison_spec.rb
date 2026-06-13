@@ -1,9 +1,9 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/backends/mir_emitter"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Comparison test harness: verifies MIR pipeline produces equivalent Zig
 # to the old transpiler for simple programs. This validates MIRLowering

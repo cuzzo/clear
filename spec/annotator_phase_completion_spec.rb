@@ -1,7 +1,7 @@
 require "spec_helper"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/semantic/pass_state"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/semantic/pass_state" unless defined?(MIRPassState::StageSpec)
 
 RSpec.describe "annotator completion phases" do
   def tok(value = "program")

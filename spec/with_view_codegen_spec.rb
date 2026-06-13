@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Phase 2.5/2.6/2.7 — transpile WITH VIEW / WITH MATERIALIZED VIEW.
 # Verifies the emitted Zig calls the runtime's uniform `.view()` /

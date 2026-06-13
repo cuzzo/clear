@@ -1,11 +1,11 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/ast/lexer'
-require_relative '../src/ast/parser'
-require_relative '../src/ast/type'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_transform/segments'
-require_relative '../src/mir/fsm_transform/liveness'
+require_relative '../src/ast/lexer' unless defined?(Lexer)
+require_relative '../src/ast/parser' unless defined?(ClearParser)
+require_relative '../src/ast/type' unless defined?(Type)
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_transform/segments' unless defined?(FsmTransform::Segments::SplitResult)
+require_relative '../src/mir/fsm_transform/liveness' unless defined?(FsmTransform::Liveness::CrossSegmentVarFact)
 
 # Tests for FsmTransform::Liveness, the cross-segment live-set analysis
 # that drives FSM ctx field decls. The analysis MUST flag:

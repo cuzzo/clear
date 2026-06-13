@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/semantic/pass_work_profiler"
+require_relative "../src/semantic/pass_work_profiler" unless defined?(PassWorkProfiler::Profiler)
 
 module AST
   PassWorkProfilerSpecNode = Struct.new(:children, :metadata, keyword_init: true)

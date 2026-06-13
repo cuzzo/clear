@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
 
 RSpec.describe "ClearParser mutable fixed-array defaults" do
   def parse_main_body(source)

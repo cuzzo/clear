@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/tools/predicate_rewriter"
-require_relative "../src/tools/formatter"
+require_relative "../src/tools/predicate_rewriter" unless defined?(PredicateRewriter::CompareSpan)
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
 
 # Unit tests for PredicateRewriter — the source-level preprocessor
 # that canonicalizes hand-written null-comparison and length-comparison

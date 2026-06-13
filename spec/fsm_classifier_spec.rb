@@ -1,9 +1,9 @@
 require "rspec"
 require "open3"
 require "tempfile"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/annotator/helpers/effects"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/annotator/helpers/effects" unless defined?(EffectTracker::EffectState)
 
 # FSM Phase A: viability classifier + suspend-point enumeration + BG spawn_form.
 # Phase A produces metadata only — the emitter still produces stackful fibers.

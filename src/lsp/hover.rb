@@ -25,12 +25,11 @@ module LSP
     extend T::Sig
     HoverResponse = T.type_alias { T::Hash[T.untyped, T.untyped] }
 
-    module_function
 
     # Build a hover response for the document at `position`. Returns
     # nil when no diagnostic overlaps the cursor.
     sig { params(document: T.untyped, position: T.untyped).returns(T.nilable(HoverResponse)) }
-    def render(document, position)
+    def self.render(document, position)
       return nil unless document
       result = document.cached_findings
       return nil unless result
@@ -62,7 +61,7 @@ module LSP
     # invisible — the user would have to pinpoint the cursor on the
     # exact token to see anything.
     sig { params(result: T.untyped, position: T.untyped, source: T.untyped).returns(T.untyped) }
-    def find_overlapping(result, position, source)
+    def self.find_overlapping(result, position, source)
       candidates = result.findings.dup
       candidates << result.fatal_error if result.fatal?
 
@@ -90,7 +89,7 @@ module LSP
     end
 
     sig { params(diag: T.untyped, entry: T.untyped, example: T.untyped).returns(String) }
-    def build_markdown(diag, entry, example)
+    def self.build_markdown(diag, entry, example)
       lines = []
       lines << header_line(diag, entry)
       lines << ""
@@ -131,7 +130,7 @@ module LSP
     end
 
     sig { params(diag: T.untyped, entry: T.untyped).returns(String) }
-    def header_line(diag, entry)
+    def self.header_line(diag, entry)
       severity = severity_label(diag[:severity])
       code     = diag[:code]
       if code && entry
@@ -151,13 +150,9 @@ module LSP
     }.freeze, T::Hash[Integer, String])
 
     sig { params(severity: T.untyped).returns(String) }
-    def severity_label(severity)
+    def self.severity_label(severity)
       SEVERITY_LABELS.fetch(severity, "error")
     end
-    private :build_markdown
-  private :find_overlapping
-  private :header_line
-  private :severity_label
   private_class_method :build_markdown
   private_class_method :find_overlapping
   private_class_method :header_line

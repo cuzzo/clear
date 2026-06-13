@@ -188,13 +188,12 @@ module FsmTransform
 
 end
 
-    module_function
 
     # Public entry. Returns [Segment, ...] on success, nil if the
     # body contains a shape we don't yet recognize (try/catch, etc.).
     #
     sig { params(body: T::Array[AST::Node], lowering: MIRLowering, ctx: T.nilable(SplitContext)).returns(T.nilable(SegmentList)) }
-    def split(body, lowering, ctx: nil)
+    def self.split(body, lowering, ctx: nil)
       T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
 
@@ -243,7 +242,7 @@ end
     # produced (or `after_idx` if `stmts` is empty / has no
     # control-flow that needs splitting).
     sig { params(stmts: T::Array[SegmentStmt], after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_stmts(stmts, after_idx, builder, lowering, ctx)
+    def self.emit_stmts(stmts, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       return after_idx if stmts.nil? || stmts.empty?
 
@@ -288,7 +287,7 @@ end
     # Suspend with pre-stmts in the same segment. The pre's locals
     # live in the same Zig fn as the descriptor's setup_stmts.
     sig { params(susp_tail: T.untyped, pre: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(Integer) }
-    def emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
+    def self.emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
       raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
@@ -302,7 +301,7 @@ end
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
     sig { params(stmt: T.nilable(T.any(AST::Node, Struct))).returns(T::Boolean) }
-    def stmt_introduces_split?(stmt)
+    def self.stmt_introduces_split?(stmt)
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
       case stmt
@@ -319,7 +318,7 @@ end
     # a lock-suspending capability counts as a suspend even if its CS
     # body is straight-line.
     sig { params(stmts: T.untyped).returns(T::Boolean) }
-    def contains_suspend_anywhere?(stmts)
+    def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
         next true if Segments.classify_suspend(stmt)
@@ -336,7 +335,7 @@ end
     # FSM lock-acquire protocol (EXCLUSIVE / write_locked_read).
     # Plain @read caps don't suspend.
     sig { params(with_node: T.untyped).returns(T::Boolean) }
-    def with_lock_suspend?(with_node)
+    def self.with_lock_suspend?(with_node)
       T.bind(self, T.untyped) rescue nil
       CapabilityPlan.require_for(with_node).locks.any?
     end
@@ -350,7 +349,7 @@ end
     #     the legacy path or stackful.
     #   * try/catch around suspends: not supported.
     sig { params(body: T.untyped).returns(T::Boolean) }
-    def contains_unsupported?(body)
+    def self.contains_unsupported?(body)
       T.bind(self, T.untyped) rescue nil
       Array(body).any? do |stmt|
         case stmt
@@ -379,7 +378,7 @@ end
     # could synthesize a non-lock leading cap (e.g. @multiowned)
     # for which we don't have a uniform acquire protocol.
     sig { params(with_node: T.untyped).returns(T::Boolean) }
-    def with_unsupported?(with_node)
+    def self.with_unsupported?(with_node)
       T.bind(self, T.untyped) rescue nil
       if with_lock_suspend?(with_node)
         with_plan = CapabilityPlan.require_for(with_node)
@@ -392,7 +391,7 @@ end
     # ineligible -- the suspend protocol assumes scalar Promise(T)
     # with a `.inner.result` field. Streams have a different shape.
     sig { params(stmt: T.untyped).returns(T::Boolean) }
-    def stmt_unsupported_suspend?(stmt)
+    def self.stmt_unsupported_suspend?(stmt)
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return false unless sus.is_a?(Segments::NextSuspend)
@@ -405,7 +404,7 @@ end
 
     # Dispatch to the appropriate fragment emitter.
     sig { params(stmt: SegmentStmt, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_pivot(stmt, after_idx, builder, lowering, ctx)
+    def self.emit_pivot(stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return emit_suspend(T.cast(sus, SuspendTail), after_idx, builder) if sus
@@ -430,7 +429,7 @@ end
     # The tail's next_index is set to after_idx so the resume
     # transitions to wherever this fragment exits.
     sig { params(susp_tail: SuspendTail, after_idx: Integer, builder: Builder).returns(Integer) }
-    def emit_suspend(susp_tail, after_idx, builder)
+    def self.emit_suspend(susp_tail, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
       raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
@@ -441,21 +440,21 @@ end
     end
 
     sig { params(while_stmt: T.any(AST::WhileLoop, AST::WhileBindLoop), after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_while_fragment(while_stmt, after_idx, builder, lowering, ctx)
+    def self.emit_while_fragment(while_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [while_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "WhileLoop recursive FSM lowering requires structural MIR conditions"
     end
 
     sig { params(for_stmt: AST::ForRange, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_for_range_fragment(for_stmt, after_idx, builder, lowering, ctx)
+    def self.emit_for_range_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [for_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "ForRange recursive FSM lowering requires structural MIR loop state"
     end
 
     sig { params(for_stmt: AST::ForEach, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_for_each_fragment(for_stmt, after_idx, builder, lowering, ctx)
+    def self.emit_for_each_fragment(for_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [for_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "ForEach recursive FSM lowering requires structural MIR iterator state"
@@ -463,7 +462,7 @@ end
 
 
     sig { params(if_stmt: AST::IfStatement, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_if_fragment(if_stmt, after_idx, builder, lowering, ctx)
+    def self.emit_if_fragment(if_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = [if_stmt, after_idx, builder, lowering, ctx]
       raise UnsupportedShape, "IfStatement recursive FSM lowering requires structural MIR conditions"
@@ -496,7 +495,7 @@ end
     # recursive emit_stmts in a with_fiber_capture_map that adds
     # alias_name -> alias_data_ref entries.
     sig { params(with_stmt: AST::WithBlock, after_idx: Integer, builder: Builder, lowering: MIRLowering, ctx: SplitContext).returns(Integer) }
-    def emit_with_fragment(with_stmt, after_idx, builder, lowering, ctx)
+    def self.emit_with_fragment(with_stmt, after_idx, builder, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       caps = CapabilityPlan.require_for(with_stmt).locks
       raise UnsupportedShape, "WITH with no capabilities" if caps.empty?
@@ -559,7 +558,7 @@ end
     end
 
     sig { params(ctx_id: Integer, lock_index: Integer, lock_field_ref: String, unlock_method: String).returns(T::Array[MIR::Node]) }
-    def lock_release_stmts(ctx_id, lock_index, lock_field_ref, unlock_method)
+    def self.lock_release_stmts(ctx_id, lock_index, lock_field_ref, unlock_method)
       [
         MIR::Set.new(
           MIR::FieldGet.new(MIR::Ident.new("__ctx_#{ctx_id}"), "__lock_held_#{lock_index}"),
@@ -578,7 +577,7 @@ end
     # an order where the entry isn't at index 0 (it can happen when
     # post-segments are emitted before the body that flows into them).
     sig { params(segments: T.untyped, entry: T.untyped).returns(T::Array[T.untyped]) }
-    def renumber_with_entry(segments, entry)
+    def self.renumber_with_entry(segments, entry)
       T.bind(self, T.untyped) rescue nil
       mapping = { entry => 0 }
       next_id = 1
@@ -596,7 +595,7 @@ end
     end
 
     sig { params(tail: T.anything, mapping: T.untyped).returns(T.untyped) }
-    def remap_tail(tail, mapping)
+    def self.remap_tail(tail, mapping)
       T.bind(self, T.untyped) rescue nil
       case tail
       when Segments::Goto
@@ -624,28 +623,10 @@ end
       end
     end
 
-    private :emit_pivot,
-      :emit_with_fragment,
-      :stmt_introduces_split?,
-      :with_unsupported?
     private_class_method :emit_pivot,
       :emit_with_fragment,
       :stmt_introduces_split?,
       :with_unsupported?
-      private :contains_suspend_anywhere?
-    private :contains_unsupported?
-    private :emit_for_each_fragment
-    private :emit_for_range_fragment
-    private :emit_if_fragment
-    private :emit_stmts
-    private :emit_suspend
-    private :emit_suspend_with_pre
-    private :emit_while_fragment
-    private :lock_release_stmts
-    private :remap_tail
-    private :renumber_with_entry
-    private :stmt_unsupported_suspend?
-    private :with_lock_suspend?
     private_class_method :contains_suspend_anywhere?
     private_class_method :contains_unsupported?
     private_class_method :emit_for_each_fragment

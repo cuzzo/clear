@@ -36,10 +36,9 @@ module LintFixRewriter
   extend T::Sig
   Edit = T.type_alias { T::Hash[Symbol, T.untyped] }
 
-  module_function
 
   sig { params(source: String).returns(String) }
-  def rewrite(source)
+  def self.rewrite(source)
     ast, findings = annotate(source)
     return source unless ast
     bg_names = collect_bg_referenced_names(ast)
@@ -60,13 +59,13 @@ module LintFixRewriter
   # build (the param's mutability check fires at the call site).
   # Skip those names defensively until the annotator is fixed.
   sig { params(ast: AST::Program).returns(Set) }
-  def collect_bg_referenced_names(ast)
+  def self.collect_bg_referenced_names(ast)
     set = Set.new
     walk_for_bg_names(ast, false, set)
     set
   end
 
-  def walk_for_bg_names(node, in_bg, set)
+  def self.walk_for_bg_names(node, in_bg, set)
     return if terminal?(node)
     if node.is_a?(Array)
       node.each { |n| walk_for_bg_names(n, in_bg, set) }
@@ -81,13 +80,13 @@ module LintFixRewriter
   end
 
   sig { params(ast: AST::Program).returns(Set) }
-  def collect_mutation_sensitive_names(ast)
+  def self.collect_mutation_sensitive_names(ast)
     set = Set.new
     walk_for_mutation_sensitive_names(ast, set)
     set
   end
 
-  def walk_for_mutation_sensitive_names(node, set)
+  def self.walk_for_mutation_sensitive_names(node, set)
     return if terminal?(node)
     if node.is_a?(Array)
       node.each { |n| walk_for_mutation_sensitive_names(n, set) }
@@ -104,7 +103,7 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_mutation_sensitive_names(v, set) }
   end
 
-  def collect_identifier_names(node, set)
+  def self.collect_identifier_names(node, set)
     return if terminal?(node)
     if node.is_a?(Array)
       node.each { |n| collect_identifier_names(n, set) }
@@ -119,7 +118,7 @@ module LintFixRewriter
   end
 
   sig { params(name: String).returns(T::Boolean) }
-  def mutating_method_name?(name)
+  def self.mutating_method_name?(name)
     %w[
       append clear delete insert pop push remove reserve resize set shift
       swap truncate unshift
@@ -131,7 +130,7 @@ module LintFixRewriter
   # raised. Errors are swallowed because fmt must remain robust
   # against files with compile errors.
   sig { params(source: String).returns(Array) }
-  def annotate(source)
+  def self.annotate(source)
     FixCollector.enable!
     begin
       tokens = ::Lexer.new(source).tokenize
@@ -151,7 +150,7 @@ module LintFixRewriter
   # ---- Rule 1: MUTABLE never reassigned ----
 
   sig { params(findings: Array, bg_names: Set, mutation_sensitive_names: Set).returns(Array) }
-  def mutable_unused_edits(findings, bg_names, mutation_sensitive_names)
+  def self.mutable_unused_edits(findings, bg_names, mutation_sensitive_names)
     findings.flat_map do |finding|
       next [] unless mutable_unused_finding?(finding)
       next [] if mentions_name_in_set?(finding, bg_names)
@@ -164,7 +163,7 @@ module LintFixRewriter
   end
 
   sig { params(finding: FixableFinding).returns(T::Boolean) }
-  def mutable_unused_finding?(finding)
+  def self.mutable_unused_finding?(finding)
     finding.respond_to?(:message) &&
       finding.message&.include?("is never reassigned")
   end
@@ -173,7 +172,7 @@ module LintFixRewriter
   # ("MUTABLE 'name' is never reassigned ...") and check it against a
   # set of names where dropping MUTABLE would be unsafe.
   sig { params(finding: FixableFinding, names: Set).returns(T::Boolean) }
-  def mentions_name_in_set?(finding, names)
+  def self.mentions_name_in_set?(finding, names)
     return false if names.empty?
     msg = finding.respond_to?(:message) ? finding.message.to_s : ""
     m = msg.match(/MUTABLE '([^']+)'/)
@@ -184,20 +183,20 @@ module LintFixRewriter
   # Translate a Span/Edit (1-based line/col) into a flat byte-offset
   # edit so we can apply both rules through the same machinery.
   sig { params(span: Span, replacement: String).returns(Hash) }
-  def edit_from_span(span, replacement)
+  def self.edit_from_span(span, replacement)
     { line: span.line, col: span.col, length: span.length, replacement: replacement.to_s }
   end
 
   # ---- Rule 2: redundant type annotation ----
 
   sig { params(ast: AST::Program, source: String).returns(Array) }
-  def redundant_type_annotation_edits(ast, source)
+  def self.redundant_type_annotation_edits(ast, source)
     edits = []
     walk_for_redundant_type(ast, source, edits)
     edits
   end
 
-  def walk_for_redundant_type(node, source, edits)
+  def self.walk_for_redundant_type(node, source, edits)
     return if node.nil? || terminal?(node)
     if node.is_a?(Array)
       node.each { |n| walk_for_redundant_type(n, source, edits) }
@@ -211,12 +210,12 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_redundant_type(v, source, edits) }
   end
 
-  def terminal?(n)
+  def self.terminal?(n)
     n.nil? || n.is_a?(Symbol) || n.is_a?(String) || n.is_a?(Integer) ||
       n.is_a?(Float) || n.is_a?(TrueClass) || n.is_a?(FalseClass)
   end
 
-  def decl_mode_bind_expr?(node)
+  def self.decl_mode_bind_expr?(node)
     node.is_a?(AST::BindExpr) && node.respond_to?(:mode) && node.mode == :decl
   end
 
@@ -226,7 +225,7 @@ module LintFixRewriter
   # when the declared type carries any decoration (sigil, capability,
   # array, optional, error union, generic instance).
   sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(T.nilable(Edit)) }
-  def compute_redundant_type_edit(node, source)
+  def self.compute_redundant_type_edit(node, source)
     declared = node.type
     inferred = node.value && node.value.respond_to?(:full_type) ? node.value.full_type : nil
     return nil unless inferred
@@ -239,7 +238,7 @@ module LintFixRewriter
 
   # True only when dropping `: Type` keeps semantics identical.
   sig { params(declared: Type, inferred: Type).returns(T::Boolean) }
-  def types_match_for_drop?(declared, inferred)
+  def self.types_match_for_drop?(declared, inferred)
     decl_t = to_type(declared)
     inf_t  = to_type(inferred)
     return false unless decl_t && inf_t
@@ -253,14 +252,14 @@ module LintFixRewriter
   end
 
   sig { params(t: T.untyped).returns(T.nilable(Type)) }
-  def to_type(t)
+  def self.to_type(t)
     return nil if t.nil?
     return t if t.respond_to?(:resolved) && t.respond_to?(:any_sync?)
     Type.new(t) rescue nil
   end
 
   sig { params(t: Type).returns(T::Boolean) }
-  def any_decoration?(t)
+  def self.any_decoration?(t)
     return true if t.respond_to?(:optional?) && t.optional?
     return true if t.respond_to?(:error_union?) && t.error_union?
     return true if t.respond_to?(:array?) && t.array?
@@ -284,7 +283,7 @@ module LintFixRewriter
   # at the `:` and ends just before the `=` (after stripping trailing
   # whitespace), so the surrounding spacing is left to the formatter.
   sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(Hash) }
-  def locate_type_annotation_span(node, source)
+  def self.locate_type_annotation_span(node, source)
     return nil unless node.token
     name_off = offset_for(source, node.token.line, node.token.column)
     return nil unless name_off
@@ -337,7 +336,7 @@ module LintFixRewriter
   # Apply edits to source. Multiple edits per line are sorted right-
   # to-left so earlier ones don't shift later positions.
   sig { params(source: String, edits: Array).returns(String) }
-  def apply_edits(source, edits)
+  def self.apply_edits(source, edits)
     grouped = edits.group_by { |e| e[:line] }
     lines = source.split("\n", -1)
     grouped.each do |ln_idx, ln_edits|
@@ -359,7 +358,7 @@ module LintFixRewriter
   # ---- Source-offset helpers ----
 
   sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
-  def offset_for(source, line, col)
+  def self.offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
     cur_line = 1
@@ -375,7 +374,7 @@ module LintFixRewriter
   end
 
   sig { params(source: String, off: Integer).returns(Array) }
-  def line_col_for_offset(source, off)
+  def self.line_col_for_offset(source, off)
     line = 1
     col = 1
     i = 0
@@ -391,29 +390,7 @@ module LintFixRewriter
     [line, col]
   end
 
-  private :types_match_for_drop?
   private_class_method :types_match_for_drop?
-  private :annotate
-  private :any_decoration?
-  private :apply_edits
-  private :collect_bg_referenced_names
-  private :collect_identifier_names
-  private :collect_mutation_sensitive_names
-  private :compute_redundant_type_edit
-  private :decl_mode_bind_expr?
-  private :edit_from_span
-  private :line_col_for_offset
-  private :locate_type_annotation_span
-  private :mentions_name_in_set?
-  private :mutable_unused_edits
-  private :mutable_unused_finding?
-  private :mutating_method_name?
-  private :offset_for
-  private :redundant_type_annotation_edits
-  private :terminal?
-  private :walk_for_bg_names
-  private :walk_for_mutation_sensitive_names
-  private :walk_for_redundant_type
   private_class_method :annotate
   private_class_method :any_decoration?
   private_class_method :apply_edits

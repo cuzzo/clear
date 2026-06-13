@@ -2,15 +2,15 @@ require "tmpdir"
 require "fileutils"
 require "pathname"
 
-require_relative "../tools/loom_atomic_coverage"
-require_relative "../tools/vopr_coverage"
-require_relative "../tools/wait_loop_coverage"
-require_relative "../tools/diff_bucket_summary"
-require_relative "../tools/src_ast_walk_guardrail"
-require_relative "../tools/zig_coverage_support"
-require_relative "../tools/zig_coverage_sanitize"
-require_relative "../tools/zig_coverage_visibility"
-require_relative "../tools/zig_dwarf_line_audit"
+require_relative "../tools/loom_atomic_coverage" unless defined?(LoomAtomicCoverage)
+require_relative "../tools/vopr_coverage" unless defined?(VoprCoverage)
+require_relative "../tools/wait_loop_coverage" unless defined?(WaitLoopCoverage)
+require_relative "../tools/diff_bucket_summary" unless defined?(SRC_RUBY_CHANGE_BUCKETS)
+require_relative "../tools/src_ast_walk_guardrail" unless defined?(SrcAstWalkGuardrail::Finding)
+require_relative "../tools/zig_coverage_support" unless defined?(ZigCoverageSupport::Error)
+require_relative "../tools/zig_coverage_sanitize" unless defined?(ZigCoverageSanitizer::CLI)
+require_relative "../tools/zig_coverage_visibility" unless defined?(ZigCoverageVisibility::CLI)
+require_relative "../tools/zig_dwarf_line_audit" unless defined?(ZigDwarfLineAudit::CLI)
 
 RSpec.describe "coverage gap tools" do
   around do |example|

@@ -1,8 +1,8 @@
 require "rspec"
 require "stringio"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Phase 2.3 — `WITH VIEW v AS s { ... }`:
 #   - parser recognizes the form (also `WITH MATERIALIZED VIEW`)
@@ -212,7 +212,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
     end
 
     it "tense-prefix fix targets the binding under WITH MATERIALIZED VIEW, not a same-typed prior decl on the same line" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       FixCollector.enable!
       begin
         src = <<~CLEAR

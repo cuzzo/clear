@@ -1,7 +1,7 @@
 require "rspec"
 require "set"
 
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # P2.8: pin the REQUIRES + WITH MATCH grammar end-to-end.
 #

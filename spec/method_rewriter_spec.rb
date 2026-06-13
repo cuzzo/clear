@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/method_rewriter"
+require_relative "../src/tools/method_rewriter" unless defined?(MethodRewriter)
 
 # Unit tests for MethodRewriter — the source-level preprocessor that
 # rewrites prefix calls of METHOD-flagged functions to UFCS form.

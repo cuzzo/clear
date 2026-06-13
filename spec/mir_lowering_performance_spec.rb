@@ -2,8 +2,8 @@
 
 require "set"
 
-require_relative "../src/compiler/module_importer"
-require_relative "../src/mir/mir_lowering"
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
 
 RSpec.describe "MIRLowering body finalization performance" do
   class CountingMIRLowering < MIRLowering

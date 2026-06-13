@@ -1,6 +1,6 @@
 require "rspec"
 require "tmpdir"
-require_relative "../src/tools/fmt_verifier"
+require_relative "../src/tools/fmt_verifier" unless defined?(FmtVerifier)
 
 # FmtVerifier compares the Zig emitted from a .cht file before and
 # after fmt to confirm fmt is semantics-preserving. Heavy parts

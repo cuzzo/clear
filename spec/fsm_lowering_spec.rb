@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/mir/fsm_lowering"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/mir/fsm_lowering" unless defined?(FsmLowering::FsmLockErrorArmSplit)
 
 RSpec.describe FsmLowering do
   let(:lowering) do

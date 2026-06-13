@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 # F2 (Tranche 3): calling a recursive function (THUNK / TAIL_CALL /
 # plain REENTRANT / MAX_DEPTH) from inside a WITH lock body is a

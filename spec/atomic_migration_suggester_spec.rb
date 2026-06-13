@@ -1,6 +1,6 @@
 require "rspec"
 require "set"
-require_relative "../src/tools/atomic_migration_suggester"
+require_relative "../src/tools/atomic_migration_suggester" unless defined?(AtomicMigrationSuggester)
 
 # Atomics M1.9 / M1.10: static eligibility check for the
 # @shared:locked -> @shared:atomic migration. Tested in isolation;

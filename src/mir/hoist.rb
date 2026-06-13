@@ -38,7 +38,6 @@ end
 
 module Hoist
   extend T::Sig
-  module_function
 
   class HoistCounter < T::Struct
     extend T::Sig
@@ -65,7 +64,7 @@ module Hoist
   end
 
   sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).returns(Result) }
-  def apply!(ast, schema_lookup: nil)
+  def self.apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
     counter = HoistCounter.new
     bindings_by_function = T.let({}, T::Hash[String, T::Array[AST::VarDecl]])
@@ -85,15 +84,15 @@ module Hoist
   # frame machine, so normal-body hoists would create bindings that the
   # synthesized body cannot see.
   sig { params(fn: T.untyped).returns(T::Boolean) }
-  def synthesized_body?(fn)
-    (fn.respond_to?(:thunk_plan) && fn.thunk_plan) ||
-      (fn.respond_to?(:mutual_thunk_plan) && fn.mutual_thunk_plan)
+  def self.synthesized_body?(fn)
+    !!((fn.respond_to?(:thunk_plan) && fn.thunk_plan) ||
+      (fn.respond_to?(:mutual_thunk_plan) && fn.mutual_thunk_plan))
   end
 
   # Walk a statement list. For each statement, lift the hoistable
   # sub-expressions into temp decls inserted immediately before it.
   sig { params(body: T::Array[AST::Node], counter: HoistCounter, schema_lookup: T.nilable(Proc), generated: T::Array[AST::VarDecl], return_type: T.nilable(Type::TypeInput)).void }
-  def hoist_body!(body, counter, schema_lookup, generated:, return_type: nil)
+  def self.hoist_body!(body, counter, schema_lookup, generated:, return_type: nil)
     return unless body.is_a?(Array)
     i = 0
     while i < body.length
@@ -113,7 +112,7 @@ module Hoist
   end
 
   sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
-  def child_bodies(stmt)
+  def self.child_bodies(stmt)
     case stmt
     when AST::ForRange, AST::ForEach, AST::WithBlock, AST::BgBlock, AST::BgStreamBlock
       [stmt.body]
@@ -129,7 +128,7 @@ module Hoist
   # Composite element stores are escaping positions; hoist allocating
   # argument fragments so the escape pass sees bindings.
   sig { params(stmt: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), return_type: T.nilable(Type::TypeInput)).void }
-  def collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: nil)
+  def self.collect_stmt_hoists!(stmt, hoists, counter, schema_lookup, return_type: nil)
     each_call(stmt) do |call|
       next if call.is_a?(AST::MethodCall) && collection_value_store_call?(call)
       call.args.each_with_index do |arg, idx|
@@ -179,7 +178,7 @@ module Hoist
   end
 
   sig { params(value: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), expected_type: T.nilable(Type::TypeInput)).returns(AST::Node) }
-  def hoist_escape_value!(value, hoists, counter, schema_lookup, expected_type: nil)
+  def self.hoist_escape_value!(value, hoists, counter, schema_lookup, expected_type: nil)
     return T.cast(value, AST::Node) if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
     if allocating?(value, schema_lookup)
       return make_temp!(value, hoists, counter.next_name, expected_type: expected_type)
@@ -193,7 +192,7 @@ module Hoist
   # An anonymous expression that allocates a fresh heap-able value and so
   # needs its own binding for escape analysis to place it.
   sig { params(node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  def allocating?(node, schema_lookup)
+  def self.allocating?(node, schema_lookup)
     return false unless node
     return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
     return false if ast_access_path?(node)
@@ -205,7 +204,7 @@ module Hoist
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
-  def moved_arg?(node)
+  def self.moved_arg?(node)
     AST.moved?(node)
   end
 
@@ -215,7 +214,7 @@ module Hoist
   # hoist_body!'s own recursion; hoisting a call found there would
   # insert the temp into the wrong scope.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
-  def each_method_call(node, &blk)
+  def self.each_method_call(node, &blk)
     each_call_like(node, ->(candidate) { candidate.is_a?(AST::MethodCall) }, &blk)
   end
 
@@ -223,12 +222,12 @@ module Hoist
   # is the call-argument hoist path: anonymous allocating call arguments become
   # named bindings before escape/cleanup placement runs.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
-  def each_call(node, &blk)
+  def self.each_call(node, &blk)
     each_call_like(node, ->(candidate) { candidate.is_a?(AST::FuncCall) || candidate.is_a?(AST::MethodCall) }, &blk)
   end
 
   sig { params(node: T.untyped, matches: T.proc.params(candidate: T.untyped).returns(T::Boolean), blk: T.proc.params(arg0: T.untyped).void).void }
-  def each_call_like(node, matches, &blk)
+  def self.each_call_like(node, matches, &blk)
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
     # Separate frames -- their bodies are walked independently.
@@ -243,7 +242,7 @@ module Hoist
   end
 
   sig { params(child: T.untyped, matches: T.proc.params(candidate: T.untyped).returns(T::Boolean), blk: T.proc.params(arg0: T.untyped).void).void }
-  def each_call_like_child(child, matches, &blk)
+  def self.each_call_like_child(child, matches, &blk)
     case child
     when Array then child.each { |c| each_call_like(c, matches, &blk) }
     when Hash  then child.each_value { |v| each_call_like(v, matches, &blk) }
@@ -254,7 +253,7 @@ module Hoist
   # For a body-bearing control-flow node, the expression members that
   # are NOT statement bodies. Plain nodes recurse through their fields normally.
   sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
-  def non_body_exprs(node)
+  def self.non_body_exprs(node)
     case node
     when AST::IfStatement, AST::WhileLoop, AST::WhileBindLoop
       [node.condition]
@@ -268,7 +267,7 @@ module Hoist
   # Replace every string concat directly held by `node` (struct/union
   # field value, list element) with a hoisted temp; recurse otherwise.
   sig { params(node: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter).void }
-  def hoist_concats_within!(node, hoists, counter)
+  def self.hoist_concats_within!(node, hoists, counter)
     case node
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_key do |k|
@@ -295,7 +294,7 @@ module Hoist
   # Composite element stores can own nested heap-bearing fields, so
   # anonymous allocating fragments inside their arguments need bindings.
   sig { params(call: T.untyped).returns(T::Boolean) }
-  def composite_element_store?(call)
+  def self.composite_element_store?(call)
     obj = call.object
     sym = (obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField)) ? obj.symbol : nil
     ti = sym&.type
@@ -305,7 +304,7 @@ module Hoist
   end
 
   sig { params(call: AST::MethodCall).returns(T::Boolean) }
-  def collection_value_store_call?(call)
+  def self.collection_value_store_call?(call)
     sig = FunctionSignature.unwrap(call.matched_stdlib_def)
     sig ||= FunctionSignature.unwrap(call.matched_signature) if call.respond_to?(:matched_signature)
     return false unless (sig&.mutates_receiver? && sig.takes_ownership?) ||
@@ -318,7 +317,7 @@ module Hoist
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
-  def concat?(node)
+  def self.concat?(node)
     node.is_a?(AST::StringConcat) ||
       (node.is_a?(AST::BinaryOp) && node.op == :ADD && !!node.string_concat)
   end
@@ -326,7 +325,7 @@ module Hoist
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl
   # to `hoists`, and return the Identifier that replaces the concat.
   sig { params(concat: AST::Node, hoists: T::Array[AST::VarDecl], name: String, moved: T::Boolean, expected_type: T.nilable(Type::TypeInput), schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
-  def make_temp!(concat, hoists, name, moved: true, expected_type: nil, schema_lookup: nil)
+  def self.make_temp!(concat, hoists, name, moved: true, expected_type: nil, schema_lookup: nil)
     tok = concat.respond_to?(:token) ? concat.token : nil
     expected = Type.from_node(expected_type)
     ti = if expected && (concat.is_a?(AST::BgStreamBlock) ? expected.stream? : true)
@@ -372,7 +371,7 @@ module Hoist
   end
 
   sig { params(ast_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  def owned_fallback_temp?(ast_node, schema_lookup)
+  def self.owned_fallback_temp?(ast_node, schema_lookup)
     return false unless ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
     return false unless ast_container_borrow_expr?(ast_node.left)
 
@@ -382,19 +381,19 @@ module Hoist
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def ast_container_borrow_expr?(ast_node)
+  def self.ast_container_borrow_expr?(ast_node)
     MIRHoistFacts.container_borrow_expr?(ast_node)
   end
 
   sig { params(ast_node: T.untyped, moved: T::Boolean).returns(T::Boolean) }
-  def ast_borrow_expr?(ast_node, moved)
+  def self.ast_borrow_expr?(ast_node, moved)
     return false if moved
     return true if ast_access_path?(ast_node)
     ast_container_borrow_expr?(ast_node)
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def ast_access_path?(ast_node)
+  def self.ast_access_path?(ast_node)
     node = ast_node
     if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
       node = node.left
@@ -402,30 +401,10 @@ module Hoist
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
   end
 
-  private :collect_stmt_hoists!,
-    :ast_borrow_expr?,
-    :hoist_body!,
-    :hoist_escape_value!
   private_class_method :collect_stmt_hoists!,
     :ast_borrow_expr?,
     :hoist_body!,
     :hoist_escape_value!
-  private :allocating?
-  private :ast_access_path?
-  private :ast_container_borrow_expr?
-  private :collection_value_store_call?
-  private :composite_element_store?
-  private :concat?
-  private :each_call
-  private :each_call_like
-  private :each_call_like_child
-  private :each_method_call
-  private :hoist_concats_within!
-  private :make_temp!
-  private :moved_arg?
-  private :non_body_exprs
-  private :owned_fallback_temp?
-  private :synthesized_body?
   private_class_method :allocating?
   private_class_method :ast_access_path?
   private_class_method :ast_container_borrow_expr?

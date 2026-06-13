@@ -1,10 +1,10 @@
 require "spec_helper"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/scope"
-require_relative "../src/annotator"
-require_relative "../src/annotator/helpers/function_signature"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/scope" unless defined?(ScopeHelper)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/annotator/helpers/function_signature" unless defined?(FunctionSignature::AnalysisFacts)
 
 RSpec.describe Scope do
   def entry(type = Type.new(:Int64), mutable: true, storage: :stack, capabilities: Set.new)

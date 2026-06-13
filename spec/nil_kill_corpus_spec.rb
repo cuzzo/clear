@@ -1,5 +1,5 @@
 require "open3"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "nil-kill corpus generators" do
   it "excludes known non-buildable explicit-parallel benchmark corpus files" do

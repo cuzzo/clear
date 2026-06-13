@@ -36,7 +36,6 @@ require_relative "fsm_transform/emit"
 
 module FsmTransform
   extend T::Sig
-  module_function
 
   class PromotedLocalFact < T::Struct
     extend T::Sig
@@ -63,7 +62,7 @@ module FsmTransform
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
   sig { params(bg_block: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
-  def transform(bg_block, ctx, lowering)
+  def self.transform(bg_block, ctx, lowering)
     T.bind(self, T.untyped) rescue nil
     suspend_points = bg_block.fsm_suspend_points || []
 
@@ -233,7 +232,7 @@ module FsmTransform
   # segment boundaries resolve via the capture_map. Returns
   # typed facts (deduped on name).
   sig { params(stmts: T.untyped).returns(T::Array[PromotedLocalFact]) }
-  def collect_body_locals(stmts)
+  def self.collect_body_locals(stmts)
     T.bind(self, T.untyped) rescue nil
     out = T.let([], T::Array[PromotedLocalFact])
     seen = T.let({}, T::Hash[String, T::Boolean])
@@ -249,7 +248,7 @@ module FsmTransform
   end
 
   sig { params(node: T.untyped).returns(T.nilable(PromotedLocalFact)) }
-  def local_entry_for_node(node)
+  def self.local_entry_for_node(node)
     T.bind(self, T.untyped) rescue nil
     case node
     when AST::VarDecl
@@ -267,7 +266,7 @@ module FsmTransform
   end
 
   sig { params(node: AST::ForEach).returns(T.nilable(PromotedLocalFact)) }
-  def foreach_local_entry(node)
+  def self.foreach_local_entry(node)
     T.bind(self, T.untyped) rescue nil
     return nil unless node.var_name
     ct = Type.new(node.collection.full_type!(context: "FSM foreach collection"))
@@ -287,7 +286,7 @@ module FsmTransform
   # purely linear bodies skip this and let Liveness over-promote
   # nothing.
   sig { params(stmts: T.untyped).returns(T::Boolean) }
-  def body_needs_conservative?(stmts)
+  def self.body_needs_conservative?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       next true if s.is_a?(AST::WithBlock)
@@ -299,7 +298,7 @@ module FsmTransform
   end
 
   sig { params(stmts: T.untyped).returns(T::Boolean) }
-  def contains_suspend_anywhere?(stmts)
+  def self.contains_suspend_anywhere?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       next true if Segments.classify_suspend(s)
@@ -314,7 +313,7 @@ module FsmTransform
   # ctx_field_decls. Used by collect_body_locals to avoid
   # double-declaring the result var.
   sig { params(value: T.untyped).returns(T::Boolean) }
-  def suspend_value?(value)
+  def self.suspend_value?(value)
     T.bind(self, T.untyped) rescue nil
     return true if value.is_a?(AST::NextExpr)
     return false unless AST.call?(value)
@@ -323,19 +322,13 @@ module FsmTransform
   end
 
   sig { params(name: T.untyped, type_obj: T.untyped, is_suspend_result: T::Boolean).returns(T.nilable(PromotedLocalFact)) }
-  def local_entry(name, type_obj, is_suspend_result: false)
+  def self.local_entry(name, type_obj, is_suspend_result: false)
     T.bind(self, T.untyped) rescue nil
     return nil if name.nil?
     t = type_obj ? Type.new(type_obj) : nil
     zig_t = t ? t.zig_type : "anyopaque"
     PromotedLocalFact.new(name: name.to_s, type_zig: zig_t, is_suspend_result: is_suspend_result)
   end
-  private :body_needs_conservative?
-  private :collect_body_locals
-  private :contains_suspend_anywhere?
-  private :foreach_local_entry
-  private :local_entry_for_node
-  private :suspend_value?
   private_class_method :body_needs_conservative?
   private_class_method :collect_body_locals
   private_class_method :contains_suspend_anywhere?

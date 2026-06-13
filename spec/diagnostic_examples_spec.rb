@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/diagnostic_examples"
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/diagnostic_examples" unless defined?(DiagnosticExamples::FixScan)
 
 # Audit the `@example_for: CODE` annotation convention. Every annotated
 # describe block must (a) reference a real registry code and (b) carry

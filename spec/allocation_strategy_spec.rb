@@ -1,6 +1,6 @@
 require "rspec"
 require "tmpdir"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Allocation Strategy Verification — spec/allocation_strategy_spec.rb
 #

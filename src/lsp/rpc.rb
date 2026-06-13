@@ -26,13 +26,12 @@ module LSP
     # fatal — there's no way to recover an out-of-sync stream.
     class FramingError < StandardError; end
 
-    module_function
 
     # Read the next LSP message from `io`. Returns the parsed Hash, or
     # nil at EOF (clean shutdown). Raises FramingError on malformed
     # frames.
     sig { params(io: T.untyped).returns(T.nilable(Message)) }
-    def read_message(io)
+    def self.read_message(io)
       T.bind(self, T.untyped) rescue nil
       headers = read_headers(io)
       return nil if headers.nil?  # EOF before any header line
@@ -53,7 +52,7 @@ module LSP
 
     # Write `msg` (a Hash) as an LSP frame to `io`.
     sig { params(io: T.untyped, msg: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
-    def write_message(io, msg)
+    def self.write_message(io, msg)
       T.bind(self, T.untyped) rescue nil
       body = JSON.generate(msg)
       io.write("Content-Length: #{body.bytesize}\r\n\r\n#{body}")
@@ -66,7 +65,7 @@ module LSP
     # of lowercased header names → values, or nil at EOF before any
     # header line was read.
     sig { params(io: T.untyped).returns(T.nilable(Headers)) }
-    def read_headers(io)
+    def self.read_headers(io)
       T.bind(self, T.untyped) rescue nil
       headers = {}
       first = T.let(true, T::Boolean)
@@ -85,7 +84,6 @@ module LSP
       end
       headers
     end
-      private :read_headers
     private_class_method :read_headers
 
 end

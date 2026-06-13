@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../../src/lsp/diagnostics"
-require_relative "../../src/lsp/analyzer"
+require_relative "../../src/lsp/diagnostics" unless defined?(LSP::Diagnostics)
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
 
 RSpec.describe LSP::Diagnostics do
   Token = Struct.new(:line, :column, :value, keyword_init: true)

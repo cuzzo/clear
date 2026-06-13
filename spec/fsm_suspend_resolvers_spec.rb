@@ -1,14 +1,14 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/ast/lexer'
-require_relative '../src/ast/parser'
-require_relative '../src/ast/type'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_ops'
-require_relative '../src/mir/fsm_transform/segments'
-require_relative '../src/mir/fsm_transform'
-require_relative '../src/mir/fsm_transform/suspend_resolvers'
-require_relative '../src/annotator/helpers/intrinsic_registry'
+require_relative '../src/ast/lexer' unless defined?(Lexer)
+require_relative '../src/ast/parser' unless defined?(ClearParser)
+require_relative '../src/ast/type' unless defined?(Type)
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_ops' unless defined?(FsmOps::Lowerer)
+require_relative '../src/mir/fsm_transform/segments' unless defined?(FsmTransform::Segments::SplitResult)
+require_relative '../src/mir/fsm_transform' unless defined?(FsmTransform::PromotedLocalFact)
+require_relative '../src/mir/fsm_transform/suspend_resolvers' unless defined?(FsmTransform::SuspendResolvers)
+require_relative '../src/annotator/helpers/intrinsic_registry' unless defined?(IntrinsicRegistry)
 
 # Tests for FsmTransform::SuspendResolvers, the per-suspend-kind
 # resolvers that turn a Segments::*Suspend tail into a

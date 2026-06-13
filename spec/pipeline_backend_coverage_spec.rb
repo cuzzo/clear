@@ -1,14 +1,14 @@
 require "rspec"
 require "ostruct"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/source_error"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/ast/type"
-require_relative "../src/mir/lower/pipeline/pipeline_host"
-require_relative "../src/mir/mir"
-require_relative "../src/backends/mir_emitter"
-require_relative "../src/mir/mir_lowering"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/lower/pipeline/pipeline_host" unless defined?(PipelineHost)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
 
 PipelineMaterializerCoverageState = Struct.new(
   :current_label,

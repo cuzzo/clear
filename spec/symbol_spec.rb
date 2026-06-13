@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/ast/type"
-require_relative "../src/backends/transpiler"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Full pipeline helper: source -> Zig string
 def compile_symbol_src(src)

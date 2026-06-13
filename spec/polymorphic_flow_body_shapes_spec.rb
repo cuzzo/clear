@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Coverage for emit_flow_stmt and flow_body_terminates? branches in
 # mir_emitter.rb. These fire only when a polymorphic-mutate WITH body

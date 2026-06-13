@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests the UseAfterMoveChecker -- the dataflow-based use-after-move checker
 # that replays CFG transfer from block-entry states.

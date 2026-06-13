@@ -152,10 +152,9 @@ module FsmTransform
       const :segments, T::Array[Segment]
     end
 
-    module_function
 
     sig { params(tail: T.untyped).returns(T::Boolean) }
-    def suspend_tail?(tail)
+    def self.suspend_tail?(tail)
       tail.respond_to?(:suspend?) && tail.suspend?
     end
 
@@ -172,7 +171,7 @@ module FsmTransform
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
     sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(SplitResult)) }
-    def split(body, lowering)
+    def self.split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
       # call at top level.
@@ -217,7 +216,7 @@ module FsmTransform
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
     sig { params(body: T.untyped).returns(T.nilable(SplitResult)) }
-    def split_while_loop_next(body)
+    def self.split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
 
@@ -287,13 +286,13 @@ module FsmTransform
     # Stage 1 punt: anything outside top-level linear stmts +
     # top-level suspends is not yet handled.
     sig { params(body: T.untyped).returns(T::Boolean) }
-    def contains_unsupported_shape?(body)
+    def self.contains_unsupported_shape?(body)
       T.bind(self, T.untyped) rescue nil
       body.any? { |stmt| stmt_unsupported?(stmt) }
     end
 
     sig { params(stmt: T.untyped).returns(T::Boolean) }
-    def stmt_unsupported?(stmt)
+    def self.stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
       when AST::WhileLoop, AST::WhileBindLoop
@@ -320,7 +319,7 @@ module FsmTransform
     # used to reject control-flow constructs that contain
     # suspends (Stage 1 punts those to the legacy emitters).
     sig { params(stmts: T.untyped).returns(T::Boolean) }
-    def contains_suspend_anywhere?(stmts)
+    def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
         case stmt
@@ -342,7 +341,7 @@ module FsmTransform
     # Identify the suspend tail (if any) that this top-level stmt
     # represents. Returns one of IoSuspend / NextSuspend / nil.
     sig { params(stmt: T.untyped).returns(T.untyped) }
-    def classify_suspend(stmt)
+    def self.classify_suspend(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
       when AST::FuncCall, AST::MethodCall, AST::NextExpr
@@ -359,7 +358,7 @@ module FsmTransform
     # BindExpr value, Assignment value -- decomplex degenerate-union /
     # Missing-Abstraction). result_var is the binding name (nil if none).
     sig { params(v: T.untyped, name: T.untyped).returns(T.untyped) }
-    def suspend_for(v, name)
+    def self.suspend_for(v, name)
       T.bind(self, T.untyped) rescue nil
       case v
       when AST::FuncCall, AST::MethodCall
@@ -373,14 +372,14 @@ module FsmTransform
     # :fsm_setup metadata -- the FSM template tells us how to set
     # up the suspend.
     sig { params(call_node: T.untyped).returns(T::Boolean) }
-    def io_suspending_call?(call_node)
+    def self.io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
       !!(md&.intrinsic_suspends? && md.intrinsic_contract.behavior.fsm_setup_present)
     end
 
     sig { params(expr: T.untyped).returns(T::Boolean) }
-    def suspending_call?(expr)
+    def self.suspending_call?(expr)
       T.bind(self, T.untyped) rescue nil
       (AST.call?(expr)) &&
         io_suspending_call?(expr)
@@ -404,7 +403,7 @@ module FsmTransform
     #   - Multi-stage chains where the suspend isn't at the LHS-most
     #     position
     sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
-    def rewrite_pipeline_io(body)
+    def self.rewrite_pipeline_io(body)
       T.bind(self, T.untyped) rescue nil
       return body unless body.is_a?(Array)
       out = []
@@ -432,13 +431,6 @@ module FsmTransform
       end
       out
     end
-      private :contains_suspend_anywhere?
-    private :contains_unsupported_shape?
-    private :io_suspending_call?
-    private :rewrite_pipeline_io
-    private :split_while_loop_next
-    private :stmt_unsupported?
-    private :suspend_for
     private_class_method :contains_suspend_anywhere?
     private_class_method :contains_unsupported_shape?
     private_class_method :io_suspending_call?

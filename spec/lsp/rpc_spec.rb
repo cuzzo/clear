@@ -1,6 +1,6 @@
 require "rspec"
 require "stringio"
-require_relative "../../src/lsp/rpc"
+require_relative "../../src/lsp/rpc" unless defined?(LSP::RPC::FramingError)
 
 # Round-trip tests for LSP::RPC. The framing is the foundation — if
 # this fails, every higher-layer feature breaks.

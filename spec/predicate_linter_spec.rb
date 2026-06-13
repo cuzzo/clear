@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/tools/predicate_rewriter"
+require_relative "../src/tools/predicate_rewriter" unless defined?(PredicateRewriter::CompareSpan)
 
 # `PredicateRewriter.lint!` emits FixableFindings for length-comparison
 # patterns whose result is constant for any non-negative length:

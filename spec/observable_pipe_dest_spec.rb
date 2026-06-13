@@ -1,7 +1,7 @@
 require "rspec"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Pipeline-terminal observable wiring (Commit 3): the annotator must
 # accept the canonical user-facing form

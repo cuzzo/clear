@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/ast/diagnostic_registry"
-require_relative "../src/ast/source_error"
-require_relative "../src/ast/fixable_error"
+require_relative "../src/ast/diagnostic_registry" unless defined?(DiagnosticRegistry)
+require_relative "../src/ast/source_error" unless defined?(CompilerError)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
 
 # DiagnosticRegistry is the unified compile-time diagnostic catalog
 # (Layer 2). Existing call sites that pass `error!(node, :CODE, ...)`

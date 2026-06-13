@@ -20,10 +20,9 @@ require_relative '../ast/fixable_error'
 module MultiStatementLinter
   extend T::Sig
 
-  module_function
 
   sig { params(source: String).void }
-  def lint!(source)
+  def self.lint!(source)
     return unless FixCollector.enabled?
 
     line_to_semis = scan_top_level_semis(source)
@@ -39,7 +38,7 @@ module MultiStatementLinter
   # separators, FOR-loop variants, etc. that legitimately share a
   # line.
   sig { params(source: String).returns(Hash) }
-  def scan_top_level_semis(source)
+  def self.scan_top_level_semis(source)
     counts = Hash.new(0)
     line_no = 1
     depth = 0
@@ -89,7 +88,7 @@ module MultiStatementLinter
     counts
   end
 
-  def emit_finding(source, line_no)
+  def self.emit_finding(source, line_no)
     line_text = source.lines[line_no - 1] || ""
     anchor = Struct.new(:line, :column).new(line_no, 1)
     msg = "multiple statements on one line — split each `;`-terminated " \
@@ -104,8 +103,6 @@ module MultiStatementLinter
     FixCollector.push(finding)
     _ = line_text  # reserved for future fix proposal
   end
-  private :emit_finding
-  private :scan_top_level_semis
   private_class_method :emit_finding
   private_class_method :scan_top_level_semis
 

@@ -1,18 +1,18 @@
 require "rspec"
 require "set"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/type"
-require_relative "../src/ast/symbol_entry"
-require_relative "../src/ast/std_lib"
-require_relative "../src/mir/control_flow"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/pre_mir_type_check"
-require_relative "../src/compiler/module_importer"
-require_relative "../src/semantic/concurrency_checks"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/semantic/escape_analysis"
-require_relative "../src/mir/fiber_ctx_builder"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/mir/control_flow" unless defined?(BorrowChecker::BorrowState)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/pre_mir_type_check" unless defined?(PreMirTypeCheck::InternalTypeResolutionError)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/semantic/concurrency_checks" unless defined?(ConcurrencyChecks)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/semantic/escape_analysis" unless defined?(EscapeAnalysis::EscapeSink)
+require_relative "../src/mir/fiber_ctx_builder" unless defined?(FiberCtxBuilder::Result)
 
 RSpec.describe "MIR gap-burn characterization" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }

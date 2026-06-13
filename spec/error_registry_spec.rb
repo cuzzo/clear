@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/ast/error_registry"
+require_relative "../src/ast/error_registry" unless defined?(AST)
 
 # Unit tests for AST::ERROR_TYPES and the lookup helpers. The registry is
 # the single source of truth for error-kind / error-type classification

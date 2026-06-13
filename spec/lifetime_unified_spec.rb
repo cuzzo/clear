@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/symbol_entry"
+require_relative "../src/ast/symbol_entry" unless defined?(SymbolEntry::BindingLifecycleFacts)
 
 # Atomics M2.1: SymbolEntry.lifetime is the single mechanism for
 # "where can this binding escape to". One shape:

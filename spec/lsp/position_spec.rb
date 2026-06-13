@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/position"
+require_relative "../../src/lsp/position" unless defined?(LSP::Position)
 
 RSpec.describe LSP::Position do
   Token = Struct.new(:line, :column, :value, keyword_init: true)

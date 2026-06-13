@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 RSpec.describe Type, "provenance" do
   it "defaults to nil" do

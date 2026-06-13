@@ -1,9 +1,9 @@
 require "rspec"
 require "set"
 
-require_relative "../src/ast/ast"
-require_relative "../src/ast/type"
-require_relative "../src/semantic/capture_strategy"
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/semantic/capture_strategy" unless defined?(CaptureStrategy::CaptureSiteInfo)
 
 RSpec.describe CaptureStrategy do
   let(:empty_site) { CaptureStrategy::CaptureSiteInfo.empty }

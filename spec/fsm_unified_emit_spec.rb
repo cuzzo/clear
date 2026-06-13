@@ -1,12 +1,12 @@
 require 'bundler/setup'
 require 'set'
-require_relative '../src/mir/mir'
-require_relative '../src/mir/fsm_ops'
-require_relative '../src/mir/fsm_transform'
-require_relative '../src/backends/fsm_wrapper_emitter'
-require_relative '../src/mir/fsm_transform/segments'
-require_relative '../src/mir/fsm_transform/suspend_resolvers'
-require_relative '../src/mir/fsm_transform/emit'
+require_relative '../src/mir/mir' unless defined?(MIR::StdlibDefFsCoercion)
+require_relative '../src/mir/fsm_ops' unless defined?(FsmOps::Lowerer)
+require_relative '../src/mir/fsm_transform' unless defined?(FsmTransform::PromotedLocalFact)
+require_relative '../src/backends/fsm_wrapper_emitter' unless defined?(FsmWrapperEmitter)
+require_relative '../src/mir/fsm_transform/segments' unless defined?(FsmTransform::Segments::SplitResult)
+require_relative '../src/mir/fsm_transform/suspend_resolvers' unless defined?(FsmTransform::SuspendResolvers)
+require_relative '../src/mir/fsm_transform/emit' unless defined?(FsmTransform::Emit::ExpandedLockSegment)
 
 # Tests for FsmTransform::Emit.build_fsm_unified -- the kind-agnostic,
 # shape-agnostic FSM emitter that produces FsmGenericBody from a list

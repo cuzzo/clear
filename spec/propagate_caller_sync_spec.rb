@@ -1,8 +1,8 @@
 require "rspec"
 require "set"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/semantic/escape_analysis"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/semantic/escape_analysis" unless defined?(EscapeAnalysis::EscapeSink)
 
 # P1.4 / P1.5 / P1.6: pin the transitive sync propagation pass.
 #

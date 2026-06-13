@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../../src/lsp/code_actions"
-require_relative "../../src/lsp/document_store"
-require_relative "../../src/lsp/analyzer"
-require_relative "../../src/ast/fixable_error"
+require_relative "../../src/lsp/code_actions" unless defined?(LSP::CodeActions)
+require_relative "../../src/lsp/document_store" unless defined?(LSP::DocumentStore)
+require_relative "../../src/lsp/analyzer" unless defined?(LSP::Analyzer)
+require_relative "../../src/ast/fixable_error" unless defined?(FixCollector)
 
 # CodeActions converts FixableFindings to LSP CodeActions. The unit
 # tests below feed canned findings; the server-level integration tests

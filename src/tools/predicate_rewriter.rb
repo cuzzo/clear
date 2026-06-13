@@ -33,7 +33,6 @@ require_relative '../ast/fixable_error'
 module PredicateRewriter
   extend T::Sig
 
-  module_function
 
   class Edit < T::Struct
     const :start, Integer
@@ -49,7 +48,7 @@ module PredicateRewriter
   end
 
   sig { params(source: String).returns(String) }
-  def rewrite(source)
+  def self.rewrite(source)
     tokens = ::Lexer.new(source).tokenize
     ast = ::ClearParser.new(tokens, source).parse
     edits = []
@@ -63,7 +62,7 @@ module PredicateRewriter
   # No source rewrite is offered — the bug is "the comparison is
   # meaningless," not "the syntax is wrong" — so the finding has no
   # auto-fix; the user has to decide what they meant.
-  def lint!(source)
+  def self.lint!(source)
     return unless FixCollector.enabled?
     tokens = ::Lexer.new(source).tokenize
     ast = ::ClearParser.new(tokens, source).parse
@@ -72,7 +71,7 @@ module PredicateRewriter
     # Lint is best-effort; a malformed file just yields no findings.
   end
 
-  def walk_lint(node)
+  def self.walk_lint(node)
     return if terminal?(node)
     if node.is_a?(Array)
       node.each { |n| walk_lint(n) }
@@ -85,7 +84,7 @@ module PredicateRewriter
 
   # `coll.length() >= 0` is always true (length is unsigned).
   # `coll.length() <  0` is always false.
-  def emit_length_lint(node)
+  def self.emit_length_lint(node)
     return unless length_call?(node.left)
     lit = int_lit_value(node.right)
     return unless lit == 0
@@ -98,7 +97,7 @@ module PredicateRewriter
     end
   end
 
-  def push_always_finding(node, message)
+  def self.push_always_finding(node, message)
     anchor = node.token ? node.token : nil
     return unless anchor
     finding = FixableFinding.new(
@@ -113,7 +112,7 @@ module PredicateRewriter
 
   # ---- AST traversal ----
 
-  def walk(node, source, edits)
+  def self.walk(node, source, edits)
     return if terminal?(node)
     if node.is_a?(Array)
       node.each { |n| walk(n, source, edits) }
@@ -128,12 +127,12 @@ module PredicateRewriter
     edits << edit if edit
   end
 
-  def terminal?(n)
+  def self.terminal?(n)
     n.nil? || n.is_a?(Symbol) || n.is_a?(String) || n.is_a?(Integer) ||
       n.is_a?(Float) || n.is_a?(TrueClass) || n.is_a?(FalseClass)
   end
 
-  def match_pattern(node, source)
+  def self.match_pattern(node, source)
     return nil unless node.is_a?(AST::BinaryOp)
     match_nil_compare(node, source) ||
       match_length_compare(node, source)
@@ -153,7 +152,7 @@ module PredicateRewriter
   # so v1 leaves it alone — users (or a future pre-pass) can flip
   # the operands first.
   sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Edit)) }
-  def match_nil_compare(node, source)
+  def self.match_nil_compare(node, source)
     return nil unless [:EQ, :NEQ].include?(node.op)
     return nil unless nil_literal?(node.right)
     other = node.left
@@ -172,7 +171,7 @@ module PredicateRewriter
     )
   end
 
-  def nil_literal?(node)
+  def self.nil_literal?(node)
     node.is_a?(AST::Literal) && node.type == :NIL
   end
 
@@ -189,7 +188,7 @@ module PredicateRewriter
   # Always-true / always-false combinations (`>= 0`, `< 0`) are NOT
   # rewritten — PredicateLinter surfaces them as warnings instead.
   sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Edit)) }
-  def match_length_compare(node, source)
+  def self.match_length_compare(node, source)
     op = node.op
     return nil unless [:EQ, :NEQ, :GT, :GTE, :LT, :LTE].include?(op)
 
@@ -220,12 +219,12 @@ module PredicateRewriter
     )
   end
 
-  def length_call?(node)
+  def self.length_call?(node)
     node.is_a?(AST::MethodCall) && node.name == "length"
   end
 
   sig { params(node: T.any(AST::Literal, AST::MethodCall)).returns(T.nilable(Integer)) }
-  def int_lit_value(node)
+  def self.int_lit_value(node)
     return nil unless node.is_a?(AST::Literal)
     return nil unless node.type == :INT64 || node.type == :INT
     node.value
@@ -234,7 +233,7 @@ module PredicateRewriter
   # Map (op, literal) -> canonical predicate name. nil means
   # "no rewrite — either always-true/false or shape we don't simplify."
   sig { params(op: Symbol, lit: Integer).returns(T.nilable(String)) }
-  def pick_length_predicate(op, lit)
+  def self.pick_length_predicate(op, lit)
     case [op, lit]
     when [:EQ, 0], [:LT, 1], [:LTE, 0]
       "empty?" # length <= 0 means == 0 for unsigned length
@@ -250,7 +249,7 @@ module PredicateRewriter
   # is the left operand used for the rewrite payload. nil if span
   # couldn't be cleanly resolved.
   sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(CompareSpan)) }
-  def compute_compare_span(node, source)
+  def self.compute_compare_span(node, source)
     return nil unless literal_node?(node.right)
 
     # `<expr> <op> <literal>`
@@ -277,7 +276,7 @@ module PredicateRewriter
   # them — otherwise replacing from inside the parens orphans the
   # opening one. Returns the expanded (lhs_start, lhs_end).
   sig { params(source: String, lhs_start: Integer, lhs_end: Integer).returns(Array) }
-  def expand_paren_wrap(source, lhs_start, lhs_end)
+  def self.expand_paren_wrap(source, lhs_start, lhs_end)
     while lhs_start > 0 &&
           lhs_end < source.length &&
           source[lhs_start - 1] == '(' &&
@@ -289,7 +288,7 @@ module PredicateRewriter
   end
 
   sig { params(node: AST::Literal).returns(T::Boolean) }
-  def literal_node?(node)
+  def self.literal_node?(node)
     node.is_a?(AST::Literal) && [:NIL, :INT64, :INT].include?(node.type)
   end
 
@@ -298,7 +297,7 @@ module PredicateRewriter
   # digits / underscores / a numeric type suffix (e.g. `0_i64`,
   # `1_000`) so the source span includes the whole literal as written.
   sig { params(node: AST::Literal, source: String, lit_off: Integer).returns(Integer) }
-  def literal_source_length(node, source, lit_off)
+  def self.literal_source_length(node, source, lit_off)
     case node.type
     when :NIL
       3
@@ -317,7 +316,7 @@ module PredicateRewriter
   # textual span. For a MethodCall `expr.method(...)` this is the
   # leftmost position of `expr`; for a chain `a.b.c.method()` it's
   # `a`'s position. Walks the AST recursively.
-  def leftmost_offset(node, source)
+  def self.leftmost_offset(node, source)
     case node
     when AST::MethodCall
       leftmost_offset(node.object, source)
@@ -334,7 +333,7 @@ module PredicateRewriter
   # or method-call form; we approximate by walking a balanced-paren
   # scan from the node's leftmost-token position. Returns nil if the
   # walk hits an unmatched close.
-  def rightmost_compact_offset(node, source)
+  def self.rightmost_compact_offset(node, source)
     start = leftmost_offset(node, source)
     return nil unless start
     # Walk forward until we see a top-level operator/close-paren
@@ -348,7 +347,7 @@ module PredicateRewriter
   # expression at depth 0. The returned offset points just past the
   # last char of the expression.
   sig { params(source: String, start: Integer).returns(Integer) }
-  def walk_to_expr_end(source, start)
+  def self.walk_to_expr_end(source, start)
     i = start
     depth = 0
     in_str = false
@@ -407,7 +406,7 @@ module PredicateRewriter
   # that would end a sub-expression in our patterns. Used to detect
   # the boundary of the operand to the left of the comparison.
   sig { params(source: String, j: Integer).returns(T::Boolean) }
-  def expression_terminator_op?(source, j)
+  def self.expression_terminator_op?(source, j)
     return true if source[j, 2] == '==' || source[j, 2] == '!=' ||
                    source[j, 2] == '>=' || source[j, 2] == '<=' ||
                    source[j, 2] == '&&' || source[j, 2] == '||'
@@ -422,7 +421,7 @@ module PredicateRewriter
   # that precedes that name. Walking back through whitespace handles
   # `coll  .length()` style spacing.
   sig { params(call: AST::MethodCall, source: String).returns(String) }
-  def receiver_source_for_method_call(call, source)
+  def self.receiver_source_for_method_call(call, source)
     obj_start = leftmost_offset(call.object, source)
     return nil unless obj_start
     name_off  = offset_for(source, call.token.line, call.token.column)
@@ -442,7 +441,7 @@ module PredicateRewriter
   # is fine; a binary expression like `a + b` would need wrapping
   # to keep `.nil?` from binding to `b`.
   sig { params(text: String).returns(String) }
-  def paren_if_needed(text)
+  def self.paren_if_needed(text)
     stripped = text.strip
     # Identifier or chain (a.b.c, a.b()) — no parens needed.
     return stripped if stripped =~ /\A[a-zA-Z_@$][\w?]*(\.[a-zA-Z_@$][\w?]*(?:\([^()]*\))?)*\Z/
@@ -455,7 +454,7 @@ module PredicateRewriter
   # ---- Source-offset helpers (mirrors MethodRewriter) ----
 
   sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
-  def offset_for(source, line, col)
+  def self.offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
     cur_line = 1
@@ -473,7 +472,7 @@ module PredicateRewriter
   # ---- Edit application ----
 
   sig { params(source: String, edits: T::Array[Edit]).returns(String) }
-  def apply_edits(source, edits)
+  def self.apply_edits(source, edits)
     sorted = edits.sort_by { |e| -e.start }
     out = source.dup
     sorted.each do |e|
@@ -482,27 +481,7 @@ module PredicateRewriter
     out
   end
 
-  private :emit_length_lint
   private_class_method :emit_length_lint
-  private :apply_edits
-  private :compute_compare_span
-  private :expand_paren_wrap
-  private :expression_terminator_op?
-  private :length_call?
-  private :literal_node?
-  private :literal_source_length
-  private :match_length_compare
-  private :match_nil_compare
-  private :match_pattern
-  private :nil_literal?
-  private :pick_length_predicate
-  private :push_always_finding
-  private :receiver_source_for_method_call
-  private :rightmost_compact_offset
-  private :terminal?
-  private :walk
-  private :walk_lint
-  private :walk_to_expr_end
   private_class_method :apply_edits
   private_class_method :compute_compare_span
   private_class_method :expand_paren_wrap

@@ -28,7 +28,7 @@ module MutationTesting
 
   sig { params(argv: T::Array[String], cwd: String, allow_failure: T::Boolean, log_path: T.nilable(String)).returns(CommandResult) }
   def self.run_cmd(argv, cwd: ROOT, allow_failure: false, log_path: nil)
-    output, status = Open3.capture2e(*argv, chdir: cwd)
+    output, status = T.unsafe(Open3).capture2e(*argv, chdir: cwd)
     if log_path
       FileUtils.mkdir_p(File.dirname(log_path))
       File.write(log_path, output)

@@ -3,8 +3,8 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"  # loads compiler, annotator, lexer, parser, ast
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)  # loads compiler, annotator, lexer, parser, ast
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   # Helper to Lex -> Parse -> Annotate

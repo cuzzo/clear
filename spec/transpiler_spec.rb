@@ -1,8 +1,8 @@
 require "rspec"
 require "byebug"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe ZigTranspiler do
   def transpile(src)

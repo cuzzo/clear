@@ -1,6 +1,6 @@
 require "rspec"
 require "set"
-require_relative "../src/tools/atomic_ptr_migration_suggester"
+require_relative "../src/tools/atomic_ptr_migration_suggester" unless defined?(AtomicPtrMigrationSuggester)
 
 # AtomicPtr M3.15: static eligibility check for the @shared:writeLocked
 # / @shared:locked (struct) -> @indirect:atomic migration. Tested in

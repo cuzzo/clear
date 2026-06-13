@@ -3,8 +3,8 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe SemanticAnnotator do
   def run(source)
@@ -957,7 +957,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     it "removes the @local on the lint-flagged binding when a prior @local is on the same line" do
-      require_relative "../src/ast/fixable_error"
+      require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
       src = counter_struct + <<~FLUX
         FN f() RETURNS !Void ->
             MUTABLE a = Counter{ value: 0 } @local; MUTABLE b = Counter{ value: 1 } @local;

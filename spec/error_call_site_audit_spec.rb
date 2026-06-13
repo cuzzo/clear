@@ -1,4 +1,4 @@
-require_relative '../src/ast/diagnostic_registry'
+require_relative '../src/ast/diagnostic_registry' unless defined?(DiagnosticRegistry)
 require 'set'
 
 # Permanent guard: every error!(...) call site must use a registry

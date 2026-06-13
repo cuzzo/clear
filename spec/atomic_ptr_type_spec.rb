@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # AtomicPtr M3.1 -- Type axis for `@indirect:atomic` (atomic pointer to
 # a refcounted struct payload).

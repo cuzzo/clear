@@ -10,7 +10,6 @@ require_relative "intrinsic_emit"
 module IntrinsicRegistry
   extend T::Sig
 
-  module_function
 
   LookupResult = T.type_alias { T.nilable(T.any(FunctionSignature, T::Array[FunctionSignature])) }
   SigsCache = T.type_alias { T::Hash[Integer, T::Hash[T.untyped, LookupResult]] }
@@ -41,7 +40,7 @@ module IntrinsicRegistry
 
   # registries: { Symbol => the registry Hash } (for {registry: X} ptrs)
   sig { params(h: T.untyped, registries: T.untyped).returns(T.nilable(IntrinsicEmit)) }
-  def build_emit(h, registries)
+  def self.build_emit(h, registries)
     return nil unless h.is_a?(Hash)
     e = IntrinsicEmit.new
     h.each do |k, v|
@@ -68,7 +67,7 @@ module IntrinsicRegistry
   # A nested sub-descriptor is either another emit Hash or a
   # {registry: <CONST>} pointer (resolved to that registry's name).
   sig { params(v: T.untyped, registries: T.untyped).returns(T.untyped) }
-  def nested_emit(v, registries)
+  def self.nested_emit(v, registries)
     return nil unless v.is_a?(Hash)
     if (ptr = v[:registry])
       name = registries.find { |_, r| r.equal?(ptr) }&.first
@@ -86,7 +85,7 @@ module IntrinsicRegistry
   # placeholder (the real resolution is consumer-side via
   # return_def.resolve, gated by fixed_return?).
   sig { params(rdef: T.untyped).returns(Type) }
-  def to_return_type(rdef)
+  def self.to_return_type(rdef)
     if rdef.fixed?
       rdef.fixed || Type.new(:Void)
     else
@@ -110,7 +109,7 @@ module IntrinsicRegistry
   # non-nil). No Proc, no Hash, no bare nil escape: every form maps to
   # Fixed(Type) | a receiver-parametric variant | Infer(host method).
   sig { params(v: T.untyped).returns(T.untyped) }
-  def to_return_def(v)
+  def self.to_return_def(v)
     return FunctionReturn.fixed(Type.new(:Void)) if v.nil?
     return FunctionReturn.fixed(v) if v.is_a?(Type)
     if v.is_a?(Hash)
@@ -134,7 +133,7 @@ module IntrinsicRegistry
   end
 
   sig { params(_name: T.untyped, h: T.untyped, registries: T.untyped).returns(FunctionSignature) }
-  def convert_entry(_name, h, registries)
+  def self.convert_entry(_name, h, registries)
     ret  = h.key?(:return_type) ? h[:return_type] : h[:return]
     rdef = to_return_def(ret)
     params = params_from_arg_spec(h[:args], h)
@@ -155,7 +154,7 @@ module IntrinsicRegistry
   end
 
   sig { params(value: T.untyped).returns(T.untyped) }
-  def normalize_lifetime(value)
+  def self.normalize_lifetime(value)
     return [] if value.nil?
     return value if value.is_a?(Array)
 
@@ -163,7 +162,7 @@ module IntrinsicRegistry
   end
 
   sig { params(spec: T.untyped, h: T.untyped).returns(T.untyped) }
-  def params_from_arg_spec(spec, h)
+  def self.params_from_arg_spec(spec, h)
     arg_specs = IntrinsicArgSpec.list_from_registry(spec)
     return [] if arg_specs.empty?
 
@@ -188,7 +187,7 @@ module IntrinsicRegistry
   # Array[FunctionSignature] for overload sets (e.g.
   # STD_LIB["charAt"]). Consumers read THIS, never the raw Hash.
   sig { params(reg: T.untyped).returns(T::Hash[T.untyped, LookupResult]) }
-  def sigs(reg)
+  def self.sigs(reg)
     SIGS_CACHE[reg.object_id] ||=
       reg.each_with_object({}) do |(name, entry), out|
         out[name] =
@@ -204,7 +203,7 @@ module IntrinsicRegistry
   # there is no load-order coupling). Used by `fs` so call sites need
   # not thread the map.
   sig { returns(T.untyped) }
-  def registries
+  def self.registries
     if REGISTRIES_CACHE.empty?
       %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS
          INDEX_OPS BUILTIN_OPS].each do |constant_name|
@@ -220,7 +219,7 @@ module IntrinsicRegistry
   # `*.stdlib_def = X` / `matched_stdlib_def = X` site routes through
   # this so the carried value is always a FunctionSignature.
   sig { params(x: T.untyped, name: T.untyped).returns(T.untyped) }
-  def fs(x, name = "_inline")
+  def self.fs(x, name = "_inline")
     return nil if x.nil?
     return x if x.is_a?(FunctionSignature)
 
@@ -228,7 +227,7 @@ module IntrinsicRegistry
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
-  def collection_element_evidence_method?(name, arity)
+  def self.collection_element_evidence_method?(name, arity)
     return false unless arity == 1
 
     method_name = name.to_s
@@ -241,7 +240,7 @@ module IntrinsicRegistry
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
-  def map_pair_evidence_method?(name, arity)
+  def self.map_pair_evidence_method?(name, arity)
     return false unless arity == 2
 
     fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(MAP_METHODS, name.to_s))
@@ -251,7 +250,7 @@ module IntrinsicRegistry
   end
 
   sig { params(name: T.any(String, Symbol), arity: Integer).returns(T::Boolean) }
-  def collection_value_store_method?(name, arity)
+  def self.collection_value_store_method?(name, arity)
     method_name = name.to_s
     [STD_LIB, POOL_METHODS, SET_METHODS, MAP_METHODS].any? do |registry|
       fs = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, method_name))
@@ -263,7 +262,7 @@ module IntrinsicRegistry
   end
 
   sig { params(reg: T.untyped, name: T.untyped).returns(T::Array[FunctionSignature]) }
-  def overloads(reg, name)
+  def self.overloads(reg, name)
     result = IntrinsicRegistry.lookup(reg, name)
     return result if result.is_a?(Array)
     return [result] if result.is_a?(FunctionSignature)
@@ -276,7 +275,7 @@ module IntrinsicRegistry
   # intentionally named `lookup`, not `sig`, so this typed module does
   # not shadow Sorbet's signature DSL.
   sig { params(reg: T.untyped, name: T.untyped).returns(LookupResult) }
-  def lookup(reg, name)
+  def self.lookup(reg, name)
     result = sigs(reg)[name]
     return result if result
 
@@ -289,12 +288,6 @@ module IntrinsicRegistry
 
     nil
   end
-  private :build_emit
-  private :convert_entry
-  private :nested_emit
-  private :normalize_lifetime
-  private :params_from_arg_spec
-  private :registries
   private_class_method :build_emit
   private_class_method :convert_entry
   private_class_method :nested_emit

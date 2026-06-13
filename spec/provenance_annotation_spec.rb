@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/semantic/escape_analysis"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/semantic/escape_analysis" unless defined?(EscapeAnalysis::EscapeSink)
 
 # Phase 2 validation: provenance is set correctly during annotation
 # and agrees with existing flags (heap_promoted, location, cleanup_alloc).

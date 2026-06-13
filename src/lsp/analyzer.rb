@@ -28,14 +28,13 @@ module LSP
       def fatal?; !fatal_error.nil?; end
     end
 
-    module_function
 
     # Run the lexer, parser, and annotator on `source`. Returns a
     # Result with the FixCollector findings and an optional
     # `fatal_error` (a synthetic FixableFinding) if the parser or
     # annotator raised.
     sig { params(source: String).returns(Result) }
-    def run(source)
+    def self.run(source)
       FixCollector.enable!
       findings = []
       fatal = nil
@@ -79,7 +78,7 @@ module LSP
     end
 
     sig { params(err: T.untyped).returns(SyntheticFinding) }
-    def synthetic_finding_from(err)
+    def self.synthetic_finding_from(err)
       tok = err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
       SyntheticFinding.new(
         level: :error,
@@ -89,7 +88,6 @@ module LSP
         fixes: [],
       )
     end
-    private :synthetic_finding_from
   private_class_method :synthetic_finding_from
 
 end

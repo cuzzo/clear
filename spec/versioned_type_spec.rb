@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../src/ast/type"
+require_relative "../src/ast/type" unless defined?(Type)
 
 # Phase L2 -- Type axis for `:versioned` (MVCC).
 #

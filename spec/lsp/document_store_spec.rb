@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../../src/lsp/document_store"
+require_relative "../../src/lsp/document_store" unless defined?(LSP::DocumentStore)
 
 RSpec.describe LSP::DocumentStore do
   let(:store) { described_class.new }

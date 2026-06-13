@@ -1,16 +1,16 @@
 require "rspec"
 require "ostruct"
 require "stringio"
-require_relative "../src/mir/mir"
-require_relative "../src/ast/std_lib"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/backends/mir_emitter"
-require_relative "../src/mir/mir_checker"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/type"
-require_relative "../src/compiler/module_importer"
-require_relative "../src/compiler/compiler_frontend"
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/ast/std_lib" unless defined?(StdLibTypeBinding)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/mir/mir_checker" unless defined?(MIRChecker::FsmStructureError)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 
 RSpec.describe MIRLowering do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }

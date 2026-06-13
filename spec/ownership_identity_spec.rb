@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/semantic/ownership_identity"
+require_relative "../src/semantic/ownership_identity" unless defined?(OwnershipIdentity::PlaceId)
 
 RSpec.describe OwnershipIdentity do
   describe OwnershipIdentity::BindingId do

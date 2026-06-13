@@ -1,7 +1,7 @@
 require "rspec"
 require "tmpdir"
 require "stringio"
-require_relative "../src/tools/doctor"
+require_relative "../src/tools/doctor" unless defined?(Doctor)
 
 RSpec.describe Doctor do
   def capture_stdout
@@ -420,7 +420,7 @@ RSpec.describe Doctor do
   it "renders atomic escape findings surfaced by the doctor" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "source.cht"), "FN main() RETURNS Void -> RETURN; END\n")
-      require_relative "../src/tools/atomic_escape_suggester"
+      require_relative "../src/tools/atomic_escape_suggester" unless defined?(AtomicEscapeSuggester)
       allow(AtomicEscapeSuggester).to receive(:analyze).and_return([
         { line: nil, kind: :return },
         { line: 5, kind: :store },

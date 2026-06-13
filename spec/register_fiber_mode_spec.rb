@@ -1,9 +1,9 @@
 require "rspec"
 require "stringio"
-require_relative "../src/compiler/compiler_frontend"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_checker"
-require_relative "../src/compiler/module_importer"
+require_relative "../src/compiler/compiler_frontend" unless defined?(CompilerFrontend)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/mir/mir_checker" unless defined?(MIRChecker::FsmStructureError)
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
 require_relative "../examples/minivm/register_bc_emitter"
 
 RSpec.describe "register-VM :fiber bg_mode" do

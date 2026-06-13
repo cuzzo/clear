@@ -43,7 +43,6 @@ require_relative "migration_suggester_helpers"
 module AtomicMigrationSuggester
   extend T::Sig
 
-  module_function
   extend MigrationSuggesterHelpers
 
   ATOMIC_ELIGIBLE_FIELD_TYPES = %i[Int64 Float64 Bool].to_set.freeze
@@ -54,14 +53,14 @@ module AtomicMigrationSuggester
   #     n_uses: }, ...]` for every eligible binding, sorted by line.
   # Returns [] on parse / annotate errors (the doctor falls back to its
   # existing lock-only diagnosis).
-  def analyze(source)
+  def self.analyze(source)
     run_analyze(source)
   end
 
   # Eligibility: STRUCT with exactly one Int64/Float64/Bool field
   # under :locked sync (NOT :write_locked -- RWLocks don't map cleanly
   # to a single Atomic primitive).
-  def candidate_decl_info(node, annotator)
+  def self.candidate_decl_info(node, annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
     val = node.value
@@ -104,7 +103,7 @@ module AtomicMigrationSuggester
   # WITH-block dispatch: only WITH EXCLUSIVE captures are valid for
   # the atomic-primitive migration; other capabilities (RESTRICT,
   # SNAPSHOT, etc.) DISQUALIFY.
-  def classify_with_block!(with_node, candidates)
+  def self.classify_with_block!(with_node, candidates)
     (with_node.capabilities || []).each do |cap|
       vn = cap[:var_node]
       next unless vn.is_a?(AST::Identifier)
@@ -123,13 +122,13 @@ module AtomicMigrationSuggester
     end
   end
 
-  def with_body_eligible?(with_node, alias_name, field_name)
+  def self.with_body_eligible?(with_node, alias_name, field_name)
     body = with_node.body
     return false unless body.is_a?(Array) && !body.empty?
     body.all? { |stmt| stmt_eligible?(stmt, alias_name, field_name) }
   end
 
-  def stmt_eligible?(stmt, alias_name, field_name)
+  def self.stmt_eligible?(stmt, alias_name, field_name)
     case stmt
     when AST::Assignment
       # `alias.field = expr` — Assignment's target is the GetField path;
@@ -177,7 +176,7 @@ module AtomicMigrationSuggester
   # `+= N` / `-= N` desugars to `alias.field = alias.field + N`. To
   # be atomic-rewriteable as fetchAdd/fetchSub: exactly one side is
   # the field read, the other side doesn't reference the alias.
-  def eligible_compound_rhs?(expr, alias_name, field_name)
+  def self.eligible_compound_rhs?(expr, alias_name, field_name)
     return false unless expr.is_a?(AST::BinaryOp)
     op = expr.respond_to?(:op) ? expr.op : nil
     return false unless op == :ADD || op == :SUB
@@ -190,16 +189,12 @@ module AtomicMigrationSuggester
   end
 
   sig { params(node: T.any(AST::GetField, AST::Literal), alias_name: String, field_name: String).returns(T::Boolean) }
-  def field_get_of?(node, alias_name, field_name)
+  def self.field_get_of?(node, alias_name, field_name)
     node.is_a?(AST::GetField) &&
       node.target.is_a?(AST::Identifier) &&
       node.target.name == alias_name &&
       node.field.to_s == field_name
   end
-  private :eligible_compound_rhs?
-  private :field_get_of?
-  private :stmt_eligible?
-  private :with_body_eligible?
   private_class_method :eligible_compound_rhs?
   private_class_method :field_get_of?
   private_class_method :stmt_eligible?

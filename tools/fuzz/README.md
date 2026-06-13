@@ -66,6 +66,16 @@ Each run writes baseline and mutated fuzz logs under the chosen output
 directory. A mutant is useful when it is "killed": the mutated run produces the
 configured failure delta over the baseline run.
 
+Active mutants:
+
+| Mutant | Templates | Signal |
+|---|---|---|
+| `allow_with_alias_return` | `access_gate` | unexpected pass |
+| `escape_struct_field_walker` | `nested_loop_escape` | fail |
+| `lower_if_cond_pending_leak` | `cond_or_fallback` | fail |
+| `cleanup_required_finalizer` | `mir_checker_negative_matrix` | unexpected pass |
+| `loop_frame_scope_stamp` | `loop_local_method_temp` | mir-error |
+
 ## Layout
 
     tools/fuzz/

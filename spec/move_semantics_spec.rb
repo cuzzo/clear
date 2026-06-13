@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Tests that CLEAR enforces Rust-like move/borrow semantics for types
 # containing heap data. Every use of a non-copyable type must be either

@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Escape promotion matrix — combinatoric coverage for Phase 1a of the
 # unified-classification refactor (silly-churning-simon.md plan).

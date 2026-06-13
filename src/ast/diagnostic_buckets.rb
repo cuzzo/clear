@@ -25,7 +25,6 @@ require_relative "diagnostic_registry"
 # per bucket. Dev-only — not part of the user-facing `clear` CLI.
 module DiagnosticBuckets
   extend T::Sig
-  module_function
 
   BUCKETS = T.let([
     # ============================================================
@@ -508,13 +507,13 @@ module DiagnosticBuckets
   # All codes referenced by any bucket — used by the audit to confirm
   # bucket assignments are exhaustive for their category.
   sig { returns(T::Set[Symbol]) }
-  def covered_codes
+  def self.covered_codes
     @covered ||= T.let(BUCKETS.flat_map { |b| b[:codes] }.to_set, T.nilable(T::Set[Symbol]))
   end
 
   # Buckets for a specific category (e.g. `:type`).
   sig { params(cat: Symbol).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
-  def for_category(cat)
+  def self.for_category(cat)
     BUCKETS.select { |b| b[:category] == cat }
   end
 
@@ -526,7 +525,7 @@ module DiagnosticBuckets
   # `examples` should be the `DiagnosticExamples.all` hash; passed in
   # so callers can reuse it across many lookups.
   sig { params(code: Symbol, examples: T::Hash[Symbol, T.untyped]).returns(Symbol) }
-  def status_of(code, examples)
+  def self.status_of(code, examples)
     return :pending if DiagnosticRegistry.pending?(code)
     e = examples[code]
     return :annotated if e && e[:bad] && e[:good]
@@ -535,13 +534,13 @@ module DiagnosticBuckets
 
   # ASCII stars for the frequency rank (1..5).
   sig { params(rank: Integer).returns(String) }
-  def frequency_stars(rank)
+  def self.frequency_stars(rank)
     "#{'★' * rank}#{'☆' * (5 - rank)}"
   end
 
   # ASCII tag for the alien-factor severity.
   sig { params(level: Symbol).returns(String) }
-  def alien_label(level)
+  def self.alien_label(level)
     case level
     when :low    then "Low"
     when :medium then "Med"

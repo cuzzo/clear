@@ -1,8 +1,8 @@
 require "spec_helper"
 require "set"
 
-require_relative "../src/compiler/module_importer"
-require_relative "../src/annotator"
+require_relative "../src/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
 
 RSpec.describe "annotator import resolution boundaries" do
   def tok(value = "require")

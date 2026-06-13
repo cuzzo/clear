@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/annotator"
-require_relative "../src/ast/ast"
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Guard test: every AST node class must be reachable from the annotator,
 # either via a direct `visit_<NodeName>` method or via the indirect

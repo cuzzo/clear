@@ -1,7 +1,7 @@
 require "spec_helper"
 
-require_relative "../src/annotator/phases/signature_registry"
-require_relative "../src/ast/lexer"
+require_relative "../src/annotator/phases/signature_registry" unless defined?(Annotator::Phases::SignatureRegistry)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
 
 RSpec.describe Annotator::Phases::SignatureRegistry do
   def tok(value = "x")

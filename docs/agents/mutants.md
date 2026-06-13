@@ -9,29 +9,54 @@ compiler correctness:
 
 ## Ruby Specs
 
-The direct Ruby gate uses the `mutant` gem with a threshold ratchet, not a
-zero-alive requirement. Several important compiler subjects have known alive
-mutants today, so requiring 100% would block useful work on pre-existing test
-gaps. The gate still fails if a selected subject has no selected tests, drops
-below its baseline threshold, or exceeds its timeout budget. Small timeout
-budgets are explicit because mutant timeouts can vary under load even when the
-coverage signal is stable.
+The Ruby gate uses `mutant --zombie run` with a threshold ratchet. It does not
+require zero alive mutants yet; several important compiler subjects still have
+known test gaps. The gate fails when a hard-gated subject selected by `--since`
+cannot produce a summary, has no selected tests, drops below its baseline, or
+exceeds its timeout budget. Advisory subjects still run and report coverage, but
+do not block CI until they are promoted.
 
-Current subjects:
+The subject matrix lives in `tools/mutants/src_subjects.yml`.
 
-| subject | spec | baseline |
-|---|---|---:|
-| `MIR::InlineAllocMetadata*` | `spec/mir_gap_burn_spec.rb` | 92.28% full, 92.02% with this PR's `--since` range |
-| `Lexer*` | `spec/lexer_spec.rb` | 76.28% |
+Current matrix:
 
-CI runs the wrapper with `--since ${{ github.event.pull_request.base.sha }}` so
-future PRs mutate only changed methods within the listed subjects. A subject not
-touched by the PR is reported as skipped with 0 selected mutations.
+| group | count |
+|---|---:|
+| total `src/` subjects | 133 |
+| hard gates | 106 |
+| advisory gates | 27 |
+| `MIRLowering#method` subjects | 89 |
 
-Known pitfall: `module_function` modules are not reliable direct mutant subjects
-in this codebase. Mutant mutates module instance methods, while specs usually
-call the copied singleton methods, producing false alive mutants. Those subjects
-should be tested by targeted patch mutants or after the subject shape is changed.
+Important implementation details:
+
+- Method subjects use exact expressions such as `MIRLowering#lower`; class and
+  module subjects use `Subject*`.
+- The runner uses zombie mode because this project defines `AST::Node` as a
+  Sorbet type alias, which collides with the `ast` gem's printer in plain mutant
+  mode after project code loads.
+- Utility modules that were written with `module_function`/`extend self` were
+  converted to explicit singleton methods so mutant mutates the methods the specs
+  actually call.
+- Spec `require_relative` lines that load `src/` or `tools/` files are guarded
+  so RSpec does not reload the original source over mutant's patched code.
+
+Current local validation:
+
+```sh
+MUTANT_JOBS=32 bundle exec ruby tools/mutants/ruby_specs.rb --since HEAD --out /tmp/clear-ruby-mutants-full-2
+```
+
+Result: exit 0. Hard-gated changed subjects passed; untouched subjects skipped;
+advisory subjects reported current ratchet coverage.
+
+Notable current advisory weak spots:
+
+| subject | current ratchet | reason |
+|---|---:|---|
+| `IntrinsicRegistry*` | 55.58% | current implementation no longer supports the stale 98.97% hard-gate claim |
+| `Pprof*` | 69.94% | just below the 70% hard-gate floor |
+| `LSP::Analyzer*` | 61.88% | below the 70% hard-gate floor |
+| `FsmTransform::Emit*` | 51.13% on this branch | improved from a stale 1.33% baseline but still advisory |
 
 ## Transpile Tests
 
@@ -46,28 +71,47 @@ Current active mutant:
 |---|---|
 | `lower_if_cond_pending_leak` | `transpile-tests/or_fallback_in_if_condition_hoist.cht` |
 
-Local validation on this branch:
+Current local validation:
 
 ```sh
-bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty
+bundle exec ruby tools/mutants/transpile_tests.rb --all --allow-dirty --out /tmp/clear-transpile-mutants-final
 ```
 
 Result: baseline passed, mutated run failed, mutant killed.
 
 ## Fuzz
 
-The fuzz gate keeps the existing targeted patch model and now runs in CI. Active
-mutants are only the patches that still map to current architecture:
+The fuzz gate keeps the targeted patch-fixture model. Patch files under
+`tools/fuzz/mutants/patches/` are intentional mutation fixtures, not scratch
+patches. Each one disables one compiler safety rule, runs the relevant fuzz
+template before and after the mutation, and requires the mutated compiler to
+produce the configured failure delta while the baseline remains clean.
 
-| mutant | templates | local signal |
+Active mutants:
+
+| mutant | templates | required signal |
 |---|---|---|
-| `allow_with_alias_return` | `access_gate` | 12 new unexpected passes |
-| `lower_if_cond_pending_leak` | `cond_or_fallback` | 1 new failure |
-| `cleanup_required_finalizer` | `mir_checker_negative_matrix` | 1 new unexpected pass |
+| `allow_with_alias_return` | `access_gate` | unexpected pass |
+| `escape_struct_field_walker` | `nested_loop_escape` | fail |
+| `lower_if_cond_pending_leak` | `cond_or_fallback` | fail |
+| `cleanup_required_finalizer` | `mir_checker_negative_matrix` | unexpected pass |
+| `loop_frame_scope_stamp` | `loop_local_method_temp` | mir-error |
 
-Retired from the active registry: old LoopFrameAnalysis mutants
-`escape_struct_field_walker` and `local_frame_decls_frame_predicate`. Their
-patches targeted pre-refactor methods that no longer exist. Re-adding those
-invariants should be done as new patches against the current
-`MIR::LocalBindingAnalysis` / loop-frame fact flow, not by keeping stale patches
-in the gate.
+Current local validation:
+
+```sh
+bundle exec ruby tools/fuzz/mutants/run.rb --all --allow-dirty --out /tmp/clear-fuzz-mutants-final
+```
+
+Result: all five mutants were killed. Every baseline fuzz run reported zero
+failures, leaks, MIR errors, and unexpected passes.
+
+## Validation
+
+Additional validation on this branch:
+
+- `bundle exec prspec spec/`: 5,839 examples, 0 failures.
+- `bundle exec prspec spec/ --tag integration`: 237 examples, 0 failures.
+- `bundle exec srb tc`: no errors.
+- Mutation tooling syntax check: all `tools/mutants/**/*.rb` and
+  `tools/fuzz/mutants/**/*.rb` parsed successfully.

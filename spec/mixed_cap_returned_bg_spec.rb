@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # Atomics M2.7: a `REQUIRES x: ATOMIC | <non-atomic>` declaration
 # combined with `RETURNS x:T` cannot be safely emitted. The

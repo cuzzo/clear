@@ -1,6 +1,6 @@
 require 'bundler/setup'
-require_relative '../src/mir/fsm_ops'
-require_relative '../src/backends/mir_emitter'
+require_relative '../src/mir/fsm_ops' unless defined?(FsmOps::Lowerer)
+require_relative '../src/backends/mir_emitter' unless defined?(MIREmitter)
 
 # Tests the FsmOps op tree that replaces the previous Zig-text
 # :fsm_setup / :fsm_finish_block / :fsm_finish_value templates.

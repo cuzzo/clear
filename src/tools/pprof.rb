@@ -23,10 +23,9 @@ module Pprof
   module Wire
     extend T::Sig
 
-    module_function
 
     sig { params(n: Integer).returns(String) }
-    def varint(n)
+    def self.varint(n)
       raise ArgumentError, "negative varint: #{n}" if n.negative?
       out = String.new(encoding: 'ASCII-8BIT')
       loop do
@@ -40,17 +39,17 @@ module Pprof
     end
 
     sig { params(field: Integer, n: Integer).returns(String) }
-    def field_varint(field, n)
+    def self.field_varint(field, n)
       varint((field << 3) | 0) + varint(n)
     end
 
     sig { params(field: Integer, bytes: String).returns(String) }
-    def field_bytes(field, bytes)
+    def self.field_bytes(field, bytes)
       varint((field << 3) | 2) + varint(bytes.bytesize) + bytes.b
     end
 
     sig { params(field: Integer, s: String).returns(String) }
-    def field_string(field, s)
+    def self.field_string(field, s)
       field_bytes(field, s.to_s)
     end
   end

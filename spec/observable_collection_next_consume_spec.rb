@@ -3,8 +3,8 @@
 # path destroys the StreamSet at scope exit and `materializeNext`
 # already published the producer's finish.
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
 
 RSpec.describe "NEXT on collection observable: linear consume" do
   def annotate(source)

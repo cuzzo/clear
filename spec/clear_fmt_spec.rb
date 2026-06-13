@@ -1,9 +1,9 @@
 require "rspec"
 require "tmpdir"
 require "fileutils"
-require_relative "../src/tools/formatter"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
+require_relative "../src/tools/formatter" unless defined?(Formatter::Emitter)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
 
 # Unit tests for the formatter. Calls Formatter.format(src) directly --
 # the CLI's flag handling (--check / --stdout / --no-warn) and width-

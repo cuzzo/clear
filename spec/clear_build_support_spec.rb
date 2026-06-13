@@ -3,7 +3,7 @@ require "tmpdir"
 require "fileutils"
 require "stringio"
 
-require_relative "../src/tools/clear_build_support"
+require_relative "../src/tools/clear_build_support" unless defined?(ClearBuildSupport::Config)
 
 RSpec.describe ClearBuildSupport do
   def support_tree

@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/parser"
-require_relative "../src/annotator"
-require_relative "../src/mir/rewriters/string_concat_rewriter"
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/parser" unless defined?(ClearParser)
+require_relative "../src/annotator" unless defined?(SemanticAnnotator)
+require_relative "../src/mir/rewriters/string_concat_rewriter" unless defined?(StringConcatRewriter)
 
 RSpec.describe StringConcatRewriter do
   def rewrite(src)

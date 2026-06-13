@@ -2,18 +2,18 @@ require "rspec"
 require "ostruct"
 require "set"
 
-require_relative "../src/annotator/annotator"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/lexer"
-require_relative "../src/ast/type"
-require_relative "../src/mir/cleanup_classifier"
-require_relative "../src/mir/control_flow"
-require_relative "../src/mir/fsm_transform/recursive_splitter"
-require_relative "../src/mir/mir"
-require_relative "../src/mir/mir_checker"
-require_relative "../src/backends/mir_emitter"
-require_relative "../src/mir/mir_lowering"
-require_relative "../src/mir/mir_pass"
+require_relative "../src/annotator/annotator" unless defined?(SemanticAnnotator::ReceiverState)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/lexer" unless defined?(Lexer)
+require_relative "../src/ast/type" unless defined?(Type)
+require_relative "../src/mir/cleanup_classifier" unless defined?(CleanupClassifier::CleanupClassificationPlan)
+require_relative "../src/mir/control_flow" unless defined?(BorrowChecker::BorrowState)
+require_relative "../src/mir/fsm_transform/recursive_splitter" unless defined?(FsmTransform::RecursiveSplitter::UnsupportedShape)
+require_relative "../src/mir/mir" unless defined?(MIR::StdlibDefFsCoercion)
+require_relative "../src/mir/mir_checker" unless defined?(MIRChecker::FsmStructureError)
+require_relative "../src/backends/mir_emitter" unless defined?(MIREmitter)
+require_relative "../src/mir/mir_lowering" unless defined?(MIRLowering::OwnershipSurfaceScan)
+require_relative "../src/mir/mir_pass" unless defined?(MIRPass::OwnershipPreparationPlan)
 
 RSpec.describe "Boobytrap-ranked method coverage gaps" do
   let(:tok) { Lexer::Token.new(:VAR_ID, "x", 1, 1) }

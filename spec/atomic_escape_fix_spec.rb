@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/backends/transpiler"
-require_relative "../src/ast/ast"
-require_relative "../src/ast/fixable_error"
+require_relative "../src/backends/transpiler" unless defined?(ZigTranspiler)
+require_relative "../src/ast/ast" unless defined?(MIR::ReassignPlan)
+require_relative "../src/ast/fixable_error" unless defined?(FixCollector)
 
 # Atomics M2.8 -- the M2.6 lifetime errors that fire on `@shared:atomic`
 # sources are now fixable findings. Under `FixCollector`, they record
