@@ -22,6 +22,8 @@ module Boobytrap
                      :verification_status, :mutation_kill_rate,
                      :mutation_gate_status, :risk_profile,
                      :verification_multiplier,
+                     :lineage_score, :lineage_fixes, :lineage_changes,
+                     :lineage_moves,
                      keyword_init: true)
 
     module_function

@@ -20,7 +20,8 @@ impl VcsProvider for GitProvider {
     fn list_commits(&self) -> Result<Vec<CommitMetadata>> {
         let mut revwalk = self.repo.revwalk()?;
         revwalk.push_head()?;
-        revwalk.set_sorting(Sort::TIME | Sort::REVERSE)?;
+        revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
+        revwalk.simplify_first_parent()?;
 
         let mut commits = Vec::new();
         for oid in revwalk {

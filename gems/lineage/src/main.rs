@@ -35,6 +35,8 @@ enum Command {
         top: usize,
         #[arg(long = "only")]
         only: Vec<String>,
+        #[arg(long, default_value = "text")]
+        format: String,
     },
 }
 
@@ -64,23 +66,72 @@ fn main() -> Result<()> {
                 stats.changes
             );
         }
-        Command::Summary { db, top, only } => {
+        Command::Summary {
+            db,
+            top,
+            only,
+            format,
+        } => {
             let storage = Storage::open(&db)?;
-            for (index, unit) in storage.top_units(top, &only)?.iter().enumerate() {
-                println!(
-                    "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={}",
-                    index + 1,
-                    unit.kind,
-                    unit.name,
-                    unit.original_path,
-                    unit.risk_score,
-                    unit.fixes,
-                    unit.changes,
-                    unit.moves,
-                    unit.total_events
-                );
+            let units = storage.top_units(top, &only)?;
+            if format == "json" {
+                print_json_summary(&units);
+            } else {
+                for (index, unit) in units.iter().enumerate() {
+                    println!(
+                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={}",
+                        index + 1,
+                        unit.kind,
+                        unit.name,
+                        unit.current_path,
+                        unit.risk_score,
+                        unit.fixes,
+                        unit.changes,
+                        unit.moves,
+                        unit.total_events
+                    );
+                }
             }
         }
     }
     Ok(())
+}
+
+fn print_json_summary(units: &[lineage::UnitSummary]) {
+    print!("[");
+    for (index, unit) in units.iter().enumerate() {
+        if index > 0 {
+            print!(",");
+        }
+        print!(
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6}}}",
+            json_escape(&unit.id),
+            json_escape(&unit.name),
+            json_escape(&unit.kind),
+            json_escape(&unit.original_path),
+            json_escape(&unit.current_path),
+            unit.total_events,
+            unit.changes,
+            unit.moves,
+            unit.fixes,
+            unit.risk_score
+        );
+    }
+    println!("]");
+}
+
+fn json_escape(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out
 }

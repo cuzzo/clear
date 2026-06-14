@@ -207,4 +207,44 @@ class ReportTest < Minitest::Test
       assert_includes md, "Highest multi-file fix blast radius"
     end
   end
+
+  def test_report_includes_lineage_overlay_when_supplied
+    Dir.mktmpdir do |dir|
+      build_repo(dir)
+      rs = resultset(dir)
+      lineage = "#{dir}/lineage.sqlite"
+      File.write(lineage, "placeholder")
+      cmd = "#{dir}/lineage-json"
+      File.write(cmd, <<~RUBY)
+        #!/usr/bin/env ruby
+        require "json"
+        puts JSON.dump([
+          {
+            "id" => "u1",
+            "name" => "a",
+            "kind" => "function",
+            "original_path" => "src/hot.rb",
+            "total_events" => 3,
+            "changes" => 1,
+            "moves" => 1,
+            "fixes" => 1,
+            "risk_score" => 4.0
+          }
+        ])
+      RUBY
+      File.chmod(0o755, cmd)
+
+      md = Boobytrap::Report.new(
+        repo: dir,
+        resultset: rs,
+        lineage: lineage,
+        lineage_command: cmd
+      ).to_markdown
+
+      assert_includes md, "## Lineage Unit Risk (1)"
+      assert_includes md, "`src/hot.rb` `a`"
+      assert_includes md, "Highest lineage unit risk"
+      assert_includes md, "Lineage DB: lineage.sqlite"
+    end
+  end
 end

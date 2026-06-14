@@ -66,92 +66,107 @@ where
             let mut current = HashMap::new();
             let mut claimed_moves = HashSet::new();
             let path_filter = |path: &str| self.extractor.supports_path(path);
-            for file in self.provider.files_at_commit(&commit.hash, &path_filter)? {
-                for unit in self.extractor.extract_units(&file) {
-                    let mut unit = unit;
-                    let observed_id = unit.id.clone();
-                    if let Some(canonical_id) = aliases.get(&observed_id).cloned() {
-                        unit.id = canonical_id;
-                    }
-                    stats.logical_units += 1;
+            let extracted_units = self
+                .provider
+                .files_at_commit(&commit.hash, &path_filter)?
+                .into_iter()
+                .flat_map(|file| self.extractor.extract_units(&file))
+                .collect::<Vec<_>>();
+            let observed_current_ids = extracted_units
+                .iter()
+                .map(|unit| {
+                    aliases
+                        .get(&unit.id)
+                        .cloned()
+                        .unwrap_or_else(|| unit.id.clone())
+                })
+                .collect::<HashSet<_>>();
+            for unit in extracted_units {
+                let mut unit = unit;
+                let observed_id = unit.id.clone();
+                if let Some(canonical_id) = aliases.get(&observed_id).cloned() {
+                    unit.id = canonical_id;
+                }
+                stats.logical_units += 1;
 
-                    if let Some(prev) = previous.get(&unit.id) {
-                        if let Some(event_type) = classify_event(prev, &unit, commit.is_fix()) {
-                            let event = Event {
-                                unit_id: unit.id.clone(),
-                                commit_hash: commit.hash.clone(),
-                                event_type,
-                                path: unit.path.clone(),
-                                name: unit.name.clone(),
-                                start_line: unit.start_line,
-                                end_line: unit.end_line,
-                                semantic_change: event_type != EventType::Move,
-                                lines_added: (unit.line_count() - prev.line_count()).max(0),
-                                lines_removed: (prev.line_count() - unit.line_count()).max(0),
-                                timestamp: commit.timestamp,
-                            };
-                            self.storage.insert_event(&event)?;
-                            stats.events += 1;
-                            match event_type {
-                                EventType::Move => stats.moves += 1,
-                                EventType::Fix => stats.fixes += 1,
-                                EventType::Change => stats.changes += 1,
-                            }
-                        }
-                    } else if let Some(prev) = find_moved_unit(&previous, &claimed_moves, &unit) {
-                        let previous_id = prev.id.clone();
-                        let semantic_change = prev.normalized_hash != unit.normalized_hash;
+                if let Some(prev) = previous.get(&unit.id) {
+                    if let Some(event_type) = classify_event(prev, &unit, commit.is_fix()) {
                         let event = Event {
-                            unit_id: previous_id.clone(),
+                            unit_id: unit.id.clone(),
                             commit_hash: commit.hash.clone(),
-                            event_type: EventType::Move,
+                            event_type,
                             path: unit.path.clone(),
                             name: unit.name.clone(),
                             start_line: unit.start_line,
                             end_line: unit.end_line,
-                            semantic_change: false,
-                            lines_added: 0,
-                            lines_removed: 0,
+                            semantic_change: event_type != EventType::Move,
+                            lines_added: (unit.line_count() - prev.line_count()).max(0),
+                            lines_removed: (prev.line_count() - unit.line_count()).max(0),
                             timestamp: commit.timestamp,
                         };
                         self.storage.insert_event(&event)?;
                         stats.events += 1;
-                        stats.moves += 1;
-                        if semantic_change {
-                            let event_type = if commit.is_fix() {
-                                EventType::Fix
-                            } else {
-                                EventType::Change
-                            };
-                            let event = Event {
-                                unit_id: previous_id.clone(),
-                                commit_hash: commit.hash.clone(),
-                                event_type,
-                                path: unit.path.clone(),
-                                name: unit.name.clone(),
-                                start_line: unit.start_line,
-                                end_line: unit.end_line,
-                                semantic_change: true,
-                                lines_added: (unit.line_count() - prev.line_count()).max(0),
-                                lines_removed: (prev.line_count() - unit.line_count()).max(0),
-                                timestamp: commit.timestamp,
-                            };
-                            self.storage.insert_event(&event)?;
-                            stats.events += 1;
-                            match event_type {
-                                EventType::Fix => stats.fixes += 1,
-                                EventType::Change => stats.changes += 1,
-                                EventType::Move => {}
-                            }
+                        match event_type {
+                            EventType::Move => stats.moves += 1,
+                            EventType::Fix => stats.fixes += 1,
+                            EventType::Change => stats.changes += 1,
                         }
-                        claimed_moves.insert(previous_id.clone());
-                        aliases.insert(observed_id, previous_id.clone());
-                        unit.id = previous_id;
                     }
-
-                    self.storage.upsert_logical_unit(&unit, commit.timestamp)?;
-                    current.insert(unit.id.clone(), unit);
+                } else if let Some(prev) =
+                    find_moved_unit(&previous, &claimed_moves, &observed_current_ids, &unit)
+                {
+                    let previous_id = prev.id.clone();
+                    let semantic_change = prev.normalized_hash != unit.normalized_hash;
+                    let event = Event {
+                        unit_id: previous_id.clone(),
+                        commit_hash: commit.hash.clone(),
+                        event_type: EventType::Move,
+                        path: unit.path.clone(),
+                        name: unit.name.clone(),
+                        start_line: unit.start_line,
+                        end_line: unit.end_line,
+                        semantic_change: false,
+                        lines_added: 0,
+                        lines_removed: 0,
+                        timestamp: commit.timestamp,
+                    };
+                    self.storage.insert_event(&event)?;
+                    stats.events += 1;
+                    stats.moves += 1;
+                    if semantic_change {
+                        let event_type = if commit.is_fix() {
+                            EventType::Fix
+                        } else {
+                            EventType::Change
+                        };
+                        let event = Event {
+                            unit_id: previous_id.clone(),
+                            commit_hash: commit.hash.clone(),
+                            event_type,
+                            path: unit.path.clone(),
+                            name: unit.name.clone(),
+                            start_line: unit.start_line,
+                            end_line: unit.end_line,
+                            semantic_change: true,
+                            lines_added: (unit.line_count() - prev.line_count()).max(0),
+                            lines_removed: (prev.line_count() - unit.line_count()).max(0),
+                            timestamp: commit.timestamp,
+                        };
+                        self.storage.insert_event(&event)?;
+                        stats.events += 1;
+                        match event_type {
+                            EventType::Fix => stats.fixes += 1,
+                            EventType::Change => stats.changes += 1,
+                            EventType::Move => {}
+                        }
+                    }
+                    claimed_moves.insert(previous_id.clone());
+                    aliases.insert(observed_id, previous_id.clone());
+                    unit.id = previous_id;
                 }
+
+                self.storage.upsert_logical_unit(&unit, commit.timestamp)?;
+                current.insert(unit.id.clone(), unit);
             }
             previous = current;
             stats.commits += 1;
@@ -164,12 +179,14 @@ where
 fn find_moved_unit<'a>(
     previous: &'a HashMap<String, LogicalUnit>,
     claimed_moves: &HashSet<String>,
+    observed_current_ids: &HashSet<String>,
     current: &LogicalUnit,
 ) -> Option<&'a LogicalUnit> {
     previous
         .values()
         .filter(|prev| {
             !claimed_moves.contains(&prev.id)
+                && !observed_current_ids.contains(&prev.id)
                 && prev.kind == current.kind
                 && prev.name == current.name
                 && prev.path != current.path
@@ -184,7 +201,7 @@ fn find_moved_unit<'a>(
 }
 
 fn classify_event(previous: &LogicalUnit, current: &LogicalUnit, fix_commit: bool) -> Option<EventType> {
-    let moved = previous.path != current.path || previous.start_line != current.start_line;
+    let moved = previous.path != current.path;
     let changed = previous.normalized_hash != current.normalized_hash;
 
     match (moved, changed, fix_commit) {
@@ -414,6 +431,47 @@ mod tests {
     }
 
     #[test]
+    fn does_not_count_same_file_line_drift_as_a_move() {
+        let commits = vec![
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "initial".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "add helper above run".into(),
+                timestamp: 2,
+            },
+        ];
+        let mut files = HashMap::new();
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n1\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def helper\n0\nend\n\ndef run\n1\nend\n".into(),
+            }],
+        );
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.moves, 0);
+        assert_eq!(stats.fixes, 0);
+        assert_eq!(stats.changes, 0);
+        assert_eq!(stats.events, 0);
+    }
+
+    #[test]
     fn records_move_and_fix_for_similar_moved_block() {
         let commits = vec![
             CommitMetadata {
@@ -482,6 +540,52 @@ mod tests {
                 path: "src/b.rb".into(),
                 contents: "def run(a, b, c)\nnetwork\nsocket\nretry\nfallback\nmetrics\nend\n".into(),
             }],
+        );
+
+        let provider = MemoryProvider { commits, files };
+        let storage = Storage::open_memory().unwrap();
+        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let stats = engine.run(None).unwrap();
+
+        assert_eq!(stats.events, 0);
+        assert_eq!(stats.moves, 0);
+        assert_eq!(stats.fixes, 0);
+    }
+
+    #[test]
+    fn does_not_treat_added_same_named_block_as_a_move_when_original_remains() {
+        let commits = vec![
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "initial".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "fix add second run".into(),
+                timestamp: 2,
+            },
+        ];
+        let mut files = HashMap::new();
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\nalpha\nbeta\ngamma\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![
+                BlobFile {
+                    path: "src/a.rb".into(),
+                    contents: "def run\nalpha\nbeta\ngamma\nend\n".into(),
+                },
+                BlobFile {
+                    path: "src/b.rb".into(),
+                    contents: "def run\nalpha\nbeta\ndelta\nend\n".into(),
+                },
+            ],
         );
 
         let provider = MemoryProvider { commits, files };

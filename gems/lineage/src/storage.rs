@@ -14,6 +14,7 @@ pub struct UnitSummary {
     pub name: String,
     pub kind: String,
     pub original_path: String,
+    pub current_path: String,
     pub total_events: i64,
     pub changes: i64,
     pub moves: i64,
@@ -158,6 +159,13 @@ impl Storage {
               u.name,
               u.type,
               u.original_path,
+              COALESCE((
+                SELECT latest.path
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+              ), u.original_path) AS current_path,
               COUNT(e.id) AS total_events,
               SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
               SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
@@ -174,10 +182,11 @@ impl Storage {
                 name: row.get(1)?,
                 kind: row.get(2)?,
                 original_path: row.get(3)?,
-                total_events: row.get(4)?,
-                changes: row.get(5)?,
-                moves: row.get(6)?,
-                fixes: row.get(7)?,
+                current_path: row.get(4)?,
+                total_events: row.get(5)?,
+                changes: row.get(6)?,
+                moves: row.get(7)?,
+                fixes: row.get(8)?,
                 risk_score: 0.0,
             })
         })?;
@@ -193,7 +202,7 @@ impl Storage {
             out.retain(|summary| {
                 only_prefixes
                     .iter()
-                    .any(|prefix| summary.original_path.starts_with(prefix))
+                    .any(|prefix| summary.current_path.starts_with(prefix))
             });
         }
         out.sort_by(|left, right| {
@@ -204,7 +213,7 @@ impl Storage {
                 .then_with(|| right.fixes.cmp(&left.fixes))
                 .then_with(|| right.changes.cmp(&left.changes))
                 .then_with(|| right.total_events.cmp(&left.total_events))
-                .then_with(|| left.original_path.cmp(&right.original_path))
+                .then_with(|| left.current_path.cmp(&right.current_path))
                 .then_with(|| left.name.cmp(&right.name))
         });
         out.truncate(limit);

@@ -5,6 +5,7 @@ require_relative "coverage_data"
 require_relative "coverage_gap"
 require_relative "decomplex_risk"
 require_relative "hotspot"
+require_relative "lineage_risk"
 require_relative "method_gap"
 require_relative "mutation_facts"
 
@@ -19,12 +20,20 @@ module Boobytrap
     # weighting stays consistent with the whole project; we only filter
     # WHICH files are ranked. Empty = whole repo.
     def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [],
-                   mutation: nil, exclude: [])
+                   mutation: nil, exclude: [], lineage: nil, lineage_command: nil)
       @repo = ::File.realpath(repo)
       @top = top
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
       @exclude = Array(exclude)
       @mutation_facts = MutationFacts.load(mutation, root: @repo)
+      @lineage = LineageRisk.load(
+        lineage,
+        repo: @repo,
+        only: @only,
+        top: [top.to_i * 10, 200].max,
+        command: lineage_command,
+        current_only: true
+      )
       events = Bugspots.events_from_git(@repo, fix_re: fix_re)
       @fix_commits = events.size
       scores = filter_paths(Bugspots.score(events))
@@ -77,6 +86,7 @@ module Boobytrap
           []
         end
       apply_empirical_method_risk!(@method_gaps)
+      apply_lineage_method_risk!(@method_gaps)
       @state_branch_hotspots = build_state_branch_hotspots(coverage)
     end
 
@@ -156,6 +166,8 @@ module Boobytrap
            "(#statebased-branch-hotspots-#{@state_branch_hotspots.size})\n"
       o << "- [Multi-File Fix Blast Radius (#{@blast_radius.size})]" \
            "(#multifile-fix-blast-radius-#{@blast_radius.size})\n"
+      o << "- [Lineage Unit Risk (#{@lineage[:units].size})]" \
+           "(#lineage-unit-risk-#{@lineage[:units].size})\n"
       o << "- [Fixed But Unmeasured (#{@unmeasured.size})]" \
            "(#fixed-but-unmeasured-#{@unmeasured.size})\n"
       o << "- [Run Summary](#run-summary)\n\n"
@@ -190,6 +202,11 @@ module Boobytrap
                "`#{method.file}:#{method.first_line}` `#{method.name}` " \
                "(risk=#{method.risk.round(2)}, fix_norm=#{method.fix_norm}, " \
                "verification=#{method.verification_status || 'not supplied'}).\n"
+        end
+        if (unit = @lineage[:units].first)
+          o << "- Highest lineage unit risk: `#{unit.file}` `#{unit.name}` " \
+               "(risk=#{unit.risk_score.round(1)}, fixes=#{unit.fixes}, " \
+               "changes=#{unit.changes}, moves=#{unit.moves}).\n"
         end
         unless @have_cov
           o << "- WARNING: no branch-coverage resultset supplied; " \
@@ -233,16 +250,16 @@ module Boobytrap
         o << "- <=20% covered: #{le20}\n"
         o << "- <=50% covered: #{le50}\n\n"
         if @mutation_facts.active?
-          o << "| # | method | risk | covered | missed | fix_norm | decomplex | verification | profile | writes | dark branches |\n"
-          o << "|---|--------|------|---------|--------|----------|-----------|--------------|---------|--------|---------------|\n"
+          o << "| # | method | risk | covered | missed | fix_norm | lineage | decomplex | verification | profile | writes | dark branches |\n"
+          o << "|---|--------|------|---------|--------|----------|---------|-----------|--------------|---------|--------|---------------|\n"
         else
-          o << "| # | method | risk | covered | missed | fix_norm | decomplex | findings | writes | dark branches |\n"
-          o << "|---|--------|------|---------|--------|----------|-----------|----------|--------|---------------|\n"
+          o << "| # | method | risk | covered | missed | fix_norm | lineage | decomplex | findings | writes | dark branches |\n"
+          o << "|---|--------|------|---------|--------|----------|---------|-----------|----------|--------|---------------|\n"
         end
         dark_methods.first(@top).each_with_index do |m, i|
           common = "| #{i + 1} | `#{m.file}:#{m.first_line}` `#{m.name}` " \
                    "| #{m.risk.round(2)} | #{m.covered_lines}/#{m.executable_lines} " \
-                   "| #{m.missed_lines} | #{m.fix_norm} | #{m.decomplex_score} "
+                   "| #{m.missed_lines} | #{m.fix_norm} | #{lineage_cell(m)} | #{m.decomplex_score} "
           if @mutation_facts.active?
             o << common
             o << "| #{m.verification_status} | #{m.risk_profile} | #{m.state_writes} "
@@ -291,6 +308,25 @@ module Boobytrap
         o << "\n"
       end
 
+      o << "## Lineage Unit Risk (#{@lineage[:units].size})\n"
+      o << "_Optional Lineage SQLite overlay: time-decayed semantic `FIX`/`CHANGE` " \
+           "events at logical-unit granularity. Pure moves are shown but do not add risk._\n\n"
+      if @lineage[:status] != :ok
+        o << "_No Lineage database supplied._\n\n"
+      elsif @lineage[:units].empty?
+        o << "None.\n\n"
+      else
+        o << "| # | unit | risk | fixes | changes | moves | events |\n"
+        o << "|---|------|------|-------|---------|-------|--------|\n"
+        @lineage[:units].first(@top).each_with_index do |unit, idx|
+          o << "| #{idx + 1} | `#{unit.file}` `#{unit.name}` | " \
+               "#{unit.risk_score.round(1)} | #{unit.fixes} | #{unit.changes} | " \
+               "#{unit.moves} | #{unit.total_events} |\n"
+        end
+        o << "\n- ...(+#{@lineage[:units].size - @top} more)\n" if @lineage[:units].size > @top
+        o << "\n"
+      end
+
       o << "## Fixed But Unmeasured (#{@unmeasured.size})\n"
       o << "_files with recurring fixes but NO branch-coverage data -- " \
            "recurring-fix code the corpus does not measure at all; " \
@@ -315,6 +351,7 @@ module Boobytrap
       o << "- Branch-coverage resultset: " \
            "#{@have_cov ? @coverage_mode : 'ABSENT (fix-churn only)'}\n"
       o << "- Mutation facts: #{@mutation_facts.active? ? @mutation_facts.label : 'not supplied'}\n"
+      o << "- Lineage DB: #{@lineage[:status] == :ok ? @lineage[:label] : 'not supplied'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
            "x normalized coverage branch gap; method gaps use Decomplex detector scores, " \
@@ -360,6 +397,30 @@ module Boobytrap
         )
         row.risk = (row.risk * row.verification_multiplier).round(4)
       end
+    end
+
+    def apply_lineage_method_risk!(rows)
+      return unless @lineage[:status] == :ok
+
+      max = @lineage[:units].map(&:risk_score).max.to_f
+      max = 1.0 if max <= 0.0
+      rows.each do |row|
+        unit = @lineage[:index][[row.file, row.name]]
+        next unless unit
+
+        row.lineage_score = unit.risk_score
+        row.lineage_fixes = unit.fixes
+        row.lineage_changes = unit.changes
+        row.lineage_moves = unit.moves
+        lineage_norm = unit.risk_score.to_f / max
+        row.risk = (row.risk.to_f * (1.0 + lineage_norm)).round(4)
+      end
+    end
+
+    def lineage_cell(row)
+      return "0" unless row.lineage_score.to_f.positive?
+
+      "#{row.lineage_score.round(1)} (f#{row.lineage_fixes}/c#{row.lineage_changes}/m#{row.lineage_moves})"
     end
 
     def empirical_structural_score(row)
