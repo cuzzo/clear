@@ -134,12 +134,24 @@ Active mutants:
 Current local validation:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p2-fuzz-mutants-all
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p3-fuzz-mutants-all
 ```
 
 Result: all 21 mutants were killed. Every baseline fuzz run reported zero
 failures, leaks, MIR errors, and unexpected passes. The shared
 `mir_checker_negative_matrix` now has 45 baseline cells.
+
+P3 fuzz coverage quality is also gated by:
+
+```sh
+bundle exec ruby tools/fuzz/coverage.rb
+bundle exec prspec spec/fuzz_coverage_model_spec.rb
+```
+
+The coverage gate verifies every registered template has scope metadata, README
+active-cell counts match the generator, high-risk templates use exhaustive
+matrices, and P0 `escape_sinks x cleanup_value_shapes` cross-products remain
+covered.
 
 ## Transpile Tests To A-Level
 

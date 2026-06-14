@@ -40,6 +40,27 @@ bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p2-fuzz-mutants-all
 
 Result: all 21 mutants killed.
 
+## Current P3 Status
+
+P3 is the fuzz-suite coverage quality wall: the suite should explain what each template proves and fail closed when registry dimensions, README counts, or high-risk cross-products drift.
+
+| Area | Gate strategy | Current result | Status |
+| :--- | :--- | :--- | :--- |
+| Template scope metadata | Every registered fuzz template has source kind, matrix strategy, failure meaning, exclusions, and high-risk flag where applicable | 64/64 templates covered | Complete |
+| README/template drift | `tools/fuzz/coverage.rb` checks registered templates and numeric active-cell counts against `tools/fuzz/README.md` | 64/64 documented; counts match generator | Clean |
+| Registry dimensions | Coverage report maps each template to declared ownership-safety dimensions | Report prints per-template cell counts, expectation mix, source kind, matrix strategy, and dimension counts | Complete |
+| P0 sink/value cross-products | High-risk `escape_sinks x cleanup_value_shapes` requirements must be collectively covered | `takes_arg`, `give_arg`, `return_value`, `struct_field_store`, and `list_append` are fully covered | Clean |
+| High-risk matrix expansion | High-risk templates cannot use smoke/curated/bounded strategies | Current high-risk templates are exhaustive | Clean |
+
+The P3 validation gate is:
+
+```sh
+bundle exec ruby tools/fuzz/coverage.rb
+bundle exec prspec spec/fuzz_coverage_model_spec.rb
+```
+
+The focused spec proves the gate catches stale README counts, missing template metadata, non-exhaustive high-risk templates, and missing high-risk sink/value-shape cross-products.
+
 ## Design Notes
 
 Broad `Type`, `CleanupClassifier`, and `EscapeAnalysis` mutation subjects are still advisory. That is intentional for now:
