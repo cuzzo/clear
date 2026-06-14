@@ -21,6 +21,7 @@ hex = "0.4"
 idna_adapter = "=1.0.0"
 openssl-sys = "=0.9.102"
 rusqlite = { version = "0.30", features = ["bundled"] }
+roxmltree = "0.19"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

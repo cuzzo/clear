@@ -401,6 +401,7 @@ dependencies = [
  "hex",
  "idna_adapter",
  "openssl-sys",
+ "roxmltree",
  "rusqlite",
  "serde",
  "serde_json",
@@ -491,6 +492,12 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "roxmltree"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cd14fd5e3b777a7422cca79358c57a8f6e3a703d9ac187448d0daf220c2407f"
 
 [[package]]
 name = "rusqlite"

@@ -1,9 +1,9 @@
 use crate::model::{
-    CommitMetadata, CrashEvent, Event, LogicalUnit, QualityEvent, QualityMetric,
-    HazardEvent, TestExposureEvent,
+    CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
+    TestExposureEvent,
 };
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -158,6 +158,17 @@ impl Storage {
               FOREIGN KEY(unit_id) REFERENCES logical_units(id)
             );
 
+            CREATE TABLE IF NOT EXISTS coverage_line_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              commit_hash TEXT NOT NULL,
+              timestamp INTEGER NOT NULL,
+              path TEXT NOT NULL,
+              line INTEGER NOT NULL,
+              hits INTEGER NOT NULL,
+              source TEXT NOT NULL DEFAULT 'coverage',
+              UNIQUE(commit_hash, path, line, source)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
             CREATE INDEX IF NOT EXISTS idx_events_commit_hash ON events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
@@ -173,6 +184,8 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_path_line ON unit_hazards(path, line);
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_type ON unit_hazards(hazard_type);
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_detected_at ON unit_hazards(detected_at_hash);
+            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line ON coverage_line_events(path, line);
+            CREATE INDEX IF NOT EXISTS idx_coverage_line_events_commit_hash ON coverage_line_events(commit_hash);
             "#,
         )?;
         self.ensure_logical_unit_column("current_line_cov", "REAL DEFAULT 0.0")?;
@@ -184,6 +197,7 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_verified_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
+        self.ensure_natural_key_indexes()?;
         Ok(())
     }
 
@@ -202,6 +216,70 @@ impl Storage {
         self.conn.execute(
             &format!("ALTER TABLE logical_units ADD COLUMN {name} {definition}"),
             [],
+        )?;
+        Ok(())
+    }
+
+    fn ensure_natural_key_indexes(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            DELETE FROM coverage_line_events
+            WHERE id NOT IN (
+              SELECT (
+                SELECT c2.id
+                FROM coverage_line_events c2
+                WHERE c2.commit_hash = c1.commit_hash
+                  AND c2.path = c1.path
+                  AND c2.line = c1.line
+                  AND c2.source = c1.source
+                ORDER BY c2.hits DESC, c2.timestamp DESC, c2.id DESC
+                LIMIT 1
+              )
+              FROM coverage_line_events c1
+              GROUP BY c1.commit_hash, c1.path, c1.line, c1.source
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_line_events_natural_key
+              ON coverage_line_events(commit_hash, path, line, source);
+
+            DELETE FROM quality_events
+            WHERE id NOT IN (
+              SELECT (
+                SELECT q2.id
+                FROM quality_events q2
+                WHERE q2.unit_id = q1.unit_id
+                  AND q2.commit_hash = q1.commit_hash
+                  AND q2.metric_type = q1.metric_type
+                ORDER BY q2.new_value DESC, q2.timestamp DESC, q2.id DESC
+                LIMIT 1
+              )
+              FROM quality_events q1
+              GROUP BY q1.unit_id, q1.commit_hash, q1.metric_type
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_events_natural_key
+              ON quality_events(unit_id, commit_hash, metric_type);
+
+            DELETE FROM crash_events
+            WHERE id NOT IN (
+              SELECT (
+                SELECT e2.id
+                FROM crash_events e2
+                WHERE e2.unit_id = e1.unit_id
+                  AND e2.commit_hash = e1.commit_hash
+                  AND e2.error_class = e1.error_class
+                  AND e2.provider_id = e1.provider_id
+                  AND e2.path = e1.path
+                  AND e2.line = e1.line
+                  AND e2.function = e1.function
+                ORDER BY e2.is_verified DESC, e2.timestamp DESC, e2.id DESC
+                LIMIT 1
+              )
+              FROM crash_events e1
+              GROUP BY e1.unit_id, e1.commit_hash, e1.error_class, e1.provider_id,
+                       e1.path, e1.line, e1.function
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_crash_events_natural_key
+              ON crash_events(unit_id, commit_hash, error_class, provider_id, path, line, function);
+            "#,
         )?;
         Ok(())
     }
@@ -305,6 +383,63 @@ impl Storage {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub fn resolve_current_path(&self, path: &str) -> Result<Option<String>> {
+        let normalized = path.trim_start_matches("./");
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH current_paths AS (
+              SELECT DISTINCT COALESCE((
+                SELECT latest.path
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+              ), u.original_path) AS current_path
+              FROM logical_units u
+            )
+            SELECT current_path
+            FROM current_paths
+            WHERE current_path = ?1
+            ORDER BY current_path
+            "#,
+        )?;
+        let exact = stmt
+            .query_map(params![normalized], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(path) = exact.into_iter().next() {
+            return Ok(Some(path));
+        }
+
+        let suffix = format!("%/{normalized}");
+        let mut stmt = self.conn.prepare(
+            r#"
+            WITH current_paths AS (
+              SELECT DISTINCT COALESCE((
+                SELECT latest.path
+                FROM events latest
+                WHERE latest.unit_id = u.id
+                ORDER BY latest.timestamp DESC, latest.id DESC
+                LIMIT 1
+              ), u.original_path) AS current_path
+              FROM logical_units u
+            )
+            SELECT current_path
+            FROM current_paths
+            WHERE current_path LIKE ?1
+            ORDER BY current_path
+            LIMIT 2
+            "#,
+        )?;
+        let candidates = stmt
+            .query_map(params![suffix], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(if candidates.len() == 1 {
+            candidates.into_iter().next()
+        } else {
+            None
+        })
+    }
+
     pub fn resolve_unit_id(&self, observed_id: &str, path: &str, name: &str) -> Result<Option<String>> {
         if self.logical_unit_exists(observed_id)? {
             return Ok(Some(observed_id.to_string()));
@@ -341,6 +476,29 @@ impl Storage {
 
     pub fn record_quality_metric(&self, event: &QualityEvent) -> Result<bool> {
         let (column, old_value) = self.current_quality_value(&event.unit_id, event.metric_type)?;
+        if let Some((id, previous_new_value)) =
+            self.existing_quality_event(&event.unit_id, &event.commit_hash, event.metric_type)?
+        {
+            let merged_value = previous_new_value.max(event.new_value);
+            self.conn.execute(
+                &format!("UPDATE logical_units SET {column} = ?2 WHERE id = ?1"),
+                params![event.unit_id, merged_value],
+            )?;
+            if (previous_new_value - merged_value).abs() < 0.0001 {
+                return Ok(false);
+            }
+
+            self.conn.execute(
+                r#"
+                UPDATE quality_events
+                SET timestamp = ?2, new_value = ?3
+                WHERE id = ?1
+                "#,
+                params![id, event.timestamp, merged_value],
+            )?;
+            return Ok(true);
+        }
+
         if old_value
             .map(|value| (value - event.new_value).abs() < 0.0001)
             .unwrap_or(false)
@@ -370,6 +528,105 @@ impl Storage {
         Ok(true)
     }
 
+    fn existing_quality_event(
+        &self,
+        unit_id: &str,
+        commit_hash: &str,
+        metric: QualityMetric,
+    ) -> Result<Option<(i64, f64)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, new_value
+            FROM quality_events
+            WHERE unit_id = ?1 AND commit_hash = ?2 AND metric_type = ?3
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )?;
+        Ok(stmt
+            .query_row(params![unit_id, commit_hash, metric.as_str()], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .optional()?)
+    }
+
+    pub fn delete_coverage_for_commit(&self, commit_hash: &str) -> Result<usize> {
+        let quality = self.conn.execute(
+            r#"
+            DELETE FROM quality_events
+            WHERE commit_hash = ?1
+              AND metric_type IN ('LINE_COV', 'INTEGRATION_COV', 'MUTANT_COV', 'GATE_STATUS')
+            "#,
+            params![commit_hash],
+        )?;
+        let lines = self.conn.execute(
+            "DELETE FROM coverage_line_events WHERE commit_hash = ?1",
+            params![commit_hash],
+        )?;
+        self.refresh_current_quality_metrics()?;
+        Ok(quality + lines)
+    }
+
+    fn refresh_current_quality_metrics(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            UPDATE logical_units
+            SET current_line_cov = 0.0,
+                current_integration_cov = 0.0,
+                current_mutant_cov = 0.0,
+                is_hard_gated = 0;
+            "#,
+        )?;
+        for (metric, column) in [
+            (QualityMetric::LineCoverage, "current_line_cov"),
+            (QualityMetric::IntegrationCoverage, "current_integration_cov"),
+            (QualityMetric::MutantCoverage, "current_mutant_cov"),
+            (QualityMetric::GateStatus, "is_hard_gated"),
+        ] {
+            self.conn.execute(
+                &format!(
+                    r#"
+                    UPDATE logical_units
+                    SET {column} = COALESCE((
+                      SELECT q.new_value
+                      FROM quality_events q
+                      WHERE q.unit_id = logical_units.id
+                        AND q.metric_type = ?1
+                      ORDER BY q.timestamp DESC, q.id DESC
+                      LIMIT 1
+                    ), 0.0)
+                    "#
+                ),
+                params![metric.as_str()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn record_coverage_line(
+        &self,
+        commit_hash: &str,
+        timestamp: i64,
+        path: &str,
+        line: u32,
+        hits: u32,
+    ) -> Result<bool> {
+        let changed = self.conn.execute(
+            r#"
+            INSERT INTO coverage_line_events
+              (commit_hash, timestamp, path, line, hits, source)
+            VALUES (?1, ?2, ?3, ?4, ?5, 'coverage')
+            ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET
+              timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp),
+              hits = MAX(coverage_line_events.hits, excluded.hits)
+            WHERE excluded.timestamp > coverage_line_events.timestamp
+               OR excluded.hits > coverage_line_events.hits
+            "#,
+            params![commit_hash, timestamp, path, line, hits],
+        )?;
+        Ok(changed > 0)
+    }
+
     fn current_quality_value(
         &self,
         unit_id: &str,
@@ -387,7 +644,54 @@ impl Storage {
         Ok((column, rows.next()?.map(|row| row.get(0)).transpose()?))
     }
 
-    pub fn insert_crash_event(&self, event: &CrashEvent) -> Result<()> {
+    pub fn insert_crash_event(&self, event: &CrashEvent) -> Result<bool> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, timestamp, is_verified
+            FROM crash_events
+            WHERE unit_id = ?1
+              AND commit_hash = ?2
+              AND error_class = ?3
+              AND provider_id = ?4
+              AND path = ?5
+              AND line = ?6
+              AND function = ?7
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )?;
+        let existing = stmt
+            .query_row(
+                params![
+                    event.unit_id,
+                    event.commit_hash,
+                    event.error_class,
+                    event.provider_id,
+                    event.path,
+                    event.line,
+                    event.function
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((id, timestamp, is_verified)) = existing {
+            let next_verified = if event.is_verified { 1 } else { 0 };
+            if timestamp == event.timestamp && is_verified == next_verified {
+                return Ok(false);
+            }
+            self.conn.execute(
+                "UPDATE crash_events SET timestamp = ?2, is_verified = ?3 WHERE id = ?1",
+                params![id, event.timestamp, next_verified],
+            )?;
+            return Ok(true);
+        }
+
         self.conn.execute(
             r#"
             INSERT INTO crash_events
@@ -407,7 +711,14 @@ impl Storage {
                 event.function
             ],
         )?;
-        Ok(())
+        Ok(true)
+    }
+
+    pub fn delete_crash_events_for_commit(&self, commit_hash: &str) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM crash_events WHERE commit_hash = ?1",
+            params![commit_hash],
+        )?)
     }
 
     pub fn insert_test_exposure_event(&self, event: &TestExposureEvent) -> Result<()> {
@@ -708,7 +1019,8 @@ fn checked_table(table: &str) -> Result<&str> {
         | "quality_events"
         | "crash_events"
         | "test_exposure_events"
-        | "unit_hazards" => Ok(table),
+        | "unit_hazards"
+        | "coverage_line_events" => Ok(table),
         _ => anyhow::bail!("unsupported table {table:?}"),
     }
 }
@@ -813,7 +1125,7 @@ mod tests {
             "def run\n1\nend",
         );
         storage.upsert_logical_unit(&unit, 10).unwrap();
-        storage.insert_crash_event(&CrashEvent {
+        assert!(storage.insert_crash_event(&CrashEvent {
             unit_id: unit.id,
             commit_hash: "abc".into(),
             timestamp: 10,
@@ -823,8 +1135,39 @@ mod tests {
             path: "src/a.rb".into(),
             line: 2,
             function: "run".into(),
-        }).unwrap();
+        }).unwrap());
 
+        assert_eq!(storage.count_rows("crash_events").unwrap(), 1);
+    }
+
+    #[test]
+    fn crash_events_are_idempotent_per_provider_frame() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        let event = CrashEvent {
+            unit_id: unit.id,
+            commit_hash: "abc".into(),
+            timestamp: 10,
+            error_class: "RuntimeError".into(),
+            provider_id: "evt-1".into(),
+            is_verified: true,
+            path: "src/a.rb".into(),
+            line: 2,
+            function: "run".into(),
+        };
+
+        assert!(storage.insert_crash_event(&event).unwrap());
+        assert!(!storage.insert_crash_event(&event).unwrap());
         assert_eq!(storage.count_rows("crash_events").unwrap(), 1);
     }
 

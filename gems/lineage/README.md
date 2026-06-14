@@ -57,8 +57,9 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
   --only zig/
 ```
 
-Ingest aggregate coverage history after a build. The Codecov parser
-accepts API v2 `totals` responses and `report/tree` responses:
+Ingest coverage history after a build. The Codecov parser accepts API
+v2 `totals` responses and `report/tree` responses. Cobertura XML is
+also supported and records exact per-line hit counts for the source UI:
 
 ```sh
 cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
@@ -66,6 +67,26 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
   --format codecov \
   --commit "$(git rev-parse HEAD)" \
   --input gems/lineage/test/fixtures/codecov-clear-totals.json
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+  --db /tmp/lineage.db \
+  --format cobertura \
+  --commit "$(git rev-parse HEAD)" \
+  --input coverage/coverage.xml
+```
+
+Coverage ingestion is commit-scoped. Re-ingesting the same artifact for
+the same commit updates existing rows instead of duplicating them. Use
+`--replace` when an artifact is authoritative for that commit and should
+delete prior coverage facts for that commit before loading the new file:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+  --db /tmp/lineage.db \
+  --format cobertura \
+  --commit "$(git rev-parse HEAD)" \
+  --input coverage/coverage.xml \
+  --replace
 ```
 
 Ingest named test exposure history after a test run. This stores one
@@ -90,6 +111,11 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest \
   --provider sentry \
   --input gems/lineage/test/fixtures/sentry-clear-event.json
 ```
+
+Stack-trace ingestion is also commit-scoped through each payload's commit
+field. Re-ingesting the same Sentry event/frame is idempotent. Add
+`--replace` to delete prior crash frames for the commits present in the
+input before reloading them.
 
 The extractor boundary is deliberately separate from storage and VCS
 traversal so Tree-sitter-backed language profiles can replace the

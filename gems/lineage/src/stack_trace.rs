@@ -5,6 +5,7 @@ use crate::storage::Storage;
 use crate::vcs::VcsProvider;
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +101,7 @@ pub fn ingest_stack_traces<E>(
     git: &GitProvider,
     extractor: &E,
     input: &str,
+    replace: bool,
 ) -> Result<StackIngestStats>
 where
     E: BoundaryExtractor,
@@ -110,12 +112,50 @@ where
         ..StackIngestStats::default()
     };
 
+    storage.begin_transaction()?;
+    let result = ingest_payloads(
+        storage,
+        normalizer,
+        git,
+        extractor,
+        payloads,
+        replace,
+        &mut stats,
+    );
+    match result {
+        Ok(()) => {
+            storage.commit_transaction()?;
+            Ok(stats)
+        }
+        Err(error) => {
+            let _ = storage.rollback_transaction();
+            Err(error)
+        }
+    }
+}
+
+fn ingest_payloads<E>(
+    storage: &Storage,
+    normalizer: &dyn LanguageNormalizer,
+    git: &GitProvider,
+    extractor: &E,
+    payloads: Vec<StackPayload>,
+    replace: bool,
+    stats: &mut StackIngestStats,
+) -> Result<()>
+where
+    E: BoundaryExtractor,
+{
+    let mut replaced_commits = HashSet::<String>::new();
     for payload in payloads {
         if !storage.commit_exists(&payload.commit_hash)? {
             anyhow::bail!(
                 "commit {} is not present in lineage metadata",
                 payload.commit_hash
             );
+        }
+        if replace && replaced_commits.insert(payload.commit_hash.clone()) {
+            storage.delete_crash_events_for_commit(&payload.commit_hash)?;
         }
         for frame in payload.frames {
             stats.frames += 1;
@@ -140,7 +180,7 @@ where
             if !verified {
                 stats.unverified += 1;
             }
-            storage.insert_crash_event(&CrashEvent {
+            if storage.insert_crash_event(&CrashEvent {
                 unit_id,
                 commit_hash: payload.commit_hash.clone(),
                 timestamp: payload.timestamp,
@@ -150,12 +190,13 @@ where
                 path,
                 line: frame.line,
                 function: frame.function,
-            })?;
-            stats.events += 1;
+            })? {
+                stats.events += 1;
+            }
         }
     }
 
-    Ok(stats)
+    Ok(())
 }
 
 fn parse_sentry_payload(value: &Value) -> Result<StackPayload> {

@@ -68,6 +68,8 @@ enum Command {
         commit: String,
         #[arg(long)]
         timestamp: Option<i64>,
+        #[arg(long)]
+        replace: bool,
     },
     /// Ingest named test exposure facts for one commit.
     IngestTestExposure {
@@ -105,6 +107,8 @@ enum Command {
         input: PathBuf,
         #[arg(long, default_value = "sentry")]
         provider: String,
+        #[arg(long)]
+        replace: bool,
     },
 }
 
@@ -179,13 +183,15 @@ fn main() -> Result<()> {
             format,
             commit,
             timestamp,
+            replace,
         } => {
             let storage = Storage::open(&db)?;
             let payload = fs::read_to_string(&input)?;
-            let stats = ingest_coverage_json(&storage, &payload, &format, &commit, timestamp)?;
+            let stats =
+                ingest_coverage_json(&storage, &payload, &format, &commit, timestamp, replace)?;
             println!(
-                "ingested coverage: files={} units={} events={} skipped_files={}",
-                stats.files, stats.units, stats.events, stats.skipped_files
+                "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
+                stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
             );
         }
         Command::IngestTestExposure {
@@ -238,6 +244,7 @@ fn main() -> Result<()> {
             repo,
             input,
             provider,
+            replace,
         } => {
             let storage = Storage::open(&db)?;
             let git = GitProvider::open(&repo)?;
@@ -252,6 +259,7 @@ fn main() -> Result<()> {
                     &git,
                     &extractor,
                     &payload,
+                    replace,
                 )?,
                 other => anyhow::bail!("unsupported stack trace provider {other:?}"),
             };

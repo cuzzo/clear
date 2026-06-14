@@ -52,6 +52,7 @@ pub struct UiLineAnnotation {
     pub distinct_tests: i64,
     pub mutant_verified_tests: i64,
     pub mutant_killed_tests: i64,
+    pub line_hits: Option<u32>,
     pub line_coverage: Option<f64>,
     pub mutant_coverage: Option<f64>,
     pub dark_arms: Vec<String>,
@@ -80,6 +81,7 @@ struct AnnotationBuilder {
     distinct_tests: i64,
     mutant_verified_tests: i64,
     mutant_killed_tests: i64,
+    line_hits: Option<u32>,
     line_coverage: Option<f64>,
     mutant_coverage: Option<f64>,
     dark_arms: Vec<String>,
@@ -415,7 +417,8 @@ fn line_annotations(
     overlays: &UiOverlays,
 ) -> Result<Vec<UiLineAnnotation>> {
     let mut lines = BTreeMap::<u32, AnnotationBuilder>::new();
-    apply_unit_quality(storage, path, &mut lines)?;
+    let has_exact_line_coverage = apply_line_coverage(storage, path, &mut lines)?;
+    apply_unit_quality(storage, path, &mut lines, !has_exact_line_coverage)?;
     apply_test_exposure(storage, path, &mut lines)?;
     apply_hazards(storage, path, &mut lines)?;
     apply_overlays(path, overlays, &mut lines);
@@ -430,6 +433,7 @@ fn line_annotations(
             distinct_tests: builder.distinct_tests,
             mutant_verified_tests: builder.mutant_verified_tests,
             mutant_killed_tests: builder.mutant_killed_tests,
+            line_hits: builder.line_hits,
             line_coverage: builder.line_coverage,
             mutant_coverage: builder.mutant_coverage,
             dark_arms: builder.dark_arms,
@@ -442,6 +446,7 @@ fn apply_unit_quality(
     storage: &Storage,
     path: &str,
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    paint_line_coverage: bool,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
         r#"
@@ -480,7 +485,7 @@ fn apply_unit_quality(
         let end = end.max(start);
         for line in start..=end {
             let entry = lines.entry(line).or_default();
-            if line_cov > 0.0 {
+            if paint_line_coverage && line_cov > 0.0 {
                 entry.covered = true;
                 entry.line_coverage = Some(entry.line_coverage.unwrap_or(0.0).max(line_cov));
             }
@@ -493,6 +498,42 @@ fn apply_unit_quality(
         }
     }
     Ok(())
+}
+
+fn apply_line_coverage(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<bool> {
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest AS (
+          SELECT line, hits,
+                 ROW_NUMBER() OVER (PARTITION BY line ORDER BY timestamp DESC, id DESC) AS rank
+          FROM coverage_line_events
+          WHERE path = ?1
+        )
+        SELECT line, hits
+        FROM latest
+        WHERE rank = 1
+        ORDER BY line
+        "#,
+    )?;
+    let rows = stmt.query_map(params![path], |row| {
+        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?))
+    })?;
+
+    let mut has_exact_line_coverage = false;
+    for row in rows {
+        let (line, hits) = row?;
+        has_exact_line_coverage = true;
+        let entry = lines.entry(line).or_default();
+        entry.line_hits = Some(hits);
+        if hits > 0 {
+            entry.covered = true;
+        }
+    }
+    Ok(has_exact_line_coverage)
 }
 
 fn apply_test_exposure(
@@ -644,13 +685,26 @@ fn render_index_page(
 ) -> Result<String> {
     let files = file_index(storage)?;
     let filtered = filtered_files(&files, filter);
+    let path_available = |file: &&UiFile| commit.is_some() || repo.join(&file.path).is_file();
     let selected_path = selected
         .map(str::to_string)
+        .or_else(|| {
+            filtered
+                .iter()
+                .find(|file| file.line_coverage > 0.0 && path_available(file))
+                .map(|file| file.path.clone())
+        })
+        .or_else(|| {
+            filtered
+                .iter()
+                .find(|file| path_available(file))
+                .map(|file| file.path.clone())
+        })
         .or_else(|| filtered.first().map(|file| file.path.clone()));
     let payload = selected_path
         .as_deref()
         .map(|path| source_payload_with_overlays(storage, repo, path, commit, overlays))
-        .transpose()?;
+        .transpose();
 
     let mut out = String::new();
     out.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
@@ -671,11 +725,18 @@ fn render_index_page(
     }
     out.push_str("</nav></aside><main>");
     match payload {
-        Some(payload) => out.push_str(&render_source_view(&payload, filter)),
-        None => {
+        Ok(Some(payload)) => out.push_str(&render_source_view(&payload, filter)),
+        Ok(None) => {
             out.push_str("<div class=\"topbar\"><div><div class=\"title\">No file selected</div>");
             out.push_str("<div class=\"subtle\">Build or ingest Lineage data first.</div></div></div>");
             out.push_str("<div class=\"viewer\"><div class=\"empty\">No source file selected.</div></div>");
+        }
+        Err(error) => {
+            out.push_str("<div class=\"topbar\"><div><div class=\"title\">Source unavailable</div>");
+            out.push_str("<div class=\"subtle\">");
+            out.push_str(&html_escape(&error.to_string()));
+            out.push_str("</div></div></div>");
+            out.push_str("<div class=\"viewer\"><div class=\"empty\">The selected path is not available in the current checkout. Regenerate coverage for HEAD or open a historical commit view.</div></div>");
         }
     }
     out.push_str("</main></div></body></html>");
@@ -703,6 +764,12 @@ fn render_file_link(file: &UiFile, active: bool, filter: &str) -> String {
         out.push_str(&format!(
             "<span class=\"pill\" title=\"active hazards\">{}</span>",
             file.hazards
+        ));
+    }
+    if file.line_coverage > 0.0 {
+        out.push_str(&format!(
+            "<span class=\"pill coverage-pill\" title=\"line coverage\">{:.0}%</span>",
+            file.line_coverage
         ));
     }
     if file.mutant_killed_tests > 0 {
@@ -747,7 +814,12 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
     out.push_str("</div><div class=\"viewer\"><div class=\"code\">");
     for (index, line) in payload.lines.iter().enumerate() {
         let line_no = (index + 1) as u32;
-        out.push_str(&render_code_line(line_no, line, annotations.get(&line_no).copied()));
+        out.push_str(&render_code_line(
+            &payload.path,
+            line_no,
+            line,
+            annotations.get(&line_no).copied(),
+        ));
     }
     out.push_str("</div></div>");
     out
@@ -780,7 +852,12 @@ fn render_history(payload: &UiSourcePayload, filter: &str) -> String {
     out
 }
 
-fn render_code_line(line_no: u32, source: &str, annotation: Option<&UiLineAnnotation>) -> String {
+fn render_code_line(
+    path: &str,
+    line_no: u32,
+    source: &str,
+    annotation: Option<&UiLineAnnotation>,
+) -> String {
     let mut classes = vec!["row"];
     if annotation.map(|a| a.covered).unwrap_or(false) {
         classes.push("covered");
@@ -829,7 +906,7 @@ fn render_code_line(line_no: u32, source: &str, annotation: Option<&UiLineAnnota
         }
     }
     out.push_str("</span><pre>");
-    out.push_str(&html_escape(source));
+    out.push_str(&highlight_source_line(path, source));
     out.push_str("</pre></div>");
     out
 }
@@ -844,6 +921,9 @@ fn render_line_details(annotation: &UiLineAnnotation) -> String {
     }
     if annotation.mutant_killed_tests > 0 {
         rows.push(format!("{} mutant killed", annotation.mutant_killed_tests));
+    }
+    if let Some(hits) = annotation.line_hits {
+        rows.push(format!("line hits {hits}"));
     }
     if !annotation.dark_arms.is_empty() {
         rows.push(format!("dark arms: {}", annotation.dark_arms.join(", ")));
@@ -870,8 +950,212 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
         || annotation.mutant_tested
         || !annotation.test_types.is_empty()
         || !annotation.dark_arms.is_empty()
+        || annotation.line_hits.is_some()
         || annotation.line_coverage.is_some()
         || annotation.mutant_coverage.is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyntaxLanguage {
+    Ruby,
+    Python,
+    JavaScript,
+    TypeScript,
+    Go,
+    Rust,
+    Lua,
+    Zig,
+    C,
+    Plain,
+}
+
+fn highlight_source_line(path: &str, source: &str) -> String {
+    let language = syntax_language(path);
+    if language == SyntaxLanguage::Plain {
+        return html_escape(source);
+    }
+
+    let mut out = String::new();
+    let mut chars = source.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if let Some(prefix) = comment_prefix(language) {
+            if source[start..].starts_with(prefix) {
+                push_token(&mut out, "comment", &source[start..]);
+                break;
+            }
+        }
+
+        if is_string_delimiter(language, ch) {
+            let end = scan_string(source, &mut chars, ch);
+            push_token(&mut out, "string", &source[start..end]);
+            continue;
+        }
+
+        if ch.is_ascii_digit() {
+            let end = scan_while(source, &mut chars, |candidate| {
+                candidate.is_ascii_alphanumeric() || matches!(candidate, '_' | '.' | ':')
+            });
+            push_token(&mut out, "number", &source[start..end]);
+            continue;
+        }
+
+        if is_identifier_start(ch) {
+            let end = scan_while(source, &mut chars, is_identifier_continue);
+            let word = &source[start..end];
+            if keywords(language).contains(&word) {
+                push_token(&mut out, "keyword", word);
+            } else {
+                out.push_str(&html_escape(word));
+            }
+            continue;
+        }
+
+        out.push_str(&html_escape(&source[start..start + ch.len_utf8()]));
+    }
+
+    out
+}
+
+fn syntax_language(path: &str) -> SyntaxLanguage {
+    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
+        Some("rb") => SyntaxLanguage::Ruby,
+        Some("py") => SyntaxLanguage::Python,
+        Some("js" | "mjs" | "cjs" | "jsx") => SyntaxLanguage::JavaScript,
+        Some("ts" | "tsx") => SyntaxLanguage::TypeScript,
+        Some("go") => SyntaxLanguage::Go,
+        Some("rs") => SyntaxLanguage::Rust,
+        Some("lua") => SyntaxLanguage::Lua,
+        Some("zig") => SyntaxLanguage::Zig,
+        Some("c" | "h" | "cc" | "cpp" | "cxx" | "hpp") => SyntaxLanguage::C,
+        _ => SyntaxLanguage::Plain,
+    }
+}
+
+fn comment_prefix(language: SyntaxLanguage) -> Option<&'static str> {
+    match language {
+        SyntaxLanguage::Ruby | SyntaxLanguage::Python => Some("#"),
+        SyntaxLanguage::Lua => Some("--"),
+        SyntaxLanguage::JavaScript
+        | SyntaxLanguage::TypeScript
+        | SyntaxLanguage::Go
+        | SyntaxLanguage::Rust
+        | SyntaxLanguage::Zig
+        | SyntaxLanguage::C => Some("//"),
+        SyntaxLanguage::Plain => None,
+    }
+}
+
+fn is_string_delimiter(language: SyntaxLanguage, ch: char) -> bool {
+    matches!(ch, '"' | '\'') || matches!(language, SyntaxLanguage::JavaScript | SyntaxLanguage::TypeScript) && ch == '`'
+}
+
+fn scan_string(
+    source: &str,
+    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    delimiter: char,
+) -> usize {
+    let mut escaped = false;
+    while let Some((index, ch)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == delimiter {
+            return index + ch.len_utf8();
+        }
+    }
+    source.len()
+}
+
+fn scan_while(
+    source: &str,
+    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    predicate: impl Fn(char) -> bool,
+) -> usize {
+    while let Some((_, candidate)) = chars.peek().copied() {
+        if !predicate(candidate) {
+            break;
+        }
+        chars.next();
+    }
+
+    chars.peek().map(|(index, _)| *index).unwrap_or(source.len())
+}
+
+fn is_identifier_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_identifier_continue(ch: char) -> bool {
+    ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric()
+}
+
+fn push_token(out: &mut String, kind: &str, value: &str) {
+    out.push_str("<span class=\"tok-");
+    out.push_str(kind);
+    out.push_str("\">");
+    out.push_str(&html_escape(value));
+    out.push_str("</span>");
+}
+
+fn keywords(language: SyntaxLanguage) -> &'static [&'static str] {
+    match language {
+        SyntaxLanguage::Ruby => &[
+            "alias", "and", "begin", "break", "case", "class", "def", "defined?", "do", "else",
+            "elsif", "end", "ensure", "false", "for", "if", "in", "module", "next", "nil", "not",
+            "or", "private", "protected", "public", "redo", "require", "require_relative",
+            "rescue", "retry", "return", "self", "super", "then", "true", "unless", "until",
+            "when", "while", "yield",
+        ],
+        SyntaxLanguage::Python => &[
+            "False", "None", "True", "and", "as", "async", "await", "break", "class", "continue",
+            "def", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+            "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+            "while", "with", "yield",
+        ],
+        SyntaxLanguage::JavaScript | SyntaxLanguage::TypeScript => &[
+            "as", "async", "await", "break", "case", "catch", "class", "const", "continue",
+            "default", "delete", "do", "else", "export", "extends", "false", "finally", "for",
+            "from", "function", "if", "import", "in", "instanceof", "interface", "let", "new",
+            "null", "of", "private", "protected", "public", "return", "static", "super", "switch",
+            "this", "throw", "true", "try", "type", "typeof", "undefined", "var", "void", "while",
+            "yield",
+        ],
+        SyntaxLanguage::Go => &[
+            "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
+            "false", "for", "func", "go", "goto", "if", "import", "interface", "map", "nil",
+            "package", "range", "return", "select", "struct", "switch", "true", "type", "var",
+        ],
+        SyntaxLanguage::Rust => &[
+            "Self", "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else",
+            "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match",
+            "mod", "move", "mut", "pub", "ref", "return", "self", "static", "struct", "super",
+            "trait", "true", "type", "unsafe", "use", "where", "while",
+        ],
+        SyntaxLanguage::Lua => &[
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if",
+            "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+        ],
+        SyntaxLanguage::Zig => &[
+            "align", "allowzero", "and", "anyerror", "asm", "async", "await", "break", "catch",
+            "comptime", "const", "continue", "defer", "else", "enum", "errdefer", "error", "export",
+            "extern", "false", "fn", "for", "if", "inline", "noalias", "nosuspend", "null", "or",
+            "orelse", "packed", "pub", "return", "resume", "struct", "suspend", "switch", "test",
+            "threadlocal", "true", "try", "union", "unreachable", "usingnamespace", "var", "volatile",
+            "while",
+        ],
+        SyntaxLanguage::C => &[
+            "auto", "bool", "break", "case", "char", "const", "continue", "default", "do", "double",
+            "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline", "int",
+            "long", "NULL", "register", "restrict", "return", "short", "signed", "sizeof", "static",
+            "struct", "switch", "true", "typedef", "union", "unsigned", "void", "volatile", "while",
+        ],
+        SyntaxLanguage::Plain => &[],
+    }
 }
 
 fn page_href(path: &str, commit: Option<&str>, filter: &str) -> String {
@@ -935,12 +1219,14 @@ const STYLE: &str = r#"
     display: grid;
     grid-template-columns: minmax(260px, 22vw) 1fr;
     height: 100vh;
+    min-height: 0;
     overflow: hidden;
   }
   aside {
     border-right: 1px solid var(--line);
     background: var(--panel);
     min-width: 0;
+    min-height: 0;
     display: grid;
     grid-template-rows: auto auto 1fr;
   }
@@ -967,7 +1253,7 @@ const STYLE: &str = r#"
     padding: 0 10px;
     font: inherit;
   }
-  .files { overflow: auto; padding: 6px; }
+  .files { min-height: 0; overflow: auto; padding: 6px; }
   .file {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -995,7 +1281,8 @@ const STYLE: &str = r#"
     min-width: 22px;
     text-align: center;
   }
-  main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+  .coverage-pill { color: #166534; background: rgba(34, 197, 94, 0.08); }
+  main { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
   .topbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(260px, 34vw);
@@ -1022,7 +1309,7 @@ const STYLE: &str = r#"
   .history summary { cursor: pointer; color: var(--muted); }
   .history-list { display: grid; gap: 4px; margin-top: 6px; max-height: 180px; overflow: auto; }
   .history-list a { color: var(--text); text-decoration: none; font-size: 12px; }
-  .viewer { overflow: auto; background: #fbfcfd; }
+  .viewer { min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
   .code {
     min-width: max-content;
     padding: 10px 0 30px;
@@ -1075,6 +1362,10 @@ const STYLE: &str = r#"
   }
   .line-meta p { margin: 0 0 4px; }
   pre { margin: 0; white-space: pre; padding-right: 24px; }
+  .tok-comment { color: #7a8495; font-style: italic; }
+  .tok-string { color: #8a4b08; }
+  .tok-number { color: #0f766e; }
+  .tok-keyword { color: #1d4ed8; font-weight: 600; }
   .empty { padding: 24px; color: var(--muted); }
   @media (max-width: 800px) {
     .app { grid-template-columns: 1fr; grid-template-rows: 36vh 64vh; }
@@ -1212,5 +1503,69 @@ mod tests {
         let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
 
         assert_eq!(line.dark_arms, vec!["genuine gap"]);
+    }
+
+    #[test]
+    fn source_payload_uses_exact_line_coverage_when_present() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/demo.rb"), "def run\n  1\nend\n").unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id,
+                commit_hash: "abc".into(),
+                event_type: EventType::Change,
+                path: "src/demo.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 3,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/demo.rb", 1, 0)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/demo.rb", 2, 1)
+            .unwrap();
+
+        let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
+        let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
+        let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+
+        assert!(!line_one.covered);
+        assert_eq!(line_one.line_hits, Some(0));
+        assert!(line_two.covered);
+        assert_eq!(line_two.line_hits, Some(1));
+    }
+
+    #[test]
+    fn syntax_highlighter_marks_basic_tokens() {
+        let html = highlight_source_line("src/demo.rb", "def run # hello");
+
+        assert!(html.contains("<span class=\"tok-keyword\">def</span>"));
+        assert!(html.contains("<span class=\"tok-comment\"># hello</span>"));
     }
 }
