@@ -69,6 +69,12 @@ RSpec.describe "coverage gap tools" do
     expect(bucket_for("zig/runtime/testing/loom-clock.zig")).to eq(:zig_tests)
   end
 
+  it "classifies gem changes separately from tools and markdown changes" do
+    expect(bucket_for("gems/decomplex/lib/decomplex.rb")).to eq(:gems)
+    expect(bucket_for("gems/decomplex/docs/agents/metrics-expo.md")).to eq(:gems)
+    expect(bucket_for("docs/agents/metrics-expo.md")).to eq(:md)
+  end
+
   it "breaks src Ruby changed lines into public, private, and other buckets" do
     source = <<~RUBY
       require "set"

@@ -154,6 +154,7 @@ transpile-tests/fuzz/*.cht
 # Catch-all
 **/*.profile/
 **/.zig-cache/
+**/zig-out/
 **/*.clear-build.json
 
 # Generated architecture reports

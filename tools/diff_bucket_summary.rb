@@ -85,6 +85,7 @@ def bucket_for(path)
   return :spec if path.start_with?("spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
+  return :gems if path.start_with?("gems/")
   return :md if path.end_with?(".md")
 
   :other
@@ -1125,6 +1126,7 @@ if $PROGRAM_NAME == __FILE__
     [:spec, "spec/"],
     [:transpile_tests, "transpile-tests/"],
     [:tools, "tools/"],
+    [:gems, "gems/"],
     [:zig_tests, "zig/**/*-test.zig + vopr/loom harness"],
     [:md, "*.md"],
     [:other, "other"],
