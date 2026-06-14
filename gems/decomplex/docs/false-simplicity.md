@@ -13,11 +13,12 @@ line scores ~1. It is the same plague decomplex already targets
 (code that looks local but is not), one rung lower than re-derived
 decisions: non-local *behaviour* hiding behind local-looking *syntax*.
 
-This is the big Ruby-specific bucket. Ruby's openness (open classes,
-`method_missing`, `define_method`, `instance_eval`, blocks-as-control)
-makes it the language where "this method is two tokens" and "I cannot
-reason about this method without reading three other files" coexist
-most often.
+This started as the big Ruby-specific bucket, but now runs over
+decomplex's normalized Tree-sitter AST. Ruby still has the richest
+profile because open classes, `method_missing`, `define_method`,
+`instance_eval`, and blocks-as-control create many local-looking
+forms with non-local behavior. Other languages use smaller language
+profiles instead of inheriting Ruby's trigger words.
 
 ## Goal
 
@@ -43,19 +44,20 @@ Engler/PR-Miner co-call mining).** Reimplementing it here would
 duplicate an existing owner; a falsely-simple half-protocol is a
 Broken-Protocols finding by construction.
 
-Every rule is pure node matching on `RubyVM::AbstractSyntaxTree` --
-no dataflow, no CFG, no points-to. Each is a closed, enumerable
-trigger set, which is exactly what makes it exhaustively testable.
+Every rule is pure node matching on decomplex's normalized
+Tree-sitter AST -- no dataflow, no CFG, no points-to. Each is a
+closed, enumerable trigger set, which is exactly what makes it
+exhaustively testable.
 
 | # | sub-detector | AST reduction (what fires) | excluded (no-FP) |
 |---|---|---|---|
-| 1 | **hidden dynamic dispatch** | `CALL`/`FCALL` mid in {`send`,`__send__`,`public_send`,`const_get`,`constantize`,`instance_variable_get`}; `method(...).call` (`CALL :call` whose recv is a `:method` call); proc/lambda invoke (`CALL :call` on a local/ivar recv); `YIELD` | a normal `.call` on a method-chain receiver; named method calls |
+| 1 | **hidden dynamic dispatch** | language profile dynamic-dispatch calls such as Ruby `send`/`public_send` or Python `getattr`/`setattr`; `method(...).call`; proc/lambda invoke (`CALL :call` on a local/ivar recv); Ruby `YIELD` | a normal `.call` on a method-chain receiver; named method calls |
 | 2 | **hidden mutation** | bang call (`CALL`/`FCALL`/`VCALL` mid ends `!`); `OPCALL :<<`; `ATTRASGN` (`recv.x=` and `recv[i]=`); `OP_ASGN1`/`OP_ASGN2` (`h[k]+=`, `o.a||=`) | unary `!` / `!=` (OPCALL, not bang); local `x+=1` (`LASGN`), `y||=2` (`OP_ASGN_OR`), `@n+=1` (`IASGN`) -- all node types we never match |
-| 3 | **hidden global/context** | `GVAR`/`GASGN` (`$x`); const-receiver in {`ENV`,`Time`,`Date`,`DateTime`,`Dir.pwd`,`Thread.current`,`Fiber.current`,`Process.pid`,`Random`,`GC`,`ObjectSpace`}; bare `rand`/`srand` | `Time`/`Date` arithmetic on a passed value; non-context constant receivers |
-| 4 | **hidden IO / effects** | const-receiver in {`File`,`IO`,`FileUtils`,`Open3`,`Socket`,`TCPSocket`,`UDPSocket`,`Marshal`,`Net::*`,`URI` (`.open`)}; bare {`puts`,`print`,`p`,`pp`,`gets`,`system`,`exec`,`spawn`,`require`,`load`,`autoload`,`at_exit`,`abort`,`exit`,`sleep`,`open`}; `XSTR`/`DXSTR` (backticks / `%x`) | pure string/array methods; `open` as a hash/keyword |
+| 3 | **hidden global/context** | language profile ambient context calls such as Ruby `ENV`, `Time.now`, `Thread.current`, Python `time.time`, or JavaScript `Date.now`; Ruby globals (`$x`) | arithmetic on a passed value; non-context constant receivers |
+| 4 | **hidden IO / effects** | language profile IO/effect calls such as Ruby `File.read`, Python `open`, JavaScript `fs`/`fetch`, process/system calls, sleeps; Ruby backticks / `%x` | pure string/array methods; unrelated local methods with the same name |
 | 5 | **callback / control inversion** | `ITER`/`LAMBDA` (or `&block` arg) whose callee mid is in {`transaction`,`synchronize`,`lock`,`with_lock`,`mutex`,`atomic`,`subscribe`,`callback`,`hook`} or matches `/^(with_|around_|on_|before_|after_)/` or `/_hook$/` | iteration blocks (`each`/`map`/`select`/`reduce`/`times`/`loop`/...) -- local, well-understood, never matched |
-| 6 | **metaprogramming / reflection** | call or block-callee mid in {`define_method`,`define_singleton_method`,`alias_method`,`class_eval`,`module_eval`,`instance_eval`,`class_exec`,`module_exec`,`instance_exec`,`eval`,`const_set`,`instance_variable_set`,`remove_method`,`undef_method`,`prepend`,`singleton_class`,`binding`}; `DEFN` of `method_missing`/`respond_to_missing?`; `SCLASS` on a non-self receiver | `attr_*`, `include`/`extend` (common, low-signal) |
-| 7 | **monkeypatch / reopen** | `CLASS`/`MODULE` whose simple name is a core class (`String`,`Array`,`Hash`,`Object`,`Kernel`,`Integer`,...) AND whose body defines methods; cross-file: same fully-qualified const defined-with-methods in >=2 distinct files | a first/single project-class definition; a namespacing `module Foo` with no direct `DEFN` |
+| 6 | **runtime reflection** | language profile reflection calls such as Ruby `define_method`/`instance_eval`/`const_set`, Python `eval`/`exec`/`setattr`, or JavaScript `eval`/`Function`/`defineProperty`; Ruby `method_missing`/`respond_to_missing?`; Ruby singleton-class reopen on a non-self receiver | low-signal declaration helpers such as Ruby `attr_*`, `include`/`extend` |
+| 7 | **reopen / monkeypatch** | profile-defined core type reopen with method definitions; cross-file: same fully-qualified owner defined-with-methods in >=2 distinct files | a first/single project-class definition; a namespacing/module wrapper with no direct method definitions |
 
 ## Ranking
 
@@ -94,12 +96,12 @@ research-grade pieces -- #5 control inversion, #2 alias-aware mutation
 (deferred, see Scope), and #8 protocol-pair mining (already shipped as
 Broken Protocols; Engler "Bugs as Deviant Behavior" SOSP'01).
 
-Lexicons (the effectful/global/dispatch name tables) are **mined from
-RuboCop/Reek/stdlib as reference data, copied once at authoring time,
-not a runtime dependency** -- decomplex stays stdlib-AST-only
-(principle 1). A dependency here would import a tree to do ~50 lines
-of node matching and then re-parse a foreign report back into
-`(file, method, line)` -- larger and more fragile than the matcher.
+Lexicons (the effectful/global/dispatch name tables) are provider
+data. Ruby's profile was **mined from RuboCop/Reek/stdlib as
+reference data, copied once at authoring time, not a runtime
+dependency**. Other languages use smaller profiles for their own
+standard/runtime surfaces, and unsupported languages fall back to a
+generic profile rather than Ruby keywords like `send` or `File`.
 
 ## Scope and caveats (v0)
 
@@ -123,12 +125,11 @@ of node matching and then re-parse a foreign report back into
 
 ## Design principles (inherited)
 
-1. **Zero runtime deps.** `RubyVM::AbstractSyntaxTree` only.
+1. **Parser facade.** Use decomplex's normalized Tree-sitter AST and
+   language profiles; no detector reaches into a Ruby-only parser.
 2. **Ranked candidates, never verdicts.** `support`/`scatter` sorted,
    `file:line` printed, *POSSIBLE*, tier 3 (high-recall/noisy).
-3. **Additive.** New module + one `SECTIONS` row + one `render` arm;
-   no existing detector is touched. Broken Protocols (#8) is reused,
-   not duplicated.
+3. **Additive.** Broken Protocols (#8) is reused, not duplicated.
 4. **Exact before semantic.** Direct-mutation tier ships; alias tier
    deferred to existing alias machinery rather than reimplemented.
 5. **Self-tested.** `test/false_simplicity_test.rb` carries, per

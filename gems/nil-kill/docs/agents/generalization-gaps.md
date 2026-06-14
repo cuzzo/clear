@@ -4,14 +4,14 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 
 ## 1. Executive Summary
 
-While `nil-kill` has a solid `Provider` registry architecture, the **Inference Engine** and **Evidence Extraction** layers remain heavily coupled to the Ruby/Sorbet ecosystem. To support "General Purpose Code Changing," the gem must move from "Ruby-as-Primary" to a "Universal Semantic Fact" model.
+`nil-kill` now has a `Provider` registry architecture and Tree-sitter-backed static evidence. The remaining Ruby/Sorbet coupling is concentrated in deeper inference, verified autofix, and Ruby runtime instrumentation. To support "General Purpose Code Changing," the gem must keep moving from "Ruby-as-Primary" to a "Universal Semantic Fact" model.
 
 ## 2. Critical Generalization Gaps
 
 ### A. Evidence Extraction (The Z3 Pipeline)
-- **Current State:** `static_evidence.rb` and `infer.rb` rely on Prism (Ruby AST) to extract facts like null-guards (`if x.nil?`), assignments, and local aliasing.
-- **The Gap:** There is no generic "Evidence Provider" interface.
-- **Requirement:** Abstract AST-walking for Z3 facts into the `Language::Provider`. A Python provider must be able to map `if x is None` to the same semantic fact that Ruby’s `if x.nil?` currently generates.
+- **Current State:** `static_evidence.rb` consumes Decomplex's normalized Tree-sitter structural facts through `Language::Provider`. `infer.rb` and the Z3 preflight still mostly reason in Ruby/Sorbet action terms.
+- **The Gap:** Z3 fact extraction is not yet a fully language-neutral provider contract.
+- **Requirement:** Extend `Language::Provider` with semantic fact methods for null checks, assignments, local aliasing, and type constraints. A Python provider must be able to map `if x is None` to the same semantic fact that Ruby's `if x.nil?` currently generates.
 
 ### B. Type Definition Indexing (Sorbet/RBI)
 - **Current State:** `rbi_return_index.rb` and `struct_rbi.rb` are dedicated to parsing Sorbet `.rbi` files and `sig` blocks.
@@ -24,9 +24,9 @@ While `nil-kill` has a solid `Provider` registry architecture, the **Inference E
 - **Requirement:** The "Collection Strategy" must be fully owned by the `Language::Provider`. The core should only care about the resulting JSON event stream.
 
 ### D. Coverage Format Coupling
-- **Current State:** Nil-kill uses `SimpleCov` results to identify "untraced" or "unreachable" code.
-- **The Gap:** It lacks a generic parser for industry-standard coverage formats like `LCOV` or `gcov`.
-- **Requirement:** Integrate with the generalized coverage providers being built in `Boobytrap`.
+- **Current State:** Nil-kill runtime traces produce their own normalized event stream, while SlopCop/Boobytrap own normalized external coverage providers.
+- **The Gap:** Nil-kill does not yet consume the shared SlopCop/Boobytrap coverage normalization layer for report enrichment.
+- **Requirement:** Integrate with the generalized coverage providers in Boobytrap/SlopCop instead of adding language-specific coverage readers in Nil-Kill.
 
 ## 3. The "Final Boss": General-Purpose Autofix
 - **Current State:** All code-changing logic (`lib/nil_kill/autofix/`) is implemented as Ruby AST transformations.
@@ -45,4 +45,4 @@ While `nil-kill` has a solid `Provider` registry architecture, the **Inference E
 
 ## 5. Conclusion
 
-`nil-kill` is the most semantically complex gem in the suite. By abstracting the **Evidence Extraction** and **Code Transformation** layers, it will transform from a "Ruby Type-Fixer" into a "Universal Nil-Drift Elimination Engine."
+`nil-kill` is the most semantically complex gem in the suite. By abstracting the **Evidence Extraction** and **Code Transformation** layers, it will transform from a "Ruby Type-Fixer" into a universal nullability and runtime type evidence engine.

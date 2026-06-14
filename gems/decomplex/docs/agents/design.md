@@ -207,8 +207,9 @@ Three reasons this is correct, not a compromise:
 
 ## Design principles
 
-1. **Zero runtime deps.** stdlib `RubyVM::AbstractSyntaxTree` only.
-   The tool that audits the compiler must not drag a dependency tree.
+1. **Shared parser facade.** Detectors consume decomplex's normalized
+   Tree-sitter AST and language profiles, not a Ruby-only parser API.
+   The tool should keep parser dependencies behind that facade.
 2. **Ranked candidates, never verdicts.** Every report sorts by
    support/scatter and prints the receiver/location so triage is a
    one-line read. FP is the accepted cost of recall (Engler).

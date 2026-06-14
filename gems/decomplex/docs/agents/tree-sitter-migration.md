@@ -1,5 +1,9 @@
 # Decomplex Tree-sitter Migration Design
 
+Status: implemented. This document is kept as migration context; references to
+RubyVM, Prism, or temporary dual parser modes describe the pre-migration plan,
+not current production parser paths.
+
 ## Goal
 
 Make Decomplex usable on most source languages by replacing the

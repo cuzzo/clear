@@ -159,9 +159,11 @@ When Espalier generates a Manifest, it runs local structural heuristics to compu
 
 ---
 
-## 6. Practical Ruby Extraction Strategy
+## 6. Practical Extraction Strategy
 
-To build Espalier for Ruby without writing a full compiler frontend, we implement a multi-source metadata processor:
+Espalier consumes normalized Tree-sitter structural facts rather than a
+Ruby-only parser path. Language-specific details live behind the parser
+and evidence-provider facades, while the report format stays stable.
 
 ```ruby
 module Espalier
@@ -175,8 +177,8 @@ module Espalier
     end
 
     def extract_file(file_path)
-      ast = Prism.parse_file(file_path).value # Use Prism, modern Ruby's core parser
-      
+      document = Decomplex::Syntax.parse(file_path, parser: "tree_sitter")
+
       # 1. Gather class/module structures
       # 2. Extract state variables via instance assign nodes (@...)
       # 3. Analyze local method boundaries

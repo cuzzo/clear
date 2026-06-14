@@ -167,7 +167,7 @@ module Decomplex
       ["Operational Discontinuity (High Confidence)", :@operational_discontinuity_high_confidence, 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary"],
       ["Function LCOM", :@function_lcom, 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns"],
       ["Operational Discontinuity", :@operational_discontinuity, 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary"],
-      ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)"],
+      ["False Simplicity",       :@fsimple, 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)"],
       ["Fat Unions",             :@fatu,   3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*"]
     ].freeze
 

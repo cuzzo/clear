@@ -1,5 +1,9 @@
 # Espalier Tree-sitter Migration Design
 
+Status: implemented. This document is kept as migration context; references to
+the old Prism extractor describe the pre-migration state unless a section
+explicitly says otherwise.
+
 ## Goal
 
 Make Espalier usable on the same Tree-sitter-backed source languages as
@@ -271,10 +275,10 @@ not need to special-case parser coordinates.
 Ruby should remain compatible with existing Espalier and Nil-Kill evidence while
 the generalized path lands.
 
-Recommended compatibility behavior:
+Implemented compatibility behavior:
 
-- Keep the current Prism extractor available for Ruby until Tree-sitter Ruby
-  output is close enough.
+- Ruby now uses the same Tree-sitter-backed structural extractor as the other
+  supported languages.
 - Load Nil-Kill v2 static evidence when present.
 - Fall back to legacy Nil-Kill Ruby evidence keys when v2 keys are absent.
 - Preserve current `architecture.yml` fields where practical.

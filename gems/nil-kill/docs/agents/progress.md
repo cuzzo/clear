@@ -8,7 +8,7 @@ This note tracks the work that was planned during the latest nil-kill session bu
 - The report now starts with project prioritization, hygiene overview, signature slot evidence, return hygiene, review actions, and collection/hash-record sections.
 - Hash-record reporting is materially better: shapes, pressure, blockers, nested collection evidence, and similar keysets are surfaced.
 - Hash-record auto-fix is routed through the verified loop instead of raw `apply --all` review actions.
-- Hash-record rewriting uses Prism/CST-oriented node matching for the main rewrite path, not broad regex replacement.
+- Hash-record rewriting uses parser-node-oriented matching for the main rewrite path, not broad regex replacement.
 - Static param backflow exists as a verified-loop feature behind `loop --signature-backflow`.
 - Static param backflow currently rejects candidates with weak/untyped types, `Object`, incompatible direct protocol requirements, or unresolved forwarding/capture gaps.
 - The latest real-source verified loop improved params from `strong 1844, untyped 794` to `strong 1848, untyped 790` after reverting one semantically bad but Sorbet-clean candidate.
