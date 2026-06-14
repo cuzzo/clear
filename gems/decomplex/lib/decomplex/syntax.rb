@@ -535,6 +535,10 @@ module Decomplex
         if hidden_ruby_method_definition?(node)
           return normalize_text(hidden_ruby_method_signature(document, node))
         end
+        if document.language == :ruby
+          signature = preceding_ruby_signature(document, node)
+          return signature unless signature.empty?
+        end
 
         body = named_field(node, "body")
         text =
@@ -546,6 +550,39 @@ module Decomplex
         normalize_text(text.empty? ? line_text(document, node) : text)
       rescue StandardError
         normalize_text(line_text(document, node))
+      end
+
+      def preceding_ruby_signature(document, node)
+        cursor = line(node) - 2
+        lines = document.lines
+        cursor -= 1 while cursor >= 0 && lines[cursor].to_s.strip.empty?
+        return "" if cursor.negative?
+
+        stripped = lines[cursor].to_s.strip
+        if stripped == "end"
+          start = cursor
+          while start >= 0
+            text = lines[start].to_s.strip
+            return normalize_text(lines[start..cursor].join("\n")) if text == "sig do"
+            return "" if start != cursor && text.match?(/\A(?:def|class|module)\b/)
+
+            start -= 1
+          end
+          return "" if start.negative?
+        end
+
+        return normalize_text(stripped) if stripped.start_with?("sig ")
+        return "" unless stripped == "}" || stripped.end_with?("}")
+
+        start = cursor
+        while start >= 0
+          text = lines[start].to_s.strip
+          return normalize_text(lines[start..cursor].join("\n")) if text.start_with?("sig ")
+          return "" if text.match?(/\A(?:def|class|module)\b/)
+
+          start -= 1
+        end
+        ""
       end
 
       def line_text(document, node)

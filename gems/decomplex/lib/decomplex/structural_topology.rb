@@ -3,11 +3,11 @@
 require_relative "ast"
 
 module Decomplex
-  # RubyTopology is Decomplex's conservative static model of Ruby method
-  # ownership, visibility, and direct internal calls. It deliberately resolves
-  # only bare/self calls inside the same owner; dynamic dispatch belongs to
-  # higher-recall detectors.
-  class RubyTopology
+  # StructuralTopology is Decomplex's conservative static model of method
+  # ownership and direct internal calls over the normalized Tree-sitter AST.
+  # It deliberately resolves only same-owner bare/self calls; dynamic dispatch
+  # belongs to higher-recall detectors.
+  class StructuralTopology
     Method = Struct.new(:id, :owner, :name, :file, :line, :span, :visibility, keyword_init: true)
     Edge = Struct.new(
       :caller, :callee, :caller_name, :callee_name, :file, :line, :span, :type, :kind, :confidence,

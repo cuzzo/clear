@@ -122,12 +122,24 @@ module NilKill
 
         fields = []
         state_types = {}
+        seen_fields = Set.new
         state_declarations.each do |state|
           field = declared_state_field(state.field)
           fields << field_record(document, rel_path, state, field)
+          seen_fields.add(state_key(state.owner, field))
           next if state.type.to_s.empty?
 
           state_types[state_key(state.owner, field)] = state.type.to_s
+        end
+        Array(facts[:state_writes]).each do |write|
+          next unless owned_state_write?(write, known_states[write.owner.to_s])
+
+          field = canonical_state_field(write.field, receiver: write.receiver)
+          key = state_key(write.owner, field)
+          next if seen_fields.include?(key)
+
+          fields << field_record(document, rel_path, write, field)
+          seen_fields.add(key)
         end
 
         state_protocols = Hash.new { |hash, key| hash[key] = Set.new }
@@ -179,6 +191,17 @@ module NilKill
         return true if known.include?(field)
 
         receiver = normalize_receiver(origin.receiver)
+        return false if receiver == ".literal"
+
+        self_receiver?(receiver) || owned_receiver?(receiver)
+      end
+
+      def owned_state_write?(write, known_states)
+        known = normalize_known_states(known_states)
+        field = canonical_state_field(write.field, receiver: write.receiver)
+        return true if known.include?(field)
+
+        receiver = normalize_receiver(write.receiver)
         return false if receiver == ".literal"
 
         self_receiver?(receiver) || owned_receiver?(receiver)
@@ -269,8 +292,8 @@ module NilKill
           "name" => field.to_s,
           "line" => state.line,
           "span" => state.span,
-          "declared_type" => state.type.to_s.empty? ? nil : state.type.to_s,
-          "static_origin" => "state_declaration",
+          "declared_type" => state.respond_to?(:type) && !state.type.to_s.empty? ? state.type.to_s : nil,
+          "static_origin" => state.respond_to?(:type) ? "state_declaration" : "state_write",
         }
       end
 

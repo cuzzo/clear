@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "json"
-require "ripper"
 require_relative "coverage_data"
 require_relative "decomplex_risk"
 
@@ -57,6 +56,7 @@ module Boobytrap
           (m[:first_line]..m[:last_line]).each do |ln|
             v = lines[ln - 1]
             next if v.nil?
+            next unless executable_source_line?(source_lines[ln - 1])
 
             exec += 1
             covered += 1 if v.to_i.positive?
@@ -171,30 +171,8 @@ module Boobytrap
       end
     end
 
-    def method_ranges(lines)
-      toks = Ripper.lex(lines.join("\n"))
-      stack = []
-      ranges = []
-      toks.each do |(pos, type, tok, _state)|
-        line = pos[0]
-        if type == :on_kw
-          case tok
-          when "def"
-            stack << { first_line: line, name: nil }
-          when "end"
-            m = stack.pop
-            ranges << m.merge(last_line: line) if m
-          end
-        elsif stack.any? && stack[-1][:name].nil? &&
-              %i[on_ident on_const on_op on_kw].include?(type)
-          stack[-1][:name] = tok
-        end
-      end
-      ranges
-    end
-
     def method_ranges_for_file(abs, lines)
-      return method_ranges(lines) unless tree_sitter_source_for_coverage?(abs)
+      return fallback_function_ranges(lines) unless tree_sitter_source_for_coverage?(abs)
 
       doc = Decomplex::Syntax.parse(abs, parser: "tree_sitter")
       ranges = doc.function_defs.map do |fn|
@@ -206,19 +184,34 @@ module Boobytrap
       end
       ranges.empty? ? fallback_function_ranges(lines) : ranges
     rescue LoadError, StandardError
-      method_ranges(lines)
+      fallback_function_ranges(lines)
     end
 
     def fallback_function_ranges(lines)
       ranges = []
       lines.each_with_index do |raw, i|
-        next unless (match = raw.match(/\bfn\s+([A-Za-z_]\w*)\s*\(/))
+        next unless (match = raw.match(/\b(?:def|function|fn|func)\s+([A-Za-z_]\w*)(?:\s*\(|\b)/))
 
         first = i + 1
-        last = find_brace_end(lines, i) || first
+        last = find_brace_end(lines, i) || find_indent_end(lines, i) || first
         ranges << { first_line: first, last_line: last, name: match[1] }
       end
       ranges
+    end
+
+    def find_indent_end(lines, start_idx)
+      base_indent = lines[start_idx][/^\s*/].to_s.length
+      last = start_idx + 1
+      lines[(start_idx + 1)..].to_a.each_with_index do |raw, offset|
+        stripped = raw.strip
+        next if stripped.empty?
+
+        indent = raw[/^\s*/].to_s.length
+        break if indent <= base_indent
+
+        last = start_idx + offset + 2
+      end
+      last
     end
 
     def find_brace_end(lines, start_idx)
@@ -283,7 +276,7 @@ module Boobytrap
       return false unless Boobytrap::DecomplexRisk.load_decomplex_syntax
       return false unless Boobytrap::DecomplexRisk.tree_sitter_supported_source?(abs)
 
-      Boobytrap::DecomplexRisk.tree_sitter? || ::File.extname(abs).downcase != ".rb"
+      true
     end
 
     def executable_source_line?(line)

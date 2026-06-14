@@ -54,7 +54,7 @@ module SlopCop
         next unless Boobytrap::DecomplexRisk.source_file?(
           file,
           root: repo,
-          parser: Classifier.tree_sitter? ? "tree_sitter" : "rubyvm",
+          parser: "tree_sitter",
           exclude: exclude
         )
 

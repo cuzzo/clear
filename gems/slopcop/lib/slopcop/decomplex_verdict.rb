@@ -48,7 +48,7 @@ module SlopCop
       return blank(:absent) unless defined?(Decomplex::Report)
       return blank(:absent) if abs_files.empty?
 
-      sections = with_tree_sitter_for_non_ruby(abs_files) do
+      sections = with_tree_sitter do
         Decomplex::Report.new(abs_files).sections_data
       end
       span_recs = Hash.new { |h, k| h[k] = [] }      # file => [rec...]
@@ -90,18 +90,12 @@ module SlopCop
       blank(:error)
     end
 
-    def with_tree_sitter_for_non_ruby(files)
-      changed = false
-      return yield unless files.any? { |file| File.extname(file).downcase != ".rb" }
-
+    def with_tree_sitter
       previous = ENV["DECOMPLEX_PARSER"]
       ENV["DECOMPLEX_PARSER"] = "tree_sitter"
-      changed = true
       yield
     ensure
-      if changed
-        previous.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous
-      end
+      previous.nil? ? ENV.delete("DECOMPLEX_PARSER") : ENV["DECOMPLEX_PARSER"] = previous
     end
 
     # Span-containment FIRST (precise: the arm's line is INSIDE a

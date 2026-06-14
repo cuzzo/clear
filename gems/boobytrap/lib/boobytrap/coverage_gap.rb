@@ -50,9 +50,6 @@ module Boobytrap
 
     def tree_sitter_line_branch_gap(abs, coverage)
       return nil unless coverage.line_coverage? || coverage.branch_arm_coverage?
-      return nil unless Boobytrap::DecomplexRisk.tree_sitter? ||
-                        coverage.branch_arm_coverage? ||
-                        ::File.extname(abs).downcase != ".rb"
       return nil unless Boobytrap::DecomplexRisk.load_decomplex_syntax
       return nil unless Boobytrap::DecomplexRisk.tree_sitter_supported_source?(abs)
 

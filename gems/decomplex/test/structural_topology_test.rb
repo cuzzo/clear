@@ -2,9 +2,9 @@
 
 require "minitest/autorun"
 require "tempfile"
-require_relative "../lib/decomplex/ruby_topology"
+require_relative "../lib/decomplex/structural_topology"
 
-class RubyTopologyTest < Minitest::Test
+class StructuralTopologyTest < Minitest::Test
   def test_scans_visibility_and_internal_edges
     with_ruby_file(<<~RB) do |path|
       class Worker
@@ -37,7 +37,7 @@ class RubyTopologyTest < Minitest::Test
         def self.helper_class; end
       end
     RB
-      graph = Decomplex::RubyTopology.scan([path])
+      graph = Decomplex::StructuralTopology.scan([path])
       methods = graph.methods_for_owner("Worker").to_h { |method| [method.name, method] }
 
       assert_equal :public, methods.fetch("run").visibility
@@ -79,7 +79,7 @@ class RubyTopologyTest < Minitest::Test
         def prepare; end
       end
     RB
-      graph = Decomplex::RubyTopology.scan([path])
+      graph = Decomplex::StructuralTopology.scan([path])
       edges = graph.edges_for_owner("Runner")
 
       assert_equal 1, edges.size
@@ -103,7 +103,7 @@ class RubyTopologyTest < Minitest::Test
         end
       end
     RB
-      graph = Decomplex::RubyTopology.scan([path])
+      graph = Decomplex::StructuralTopology.scan([path])
 
       assert graph.method_for("Outer::Inner", "run")
       assert graph.method_for("Outer::Inner", "hidden")
@@ -133,7 +133,7 @@ class RubyTopologyTest < Minitest::Test
         def OddVisibility.explicit; end
       end
     RB
-      graph = Decomplex::RubyTopology.scan([path])
+      graph = Decomplex::StructuralTopology.scan([path])
 
       assert_equal :public, graph.visibility(graph.method_id("OddVisibility", "run"))
       assert_nil graph.visibility(graph.method_id("OddVisibility", "missing"))
@@ -147,7 +147,7 @@ class RubyTopologyTest < Minitest::Test
   end
 
   def test_groups_dangling_edge_under_nil_owner
-    edge = Decomplex::RubyTopology::Edge.new(
+    edge = Decomplex::StructuralTopology::Edge.new(
       caller: "Missing#run",
       callee: "Missing#helper",
       caller_name: "run",
@@ -160,7 +160,7 @@ class RubyTopologyTest < Minitest::Test
       confidence: :high
     )
 
-    graph = Decomplex::RubyTopology::Graph.new([], [edge])
+    graph = Decomplex::StructuralTopology::Graph.new([], [edge])
 
     assert_empty graph.edges_for_owner("Missing")
     assert_equal [edge], graph.edges_for_owner(nil)
@@ -169,7 +169,7 @@ class RubyTopologyTest < Minitest::Test
   private
 
   def with_ruby_file(code)
-    file = Tempfile.new(["ruby_topology", ".rb"])
+    file = Tempfile.new(["structural_topology", ".rb"])
     file.write(code)
     file.close
     yield file.path
