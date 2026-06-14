@@ -187,6 +187,10 @@ impl Storage {
         Ok(())
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     fn ensure_logical_unit_column(&self, name: &str, definition: &str) -> Result<()> {
         let mut stmt = self.conn.prepare("PRAGMA table_info(logical_units)")?;
         let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;

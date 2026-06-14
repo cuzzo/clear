@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
     ingest_coverage_json, ingest_hazards, ingest_stack_traces, ingest_test_exposure_json, GitProvider,
-    HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
+    serve_ui_with_overlays, HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider,
+    Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -41,6 +42,19 @@ enum Command {
         only: Vec<String>,
         #[arg(long, default_value = "text")]
         format: String,
+    },
+    /// Serve the local Lineage source and verification UI.
+    Ui {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        #[arg(long = "overlay")]
+        overlays: Vec<PathBuf>,
     },
     /// Ingest aggregate coverage or mutation quality data for one commit.
     IngestCoverage {
@@ -149,6 +163,15 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        Command::Ui {
+            db,
+            repo,
+            host,
+            port,
+            overlays,
+        } => {
+            serve_ui_with_overlays(db, repo, &host, port, &overlays)?;
         }
         Command::IngestCoverage {
             db,

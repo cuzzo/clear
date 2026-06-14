@@ -12,6 +12,7 @@ pub mod quality;
 pub mod stack_trace;
 pub mod storage;
 pub mod test_exposure;
+pub mod ui;
 pub mod vcs;
 
 pub use engine::{EngineStats, LineageEngine};
@@ -31,5 +32,9 @@ pub use storage::{Storage, UnitSummary};
 pub use test_exposure::{
     ingest_test_exposure_json, parse_test_exposure_records, TestExposureIngestStats,
     TestExposureRecord,
+};
+pub use ui::{
+    file_index, serve_ui, serve_ui_with_overlays, source_payload, source_payload_with_overlays,
+    UiFile, UiLineAnnotation, UiOverlays, UiSourcePayload,
 };
 pub use vcs::VcsProvider;

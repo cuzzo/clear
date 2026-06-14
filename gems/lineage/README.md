@@ -94,3 +94,20 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest \
 The extractor boundary is deliberately separate from storage and VCS
 traversal so Tree-sitter-backed language profiles can replace the
 bootstrap extractor without changing Boobytrap's database contract.
+
+Serve the local source and verification UI:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
+  --db /tmp/lineage.db \
+  --repo . \
+  --overlay tmp/slopcop-constraints.json \
+  --port 8080
+```
+
+The MVP UI lists tracked files, renders source, lets you inspect prior
+commit versions, highlights covered lines, darkens mutation-tested
+lines, and shows systems hazards with tooltip details. The HTML view is
+server-rendered; filtering, file navigation, version history, and line
+details use regular links, GET forms, and `<details>` controls rather
+than client-side JavaScript.
