@@ -135,6 +135,7 @@ impl Storage {
               test_id TEXT NOT NULL,
               test_type TEXT NOT NULL,
               mutation_status TEXT,
+              mutation_kind TEXT NOT NULL DEFAULT '',
               is_mutation_verified INTEGER NOT NULL CHECK (is_mutation_verified IN (0, 1)),
               is_mutation_killed INTEGER NOT NULL CHECK (is_mutation_killed IN (0, 1)),
               is_verified INTEGER NOT NULL CHECK (is_verified IN (0, 1)),
@@ -197,6 +198,12 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_verified_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
+        self.ensure_column("test_exposure_events", "mutation_kind", "TEXT NOT NULL DEFAULT ''")?;
+        self.backfill_mutation_kind()?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_test_exposure_events_mutation_kind ON test_exposure_events(mutation_kind)",
+            [],
+        )?;
         self.ensure_natural_key_indexes()?;
         Ok(())
     }
@@ -206,7 +213,12 @@ impl Storage {
     }
 
     fn ensure_logical_unit_column(&self, name: &str, definition: &str) -> Result<()> {
-        let mut stmt = self.conn.prepare("PRAGMA table_info(logical_units)")?;
+        self.ensure_column("logical_units", name, definition)
+    }
+
+    fn ensure_column(&self, table: &str, name: &str, definition: &str) -> Result<()> {
+        let table = checked_table(table)?;
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
         for column in columns {
             if column? == name {
@@ -214,7 +226,7 @@ impl Storage {
             }
         }
         self.conn.execute(
-            &format!("ALTER TABLE logical_units ADD COLUMN {name} {definition}"),
+            &format!("ALTER TABLE {table} ADD COLUMN {name} {definition}"),
             [],
         )?;
         Ok(())
@@ -295,6 +307,11 @@ impl Storage {
                 ORDER BY t2.is_verified DESC,
                          t2.is_mutation_killed DESC,
                          t2.is_mutation_verified DESC,
+                         CASE
+                           WHEN lower(COALESCE(t2.mutation_kind, '')) IN ('invariant', 'contract') THEN 2
+                           WHEN COALESCE(t2.mutation_kind, '') <> '' THEN 1
+                           ELSE 0
+                         END DESC,
                          t2.timestamp DESC,
                          t2.id DESC
                 LIMIT 1
@@ -314,6 +331,26 @@ impl Storage {
                 test_type
               );
             "#,
+        )?;
+        Ok(())
+    }
+
+    fn backfill_mutation_kind(&self) -> Result<()> {
+        self.conn.execute(
+            r#"
+            UPDATE test_exposure_events
+            SET mutation_kind = CASE
+              WHEN lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%invariant%'
+                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%contract%'
+                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%property%'
+                OR lower(COALESCE(test_type, '') || ' ' || COALESCE(test_id, '')) LIKE '%fuzz%'
+              THEN 'invariant'
+              ELSE 'stochastic'
+            END
+            WHERE is_mutation_verified = 1
+              AND COALESCE(mutation_kind, '') = ''
+            "#,
+            [],
         )?;
         Ok(())
     }
@@ -812,13 +849,19 @@ impl Storage {
             r#"
             INSERT INTO test_exposure_events
               (unit_id, commit_hash, timestamp, path, function, line, branch_id,
-               test_id, test_type, mutation_status, is_mutation_verified,
+               test_id, test_type, mutation_status, mutation_kind, is_mutation_verified,
                is_mutation_killed, is_verified, payload_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, COALESCE(?11, ''), ?12, ?13, ?14, ?15)
             ON CONFLICT DO UPDATE SET
               timestamp = MAX(test_exposure_events.timestamp, excluded.timestamp),
               function = COALESCE(excluded.function, test_exposure_events.function),
               mutation_status = COALESCE(excluded.mutation_status, test_exposure_events.mutation_status),
+              mutation_kind = CASE
+                WHEN lower(COALESCE(test_exposure_events.mutation_kind, '')) IN ('invariant', 'contract') THEN test_exposure_events.mutation_kind
+                WHEN lower(COALESCE(excluded.mutation_kind, '')) IN ('invariant', 'contract') THEN excluded.mutation_kind
+                WHEN COALESCE(excluded.mutation_kind, '') <> '' THEN excluded.mutation_kind
+                ELSE test_exposure_events.mutation_kind
+              END,
               is_mutation_verified = MAX(test_exposure_events.is_mutation_verified, excluded.is_mutation_verified),
               is_mutation_killed = MAX(test_exposure_events.is_mutation_killed, excluded.is_mutation_killed),
               is_verified = MAX(test_exposure_events.is_verified, excluded.is_verified),
@@ -827,6 +870,7 @@ impl Storage {
                OR excluded.is_mutation_verified > test_exposure_events.is_mutation_verified
                OR excluded.is_mutation_killed > test_exposure_events.is_mutation_killed
                OR excluded.is_verified > test_exposure_events.is_verified
+               OR COALESCE(excluded.mutation_kind, '') <> COALESCE(test_exposure_events.mutation_kind, '')
                OR excluded.payload_json <> test_exposure_events.payload_json
             "#,
             params![
@@ -840,6 +884,7 @@ impl Storage {
                 event.test_id,
                 event.test_type,
                 event.mutation_status,
+                event.mutation_kind,
                 if event.is_mutation_verified { 1 } else { 0 },
                 if event.is_mutation_killed { 1 } else { 0 },
                 if event.is_verified { 1 } else { 0 },
@@ -1333,6 +1378,7 @@ mod tests {
                 test_id: "spec/a_spec.rb:1".into(),
                 test_type: "unit".into(),
                 mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,
@@ -1351,6 +1397,7 @@ mod tests {
                 test_id: "test/a_test.rb:2".into(),
                 test_type: "integration".into(),
                 mutation_status: None,
+                mutation_kind: None,
                 is_mutation_verified: false,
                 is_mutation_killed: false,
                 is_verified: true,
@@ -1418,6 +1465,7 @@ mod tests {
                 test_id: "spec/a_spec.rb:1".into(),
                 test_type: "unit".into(),
                 mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,

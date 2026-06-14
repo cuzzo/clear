@@ -68,6 +68,7 @@ module SlopCop
 
       per_file = {}
       gaps = []
+      dark_arms = []
       sources = Hash.new(0)
       abs_for.each do |rel, abs|
         arms = Classifier.classify_file(resultset, abs,
@@ -97,6 +98,15 @@ module SlopCop
                 end
           counts[cat] += 1
           sources[a.source || :coverage] += 1
+          dark_arms << {
+            file: rel,
+            line: a.line,
+            method: a.defn,
+            category: cat,
+            arm_category: cat,
+            source: a.source || :coverage,
+            message: "dark arm: #{cat}"
+          }
           next unless cat == :genuine
 
           gaps << { file: rel, line: a.line, method: a.defn, churn: cn,
@@ -158,6 +168,9 @@ module SlopCop
         # deviance, then -churn / file / line for stable order.
         top_gaps: gaps.sort_by do |g|
           [-g[:priority], -g[:churn], g[:file], g[:line]]
+        end,
+        dark_arms: dark_arms.sort_by do |arm|
+          [arm[:file], arm[:line], arm[:method].to_s, arm[:category].to_s]
         end,
         coverage_label: coverage && !coverage.empty? ? coverage.label : nil,
         mutation_label: mutation_facts.active? ? mutation_facts.label : nil,

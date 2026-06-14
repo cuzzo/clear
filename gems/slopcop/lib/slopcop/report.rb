@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rollup"
+require "json"
 require "pathname"
 
 module SlopCop
@@ -145,6 +146,48 @@ module SlopCop
            "(file, method) fallback when no flagged span contained the " \
            "arm. A ranked candidate, not a verdict (Engler discipline).\n"
       o
+    end
+
+    def to_h
+      {
+        "format" => "slopcop.report.v1",
+        "summary" => {
+          "repo" => @repo,
+          "files" => @r[:per_file].size,
+          "dark_arms" => @r[:grand],
+          "genuine_gaps" => @r[:top_gaps].size,
+          "coverage_input" => @r[:coverage_label],
+          "mutation_facts" => @r[:mutation_label],
+          "decomplex_status" => @r[:decomplex_status].to_s,
+          "branch_sources" => stringify_counts(@r[:sources])
+        },
+        "totals" => stringify_counts(@r[:totals]),
+        "per_file" => @r[:per_file].transform_values do |file|
+          {
+            "total" => file[:total],
+            "counts" => stringify_counts(file[:counts]),
+            "churn" => file[:churn]
+          }
+        end,
+        "top_gaps" => @r[:top_gaps].map { |gap| stringify_keys(gap) },
+        "dark_arms" => @r[:dark_arms].map { |arm| stringify_keys(arm) }
+      }
+    end
+
+    def to_json(*_args)
+      JSON.pretty_generate(to_h)
+    end
+
+    private
+
+    def stringify_counts(counts)
+      counts.to_h.transform_keys(&:to_s)
+    end
+
+    def stringify_keys(hash)
+      hash.to_h.transform_keys(&:to_s).transform_values do |value|
+        value.is_a?(Symbol) ? value.to_s : value
+      end
     end
   end
 end

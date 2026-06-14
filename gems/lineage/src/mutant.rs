@@ -114,6 +114,7 @@ where
                             test_id: mutant_test_id(&fact),
                             test_type: test_type.clone(),
                             mutation_status: Some(status.to_string()),
+                            mutation_kind: Some("stochastic".to_string()),
                             is_mutation_verified: true,
                             is_mutation_killed: status == "killed",
                             is_verified: true,

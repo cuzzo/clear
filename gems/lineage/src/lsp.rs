@@ -507,6 +507,7 @@ mod tests {
                 hazard_type: "zig_loom_atomic".to_string(),
                 required_evidence: "loom".to_string(),
                 source: "atomic load".to_string(),
+                evidence_present: false,
                 verified: false,
             }],
         }

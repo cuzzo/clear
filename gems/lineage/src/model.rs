@@ -167,6 +167,7 @@ pub struct TestExposureEvent {
     pub test_id: String,
     pub test_type: String,
     pub mutation_status: Option<String>,
+    pub mutation_kind: Option<String>,
     pub is_mutation_verified: bool,
     pub is_mutation_killed: bool,
     pub is_verified: bool,

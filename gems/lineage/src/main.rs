@@ -86,6 +86,10 @@ enum Command {
         test_type: Option<String>,
         #[arg(long)]
         test_id: Option<String>,
+        #[arg(long)]
+        mutation_status: Option<String>,
+        #[arg(long)]
+        mutation_kind: Option<String>,
     },
     /// Ingest named test exposure facts for one commit.
     IngestTestExposure {
@@ -224,6 +228,8 @@ fn main() -> Result<()> {
             replace,
             test_type,
             test_id,
+            mutation_status,
+            mutation_kind,
         } => {
             let storage = Storage::open(&db)?;
             let payload = fs::read_to_string(&input)?;
@@ -265,6 +271,8 @@ fn main() -> Result<()> {
                     &test_type,
                     &test_id,
                     "lineage ingest-coverage",
+                    mutation_status.as_deref(),
+                    mutation_kind.as_deref(),
                 );
                 let git = GitProvider::open(&repo)?;
                 let extractor = HeuristicExtractor::default();

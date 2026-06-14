@@ -2,6 +2,7 @@
 
 require_relative "slopcop/classifier"
 require_relative "slopcop/constraints"
+require_relative "slopcop/dark_arm_overlay"
 require_relative "slopcop/decomplex_verdict"
 require_relative "slopcop/rollup"
 require_relative "slopcop/report"

@@ -32,10 +32,19 @@ method names and domain diagnostic helpers are caller-supplied via
 
 ```
 slopcop report --repo=. --coverage=coverage/.resultset.json \
-             --output=report.md \
+             --output=report.md --json=report.json \
              --files=src/a.rb,src/b.rb \
              --ffi=my_extern_call,my_boundary_method \
              --diagnostic=report_invalid_input!,emit_error!
+```
+
+For Lineage gutters/source overlays, emit the line-level dark-arm
+artifact without the ranked report pass:
+
+```
+slopcop dark-arms --repo=. --coverage=coverage/.resultset.json \
+             --json=slopcop-dark-arms.json \
+             --files=src/a.rb,src/b.rb
 ```
 
 Accepts Boobytrap-normalized coverage inputs: SimpleCov resultsets,

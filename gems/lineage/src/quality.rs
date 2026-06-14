@@ -474,6 +474,8 @@ pub fn coverage_records_to_test_exposure_json(
     test_type: &str,
     test_id: &str,
     producer: &str,
+    mutation_status: Option<&str>,
+    mutation_kind: Option<&str>,
 ) -> String {
     let hits = records
         .iter()
@@ -483,13 +485,20 @@ pub fn coverage_records_to_test_exposure_json(
                 .iter()
                 .filter(|hit| hit.hits > 0)
                 .map(move |hit| {
-                    json!({
+                    let mut payload = json!({
                         "file": record.path,
                         "line": hit.line,
                         "test_id": test_id,
                         "test_type": test_type,
                         "coverage_hits": hit.hits,
-                    })
+                    });
+                    if let Some(status) = mutation_status {
+                        payload["mutation_status"] = json!(status);
+                    }
+                    if let Some(kind) = mutation_kind {
+                        payload["mutation_kind"] = json!(kind);
+                    }
+                    payload
                 })
         })
         .collect::<Vec<_>>();
@@ -691,6 +700,8 @@ mod tests {
             "unit",
             "coverage:unit:coverage/.resultset.json",
             "test",
+            Some("killed"),
+            Some("stochastic"),
         );
         let value: Value = serde_json::from_str(&payload).unwrap();
         let hits = value.get("hits").and_then(Value::as_array).unwrap();
@@ -699,6 +710,14 @@ mod tests {
         assert_eq!(hits[0].get("file").and_then(Value::as_str), Some("src/demo.rb"));
         assert_eq!(hits[0].get("line").and_then(Value::as_u64), Some(1));
         assert_eq!(hits[0].get("test_type").and_then(Value::as_str), Some("unit"));
+        assert_eq!(
+            hits[0].get("mutation_status").and_then(Value::as_str),
+            Some("killed")
+        );
+        assert_eq!(
+            hits[0].get("mutation_kind").and_then(Value::as_str),
+            Some("stochastic")
+        );
     }
 
     #[test]

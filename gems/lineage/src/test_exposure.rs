@@ -17,6 +17,7 @@ pub struct TestExposureRecord {
     pub test_id: String,
     pub test_type: String,
     pub mutation_status: Option<String>,
+    pub mutation_kind: Option<String>,
     pub context_line: Option<String>,
     pub payload_json: String,
 }
@@ -108,6 +109,7 @@ where
                 test_id: record.test_id.clone(),
                 test_type: normalized_test_type(&record.test_type),
                 mutation_status: record.mutation_status.clone(),
+                mutation_kind: record.mutation_kind.clone(),
                 is_mutation_verified,
                 is_mutation_killed,
                 is_verified,
@@ -231,16 +233,29 @@ fn flat_record(entry: &Value) -> Option<TestExposureRecord> {
     if test_id.is_empty() {
         return None;
     }
+    let test_type = string_at(entry, &["test_type", "type"])
+        .unwrap_or("unknown")
+        .to_string();
+    let mutation_status = optional_string_at(entry, &["mutation_status", "mutant_status", "mutation"]);
+    let mutation_kind = normalized_mutation_kind(
+        optional_string_at(
+            entry,
+            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+        )
+        .as_deref(),
+        mutation_status.as_deref(),
+        &test_type,
+        &test_id,
+    );
     Some(TestExposureRecord {
         path,
         function: optional_string_at(entry, &["function", "method", "defn"]),
         line: u32_at(entry, &["line"]),
         branch_id: optional_string_at(entry, &["branch_id"]),
         test_id,
-        test_type: string_at(entry, &["test_type", "type"])
-            .unwrap_or("unknown")
-            .to_string(),
-        mutation_status: optional_string_at(entry, &["mutation_status", "mutant_status", "mutation"]),
+        test_type,
+        mutation_status,
+        mutation_kind,
         context_line: optional_string_at(entry, &["context_line"]),
         payload_json: serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_string()),
     })
@@ -262,6 +277,16 @@ fn nested_record(
     let test_type = string_at(test, &["test_type", "type"])
         .unwrap_or("unknown")
         .to_string();
+    let mutation_kind = normalized_mutation_kind(
+        optional_string_at(
+            test,
+            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+        )
+        .as_deref(),
+        mutation_status.as_deref(),
+        &test_type,
+        &test_id,
+    );
     let payload = json!({
         "file": path,
         "function": function.clone(),
@@ -277,6 +302,7 @@ fn nested_record(
         test_id,
         test_type,
         mutation_status,
+        mutation_kind,
         context_line,
         payload_json: serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
     })
@@ -347,6 +373,45 @@ fn is_mutation_killed_status(status: Option<&str>) -> bool {
     )
 }
 
+fn normalized_mutation_kind(
+    kind: Option<&str>,
+    status: Option<&str>,
+    test_type: &str,
+    test_id: &str,
+) -> Option<String> {
+    let explicit = kind.unwrap_or_default().trim().to_ascii_lowercase();
+    if !explicit.is_empty() && !matches!(explicit.as_str(), "none" | "unknown" | "false") {
+        return Some(match explicit.as_str() {
+            "contract" | "contracts" | "invariant" | "invariants" | "property" | "properties"
+            | "property-based" | "fuzz" | "fuzzer" | "fuzzing" => "invariant".to_string(),
+            "stochastic" | "random" | "mutation" | "mutant" | "ruby-mutant" | "ruby_mutant"
+            | "cargo-mutant" | "cargo-mutants" | "cargo_mutant" | "cargo_mutants" => {
+                "stochastic".to_string()
+            }
+            other => other.to_string(),
+        });
+    }
+
+    if !is_mutation_verified_status(status) {
+        return None;
+    }
+
+    let inferred_from = format!(
+        "{} {}",
+        test_type.to_ascii_lowercase(),
+        test_id.to_ascii_lowercase()
+    );
+    if inferred_from.contains("invariant")
+        || inferred_from.contains("contract")
+        || inferred_from.contains("property")
+        || inferred_from.contains("fuzz")
+    {
+        Some("invariant".to_string())
+    } else {
+        Some("stochastic".to_string())
+    }
+}
+
 fn normalized_test_type(test_type: &str) -> String {
     let normalized = test_type.trim();
     if normalized.is_empty() {
@@ -389,7 +454,8 @@ mod tests {
             "branch_id": "b1",
             "test_id": "spec/demo_spec.rb:1",
             "test_type": "unit",
-            "mutation_status": "killed"
+            "mutation_status": "killed",
+            "mutation_kind": "ruby-mutant"
           }],
           "files": [{
             "file": "src/demo.rb",
@@ -411,8 +477,10 @@ mod tests {
         assert_eq!(records[0].function.as_deref(), Some("Worker#call"));
         assert_eq!(records[0].branch_id.as_deref(), Some("b1"));
         assert!(is_mutation_killed_status(records[0].mutation_status.as_deref()));
+        assert_eq!(records[0].mutation_kind.as_deref(), Some("stochastic"));
         assert_eq!(records[1].test_type, "integration");
         assert_eq!(records[2].mutation_status.as_deref(), Some("survived"));
+        assert_eq!(records[2].mutation_kind.as_deref(), Some("stochastic"));
     }
 
     #[test]

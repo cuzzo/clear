@@ -12,6 +12,18 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageScope {
+    include_prefixes: Vec<String>,
+    ignore_patterns: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct LineCoverageStats {
+    tracked: i64,
+    covered: i64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct UiFile {
     pub path: String,
@@ -19,6 +31,8 @@ pub struct UiFile {
     pub hazards: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
+    pub tracked_lines: i64,
+    pub covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
 }
@@ -31,6 +45,8 @@ pub struct UiDirectory {
     pub hazards: i64,
     pub distinct_tests: i64,
     pub mutant_killed_tests: i64,
+    pub tracked_lines: i64,
+    pub covered_lines: i64,
     pub line_coverage: f64,
     pub mutant_coverage: f64,
 }
@@ -52,6 +68,7 @@ pub struct UiHazard {
     pub hazard_type: String,
     pub required_evidence: String,
     pub source: String,
+    pub evidence_present: bool,
     pub verified: bool,
 }
 
@@ -87,14 +104,30 @@ pub struct UiDashboard {
     pub covered_lines: i64,
     pub coverage_percent: f64,
     pub active_hazards: i64,
+    pub evidence_covered_hazards: i64,
+    pub hazard_evidence_percent: f64,
     pub covered_hazards: i64,
     pub hazard_coverage_percent: f64,
     pub mutant_killed_covered_lines: i64,
     pub mutant_killed_covered_percent: f64,
+    pub stochastic_mutant_killed_covered_lines: i64,
+    pub stochastic_mutant_killed_covered_percent: f64,
+    pub invariant_mutant_killed_covered_lines: i64,
+    pub invariant_mutant_killed_covered_percent: f64,
     pub multi_type_covered_lines: i64,
     pub multi_type_covered_percent: f64,
     pub files_with_coverage: i64,
     pub top_hazard_files: Vec<UiFile>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DashboardLineCounts {
+    tracked: i64,
+    covered: i64,
+    mutant_killed: i64,
+    stochastic_mutant_killed: i64,
+    invariant_mutant_killed: i64,
+    multi_type: i64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -148,15 +181,20 @@ pub fn serve_ui_with_overlays(
 }
 
 pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
+    file_index_with_scope(storage, &CoverageScope::all())
+}
+
+pub fn file_index_with_scope(storage: &Storage, scope: &CoverageScope) -> Result<Vec<UiFile>> {
+    let line_stats = line_coverage_by_file(storage, scope)?;
     let mut stmt = storage.connection().prepare(
         r#"
         WITH current_units AS (
           SELECT
             u.id,
-            COALESCE((
-              SELECT latest.path
-              FROM events latest
-              WHERE latest.unit_id = u.id
+          COALESCE((
+            SELECT latest.path
+            FROM events latest
+            WHERE latest.unit_id = u.id
               ORDER BY latest.timestamp DESC, latest.id DESC
               LIMIT 1
             ), u.original_path) AS current_path,
@@ -188,27 +226,196 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
         "#,
     )?;
     let rows = stmt.query_map([], |row| {
+        let path = row.get::<_, String>(0)?;
+        let fallback_line_coverage = row.get::<_, f64>(5)?;
+        let stats = line_stats.get(&path).copied().unwrap_or_default();
         Ok(UiFile {
-            path: row.get(0)?,
+            path,
             units: row.get(1)?,
             hazards: row.get(2)?,
             distinct_tests: row.get(3)?,
             mutant_killed_tests: row.get(4)?,
-            line_coverage: row.get(5)?,
+            tracked_lines: stats.tracked,
+            covered_lines: stats.covered,
+            line_coverage: if stats.tracked > 0 {
+                percent(stats.covered, stats.tracked)
+            } else {
+                fallback_line_coverage
+            },
             mutant_coverage: row.get(6)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    Ok(rows
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|file| scope.allows(&file.path))
+        .collect())
+}
+
+impl CoverageScope {
+    pub fn all() -> Self {
+        Self {
+            include_prefixes: Vec::new(),
+            ignore_patterns: Vec::new(),
+        }
+    }
+
+    pub fn from_repo(repo: &Path) -> Self {
+        let path = repo.join("codecov.yml");
+        let Ok(text) = fs::read_to_string(path) else {
+            return Self::all();
+        };
+        let mut scope = Self::all();
+        let mut section: Option<&str> = None;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if !line.starts_with(' ') && trimmed.ends_with(':') {
+                section = Some(trimmed.trim_end_matches(':'));
+                continue;
+            }
+            if trimmed == "paths:" {
+                section = Some("paths");
+                continue;
+            }
+            let Some(value) = yaml_list_value(trimmed) else {
+                continue;
+            };
+            match section {
+                Some("ignore") => scope.ignore_patterns.push(value),
+                Some("paths") => scope.include_prefixes.push(normalize_directory(&value)),
+                _ => {}
+            }
+        }
+        scope.include_prefixes.retain(|value| !value.is_empty());
+        scope.include_prefixes.sort();
+        scope.include_prefixes.dedup();
+        scope.ignore_patterns.sort();
+        scope.ignore_patterns.dedup();
+        scope
+    }
+
+    pub fn allows(&self, path: &str) -> bool {
+        let path = normalize_source_path(path);
+        let included = self.include_prefixes.is_empty()
+            || self
+                .include_prefixes
+                .iter()
+                .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")));
+        included && !self.ignore_patterns.iter().any(|pattern| ignore_matches(pattern, &path))
+    }
+}
+
+fn yaml_list_value(trimmed: &str) -> Option<String> {
+    let value = trimmed.strip_prefix("- ")?;
+    Some(value.trim().trim_matches('"').trim_matches('\'').to_string())
+}
+
+fn ignore_matches(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.trim().trim_matches('"').trim_matches('\'').trim_start_matches("./");
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern.ends_with('/') {
+        let prefix = pattern.trim_end_matches('/');
+        return path == prefix || path.starts_with(&format!("{prefix}/"));
+    }
+    wildcard_match(pattern, path)
+        || path
+            .rsplit_once('/')
+            .map(|(_, basename)| wildcard_match(pattern, basename))
+            .unwrap_or(false)
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let (mut pi, mut ti) = (0, 0);
+    let mut star = None;
+    let mut star_text = 0;
+    while ti < text.len() {
+        if pi < pattern.len() && (pattern[pi] == text[ti] || pattern[pi] == b'?') {
+            pi += 1;
+            ti += 1;
+        } else if pi < pattern.len() && pattern[pi] == b'*' {
+            star = Some(pi);
+            pi += 1;
+            star_text = ti;
+        } else if let Some(star_index) = star {
+            pi = star_index + 1;
+            star_text += 1;
+            ti = star_text;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == b'*' {
+        pi += 1;
+    }
+    pi == pattern.len()
+}
+
+fn line_coverage_by_file(
+    storage: &Storage,
+    scope: &CoverageScope,
+) -> Result<HashMap<String, LineCoverageStats>> {
+    let mut by_file = HashMap::<String, LineCoverageStats>::new();
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_source_lines AS (
+          SELECT path, line, hits
+          FROM (
+            SELECT path, line, source, hits,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY path, line, source
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM coverage_line_events
+          )
+          WHERE rank = 1
+        ),
+        latest_lines AS (
+          SELECT path, line, MAX(hits) AS hits
+          FROM latest_source_lines
+          GROUP BY path, line
+        )
+        SELECT path, hits
+        FROM latest_lines
+        ORDER BY path
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
+    for row in rows {
+        let (path, hits) = row?;
+        if !scope.allows(&path) {
+            continue;
+        }
+        let entry = by_file.entry(path).or_default();
+        entry.tracked += 1;
+        if hits > 0 {
+            entry.covered += 1;
+        }
+    }
+    Ok(by_file)
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
-    dashboard_summary_for_directory(storage, "")
+    dashboard_summary_for_directory_with_scope(storage, "", &CoverageScope::all())
 }
 
 pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
+    dashboard_summary_for_directory_with_scope(storage, directory, &CoverageScope::all())
+}
+
+pub fn dashboard_summary_for_directory_with_scope(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<UiDashboard> {
     let directory = normalize_directory(directory);
-    let like = directory_like(&directory);
-    let files = file_index(storage)?;
+    let files = file_index_with_scope(storage, scope)?;
     let mut top_hazard_files = files
         .iter()
         .filter(|file| path_in_directory(&file.path, &directory) && file.hazards > 0)
@@ -222,73 +429,9 @@ pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Re
     });
     top_hazard_files.truncate(8);
 
-    let (tracked_lines, covered_lines, mutant_killed_covered_lines, multi_type_covered_lines) =
-        storage.connection().query_row(
-            r#"
-            WITH latest_source_lines AS (
-              SELECT path, line, hits
-              FROM (
-                SELECT path, line, source, hits,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY path, line, source
-                         ORDER BY timestamp DESC, id DESC
-                       ) AS rank
-                FROM coverage_line_events
-              )
-              WHERE rank = 1
-            ),
-            latest_lines AS (
-              SELECT path, line, MAX(hits) AS hits
-              FROM latest_source_lines
-              GROUP BY path, line
-            ),
-            line_tests AS (
-              SELECT path,
-                     line,
-                     COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
-                     MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed
-              FROM test_exposure_events
-              WHERE line IS NOT NULL
-              GROUP BY path, line
-            )
-            SELECT COUNT(*),
-                   COALESCE(SUM(CASE WHEN l.hits > 0 THEN 1 ELSE 0 END), 0),
-                   COALESCE(SUM(CASE WHEN l.hits > 0 AND COALESCE(t.mutant_killed, 0) = 1 THEN 1 ELSE 0 END), 0),
-                   COALESCE(SUM(CASE WHEN l.hits > 0 AND COALESCE(t.verified_test_types, 0) >= 2 THEN 1 ELSE 0 END), 0)
-            FROM latest_lines l
-            LEFT JOIN line_tests t ON t.path = l.path AND t.line = l.line
-            WHERE (?1 = '' OR l.path LIKE ?2)
-            "#,
-            params![directory, like],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            },
-        )?;
-
-    let (active_hazards, covered_hazards) = storage.connection().query_row(
-        r#"
-        SELECT COUNT(*),
-               COALESCE(SUM(CASE WHEN EXISTS(
-                 SELECT 1
-                 FROM test_exposure_events t
-                 WHERE t.unit_id = h.unit_id
-                   AND t.path = h.path
-                   AND t.line = h.line
-                   AND t.is_verified = 1
-                   AND lower(t.test_type) = lower(h.required_evidence)
-               ) THEN 1 ELSE 0 END), 0)
-        FROM unit_hazards h
-        WHERE h.is_active = 1
-          AND (?1 = '' OR h.path LIKE ?2)
-        "#,
-        params![directory, like],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    )?;
+    let line_counts = dashboard_line_counts(storage, &directory, scope)?;
+    let (active_hazards, evidence_covered_hazards, covered_hazards) =
+        dashboard_hazard_counts(storage, &directory, scope)?;
 
     let files_with_coverage = files
         .iter()
@@ -301,19 +444,240 @@ pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Re
 
     Ok(UiDashboard {
         files: files_count,
-        tracked_lines,
-        covered_lines,
-        coverage_percent: percent(covered_lines, tracked_lines),
+        tracked_lines: line_counts.tracked,
+        covered_lines: line_counts.covered,
+        coverage_percent: percent(line_counts.covered, line_counts.tracked),
         active_hazards,
+        evidence_covered_hazards,
+        hazard_evidence_percent: percent(evidence_covered_hazards, active_hazards),
         covered_hazards,
         hazard_coverage_percent: percent(covered_hazards, active_hazards),
-        mutant_killed_covered_lines,
-        mutant_killed_covered_percent: percent(mutant_killed_covered_lines, covered_lines),
-        multi_type_covered_lines,
-        multi_type_covered_percent: percent(multi_type_covered_lines, covered_lines),
+        mutant_killed_covered_lines: line_counts.mutant_killed,
+        mutant_killed_covered_percent: percent(line_counts.mutant_killed, line_counts.covered),
+        stochastic_mutant_killed_covered_lines: line_counts.stochastic_mutant_killed,
+        stochastic_mutant_killed_covered_percent: percent(
+            line_counts.stochastic_mutant_killed,
+            line_counts.covered,
+        ),
+        invariant_mutant_killed_covered_lines: line_counts.invariant_mutant_killed,
+        invariant_mutant_killed_covered_percent: percent(
+            line_counts.invariant_mutant_killed,
+            line_counts.covered,
+        ),
+        multi_type_covered_lines: line_counts.multi_type,
+        multi_type_covered_percent: percent(line_counts.multi_type, line_counts.covered),
         files_with_coverage,
         top_hazard_files,
     })
+}
+
+fn dashboard_line_counts(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<DashboardLineCounts> {
+    let mut covered_lines = BTreeSet::<(String, u32)>::new();
+    let mut counts = DashboardLineCounts::default();
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH latest_source_lines AS (
+          SELECT path, line, hits
+          FROM (
+            SELECT path, line, source, hits,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY path, line, source
+                     ORDER BY timestamp DESC, id DESC
+                   ) AS rank
+            FROM coverage_line_events
+          )
+          WHERE rank = 1
+        ),
+        latest_lines AS (
+          SELECT path, line, MAX(hits) AS hits
+          FROM latest_source_lines
+          GROUP BY path, line
+        )
+        SELECT path, line, hits
+        FROM latest_lines
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, u32>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (path, line, hits) = row?;
+        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+            continue;
+        }
+        counts.tracked += 1;
+        if hits > 0 {
+            counts.covered += 1;
+            covered_lines.insert((path, line));
+        }
+    }
+
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH ranked_exposure AS (
+          SELECT path, line, branch_id, test_id, test_type, is_verified,
+                 is_mutation_killed, mutation_kind,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
+          FROM test_exposure_events
+          WHERE line IS NOT NULL
+        ),
+        latest_exposure AS (
+          SELECT *
+          FROM ranked_exposure
+          WHERE rank = 1
+        )
+        SELECT path,
+               line,
+               COUNT(DISTINCT CASE WHEN is_verified = 1 THEN test_type END) AS verified_test_types,
+               MAX(CASE WHEN is_verified = 1 AND is_mutation_killed = 1 THEN 1 ELSE 0 END) AS mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_killed = 1
+                  AND lower(COALESCE(mutation_kind, '')) = 'stochastic'
+                 THEN 1 ELSE 0
+               END) AS stochastic_mutant_killed,
+               MAX(CASE
+                 WHEN is_verified = 1
+                  AND is_mutation_killed = 1
+                  AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                 THEN 1 ELSE 0
+               END) AS invariant_mutant_killed
+        FROM latest_exposure
+        GROUP BY path, line
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (
+            path,
+            line,
+            verified_test_types,
+            has_mutant_killed,
+            has_stochastic_mutant_killed,
+            has_invariant_mutant_killed,
+        ) = row?;
+        if !covered_lines.contains(&(path, line)) {
+            continue;
+        }
+        if has_mutant_killed > 0 {
+            counts.mutant_killed += 1;
+        }
+        if has_stochastic_mutant_killed > 0 {
+            counts.stochastic_mutant_killed += 1;
+        }
+        if has_invariant_mutant_killed > 0 {
+            counts.invariant_mutant_killed += 1;
+        }
+        if verified_test_types >= 2 {
+            counts.multi_type += 1;
+        }
+    }
+
+    Ok(counts)
+}
+
+fn dashboard_hazard_counts(
+    storage: &Storage,
+    directory: &str,
+    scope: &CoverageScope,
+) -> Result<(i64, i64, i64)> {
+    let mut active = 0;
+    let mut evidence_covered = 0;
+    let mut verified = 0;
+    let mut stmt = storage.connection().prepare(
+        r#"
+        WITH ranked_exposure AS (
+          SELECT unit_id, path, line, test_type, is_verified, is_mutation_killed, mutation_kind,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
+          FROM test_exposure_events
+          WHERE line IS NOT NULL
+        ),
+        latest_exposure AS (
+          SELECT *
+          FROM ranked_exposure
+          WHERE rank = 1
+        ),
+        evidence AS (
+          SELECT unit_id,
+                 path,
+                 line,
+                 lower(test_type) AS test_type,
+                 MAX(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) AS has_evidence,
+                 MAX(CASE
+                   WHEN is_verified = 1
+                    AND is_mutation_killed = 1
+                    AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                   THEN 1 ELSE 0
+                 END) AS has_invariant_mutation
+          FROM latest_exposure
+          GROUP BY unit_id, path, line, lower(test_type)
+        )
+        SELECT h.path,
+               MAX(CASE
+                 WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
+                 THEN 1 ELSE 0
+               END) AS evidence_present,
+               CASE
+                 WHEN MAX(CASE
+                        WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
+                        THEN 1 ELSE 0
+                      END) = 1
+                  AND MAX(COALESCE(e.has_invariant_mutation, 0)) = 1
+                 THEN 1 ELSE 0
+               END AS verified
+        FROM unit_hazards h
+        LEFT JOIN evidence e
+          ON e.unit_id = h.unit_id
+         AND e.path = h.path
+         AND e.line = h.line
+        WHERE h.is_active = 1
+        GROUP BY h.id, h.path
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (path, evidence_present, is_verified) = row?;
+        if !scope.allows(&path) || !path_in_directory(&path, directory) {
+            continue;
+        }
+        active += 1;
+        if evidence_present != 0 {
+            evidence_covered += 1;
+        }
+        if is_verified != 0 {
+            verified += 1;
+        }
+    }
+    Ok((active, evidence_covered, verified))
 }
 
 pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
@@ -329,12 +693,22 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
         entry.hazards += file.hazards;
         entry.distinct_tests += file.distinct_tests;
         entry.mutant_killed_tests += file.mutant_killed_tests;
+        entry.tracked_lines += file.tracked_lines;
+        entry.covered_lines += file.covered_lines;
         entry.line_coverage_sum += file.line_coverage;
         entry.mutant_coverage_sum += file.mutant_coverage;
+        if file.tracked_lines == 0 {
+            entry.fallback_files += 1;
+        }
     }
     dirs.into_iter()
         .map(|(path, builder)| {
             let files = builder.files.max(1) as f64;
+            let line_coverage = if builder.tracked_lines > 0 {
+                percent(builder.covered_lines, builder.tracked_lines)
+            } else {
+                builder.line_coverage_sum / files
+            };
             UiDirectory {
                 path,
                 files: builder.files,
@@ -342,7 +716,9 @@ pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
                 hazards: builder.hazards,
                 distinct_tests: builder.distinct_tests,
                 mutant_killed_tests: builder.mutant_killed_tests,
-                line_coverage: builder.line_coverage_sum / files,
+                tracked_lines: builder.tracked_lines,
+                covered_lines: builder.covered_lines,
+                line_coverage,
                 mutant_coverage: builder.mutant_coverage_sum / files,
             }
         })
@@ -356,6 +732,9 @@ struct DirectoryBuilder {
     hazards: i64,
     distinct_tests: i64,
     mutant_killed_tests: i64,
+    tracked_lines: i64,
+    covered_lines: i64,
+    fallback_files: i64,
     line_coverage_sum: f64,
     mutant_coverage_sum: f64,
 }
@@ -378,12 +757,15 @@ pub fn source_payload_with_overlays(
 ) -> Result<UiSourcePayload> {
     let repo = repo.as_ref();
     let file = read_source(repo, path, commit)?;
+    let lines = file.contents.lines().map(str::to_string).collect::<Vec<_>>();
+    let mut annotations = line_annotations(storage, path, overlays)?;
+    paint_statement_continuations(&lines, &mut annotations);
     Ok(UiSourcePayload {
         path: path.to_string(),
         commit: commit.map(str::to_string),
-        lines: file.contents.lines().map(str::to_string).collect(),
+        lines,
         versions: file_versions(storage, path)?,
-        annotations: line_annotations(storage, path, overlays)?,
+        annotations,
     })
 }
 
@@ -436,6 +818,7 @@ fn route(
     match path {
         "/" | "/index.html" => {
             let storage = Storage::open(db)?;
+            let scope = CoverageScope::from_repo(repo);
             let selected = query.get("path").map(String::as_str);
             let directory = query.get("dir").map(String::as_str);
             let commit = query
@@ -443,18 +826,20 @@ fn route(
                 .map(String::as_str)
                 .filter(|value| !value.is_empty() && *value != "current");
             let filter = query.get("q").map(String::as_str).unwrap_or_default();
-            let body = render_index_page(&storage, repo, overlays, selected, directory, commit, filter)?;
+            let body = render_index_page(&storage, repo, overlays, &scope, selected, directory, commit, filter)?;
             write_response(stream, 200, "text/html; charset=utf-8", &body)
         }
         "/api/files" => {
             let storage = Storage::open(db)?;
-            let json = serde_json::to_string(&file_index(&storage)?)?;
+            let scope = CoverageScope::from_repo(repo);
+            let json = serde_json::to_string(&file_index_with_scope(&storage, &scope)?)?;
             write_response(stream, 200, "application/json", &json)
         }
         "/api/dashboard" => {
             let storage = Storage::open(db)?;
+            let scope = CoverageScope::from_repo(repo);
             let directory = query.get("dir").map(String::as_str).unwrap_or_default();
-            let json = serde_json::to_string(&dashboard_summary_for_directory(&storage, directory)?)?;
+            let json = serde_json::to_string(&dashboard_summary_for_directory_with_scope(&storage, directory, &scope)?)?;
             write_response(stream, 200, "application/json", &json)
         }
         "/api/source" => {
@@ -614,7 +999,7 @@ pub fn line_annotations(
     let mut lines = BTreeMap::<u32, AnnotationBuilder>::new();
     let has_exact_line_coverage = apply_line_coverage(storage, path, &mut lines)?;
     apply_unit_quality(storage, path, &mut lines, !has_exact_line_coverage)?;
-    apply_test_exposure(storage, path, &mut lines)?;
+    apply_test_exposure(storage, path, &mut lines, !has_exact_line_coverage)?;
     apply_hazards(storage, path, &mut lines)?;
     apply_overlays(path, overlays, &mut lines);
 
@@ -635,6 +1020,136 @@ pub fn line_annotations(
             hazards: builder.hazards,
         })
         .collect())
+}
+
+fn paint_statement_continuations(lines: &[String], annotations: &mut Vec<UiLineAnnotation>) {
+    let mut by_line = annotations
+        .drain(..)
+        .map(|annotation| (annotation.line, annotation))
+        .collect::<BTreeMap<_, _>>();
+    let mut index = 0;
+    while index < lines.len() {
+        let line_no = (index + 1) as u32;
+        let starts_covered_statement = by_line
+            .get(&line_no)
+            .map(|annotation| annotation.covered && annotation.line_hits.unwrap_or(1) > 0)
+            .unwrap_or(false);
+        if !starts_covered_statement || !line_opens_continuation(&lines[index]) {
+            index += 1;
+            continue;
+        }
+
+        let mut balance = delimiter_delta(&lines[index]).max(0);
+        let mut cursor = index + 1;
+        while cursor < lines.len() {
+            let current_no = (cursor + 1) as u32;
+            let trimmed = lines[cursor].trim();
+            if trimmed.is_empty() {
+                cursor += 1;
+                continue;
+            }
+            let exact_uncovered = by_line
+                .get(&current_no)
+                .and_then(|annotation| annotation.line_hits)
+                == Some(0);
+            if exact_uncovered {
+                break;
+            }
+            by_line
+                .entry(current_no)
+                .or_insert_with(|| visual_coverage_annotation(current_no))
+                .covered = true;
+
+            balance += delimiter_delta(&lines[cursor]);
+            let continues = balance > 0 || line_opens_continuation(&lines[cursor]);
+            cursor += 1;
+            if !continues {
+                break;
+            }
+        }
+        index = cursor.max(index + 1);
+    }
+    *annotations = by_line.into_values().collect();
+}
+
+fn visual_coverage_annotation(line: u32) -> UiLineAnnotation {
+    UiLineAnnotation {
+        line,
+        covered: true,
+        mutant_tested: false,
+        test_types: Vec::new(),
+        distinct_tests: 0,
+        mutant_verified_tests: 0,
+        mutant_killed_tests: 0,
+        line_hits: None,
+        line_coverage: None,
+        mutant_coverage: None,
+        dark_arms: Vec::new(),
+        hazards: Vec::new(),
+    }
+}
+
+fn line_opens_continuation(line: &str) -> bool {
+    let code = strip_line_comment(line).trim_end();
+    if code.is_empty() {
+        return false;
+    }
+    delimiter_delta(code) > 0
+        || matches!(
+            code.chars().last(),
+            Some(',' | '\\' | '.' | '+' | '-' | '*' | '/' | '%' | '=' | ':' | '|' | '&')
+        )
+        || code.ends_with("do")
+        || code.ends_with("then")
+}
+
+fn delimiter_delta(line: &str) -> i32 {
+    let mut delta = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in strip_line_comment(line).chars() {
+        if let Some(current) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == current {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' | '`' => quote = Some(ch),
+            '(' | '[' | '{' => delta += 1,
+            ')' | ']' | '}' => delta -= 1,
+            _ => {}
+        }
+    }
+    delta
+}
+
+fn strip_line_comment(line: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, ch) in line.char_indices() {
+        if let Some(current) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == current {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' | '`' => quote = Some(ch),
+            '#' => return &line[..index],
+            '/' if line[index..].starts_with("//") => return &line[..index],
+            _ => {}
+        }
+    }
+    line
 }
 
 fn apply_unit_quality(
@@ -743,14 +1258,30 @@ fn apply_test_exposure(
     storage: &Storage,
     path: &str,
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
+    paint_line_coverage: bool,
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
         r#"
+        WITH ranked_exposure AS (
+          SELECT path, line, branch_id, test_id, test_type, is_verified,
+                 is_mutation_verified, is_mutation_killed,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
+          FROM test_exposure_events
+          WHERE path = ?1 AND line IS NOT NULL
+        ),
+        latest_exposure AS (
+          SELECT *
+          FROM ranked_exposure
+          WHERE rank = 1
+        )
         SELECT line, test_type, COUNT(DISTINCT test_id),
                COUNT(DISTINCT CASE WHEN is_mutation_verified = 1 THEN test_id END),
                COUNT(DISTINCT CASE WHEN is_mutation_killed = 1 THEN test_id END)
-        FROM test_exposure_events
-        WHERE path = ?1 AND line IS NOT NULL AND is_verified = 1
+        FROM latest_exposure
+        WHERE is_verified = 1
         GROUP BY line, test_type
         "#,
     )?;
@@ -766,7 +1297,9 @@ fn apply_test_exposure(
     for row in rows {
         let (line, test_type, tests, mutation_verified, mutation_killed) = row?;
         let entry = lines.entry(line).or_default();
-        entry.covered = true;
+        if paint_line_coverage {
+            entry.covered = true;
+        }
         entry.test_types.insert(test_type);
         entry.distinct_tests += tests;
         entry.mutant_verified_tests += mutation_verified;
@@ -783,18 +1316,55 @@ fn apply_hazards(
 ) -> Result<()> {
     let mut stmt = storage.connection().prepare(
         r#"
+        WITH ranked_exposure AS (
+          SELECT unit_id, path, line, test_type, is_verified, is_mutation_killed, mutation_kind,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY path, line, COALESCE(branch_id, ''), test_id, test_type
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
+          FROM test_exposure_events
+          WHERE line IS NOT NULL
+        ),
+        latest_exposure AS (
+          SELECT *
+          FROM ranked_exposure
+          WHERE rank = 1
+        ),
+        evidence AS (
+          SELECT unit_id,
+                 path,
+                 line,
+                 lower(test_type) AS test_type,
+                 MAX(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) AS has_evidence,
+                 MAX(CASE
+                   WHEN is_verified = 1
+                    AND is_mutation_killed = 1
+                    AND lower(COALESCE(mutation_kind, '')) IN ('invariant', 'contract')
+                   THEN 1 ELSE 0
+                 END) AS has_invariant_mutation
+          FROM latest_exposure
+          GROUP BY unit_id, path, line, lower(test_type)
+        )
         SELECT h.line, h.hazard_type, h.required_evidence, h.source,
-               EXISTS(
-                 SELECT 1
-                 FROM test_exposure_events t
-                 WHERE t.unit_id = h.unit_id
-                   AND t.path = h.path
-                   AND t.line = h.line
-                   AND t.is_verified = 1
-                   AND lower(t.test_type) = lower(h.required_evidence)
-               ) AS verified
+               MAX(CASE
+                 WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
+                 THEN 1 ELSE 0
+               END) AS evidence_present,
+               CASE
+                 WHEN MAX(CASE
+                        WHEN e.test_type = lower(h.required_evidence) AND e.has_evidence = 1
+                        THEN 1 ELSE 0
+                      END) = 1
+                  AND MAX(COALESCE(e.has_invariant_mutation, 0)) = 1
+                 THEN 1 ELSE 0
+               END AS verified
         FROM unit_hazards h
+        LEFT JOIN evidence e
+          ON e.unit_id = h.unit_id
+         AND e.path = h.path
+         AND e.line = h.line
         WHERE h.path = ?1 AND h.is_active = 1
+        GROUP BY h.id, h.line, h.hazard_type, h.required_evidence, h.source
         ORDER BY h.line, h.hazard_type
         "#,
     )?;
@@ -805,7 +1375,8 @@ fn apply_hazards(
                 hazard_type: row.get(1)?,
                 required_evidence: row.get(2)?,
                 source: row.get(3)?,
-                verified: row.get::<_, i64>(4)? != 0,
+                evidence_present: row.get::<_, i64>(4)? != 0,
+                verified: row.get::<_, i64>(5)? != 0,
             },
         ))
     })?;
@@ -892,12 +1463,13 @@ fn render_index_page(
     storage: &Storage,
     repo: &Path,
     overlays: &UiOverlays,
+    scope: &CoverageScope,
     selected: Option<&str>,
     directory: Option<&str>,
     commit: Option<&str>,
     filter: &str,
 ) -> Result<String> {
-    let files = file_index(storage)?;
+    let files = file_index_with_scope(storage, scope)?;
     let selected_path = selected
         .map(normalize_source_path)
         .filter(|path| !path.is_empty());
@@ -906,7 +1478,7 @@ fn render_index_page(
         .as_deref()
         .map(parent_directory)
         .unwrap_or(requested_directory);
-    let dashboard = dashboard_summary_for_directory(storage, &current_directory)?;
+    let dashboard = dashboard_summary_for_directory_with_scope(storage, &current_directory, scope)?;
     let child_directories = directory_index(&files, &current_directory);
     let child_files = files_in_directory(&files, &current_directory);
     let filtered = filtered_files_in_directory(&files, filter, &current_directory);
@@ -1028,14 +1600,6 @@ fn normalize_directory(directory: &str) -> String {
 
 fn normalize_source_path(path: &str) -> String {
     path.trim().trim_start_matches("./").trim_matches('/').to_string()
-}
-
-fn directory_like(directory: &str) -> String {
-    if directory.is_empty() {
-        "%".to_string()
-    } else {
-        format!("{}/%", directory.trim_end_matches('/'))
-    }
 }
 
 fn path_in_directory(path: &str, directory: &str) -> bool {
@@ -1206,9 +1770,17 @@ fn render_dashboard(
     ));
     out.push_str(&render_metric(
         "Hazard evidence",
+        &format!("{:.1}%", dashboard.hazard_evidence_percent),
+        &format!(
+            "{} / {} active hazards have required systems evidence",
+            dashboard.evidence_covered_hazards, dashboard.active_hazards
+        ),
+    ));
+    out.push_str(&render_metric(
+        "Hazard verification",
         &format!("{:.1}%", dashboard.hazard_coverage_percent),
         &format!(
-            "{} / {} active hazards covered",
+            "{} / {} active hazards have evidence plus invariant mutants",
             dashboard.covered_hazards, dashboard.active_hazards
         ),
     ));
@@ -1218,6 +1790,22 @@ fn render_dashboard(
         &format!(
             "{} / {} covered lines have killed-mutant evidence",
             dashboard.mutant_killed_covered_lines, dashboard.covered_lines
+        ),
+    ));
+    out.push_str(&render_metric(
+        "Stochastic mutants",
+        &format!("{:.1}%", dashboard.stochastic_mutant_killed_covered_percent),
+        &format!(
+            "{} / {} covered lines are stochastic-mutant backed",
+            dashboard.stochastic_mutant_killed_covered_lines, dashboard.covered_lines
+        ),
+    ));
+    out.push_str(&render_metric(
+        "Invariant mutants",
+        &format!("{:.1}%", dashboard.invariant_mutant_killed_covered_percent),
+        &format!(
+            "{} / {} covered lines are invariant-mutant backed",
+            dashboard.invariant_mutant_killed_covered_lines, dashboard.covered_lines
         ),
     ));
     out.push_str(&render_metric(
@@ -1268,9 +1856,9 @@ fn render_dashboard(
         out.push_str("\"></span></div>");
         out.push_str("<p class=\"subtle\">");
         out.push_str(&format!(
-            "{} hazards have matching required test evidence; {} remain uncovered.",
+            "{} hazards have required systems evidence; {} also have invariant-mutant proof.",
+            dashboard.evidence_covered_hazards,
             dashboard.covered_hazards,
-            dashboard.active_hazards - dashboard.covered_hazards
         ));
         out.push_str("</p>");
     }
@@ -1307,8 +1895,12 @@ fn render_directory_dashboard_row(directory: &UiDirectory, filter: &str) -> Stri
     out.push_str(&html_escape(&directory.path));
     out.push_str("/</span><small>");
     out.push_str(&html_escape(&format!(
-        "{} files | {} units | {} hazards | {} mutant-killed tests",
-        directory.files, directory.units, directory.hazards, directory.mutant_killed_tests
+        "{} files | {} / {} lines | {} hazards | {} mutant-killed tests",
+        directory.files,
+        directory.covered_lines,
+        directory.tracked_lines,
+        directory.hazards,
+        directory.mutant_killed_tests
     )));
     out.push_str("</small></span><strong class=\"metric-value\">");
     out.push_str(&format!("{:.0}%", directory.line_coverage));
@@ -1332,8 +1924,13 @@ fn render_file_dashboard_row(file: &UiFile, filter: &str) -> String {
 
 fn file_detail(file: &UiFile) -> String {
     html_escape(&format!(
-        "{} units | {} hazards | {} tests | {} mutant-killed tests",
-        file.units, file.hazards, file.distinct_tests, file.mutant_killed_tests
+        "{} units | {} / {} lines | {} hazards | {} tests | {} mutant-killed tests",
+        file.units,
+        file.covered_lines,
+        file.tracked_lines,
+        file.hazards,
+        file.distinct_tests,
+        file.mutant_killed_tests
     ))
 }
 
@@ -1355,7 +1952,11 @@ fn render_source_view(payload: &UiSourcePayload, filter: &str) -> String {
         .iter()
         .map(|annotation| (annotation.line, annotation))
         .collect::<BTreeMap<_, _>>();
-    let covered = payload.annotations.iter().filter(|annotation| annotation.covered).count();
+    let covered = payload
+        .annotations
+        .iter()
+        .filter(|annotation| annotation.line_hits.unwrap_or(0) > 0)
+        .count();
     let mutant = payload
         .annotations
         .iter()
@@ -1452,10 +2053,16 @@ fn render_code_line(
     if let Some(annotation) = annotation {
         for hazard in &annotation.hazards {
             let mut title = format!(
-                "{} requires {} {}",
+                "{} requires {} ({})",
                 hazard.hazard_type,
                 hazard.required_evidence,
-                if hazard.verified { "coverage present" } else { "coverage missing" }
+                if hazard.verified {
+                    "evidence plus invariant mutation present"
+                } else if hazard.evidence_present {
+                    "systems evidence present; invariant mutation missing"
+                } else {
+                    "systems evidence and invariant mutation missing"
+                }
             );
             if !hazard.source.is_empty() {
                 title.push('\n');
@@ -2197,6 +2804,7 @@ mod tests {
                 test_id: "zig/runtime/a-loom-test.zig:1".into(),
                 test_type: "loom".into(),
                 mutation_status: Some("killed".into()),
+                mutation_kind: Some("invariant".into()),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,
@@ -2377,6 +2985,7 @@ mod tests {
                 test_id: "loom-test".into(),
                 test_type: "loom".into(),
                 mutation_status: Some("killed".into()),
+                mutation_kind: Some("invariant".into()),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,
@@ -2395,6 +3004,7 @@ mod tests {
                 test_id: "unit-test".into(),
                 test_type: "unit".into(),
                 mutation_status: None,
+                mutation_kind: None,
                 is_mutation_verified: false,
                 is_mutation_killed: false,
                 is_verified: true,
@@ -2413,6 +3023,7 @@ mod tests {
                 test_id: "integration-test".into(),
                 test_type: "integration".into(),
                 mutation_status: None,
+                mutation_kind: None,
                 is_mutation_verified: false,
                 is_mutation_killed: false,
                 is_verified: true,
@@ -2442,6 +3053,8 @@ mod tests {
         assert_eq!(dashboard.active_hazards, 1);
         assert_eq!(dashboard.covered_hazards, 1);
         assert_eq!(dashboard.mutant_killed_covered_lines, 1);
+        assert_eq!(dashboard.stochastic_mutant_killed_covered_lines, 0);
+        assert_eq!(dashboard.invariant_mutant_killed_covered_lines, 1);
         assert_eq!(dashboard.multi_type_covered_lines, 1);
         assert_eq!(dashboard.coverage_percent, 200.0 / 3.0);
     }
@@ -2455,6 +3068,8 @@ mod tests {
                 hazards: 2,
                 distinct_tests: 3,
                 mutant_killed_tests: 4,
+                tracked_lines: 10,
+                covered_lines: 5,
                 line_coverage: 50.0,
                 mutant_coverage: 25.0,
             },
@@ -2464,6 +3079,8 @@ mod tests {
                 hazards: 1,
                 distinct_tests: 5,
                 mutant_killed_tests: 6,
+                tracked_lines: 30,
+                covered_lines: 15,
                 line_coverage: 75.0,
                 mutant_coverage: 50.0,
             },
@@ -2473,6 +3090,8 @@ mod tests {
                 hazards: 7,
                 distinct_tests: 8,
                 mutant_killed_tests: 9,
+                tracked_lines: 4,
+                covered_lines: 4,
                 line_coverage: 100.0,
                 mutant_coverage: 0.0,
             },
@@ -2482,7 +3101,9 @@ mod tests {
         assert_eq!(root.iter().map(|directory| directory.path.as_str()).collect::<Vec<_>>(), vec!["src", "zig"]);
         assert_eq!(root[0].files, 2);
         assert_eq!(root[0].hazards, 3);
-        assert_eq!(root[0].line_coverage, 62.5);
+        assert_eq!(root[0].tracked_lines, 40);
+        assert_eq!(root[0].covered_lines, 20);
+        assert_eq!(root[0].line_coverage, 50.0);
 
         let src = directory_index(&files, "src");
         assert_eq!(src.len(), 1);
@@ -2514,6 +3135,104 @@ mod tests {
         assert_eq!(src.coverage_percent, 50.0);
         assert_eq!(zig.tracked_lines, 1);
         assert_eq!(zig.covered_lines, 1);
+    }
+
+    #[test]
+    fn coverage_scope_reads_codecov_paths_and_ignores() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("codecov.yml"),
+            r#"
+ignore:
+  - "gems/nil-kill/"
+  - "**/*-test.zig"
+flags:
+  ruby:
+    paths:
+      - src/
+  zig:
+    paths:
+      - zig/
+"#,
+        )
+        .unwrap();
+
+        let scope = CoverageScope::from_repo(dir.path());
+
+        assert!(scope.allows("src/ast/type.rb"));
+        assert!(scope.allows("zig/runtime/scheduler.zig"));
+        assert!(!scope.allows("gems/decomplex/lib/decomplex.rb"));
+        assert!(!scope.allows("zig/runtime/scheduler-test.zig"));
+        assert!(!scope.allows("gems/nil-kill/lib/nil_kill.rb"));
+    }
+
+    #[test]
+    fn dashboard_summary_respects_coverage_scope() {
+        let storage = Storage::open_memory().unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 1, 1)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 2, 1)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "gems/a.rb", 1, 0)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "zig/a-test.zig", 1, 0)
+            .unwrap();
+        let scope = CoverageScope {
+            include_prefixes: vec!["src".into(), "zig".into()],
+            ignore_patterns: vec!["**/*-test.zig".into()],
+        };
+
+        let dashboard = dashboard_summary_for_directory_with_scope(&storage, "", &scope).unwrap();
+
+        assert_eq!(dashboard.tracked_lines, 2);
+        assert_eq!(dashboard.covered_lines, 2);
+        assert_eq!(dashboard.coverage_percent, 100.0);
+    }
+
+    #[test]
+    fn visual_coverage_paints_multiline_continuations_without_counting_hits() {
+        let mut annotations = vec![UiLineAnnotation {
+            line: 1,
+            covered: true,
+            mutant_tested: false,
+            test_types: Vec::new(),
+            distinct_tests: 0,
+            mutant_verified_tests: 0,
+            mutant_killed_tests: 0,
+            line_hits: Some(1),
+            line_coverage: None,
+            mutant_coverage: None,
+            dark_arms: Vec::new(),
+            hazards: Vec::new(),
+        }];
+        let lines = vec![
+            "result = call(".to_string(),
+            "  first,".to_string(),
+            "  second".to_string(),
+            ")".to_string(),
+            "other".to_string(),
+        ];
+
+        paint_statement_continuations(&lines, &mut annotations);
+
+        let covered = annotations
+            .iter()
+            .filter(|annotation| annotation.covered)
+            .map(|annotation| annotation.line)
+            .collect::<Vec<_>>();
+        assert_eq!(covered, vec![1, 2, 3, 4]);
+        assert_eq!(
+            annotations
+                .iter()
+                .find(|annotation| annotation.line == 2)
+                .unwrap()
+                .line_hits,
+            None
+        );
     }
 
     #[test]
