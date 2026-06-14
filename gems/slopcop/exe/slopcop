@@ -14,14 +14,14 @@ def usage
 
     --coverage
              SimpleCov .resultset.json, kcov output directory,
-             kcov Cobertura XML, or kcov codecov JSON
+             kcov Cobertura XML, kcov codecov JSON, coverage.py JSON,
+             or Nil-Kill branch coverage JSON
     --files  repo-relative source files to triage (default: app/lib/src;
-             .rb in RubyVM mode, Decomplex Tree-sitter extensions in
-             DECOMPLEX_PARSER=tree_sitter mode)
+             Decomplex Tree-sitter source extensions)
     --ffi    project external-boundary method names (the per-project
              lexicon; the gem ships none -- it is general)
     --diagnostic
-             project methods that report/raise invalid-input diagnostics
+             project methods that emit invalid-input diagnostics
              and should not be treated as ordinary reachable work
     --mutation
              mutant-facts/v1 JSON with file/method kill-rate and gate
@@ -36,20 +36,15 @@ end
 usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
 usage unless ARGV[0] == "report"
 
-TREE_SITTER_EXTS = %w[rb py js jsx mjs cjs ts tsx go rs zig].freeze
-
-def tree_sitter_parser?
-  ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
-end
+TREE_SITTER_EXTS = %w[rb py pyi js jsx mjs cjs ts tsx go rs zig].freeze
 
 def default_file_globs
-  exts = tree_sitter_parser? ? TREE_SITTER_EXTS : %w[rb]
   roots = %w[app lib src]
-  roots.product(exts).map { |root, ext| "#{root}/**/*.#{ext}" }
+  roots.product(TREE_SITTER_EXTS).map { |root, ext| "#{root}/**/*.#{ext}" }
 end
 
 def selected_parser
-  tree_sitter_parser? ? "tree_sitter" : "rubyvm"
+  "tree_sitter"
 end
 
 def repo_relative(path, repo)

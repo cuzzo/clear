@@ -60,6 +60,10 @@ class SyntaxTest < Minitest::Test
   end
 
   def test_tree_sitter_parser_path_requires_a_grammar
+    adapter_class = Decomplex::Syntax::TreeSitterAdapter
+    original = adapter_class.instance_method(:grammar_candidates)
+    adapter_class.define_method(:grammar_candidates) { |_language| [] }
+
     with_file("def a; end\n") do |path|
       error = nil
       with_env("DECOMPLEX_TS_RUBY_PATH", nil) do
@@ -69,6 +73,21 @@ class SyntaxTest < Minitest::Test
       end
       assert_match(/missing Tree-sitter grammar/, error.message)
     end
+  ensure
+    adapter_class&.define_method(:grammar_candidates, original) if original
+  end
+
+  def test_tree_sitter_grammar_candidates_keep_only_current_platform_prebuilds
+    adapter = Decomplex::Syntax::TreeSitterAdapter.new
+    os = adapter.send(:host_os)
+    arch = adapter.send(:host_arch)
+    skip "unknown host platform" unless os && arch
+
+    current = "/tmp/pkg/prebuilds/#{os}-#{arch}/tree-sitter-ruby.node"
+    other = "/tmp/pkg/prebuilds/darwin-arm64/tree-sitter-ruby.node"
+    other = "/tmp/pkg/prebuilds/linux-x64/tree-sitter-ruby.node" if other == current
+
+    assert_equal [current], adapter.send(:platform_prebuilds, [other, current])
   end
 
   def test_tree_sitter_ruby_adapter_extracts_portable_facts_when_grammar_is_available

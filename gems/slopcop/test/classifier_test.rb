@@ -28,6 +28,36 @@ class ClassifierTest < Minitest::Test
     refute C.type_guard_text?("x.bar(1)")
   end
 
+  def test_language_lexicons_drive_type_guard_detection
+    assert C.type_guard_text?("x.is_a?(Type)", language: :ruby)
+    refute C.type_guard_text?("x.is_a?(Type)", language: :python)
+    assert C.type_guard_text?("isinstance(x, Type)", language: :python)
+    assert C.type_guard_text?("value is None", language: :python)
+    assert C.type_guard_text?("typeof value === 'string'", language: :javascript)
+    assert C.type_guard_text?("err != nil", language: :go)
+    assert C.type_guard_text?("value.is_none()", language: :rust)
+    assert C.type_guard_text?("@typeInfo(T)", language: :zig)
+  end
+
+  def test_language_lexicons_drive_diagnostic_detection
+    assert C.diagnostic_text?("raise 'x'", language: :ruby)
+    refute C.diagnostic_text?("panic('x')", language: :ruby)
+    assert C.diagnostic_text?("raise ValueError('x')", language: :python)
+    assert C.diagnostic_text?("throw new Error('x')", language: :typescript)
+    assert C.diagnostic_text?("panic(\"bad\")", language: :go)
+    assert C.diagnostic_text?("panic!(\"bad\")", language: :rust)
+    assert C.diagnostic_text?("@panic(\"bad\")", language: :zig)
+  end
+
+  def test_categorize_uses_language_lexicon
+    assert_equal :diagnostic,
+                 C.categorize_text("m", :if, "panic(\"bad\")", true,
+                                   nil, [], [], language: :go)
+    assert_equal :type_norm,
+                 C.categorize_text("m", :if, "return 1", false,
+                                   "isinstance(x, Type)", [], [], language: :python)
+  end
+
   def test_trivial_is_the_narrow_inert_residue
     assert C.trivial_text?(nil)
     assert C.trivial_text?("nil")

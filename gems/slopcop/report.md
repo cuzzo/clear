@@ -97,12 +97,12 @@ _6909 dark arms; only 4587 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 992 | 14.4% | type/nil guard -- likely dead if runtime contracts were stricter |
+| type_norm | 992 | 14.4% | type/null guard -- likely dead if runtime contracts were stricter |
 | dead | 38 | 0.6% | decision never executes in coverage -- audit as missing test or statically-dead code |
 | defensive | 574 | 8.3% | inert / invariant-pinned -- accept, exclude from denominator |
 | spurious | 409 | 5.9% | span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?) |
 | ffi | 0 | 0.0% | external/boundary call -- needs an integration test |
-| diagnostic | 309 | 4.5% | error/raise/diagnostic path -- reachable only by invalid input (negative test) |
+| diagnostic | 309 | 4.5% | language diagnostic/error path -- reachable only by invalid input (negative test) |
 | genuine | 4587 | 66.4% | real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance |
 
 ## Run Summary

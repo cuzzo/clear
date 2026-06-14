@@ -19,22 +19,22 @@ module SlopCop
     # testing-strategy-neutral; the consuming project decides what a
     # "negative test" / "integration test" concretely is.
     ACTION = {
-      type_norm:  "type/nil guard -- likely dead if runtime contracts were stricter",
+      type_norm:  "type/null guard -- likely dead if runtime contracts were stricter",
       dead:       "decision never executes in coverage -- audit as missing test or statically-dead code",
       defensive:  "inert / invariant-pinned -- accept, exclude from denominator",
       spurious:   "span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?)",
       ffi:        "external/boundary call -- needs an integration test",
-      diagnostic: "error/raise/diagnostic path -- reachable only by invalid input (negative test)",
+      diagnostic: "language diagnostic/error path -- reachable only by invalid input (negative test)",
       genuine:    "real reachable gap -- test it; ranked by fix-churn x decomplex structural deviance"
     }.freeze
     CATS = ACTION.keys.freeze
 
     module_function
 
-    # files: repo-relative .rb paths. repo: absolute root. resultset:
-    # SimpleCov json. ffi_boundary and diagnostic_mids are
-    # caller-supplied lexicons (the gem ships none beyond general Ruby
-    # raise/fail/abort -- consuming projects provide their own).
+    # files: repo-relative source paths. repo: absolute root. resultset:
+    # any Boobytrap-normalized coverage input. ffi_boundary and
+    # diagnostic_mids are caller-supplied project lexicons; language
+    # defaults come from Decomplex::Syntax.
     def run(files:, repo:, resultset:, ffi_boundary: [], diagnostic_mids: [],
             mutation: nil, exclude: [])
       repo = File.realpath(repo)

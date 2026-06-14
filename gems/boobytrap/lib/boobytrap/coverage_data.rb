@@ -195,6 +195,9 @@ module Boobytrap
       if file_coverage&.branch_arm_coverage?
         return native_branch_arm_coverage(file_coverage, branch_arms)
       end
+      if file_coverage&.branch_coverage?
+        return tuple_branch_arm_coverage(file_coverage, branch_arms)
+      end
 
       return [] unless file_coverage&.line_coverage?
 
@@ -212,6 +215,71 @@ module Boobytrap
           source: branch_source(file_coverage.format)
         )
       end
+    end
+
+    def tuple_branch_arm_coverage(file_coverage, branch_arms)
+      file_coverage.branches.flat_map do |parent_key, arms|
+        parent = coverage_tuple(parent_key)
+        arms.flat_map do |arm_key, hits|
+          tuple = coverage_tuple(arm_key)
+          next [] unless tuple
+
+          matching_branch_arms(branch_arms, parent, tuple).map do |arm|
+            ArmCoverage.new(
+              arm: arm,
+              covered: hits.to_i.positive?,
+              hits: hits.to_i,
+              executable_lines: [arm.line],
+              source: branch_source(file_coverage.format)
+            )
+          end
+        end
+      end
+    end
+
+    def matching_branch_arms(branch_arms, parent, tuple)
+      candidates = branch_arms.select { |arm| same_span?(arm.span, tuple[:span]) }
+      if candidates.empty?
+        candidates = branch_arms.select { |arm| span_contains?(arm.span, tuple[:span]) }
+      end
+      if candidates.empty?
+        candidates = branch_arms.select do |arm|
+          arm.line.to_i == tuple[:span][0] && arm.member.to_s == tuple[:kind].to_s
+        end
+      end
+      if parent && candidates.size > 1
+        decision_span = parent[:span]
+        narrowed = candidates.select do |arm|
+          same_span?(arm.decision_span, decision_span) || arm.decision_line.to_i == decision_span[0]
+        end
+        candidates = narrowed unless narrowed.empty?
+      end
+      candidates
+    end
+
+    def coverage_tuple(value)
+      fields = value.to_s.gsub(/[\[\]\":]/, "").split(",").map(&:strip)
+      return nil if fields.size < 6
+
+      {
+        kind: fields[0].delete_prefix(":"),
+        id: fields[1],
+        span: fields[-4, 4].map(&:to_i)
+      }
+    end
+
+    def same_span?(left, right)
+      Array(left).map(&:to_i) == Array(right).map(&:to_i)
+    end
+
+    def span_contains?(outer, inner)
+      outer = Array(outer).map(&:to_i)
+      inner = Array(inner).map(&:to_i)
+      return false unless outer.size == 4 && inner.size == 4
+
+      starts_before = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1])
+      ends_after = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3])
+      starts_before && ends_after
     end
 
     def dark_branch_misses_by_line(file_coverage, branch_arms)
