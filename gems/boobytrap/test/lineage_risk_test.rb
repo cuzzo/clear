@@ -26,7 +26,14 @@ class LineageRiskTest < Minitest::Test
           "changes" => 2,
           "moves" => 1,
           "fixes" => 4,
-          "risk_score" => 3.5
+          "risk_score" => 3.5,
+          "current_distinct_tests" => 2,
+          "current_test_types" => "integration,unit",
+          "current_mutant_verified_tests" => 1,
+          "current_mutant_killed_tests" => 1,
+          "last_test_exposure_at" => 20,
+          "latest_fix_at" => 10,
+          "fixes_after_test_exposure" => 0
         }
       ])
     RUBY
@@ -44,9 +51,55 @@ class LineageRiskTest < Minitest::Test
     unit = data[:index].fetch(["src/compiler.rb", "compile"])
     assert_equal 3.5, unit.risk_score
     assert_equal 4, unit.fixes
+    assert data[:has_test_exposure]
+    assert_equal ["integration", "unit"], unit.current_test_types
+    assert_equal "lineage: 2 tests; integration/unit; mutant killed 1/1; hardened after latest fix",
+                 Boobytrap::LineageRisk.test_exposure_status(unit)
+    assert_equal "mutation-killed exposure (lineage)",
+                 Boobytrap::LineageRisk.exposure_profile(unit)
+    assert_operator Boobytrap::LineageRisk.exposure_multiplier(
+      unit,
+      active: true,
+      complexity: 8,
+      history: 1.0,
+      coverage_gap: 1.0
+    ), :<, 1.0
   ensure
     db&.unlink
     cmd&.unlink
+  end
+
+  def test_stale_lineage_test_exposure_is_reported_but_not_discounted
+    unit = Boobytrap::LineageRisk.unit_from_json(
+      "id" => "u1",
+      "name" => "compile",
+      "kind" => "function",
+      "original_path" => "src/compiler.rb",
+      "total_events" => 7,
+      "changes" => 2,
+      "moves" => 1,
+      "fixes" => 4,
+      "risk_score" => 3.5,
+      "current_distinct_tests" => 3,
+      "current_test_types" => "unit",
+      "current_mutant_verified_tests" => 3,
+      "current_mutant_killed_tests" => 3,
+      "last_test_exposure_at" => 10,
+      "latest_fix_at" => 20,
+      "fixes_after_test_exposure" => 1
+    )
+
+    assert_equal "stale lineage exposure ignored",
+                 Boobytrap::LineageRisk.exposure_profile(unit)
+    assert_includes Boobytrap::LineageRisk.test_exposure_status(unit),
+                    "ignored: 1 later fix(es)"
+    assert_equal 1.0, Boobytrap::LineageRisk.exposure_multiplier(
+      unit,
+      active: true,
+      complexity: 8,
+      history: 1.0,
+      coverage_gap: 1.0
+    )
   end
 
   def test_load_falls_back_to_cargo_when_local_binary_is_stale

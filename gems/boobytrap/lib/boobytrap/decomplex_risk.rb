@@ -19,7 +19,7 @@ module Boobytrap
       from_sections(sections, root: root)
     rescue ArgumentError
       raise
-    rescue SyntaxError, StandardError => e
+    rescue LoadError, SyntaxError, StandardError => e
       warn "boobytrap: decomplex risk unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       {}
     end
@@ -34,7 +34,7 @@ module Boobytrap
       findings.map do |h|
         h.merge(file: relpath(h[:file], root))
       end
-    rescue SyntaxError, StandardError => e
+    rescue LoadError, SyntaxError, StandardError => e
       warn "boobytrap: decomplex state-branch density unavailable: #{e.message}" if ENV["BOOBYTRAP_DEBUG"]
       []
     end

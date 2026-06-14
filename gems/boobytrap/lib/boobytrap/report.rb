@@ -359,7 +359,7 @@ module Boobytrap
            "#{@have_cov ? @coverage_mode : 'ABSENT (fix-churn only)'}\n"
       o << "- Mutation facts: #{@mutation_facts.active? ? @mutation_facts.label : 'not supplied'}\n"
       o << "- Test exposure facts: " \
-           "#{@test_exposure_facts.active? ? @test_exposure_facts.label : 'not supplied'}\n"
+           "#{test_exposure_label}\n"
       o << "- Lineage DB: #{@lineage[:status] == :ok ? @lineage[:label] : 'not supplied'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
@@ -370,7 +370,7 @@ module Boobytrap
     end
 
     def empirical_columns?
-      @mutation_facts.active? || @test_exposure_facts.active?
+      @mutation_facts.active? || @test_exposure_facts.active? || @lineage[:has_test_exposure]
     end
 
     def empirical_profile(row)
@@ -463,7 +463,30 @@ module Boobytrap
         row.lineage_moves = unit.moves
         lineage_norm = unit.risk_score.to_f / max
         row.risk = (row.risk.to_f * (1.0 + lineage_norm)).round(4)
+        apply_lineage_test_exposure_risk!(row, unit, row.fix_norm)
       end
+    end
+
+    def apply_lineage_test_exposure_risk!(row, unit, fix_norm)
+      return if @test_exposure_facts.active?
+      return unless unit.test_exposure?
+
+      row.test_exposure_status = LineageRisk.test_exposure_status(unit)
+      row.test_exposure_profile = LineageRisk.exposure_profile(unit)
+      row.distinct_test_count = unit.current_distinct_tests
+      row.tested_line_count = 0
+      row.tested_branch_count = 0
+      row.mutant_verified_test_count = unit.current_mutant_verified_tests
+      row.mutant_killed_test_count = unit.current_mutant_killed_tests
+      structural_score = empirical_structural_score(row)
+      row.test_exposure_multiplier = LineageRisk.exposure_multiplier(
+        unit,
+        active: true,
+        complexity: structural_score,
+        history: fix_norm,
+        coverage_gap: row.line_gap
+      )
+      row.risk = (row.risk * row.test_exposure_multiplier).round(4)
     end
 
     def lineage_cell(row)
@@ -502,7 +525,8 @@ module Boobytrap
         line_gap = m&.line_gap.to_f
         dark = m&.uncovered_branches.to_i
         risk = h[:score].to_f * (1.0 + fix_norm) *
-               (1.0 + branch_gap) * (1.0 + line_gap) + dark
+               (1.0 + branch_gap) * (1.0 + line_gap) *
+               (m&.test_exposure_multiplier || 1.0) + dark
         h.merge(
           file: file,
           method: method,
@@ -513,6 +537,13 @@ module Boobytrap
           risk: risk
         )
       end.sort_by { |h| [-h[:risk], -h[:decisions], h[:file], h[:method]] }
+    end
+
+    def test_exposure_label
+      return @test_exposure_facts.label if @test_exposure_facts.active?
+      return "#{@lineage[:label]} (Lineage)" if @lineage[:has_test_exposure]
+
+      "not supplied"
     end
   end
 end

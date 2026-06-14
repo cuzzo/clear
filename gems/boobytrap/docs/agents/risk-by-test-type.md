@@ -171,36 +171,44 @@ Boobytrap should support both:
 - `mutant-facts/v1` for coarse method verification status
 - `test-exposure/v1` for distinct test cardinality and test type
 
-## 7. Future Lineage Integration: Historical Hardening Decay
+## 7. Lineage Integration: Historical Hardening Decay
 
-The next major step belongs in Lineage, not Boobytrap's one-shot report
-loader.
+The historical version belongs in Lineage, not Boobytrap's one-shot
+report loader.
 
-Lineage should track quality events over time:
+Lineage tracks quality and exposure events over time:
 
 - a function had bug-fix events in the past
 - later commits added substantial unit/integration/fuzz coverage
 - later commits added mutation-killed tests
 - subsequent bug-fix events did or did not continue after that hardening
 
-Boobytrap should eventually consume a Lineage "hardening verdict":
+Boobytrap consumes Lineage's current exposure snapshot and event-order
+fields from the `summary --format json` output:
 
-- `unhardened`: historically buggy and still weakly protected
-- `hardened`: historically buggy but substantially protected after the
-  last bug
-- `failed_hardening`: coverage/mutants were added, but bugs continued
-- `regressed`: protection existed and later disappeared
+- `current_distinct_tests`
+- `current_test_types`
+- `current_mutant_verified_tests`
+- `current_mutant_killed_tests`
+- `last_test_exposure_at`
+- `latest_fix_at`
+- `fixes_after_test_exposure`
 
-Risk handling:
+Risk handling in Boobytrap:
 
-- `hardened` should dramatically decay the historical bug signal.
-- `failed_hardening` should preserve or increase risk because tests are
-  likely insufficient or aimed at the wrong behavior.
-- `regressed` should raise risk because the safety net disappeared.
+- exposure after the latest fix can dramatically reduce method risk,
+  especially when mutation-killed tests are present
+- exposure with later fixes is reported but ignored as stale/failed
+  hardening
+- missing mutation status is neutral; sparse historical mutant data does
+  not count as killed evidence or survived evidence
+- direct `--test-exposure` takes precedence over Lineage exposure to
+  avoid double-counting the same current test run
 
-This requires Lineage to record ordered fix events, coverage events,
-mutation events, and possibly test-type events per logical unit. After
-that, Boobytrap can consume the verdict and adjust method/file ranking.
+This is intentionally conservative. Lineage stores the raw
+`test_exposure_events` ledger, so a future pass can add richer verdicts
+such as `regressed` or type-specific hardening without changing
+Boobytrap's report contract.
 
 ## 8. Implementation Status
 
@@ -209,11 +217,10 @@ Current Boobytrap implementation:
 - consumes aggregate line/branch coverage
 - consumes `mutant-facts/v1`
 - consumes `test-exposure/v1`
+- consumes Lineage-backed `test_exposure_events` via the Lineage JSON
+  summary
 - reports named-test exposure on mostly uncovered methods
-- adjusts method risk based on test exposure and mutation-killed tests
-
-Pending Lineage work:
-
-- persist test exposure and mutation events historically
-- derive hardening verdicts from event order
-- expose those verdicts to Boobytrap for historical decay
+- adjusts method and state-branch risk based on fresh test exposure and
+  mutation-killed tests
+- ignores stale Lineage exposure when later fix events show the
+  hardening did not stop bugs

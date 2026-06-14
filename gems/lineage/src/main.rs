@@ -120,7 +120,7 @@ fn main() -> Result<()> {
             } else {
                 for (index, unit) in units.iter().enumerate() {
                     println!(
-                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={}",
+                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={} tests={} mutant_killed={}/{}",
                         index + 1,
                         unit.kind,
                         unit.name,
@@ -129,7 +129,10 @@ fn main() -> Result<()> {
                         unit.fixes,
                         unit.changes,
                         unit.moves,
-                        unit.total_events
+                        unit.total_events,
+                        unit.current_distinct_tests,
+                        unit.current_mutant_killed_tests,
+                        unit.current_mutant_verified_tests
                     );
                 }
             }
@@ -218,7 +221,7 @@ fn print_json_summary(units: &[lineage::UnitSummary]) {
             print!(",");
         }
         print!(
-            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6}}}",
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6},\"current_distinct_tests\":{},\"current_test_types\":\"{}\",\"current_mutant_verified_tests\":{},\"current_mutant_killed_tests\":{},\"last_test_exposure_at\":{},\"latest_fix_at\":{},\"latest_change_at\":{},\"fixes_after_test_exposure\":{},\"changes_after_test_exposure\":{}}}",
             json_escape(&unit.id),
             json_escape(&unit.name),
             json_escape(&unit.kind),
@@ -228,7 +231,16 @@ fn print_json_summary(units: &[lineage::UnitSummary]) {
             unit.changes,
             unit.moves,
             unit.fixes,
-            unit.risk_score
+            unit.risk_score,
+            unit.current_distinct_tests,
+            json_escape(&unit.current_test_types),
+            unit.current_mutant_verified_tests,
+            unit.current_mutant_killed_tests,
+            unit.last_test_exposure_at,
+            unit.latest_fix_at,
+            unit.latest_change_at,
+            unit.fixes_after_test_exposure,
+            unit.changes_after_test_exposure
         );
     }
     println!("]");

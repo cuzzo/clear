@@ -23,6 +23,15 @@ pub struct UnitSummary {
     pub moves: i64,
     pub fixes: i64,
     pub risk_score: f64,
+    pub current_distinct_tests: i64,
+    pub current_test_types: String,
+    pub current_mutant_verified_tests: i64,
+    pub current_mutant_killed_tests: i64,
+    pub last_test_exposure_at: i64,
+    pub latest_fix_at: i64,
+    pub latest_change_at: i64,
+    pub fixes_after_test_exposure: i64,
+    pub changes_after_test_exposure: i64,
 }
 
 impl Storage {
@@ -511,10 +520,34 @@ impl Storage {
               COUNT(e.id) AS total_events,
               SUM(CASE WHEN e.event_type = 'CHANGE' THEN 1 ELSE 0 END) AS changes,
               SUM(CASE WHEN e.event_type = 'MOVE' THEN 1 ELSE 0 END) AS moves,
-              SUM(CASE WHEN e.event_type = 'FIX' THEN 1 ELSE 0 END) AS fixes
+              SUM(CASE WHEN e.event_type = 'FIX' THEN 1 ELSE 0 END) AS fixes,
+              u.current_distinct_tests,
+              u.current_test_types,
+              u.current_mutant_verified_tests,
+              u.current_mutant_killed_tests,
+              u.last_test_exposure_at,
+              MAX(CASE WHEN e.event_type = 'FIX' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_fix_at,
+              MAX(CASE WHEN e.event_type = 'CHANGE' AND e.semantic_change = 1 THEN e.timestamp ELSE 0 END) AS latest_change_at,
+              SUM(CASE
+                WHEN u.last_test_exposure_at > 0
+                 AND e.event_type = 'FIX'
+                 AND e.semantic_change = 1
+                 AND e.timestamp > u.last_test_exposure_at
+                THEN 1 ELSE 0
+              END) AS fixes_after_test_exposure,
+              SUM(CASE
+                WHEN u.last_test_exposure_at > 0
+                 AND e.event_type = 'CHANGE'
+                 AND e.semantic_change = 1
+                 AND e.timestamp > u.last_test_exposure_at
+                THEN 1 ELSE 0
+              END) AS changes_after_test_exposure
             FROM logical_units u
             JOIN events e ON e.unit_id = u.id
-            GROUP BY u.id, u.name, u.type, u.original_path
+            GROUP BY u.id, u.name, u.type, u.original_path,
+                     u.current_distinct_tests, u.current_test_types,
+                     u.current_mutant_verified_tests,
+                     u.current_mutant_killed_tests, u.last_test_exposure_at
             "#,
         )?;
 
@@ -529,6 +562,15 @@ impl Storage {
                 changes: row.get(6)?,
                 moves: row.get(7)?,
                 fixes: row.get(8)?,
+                current_distinct_tests: row.get(9)?,
+                current_test_types: row.get(10)?,
+                current_mutant_verified_tests: row.get(11)?,
+                current_mutant_killed_tests: row.get(12)?,
+                last_test_exposure_at: row.get(13)?,
+                latest_fix_at: row.get(14)?,
+                latest_change_at: row.get(15)?,
+                fixes_after_test_exposure: row.get(16)?,
+                changes_after_test_exposure: row.get(17)?,
                 risk_score: 0.0,
             })
         })?;
@@ -798,5 +840,80 @@ mod tests {
 
         assert_eq!(storage.count_rows("test_exposure_events").unwrap(), 2);
         assert_eq!(summary, (2, "integration,unit".into(), 1, 1, 10));
+    }
+
+    #[test]
+    fn top_units_include_test_exposure_hardening_fields() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "fix1".into(),
+                event_type: EventType::Fix,
+                path: "src/a.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 1,
+                lines_removed: 0,
+                timestamp: 10,
+            })
+            .unwrap();
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "cov1".into(),
+                timestamp: 20,
+                path: "src/a.rb".into(),
+                function: Some("run".into()),
+                line: Some(2),
+                branch_id: None,
+                test_id: "spec/a_spec.rb:1".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id,
+                commit_hash: "fix2".into(),
+                event_type: EventType::Fix,
+                path: "src/a.rb".into(),
+                name: "run".into(),
+                start_line: 1,
+                end_line: 3,
+                semantic_change: true,
+                lines_added: 1,
+                lines_removed: 0,
+                timestamp: 30,
+            })
+            .unwrap();
+
+        let top = storage.top_units(10, &[]).unwrap();
+
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].current_distinct_tests, 1);
+        assert_eq!(top[0].current_test_types, "unit");
+        assert_eq!(top[0].current_mutant_verified_tests, 1);
+        assert_eq!(top[0].current_mutant_killed_tests, 1);
+        assert_eq!(top[0].last_test_exposure_at, 20);
+        assert_eq!(top[0].latest_fix_at, 30);
+        assert_eq!(top[0].fixes_after_test_exposure, 1);
     }
 }
