@@ -18,6 +18,7 @@ module NilKill
       sorbet_validate_high_actions! if @run_sorbet
       build_flow_graph
       build_fallibility_pressure
+      build_hidden_enum_pressure
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
@@ -403,6 +404,13 @@ module NilKill
         NilKill.target_files,
         runtime_methods: @store.methods.values,
         runtime_edges: @store.facts["runtime_call_edges"]
+      )
+    end
+
+    def build_hidden_enum_pressure
+      @store.facts["hidden_enum_pressure"] = HiddenEnumPressure.scan(
+        NilKill.target_files,
+        evidence: @store.to_h
       )
     end
 
