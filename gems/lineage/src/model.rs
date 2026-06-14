@@ -174,6 +174,21 @@ pub struct TestExposureEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HazardEvent {
+    pub unit_id: String,
+    pub language: String,
+    pub hazard_type: String,
+    pub required_evidence: String,
+    pub path: String,
+    pub line: u32,
+    pub symbol: Option<String>,
+    pub source: String,
+    pub detected_at_hash: String,
+    pub is_active: bool,
+    pub payload_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitMetadata {
     pub hash: String,
     pub message: String,

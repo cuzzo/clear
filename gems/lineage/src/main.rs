@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
-    ingest_coverage_json, ingest_stack_traces, ingest_test_exposure_json, GitProvider,
+    ingest_coverage_json, ingest_hazards, ingest_stack_traces, ingest_test_exposure_json, GitProvider,
     HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
@@ -63,6 +63,19 @@ enum Command {
         repo: PathBuf,
         #[arg(long)]
         input: PathBuf,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        timestamp: Option<i64>,
+    },
+    /// Ingest current hazard sites for one provider and commit.
+    IngestHazards {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = "zig")]
+        provider: String,
         #[arg(long)]
         commit: String,
         #[arg(long)]
@@ -181,6 +194,20 @@ fn main() -> Result<()> {
                 stats.unverified,
                 stats.skipped_files,
                 stats.skipped_records
+            );
+        }
+        Command::IngestHazards {
+            db,
+            repo,
+            provider,
+            commit,
+            timestamp,
+        } => {
+            let storage = Storage::open(&db)?;
+            let stats = ingest_hazards(&storage, &repo, &provider, &commit, timestamp)?;
+            println!(
+                "ingested hazards: scanned_files={} hazards={} events={}",
+                stats.scanned_files, stats.hazards, stats.events
             );
         }
         Command::Ingest {

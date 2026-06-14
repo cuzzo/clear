@@ -1,6 +1,6 @@
 use crate::model::{
     CommitMetadata, CrashEvent, Event, LogicalUnit, QualityEvent, QualityMetric,
-    TestExposureEvent,
+    HazardEvent, TestExposureEvent,
 };
 use anyhow::Result;
 use rusqlite::{params, Connection};
@@ -142,6 +142,22 @@ impl Storage {
               FOREIGN KEY(unit_id) REFERENCES logical_units(id)
             );
 
+            CREATE TABLE IF NOT EXISTS unit_hazards (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              unit_id TEXT NOT NULL,
+              language TEXT NOT NULL,
+              hazard_type TEXT NOT NULL,
+              required_evidence TEXT NOT NULL,
+              path TEXT NOT NULL,
+              line INTEGER NOT NULL,
+              symbol TEXT,
+              source TEXT NOT NULL,
+              detected_at_hash TEXT NOT NULL,
+              is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+              payload_json TEXT NOT NULL,
+              FOREIGN KEY(unit_id) REFERENCES logical_units(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_unit_id ON events(unit_id);
             CREATE INDEX IF NOT EXISTS idx_events_commit_hash ON events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
@@ -153,6 +169,10 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_commit_hash ON test_exposure_events(commit_hash);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_test_id ON test_exposure_events(test_id);
             CREATE INDEX IF NOT EXISTS idx_test_exposure_events_type ON test_exposure_events(test_type);
+            CREATE INDEX IF NOT EXISTS idx_unit_hazards_unit_id ON unit_hazards(unit_id);
+            CREATE INDEX IF NOT EXISTS idx_unit_hazards_path_line ON unit_hazards(path, line);
+            CREATE INDEX IF NOT EXISTS idx_unit_hazards_type ON unit_hazards(hazard_type);
+            CREATE INDEX IF NOT EXISTS idx_unit_hazards_detected_at ON unit_hazards(detected_at_hash);
             "#,
         )?;
         self.ensure_logical_unit_column("current_line_cov", "REAL DEFAULT 0.0")?;
@@ -416,6 +436,38 @@ impl Storage {
         Ok(())
     }
 
+    pub fn deactivate_active_hazards(&self, language: &str) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE unit_hazards SET is_active = 0 WHERE language = ?1 AND is_active = 1",
+            params![language],
+        )?)
+    }
+
+    pub fn insert_hazard_event(&self, event: &HazardEvent) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO unit_hazards
+              (unit_id, language, hazard_type, required_evidence, path, line,
+               symbol, source, detected_at_hash, is_active, payload_json)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                event.unit_id,
+                event.language,
+                event.hazard_type,
+                event.required_evidence,
+                event.path,
+                event.line,
+                event.symbol,
+                event.source,
+                event.detected_at_hash,
+                if event.is_active { 1 } else { 0 },
+                event.payload_json
+            ],
+        )?;
+        Ok(())
+    }
+
     fn refresh_test_exposure_summary(&self, unit_id: &str) -> Result<()> {
         let mut latest_stmt = self.conn.prepare(
             r#"
@@ -651,7 +703,8 @@ fn checked_table(table: &str) -> Result<&str> {
         | "metadata"
         | "quality_events"
         | "crash_events"
-        | "test_exposure_events" => Ok(table),
+        | "test_exposure_events"
+        | "unit_hazards" => Ok(table),
         _ => anyhow::bail!("unsupported table {table:?}"),
     }
 }
@@ -769,6 +822,40 @@ mod tests {
         }).unwrap();
 
         assert_eq!(storage.count_rows("crash_events").unwrap(), 1);
+    }
+
+    #[test]
+    fn records_and_deactivates_hazard_events() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "zig/runtime/a.zig",
+            1,
+            1,
+            3,
+            "fn run",
+            "fn run() void {\nvalue.store(1, .release);\n}",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_hazard_event(&HazardEvent {
+                unit_id: unit.id,
+                language: "zig".into(),
+                hazard_type: "zig_loom_atomic".into(),
+                required_evidence: "loom".into(),
+                path: "zig/runtime/a.zig".into(),
+                line: 2,
+                symbol: Some("run".into()),
+                source: "value.store(1, .release);".into(),
+                detected_at_hash: "abc".into(),
+                is_active: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+
+        assert_eq!(storage.count_rows("unit_hazards").unwrap(), 1);
+        assert_eq!(storage.deactivate_active_hazards("zig").unwrap(), 1);
     }
 
     #[test]

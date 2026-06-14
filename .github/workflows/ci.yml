@@ -813,6 +813,91 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  zig-special-coverage:
+    name: Zig ${{ matrix.suite }} coverage (kcov, shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [loom, vopr]
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+          kcov --version
+      - working-directory: zig
+        run: zig build coverage-${{ matrix.suite }} -Dcoverage-${{ matrix.suite }} -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-${{ matrix.suite }}-${{ matrix.shard }}
+          path: zig/zig-out/coverage-${{ matrix.suite }}/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  zig-constraint-sarif:
+    name: Zig constraint coverage SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - zig-special-coverage
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Download specialized Zig coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/zig-special-coverage-artifacts
+      - name: Generate SlopCop constraint SARIF
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          mkdir -p tmp
+          args=()
+          while IFS= read -r path; do
+            args+=(--coverage="loom:${path}")
+          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-loom-*/*cobertura.xml' -type f | sort)
+          while IFS= read -r path; do
+            args+=(--coverage="vopr:${path}")
+          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
+          bundle exec ruby gems/slopcop/exe/slopcop constraints \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            "${args[@]}" \
+            --sarif=tmp/slopcop-zig-constraints.sarif \
+            --markdown=tmp/slopcop-zig-constraints.md
+      - name: Upload SlopCop constraint SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tmp/slopcop-zig-constraints.sarif
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcop-zig-constraints
+          path: |
+            tmp/slopcop-zig-constraints.sarif
+            tmp/slopcop-zig-constraints.md
+          if-no-files-found: error
+          retention-days: 7
+
   diff-coverage-comment:
     name: Diff coverage bucket PR comment
     runs-on: ubuntu-latest
