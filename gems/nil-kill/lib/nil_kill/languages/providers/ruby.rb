@@ -1,6 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
+require_relative "ruby/sorbet"
+
 module NilKill
   module Languages
     module Providers
@@ -15,6 +17,10 @@ module NilKill
 
         def static_parser
           "tree_sitter"
+        end
+
+        def type_systems
+          sorbet.type_systems
         end
 
         def runtime_tracing?
@@ -55,6 +61,39 @@ module NilKill
 
         def notes
           ["runtime collection uses the existing nil-kill collect command and Ruby source instrumentation"]
+        end
+
+        def method_source(function_def)
+          sorbet.method_source(function_def)
+        end
+
+        def static_method_signature(function_def)
+          sorbet.signature_for(function_def)
+        end
+
+        def type_definitions(document:, facts:, rel_path:, methods:, state_declarations:)
+          sorbet.type_definitions(
+            rel_path: rel_path,
+            function_defs: Array(facts[:function_defs]),
+            state_declarations: state_declarations,
+            provider: self
+          )
+        end
+
+        def return_type_index(root:)
+          sorbet.return_type_index(root: root)
+        end
+
+        def field_type_index(root:)
+          sorbet.field_type_index(root: root)
+        end
+
+        def external_type_definitions(root:)
+          sorbet.external_type_definitions(root: root)
+        end
+
+        def sorbet
+          @sorbet ||= Sorbet.new
         end
 
         private

@@ -416,7 +416,10 @@ module NilKill
   end
 
   def rbi_return_index
-    @rbi_return_index ||= RbiReturnIndex.build
+    @rbi_return_index ||= begin
+      provider = Languages.provider_for("ruby") if defined?(Languages)
+      provider&.return_type_index(root: ROOT) || RbiReturnIndex.build
+    end
   end
 
   def display_union(classes, allow_nilable: true)

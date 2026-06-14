@@ -3,15 +3,21 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
-  it "publishes language provider capabilities for Ruby, Python, and Zig" do
+  it "publishes language provider capabilities for Ruby, Python, TypeScript, and Zig" do
     ruby = NilKill::Languages.capability_for("ruby")
     python = NilKill::Languages.capability_for("python")
+    typescript = NilKill::Languages.capability_for("typescript")
     zig = NilKill::Languages.capability_for("zig")
 
     expect(ruby).to include("runtime_tracing" => true, "autofix" => true)
+    expect(ruby["type_systems"]).to include("sorbet", "rbi")
     expect(python).to include("runtime_tracing" => true, "autofix" => false)
+    expect(python).to include("type_indexing" => true)
+    expect(python["type_systems"]).to include("python-typing")
     expect(python.dig("runtime_capabilities", "params")).to be(true)
     expect(python.dig("runtime_capabilities", "line_coverage")).to be(true)
+    expect(typescript).to include("static_analysis" => true, "runtime_tracing" => false, "type_indexing" => true)
+    expect(typescript["type_systems"]).to include("typescript")
     expect(zig).to include("static_analysis" => true, "runtime_tracing" => false)
     expect(zig["notes"].join).to include("runtime tracing is not implemented")
   end
@@ -52,18 +58,122 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
       FileUtils.mkdir_p(src)
       File.write(File.join(src, "worker.py"), <<~PY)
         class Worker:
-            def __init__(self, items):
-                self.items = items
+            def __init__(self, items: list[str]):
+                self.items: list[str] = items
 
-            def call(self):
+            def call(self, value: str | None) -> None:
                 self.items.append("x")
       PY
+      File.write(File.join(src, "client.pyi"), <<~PYI)
+        class Client:
+            name: str | None
+            def fetch(self, value: str | None) -> str | None: ...
+      PYI
 
       evidence = NilKill::StaticEvidence.build([src], root: dir)
 
+      type_definitions = evidence.dig("facts", "type_definitions")
       expect(evidence.dig("facts", "state_param_origins", "Worker\u0000@items")).to eq(["items"])
       expect(evidence.dig("facts", "state_protocols", "Worker\u0000@items")).to include("append")
+      expect(evidence.dig("facts", "state_types", "Worker\u0000@items")).to eq("list[str]")
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "python",
+        "type_system" => "python-typing",
+        "kind" => "method_signature",
+        "name" => "call",
+        "return_type" => "None"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "python",
+        "type_system" => "python-typing",
+        "kind" => "state_field",
+        "name" => "@items",
+        "declared_type" => "list[str]"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "python",
+        "type_system" => "python-typing",
+        "kind" => "method_signature",
+        "owner" => "Client",
+        "name" => "fetch",
+        "return_type" => "str | None"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "python",
+        "type_system" => "python-typing",
+        "kind" => "state_field",
+        "owner" => "Client",
+        "name" => "name",
+        "declared_type" => "str | None"
+      ))
       expect(evidence.dig("language_capabilities", "python", "runtime_tracing")).to be(true)
+      expect(evidence.dig("summary", "signatures")).to eq(3)
+    end
+  end
+
+  it "uses TypeScript provider annotations when building Tree-sitter static evidence" do
+    grammar = ENV["DECOMPLEX_TS_TYPESCRIPT_PATH"]
+    skip "set DECOMPLEX_TS_TYPESCRIPT_PATH to run TypeScript Tree-sitter static evidence test" unless grammar && File.file?(grammar)
+
+    Dir.mktmpdir("nil-kill-typescript-static", NilKill::ROOT) do |dir|
+      src = File.join(dir, "src")
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, "worker.ts"), <<~TS)
+        interface Client {
+          name?: string | null;
+          fetch(value: string | null): string | null;
+        }
+
+        class Worker {
+          private client: Client | null;
+
+          constructor(client: Client | null) {
+            this.client = client;
+          }
+
+          call(value: string | null): string | null {
+            return this.client?.fetch(value) ?? null;
+          }
+        }
+      TS
+
+      evidence = NilKill::StaticEvidence.build([src], root: dir)
+      type_definitions = evidence.dig("facts", "type_definitions")
+
+      expect(evidence.dig("facts", "state_types", "Worker\u0000@client")).to eq("Client | null")
+      expect(evidence.dig("facts", "state_param_origins", "Worker\u0000@client")).to eq(["client"])
+      expect(evidence.dig("facts", "state_protocols", "Worker\u0000@client")).to include("fetch")
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "typescript",
+        "type_system" => "typescript",
+        "kind" => "method_signature",
+        "name" => "call",
+        "return_type" => "string | null"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "typescript",
+        "type_system" => "typescript",
+        "kind" => "method_signature",
+        "owner" => "Client",
+        "name" => "fetch",
+        "return_type" => "string | null"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "typescript",
+        "type_system" => "typescript",
+        "kind" => "state_field",
+        "name" => "@client",
+        "declared_type" => "Client | null"
+      ))
+      expect(type_definitions).to include(a_hash_including(
+        "language" => "typescript",
+        "type_system" => "typescript",
+        "kind" => "state_field",
+        "owner" => "Client",
+        "name" => "name",
+        "declared_type" => "string | null"
+      ))
+      expect(evidence.dig("language_capabilities", "typescript", "type_indexing")).to be(true)
     end
   end
 
@@ -72,6 +182,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     languages = spec.fetch("language_capabilities").to_h { |cap| [cap.fetch("language"), cap] }
 
     expect(languages.fetch("python")).to include("runtime_tracing" => true)
+    expect(languages.fetch("typescript")).to include("type_indexing" => true)
     expect(languages.fetch("zig")).to include("runtime_tracing" => false)
   end
 

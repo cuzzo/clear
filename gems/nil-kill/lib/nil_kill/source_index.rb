@@ -65,6 +65,10 @@ module NilKill
       end
 
       def load_rbi_field_types
+        provider = NilKill::Languages.provider_for("ruby") if defined?(NilKill::Languages)
+        indexed = provider&.field_type_index(root: NilKill::ROOT)
+        return indexed if indexed && !indexed.empty?
+
         types = {}
         Dir.glob(File.join(NilKill::ROOT, "sorbet", "rbi", "**", "*.rbi")).each do |path|
           klass = nil

@@ -30,6 +30,7 @@ module NilKill
       state_protocols = Hash.new { |h, k| h[k] = Set.new }
       state_param_origins = Hash.new { |h, k| h[k] = Set.new }
       signatures = {}
+      type_definitions = []
       files = target_files
 
       files.each do |file|
@@ -37,55 +38,23 @@ module NilKill
         provider = Languages.provider_for(doc.language)
         facts = doc.adapter.structural_facts(doc)
         rel_path = rel(file)
-
-        facts[:function_defs].each do |fn|
-          owner = fn.owner.to_s
-          name = fn.name.to_s
-          signature = fn.signature.to_s
-          key = [owner, name, fn.kind.to_s]
-          methods << {
-            "key" => key,
-            "owner" => owner,
-            "name" => name,
-            "kind" => fn.kind.to_s,
-            "path" => rel_path,
-            "line" => fn.line,
-            "span" => fn.span,
-            "language" => doc.language.to_s,
-            "signature" => signature,
-            "params" => Array(fn.params).map(&:to_s),
-            "source" => { "sig" => signature },
-          }
-          signatures[[owner, name].join("\u0000")] = signature unless signature.empty?
-        end
-
-        known_states = declared_states_by_owner(facts, provider)
-        facts[:state_declarations].each do |state|
-          field = provider.declared_state_field(state.field)
-          fields << field_record(doc, rel_path, state, field)
-          next if state.type.to_s.empty?
-
-          state_types[state_key(state.owner, field)] = state.type.to_s
-        end
-
-        facts[:state_param_origins].each do |origin|
-          next unless provider.owned_state_origin?(origin, known_states[origin.owner.to_s])
-          next if %w[self this].include?(origin.param.to_s)
-
-          field = provider.canonical_state_field(origin.field, receiver: origin.receiver)
-          state_param_origins[state_key(origin.owner, field)].add(origin.param.to_s)
-        end
-
-        facts[:call_sites].each do |call|
-          state = provider.receiver_state_field(call.receiver, known_states[call.owner.to_s])
-          next unless state
-
-          state_protocols[state_key(call.owner, state)].add(call.message.to_s)
-        end
+        evidence = provider.static_evidence(document: doc, facts: facts, rel_path: rel_path)
+        methods.concat(evidence.fetch("methods", []))
+        fields.concat(evidence.fetch("fields", []))
+        state_types.merge!(evidence.fetch("state_types", {}))
+        merge_set_map!(state_protocols, evidence.fetch("state_protocols", {}))
+        merge_set_map!(state_param_origins, evidence.fetch("state_param_origins", {}))
+        signatures.merge!(evidence.fetch("signatures", {}))
+        type_definitions.concat(evidence.fetch("type_definitions", []))
       end
 
       state_protocols = stringify_set_map(state_protocols)
       state_param_origins = stringify_set_map(state_param_origins)
+      type_definitions = type_definitions.uniq do |definition|
+        [definition["language"], definition["path"], definition["owner"], definition["kind"],
+          definition["name"], definition["line"], definition["type_system"]]
+      end
+      typed_signature_count = type_definitions.count { |definition| definition["kind"] == "method_signature" }
 
       {
         "version" => 2,
@@ -105,6 +74,7 @@ module NilKill
           "state_protocols" => state_protocols,
           "state_param_origins" => state_param_origins,
           "signatures" => Hash[signatures.sort],
+          "type_definitions" => type_definitions.sort_by { |definition| [definition["path"].to_s, definition["owner"].to_s, definition["kind"].to_s, definition["name"].to_s] },
           "ivar_runtime" => [],
           "ivar_protocols" => state_protocols,
           "ivar_param_origins" => state_param_origins,
@@ -113,10 +83,11 @@ module NilKill
           "files" => files.size,
           "methods" => methods.size,
           "fields" => fields.uniq { |field| field["id"] }.size,
-          "signatures" => methods.count { |method| !method.dig("source", "sig").to_s.empty? },
+          "signatures" => typed_signature_count,
           "state_types" => state_types.size,
           "state_protocols" => state_protocols.size,
           "state_param_origins" => state_param_origins.size,
+          "type_definitions" => type_definitions.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
         },
@@ -168,32 +139,14 @@ module NilKill
       }
     end
 
-    def declared_states_by_owner(facts, provider)
-      index = Hash.new { |h, k| h[k] = Set.new }
-      facts[:state_declarations].each { |state| index[state.owner.to_s].add(provider.declared_state_field(state.field)) }
-      index
-    end
-
-    def state_key(owner, field)
-      [owner.to_s, field.to_s].join("\u0000")
-    end
-
-    def field_record(doc, rel_path, state, field)
-      {
-        "id" => [doc.language, rel_path, state.owner, "field", field].map(&:to_s).join("\u0000"),
-        "language" => doc.language.to_s,
-        "path" => rel_path,
-        "owner" => state.owner.to_s,
-        "name" => field.to_s,
-        "line" => state.line,
-        "span" => state.span,
-        "declared_type" => state.type.to_s.empty? ? nil : state.type.to_s,
-        "static_origin" => "state_declaration",
-      }
-    end
-
     def languages_for(files)
       files.map { |file| Decomplex::Syntax.language_for(file).to_s }.uniq.sort
+    end
+
+    def merge_set_map!(target, source)
+      source.each do |key, values|
+        Array(values).each { |value| target[key].add(value) }
+      end
     end
 
     def stringify_set_map(map)

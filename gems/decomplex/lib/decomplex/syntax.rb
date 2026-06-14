@@ -67,7 +67,7 @@ module Decomplex
     def language_for(file)
       case File.extname(file).downcase
       when ".rb" then :ruby
-      when ".py" then :python
+      when ".py", ".pyi" then :python
       when ".js", ".jsx", ".mjs", ".cjs" then :javascript
       when ".ts", ".tsx" then :typescript
       when ".go" then :go
@@ -80,7 +80,7 @@ module Decomplex
     def supported_exts(parser: self.parser)
       case parser.to_s.tr("-", "_")
       when "", "tree_sitter", "treesitter"
-        %w[.rb .py .js .jsx .mjs .cjs .ts .tsx .go .rs .zig]
+        %w[.rb .py .pyi .js .jsx .mjs .cjs .ts .tsx .go .rs .zig]
       else
         []
       end
