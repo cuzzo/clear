@@ -1,14 +1,13 @@
 # typed: false
 # frozen_string_literal: true
 
-module NilKill
+module AutoType
   class Loop
-    SKIP_FILE = File.join(ROOT, "tools", "nil-kill-skip.json")
-    Z3_SOLVER_PATH = File.expand_path("z3_solver.rb", __dir__)
+    SKIP_FILE = File.join(NilKill::ROOT, "tools", "nil-kill-skip.json")
 
     def initialize(argv)
       if argv.delete("--defaults")
-        warn "nil-kill: --defaults is review-only; nil default rewrites are not auto-applied"
+        warn "auto-type: --defaults is review-only; nil default rewrites are not auto-applied"
       end
       @try_levenshtein = !!argv.delete("--try-levenshtein")
       @try_hash_records = !!argv.delete("--hash-records")
@@ -35,9 +34,9 @@ module NilKill
     end
 
     def load_z3_solver
-      require Z3_SOLVER_PATH
+      require "nil_kill/z3_solver"
     rescue LoadError, SyntaxError => e
-      warn "nil-kill: Z3 solver not loaded (#{e.message}); running without pre-filter"
+      warn "auto-type: Z3 solver not loaded (#{e.message}); running without pre-filter"
     end
 
     def load_permanent_skip
@@ -56,17 +55,17 @@ module NilKill
     end
 
     def run
-      abort "usage: bundle exec tools/nil-kill loop -- <verify command...>" if @verify_cmd.empty? && !@verify_spec_subset
+      abort "usage: bundle exec auto-type loop -- <verify command...>" if @verify_cmd.empty? && !@verify_spec_subset
       iter = 0
       loop do
         iter += 1
-        puts "nil-kill loop iteration #{iter}"
-        Infer.new([]).run
-        evidence = Store.read
+        puts "auto-type loop iteration #{iter}"
+        NilKill::Infer.new([]).run
+        evidence = NilKill::Store.read
         @z3_solver = init_z3_solver(evidence)
         emit_z3_inferred_actions(@z3_solver, evidence) if @z3_solver
         high_actions = evidence["actions"].select do |action|
-          next false unless action["confidence"] == HIGH
+          next false unless action["confidence"] == NilKill::HIGH
           next false if @skipped.include?(fingerprint(action))
           next false if permanently_skipped?(action)
           next false if z3_preflight_skip?(action)
@@ -128,9 +127,9 @@ module NilKill
 
     def init_z3_solver(evidence)
       return nil unless defined?(NilKill::Z3Solver)
-      Z3Solver.new(evidence, NilKill.target_files)
+      NilKill::Z3Solver.new(evidence, AutoType.target_files)
     rescue StandardError => e
-      warn "nil-kill: Z3 solver init failed: #{e.message}"
+      warn "auto-type: Z3 solver init failed: #{e.message}"
       nil
     end
 
@@ -152,7 +151,7 @@ module NilKill
     def struct_rbi_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless action["kind"] == "add_struct_field_sig"
         next false if seen.include?(fingerprint(action))
         next false if @skipped.include?(fingerprint(action))
@@ -164,7 +163,7 @@ module NilKill
     def hash_record_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       actions = Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless %w[promote_hash_record_to_struct promote_hash_record_cluster_to_struct].include?(action["kind"])
         next false if seen.include?(fingerprint(action))
         next false if @skipped.include?(fingerprint(action))
@@ -188,7 +187,7 @@ module NilKill
     def signature_backflow_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       actions = Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless action["kind"] == "fix_sig_param"
         next false unless action.dig("data", "source") == "static_param_backflow"
         next false if seen.include?(fingerprint(action))
@@ -210,7 +209,7 @@ module NilKill
     def return_backflow_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       actions = Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless action["kind"] == "fix_sig_return"
         next false unless RETURN_BACKFLOW_SOURCES.include?(action.dig("data", "source").to_s)
         next false if seen.include?(fingerprint(action))
@@ -234,7 +233,7 @@ module NilKill
     def narrow_tlet_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       actions = Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless action["kind"] == "narrow_tlet"
         next false if seen.include?(fingerprint(action))
         next false if @skipped.include?(fingerprint(action))
@@ -253,7 +252,7 @@ module NilKill
     def narrow_generic_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
       actions = Array(evidence["actions"]).select do |action|
-        next false unless action["confidence"] == REVIEW
+        next false unless action["confidence"] == NilKill::REVIEW
         next false unless NARROW_GENERIC_KINDS.include?(action["kind"])
         next false unless action.dig("data", "source") == "collection_runtime"
         next false if seen.include?(fingerprint(action))
@@ -270,12 +269,12 @@ module NilKill
     end
 
     # A3: run static inference for unobserved params, write to z3-inferred.json,
-    # and print a one-line summary. Actions are REVIEW confidence -- not auto-applied.
+    # and print a one-line summary. Actions are NilKill::REVIEW confidence -- not auto-applied.
     def emit_z3_inferred_actions(solver, evidence)
       actions = solver.infer_unobserved_params(evidence)
-      out = File.join(TMP_DIR, "z3-inferred.json")
+      out = File.join(NilKill::TMP_DIR, "z3-inferred.json")
       File.write(out, JSON.pretty_generate(actions))
-      puts "Z3 A3: #{actions.size} static param inference(s) written to #{NilKill.rel(out)}"
+      puts "Z3 A3: #{actions.size} static param inference(s) written to #{AutoType.rel(out)}"
     rescue StandardError => e
       warn "nil-kill: Z3 A3 inference failed: #{e.message}"
     end
@@ -300,7 +299,7 @@ module NilKill
           next unless concrete.size > 1
           candidate = levenshtein_candidate(name, concrete)
           next unless candidate
-          actions << { "kind" => "fix_sig_param", "confidence" => HIGH, "path" => src["path"], "line" => src["line"],
+          actions << { "kind" => "fix_sig_param", "confidence" => NilKill::HIGH, "path" => src["path"], "line" => src["line"],
             "message" => "try Levenshtein param #{name} -> #{candidate[:type]} from observed #{concrete.first(8).join(", ")}",
             "data" => { "name" => name, "type" => candidate[:type], "distance" => candidate[:distance],
               "observed_classes" => concrete.sort, "callsites" => param_sites_for_levenshtein(rec)[name] || {} } }
@@ -433,7 +432,7 @@ module NilKill
       combined = out + err
       ok = status.success? && RSPEC_LOAD_FAILURE_PATTERNS.none? { |re| re.match?(combined) }
       if status.success? && !ok
-        warn "nil-kill loop: verify exit was 0 but rspec reported spec-load failures; treating as failure"
+        warn "auto-type loop: verify exit was 0 but rspec reported spec-load failures; treating as failure"
       end
       [ok, combined]
     end
@@ -444,9 +443,9 @@ module NilKill
     # found (e.g. action touches a file no spec exercises -- still want
     # srb tc + at least minimum coverage).
     def subset_verify_cmd(actions)
-      paths = snapshot_paths_for_actions(actions).map { |rel| File.expand_path(rel, ROOT) }
-      specs = SpecDependencyIndex.instance.specs_depending_on(paths)
-      rel_specs = specs.map { |abs| Pathname.new(abs).relative_path_from(Pathname.new(ROOT)).to_s }
+      paths = snapshot_paths_for_actions(actions).map { |rel| File.expand_path(rel, NilKill::ROOT) }
+      specs = NilKill::SpecDependencyIndex.instance.specs_depending_on(paths)
+      rel_specs = specs.map { |abs| Pathname.new(abs).relative_path_from(Pathname.new(NilKill::ROOT)).to_s }
       runner = self.class.spec_runner_command
       if rel_specs.empty?
         ["bash", "-c", "bundle exec srb tc"]
@@ -496,7 +495,7 @@ module NilKill
     end
 
     def feedback_for_action(action, verify_output, code)
-      infer = Infer.allocate
+      infer = NilKill::Infer.allocate
       infer.send(:parse_sorbet_feedback, verify_output).find do |feedback|
         feedback["code"] == code && feedback["path"] == action["path"] && feedback["line"].to_i == action["line"].to_i
       end
@@ -554,12 +553,12 @@ module NilKill
     end
 
     def apply_useless_tcast_feedback(feedback, allowed_paths)
-      allowed = allowed_paths.map { |path| File.expand_path(path, ROOT) }.to_set
-      grouped = feedback.group_by { |item| File.expand_path(item["path"], ROOT) }
+      allowed = allowed_paths.map { |path| File.expand_path(path, NilKill::ROOT) }.to_set
+      grouped = feedback.group_by { |item| File.expand_path(item["path"], NilKill::ROOT) }
       grouped.sum do |path, items|
         next 0 unless allowed.include?(path) && File.file?(path)
         source = File.read(path)
-        parsed = Syntax.parse(source)
+        parsed = NilKill::Syntax.parse(source)
         next 0 unless parsed.success?
         edits = []
         applier = Apply.allocate
@@ -567,7 +566,7 @@ module NilKill
           replacement = item["replacement"].to_s
           next if replacement.empty?
           applier.send(:nodes_matching, parsed.value) do |node|
-            node.is_a?(Syntax::CallNode) &&
+            node.is_a?(NilKill::Syntax::CallNode) &&
               node.location.start_line == item["line"].to_i &&
               node.name == :cast &&
               node.receiver&.slice == "T" &&
@@ -584,7 +583,7 @@ module NilKill
 
     def snapshot_files(actions)
       actions.flat_map { |action| snapshot_paths_for_action(action) }.uniq.each_with_object({}) do |rel_path, snapshot|
-        path = File.join(ROOT, rel_path)
+        path = File.join(NilKill::ROOT, rel_path)
         snapshot[path] = File.read(path) if File.file?(path)
       end
     end

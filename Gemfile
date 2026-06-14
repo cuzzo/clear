@@ -33,6 +33,7 @@ group :development do
   # Local path while nil-kill is extracted as a standalone gem.
   gem 'decomplex', path: 'gems/decomplex', require: false
   gem 'nil-kill', path: 'gems/nil-kill', require: false
+  gem 'auto-type', path: 'gems/auto-type', require: false
 
   # Rubocop with the rubocop-sorbet plugin. We don't run general
   # Rubocop style — only the `Sorbet/EnforceSignatures` cop, which

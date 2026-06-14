@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require_relative "../../auto-type/lib/auto_type"
 
 RSpec.describe NilKill do
   describe ".sorbet_type union policy" do
@@ -243,7 +244,7 @@ RSpec.describe NilKill do
         expect(lines.join("\n")).to include("### Type Soundness")
         expect(lines.join("\n")).to include("### Untyped Cause Breakdown")
         expect(lines.join("\n")).to include("## Auto-Fix Action Counts")
-        expect(lines.join("\n")).to include("HIGH (auto-applied): 1")
+        expect(lines.join("\n")).to include("HIGH (Auto-type ready): 1")
         expect(lines.join("\n")).to include("REVIEW (manual or verified-loop): 1")
         # Heavy sections must NOT be present
         expect(lines.join("\n")).not_to include("### Param T.untyped Buckets")
@@ -2484,7 +2485,7 @@ RSpec.describe NilKill do
     end
   end
 
-  describe NilKill::Loop do
+  describe AutoType::Loop do
     def loop_for_hash_records(limit: 1)
       described_class.allocate.tap do |loop|
         loop.instance_variable_set(:@skipped, Set.new)
@@ -2673,9 +2674,9 @@ RSpec.describe NilKill do
           stub_const = stub_apply
           loop.define_singleton_method(:apply_useless_tcast_feedback) { |_, _| 0 }
 
-          orig = NilKill::Apply
-          NilKill.send(:remove_const, :Apply)
-          NilKill.const_set(:Apply, stub_const)
+          orig = AutoType::Apply
+          AutoType.send(:remove_const, :Apply)
+          AutoType.const_set(:Apply, stub_const)
           begin
             snapshot = { path => "ORIGINAL\n" }
             action = { "kind" => "promote_hash_record_to_struct", "path" => path }
@@ -2684,8 +2685,8 @@ RSpec.describe NilKill do
             expect(File.read(path)).to eq("ORIGINAL\n")  # snapshot restored
             expect(apply_calls).to be > 0  # apply ran before crash
           ensure
-            NilKill.send(:remove_const, :Apply)
-            NilKill.const_set(:Apply, orig)
+            AutoType.send(:remove_const, :Apply)
+            AutoType.const_set(:Apply, orig)
           end
         end
       end
@@ -2710,7 +2711,7 @@ RSpec.describe NilKill do
           # (SystemExit) when this example's tmp has no evidence.json,
           # which otherwise leaks a non-zero process exit despite the
           # suite reporting 0 failures.
-          apply = NilKill::Apply.allocate
+          apply = AutoType::Apply.allocate
           data = {
             "struct_name" => "NameRecord",
             "type_name" => "MIR::NameRecord",
@@ -2742,7 +2743,7 @@ RSpec.describe NilKill do
         loop.instance_variable_set(:@verify_cmd, ["echo", "fake"])
         loop.define_singleton_method(:verify) do |actions: nil|
           combined = stdout + stderr
-          patterns = NilKill::Loop::RSPEC_LOAD_FAILURE_PATTERNS
+          patterns = AutoType::Loop::RSPEC_LOAD_FAILURE_PATTERNS
           ok = exit_status.zero? && patterns.none? { |re| re.match?(combined) }
           [ok, combined]
         end
@@ -3221,7 +3222,7 @@ RSpec.describe NilKill do
 
     describe "add_struct_field_sig (verified-loop struct-rbi)" do
       it "applies via the Apply handler: update / insert / append / idempotent" do
-        ap = NilKill::Apply.allocate
+        ap = AutoType::Apply.allocate
         lines = ["# typed: true\n", "\n", "class AST::Foo\n",
                  "  sig { returns(T.untyped) }\n", "  def token; end\n", "end\n", "\n"]
         act = ->(c, f, t) { { "kind" => "add_struct_field_sig", "line" => 1,
@@ -3238,7 +3239,7 @@ RSpec.describe NilKill do
 
 
       it "the loop selector picks unskipped REVIEW add_struct_field_sig actions" do
-        loop = NilKill::Loop.allocate
+        loop = AutoType::Loop.allocate
         loop.instance_variable_set(:@skipped, Set.new)
         loop.instance_variable_set(:@permanent_skip, [])
         ev = { "actions" => [
@@ -3976,7 +3977,7 @@ RSpec.describe NilKill do
     end
   end
 
-  describe NilKill::GuardedAutocorrect do
+  describe AutoType::GuardedAutocorrect do
     it "restores Sorbet autocorrect removals of defensive safe navigation" do
       Dir.mktmpdir("nil-kill-autocorrect") do |dir|
         path = File.join(dir, "example.rb")

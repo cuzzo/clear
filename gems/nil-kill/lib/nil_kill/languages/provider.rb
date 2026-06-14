@@ -62,10 +62,6 @@ module NilKill
         }
       end
 
-      def autofix?
-        false
-      end
-
       def notes
         []
       end
@@ -83,7 +79,6 @@ module NilKill
           "runtime_tracing" => runtime_tracing?,
           "runtime_trace_events" => runtime_trace_events.map(&:to_s).sort,
           "runtime_capabilities" => runtime_capabilities,
-          "autofix" => autofix?,
           "notes" => notes.map(&:to_s),
         }
       end

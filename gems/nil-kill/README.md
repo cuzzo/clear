@@ -1,8 +1,8 @@
-# Nil-kill: fix `nil`s and type ambiguity at the source, automatically.
+# Nil-kill: find `nil`s and type ambiguity at the source.
 
- * Nil-kill is the easiest way to eliminate `nil`s and strongly type your codebase.
- * It combines *static anlysis* with *runtime observations*.
- * Nil-kill autofixes where possible and surfaces which `nil`s and `untyped` vars in your codebase have the most outward *pressure*.
+ * Nil-kill helps you eliminate `nil`s and strongly type your codebase by showing where the pressure originates.
+ * It combines *static analysis* with *runtime observations*.
+ * Nil-kill emits evidence and action plans. Source rewriting lives in [Auto-type](../auto-type/README.md).
 
 ## What is *pressure*?
 
@@ -15,7 +15,7 @@ Nil-kill helps you prioritize your efforts by *pressure*.
 CLEAR's codebase was only ~50k dense lines of Ruby (production code, not including test code).
 
  * ~50% of T.nilable() removed, ~50% of `&.` and `.present?` removed.
- * ~80% of signature parameters could be inferred automatically combining runtime and static analysis and auto-rewrite.
+ * ~80% of signature parameters could be inferred automatically combining runtime and static analysis.
  * ~90% of signature returns could be inferred automatically.
 
 Nil-kill starts by giving you an overall report of your codebase, so you can figure out how well it *might* help you before you invest much in trying it out.
@@ -29,14 +29,16 @@ There's still thousands of issues that need to be resolved semi-manually. Nil-ki
 
 ## How do I use it?
 
-In short, Nil-kill has 9 uses, but the 4 major ones are:
+In short, Nil-kill has 6 analyzer uses, but the 4 major ones are:
 
  1. `nil-kill infer`: this mainly outsources to Sorbet and z3 to do static analysis and type your codebase as much as possible without runtime analysis.
  2. `nil-kill collect -- <command>`: this does runtime data collection. The `<command>` could be just `bundle exec rspec` -> but you'll get much better results if you run it on your production code on *REAL* replay logs.
- 3. `nil-kill loop -- <comand>`: this will recursively resolve types and the new types unlocked. The `<command>` is your entire test suite, which may be just `bundle exec rspec`.
- 4. `nil-kill report`: generates a report of action items by priority. You can use this to prioritize efforts manually, or - like CLEAR - feed this to an LLM to do it for you.
+ 3. `nil-kill report`: generates a report of action items by priority. You can use this to prioritize efforts manually, or - like CLEAR - feed this to an LLM to do it for you.
+ 4. `nil-kill espalier-evidence`: generates fast static evidence for architecture tooling.
 
-> WARNING: the `<command>` for `nil-kill loop` MUST include your host project's behavioral test suite (e.g. `bundle exec rspec spec/`). Running with `srb tc` alone is NOT enough: Sorbet typecheck cannot see runtime call paths that flow through `||` fallthrough, `T.unsafe`, or dynamic dispatch, so a narrowing the proposer derives from static evidence can be accepted by Sorbet while still violating the runtime contract on those paths. If the loop's verifier doesn't exercise the code, the autofix can land changes that pass typecheck but break callers.
+For automated fixes, use `auto-type`. It consumes Nil-kill evidence/actions and currently supports Ruby/Sorbet rewrites. Its provider interface is designed so other language rewriters can be added without changing Nil-kill's analyzer.
+
+> WARNING: the `<command>` for `auto-type loop` MUST include your host project's behavioral test suite (e.g. `bundle exec rspec spec/`). Running with `srb tc` alone is NOT enough: Sorbet typecheck cannot see runtime call paths that flow through `||` fallthrough, `T.unsafe`, or dynamic dispatch, so a narrowing the proposer derives from static evidence can be accepted by Sorbet while still violating the runtime contract on those paths. If the loop's verifier doesn't exercise the code, the fix can land changes that pass typecheck but break callers.
 
 > NOTE: `nil-kill collect -- <command>` runs `<command>` roughly **20-100x slower** than running it uninstrumented -- one to two orders of magnitude, scaling with how collection-mutation-heavy the traced code is (return/build-heavy code is near the low end; code that repeatedly mutates collections passed as parameters is near the high end). This is expected: with no types yet, every traced call and every mutation of a traced collection is recorded. `collect` is a one-time evidence-gathering pass, not a steady state. Run `nil-kill infer` first -- resolving ~50% of types makes subsequent collects considerably faster.
 
@@ -73,7 +75,7 @@ Example:
 
 If you have a lot of these types of recrods, and their keys have high pressure, under Sorbet today - those will be `T.untyped`.
 
-Nil-kill can autofix most of these, prioritize the rest for manual resolution.
+Nil-kill prioritizes these for manual resolution or for an Auto-type provider.
 
 ### Full details:
 
@@ -89,20 +91,21 @@ Usage:
   bundle exec tools/nil-kill collect --instrument-source -- <command...>
   bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
   bundle exec tools/nil-kill infer [--no-sorbet]
-  bundle exec tools/nil-kill apply [--dry-run]
-  bundle exec tools/nil-kill review [--kind replace_nil_with_default]
-  bundle exec tools/nil-kill loop [--defaults] [--try-levenshtein] -- <verify command...>
   bundle exec tools/nil-kill report
   bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
-  bundle exec tools/nil-kill guarded-autocorrect [--max-iterations N]
   bundle exec tools/nil-kill doctor
+
+  # Source rewriting is in Auto-type:
+  bundle exec auto-type apply [--dry-run]
+  bundle exec auto-type review [--kind replace_nil_with_default]
+  bundle exec auto-type loop [--defaults] [--try-levenshtein] -- <verify command...>
+  bundle exec auto-type guarded-autocorrect [--max-iterations N]
 
 Config:
   NIL_KILL_TARGETS=src[:other_dir]   target Ruby source roots
   NIL_KILL_EXCLUDE_TARGETS=src/tools  exclude Ruby source roots
   NIL_KILL_MIN_CALLS=20              runtime confidence threshold
   NIL_KILL_UNION_POLICY=untyped|any  default: untyped
-  NIL_KILL_AUTO_DEFAULTS=1           promote safe nil default rewrites into loop/apply
   NIL_KILL_LEVENSHTEIN_DISTANCE=2    max param-name/class-name distance for speculative narrowing
   NIL_KILL_LEVENSHTEIN_LIMIT=50      max speculative actions per loop iteration; 0 = unlimited
   NIL_KILL_PRESSURE_SORT=priority|slots|hotness

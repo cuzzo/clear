@@ -1,12 +1,12 @@
 # typed: false
 # frozen_string_literal: true
 
-module NilKill
+module AutoType
   class InteractiveReview
     def initialize(argv)
       @kind = option_value(argv, "--kind") || "replace_nil_with_default"
       @dry_run = argv.include?("--dry-run")
-      @evidence = Store.read
+      @evidence = NilKill::Store.read
       @selected = Set.new
     end
 
@@ -19,7 +19,7 @@ module NilKill
       end
       loop do
         render(actions)
-        print "nil-kill review> "
+        print "auto-type review> "
         input = $stdin.gets&.strip
         break if input.nil? || input == "q"
         case input
@@ -70,7 +70,7 @@ module NilKill
     def open_context(actions, idx)
       action = actions[idx]
       return puts "out of range" unless action
-      path = File.join(ROOT, action["path"])
+      path = File.join(NilKill::ROOT, action["path"])
       line = action["line"].to_i
       lines = File.readlines(path)
       first = [line - 4, 1].max

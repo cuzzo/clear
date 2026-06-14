@@ -29,8 +29,8 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 - **Requirement:** Integrate with the generalized coverage providers in Boobytrap/SlopCop instead of adding language-specific coverage readers in Nil-Kill.
 
 ## 3. The "Final Boss": General-Purpose Autofix
-- **Current State:** All code-changing logic (`lib/nil_kill/autofix/`) is implemented as Ruby AST transformations.
-- **The Gap:** To fix code in JS or Python, `nil-kill` would currently need an entirely parallel set of rewriters.
+- **Current State:** Code-changing logic now lives in `gems/auto-type`, with Ruby/Sorbet as the first provider.
+- **The Gap:** To fix code in JS or Python, `auto-type` needs additional provider implementations that consume Nil-kill facts without adding rewrite logic back to Nil-kill.
 - **Proposed Solution:** Implement a **Hybrid LLM-Driven Autofix** model:
   1. **Surgical Fact:** Use the generalized static analysis to find the exact file/line/span needing a fix.
   2. **Provider Template:** The `Language::Provider` provides the *idiomatic* template for the fix (e.g., `return nil if x.nil?` vs `if x is None: return None`).

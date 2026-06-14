@@ -542,7 +542,7 @@ nil-kill collect --tracer ruby --output traces/ -- bundle exec ruby test.rb
 nil-kill normalize --static static.json --traces traces/ --output evidence.json
 nil-kill analyze --evidence evidence.json --output actions.json
 nil-kill report --evidence evidence.json --actions actions.json
-nil-kill apply --actions actions.json --provider ruby
+auto-type apply --actions actions.json --provider ruby
 nil-kill trace-spec
 ```
 
@@ -561,7 +561,7 @@ lib/nil_kill/runtime/
 lib/nil_kill/analyzers/
 lib/nil_kill/actions/
 lib/nil_kill/reporting/
-lib/nil_kill/autofix/
+gems/auto-type/lib/auto_type/providers/
 lib/nil_kill/languages/ruby/
 lib/nil_kill/languages/python/
 lib/nil_kill/languages/javascript/

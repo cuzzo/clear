@@ -1401,12 +1401,24 @@ module NilKill
         next if File.file?(path) && File.read(path) == content
         File.write(path, content)
       end
-      (@validate_applier ||= Apply.new([])).apply_actions(actions)
+      applier = sorbet_validate_applier
+      return [] unless applier
+      applier.apply_actions(actions)
       return [] if sorbet_clean?
       return actions if actions.size == 1
       mid = actions.size / 2
       sorbet_validate_batch(actions.first(mid), snapshot) +
         sorbet_validate_batch(actions.drop(mid), snapshot)
+    end
+
+    def sorbet_validate_applier
+      @validate_applier ||= begin
+        require "auto_type"
+        AutoType::Apply.new([])
+      end
+    rescue LoadError => e
+      warn "nil-kill: auto-type unavailable for Sorbet pre-validation (#{e.message}); leaving HIGH actions undowngraded"
+      nil
     end
 
     def sorbet_validate_cache_dir

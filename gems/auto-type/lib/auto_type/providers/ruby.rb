@@ -1,8 +1,8 @@
 # typed: false
 # frozen_string_literal: true
 
-module NilKill
-  module AutoFix
+module AutoType
+  module Providers
     class Provider
       def language
         raise NotImplementedError
@@ -29,11 +29,11 @@ module NilKill
       def unsupported_diagnostic(action)
         {
           "severity" => "info",
-          "code" => "unsupported_autofix_provider",
+          "code" => "unsupported_auto_type_provider",
           "language" => action["language"],
           "path" => action.dig("target", "path") || action["path"],
           "line" => action.dig("target", "line") || action["line"],
-          "message" => "no auto-fix provider supports #{action["kind"]} for #{action["language"]}",
+          "message" => "no Auto-type provider supports #{action["kind"]} for #{action["language"]}",
         }
       end
     end

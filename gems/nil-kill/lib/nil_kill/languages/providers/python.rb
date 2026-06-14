@@ -60,7 +60,7 @@ module NilKill
         end
 
         def notes
-          ["autofix is intentionally unsupported; Python actions remain report-only"]
+          ["source rewriting is owned by auto-type providers; Python analysis remains report-only here"]
         end
 
         def collect_runtime(argv:, root:, output:, targets:, append: false)

@@ -2,7 +2,7 @@
 
 require_relative "spec_helper"
 
-RSpec.describe NilKill::Apply do
+RSpec.describe AutoType::Apply do
   def applier
     described_class.allocate.tap do |instance|
       instance.instance_variable_set(:@dry_run, false)
@@ -682,7 +682,7 @@ RSpec.describe NilKill::Apply do
     RUBY
     path = File.join(NilKill::ROOT, rel)
     original = File.read(path)
-    loop = NilKill::Loop.allocate
+    loop = AutoType::Loop.allocate
     loop.instance_variable_set(:@skipped, Set.new)
     loop.instance_variable_set(:@z3_solver, nil)
     loop.define_singleton_method(:verify) { |actions: nil| [false, "forced verification failure"] }
@@ -728,7 +728,7 @@ RSpec.describe NilKill::Apply do
         "blockers" => [],
       } }
 
-    loop = NilKill::Loop.allocate
+    loop = AutoType::Loop.allocate
     loop.instance_variable_set(:@skipped, Set.new)
     loop.instance_variable_set(:@z3_solver, nil)
     verify_calls = 0

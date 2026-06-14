@@ -1,7 +1,7 @@
 # typed: false
 # frozen_string_literal: true
 
-module NilKill
+module AutoType
   class Apply
     def initialize(argv)
       @dry_run = argv.include?("--dry-run") || ENV["DRY_RUN"] == "1"
@@ -12,14 +12,14 @@ module NilKill
     # pre-validate bisection) never needs evidence, so constructing an
     # Apply must not eagerly JSON.parse the multi-100MB evidence.json.
     def evidence
-      @evidence ||= Store.read
+      @evidence ||= NilKill::Store.read
     end
 
     def run
       if @all && ENV["NIL_KILL_UNSAFE_APPLY_ALL"] != "1"
         abort "`apply --all` would apply review actions without verification. Use `loop --hash-records -- <verify command...>` for reviewed fixes, or set NIL_KILL_UNSAFE_APPLY_ALL=1 for debugging."
       end
-      actions = evidence["actions"].select { |a| @all || a["confidence"] == HIGH }
+      actions = evidence["actions"].select { |a| @all || a["confidence"] == NilKill::HIGH }
       apply_actions(actions)
     end
 
@@ -27,7 +27,7 @@ module NilKill
       changed = 0
       actions = expand_cross_file_actions(actions)
       actions.group_by { |a| a["path"] }.each do |rel_path, list|
-        path = File.join(ROOT, rel_path)
+        path = File.join(NilKill::ROOT, rel_path)
         next unless File.exist?(path)
         lines = File.readlines(path)
         list.sort_by { |a| -a["line"].to_i }.each { |action| changed += 1 if apply_one(lines, action) }
@@ -156,7 +156,7 @@ module NilKill
 
       changed = false
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       if parsed.success?
         edits = []
         replacement = hash_record_constructor(struct_name, literal["code"])
@@ -196,7 +196,7 @@ module NilKill
       return false if struct_name.empty? || type_name.empty? || fields.empty? || (producers.empty? && consumers.empty? && signatures.empty? && !insert_only)
 
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
 
       edits = []
@@ -235,7 +235,7 @@ module NilKill
     def apply_signature_cst_rewrite(lines, action, kind, name, from, to)
       return false if to.empty? || from.empty?
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
       sig_node = nearest_sig_call_before_line(parsed.value, action["line"].to_i)
       return false unless sig_node
@@ -256,10 +256,10 @@ module NilKill
 
     def apply_narrow_tlet_cst_rewrite(lines, action)
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
       node = nodes_matching(parsed.value) do |candidate|
-        candidate.is_a?(Syntax::CallNode) &&
+        candidate.is_a?(NilKill::Syntax::CallNode) &&
           candidate.location.start_line == action["line"].to_i &&
           candidate.name == :let &&
           candidate.receiver&.slice == "T" &&
@@ -273,7 +273,7 @@ module NilKill
 
     def apply_add_tlet_cst_rewrite(lines, action)
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
       name = action["data"]["name"].to_s
       node = nodes_matching(parsed.value) do |candidate|
@@ -290,21 +290,21 @@ module NilKill
     end
 
     def variable_write_node?(node)
-      node.is_a?(Syntax::LocalVariableWriteNode) ||
-        node.is_a?(Syntax::InstanceVariableWriteNode) ||
-        node.is_a?(Syntax::ClassVariableWriteNode) ||
-        node.is_a?(Syntax::GlobalVariableWriteNode)
+      node.is_a?(NilKill::Syntax::LocalVariableWriteNode) ||
+        node.is_a?(NilKill::Syntax::InstanceVariableWriteNode) ||
+        node.is_a?(NilKill::Syntax::ClassVariableWriteNode) ||
+        node.is_a?(NilKill::Syntax::GlobalVariableWriteNode)
     end
 
     def apply_safe_nav_cst_rewrite(lines, action)
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
       code = action.dig("data", "code").to_s
       nodes = if code.empty?
-        nodes_matching(parsed.value) { |node| node.is_a?(Syntax::CallNode) && node.location.start_line == action["line"].to_i && node.safe_navigation? }
+        nodes_matching(parsed.value) { |node| node.is_a?(NilKill::Syntax::CallNode) && node.location.start_line == action["line"].to_i && node.safe_navigation? }
       else
-        nodes_matching_source(parsed.value, action["line"].to_i, code).select { |node| node.is_a?(Syntax::CallNode) && node.safe_navigation? }
+        nodes_matching_source(parsed.value, action["line"].to_i, code).select { |node| node.is_a?(NilKill::Syntax::CallNode) && node.safe_navigation? }
       end
       return false if nodes.empty?
       edits = nodes.filter_map do |node|
@@ -320,7 +320,7 @@ module NilKill
       code = action.dig("data", "code").to_s
       return false if code.empty?
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
       nodes = nodes_matching_source(parsed.value, action["line"].to_i, code)
       return false if nodes.empty?
@@ -331,9 +331,9 @@ module NilKill
 
     def apply_nil_default_cst_rewrite(lines, action)
       source = lines.join
-      parsed = Syntax.parse(source)
+      parsed = NilKill::Syntax.parse(source)
       return false unless parsed.success?
-      nils = nodes_matching(parsed.value) { |node| node.is_a?(Syntax::NilNode) && node.location.start_line == action["line"].to_i }
+      nils = nodes_matching(parsed.value) { |node| node.is_a?(NilKill::Syntax::NilNode) && node.location.start_line == action["line"].to_i }
       return false unless nils.size == 1
       node = nils.first
       lines.replace(apply_source_edits(source, [[node.location.start_offset, node.location.end_offset, action.dig("data", "default").to_s]]).lines)
@@ -362,20 +362,20 @@ module NilKill
 
     def nearest_sig_call_before_line(root, line)
       sigs = nodes_matching(root) do |node|
-        node.is_a?(Syntax::CallNode) && node.name == :sig && node.location.end_line < line
+        node.is_a?(NilKill::Syntax::CallNode) && node.name == :sig && node.location.end_line < line
       end
       sigs.select { |node| line - node.location.end_line <= 30 }.max_by { |node| node.location.end_line }
     end
 
     def signature_return_type_node(sig_node, from)
       nodes_matching(sig_node) do |node|
-        node.is_a?(Syntax::CallNode) && node.name == :returns
+        node.is_a?(NilKill::Syntax::CallNode) && node.name == :returns
       end.filter_map { |node| node.arguments&.arguments&.first }.find { |arg| arg&.slice == from }
     end
 
     def signature_void_return_edit(sig_node, from)
       returns_node = nodes_matching(sig_node) do |node|
-        node.is_a?(Syntax::CallNode) && node.name == :returns
+        node.is_a?(NilKill::Syntax::CallNode) && node.name == :returns
       end.find { |node| node.arguments&.arguments&.first&.slice == from }
       return nil unless returns_node
       receiver = returns_node.receiver
@@ -388,9 +388,9 @@ module NilKill
 
     def signature_param_type_node(sig_node, name, from)
       params_call = nodes_matching(sig_node) do |node|
-        node.is_a?(Syntax::CallNode) && node.name == :params
+        node.is_a?(NilKill::Syntax::CallNode) && node.name == :params
       end.first
-      keyword_hash = params_call&.arguments&.arguments&.find { |arg| arg.is_a?(Syntax::KeywordHashNode) }
+      keyword_hash = params_call&.arguments&.arguments&.find { |arg| arg.is_a?(NilKill::Syntax::KeywordHashNode) }
       keyword_hash&.elements&.filter_map do |assoc|
         next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
         key = signature_keyword_name(assoc.key)
@@ -400,9 +400,9 @@ module NilKill
 
     def signature_keyword_name(node)
       case node
-      when Syntax::SymbolNode
+      when NilKill::Syntax::SymbolNode
         node.value.to_s
-      when Syntax::StringNode
+      when NilKill::Syntax::StringNode
         node.content.to_s
       end
     end
@@ -471,13 +471,13 @@ module NilKill
     def hash_record_cast_constructor_fields(hash_code, fields)
       field_types = Array(fields).each_with_object({}) { |field, index| index[field["name"].to_s] = field["type"].to_s }
       return hash_code if field_types.empty?
-      parsed = Syntax.parse(hash_code)
+      parsed = NilKill::Syntax.parse(hash_code)
       return hash_code unless parsed.success?
       edits = []
-      root_hash = nodes_matching(parsed.value) { |node| node.is_a?(Syntax::HashNode) || node.is_a?(Syntax::KeywordHashNode) }.first
+      root_hash = nodes_matching(parsed.value) { |node| node.is_a?(NilKill::Syntax::HashNode) || node.is_a?(NilKill::Syntax::KeywordHashNode) }.first
       edits.concat(hash_record_nested_constructor_edits(root_hash, fields)) if root_hash
       nodes_matching(parsed.value) do |node|
-        (node.is_a?(Syntax::HashNode) || node.is_a?(Syntax::KeywordHashNode))
+        (node.is_a?(NilKill::Syntax::HashNode) || node.is_a?(NilKill::Syntax::KeywordHashNode))
       end.each do |hash|
         Array(hash.elements).each do |assoc|
           next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
@@ -508,14 +508,14 @@ module NilKill
         case nested["kind"]
         when "hash"
           value = assoc.value
-          next [] unless value.is_a?(Syntax::HashNode) || value.is_a?(Syntax::KeywordHashNode)
+          next [] unless value.is_a?(NilKill::Syntax::HashNode) || value.is_a?(NilKill::Syntax::KeywordHashNode)
           rewritten = hash_record_cast_constructor_fields(value.slice, nested["fields"])
           [[value.location.start_offset, value.location.end_offset, hash_record_constructor(type_name, rewritten)]]
         when "array"
           value = assoc.value
-          next [] unless value.is_a?(Syntax::ArrayNode)
+          next [] unless value.is_a?(NilKill::Syntax::ArrayNode)
           Array(value.elements).filter_map do |elem|
-            next unless elem.is_a?(Syntax::HashNode) || elem.is_a?(Syntax::KeywordHashNode)
+            next unless elem.is_a?(NilKill::Syntax::HashNode) || elem.is_a?(NilKill::Syntax::KeywordHashNode)
             rewritten = hash_record_cast_constructor_fields(elem.slice, nested["fields"])
             [elem.location.start_offset, elem.location.end_offset, hash_record_constructor(type_name, rewritten)]
           end
@@ -527,9 +527,9 @@ module NilKill
 
     def hash_record_constructor_key_name(node)
       case node
-      when Syntax::SymbolNode
+      when NilKill::Syntax::SymbolNode
         node.respond_to?(:value) ? node.value.to_s : node.slice.delete_prefix(":")
-      when Syntax::StringNode
+      when NilKill::Syntax::StringNode
         node.respond_to?(:unescaped) ? node.unescaped : node.slice.delete_prefix("\"").delete_prefix("'").delete_suffix("\"").delete_suffix("'")
       else
         nil
@@ -539,19 +539,19 @@ module NilKill
     def hash_record_constructor_cast_needed?(value, type)
       raw = type.to_s
       case value
-      when Syntax::NilNode
+      when NilKill::Syntax::NilNode
         !raw.start_with?("T.nilable(")
-      when Syntax::TrueNode, Syntax::FalseNode
+      when NilKill::Syntax::TrueNode, NilKill::Syntax::FalseNode
         raw != "T::Boolean" && raw != "T.nilable(T::Boolean)" && raw != "T.untyped"
-      when Syntax::IntegerNode
+      when NilKill::Syntax::IntegerNode
         raw != "Integer" && raw != "T.untyped"
-      when Syntax::StringNode
+      when NilKill::Syntax::StringNode
         raw != "String" && raw != "T.untyped"
-      when Syntax::SymbolNode
+      when NilKill::Syntax::SymbolNode
         raw != "Symbol" && raw != "T.untyped"
-      when Syntax::ArrayNode
+      when NilKill::Syntax::ArrayNode
         !(raw.start_with?("T::Array[") || raw.start_with?("T.nilable(T::Array[") || raw == "T.untyped")
-      when Syntax::HashNode, Syntax::KeywordHashNode
+      when NilKill::Syntax::HashNode, NilKill::Syntax::KeywordHashNode
         !(raw.start_with?("T::Hash[") || raw.start_with?("T.nilable(T::Hash[") || raw == "T.untyped")
       else
         true
@@ -568,7 +568,7 @@ module NilKill
       struct_name = data["struct_name"].to_s
       return false if struct_name.empty? || lines.any? { |line| line.match?(/\bclass\s+#{Regexp.escape(struct_name)}\b/) }
       fields = Array(data["fields"])
-      parsed = Syntax.parse(lines.join)
+      parsed = NilKill::Syntax.parse(lines.join)
       return false unless parsed.success?
       scope = Array(data["scope"])
       if scope.empty?
@@ -602,9 +602,9 @@ module NilKill
       matches = []
       scope_node.child_nodes.compact.each do |child|
         nodes_matching(child) do |node|
-          if node.is_a?(Syntax::ClassNode) || node.is_a?(Syntax::ModuleNode)
+          if node.is_a?(NilKill::Syntax::ClassNode) || node.is_a?(NilKill::Syntax::ModuleNode)
             names.include?(node.constant_path.slice.to_s.split("::").last)
-          elsif node.is_a?(Syntax::ConstantWriteNode)
+          elsif node.is_a?(NilKill::Syntax::ConstantWriteNode)
             # `Foo = Struct.new(...)` and similar constant-assigned types
             # are also legitimate dependency targets. Without recognising
             # them, the promoter inserts the new struct ABOVE its own
@@ -676,7 +676,7 @@ module NilKill
     def ensure_sig_extensions(lines, rel_path, sig_actions)
       scopes = sig_actions.filter_map { |action| action.dig("data", "scope") }.uniq
       return if scopes.empty?
-      parsed = Syntax.parse(lines.join)
+      parsed = NilKill::Syntax.parse(lines.join)
       return unless parsed.success?
       insertions = []
       scopes.each do |scope|
@@ -700,7 +700,7 @@ module NilKill
       walk = lambda do |node, stack|
         return if found
         case node
-        when Syntax::ClassNode, Syntax::ModuleNode
+        when NilKill::Syntax::ClassNode, NilKill::Syntax::ModuleNode
           new_stack = stack + [node.constant_path.slice]
           found = node if new_stack == scope
           node.child_nodes.compact.each { |child| walk.call(child, new_stack) } if node.respond_to?(:child_nodes)
@@ -740,15 +740,15 @@ module NilKill
     # best matches `scope`. Exactly one candidate -> its 0-based line;
     # zero or ambiguous -> nil (caller skips rather than corrupt).
     def relocate_def_idx(lines, want, scope)
-      parsed = Syntax.parse(lines.join)
+      parsed = NilKill::Syntax.parse(lines.join)
       return nil unless parsed.success?
       cands = []
       walk = lambda do |node, stack|
-        return unless node.is_a?(Syntax::Node)
+        return unless node.is_a?(NilKill::Syntax::Node)
         case node
-        when Syntax::DefNode
+        when NilKill::Syntax::DefNode
           cands << [stack.dup, node.location.start_line - 1] if node.name.to_s == want
-        when Syntax::ClassNode, Syntax::ModuleNode
+        when NilKill::Syntax::ClassNode, NilKill::Syntax::ModuleNode
           stack = stack + [node.constant_path.slice]
         end
         node.compact_child_nodes.each { |c| walk.call(c, stack) }

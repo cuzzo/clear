@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require_relative "../../auto-type/lib/auto_type"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
   it "publishes language provider capabilities for Ruby, Python, TypeScript, and Zig" do
@@ -9,9 +10,9 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     typescript = NilKill::Languages.capability_for("typescript")
     zig = NilKill::Languages.capability_for("zig")
 
-    expect(ruby).to include("runtime_tracing" => true, "autofix" => true)
+    expect(ruby).to include("runtime_tracing" => true)
     expect(ruby["type_systems"]).to include("sorbet", "rbi")
-    expect(python).to include("runtime_tracing" => true, "autofix" => false)
+    expect(python).to include("runtime_tracing" => true)
     expect(python).to include("type_indexing" => true)
     expect(python["type_systems"]).to include("python-typing")
     expect(python.dig("runtime_capabilities", "params")).to be(true)
@@ -351,7 +352,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "keeps unsupported non-Ruby auto-fixes report-only" do
+  it "keeps unsupported non-Ruby Auto-type actions report-only" do
     action = NilKill::Actions::Record.build(
       kind: "add_nullability",
       language: "python",
@@ -361,11 +362,11 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
       data: {"slot" => "param", "name" => "fallback"}
     )
 
-    provider = NilKill::AutoFix.provider_for("python")
+    provider = AutoType::Providers.provider_for("python")
     plan = provider.plan(action)
 
     expect(provider.supports?(action)).to be(false)
     expect(plan["supported"]).to be(false)
-    expect(plan.dig("diagnostics", 0, "code")).to eq("unsupported_autofix_provider")
+    expect(plan.dig("diagnostics", 0, "code")).to eq("unsupported_auto_type_provider")
   end
 end

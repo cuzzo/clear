@@ -89,7 +89,7 @@ module NilKill
         .sort_by { |_, count| -count }
       high = counts.select { |key, _| key[0] == "high" }
       review = counts.select { |key, _| key[0] == "review" }
-      lines << "- HIGH (auto-applied): #{high.sum { |_, c| c }}"
+      lines << "- HIGH (Auto-type ready): #{high.sum { |_, c| c }}"
       high.each { |(_, kind, src), c| lines << "  - #{c.to_s.rjust(4)}  #{kind} / #{src}" }
       lines << "- REVIEW (manual or verified-loop): #{review.sum { |_, c| c }}"
       review.first(8).each { |(_, kind, src), c| lines << "  - #{c.to_s.rjust(4)}  #{kind} / #{src}" }

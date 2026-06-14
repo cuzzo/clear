@@ -55,10 +55,6 @@ module NilKill
           )
         end
 
-        def autofix?
-          true
-        end
-
         def notes
           ["runtime collection uses the existing nil-kill collect command and Ruby source instrumentation"]
         end
