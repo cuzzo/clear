@@ -96,6 +96,7 @@ module Pprof
 
     # `period` and `period_type` describe the sampling rate (e.g.
     # 1 sample per N events). Optional; pprof shows it in the header.
+    sig { params(type: String, unit: String, period: Integer).returns(Integer) }
     def set_period_type(type, unit, period)
       @period_type = T.let([intern(type), intern(unit)], T::Array[T.untyped])
       @period = period
@@ -103,6 +104,7 @@ module Pprof
 
     # Pick which sample-type column the pprof UI selects by default
     # (`pprof -inuse_space file.pb.gz`). Optional.
+    sig { params(type: String).returns(Integer) }
     def default_sample_type=(type)
       @default_sample_type_idx = intern(type)
     end
@@ -177,6 +179,7 @@ module Pprof
       nil
     end
 
+    sig { returns(String) }
     def encode
       buf = String.new(encoding: 'ASCII-8BIT')
 
@@ -218,6 +221,7 @@ module Pprof
       buf
     end
 
+    sig { returns(String) }
     def encode_gzip
       io = StringIO.new(String.new(encoding: 'ASCII-8BIT'))
       io.set_encoding('ASCII-8BIT')
@@ -225,6 +229,7 @@ module Pprof
       io.string
     end
 
+    sig { params(path: String).returns(Integer) }
     def write_gzip(path)
       File.binwrite(path, encode_gzip)
     end

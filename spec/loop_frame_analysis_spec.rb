@@ -671,6 +671,28 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("saveLoopMark")
     end
 
+    it "promise-list BG append keeps the accumulated list on frame without frame-owned promise temps" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          count: Int64 = 3_i64;
+          MUTABLE futures: ~Void[]@list = [];
+          FOR i IN (0_i64 ..< count) DO
+            futures.append(BG { sleep(1_i64); });
+          END
+          FOR j IN (0_i64 ..< count) DO
+            NEXT futures[j];
+          END
+          RETURN;
+        END
+      CLEAR
+
+      zig = nil
+      expect { zig = transpile(src) }.not_to raise_error
+      expect(zig).to include("try futures.append(rt.frameAlloc()")
+      expect(zig).not_to include("saveLoopMark")
+      expect(zig).not_to include("restoreLoopMark")
+    end
+
     it "nested loops: inner saveLoopMark appears once, outer does not" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

@@ -1015,7 +1015,7 @@ module MIRLoweringExpressions
     )
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(MIR::DefaultValue) }
   def or_pass_fallback(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")

@@ -20,7 +20,7 @@ class PipelineRewriter
 
   sig { params(annotator: T.untyped).void }
   def initialize(annotator = nil)
-    @annotator = T.let(annotator, T.untyped)
+    @annotator = T.let(annotator, T.nilable(SemanticAnnotator))
     @var_counter = T.let(0, Integer)
   end
 

@@ -160,6 +160,7 @@ module PprofConverter
 
   # Pre-build one Location per unique address so multi-frame samples
   # can share frames. Returns { hex_addr => location_id }.
+  sig { params(pb: Pprof::Profile, addrs: Array, resolved: Hash, profile_dir: String).returns(Hash) }
   def self.build_location_index(pb, addrs, resolved, profile_dir)
     addrs.each_with_object({}) do |addr, idx|
       r = resolved[addr] || {}
@@ -332,6 +333,7 @@ module PprofConverter
   # caller_trace field can carry commas without a column-count
   # ambiguity. Older single-tab-or-whitespace files still parse via
   # the fallback. Filters rows shorter than `min_cols`.
+  sig { params(path: String, min_cols: Integer).returns(Array) }
   def self.parse_tabbed_columns(path, min_cols)
     File.readlines(path).each_with_object([]) do |line, acc|
       next if line.start_with?('#') || line.strip.empty?
@@ -351,6 +353,7 @@ module PprofConverter
   # code where CLR markers don't exist, and we'd misattribute by
   # walking back through transpiled.zig anyway. (Repro: `pprof -list
   # entryWrapper` showed it pointing at random source.cht lines.)
+  sig { params(addrs: Array, binary: T.nilable(String), profile_dir: String).returns(Hash) }
   def self.resolve_addrs(addrs, binary, profile_dir)
     return {} if addrs.empty? || binary.nil?
     raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)

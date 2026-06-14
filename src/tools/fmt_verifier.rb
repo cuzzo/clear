@@ -18,12 +18,16 @@
 #
 # CLI: `clear fmt --verify <file-or-dir>` wires through to this module.
 
+require "sorbet-runtime"
+
 require_relative '../backends/transpiler'
 require_relative '../compiler/module_importer'
 require_relative 'formatter'
 require 'tempfile'
 
 module FmtVerifier
+  extend T::Sig
+
   Result = Struct.new(:path, :ok, :error, :diff_excerpt) do
     def status_label
       return "OK" if ok
@@ -69,6 +73,7 @@ module FmtVerifier
   #
   # Rule of thumb: any comment line whose only purpose is "remember
   # where the emitter was when it wrote this," normalize away.
+  sig { params(zig_source: String).returns(String) }
   def self.normalize_for_compare(zig_source)
     zig_source
       .gsub(%r{^\s*// CLR:\d+\n}, '')
