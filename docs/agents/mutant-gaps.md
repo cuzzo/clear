@@ -21,7 +21,7 @@ P2 is the targeted safety wall: compiler patch mutants that deliberately break o
 
 | Area | Gate strategy | Current result | Status |
 | :--- | :--- | :--- | :--- |
-| Fuzz safety mutants | 21 targeted compiler patch mutants | 21/21 killed; every baseline matrix clean | Complete for current P2 scope |
+| Fuzz safety mutants | 37 targeted compiler patch mutants | 37/37 killed; every baseline matrix clean | Complete for current P2 scope |
 | Fuzz coverage registry | Registered/documented template coverage | 64/64 templates documented; no coverage gaps | Clean |
 | MIR negative matrix | Direct malformed MIR cells | 45/45 baseline cells reject with expected diagnostics | Strengthened |
 | Transpile patch mutants | 5 targeted `.cht` fixtures | 5/5 killed on the existing gate | Useful smoke, not the primary P2 wall |
@@ -31,14 +31,31 @@ New P2 mutants added:
 - `or_rescue_catch_allocator_identity`: breaks OR/catch fallback allocator placement. `catch_allocator_matrix` kills it with a new failure.
 - `escape_identifier_heap_placement`: disables the central escape-sink identifier heap-placement walker. `escape_mechanism_matrix` kills it with MIR errors.
 - `ownership_surface_finalization`: disables MIRChecker enforcement that side-channel ownership metadata is finalized into `Owned*` facts. A new `mir_checker_negative_matrix` cell kills it with an unexpected pass.
+- `bg_capture_transfer_move_guard`: disables move guards for BG/DO capture transfers. `bg_capture_transfer_matrix` kills it with failures/leaks.
+- `branch_cleanup_emits_finalizers`: disables branch cleanup emission. `branch_cleanup` kills it with a failure.
+- `error_cleanup_emits_finalizers`: disables error-path cleanup emission. `error_cleanup` kills it with a failure.
+- `escape_via_return_heap_placement`: disables return-escape heap placement. `escape_via_return` kills it with MIR errors.
+- `execution_boundary_parallel_policy`: accepts unsafe parallel boundary captures. `execution_boundary` kills it with unexpected passes.
+- `list_append_move_guard`: disables move guards for list append transfer paths. `list_append_modality` kills it with a failure.
+- `loop_carry_frame_scope`: breaks loop-carried collection frame scope stamping. `loop_carry_collection` kills it with MIR errors.
+- `loop_cleanup_emits_finalizers`: disables loop-disruptor cleanup emission. `loop_cleanup` kills it with a failure.
+- `lowering_boundary_move_guard`: disables move guards across lowering-boundary shapes. `lowering_boundary_matrix` kills it with failures.
+- `mutable_collection_param_pointer_passing`: stops mutable collection params lowering as pointer args. `mutable_collection_param` kills it with a failure.
+- `or_heap_destination_branch_placement`: disables OR branch destination placement. `or_heap_destination_matrix` kills it with MIR errors.
+- `or_positional_branch_placement`: disables positional OR destination placement. `or_positional` kills it with MIR errors.
+- `owned_sink_destination_heap_placement`: disables heap placement for owned sink destinations. `owned_sink_destination_matrix` kills it with MIR errors.
+- `return_value_branch_placement`: disables branch destination placement for return values. `return_value_modality` kills it with a failure.
+- `stream_boundary_move_guard`: disables move guards for stream boundary transfers. `stream_into_boundary` kills it with leaks.
+- `struct_field_store_heap_placement`: disables heap placement for struct field stores. `struct_field_store_modality` kills it with MIR errors.
 
 The full fuzz mutant validation was:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p2-fuzz-mutants-all
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/fuzz-mutants-highrisk-all
 ```
 
-Result: all 21 mutants killed.
+Result: all 37 mutants killed. The registry now directly covers 31/64 fuzz
+templates, including 27/27 high-risk templates.
 
 ## Current P3 Status
 

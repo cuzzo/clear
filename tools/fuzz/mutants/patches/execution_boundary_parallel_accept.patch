@@ -1,0 +1,44 @@
+diff --git a/src/annotator/helpers/capabilities.rb b/src/annotator/helpers/capabilities.rb
+--- a/src/annotator/helpers/capabilities.rb
++++ b/src/annotator/helpers/capabilities.rb
+@@ -1246,7 +1246,7 @@ module CapabilityHelper
+   def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
+     T.bind(self, SemanticAnnotator) rescue nil
+ 
+-    if is_parallel
++    if false && is_parallel
+       if analysis.has_local
+         error!(node, :LOCAL_VAR_NOT_IN_PARALLEL)
+       end
+diff --git a/src/annotator/domains/execution_boundaries.rb b/src/annotator/domains/execution_boundaries.rb
+--- a/src/annotator/domains/execution_boundaries.rb
++++ b/src/annotator/domains/execution_boundaries.rb
+@@ -643,7 +643,7 @@ class SemanticAnnotator
+           analysis_result = T.must(full_analysis)
+           branch.capture_analysis = analysis_result
+ 
+-          if branch.parallel
++          if false && branch.parallel
+             error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
+             error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
+           end
+@@ -758,7 +758,7 @@ class SemanticAnnotator
+         node.capture_analysis = analysis_result
+
+         # Validate: @local in @parallel, @rc in @parallel
+-        if node.parallel
++        if false && node.parallel
+           error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
+           error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
+         end
+diff --git a/src/mir/mir_checker.rb b/src/mir/mir_checker.rb
+--- a/src/mir/mir_checker.rb
++++ b/src/mir/mir_checker.rb
+@@ -2520,6 +2520,7 @@ class MIRChecker
+       next unless fact.dispatch == :parallel
+       next if capture.parallel_safe
+ 
++      next # MUTANT: unsafe captures are accepted across @parallel execution boundaries.
+       reason = capture.forbidden_reason || :not_parallel_safe
+       @errors << error(:BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, capture.name,
+         "capture '#{capture.name}' is not safe for @parallel dispatch " \

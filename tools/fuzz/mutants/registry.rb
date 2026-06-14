@@ -231,6 +231,163 @@ module FuzzMutants
       templates: [:fsm_suspension_matrix],
       kill: { bucket: :fail, min_delta: 1 }
     ),
+    Mutant.new(
+      name: :bg_capture_transfer_move_guard,
+      description: 'Disable MIREmitter MoveMark output for BG/DO capture ' \
+                   'transfer shapes. Captures that move owned roots across an ' \
+                   'execution boundary must not leave the source cleanup live.',
+      invariant: :bg_capture_transfer_move_guard,
+      patch: File.join(PATCH_DIR, 'mir_emitter_move_mark_noop.patch'),
+      templates: [:bg_capture_transfer_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :branch_cleanup_emits_finalizers,
+      description: 'Disable cleanup emission for branch-local owned values. ' \
+                   'Branch exits must still run finalizers on every live path.',
+      invariant: :branch_cleanup_finalizers,
+      patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
+      templates: [:branch_cleanup],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :error_cleanup_emits_finalizers,
+      description: 'Disable cleanup emission for error-path owned values. OR, ' \
+                   'RAISE, and DEFAULT paths must still clean or transfer owned roots.',
+      invariant: :error_cleanup_finalizers,
+      patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
+      templates: [:error_cleanup],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :escape_via_return_heap_placement,
+      description: 'Disable the identifier heap-placement walker for returned ' \
+                   'owned values. Returning frame-owned cleanup-bearing values ' \
+                   'must still promote or reject before backend emission.',
+      invariant: :return_escape_heap_placement,
+      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      templates: [:escape_via_return],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :execution_boundary_parallel_policy,
+      description: 'Allow unsafe captures through parallel execution-boundary ' \
+                   'validation. Boundary admission must reject non-transferable ' \
+                   'values instead of silently compiling them.',
+      invariant: :parallel_boundary_admission,
+      patch: File.join(PATCH_DIR, 'execution_boundary_parallel_accept.patch'),
+      templates: [:execution_boundary],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :list_append_move_guard,
+      description: 'Disable MoveMark output for list append transfer paths. ' \
+                   'Appending cleanup-bearing values to heap lists must move ' \
+                   'the source or preserve safe cleanup ownership.',
+      invariant: :list_append_move_guard,
+      patch: File.join(PATCH_DIR, 'mir_emitter_move_mark_noop.patch'),
+      templates: [:list_append_modality],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :loop_carry_frame_scope,
+      description: 'Force loop-local frame allocations to lower as function-' \
+                   'scoped for loop-carried collections. Loop rewinds must not ' \
+                   'leave dangling per-iteration storage behind.',
+      invariant: :loop_carry_frame_scope,
+      patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
+      templates: [:loop_carry_collection],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :loop_cleanup_emits_finalizers,
+      description: 'Disable cleanup emission for loop disruptor paths. BREAK, ' \
+                   'CONTINUE, RETURN, and RAISE must still finalize owned loop locals.',
+      invariant: :loop_cleanup_finalizers,
+      patch: File.join(PATCH_DIR, 'mir_emitter_cleanup_noop.patch'),
+      templates: [:loop_cleanup],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :lowering_boundary_move_guard,
+      description: 'Disable MoveMark output for lowering-boundary transfer ' \
+                   'shapes. Lowered WITH, BG/DO/NEXT, pipeline, and call ' \
+                   'boundaries must preserve transfer guards.',
+      invariant: :lowering_boundary_move_guard,
+      patch: File.join(PATCH_DIR, 'mir_emitter_move_mark_noop.patch'),
+      templates: [:lowering_boundary_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :mutable_collection_param_pointer_passing,
+      description: 'Stop lowering mutable collection arguments as pointer ' \
+                   'arguments. Forwarded mutations must remain visible through ' \
+                   'the declared param contract.',
+      invariant: :mutable_collection_param_pointer,
+      patch: File.join(PATCH_DIR, 'function_arg_pointer_noop.patch'),
+      templates: [:mutable_collection_param],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :or_heap_destination_branch_placement,
+      description: 'Disable destination placement for owned OR branch values. ' \
+                   'Success and fallback branches must agree on destination ' \
+                   'allocator facts for heap-owned results.',
+      invariant: :or_branch_destination_placement,
+      patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),
+      templates: [:or_heap_destination_matrix],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :or_positional_branch_placement,
+      description: 'Disable destination placement for owned OR values in ' \
+                   'different syntactic positions. Positional OR lowering must ' \
+                   'keep cleanup and allocator facts coherent.',
+      invariant: :or_positional_destination_placement,
+      patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),
+      templates: [:or_positional],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :owned_sink_destination_heap_placement,
+      description: 'Disable identifier heap-placement for owned values crossing ' \
+                   'return, field, list, map, TAKES, and call sinks. Sink ' \
+                   'destinations must still receive coherent ownership facts.',
+      invariant: :owned_sink_heap_placement,
+      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      templates: [:owned_sink_destination_matrix],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :return_value_branch_placement,
+      description: 'Disable destination placement for owned branch values that ' \
+                   'feed returns. Return contexts must still promote, clean, or ' \
+                   'reject cleanup-bearing branch results.',
+      invariant: :return_branch_destination_placement,
+      patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),
+      templates: [:return_value_modality],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :stream_boundary_move_guard,
+      description: 'Disable MoveMark output for stream values crossing ' \
+                   'execution boundaries. STREAM NEXT transfer paths must not ' \
+                   'double-clean or leak moved values.',
+      invariant: :stream_boundary_move_guard,
+      patch: File.join(PATCH_DIR, 'mir_emitter_move_mark_noop.patch'),
+      templates: [:stream_into_boundary],
+      kill: { bucket: :leak, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :struct_field_store_heap_placement,
+      description: 'Disable identifier heap-placement for cleanup-bearing values ' \
+                   'stored into heap struct fields. Field stores must preserve ' \
+                   'owned child allocation and cleanup facts.',
+      invariant: :struct_field_store_heap_placement,
+      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      templates: [:struct_field_store_modality],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
   ].freeze, T::Array[Mutant])
 
   sig { params(name: T.any(String, Symbol)).returns(T.nilable(Mutant)) }

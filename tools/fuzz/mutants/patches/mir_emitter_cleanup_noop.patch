@@ -1,0 +1,9 @@
+diff --git a/src/backends/mir_emitter.rb b/src/backends/mir_emitter.rb
+--- a/src/backends/mir_emitter.rb
++++ b/src/backends/mir_emitter.rb
+@@ -2244,4 +2244,5 @@ class MIREmitter
+   def emit_cleanup(node, errdefer: false)
++    return "" # MUTANT: cleanup-bearing MIR nodes no longer emit runtime finalizers.
+     entry = node.cleanup_entry
+     alloc = alloc_from_entry(entry)
+     name = node.name

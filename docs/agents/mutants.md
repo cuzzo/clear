@@ -7,6 +7,32 @@ compiler correctness:
 - transpile-tests: `tools/mutants/transpile_tests.rb`
 - fuzz templates: `tools/fuzz/mutants/run.rb`
 
+## CI Gate Shape
+
+Mutation testing is intentionally a manual required gate, not an automatic PR
+push gate. Normal CI marks the `mutants/manual` commit status as pending for
+each new PR head SHA. Before merge, run the `Manual mutants` workflow against
+that exact SHA; the workflow updates the same `mutants/manual` status to success
+or failure.
+
+Recommended branch protection:
+
+- require normal CI checks;
+- require the commit status `mutants/manual`;
+- do not require the old automatic `Mutant Ruby specs shard */4`,
+  `Mutant transpile-tests`, or `Mutant tools/fuzz invariants` checks.
+
+Manual run inputs:
+
+| input | value |
+|---|---|
+| `sha` | PR head SHA |
+| `base_sha` | PR base SHA for Ruby `--since` filtering |
+| `head_repository` | blank for same-repo PRs; `owner/repo` for fork heads |
+| `ruby_shards` | default `32` |
+| `fuzz_shards` | default `8` |
+| `transpile_shards` | default `5` |
+
 ## Ruby Specs
 
 The Ruby gate uses `mutant --zombie run` with a threshold ratchet. It does not
@@ -108,11 +134,11 @@ produce the configured failure delta while the baseline remains clean.
 
 This is now A-level for targeted compiler-invariant patch mutants in the
 current compiler phase: it covers parser/annotator policy, escape analysis, MIR
-ownership verification, lifetime facts, error-path allocator identity, lowering
-order, FSM suspension, union payload binding, ownership-surface finalization,
-and runtime/codegen move guard emission. It is still not A+ because it is a
-curated invariant registry, not native language-level mutation over every
-`.cht` program.
+ownership verification, lifetime facts, cleanup emission, error-path allocator
+identity, lowering order, execution-boundary admission, FSM suspension, union
+payload binding, ownership-surface finalization, and runtime/codegen move guard
+emission. It is still not A+ because it is a curated invariant registry, not
+native language-level mutation over every `.cht` program.
 
 Active mutants:
 
@@ -139,14 +165,30 @@ Active mutants:
 | `ownership_surface_finalization` | `mir_checker_negative_matrix` | unexpected pass |
 | `union_match_drops_payload_capture` | `union_lowering_cleanup_matrix` | fail |
 | `fsm_suspend_returns_done` | `fsm_suspension_matrix` | fail |
+| `bg_capture_transfer_move_guard` | `bg_capture_transfer_matrix` | fail |
+| `branch_cleanup_emits_finalizers` | `branch_cleanup` | fail |
+| `error_cleanup_emits_finalizers` | `error_cleanup` | fail |
+| `escape_via_return_heap_placement` | `escape_via_return` | mir-error |
+| `execution_boundary_parallel_policy` | `execution_boundary` | unexpected pass |
+| `list_append_move_guard` | `list_append_modality` | fail |
+| `loop_carry_frame_scope` | `loop_carry_collection` | mir-error |
+| `loop_cleanup_emits_finalizers` | `loop_cleanup` | fail |
+| `lowering_boundary_move_guard` | `lowering_boundary_matrix` | fail |
+| `mutable_collection_param_pointer_passing` | `mutable_collection_param` | fail |
+| `or_heap_destination_branch_placement` | `or_heap_destination_matrix` | mir-error |
+| `or_positional_branch_placement` | `or_positional` | mir-error |
+| `owned_sink_destination_heap_placement` | `owned_sink_destination_matrix` | mir-error |
+| `return_value_branch_placement` | `return_value_modality` | fail |
+| `stream_boundary_move_guard` | `stream_into_boundary` | leak |
+| `struct_field_store_heap_placement` | `struct_field_store_modality` | mir-error |
 
 Current local validation:
 
 ```sh
-bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/p3-fuzz-mutants-all
+bundle exec ruby tools/fuzz/mutants/run.rb --all --out /tmp/fuzz-mutants-highrisk-all
 ```
 
-Result: all 21 mutants were killed. Every baseline fuzz run reported zero
+Result: all 37 mutants were killed. Every baseline fuzz run reported zero
 failures, leaks, MIR errors, and unexpected passes. The shared
 `mir_checker_negative_matrix` now has 45 baseline cells.
 
@@ -161,6 +203,9 @@ The coverage gate verifies every registered template has scope metadata, README
 active-cell counts match the generator, high-risk templates use exhaustive
 matrices, and P0 `escape_sinks x cleanup_value_shapes` cross-products remain
 covered.
+
+Direct coverage summary: 31/64 templates have direct compiler patch mutants,
+including 27/27 high-risk templates.
 
 ## Transpile Tests To A-Level
 

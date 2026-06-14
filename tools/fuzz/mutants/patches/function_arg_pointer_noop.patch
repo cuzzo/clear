@@ -1,0 +1,12 @@
+diff --git a/src/mir/lowering/functions.rb b/src/mir/lowering/functions.rb
+--- a/src/mir/lowering/functions.rb
++++ b/src/mir/lowering/functions.rb
+@@ -1018,7 +1018,7 @@ module MIRLoweringFunctions
+       return MIR::ItemsAccess.new(arg, true)
+     end
+ 
+-    return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
++    return arg unless false && wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
+     return arg if arg_already_pointer_shaped?(a)
+     MIR::AddressOf.new(arg)
+   end

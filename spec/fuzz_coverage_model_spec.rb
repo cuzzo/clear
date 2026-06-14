@@ -3,6 +3,7 @@ require "tmpdir"
 require_relative "../tools/fuzz/generator"
 require_relative "../tools/fuzz/surface_registry"
 require_relative "../tools/fuzz/coverage_model"
+require_relative "../tools/fuzz/mutants/registry"
 
 RSpec.describe FuzzCoverageModel do
   before(:all) do
@@ -24,6 +25,26 @@ RSpec.describe FuzzCoverageModel do
 
   it "keeps current high-risk sink/value-shape cross-products covered" do
     expect(described_class.cross_product_gaps).to be_empty
+  end
+
+  it "has direct mutant coverage for every high-risk template" do
+    high_risk = described_class.snapshots(templates).filter_map do |snapshot|
+      snapshot.name if snapshot.profile.high_risk
+    end
+    mutant_covered = FuzzMutants::REGISTRY.flat_map(&:templates).uniq
+
+    expect(high_risk - mutant_covered).to be_empty
+  end
+
+  it "keeps fuzz mutant registry entries wired to real templates and patches" do
+    template_names = templates.keys
+    mutant_templates = FuzzMutants::REGISTRY.flat_map(&:templates).uniq
+    missing_patches = FuzzMutants::REGISTRY.filter_map do |mutant|
+      mutant.patch unless File.file?(mutant.patch)
+    end
+
+    expect(mutant_templates - template_names).to be_empty
+    expect(missing_patches).to be_empty
   end
 
   it "reports stale README active-cell counts" do

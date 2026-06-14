@@ -1,0 +1,11 @@
+diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
+--- a/src/mir/mir_lowering.rb
++++ b/src/mir/mir_lowering.rb
+@@ -778,6 +778,7 @@ class MIRLowering
+ 
+   sig { params(mir: T.untyped, dst_ti: Type, dest_alloc: Symbol).returns(T.untyped) }
+   def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
++    return mir # MUTANT: OR/branch owned values are no longer placed into the destination allocator.
+     owned_alloc = mir_owned_alloc(mir)
+     return mir if owned_alloc == dest_alloc
+     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
