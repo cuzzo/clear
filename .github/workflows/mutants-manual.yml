@@ -117,6 +117,15 @@ jobs:
             args+=(--since "${BASE_SHA}")
           fi
           MUTANT_JOBS="$(nproc)" bundle exec ruby tools/mutants/ruby_specs.rb "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ruby-mutant-facts-${{ matrix.shard }}
+          path: |
+            /tmp/clear-ruby-mutants-${{ matrix.shard }}/mutant-facts.json
+            /tmp/clear-ruby-mutants-${{ matrix.shard }}/*.log
+          if-no-files-found: warn
+          retention-days: 14
 
   fuzz-mutants:
     name: Fuzz mutants shard ${{ matrix.shard }}/${{ matrix.count }}

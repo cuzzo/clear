@@ -23,6 +23,18 @@ pub struct UiFile {
     pub mutant_coverage: f64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UiDirectory {
+    pub path: String,
+    pub files: i64,
+    pub units: i64,
+    pub hazards: i64,
+    pub distinct_tests: i64,
+    pub mutant_killed_tests: i64,
+    pub line_coverage: f64,
+    pub mutant_coverage: f64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UiVersion {
     pub commit_hash: String,
@@ -190,10 +202,16 @@ pub fn file_index(storage: &Storage) -> Result<Vec<UiFile>> {
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
+    dashboard_summary_for_directory(storage, "")
+}
+
+pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
+    let directory = normalize_directory(directory);
+    let like = directory_like(&directory);
     let files = file_index(storage)?;
     let mut top_hazard_files = files
         .iter()
-        .filter(|file| file.hazards > 0)
+        .filter(|file| path_in_directory(&file.path, &directory) && file.hazards > 0)
         .cloned()
         .collect::<Vec<_>>();
     top_hazard_files.sort_by(|left, right| {
@@ -239,8 +257,9 @@ pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
                    COALESCE(SUM(CASE WHEN l.hits > 0 AND COALESCE(t.verified_test_types, 0) >= 2 THEN 1 ELSE 0 END), 0)
             FROM latest_lines l
             LEFT JOIN line_tests t ON t.path = l.path AND t.line = l.line
+            WHERE (?1 = '' OR l.path LIKE ?2)
             "#,
-            [],
+            params![directory, like],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -265,18 +284,23 @@ pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
                ) THEN 1 ELSE 0 END), 0)
         FROM unit_hazards h
         WHERE h.is_active = 1
+          AND (?1 = '' OR h.path LIKE ?2)
         "#,
-        [],
+        params![directory, like],
         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
     )?;
 
     let files_with_coverage = files
         .iter()
-        .filter(|file| file.line_coverage > 0.0)
+        .filter(|file| path_in_directory(&file.path, &directory) && file.line_coverage > 0.0)
         .count() as i64;
+    let files_count = files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, &directory))
+        .count();
 
     Ok(UiDashboard {
-        files: files.len(),
+        files: files_count,
         tracked_lines,
         covered_lines,
         coverage_percent: percent(covered_lines, tracked_lines),
@@ -290,6 +314,50 @@ pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
         files_with_coverage,
         top_hazard_files,
     })
+}
+
+pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
+    let directory = normalize_directory(directory);
+    let mut dirs = BTreeMap::<String, DirectoryBuilder>::new();
+    for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
+        let Some(child) = immediate_child_directory(&file.path, &directory) else {
+            continue;
+        };
+        let entry = dirs.entry(child.clone()).or_default();
+        entry.files += 1;
+        entry.units += file.units;
+        entry.hazards += file.hazards;
+        entry.distinct_tests += file.distinct_tests;
+        entry.mutant_killed_tests += file.mutant_killed_tests;
+        entry.line_coverage_sum += file.line_coverage;
+        entry.mutant_coverage_sum += file.mutant_coverage;
+    }
+    dirs.into_iter()
+        .map(|(path, builder)| {
+            let files = builder.files.max(1) as f64;
+            UiDirectory {
+                path,
+                files: builder.files,
+                units: builder.units,
+                hazards: builder.hazards,
+                distinct_tests: builder.distinct_tests,
+                mutant_killed_tests: builder.mutant_killed_tests,
+                line_coverage: builder.line_coverage_sum / files,
+                mutant_coverage: builder.mutant_coverage_sum / files,
+            }
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct DirectoryBuilder {
+    files: i64,
+    units: i64,
+    hazards: i64,
+    distinct_tests: i64,
+    mutant_killed_tests: i64,
+    line_coverage_sum: f64,
+    mutant_coverage_sum: f64,
 }
 
 pub fn source_payload(
@@ -369,12 +437,13 @@ fn route(
         "/" | "/index.html" => {
             let storage = Storage::open(db)?;
             let selected = query.get("path").map(String::as_str);
+            let directory = query.get("dir").map(String::as_str);
             let commit = query
                 .get("commit")
                 .map(String::as_str)
                 .filter(|value| !value.is_empty() && *value != "current");
             let filter = query.get("q").map(String::as_str).unwrap_or_default();
-            let body = render_index_page(&storage, repo, overlays, selected, commit, filter)?;
+            let body = render_index_page(&storage, repo, overlays, selected, directory, commit, filter)?;
             write_response(stream, 200, "text/html; charset=utf-8", &body)
         }
         "/api/files" => {
@@ -384,7 +453,8 @@ fn route(
         }
         "/api/dashboard" => {
             let storage = Storage::open(db)?;
-            let json = serde_json::to_string(&dashboard_summary(&storage)?)?;
+            let directory = query.get("dir").map(String::as_str).unwrap_or_default();
+            let json = serde_json::to_string(&dashboard_summary_for_directory(&storage, directory)?)?;
             write_response(stream, 200, "application/json", &json)
         }
         "/api/source" => {
@@ -823,13 +893,23 @@ fn render_index_page(
     repo: &Path,
     overlays: &UiOverlays,
     selected: Option<&str>,
+    directory: Option<&str>,
     commit: Option<&str>,
     filter: &str,
 ) -> Result<String> {
     let files = file_index(storage)?;
-    let dashboard = dashboard_summary(storage)?;
-    let filtered = filtered_files(&files, filter);
-    let selected_path = selected.map(str::to_string);
+    let selected_path = selected
+        .map(normalize_source_path)
+        .filter(|path| !path.is_empty());
+    let requested_directory = directory.map(normalize_directory).unwrap_or_default();
+    let current_directory = selected_path
+        .as_deref()
+        .map(parent_directory)
+        .unwrap_or(requested_directory);
+    let dashboard = dashboard_summary_for_directory(storage, &current_directory)?;
+    let child_directories = directory_index(&files, &current_directory);
+    let child_files = files_in_directory(&files, &current_directory);
+    let filtered = filtered_files_in_directory(&files, filter, &current_directory);
     let payload = selected_path
         .as_deref()
         .map(|path| source_payload_with_overlays(storage, repo, path, commit, overlays))
@@ -843,30 +923,58 @@ fn render_index_page(
     out.push_str("</style></head><body><div class=\"app\"><aside>");
     out.push_str("<header><h1>Lineage</h1><div class=\"subtle\">");
     out.push_str(&format!(
-        "{} files | {:.1}% covered",
-        files.len(),
+        "{} files{} | {:.1}% covered",
+        dashboard.files,
+        directory_label_suffix(&current_directory),
         dashboard.coverage_percent
     ));
-    out.push_str("</div><a class=\"home-link\" href=\"/");
-    if !filter.trim().is_empty() {
-        out.push_str("?q=");
-        out.push_str(&percent_encode(filter));
-    }
-    out.push_str("\">Dashboard</a>");
+    out.push_str("</div>");
+    out.push_str(&render_sidebar_navigation(&current_directory, filter));
     out.push_str("</header>");
-    out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\"><input name=\"q\" placeholder=\"Filter files\" value=\"");
+    out.push_str("<form class=\"toolbar\" method=\"get\" action=\"/\">");
+    if !current_directory.is_empty() {
+        out.push_str("<input type=\"hidden\" name=\"dir\" value=\"");
+        out.push_str(&html_escape(&current_directory));
+        out.push_str("\">");
+    }
+    out.push_str("<input name=\"q\" placeholder=\"Filter files\" value=\"");
     out.push_str(&html_escape(filter));
     out.push_str("\"><button type=\"submit\">Filter</button></form>");
     out.push_str("<nav class=\"files\">");
-    for file in filtered {
-        let active = selected_path.as_deref() == Some(file.path.as_str());
-        out.push_str(&render_file_link(file, active, filter));
+    if filter.trim().is_empty() {
+        if !current_directory.is_empty() {
+            out.push_str(&render_parent_directory_link(&current_directory, filter));
+        }
+        for directory in &child_directories {
+            out.push_str(&render_directory_link(directory, false, filter));
+        }
+        for file in &child_files {
+            let active = selected_path.as_deref() == Some(file.path.as_str());
+            out.push_str(&render_file_link(file, active, filter));
+        }
+        if child_directories.is_empty() && child_files.is_empty() {
+            out.push_str("<div class=\"empty\">No tracked files in this directory.</div>");
+        }
+    } else {
+        for file in &filtered {
+            let active = selected_path.as_deref() == Some(file.path.as_str());
+            out.push_str(&render_file_link(file, active, filter));
+        }
+        if filtered.is_empty() {
+            out.push_str("<div class=\"empty\">No matching files in this directory.</div>");
+        }
     }
     out.push_str("</nav></aside><main>");
     match payload {
         Ok(Some(payload)) => out.push_str(&render_source_view(&payload, filter)),
         Ok(None) => {
-            out.push_str(&render_dashboard(&dashboard, filter));
+            out.push_str(&render_dashboard(
+                &dashboard,
+                &current_directory,
+                &child_directories,
+                &child_files,
+                filter,
+            ));
         }
         Err(error) => {
             out.push_str("<div class=\"topbar\"><div><div class=\"title\">Source unavailable</div>");
@@ -886,6 +994,109 @@ fn filtered_files<'a>(files: &'a [UiFile], filter: &str) -> Vec<&'a UiFile> {
         .iter()
         .filter(|file| normalized.is_empty() || file.path.to_ascii_lowercase().contains(&normalized))
         .collect()
+}
+
+fn filtered_files_in_directory<'a>(
+    files: &'a [UiFile],
+    filter: &str,
+    directory: &str,
+) -> Vec<&'a UiFile> {
+    filtered_files(files, filter)
+        .into_iter()
+        .filter(|file| path_in_directory(&file.path, directory))
+        .collect()
+}
+
+fn files_in_directory<'a>(files: &'a [UiFile], directory: &str) -> Vec<&'a UiFile> {
+    let directory = normalize_directory(directory);
+    files
+        .iter()
+        .filter(|file| {
+            path_in_directory(&file.path, &directory)
+                && immediate_child_directory(&file.path, &directory).is_none()
+        })
+        .collect()
+}
+
+fn normalize_directory(directory: &str) -> String {
+    directory
+        .trim()
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_string()
+}
+
+fn normalize_source_path(path: &str) -> String {
+    path.trim().trim_start_matches("./").trim_matches('/').to_string()
+}
+
+fn directory_like(directory: &str) -> String {
+    if directory.is_empty() {
+        "%".to_string()
+    } else {
+        format!("{}/%", directory.trim_end_matches('/'))
+    }
+}
+
+fn path_in_directory(path: &str, directory: &str) -> bool {
+    let directory = normalize_directory(directory);
+    if directory.is_empty() {
+        return true;
+    }
+    path.starts_with(&format!("{directory}/"))
+}
+
+fn immediate_child_directory(path: &str, directory: &str) -> Option<String> {
+    let directory = normalize_directory(directory);
+    let rest = if directory.is_empty() {
+        path
+    } else {
+        path.strip_prefix(&format!("{directory}/"))?
+    };
+    let (child, _) = rest.split_once('/')?;
+    Some(if directory.is_empty() {
+        child.to_string()
+    } else {
+        format!("{directory}/{child}")
+    })
+}
+
+fn parent_directory(path: &str) -> String {
+    path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("").to_string()
+}
+
+fn directory_label_suffix(directory: &str) -> String {
+    let directory = normalize_directory(directory);
+    if directory.is_empty() {
+        "".to_string()
+    } else {
+        format!(" in {directory}/")
+    }
+}
+
+fn render_sidebar_navigation(directory: &str, filter: &str) -> String {
+    let directory = normalize_directory(directory);
+    let mut out = String::new();
+    out.push_str("<div class=\"nav-links\"><a class=\"home-link\" href=\"");
+    out.push_str(&html_escape(&directory_href("", filter)));
+    out.push_str("\">Root</a>");
+    if !directory.is_empty() {
+        out.push_str("<a class=\"home-link\" href=\"");
+        out.push_str(&html_escape(&directory_href(&parent_directory(&directory), filter)));
+        out.push_str("\">Up</a><a class=\"home-link\" href=\"");
+        out.push_str(&html_escape(&directory_href(&directory, filter)));
+        out.push_str("\">Directory</a>");
+    }
+    out.push_str("</div>");
+    out
+}
+
+fn render_parent_directory_link(directory: &str, filter: &str) -> String {
+    let parent = parent_directory(directory);
+    format!(
+        "<a class=\"file dir-up\" href=\"{}\"><span class=\"file-path\">../</span><span class=\"pills\"></span></a>",
+        html_escape(&directory_href(&parent, filter))
+    )
 }
 
 fn render_file_link(file: &UiFile, active: bool, filter: &str) -> String {
@@ -919,10 +1130,70 @@ fn render_file_link(file: &UiFile, active: bool, filter: &str) -> String {
     out
 }
 
-fn render_dashboard(dashboard: &UiDashboard, filter: &str) -> String {
+fn render_directory_link(directory: &UiDirectory, active: bool, filter: &str) -> String {
+    let href = directory_href(&directory.path, filter);
+    let mut out = format!(
+        "<a class=\"file{}\" href=\"{}\"><span class=\"file-path\" title=\"{}\">{}/</span><span class=\"pills\">",
+        if active { " active" } else { "" },
+        html_escape(&href),
+        html_escape(&directory.path),
+        html_escape(&directory.path)
+    );
+    if directory.hazards > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"active hazards\">{}</span>",
+            directory.hazards
+        ));
+    }
+    if directory.line_coverage > 0.0 {
+        out.push_str(&format!(
+            "<span class=\"pill coverage-pill\" title=\"line coverage\">{:.0}%</span>",
+            directory.line_coverage
+        ));
+    }
+    if directory.mutant_killed_tests > 0 {
+        out.push_str(&format!(
+            "<span class=\"pill\" title=\"mutant killed tests\">{}</span>",
+            directory.mutant_killed_tests
+        ));
+    }
+    out.push_str("</span></a>");
+    out
+}
+
+fn render_dashboard(
+    dashboard: &UiDashboard,
+    directory: &str,
+    directories: &[UiDirectory],
+    files: &[&UiFile],
+    filter: &str,
+) -> String {
+    let directory = normalize_directory(directory);
     let mut out = String::new();
-    out.push_str("<div class=\"topbar\"><div><div class=\"title\">Coverage Dashboard</div>");
-    out.push_str("<div class=\"subtle\">Current Lineage database snapshot</div></div></div>");
+    out.push_str("<div class=\"topbar\"><div><div class=\"title\">");
+    if directory.is_empty() {
+        out.push_str("Coverage Dashboard");
+    } else {
+        out.push_str("Directory: ");
+        out.push_str(&html_escape(&directory));
+        out.push('/');
+    }
+    out.push_str("</div><div class=\"subtle\">Current Lineage database snapshot");
+    if !directory.is_empty() {
+        out.push_str(" scoped to ");
+        out.push_str(&html_escape(&directory));
+        out.push('/');
+    }
+    out.push_str("</div></div>");
+    out.push_str("<div class=\"crumbs\"><a href=\"");
+    out.push_str(&html_escape(&directory_href("", filter)));
+    out.push_str("\">root</a>");
+    if !directory.is_empty() {
+        out.push_str("<a href=\"");
+        out.push_str(&html_escape(&directory_href(&parent_directory(&directory), filter)));
+        out.push_str("\">up</a>");
+    }
+    out.push_str("</div></div>");
     out.push_str("<div class=\"viewer\"><section class=\"dashboard\">");
     out.push_str("<div class=\"metric-grid\">");
     out.push_str(&render_metric(
@@ -964,6 +1235,30 @@ fn render_dashboard(dashboard: &UiDashboard, filter: &str) -> String {
     ));
     out.push_str("</div>");
 
+    out.push_str("<section class=\"dashboard-section\"><h2>Directories</h2>");
+    if directories.is_empty() {
+        out.push_str("<p class=\"empty-inline\">No child directories are tracked here.</p>");
+    } else {
+        out.push_str("<div class=\"dashboard-files\">");
+        for directory in directories {
+            out.push_str(&render_directory_dashboard_row(directory, filter));
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</section>");
+
+    out.push_str("<section class=\"dashboard-section\"><h2>Files</h2>");
+    if files.is_empty() {
+        out.push_str("<p class=\"empty-inline\">No files are tracked directly in this directory.</p>");
+    } else {
+        out.push_str("<div class=\"dashboard-files\">");
+        for file in files {
+            out.push_str(&render_file_dashboard_row(file, filter));
+        }
+        out.push_str("</div>");
+    }
+    out.push_str("</section>");
+
     out.push_str("<section class=\"dashboard-section\"><h2>Active Hazards</h2>");
     if dashboard.active_hazards == 0 {
         out.push_str("<p class=\"empty-inline\">No active systems hazards are recorded.</p>");
@@ -989,9 +1284,11 @@ fn render_dashboard(dashboard: &UiDashboard, filter: &str) -> String {
         for file in &dashboard.top_hazard_files {
             out.push_str("<a href=\"");
             out.push_str(&html_escape(&page_href(&file.path, None, filter)));
-            out.push_str("\"><span>");
+            out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
             out.push_str(&html_escape(&file.path));
-            out.push_str("</span><strong>");
+            out.push_str("</span><small>");
+            out.push_str(&file_detail(file));
+            out.push_str("</small></span><strong class=\"hazard-value\">");
             out.push_str(&file.hazards.to_string());
             out.push_str("</strong></a>");
         }
@@ -1000,6 +1297,44 @@ fn render_dashboard(dashboard: &UiDashboard, filter: &str) -> String {
     out.push_str("</section>");
     out.push_str("</section></div>");
     out
+}
+
+fn render_directory_dashboard_row(directory: &UiDirectory, filter: &str) -> String {
+    let mut out = String::new();
+    out.push_str("<a href=\"");
+    out.push_str(&html_escape(&directory_href(&directory.path, filter)));
+    out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
+    out.push_str(&html_escape(&directory.path));
+    out.push_str("/</span><small>");
+    out.push_str(&html_escape(&format!(
+        "{} files | {} units | {} hazards | {} mutant-killed tests",
+        directory.files, directory.units, directory.hazards, directory.mutant_killed_tests
+    )));
+    out.push_str("</small></span><strong class=\"metric-value\">");
+    out.push_str(&format!("{:.0}%", directory.line_coverage));
+    out.push_str("</strong></a>");
+    out
+}
+
+fn render_file_dashboard_row(file: &UiFile, filter: &str) -> String {
+    let mut out = String::new();
+    out.push_str("<a href=\"");
+    out.push_str(&html_escape(&page_href(&file.path, None, filter)));
+    out.push_str("\"><span class=\"row-label\"><span class=\"row-title\">");
+    out.push_str(&html_escape(&file.path));
+    out.push_str("</span><small>");
+    out.push_str(&file_detail(file));
+    out.push_str("</small></span><strong class=\"metric-value\">");
+    out.push_str(&format!("{:.0}%", file.line_coverage));
+    out.push_str("</strong></a>");
+    out
+}
+
+fn file_detail(file: &UiFile) -> String {
+    html_escape(&format!(
+        "{} units | {} hazards | {} tests | {} mutant-killed tests",
+        file.units, file.hazards, file.distinct_tests, file.mutant_killed_tests
+    ))
 }
 
 fn render_metric(label: &str, value: &str, detail: &str) -> String {
@@ -1512,6 +1847,20 @@ fn page_href(path: &str, commit: Option<&str>, filter: &str) -> String {
     query
 }
 
+fn directory_href(directory: &str, filter: &str) -> String {
+    let directory = normalize_directory(directory);
+    let mut query = if directory.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/?dir={}", percent_encode(&directory))
+    };
+    if !filter.trim().is_empty() {
+        query.push_str(if query.contains('?') { "&q=" } else { "?q=" });
+        query.push_str(&percent_encode(filter));
+    }
+    query
+}
+
 fn percent_encode(input: &str) -> String {
     let mut out = String::new();
     for byte in input.bytes() {
@@ -1575,7 +1924,8 @@ const STYLE: &str = r#"
   h1 { margin: 0; font-size: 15px; letter-spacing: 0; }
   h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0; }
   .subtle { color: var(--muted); font-size: 12px; }
-  .home-link { display: inline-block; margin-top: 6px; color: #1d4ed8; font-size: 12px; text-decoration: none; }
+  .nav-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .home-link { color: #1d4ed8; font-size: 12px; text-decoration: none; }
   .toolbar { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
   input {
     width: 100%;
@@ -1607,6 +1957,7 @@ const STYLE: &str = r#"
     text-decoration: none;
   }
   .file:hover, .file.active { background: #eef2f7; }
+  .dir-up { color: var(--muted); }
   .file-path {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1652,6 +2003,8 @@ const STYLE: &str = r#"
   .history summary { cursor: pointer; color: var(--muted); }
   .history-list { display: grid; gap: 4px; margin-top: 6px; max-height: 180px; overflow: auto; }
   .history-list a { color: var(--text); text-decoration: none; font-size: 12px; }
+  .crumbs { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
+  .crumbs a { color: #1d4ed8; text-decoration: none; font-size: 12px; }
   .viewer { min-width: 0; min-height: 0; overflow: auto; background: #fbfcfd; }
   .dashboard {
     max-width: 1180px;
@@ -1705,8 +2058,11 @@ const STYLE: &str = r#"
     text-decoration: none;
   }
   .dashboard-files a:last-child { border-bottom: 0; }
-  .dashboard-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .dashboard-files strong { color: var(--hazard); }
+  .dashboard-files .row-label { min-width: 0; display: grid; gap: 2px; }
+  .dashboard-files .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .dashboard-files small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .dashboard-files .metric-value { color: #166534; }
+  .dashboard-files .hazard-value { color: var(--hazard); }
   .empty-inline { margin: 0; color: var(--muted); }
   .code {
     min-width: max-content;
@@ -2088,6 +2444,76 @@ mod tests {
         assert_eq!(dashboard.mutant_killed_covered_lines, 1);
         assert_eq!(dashboard.multi_type_covered_lines, 1);
         assert_eq!(dashboard.coverage_percent, 200.0 / 3.0);
+    }
+
+    #[test]
+    fn directory_index_groups_immediate_children() {
+        let files = vec![
+            UiFile {
+                path: "src/a.rb".into(),
+                units: 1,
+                hazards: 2,
+                distinct_tests: 3,
+                mutant_killed_tests: 4,
+                line_coverage: 50.0,
+                mutant_coverage: 25.0,
+            },
+            UiFile {
+                path: "src/internal/b.rb".into(),
+                units: 2,
+                hazards: 1,
+                distinct_tests: 5,
+                mutant_killed_tests: 6,
+                line_coverage: 75.0,
+                mutant_coverage: 50.0,
+            },
+            UiFile {
+                path: "zig/c.zig".into(),
+                units: 3,
+                hazards: 7,
+                distinct_tests: 8,
+                mutant_killed_tests: 9,
+                line_coverage: 100.0,
+                mutant_coverage: 0.0,
+            },
+        ];
+
+        let root = directory_index(&files, "");
+        assert_eq!(root.iter().map(|directory| directory.path.as_str()).collect::<Vec<_>>(), vec!["src", "zig"]);
+        assert_eq!(root[0].files, 2);
+        assert_eq!(root[0].hazards, 3);
+        assert_eq!(root[0].line_coverage, 62.5);
+
+        let src = directory_index(&files, "src");
+        assert_eq!(src.len(), 1);
+        assert_eq!(src[0].path, "src/internal");
+        assert_eq!(files_in_directory(&files, "src")[0].path, "src/a.rb");
+    }
+
+    #[test]
+    fn dashboard_summary_can_scope_to_directory() {
+        let storage = Storage::open_memory().unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 1, 1)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "src/a.rb", 2, 0)
+            .unwrap();
+        storage
+            .record_coverage_line("abc", 10, "zig/a.zig", 1, 1)
+            .unwrap();
+
+        let root = dashboard_summary_for_directory(&storage, "").unwrap();
+        let src = dashboard_summary_for_directory(&storage, "src").unwrap();
+        let zig = dashboard_summary_for_directory(&storage, "zig").unwrap();
+
+        assert_eq!(root.tracked_lines, 3);
+        assert_eq!(root.covered_lines, 2);
+        assert_eq!(src.tracked_lines, 2);
+        assert_eq!(src.covered_lines, 1);
+        assert_eq!(src.coverage_percent, 50.0);
+        assert_eq!(zig.tracked_lines, 1);
+        assert_eq!(zig.covered_lines, 1);
     }
 
     #[test]

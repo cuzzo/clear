@@ -9,6 +9,7 @@ pub mod git;
 pub mod hazard;
 pub mod lsp;
 pub mod model;
+pub mod mutant;
 pub mod quality;
 pub mod stack_trace;
 pub mod storage;
@@ -28,6 +29,7 @@ pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
     HazardEvent, QualityMetric, TestExposureEvent, UnitKind,
 };
+pub use mutant::{ingest_mutant_facts_json, parse_mutant_facts, MutantFact, MutantIngestStats};
 pub use quality::{
     coverage_records_to_test_exposure_json, ingest_coverage_json,
     ingest_coverage_json_with_options, parse_coverage_input, resolve_coverage_record_paths,

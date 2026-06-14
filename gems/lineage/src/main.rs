@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
     coverage_records_to_test_exposure_json, ingest_coverage_json_with_options, ingest_hazards,
-    ingest_stack_traces, ingest_test_exposure_json, parse_coverage_input,
+    ingest_mutant_facts_json, ingest_stack_traces, ingest_test_exposure_json, parse_coverage_input,
     resolve_coverage_record_paths, serve_lsp, serve_ui_with_overlays, CoverageIngestOptions,
     GitProvider, HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
 };
@@ -99,6 +99,21 @@ enum Command {
         commit: String,
         #[arg(long)]
         timestamp: Option<i64>,
+    },
+    /// Ingest Ruby mutant-facts/v1 and convert them to mutation exposure.
+    IngestMutants {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        timestamp: Option<i64>,
+        #[arg(long, default_value = "unit")]
+        test_type: String,
     },
     /// Ingest current hazard sites for one provider and commit.
     IngestHazards {
@@ -213,9 +228,17 @@ fn main() -> Result<()> {
             let storage = Storage::open(&db)?;
             let payload = fs::read_to_string(&input)?;
             let normalized_test_type = test_type.as_deref().map(normalize_test_type);
+            let coverage_test_id = normalized_test_type
+                .as_ref()
+                .map(|test_type| {
+                    test_id
+                        .clone()
+                        .unwrap_or_else(|| default_coverage_test_id(test_type, &input))
+                });
             let line_source = normalized_test_type
                 .as_ref()
-                .map(|value| format!("coverage:{value}"))
+                .zip(coverage_test_id.as_ref())
+                .map(|(_, test_id)| format!("coverage:{test_id}"))
                 .unwrap_or_else(|| "coverage".to_string());
             let stats = ingest_coverage_json_with_options(
                 &storage,
@@ -231,8 +254,7 @@ fn main() -> Result<()> {
                 stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
             );
             if let Some(test_type) = normalized_test_type {
-                let test_id =
-                    test_id.unwrap_or_else(|| default_coverage_test_id(&test_type, &input));
+                let test_id = coverage_test_id.expect("coverage test id exists for typed coverage");
                 if replace {
                     storage.delete_test_exposure_for_commit_test(&commit, &test_type, &test_id)?;
                 }
@@ -297,6 +319,39 @@ fn main() -> Result<()> {
                 stats.unverified,
                 stats.skipped_files,
                 stats.skipped_records
+            );
+        }
+        Command::IngestMutants {
+            db,
+            repo,
+            input,
+            commit,
+            timestamp,
+            test_type,
+        } => {
+            let storage = Storage::open(&db)?;
+            let git = GitProvider::open(&repo)?;
+            let extractor = HeuristicExtractor::default();
+            let normalizer = RepoPathNormalizer::new(&repo);
+            let payload = fs::read_to_string(&input)?;
+            let stats = ingest_mutant_facts_json(
+                &storage,
+                &normalizer,
+                &git,
+                &extractor,
+                &payload,
+                &commit,
+                timestamp,
+                &test_type,
+            )?;
+            println!(
+                "ingested mutant facts: facts={} units={} quality_events={} exposure_events={} skipped_files={} skipped_facts={}",
+                stats.facts,
+                stats.units,
+                stats.quality_events,
+                stats.exposure_events,
+                stats.skipped_files,
+                stats.skipped_facts
             );
         }
         Command::IngestHazards {
@@ -402,7 +457,7 @@ fn default_coverage_test_id(test_type: &str, input: &std::path::Path) -> String 
         .to_string_lossy()
         .trim_start_matches("./")
         .replace('\\', "/");
-    format!("coverage:{test_type}:{path}")
+    format!("{test_type}:{path}")
 }
 
 fn json_escape(value: &str) -> String {
