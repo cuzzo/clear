@@ -247,4 +247,88 @@ class ReportTest < Minitest::Test
       assert_includes md, "Lineage DB: lineage.sqlite"
     end
   end
+
+  def test_report_includes_named_test_exposure_when_supplied
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      file = "#{dir}/src/hot.rb"
+      File.write(file, <<~RUBY)
+        class Hot
+          def risky(x)
+            total = x.to_i
+            if x
+              total += 1
+            else
+              total -= 1
+            end
+            total *= 2
+            total + 3
+          end
+        end
+      RUBY
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Add hot", date: "2020-01-01T00:00:00")
+      File.write(file, File.read(file) + "\n# fix\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix hot regression", date: "2024-01-01T00:00:00")
+
+      lines = Array.new(12)
+      [2].each { |i| lines[i - 1] = 1 }
+      [3, 4, 5, 6, 7, 8, 9, 10].each { |i| lines[i - 1] = 0 }
+      rs = {
+        "RSpec" => { "coverage" => {
+          file => {
+            "lines" => lines,
+            "branches" => {
+              "[:if,0,3,0,7,3]" => {
+                "[:then,1,4,0,5,10]" => 0,
+                "[:else,2,6,0,7,10]" => 0
+              }
+            }
+          }
+        } }
+      }
+      coverage = "#{dir}/.resultset.json"
+      File.write(coverage, JSON.dump(rs))
+      exposure = "#{dir}/test-exposure.json"
+      File.write(exposure, JSON.dump(
+        "schema" => "test-exposure/v1",
+        "hits" => [
+          {
+            "file" => "src/hot.rb",
+            "function" => "risky",
+            "line" => 4,
+            "branch_id" => "b1",
+            "test_id" => "spec/hot_spec.rb:1",
+            "test_type" => "unit",
+            "mutation_status" => "killed"
+          },
+          {
+            "file" => "src/hot.rb",
+            "function" => "risky",
+            "line" => 6,
+            "branch_id" => "b2",
+            "test_id" => "spec/hot_spec.rb:2",
+            "test_type" => "integration",
+            "mutation_status" => "killed"
+          }
+        ]
+      ))
+
+      md = Boobytrap::Report.new(
+        repo: dir,
+        resultset: coverage,
+        test_exposure: exposure
+      ).to_markdown
+
+      assert_includes md, "tests"
+      assert_includes md, "2 tests; integration=1/unit=1; mutant killed 2/2"
+      assert_includes md, "mutation-killed exposure"
+      assert_includes md, "Test exposure facts: test-exposure.json"
+      assert_includes md, "tests=2 tests"
+    end
+  end
 end

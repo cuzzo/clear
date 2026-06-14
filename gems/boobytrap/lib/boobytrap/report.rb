@@ -8,6 +8,7 @@ require_relative "hotspot"
 require_relative "lineage_risk"
 require_relative "method_gap"
 require_relative "mutation_facts"
+require_relative "test_exposure_facts"
 
 module Boobytrap
   # Single markdown report, structured like decomplex / nil-kill: TOC,
@@ -20,12 +21,14 @@ module Boobytrap
     # weighting stays consistent with the whole project; we only filter
     # WHICH files are ranked. Empty = whole repo.
     def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [],
-                   mutation: nil, exclude: [], lineage: nil, lineage_command: nil)
+                   mutation: nil, test_exposure: nil, exclude: [], lineage: nil,
+                   lineage_command: nil)
       @repo = ::File.realpath(repo)
       @top = top
       @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
       @exclude = Array(exclude)
       @mutation_facts = MutationFacts.load(mutation, root: @repo)
+      @test_exposure_facts = TestExposureFacts.load(test_exposure, root: @repo)
       @lineage = LineageRisk.load(
         lineage,
         repo: @repo,
@@ -201,7 +204,8 @@ module Boobytrap
           o << "- Highest empirical method risk: " \
                "`#{method.file}:#{method.first_line}` `#{method.name}` " \
                "(risk=#{method.risk.round(2)}, fix_norm=#{method.fix_norm}, " \
-               "verification=#{method.verification_status || 'not supplied'}).\n"
+               "verification=#{method.verification_status || 'not supplied'}, " \
+               "tests=#{method.test_exposure_status || 'not supplied'}).\n"
         end
         if (unit = @lineage[:units].first)
           o << "- Highest lineage unit risk: `#{unit.file}` `#{unit.name}` " \
@@ -234,8 +238,8 @@ module Boobytrap
       o << "## Mostly Uncovered Methods (#{dark_method_count})\n"
       o << "_non-trivial methods (`>=5` executable lines) with very low line coverage; " \
            "risk = missed lines x gap, Decomplex detector score, " \
-           "instance-state writes, dark branches, fix history, and " \
-           "mutation verification when supplied._\n\n"
+           "instance-state writes, dark branches, fix history, mutation " \
+           "verification, and named-test exposure when supplied._\n\n"
       if @method_gaps.empty?
         o << "_No line-coverage method data available._\n\n"
       elsif dark_method_count.zero?
@@ -249,9 +253,9 @@ module Boobytrap
         o << "- <=10% covered: #{le10}\n"
         o << "- <=20% covered: #{le20}\n"
         o << "- <=50% covered: #{le50}\n\n"
-        if @mutation_facts.active?
-          o << "| # | method | risk | covered | missed | fix_norm | lineage | decomplex | verification | profile | writes | dark branches |\n"
-          o << "|---|--------|------|---------|--------|----------|---------|-----------|--------------|---------|--------|---------------|\n"
+        if empirical_columns?
+          o << "| # | method | risk | covered | missed | fix_norm | lineage | decomplex | verification | tests | profile | writes | dark branches |\n"
+          o << "|---|--------|------|---------|--------|----------|---------|-----------|--------------|-------|---------|--------|---------------|\n"
         else
           o << "| # | method | risk | covered | missed | fix_norm | lineage | decomplex | findings | writes | dark branches |\n"
           o << "|---|--------|------|---------|--------|----------|---------|-----------|----------|--------|---------------|\n"
@@ -260,9 +264,12 @@ module Boobytrap
           common = "| #{i + 1} | `#{m.file}:#{m.first_line}` `#{m.name}` " \
                    "| #{m.risk.round(2)} | #{m.covered_lines}/#{m.executable_lines} " \
                    "| #{m.missed_lines} | #{m.fix_norm} | #{lineage_cell(m)} | #{m.decomplex_score} "
-          if @mutation_facts.active?
+          if empirical_columns?
             o << common
-            o << "| #{m.verification_status} | #{m.risk_profile} | #{m.state_writes} "
+            o << "| #{m.verification_status || 'not supplied'} " \
+              "| #{m.test_exposure_status || 'not supplied'} " \
+              "| #{empirical_profile(m)} " \
+              "| #{m.state_writes} "
             o << "| #{m.uncovered_branches} |\n"
           else
             o << common
@@ -351,13 +358,24 @@ module Boobytrap
       o << "- Branch-coverage resultset: " \
            "#{@have_cov ? @coverage_mode : 'ABSENT (fix-churn only)'}\n"
       o << "- Mutation facts: #{@mutation_facts.active? ? @mutation_facts.label : 'not supplied'}\n"
+      o << "- Test exposure facts: " \
+           "#{@test_exposure_facts.active? ? @test_exposure_facts.label : 'not supplied'}\n"
       o << "- Lineage DB: #{@lineage[:status] == :ok ? @lineage[:label] : 'not supplied'}\n"
       o << "- Method: vendored bugspots " \
            "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
            "x normalized coverage branch gap; method gaps use Decomplex detector scores, " \
-           "fix history, and mutation verification when supplied " \
+           "fix history, mutation verification, and named-test exposure when supplied " \
            "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
+    end
+
+    def empirical_columns?
+      @mutation_facts.active? || @test_exposure_facts.active?
+    end
+
+    def empirical_profile(row)
+      profiles = [row.risk_profile, row.test_exposure_profile].compact.uniq
+      profiles.empty? ? "not supplied" : profiles.join("; ")
     end
 
     def dark_methods
@@ -374,29 +392,60 @@ module Boobytrap
         fix_norm = (@fix_scores[row.file].to_f / @fix_max).round(3)
         row.fix_norm = fix_norm
         row.risk = (row.risk.to_f * (1.0 + fix_norm)).round(4)
-        next unless @mutation_facts.active?
-
-        fact = @mutation_facts.status_for(row.file, row.name)
-        row.verification_status = fact.summary
-        row.mutation_kill_rate = fact.kill_rate
-        row.mutation_gate_status = fact.gate_status
         structural_score = empirical_structural_score(row)
-        row.risk_profile = MutationFacts.profile(
-          fact,
-          active: true,
-          complexity: structural_score,
-          history: fix_norm,
-          coverage_gap: row.line_gap
-        )
-        row.verification_multiplier = MutationFacts.risk_multiplier(
-          fact,
-          active: true,
-          complexity: structural_score,
-          history: fix_norm,
-          coverage_gap: row.line_gap
-        )
-        row.risk = (row.risk * row.verification_multiplier).round(4)
+        apply_mutation_risk!(row, structural_score, fix_norm)
+        apply_test_exposure_risk!(row, structural_score, fix_norm)
       end
+    end
+
+    def apply_mutation_risk!(row, structural_score, fix_norm)
+      return unless @mutation_facts.active?
+
+      fact = @mutation_facts.status_for(row.file, row.name)
+      row.verification_status = fact.summary
+      row.mutation_kill_rate = fact.kill_rate
+      row.mutation_gate_status = fact.gate_status
+      row.risk_profile = MutationFacts.profile(
+        fact,
+        active: true,
+        complexity: structural_score,
+        history: fix_norm,
+        coverage_gap: row.line_gap
+      )
+      row.verification_multiplier = MutationFacts.risk_multiplier(
+        fact,
+        active: true,
+        complexity: structural_score,
+        history: fix_norm,
+        coverage_gap: row.line_gap
+      )
+      row.risk = (row.risk * row.verification_multiplier).round(4)
+    end
+
+    def apply_test_exposure_risk!(row, structural_score, fix_norm)
+      return unless @test_exposure_facts.active?
+
+      fact = @test_exposure_facts.status_for(
+        row.file,
+        row.name,
+        first_line: row.first_line,
+        last_line: row.last_line
+      )
+      row.test_exposure_status = fact.summary
+      row.test_exposure_profile = TestExposureFacts.profile(fact, active: true)
+      row.distinct_test_count = fact.distinct_test_count
+      row.tested_line_count = fact.tested_line_count
+      row.tested_branch_count = fact.tested_branch_count
+      row.mutant_verified_test_count = fact.mutant_verified_test_count
+      row.mutant_killed_test_count = fact.mutant_killed_test_count
+      row.test_exposure_multiplier = TestExposureFacts.risk_multiplier(
+        fact,
+        active: true,
+        complexity: structural_score,
+        history: fix_norm,
+        coverage_gap: row.line_gap
+      )
+      row.risk = (row.risk * row.test_exposure_multiplier).round(4)
     end
 
     def apply_lineage_method_risk!(rows)

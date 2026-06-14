@@ -1,45 +1,155 @@
-# Empirical Risk Assessment: Integrating Mutation Signal
+# Empirical Risk Assessment: Test Type, Exposure, and Mutation Quality
 
-This document outlines the design for incorporating "Verification Quality" (specifically mutation testing signals) into the `Boobytrap` and `SlopCop` risk models.
+This document defines Boobytrap's verification-quality axis. The goal is
+to distinguish code that merely executed during a test run from code that
+is protected by a useful, load-bearing safety net.
 
-## 1. The Core Philosophy: "Hollow" vs. "Load-Bearing" Tests
+## 1. Problem
 
-Currently, `Decomplex` identifies structural risk (complexity, scattered state) and `Boobytrap` identifies historical risk (churn, bugspots). However, standard line-coverage cannot differentiate between a "Hollow Test" (code executed without assertion) and a "Load-Bearing Test" (code explicitly verified against mutation).
+Standard line coverage answers only one question: did this line execute
+at least once in the measured corpus?
 
-By joining **Mutation Coverage** with **Structural Complexity**, we move from static analysis to **Empirical Risk Assessment**.
+That is not enough for risk ranking:
 
-## 2. The "Structural Integrity" Formula
+- A line hit by one broad smoke test is weaker than a line hit by five
+  focused unit tests.
+- A branch arm reached only by an integration test may still lack a
+  precise regression guard.
+- A function covered by fuzz and mutation-killed tests is much safer
+  than a function with the same line coverage but no killed mutants.
+- A historically buggy function should remain high risk until it has
+  been substantially covered after the bug, especially by tests that
+  kill mutants. Once that happens, Boobytrap should decay its historical
+  signal unless bugs keep recurring after the hardening.
 
-Risk is no longer just "Is this code complex?" It is: **"Is this complexity protected?"**
+## 2. Desired Signals
 
-We introduce a three-axis risk assessment for every method/module:
+Boobytrap should be able to ingest and report:
 
-| Axis | Tool | Signal | Risk Indicator |
-| :--- | :--- | :--- | :--- |
-| **Complexity** | `Decomplex` | Decision Pressure, Co-Update | The code is hard for humans to reason about. |
-| **History** | `Boobytrap` | Bugspots, Commit Churn | The code breaks frequently in practice. |
-| **Verification** | `Mutant` | Kill-Rate, Gate Status | The test suite is incapable of catching regressions. |
+- distinct tests that hit a function
+- distinct tests that hit each line
+- distinct tests that hit each branch arm
+- test type for each hit, such as `unit`, `integration`, `transpile`,
+  `fuzz`, `runtime`, `smoke`, or `unknown`
+- whether a test is mutation-related
+- whether a mutation subject was killed, survived, timed out, errored,
+  or only advisory
 
-### The Risk Profiles
+The first implementation consumes a normalized side-input file instead
+of trying to recover this from coverage formats. Coverage formats mostly
+aggregate hits, while this feature needs test identity and intent.
 
-1. **The "Lurking Disaster" (Critical Risk)**
-   - *Signal:* High Complexity + High Churn + Low/No Mutation Coverage.
-   - *Verdict:* A developer changing this code is flying blind. Even if tests pass, they are performative. This is the highest priority for refactoring or hard-gating.
+## 3. Input Schema
 
-2. **The "Hardened Veteran" (Low/Managed Risk)**
-   - *Signal:* High Complexity + Low/Moderate Churn + High Mutation Coverage (Hard-Gated).
-   - *Verdict:* The code is complex, but the safety net is empirically proven. The "Decision Pressure" is high, but it is "Safe Complexity." SlopCop can downgrade the urgency of this warning.
+Boobytrap accepts a `test-exposure/v1` JSON file:
 
-3. **The "Fragile Newcomer" (Rising Risk)**
-   - *Signal:* Low Complexity + High Churn + Low Mutation Coverage.
-   - *Verdict:* Code that is frequently modified but lacks strict verification. A bug factory in the making.
+```json
+{
+  "schema": "test-exposure/v1",
+  "hits": [
+    {
+      "file": "src/ast/type.rb",
+      "function": "with",
+      "line": 81,
+      "branch_id": "ruby:src/ast/type.rb:65:if:then",
+      "test_id": "spec/type_spec.rb:42",
+      "test_type": "unit",
+      "mutation_status": "killed"
+    }
+  ]
+}
+```
 
-## 3. Implementation Plan
+The same facts may be emitted in a nested form:
 
-This does not require a new gem; it requires a **Verification Join** within the existing `SlopCop` / `Boobytrap` rollup.
+```json
+{
+  "schema": "test-exposure/v1",
+  "files": [
+    {
+      "file": "src/ast/type.rb",
+      "functions": [
+        {
+          "name": "with",
+          "tests": [
+            {
+              "id": "spec/type_spec.rb:42",
+              "type": "unit",
+              "mutation_status": "killed"
+            }
+          ]
+        }
+      ],
+      "lines": [
+        {
+          "line": 81,
+          "tests": [
+            { "id": "spec/type_spec.rb:42", "type": "unit" }
+          ]
+        }
+      ],
+      "branches": [
+        {
+          "branch_id": "ruby:src/ast/type.rb:65:if:then",
+          "line": 81,
+          "tests": [
+            { "id": "spec/type_spec.rb:42", "type": "unit" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
 
-### Step 1: Fact Extraction (Mutant)
-Modify the mutation runner (`tools/mutants/ruby_specs.rb` or similar) to emit a structured JSON fact file:
+The side-input should be generated by coverage/mutation tooling that can
+preserve test identity. It is valid for a project to produce only
+function-level records at first, then add line and branch records later.
+
+## 4. Normalized Facts
+
+Boobytrap normalizes the side input into per-method exposure facts:
+
+- `distinct_test_count`
+- `test_types`
+- `tested_line_count`
+- `tested_branch_count`
+- `mutant_verified_test_count`
+- `mutant_killed_test_count`
+- `mutant_survived_test_count`
+- `summary`
+
+Line and branch facts are joined to a method by source range when the
+record does not already name a function.
+
+## 5. Risk Model
+
+The verification-quality axis is a multiplier applied after structural,
+coverage-gap, fix-history, mutation-fact, and Lineage overlays.
+
+Risk should rise when a method has no named tests in an active
+test-exposure dataset. Risk should fall when the method is hit by
+multiple named tests, by multiple test types, or by mutation-killed
+tests.
+
+Initial multiplier rules:
+
+- no active exposure file: neutral
+- active exposure file but no fact for the method: mild increase
+- only one non-mutant hit: near-neutral
+- multiple named tests: mild reduction
+- multiple test types: stronger reduction
+- at least one killed mutant: strong reduction
+- several killed mutant tests: strongest reduction
+
+The implementation must avoid over-crediting "hollow" coverage. Named
+line/function hits without mutation evidence help, but they do not erase
+risk the way killed mutants do.
+
+## 6. Relationship to `mutant-facts/v1`
+
+`mutant-facts/v1` remains the compact method-level summary:
+
 ```json
 {
   "schema": "mutant-facts/v1",
@@ -54,15 +164,56 @@ Modify the mutation runner (`tools/mutants/ruby_specs.rb` or similar) to emit a 
 }
 ```
 
-### Step 2: The Join (SlopCop)
-In `SlopCop::Rollup` (or the equivalent Boobytrap analyzer), join the `Decomplex` structural facts with the `Mutant` verification facts using `(file, method)` as the primary key.
+`test-exposure/v1` is the richer record of which tests hit which
+function/line/branch and whether those hits are mutation-verified.
+Boobytrap should support both:
 
-### Step 3: Reporting & Verdicts
-Update the `SlopCop` report to expose the Verification layer.
-- Elevate the severity of complex methods that lack mutation coverage.
-- Add a "Verification Status" column to standard outputs.
+- `mutant-facts/v1` for coarse method verification status
+- `test-exposure/v1` for distinct test cardinality and test type
 
-## 4. Why This Matters for v0.1
+## 7. Future Lineage Integration: Historical Hardening Decay
 
-- **Internal Velocity:** It provides a deterministic "Heatmap" for the remaining 10 weeks of development. It highlights exactly which "Advisory" mutant subjects are protecting complex, highly-churned code (e.g., `EscapeAnalysis`).
-- **Product Value:** When launching `SlopCop`, this feature becomes a primary differentiator. It offers a level of insight—differentiating "Safe Complexity" from "Unsafe Complexity"—that standard linters and coverage tools cannot match.
+The next major step belongs in Lineage, not Boobytrap's one-shot report
+loader.
+
+Lineage should track quality events over time:
+
+- a function had bug-fix events in the past
+- later commits added substantial unit/integration/fuzz coverage
+- later commits added mutation-killed tests
+- subsequent bug-fix events did or did not continue after that hardening
+
+Boobytrap should eventually consume a Lineage "hardening verdict":
+
+- `unhardened`: historically buggy and still weakly protected
+- `hardened`: historically buggy but substantially protected after the
+  last bug
+- `failed_hardening`: coverage/mutants were added, but bugs continued
+- `regressed`: protection existed and later disappeared
+
+Risk handling:
+
+- `hardened` should dramatically decay the historical bug signal.
+- `failed_hardening` should preserve or increase risk because tests are
+  likely insufficient or aimed at the wrong behavior.
+- `regressed` should raise risk because the safety net disappeared.
+
+This requires Lineage to record ordered fix events, coverage events,
+mutation events, and possibly test-type events per logical unit. After
+that, Boobytrap can consume the verdict and adjust method/file ranking.
+
+## 8. Implementation Status
+
+Current Boobytrap implementation:
+
+- consumes aggregate line/branch coverage
+- consumes `mutant-facts/v1`
+- consumes `test-exposure/v1`
+- reports named-test exposure on mostly uncovered methods
+- adjusts method risk based on test exposure and mutation-killed tests
+
+Pending Lineage work:
+
+- persist test exposure and mutation events historically
+- derive hardening verdicts from event order
+- expose those verdicts to Boobytrap for historical decay

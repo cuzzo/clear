@@ -42,6 +42,10 @@ boobytrap report --repo=. --coverage=coverage/.resultset.json \
 boobytrap report --repo=. --coverage=coverage/.resultset.json \
                  --lineage-db=lineage.sqlite --output=report.md
 
+# Add optional named-test exposure facts:
+boobytrap report --repo=. --coverage=coverage/.resultset.json \
+                 --test-exposure=test-exposure.json --output=report.md
+
 # Restrict ranking to part of the codebase (repeatable). The
 # committed report.md is generated with --only=src/ -- the fix
 # time-decay baseline still spans the WHOLE history; only which
@@ -72,6 +76,9 @@ over CLEAR's compiler.
 - **Lineage Unit Risk** -- optional logical-unit history from
   `gems/lineage`. Semantic `FIX`/`CHANGE` events add risk; pure moves
   are shown separately and do not add risk.
+- **Named-Test Exposure** -- optional `test-exposure/v1` facts that
+  count distinct tests hitting functions, lines, and branch arms,
+  including test type and mutation-killed status.
 - **Fixed But Unmeasured** -- files with recurring fixes but *no*
   branch-coverage data. Recurring-fix code the corpus does not measure
   at all is itself a risk; it is surfaced, not dropped.
@@ -84,6 +91,8 @@ over CLEAR's compiler.
    Complexity (Flog) is the documented optional third axis.
  * **Lineage is optional.** Without `--lineage-db`, Boobytrap still
    works from fix history, coverage, Decomplex, and mutation facts.
+ * **Per-test exposure is optional.** Without `--test-exposure`,
+   Boobytrap falls back to aggregate coverage and mutation summaries.
  * **Not duplication or type analysis.** That is decomplex (what
    decision is duplicated) and nil-kill (which nils/types pollute).
    boobytrap only says *where* to look; the other two say *what* is

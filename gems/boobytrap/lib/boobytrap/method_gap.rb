@@ -22,6 +22,11 @@ module Boobytrap
                      :verification_status, :mutation_kill_rate,
                      :mutation_gate_status, :risk_profile,
                      :verification_multiplier,
+                     :test_exposure_status, :test_exposure_profile,
+                     :test_exposure_multiplier, :distinct_test_count,
+                     :tested_line_count, :tested_branch_count,
+                     :mutant_verified_test_count,
+                     :mutant_killed_test_count,
                      :lineage_score, :lineage_fixes, :lineage_changes,
                      :lineage_moves,
                      keyword_init: true)
