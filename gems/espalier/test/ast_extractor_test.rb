@@ -5,8 +5,28 @@ require "tempfile"
 require_relative "../lib/espalier"
 
 class AstExtractorTest < Minitest::Test
+  GRAMMAR_ENVS = {
+    ruby: "DECOMPLEX_TS_RUBY_PATH",
+    python: "DECOMPLEX_TS_PYTHON_PATH",
+    javascript: "DECOMPLEX_TS_JAVASCRIPT_PATH",
+    typescript: "DECOMPLEX_TS_TYPESCRIPT_PATH",
+    go: "DECOMPLEX_TS_GO_PATH",
+    rust: "DECOMPLEX_TS_RUST_PATH",
+    zig: "DECOMPLEX_TS_ZIG_PATH"
+  }.freeze
+
   def parse_ruby(code)
-    f = Tempfile.new(["espalier", ".rb"])
+    skip_unless_grammar(:ruby)
+    parse_source(code, ".rb")
+  end
+
+  def parse_zig(code)
+    skip_unless_grammar(:zig)
+    parse_source(code, ".zig")
+  end
+
+  def parse_source(code, ext)
+    f = Tempfile.new(["espalier", ext])
     f.write(code)
     f.close
     extractor = Espalier::AstExtractor.new(f.path)
@@ -15,14 +35,10 @@ class AstExtractorTest < Minitest::Test
     f&.unlink
   end
 
-  def parse_zig(code)
-    f = Tempfile.new(["espalier", ".zig"])
-    f.write(code)
-    f.close
-    extractor = Espalier::AstExtractor.new(f.path)
-    extractor.extract
-  ensure
-    f&.unlink
+  def skip_unless_grammar(language)
+    env = GRAMMAR_ENVS.fetch(language)
+    grammar = ENV[env]
+    skip "set #{env} to run #{language} Tree-sitter extractor test" unless grammar && File.file?(grammar)
   end
 
   def test_extracts_static_ivar_t_let_types
@@ -133,9 +149,6 @@ class AstExtractorTest < Minitest::Test
   end
 
   def test_extracts_zig_tree_sitter_owners_state_and_delegations
-    grammar = ENV["DECOMPLEX_TS_ZIG_PATH"]
-    skip "set DECOMPLEX_TS_ZIG_PATH to run Zig Tree-sitter extractor test" unless grammar && File.file?(grammar)
-
     mods = parse_zig(<<~ZIG)
       pub fn Box(comptime T: type) type {
           return struct {
@@ -168,5 +181,121 @@ class AstExtractorTest < Minitest::Test
     assert_includes get[:effects][:writes], "count"
     assert_includes get[:delegations], { receiver: "self", message: "bump", type: :always }
     assert get[:line].positive?
+  end
+
+  def test_extracts_receiver_state_and_internal_delegations_across_tree_sitter_languages
+    profiles = {
+      python: [
+        ".py",
+        <<~PY,
+          class Unit:
+              def __init__(self, value):
+                  self.value = value
+              def run(self):
+                  self.value = self.value + 1
+                  self.bump()
+              def bump(self):
+                  pass
+        PY
+        "Unit",
+        "value",
+        "run",
+        "bump"
+      ],
+      javascript: [
+        ".js",
+        <<~JS,
+          class Unit {
+            constructor(value) { this.value = value; }
+            run() { this.value = this.value + 1; this.bump(); }
+            bump() {}
+          }
+        JS
+        "Unit",
+        "value",
+        "run",
+        "bump"
+      ],
+      typescript: [
+        ".ts",
+        <<~TS,
+          class Unit {
+            value: number;
+            constructor(value: number) { this.value = value; }
+            run(): void { this.value = this.value + 1; this.bump(); }
+            private bump(): void {}
+          }
+        TS
+        "Unit",
+        "value",
+        "run",
+        "bump"
+      ],
+      go: [
+        ".go",
+        <<~GO,
+          package p
+          type Unit struct { value int }
+          func (u *Unit) Run() { u.value = u.value + 1; u.Bump() }
+          func (u *Unit) Bump() {}
+        GO
+        "Unit",
+        "value",
+        "Run",
+        "Bump"
+      ],
+      rust: [
+        ".rs",
+        <<~RS,
+          struct Unit { value: i32 }
+          impl Unit {
+            fn run(&mut self) { self.value = self.value + 1; self.bump(); }
+            fn bump(&self) {}
+          }
+        RS
+        "Unit",
+        "value",
+        "run",
+        "bump"
+      ],
+      zig: [
+        ".zig",
+        <<~ZIG,
+          pub fn Unit() type {
+            return struct {
+              value: usize = 0,
+              const Self = @This();
+              pub fn run(self: *Self) void { self.value = self.value + 1; self.bump(); }
+              fn bump(self: *Self) void {}
+            };
+          }
+        ZIG
+        "Unit",
+        "value",
+        "run",
+        "bump"
+      ]
+    }
+
+    available = profiles.select do |language, _profile|
+      grammar = ENV[GRAMMAR_ENVS.fetch(language)]
+      grammar && File.file?(grammar)
+    end
+    skip "set Tree-sitter grammar paths to run cross-language extractor test" if available.empty?
+
+    available.each do |language, (ext, source, owner_name, state_name, run_name, bump_name)|
+      mods = parse_source(source, ext)
+      mod = mods.find { |candidate| candidate[:name] == owner_name }
+      refute_nil mod, language
+      assert_equal language, mod[:language], language
+      assert_includes mod[:states], state_name, language
+
+      run = mod[:methods].find { |method| method[:name] == run_name }
+      refute_nil run, language
+      assert_includes run[:effects][:writes], state_name, language
+      assert_includes run[:delegations], { receiver: "self", message: bump_name, type: :always }, language
+      assert run[:line].positive?, language
+      refute_nil run[:span], language
+    end
   end
 end

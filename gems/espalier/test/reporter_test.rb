@@ -20,6 +20,7 @@ class ReporterTest < Minitest::Test
           {
             name: "coordinate",
             signature: "def coordinate(node)",
+            line: 2,
             EFFECTS: { reads: ["@stack"], writes: ["@stack", "@cache"] },
             DELEGATIONS: {
               always_calls: ["lower_one", "lower_two", "emit"],
@@ -111,6 +112,7 @@ class ReporterTest < Minitest::Test
             {
               name: "coordinate",
               signature: "def coordinate(node)",
+              line: 2,
               EFFECTS: { reads: [], writes: [] },
               DELEGATIONS: { conditionally_calls: Array.new(12) { |idx| "branch_#{idx}" } }
             }

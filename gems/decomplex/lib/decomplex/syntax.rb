@@ -459,9 +459,14 @@ module Decomplex
       def function_context(node, stack)
         {
           function: function_name(node),
-          owner: current_owner_from_stack(stack),
-          params: function_params(node)
+          owner: function_owner_name(node, stack),
+          params: function_params(node),
+          receiver: function_receiver_name(node)
         }
+      end
+
+      def function_owner_name(node, stack)
+        receiver_owner_name(node) || current_owner_from_stack(stack)
       end
 
       def function_name(node)
@@ -498,8 +503,12 @@ module Decomplex
       def function_params(node)
         return hidden_ruby_method_params(node) if hidden_ruby_method_definition?(node)
 
-        params = named_field(node, "parameters") ||
-                 node.named_children.find { |child| %w[parameters formal_parameters parameter_list].include?(child.kind) }
+        params = if node.kind == "method_declaration"
+                   node.named_children.select { |child| child.kind == "parameter_list" }[1]
+                 else
+                   named_field(node, "parameters") ||
+                     node.named_children.find { |child| %w[parameters formal_parameters parameter_list].include?(child.kind) }
+                 end
         params ||= node.named_children.find { |child| child.kind == "method_parameters" } if inline_def_argument_list?(node)
         return [] unless params
 
@@ -672,6 +681,7 @@ module Decomplex
       def record_call_site(document, node, stack, out)
         target = call_target(document, node)
         return unless target
+        target = normalize_target_receiver(target, stack)
         return if noise_call?(target)
 
         out << CallSite.new(
@@ -904,6 +914,7 @@ module Decomplex
 
         target = state_target(lhs)
         return unless target
+        target = normalize_target_receiver(target, stack)
         return if target[:field] == "[]"
         return if document.language == :ruby && target[:field].to_s.start_with?("$")
 
@@ -922,6 +933,7 @@ module Decomplex
       def record_state_read(document, node, stack, out)
         target = state_read_target(node)
         return unless target
+        target = normalize_target_receiver(target, stack)
 
         out << StateRead.new(
           field: target[:field],
@@ -948,6 +960,7 @@ module Decomplex
 
         target = state_target(lhs)
         return unless target && rhs
+        target = normalize_target_receiver(target, stack)
 
         params = current_params(stack)
         return if params.empty?
@@ -1251,6 +1264,9 @@ module Decomplex
       end
 
       def owner_for_node(document, node, stack: nil)
+        receiver_owner = receiver_owner_name(node)
+        return receiver_owner if receiver_owner
+
         stacked_owner = current_owner_from_stack(Array(stack))
         return stacked_owner if stacked_owner
 
@@ -1317,6 +1333,39 @@ module Decomplex
         normalize_type_owner(type&.text)
       end
 
+      def receiver_owner_name(node)
+        receiver_type = method_receiver_type_node(node)
+        receiver_type && normalize_type_owner(receiver_type.text)
+      end
+
+      def function_receiver_name(node)
+        receiver_param = method_receiver_param_node(node)
+        receiver_param&.text
+      end
+
+      def method_receiver_type_node(node)
+        declaration = method_receiver_declaration(node)
+        return nil unless declaration
+
+        declaration.named_children.reverse.find do |child|
+          %w[pointer_type type_identifier qualified_type generic_type scoped_type_identifier].include?(child.kind)
+        end
+      end
+
+      def method_receiver_param_node(node)
+        declaration = method_receiver_declaration(node)
+        return nil unless declaration
+
+        declaration.named_children.find { |child| child.kind == "identifier" }
+      end
+
+      def method_receiver_declaration(node)
+        return nil unless ts_node?(node) && node.kind == "method_declaration"
+
+        receiver_params = node.named_children.find { |child| child.kind == "parameter_list" }
+        receiver_params&.named_children&.find { |child| child.kind == "parameter_declaration" }
+      end
+
       def bound_container_name(node)
         parent = parent_node(node)
         seen_nodes = Set.new
@@ -1374,8 +1423,9 @@ module Decomplex
           ruby_bare_call_target(document, node)
         when "call_expression", "method_invocation", "invocation_expression"
           generic_call_target(node)
-        when "attribute"
-          hidden_attribute_call_target(node)
+        when "attribute", "selector_expression", "field", "member_expression",
+             "field_expression", "expression_list"
+          adjacent_argument_call_target(node)
         end
       end
 
@@ -1383,6 +1433,7 @@ module Decomplex
         receiver = named_field(node, "receiver")
         method = named_field(node, "method")
         message = method&.text || first_named_text(node, %w[identifier constant])
+        message ||= normalize_text(node.text) if receiver.nil? && ruby_simple_call_text?(node.text)
         return nil unless message
 
         {
@@ -1407,8 +1458,11 @@ module Decomplex
         return nil unless document.language == :ruby
         return nil if hidden_ruby_method_definition?(node) || hidden_ruby_owner_declaration?(node)
 
+        explicit = ruby_explicit_receiver_body_call_target(node)
+        return explicit if explicit
+
         message = node.text.to_s.strip
-        return nil unless message.match?(/\A[a-z_]\w*[!?=]?\z/)
+        return nil unless ruby_simple_call_text?(message)
         return nil if %w[true false nil self].include?(message)
 
         {
@@ -1416,6 +1470,23 @@ module Decomplex
           message: message,
           arguments: []
         }
+      end
+
+      def ruby_explicit_receiver_body_call_target(node)
+        receiver, message = node.named_children
+        return nil unless receiver && message
+        return nil unless %w[self constant identifier].include?(receiver.kind)
+        return nil unless %w[identifier constant].include?(message.kind)
+
+        {
+          receiver: normalize_text(receiver.text),
+          message: message.text,
+          arguments: []
+        }
+      end
+
+      def ruby_simple_call_text?(text)
+        text.to_s.strip.match?(/\A[a-z_]\w*[!?=]?\z/)
       end
 
       def generic_call_target(node)
@@ -1428,7 +1499,7 @@ module Decomplex
         nil
       end
 
-      def hidden_attribute_call_target(node)
+      def adjacent_argument_call_target(node)
         return nil unless next_sibling(node)&.kind == "argument_list"
 
         target_from_callee(node).merge(arguments: [])
@@ -1755,6 +1826,19 @@ module Decomplex
         text = args.text.to_s.strip
         text = text[1...-1] if text.start_with?("(") && text.end_with?(")")
         text.split(/\s*,\s*/).map { |arg| normalize_text(arg) }.reject(&:empty?)
+      end
+
+      def normalize_target_receiver(target, stack)
+        receiver = target[:receiver].to_s
+        current_receiver = current_receiver_name(stack)
+        return target unless current_receiver && receiver == current_receiver
+
+        target.merge(receiver: "self")
+      end
+
+      def current_receiver_name(stack)
+        entry = stack.reverse.find { |item| item.is_a?(Hash) && item[:receiver] }
+        entry && entry[:receiver]
       end
 
       def ruby_t_let_state_declaration(node)

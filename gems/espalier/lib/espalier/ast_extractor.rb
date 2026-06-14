@@ -10,9 +10,8 @@ end
 
 module Espalier
   # Extracts the structural skeleton, state, and call delegation model through
-  # Decomplex's Tree-sitter syntax facts. Ruby uses the same path as every other
-  # supported language; Ruby-specific handling below only preserves Espalier's
-  # historical output shape.
+  # Decomplex's Tree-sitter syntax facts. Every supported language uses the same
+  # extractor and manifest-shaping path.
   class AstExtractor
     attr_reader :file_path
 
@@ -71,20 +70,18 @@ module Espalier
             name: fn.name.to_s,
             signature: method_signature(doc, fn),
             parameters: Array(fn.params).map(&:to_s),
-            visibility: ruby?(doc) ? nil : (fn.visibility || :public),
+            visibility: fn.visibility || :public,
+            line: fn.line,
+            span: fn.span,
             effects: { reads: Set.new, writes: Set.new },
             delegations: []
           }
-          unless ruby?(doc)
-            method[:line] = fn.line
-            method[:span] = fn.span
-          end
 
           mod[:methods] << method
           method_records_by_owner[owner] << [fn, method]
         end
 
-        apply_ruby_visibility!(facts, method_records_by_owner) if ruby?(doc)
+        apply_visibility!(facts, method_records_by_owner)
 
         facts[:state_declarations].each do |state|
           mod = module_for(modules, state.owner.to_s, doc, owner_kinds[state.owner.to_s])
@@ -153,9 +150,9 @@ module Espalier
             file: @file_path,
             states: Set.new,
             ivar_types: {},
-            methods: []
+            methods: [],
+            language: doc.language
           }
-          mod[:language] = doc.language unless ruby?(doc)
           mod
         end
       end
@@ -174,8 +171,10 @@ module Espalier
 
       def method_signature(doc, fn)
         signature = fn.signature.to_s.empty? ? fn.name.to_s : fn.signature.to_s
-        return signature unless ruby?(doc)
+        normalize_signature(signature)
+      end
 
+      def normalize_signature(signature)
         signature = signature.sub(/\A(?:private|protected|public)\s+/, "")
         signature = signature.sub(/;\s*end\z/, "")
         signature = signature.sub(/\s+end\z/, "")
@@ -183,8 +182,8 @@ module Espalier
         signature.strip.gsub(/\s+/, " ")
       end
 
-      def apply_ruby_visibility!(facts, method_records_by_owner)
-        directives_by_owner = ruby_visibility_directives(facts).group_by { |call| call.owner.to_s }
+      def apply_visibility!(facts, method_records_by_owner)
+        directives_by_owner = visibility_directives(facts).group_by { |call| call.owner.to_s }
         method_records_by_owner.each do |owner, records|
           current = :public
           methods_by_name = Hash.new { |h, k| h[k] = [] }
@@ -207,13 +206,13 @@ module Espalier
                 end
               end
             else
-              method[:visibility] = ruby_method_visibility(item, current)
+              method[:visibility] = method_visibility(item, current)
             end
           end
         end
       end
 
-      def ruby_visibility_directives(facts)
+      def visibility_directives(facts)
         facts[:call_sites].select do |call|
           call.function.to_s == "(top-level)" &&
             call.receiver.to_s == "self" &&
@@ -230,7 +229,7 @@ module Espalier
         end
       end
 
-      def ruby_method_visibility(fn, current)
+      def method_visibility(fn, current)
         return :public if fn.name.to_s.start_with?("self.")
 
         if (match = fn.signature.to_s.match(/\A\s*(private|protected|public)\s+def\b/))
@@ -254,7 +253,6 @@ module Espalier
         message = call.message.to_s
         receiver = call.receiver.to_s
         return true if message.include?("\n") || receiver.include?("\n")
-        return true if receiver == "T" || receiver.start_with?("T::") || receiver == "Sorbet"
 
         IGNORED_SELECTORS.include?(message)
       end
@@ -275,10 +273,6 @@ module Espalier
         return control if %i[conditional iterates always].include?(control)
 
         call.conditional ? :conditional : :always
-      end
-
-      def ruby?(doc)
-        doc.language == :ruby
       end
     end
   end

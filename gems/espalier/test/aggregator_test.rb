@@ -5,6 +5,11 @@ require "tmpdir"
 require_relative "../lib/espalier"
 
 class AggregatorTest < Minitest::Test
+  def skip_unless_ruby_grammar
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run Ruby Tree-sitter extractor test" unless grammar && File.file?(grammar)
+  end
+
   def test_aggregates_sibling_data_into_clean_schema
     # Mock extracted AST data
     modules = [
@@ -133,6 +138,8 @@ class AggregatorTest < Minitest::Test
   end
 
   def test_uses_tree_sitter_delegations_for_internal_call_graph
+    skip_unless_ruby_grammar
+
     Dir.mktmpdir do |dir|
       path = File.join(dir, "worker.rb")
       File.write(path, <<~RB)
@@ -168,6 +175,8 @@ class AggregatorTest < Minitest::Test
   end
 
   def test_tree_sitter_delegations_handle_explicit_self_internal_calls
+    skip_unless_ruby_grammar
+
     Dir.mktmpdir do |dir|
       path = File.join(dir, "phase.rb")
       File.write(path, <<~RB)

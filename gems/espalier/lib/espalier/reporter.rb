@@ -113,9 +113,9 @@ module Espalier
       delegation_count = all_methods.sum { |row| row[:always_calls] + row[:conditional_calls] }
       read_count = all_methods.sum { |row| row[:reads] }
       write_count = all_methods.sum { |row| row[:writes] }
-      source_bytes = ruby_source_bytes
+      source_bytes = source_bytes
       manifest_bytes = File.exist?(manifest_path) ? File.size(manifest_path) : nil
-      source_words = ruby_source_words
+      source_words = source_words
       manifest_words = File.exist?(manifest_path) ? File.read(manifest_path).split(/\s+/).size : nil
 
       lines = ["## Run Summary"]
@@ -380,7 +380,7 @@ module Espalier
 
     def privatization_candidates
       @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest).map do |row|
-        row.merge(line: row[:line] || method_line(row[:file], row[:name]))
+        row.merge(line: row[:line])
       end
     end
 
@@ -414,7 +414,7 @@ module Espalier
         module: mod[:module],
         file: mod[:file],
         name: fn[:name],
-        line: fn[:line] || method_line(mod[:file], fn[:name]),
+        line: fn[:line],
         reads: reads.size,
         writes: writes.size,
         always_calls: always.size,
@@ -478,25 +478,6 @@ module Espalier
     def source_path(file)
       path = file.to_s
       Pathname.new(path).absolute? ? path : File.expand_path(path, @root)
-    end
-
-    def method_line(file, method_name)
-      return nil unless file && method_name
-
-      @method_line_cache ||= {}
-      key = [file, method_name]
-      return @method_line_cache[key] if @method_line_cache.key?(key)
-
-      path = source_path(file)
-      return @method_line_cache[key] = nil unless File.file?(path)
-
-      escaped = Regexp.escape(method_name.to_s.sub(/\Aself\./, ""))
-      receiver = method_name.to_s.start_with?("self.") ? /self\./ : /(?:self\.)?/
-      regex = /^\s*def\s+#{receiver}#{escaped}(?:\s|\(|$)/
-      File.readlines(path).each_with_index do |line, idx|
-        return @method_line_cache[key] = idx + 1 if line.match?(regex)
-      end
-      @method_line_cache[key] = nil
     end
 
     def quality_summary(row)
@@ -751,11 +732,11 @@ module Espalier
       score
     end
 
-    def ruby_source_bytes
+    def source_bytes
       source_files.sum { |path| File.size(path) }
     end
 
-    def ruby_source_words
+    def source_words
       source_files.sum { |path| File.read(path).split(/\s+/).size }
     end
 
