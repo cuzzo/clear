@@ -12,12 +12,12 @@ Nil-Kill should have five separable concerns:
 4. Reporting
 5. Auto-fixing
 
-The target architecture lets someone add a Python, JavaScript/TypeScript, or Lua tracer by emitting the documented trace format. Nil-Kill should then normalize, analyze, and report on those traces without tracer-specific code paths. Auto-fixing remains Ruby-only initially, but the design should make it straightforward to add fix providers for other languages later.
+The target architecture lets someone add a Python, JavaScript/TypeScript, or Lua tracer by emitting the documented trace format. Nil-Kill should then normalize, analyze, and report on those traces without tracer-specific code paths. Auto-type rewriting remains Ruby-only initially, but the design should make it straightforward to add rewrite providers for other languages later.
 
 ## Non-Goals
 
 - Do not require non-Ruby tracers to mimic Ruby internals such as ivars, Sorbet sigs, or `T.let`.
-- Do not require every language to support auto-fixing.
+- Do not require every language to support automated rewriting.
 - Do not make reporting read raw trace files directly.
 - Do not make runtime tracing mandatory for static-only reports.
 - Do not force every language to implement the same type-system surface area.
@@ -55,7 +55,7 @@ Language Static Adapter
         |
         +----> Reporter
         |
-        +----> Optional AutoFix Provider
+        +----> Optional Auto-type Provider
 ```
 
 Core rules:
@@ -84,7 +84,7 @@ provider.receiver_state_field(receiver, known_states)
 
 Initial providers:
 
-- `ruby`: existing static/runtime/autofix path; runtime collection remains the
+- `ruby`: existing static/runtime evidence path; runtime collection remains the
   legacy `nil-kill collect` flow.
 - `python`: Tree-sitter static policy plus the `sitecustomize`/`sys.settrace`
   tracer; `collect-python` is now a compatibility wrapper around
@@ -132,7 +132,7 @@ Normalized evidence should be persisted as one versioned bundle:
 }
 ```
 
-The bundle is the contract between phases. Reports and auto-fix providers should be able to run from this bundle without re-reading raw traces.
+The bundle is the contract between phases. Reports and Auto-type providers should be able to run from this bundle without re-reading raw traces.
 
 ## Static Evidence v2
 
@@ -428,7 +428,7 @@ Ruby-specific analyzers should remain isolated:
 
 ## Action Format
 
-Actions are the bridge between analysis, reporting, and optional auto-fixing.
+Actions are the bridge between analysis, reporting, and optional automated rewriting.
 
 ```json
 {
@@ -488,20 +488,20 @@ Reporter outputs:
 
 - Existing Ruby report format by default for Ruby projects.
 - Multi-language report format when evidence includes non-Ruby languages.
-- Diagnostics for missing runtime data, stale files, unsupported auto-fix providers, and unresolved trace events.
+- Diagnostics for missing runtime data, stale files, unsupported Auto-type providers, and unresolved trace events.
 
 Report code should not know how to parse Python trace events, Ruby instrumentation logs, or JavaScript coverage files. That logic belongs to the normalizer.
 
-## Auto-Fix Provider Interface
+## Auto-type Provider Interface
 
-Auto-fixing is optional and language-specific.
+Source rewriting is optional and language-specific. It lives in Auto-type, not Nil-kill.
 
 Provider interface:
 
 ```ruby
-module NilKill
-  module AutoFix
-    class Provider
+module AutoType
+  module Providers
+    class Ruby
       def language = raise NotImplementedError
       def supports?(action) = raise NotImplementedError
       def plan(action, source_index) = raise NotImplementedError
@@ -514,8 +514,8 @@ end
 
 Initial providers:
 
-- `AutoFix::RubyProvider`: wraps the existing Ruby apply/autocorrect flow.
-- `AutoFix::NullProvider`: returns unsupported diagnostics and leaves actions report-only.
+- `AutoType::Providers::Ruby`: wraps the Ruby apply/autocorrect flow.
+- `AutoType::Providers::NullProvider`: returns unsupported diagnostics and leaves actions report-only.
 
 Future providers:
 
@@ -582,7 +582,7 @@ Near-term path:
 - Keep richer Ruby/Sorbet extraction in the Ruby adapter.
 - Add language profiles for Python, JavaScript, TypeScript, and Lua as their nullability/type annotation conventions become useful.
 
-Tree-sitter should provide static structure. It should not be responsible for runtime traces or auto-fixes.
+Tree-sitter should provide static structure. It should not be responsible for runtime traces or automated rewrites.
 
 ## Language Adapter Expectations
 
@@ -591,28 +591,28 @@ Tree-sitter should provide static structure. It should not be responsible for ru
 - Static: existing Ruby/Sorbet indexing plus Tree-sitter structure where helpful.
 - Runtime: existing Ruby tracer wrapped into Raw Runtime Trace Events v1.
 - Analysis: full existing Nil-Kill behavior.
-- Auto-fix: supported through `AutoFix::RubyProvider`.
+- Rewrite support: supported through `AutoType::Providers::Ruby`.
 
 ### Python
 
 - Static: Tree-sitter plus Python annotations; optionally consume MyPy/Pyright output later.
 - Runtime: `sys.settrace`, coverage.py data, or a small wrapper around tests.
 - Analysis: params, returns, attributes, call edges, coverage, and nil/`None` evidence.
-- Auto-fix: future provider, likely LibCST-based.
+- Rewrite support: future Auto-type provider, likely LibCST-based.
 
 ### JavaScript/TypeScript
 
 - Static: Tree-sitter for JS, Tree-sitter or TypeScript compiler API for TS.
 - Runtime: Node/V8 hooks, Istanbul coverage, or test-runner integration.
 - Analysis: params, returns, properties, object shapes, `null`/`undefined`, coverage.
-- Auto-fix: future provider using TypeScript compiler API, ts-morph, ESLint, or Biome.
+- Rewrite support: future Auto-type provider using TypeScript compiler API, ts-morph, ESLint, or Biome.
 
 ### Lua
 
 - Static: Tree-sitter Lua once included in the shared syntax layer.
 - Runtime: `debug.sethook` plus wrapped function entry/exit where feasible.
 - Analysis: params, returns, table fields, nil evidence, coverage-like hit counts.
-- Auto-fix: future provider, likely limited until a reliable CST rewrite path is chosen.
+- Rewrite support: future Auto-type provider, likely limited until a reliable CST rewrite path is chosen.
 
 ## Migration Plan
 
@@ -622,9 +622,9 @@ Tree-sitter should provide static structure. It should not be responsible for ru
 4. Emit Runtime Evidence v2 plus legacy Ruby aliases from the normalizer.
 5. Extract current action generation into analyzer/action proposer classes that consume normalized evidence.
 6. Move report rendering to consume evidence/actions only.
-7. Move Ruby apply logic behind `AutoFix::RubyProvider`.
+7. Move Ruby apply logic behind `AutoType::Providers::Ruby`.
 8. Keep existing CLI commands as wrappers over the new phases.
-9. Add golden fixtures for a minimal Python static index and raw trace; verify Nil-Kill can normalize, analyze, and report without a Python auto-fixer.
+9. Add golden fixtures for a minimal Python static index and raw trace; verify Nil-Kill can normalize, analyze, and report without a Python rewrite provider.
 10. Add equivalent JS/TS and Lua trace fixtures before adding real tracers.
 11. Add real tracer spikes one language at a time.
 
@@ -633,13 +633,13 @@ Tree-sitter should provide static structure. It should not be responsible for ru
 Required tests:
 
 - Ruby reports remain byte-for-byte stable in compatibility mode.
-- Existing Ruby auto-fix tests pass through `AutoFix::RubyProvider`.
+- Existing Ruby rewrite tests pass through `AutoType::Providers::Ruby`.
 - Raw trace schema validation rejects malformed events with clear diagnostics.
 - Normalization is deterministic for repeated runs.
 - A fake Python trace plus static evidence produces param, return, field, and coverage evidence.
 - A fake JS/TS trace distinguishes `null`, `undefined`, and missing properties.
 - A fake Lua trace reports table field nil observations.
-- Unsupported auto-fix providers produce report diagnostics instead of failing.
+- Unsupported Auto-type providers produce diagnostics instead of failing.
 - Stale runtime traces are detected through file digest mismatches.
 
 ## Compatibility Strategy

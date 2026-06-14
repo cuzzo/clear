@@ -44,7 +44,7 @@ The first complete milestone is hash records. Tuple-like arrays and generated in
    - `T::Hash[Symbol, T.untyped]` param slots can become the generated struct
    - `T::Array[T::Hash[Symbol, T.untyped]]` slots can become `T::Array[GeneratedStruct]`
 
-7. The verified auto-fix loop must either:
+7. Auto-type's verified rewrite loop must either:
    - apply the candidate, run the configured verifier, and keep the rewrite when it passes; or
    - restore the original files and report why the candidate was rejected.
 
@@ -55,7 +55,7 @@ The first complete milestone is hash records. Tuple-like arrays and generated in
 
 ## Implementation Action Items
 
-- Syntax-aware rewriting: replace broad regex/string substitutions for hash-record promotion with normalized Tree-sitter node locations where possible, falling back to provider-owned source edits only for Ruby autofix details. Producer rewrites, consumer read rewrites, signature rewrites, and struct insertion should be computed from parsed node locations instead of ad hoc line matching.
+- Syntax-aware rewriting: replace broad regex/string substitutions for hash-record promotion with normalized Tree-sitter node locations where possible, falling back to Auto-type provider-owned source edits only for Ruby rewrite details. Producer rewrites, consumer read rewrites, signature rewrites, and struct insertion should be computed from parsed node locations instead of ad hoc line matching.
 - Node matching: current rewrites use parser node locations plus source slices. This is substantially safer than regex rewriting, but identical expressions repeated on the same line remain a known fragile edge case. The verified loop is expected to catch these by rolling back failed candidates.
 - T.let feedback loop: nil-kill records existing and candidate `T.let` sites and can narrow them, but runtime `T.let` observations are not yet fed back into method return inference, param inference, or hash-record pressure ranking. A future pass should compare injected `T.let` candidates against runtime observations and downgrade or correct inferred types before reporting.
 
@@ -73,7 +73,7 @@ Desired behavior:
 1. Static inference proposes a candidate type, such as `String`.
 2. The instrumented run injects or observes `T.let(value, String)`.
 3. Runtime observation sees the actual flow, such as `NilClass`.
-4. Nil-kill downgrades, nilabilizes, or blocks that candidate before reporting or autofix.
+4. Nil-kill downgrades, nilabilizes, or blocks that candidate before reporting.
 
 That validation loop is not implemented yet.
 

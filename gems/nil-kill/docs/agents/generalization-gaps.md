@@ -4,7 +4,7 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 
 ## 1. Executive Summary
 
-`nil-kill` now has a `Provider` registry architecture and Tree-sitter-backed static evidence. The remaining Ruby/Sorbet coupling is concentrated in deeper inference, verified autofix, and Ruby runtime instrumentation. To support "General Purpose Code Changing," the gem must keep moving from "Ruby-as-Primary" to a "Universal Semantic Fact" model.
+`nil-kill` now has a `Provider` registry architecture and Tree-sitter-backed static evidence. The remaining Ruby/Sorbet coupling is concentrated in deeper inference and Ruby runtime instrumentation. Source rewriting now belongs to `gems/auto-type`, so Nil-kill should keep moving from "Ruby-as-Primary" to a "Universal Semantic Fact" model.
 
 ## 2. Critical Generalization Gaps
 
@@ -28,10 +28,10 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 - **The Gap:** Nil-kill does not yet consume the shared SlopCop/Boobytrap coverage normalization layer for report enrichment.
 - **Requirement:** Integrate with the generalized coverage providers in Boobytrap/SlopCop instead of adding language-specific coverage readers in Nil-Kill.
 
-## 3. The "Final Boss": General-Purpose Autofix
+## 3. The "Final Boss": General-Purpose Rewrite Support
 - **Current State:** Code-changing logic now lives in `gems/auto-type`, with Ruby/Sorbet as the first provider.
 - **The Gap:** To fix code in JS or Python, `auto-type` needs additional provider implementations that consume Nil-kill facts without adding rewrite logic back to Nil-kill.
-- **Proposed Solution:** Implement a **Hybrid LLM-Driven Autofix** model:
+- **Proposed Solution:** Implement a **Hybrid LLM-Driven Rewrite** model in Auto-type:
   1. **Surgical Fact:** Use the generalized static analysis to find the exact file/line/span needing a fix.
   2. **Provider Template:** The `Language::Provider` provides the *idiomatic* template for the fix (e.g., `return nil if x.nil?` vs `if x is None: return None`).
   3. **LLM Execution:** Orchestrate an LLM to apply the transformation using the surgical fact and the idiomatic template.
@@ -41,8 +41,8 @@ This document identifies the remaining Ruby-specific and Sorbet-specific "tendri
 1. **Phase 1: Fact Abstraction.** Move Z3 evidence extraction from `static_evidence.rb` into the `Language::Provider` interface.
 2. **Phase 2: Type Indexer Generalization.** Create a generic interface for "External Type Definitions" (replacing the RBI-only logic).
 3. **Phase 3: Integration with Boobytrap.** Swap Ruby-specific coverage loading for the generalized Boobytrap provider registry.
-4. **Phase 4: Multi-Language Autofix.** Implement the first Python null-guard autofix using the Hybrid LLM model.
+4. **Phase 4: Multi-Language Rewrite Support.** Implement the first Python null-guard rewrite in Auto-type using the Hybrid LLM model.
 
 ## 5. Conclusion
 
-`nil-kill` is the most semantically complex gem in the suite. By abstracting the **Evidence Extraction** and **Code Transformation** layers, it will transform from a "Ruby Type-Fixer" into a universal nullability and runtime type evidence engine.
+`nil-kill` is the most semantically complex gem in the suite. By abstracting the **Evidence Extraction** layer and leaving code transformation to Auto-type, it will transform from a "Ruby Type-Fixer" into a universal nullability and runtime type evidence engine.

@@ -159,7 +159,7 @@ RSpec.describe NilKill::HiddenEnumPressure do
 end
 
 RSpec.describe NilKill::Report, "hidden enum pressure" do
-  it "renders hidden enum rows without requiring autofix actions" do
+  it "renders hidden enum rows without requiring rewrite actions" do
     evidence = {
       "facts" => {
         "hidden_enum_pressure" => [{

@@ -17,10 +17,8 @@ if ENV["NIL_KILL_COVERAGE"] == "1"
   SimpleCov.start do
     enable_coverage :branch
     track_files "gems/nil-kill/lib/**/*.rb"
-    track_files "gems/auto-type/lib/**/*.rb"
     add_filter "/gems/nil-kill/spec/"
     add_group "nil-kill", "gems/nil-kill/lib"
-    add_group "auto-type", "gems/auto-type/lib"
 
     if cobertura_available
       formatter SimpleCov::Formatter::MultiFormatter.new([

@@ -140,12 +140,12 @@ The intended next step is:
 ```text
 static inference proposes String
 instrumented run observes NilClass at the injected T.let site
-nil-kill downgrades or corrects that candidate before reporting/autofix
+nil-kill downgrades or corrects that candidate before reporting
 ```
 
 That feedback is not wired into return inference, param inference, or hash-record pressure ranking yet. Today, `T.let` runtime data is useful for narrowing existing `T.let` sites, not for correcting nil-kill's broader inferred candidates.
 
-Nil-kill was born as a tool to detect pervasive nil check guards, and allowed [CLEAR](../../README.md) to remove the majority of `&.` safe navigation checks and `T.nilable()` returns and parameters in a few easy commits, mostly with autofixes.
+Nil-kill was born as a tool to detect pervasive nil check guards, and allowed [CLEAR](../../README.md) to remove the majority of `&.` safe navigation checks and `T.nilable()` returns and parameters in a few easy commits. Verified source rewrites now belong to Auto-type.
 
 Then the idea came up: why not do the same to detect the source of `T.untyped()` for the number of hard reasons listed above, where static analysis / Sorbet / existing Ruby tooling fail?
 

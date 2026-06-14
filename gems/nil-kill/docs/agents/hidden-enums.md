@@ -73,9 +73,9 @@ The report should include:
 - Decision sites and producer sites.
 - Runtime support if available.
 - Confidence and blockers.
-- Suggested next step: define a named enum or literal-union contract, not an autofix.
+- Suggested next step: define a named enum or literal-union contract, not an automated rewrite.
 
-## Autofix Later
+## Rewrite Later
 
 Autofix should be added only after the report consistently produces high-signal candidates.
 

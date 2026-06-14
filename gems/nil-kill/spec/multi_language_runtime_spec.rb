@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "../../auto-type/lib/auto_type"
 
 RSpec.describe "nil-kill multi-language runtime pipeline" do
   it "publishes language provider capabilities for Ruby, Python, TypeScript, and Zig" do
@@ -352,21 +351,4 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "keeps unsupported non-Ruby Auto-type actions report-only" do
-    action = NilKill::Actions::Record.build(
-      kind: "add_nullability",
-      language: "python",
-      confidence: "review",
-      target: {"path" => "pkg/user.py", "line" => 12, "symbol_id" => "python\u0000pkg/user.py\u0000User\u0000method\u0000name\u000012"},
-      message: "param fallback observed None",
-      data: {"slot" => "param", "name" => "fallback"}
-    )
-
-    provider = AutoType::Providers.provider_for("python")
-    plan = provider.plan(action)
-
-    expect(provider.supports?(action)).to be(false)
-    expect(plan["supported"]).to be(false)
-    expect(plan.dig("diagnostics", 0, "code")).to eq("unsupported_auto_type_provider")
-  end
 end

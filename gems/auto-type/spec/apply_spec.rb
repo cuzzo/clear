@@ -206,6 +206,69 @@ RSpec.describe AutoType::Apply do
     expect(File.read(File.join(NilKill::ROOT, rel))).to eq("consume(nil, nil)\n")
   end
 
+  it "applies struct-field RBI signatures with update, insert, append, and idempotent paths" do
+    apply = described_class.allocate
+    lines = [
+      "# typed: true\n",
+      "\n",
+      "class AST::Foo\n",
+      "  sig { returns(T.untyped) }\n",
+      "  def token; end\n",
+      "end\n",
+      "\n",
+    ]
+    action = ->(class_name, field, type) do
+      {
+        "kind" => "add_struct_field_sig",
+        "line" => 1,
+        "data" => { "class" => class_name, "field" => field, "type" => type },
+      }
+    end
+
+    expect(apply.send(:apply_add_struct_field_sig, lines, action.call("AST::Foo", "token", "Token"))).to be(true)
+    expect(apply.send(:apply_add_struct_field_sig, lines, action.call("AST::Foo", "name", "String"))).to be(true)
+    expect(apply.send(:apply_add_struct_field_sig, lines, action.call("AST::Bar", "id", "Integer"))).to be(true)
+    expect(apply.send(:apply_add_struct_field_sig, lines, action.call("AST::Foo", "token", "Token"))).to be(false)
+
+    output = lines.join
+    expect(output).to include("class AST::Foo\n  sig { returns(Token) }\n  def token; end")
+    expect(output).to include("  sig { returns(String) }\n  def name; end")
+    expect(output).to include("class AST::Bar\n  sig { returns(Integer) }\n  def id; end\nend")
+  end
+
+  it "inserts promoted hash-record structs after same-file constant forward references" do
+    _path, rel = repo_tmp_file("apply_hash_record_forward_ref.rb", <<~RUBY)
+      module MIR
+        # Inserted struct references MIR::StructInit, which is defined below
+        # as a constant assignment instead of a class.
+
+        StructInit = Struct.new(:zig_type, :fields)
+      end
+    RUBY
+    path = File.join(NilKill::ROOT, rel)
+    lines = File.readlines(path)
+    data = {
+      "struct_name" => "NameRecord",
+      "type_name" => "MIR::NameRecord",
+      "scope" => ["MIR"],
+      "struct_path" => path,
+      "fields" => [
+        { "name" => "name", "type" => "String" },
+        { "name" => "value", "type" => "MIR::StructInit" },
+      ],
+      "nested_structs" => [],
+    }
+
+    changed = described_class.allocate.send(:insert_hash_record_struct, lines, data)
+
+    expect(changed).to be(true)
+    struct_init_line = lines.find_index { |line| line.include?("StructInit = Struct.new") }
+    name_record_line = lines.find_index { |line| line.include?("class NameRecord") }
+    expect(struct_init_line).not_to be_nil
+    expect(name_record_line).not_to be_nil
+    expect(name_record_line).to be > struct_init_line
+  end
+
   it "promotes a local hash record to a T::Struct and rewrites literal field reads" do
     _path, rel = repo_tmp_file("apply_hash_record_struct.rb", <<~RUBY)
       class Example

@@ -56,4 +56,4 @@ A future `auto-type-plan/v1` wrapper can generalize this for other analyzers, bu
 - Review-grade actions must go through `auto-type loop` with a behavioral verifier.
 - Raw bulk application of review actions remains debug-only.
 - Hidden enum automated repair is intentionally out of scope until report quality is proven.
-- Nil-kill may use Auto-type internally for temporary Sorbet prevalidation when available, but that is a validation implementation detail, not a public repair API.
+- Nil-kill must not call Auto-type internally; analyzer confidence and rewrite/provider support are separate concerns.

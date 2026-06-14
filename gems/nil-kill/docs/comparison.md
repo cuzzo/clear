@@ -44,7 +44,7 @@ def foo():
 
 Is this function supposed to return the value of `doX()`, or is that merely the last line, never expected to be used?
 
-Nil-kill surfaces this problem and will auto-fix it for you.
+Nil-kill surfaces this problem as evidence and action candidates. Auto-type owns verified source rewriting.
 
 ### On Fallibility:
 

@@ -7,9 +7,9 @@ This note tracks the work that was planned during the latest nil-kill session bu
 - The report can be generated with GitHub links and an excluded target set, for example excluding `src/tools`.
 - The report now starts with project prioritization, hygiene overview, signature slot evidence, return hygiene, review actions, and collection/hash-record sections.
 - Hash-record reporting is materially better: shapes, pressure, blockers, nested collection evidence, and similar keysets are surfaced.
-- Hash-record auto-fix is routed through the verified loop instead of raw `apply --all` review actions.
+- Hash-record rewrite actions are routed through Auto-type's verified loop instead of raw `apply --all` review actions.
 - Hash-record rewriting uses parser-node-oriented matching for the main rewrite path, not broad regex replacement.
-- Static param backflow exists as a verified-loop feature behind `loop --signature-backflow`.
+- Static param backflow exists as an Auto-type verified-loop feature behind `loop --signature-backflow`.
 - Static param backflow currently rejects candidates with weak/untyped types, `Object`, incompatible direct protocol requirements, or unresolved forwarding/capture gaps.
 - The latest real-source verified loop improved params from `strong 1844, untyped 794` to `strong 1848, untyped 790` after reverting one semantically bad but Sorbet-clean candidate.
 
@@ -22,10 +22,10 @@ This note tracks the work that was planned during the latest nil-kill session bu
 
 - Runtime-only param observation through the verified loop.
   - The report still has `candidate: runtime-only param observation` slots.
-  - These are not currently promoted by a dedicated verified-loop mode.
+  - These are not currently promoted by a dedicated Auto-type verified-loop mode.
   - Needed: reuse the same protocol preflight and verification rollback model as static backflow.
 
-- Return signature autofix frontier.
+- Return signature action frontier.
   - Return slots did not improve in the latest phase.
   - What already exists: `propose_forwarded_return_chain_actions` plus `ForwardedReturnResolver` (`lib/nil_kill.rb:2119,2149`) resolve direct forwarded-return chains and emit `fix_sig_return` actions with HIGH/REVIEW confidence (specs at `spec/nil_kill_spec.rb:695-800`).
   - What is missing: no dedicated `loop --return-backflow` mode wires REVIEW return actions through the verified-rollback path the way `--signature-backflow` does for params. Collection-lookup returns, mixed-source returns, and weak collection-element returns are still unhandled.
@@ -71,7 +71,7 @@ This note tracks the work that was planned during the latest nil-kill session bu
   - Runtime-only single-type observations may be correct or may be accidental coverage artifacts.
 
 - `Object` and `T.nilable(Object)` are treated as non-informative for static backflow.
-  - This is correct for auto-fix, but the report should make clear that these are blocked because they do not improve precision.
+  - This is correct for rewrite safety, but the report should make clear that these are blocked because they do not improve precision.
 
 - Forwarded return blockers are still less actionable than high-pressure hash-map sections.
   - They now show better evidence, but they do not yet consistently point to one verified fix that unlocks many slots.
@@ -101,7 +101,7 @@ This note tracks the work that was planned during the latest nil-kill session bu
 
 ## Next Biggest Opportunities
 
-1. Return signature autofix frontier through the verified loop.
+1. Return signature action frontier through Auto-type's verified loop.
    - Why it matters: return hygiene has been the stalled metric across the last few phases, the forwarded-return resolver already emits actions, and adding a `--return-backflow` loop mode reuses existing scaffolding (`signature_backflow_review_actions` is the template).
    - Acceptance signal: `Return slots strong` rises, untyped return buckets for forwarded returns / collection lookup / mixed sources shrink, and the loop reports applied actions rather than skipped actions.
 
