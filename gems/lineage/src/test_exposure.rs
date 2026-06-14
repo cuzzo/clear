@@ -59,62 +59,76 @@ where
     let mut files = HashMap::<String, Option<BlobFile>>::new();
     let mut units = HashMap::<String, Vec<LogicalUnit>>::new();
 
-    for record in records {
-        let path = normalizer.normalize_path(&record.path);
-        if !files.contains_key(&path) {
-            files.insert(path.clone(), file_at_commit(git, commit_hash, &path)?);
-        }
-        let Some(file) = files.get(&path).and_then(Option::as_ref) else {
-            stats.skipped_files += 1;
-            continue;
-        };
-        if !units.contains_key(&path) {
-            units.insert(path.clone(), extractor.extract_units(file));
-        }
-        let Some(unit) = units
-            .get(&path)
-            .and_then(|file_units| matching_unit(file_units, &record))
-        else {
-            stats.skipped_records += 1;
-            continue;
-        };
-        let Some(unit_id) = storage.resolve_unit_id(&unit.id, &path, &unit.name)? else {
-            stats.skipped_records += 1;
-            continue;
-        };
-        let verified_line = record.line.unwrap_or(unit.start_line);
-        let is_verified = verify_context_line(file, verified_line, record.context_line.as_deref());
-        if !is_verified {
-            stats.unverified += 1;
-        }
-        let is_mutation_verified =
-            is_mutation_verified_status(record.mutation_status.as_deref());
-        let is_mutation_killed = is_mutation_killed_status(record.mutation_status.as_deref());
-        if is_mutation_verified {
-            stats.mutation_records += 1;
-        }
+    storage.begin_transaction()?;
+    let result = (|| -> Result<TestExposureIngestStats> {
+        for record in records {
+            let path = normalizer.normalize_path(&record.path);
+            if !files.contains_key(&path) {
+                files.insert(path.clone(), file_at_commit(git, commit_hash, &path)?);
+            }
+            let Some(file) = files.get(&path).and_then(Option::as_ref) else {
+                stats.skipped_files += 1;
+                continue;
+            };
+            if !units.contains_key(&path) {
+                units.insert(path.clone(), extractor.extract_units(file));
+            }
+            let Some(unit) = units
+                .get(&path)
+                .and_then(|file_units| matching_unit(file_units, &record))
+            else {
+                stats.skipped_records += 1;
+                continue;
+            };
+            let Some(unit_id) = storage.resolve_unit_id(&unit.id, &path, &unit.name)? else {
+                stats.skipped_records += 1;
+                continue;
+            };
+            let verified_line = record.line.unwrap_or(unit.start_line);
+            let is_verified =
+                verify_context_line(file, verified_line, record.context_line.as_deref());
+            if !is_verified {
+                stats.unverified += 1;
+            }
+            let is_mutation_verified =
+                is_mutation_verified_status(record.mutation_status.as_deref());
+            let is_mutation_killed = is_mutation_killed_status(record.mutation_status.as_deref());
+            if is_mutation_verified {
+                stats.mutation_records += 1;
+            }
 
-        if storage.insert_test_exposure_event(&TestExposureEvent {
-            unit_id,
-            commit_hash: commit_hash.to_string(),
-            timestamp,
-            path,
-            function: record.function.clone(),
-            line: record.line,
-            branch_id: record.branch_id.clone(),
-            test_id: record.test_id.clone(),
-            test_type: normalized_test_type(&record.test_type),
-            mutation_status: record.mutation_status.clone(),
-            is_mutation_verified,
-            is_mutation_killed,
-            is_verified,
-            payload_json: record.payload_json.clone(),
-        })? {
-            stats.events += 1;
+            if storage.insert_test_exposure_event(&TestExposureEvent {
+                unit_id,
+                commit_hash: commit_hash.to_string(),
+                timestamp,
+                path,
+                function: record.function.clone(),
+                line: record.line,
+                branch_id: record.branch_id.clone(),
+                test_id: record.test_id.clone(),
+                test_type: normalized_test_type(&record.test_type),
+                mutation_status: record.mutation_status.clone(),
+                is_mutation_verified,
+                is_mutation_killed,
+                is_verified,
+                payload_json: record.payload_json.clone(),
+            })? {
+                stats.events += 1;
+            }
+        }
+        Ok(stats)
+    })();
+
+    match result {
+        Ok(stats) => {
+            storage.commit_transaction()?;
+            Ok(stats)
+        }
+        Err(error) => {
+            let _ = storage.rollback_transaction();
+            Err(error)
         }
     }
-
-    Ok(stats)
 }
 
 pub fn parse_test_exposure_records(value: &Value) -> Result<Vec<TestExposureRecord>> {

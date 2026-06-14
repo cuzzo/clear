@@ -601,6 +601,46 @@ impl Storage {
         Ok(quality + lines)
     }
 
+    pub fn delete_coverage_lines_for_commit_source(
+        &self,
+        commit_hash: &str,
+        source: &str,
+    ) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM coverage_line_events WHERE commit_hash = ?1 AND source = ?2",
+            params![commit_hash, source],
+        )?)
+    }
+
+    pub fn delete_test_exposure_for_commit_test(
+        &self,
+        commit_hash: &str,
+        test_type: &str,
+        test_id: &str,
+    ) -> Result<usize> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT DISTINCT unit_id
+            FROM test_exposure_events
+            WHERE commit_hash = ?1 AND test_type = ?2 AND test_id = ?3
+            "#,
+        )?;
+        let unit_ids = stmt
+            .query_map(params![commit_hash, test_type, test_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let deleted = self.conn.execute(
+            r#"
+            DELETE FROM test_exposure_events
+            WHERE commit_hash = ?1 AND test_type = ?2 AND test_id = ?3
+            "#,
+            params![commit_hash, test_type, test_id],
+        )?;
+        for unit_id in unit_ids {
+            self.refresh_test_exposure_summary(&unit_id)?;
+        }
+        Ok(deleted)
+    }
+
     fn refresh_current_quality_metrics(&self) -> Result<()> {
         self.conn.execute_batch(
             r#"
@@ -645,18 +685,30 @@ impl Storage {
         line: u32,
         hits: u32,
     ) -> Result<bool> {
+        self.record_coverage_line_with_source(commit_hash, timestamp, path, line, hits, "coverage")
+    }
+
+    pub fn record_coverage_line_with_source(
+        &self,
+        commit_hash: &str,
+        timestamp: i64,
+        path: &str,
+        line: u32,
+        hits: u32,
+        source: &str,
+    ) -> Result<bool> {
         let changed = self.conn.execute(
             r#"
             INSERT INTO coverage_line_events
               (commit_hash, timestamp, path, line, hits, source)
-            VALUES (?1, ?2, ?3, ?4, ?5, 'coverage')
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ON CONFLICT(commit_hash, path, line, source) DO UPDATE SET
               timestamp = MAX(coverage_line_events.timestamp, excluded.timestamp),
               hits = MAX(coverage_line_events.hits, excluded.hits)
             WHERE excluded.timestamp > coverage_line_events.timestamp
                OR excluded.hits > coverage_line_events.hits
             "#,
-            params![commit_hash, timestamp, path, line, hits],
+            params![commit_hash, timestamp, path, line, hits, source],
         )?;
         Ok(changed > 0)
     }

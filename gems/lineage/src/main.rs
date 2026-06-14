@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
-    ingest_coverage_json, ingest_hazards, ingest_stack_traces, ingest_test_exposure_json,
-    serve_lsp, serve_ui_with_overlays, GitProvider, HeuristicExtractor, LineageEngine,
-    RepoPathNormalizer, SentryProvider, Storage,
+    coverage_records_to_test_exposure_json, ingest_coverage_json_with_options, ingest_hazards,
+    ingest_stack_traces, ingest_test_exposure_json, parse_coverage_input,
+    resolve_coverage_record_paths, serve_lsp, serve_ui_with_overlays, CoverageIngestOptions,
+    GitProvider, HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -69,6 +70,8 @@ enum Command {
     IngestCoverage {
         #[arg(long, default_value = "lineage.db")]
         db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
         #[arg(long)]
         input: PathBuf,
         #[arg(long, default_value = "codecov")]
@@ -79,6 +82,10 @@ enum Command {
         timestamp: Option<i64>,
         #[arg(long)]
         replace: bool,
+        #[arg(long)]
+        test_type: Option<String>,
+        #[arg(long)]
+        test_id: Option<String>,
     },
     /// Ingest named test exposure facts for one commit.
     IngestTestExposure {
@@ -194,20 +201,72 @@ fn main() -> Result<()> {
         }
         Command::IngestCoverage {
             db,
+            repo,
             input,
             format,
             commit,
             timestamp,
             replace,
+            test_type,
+            test_id,
         } => {
             let storage = Storage::open(&db)?;
             let payload = fs::read_to_string(&input)?;
-            let stats =
-                ingest_coverage_json(&storage, &payload, &format, &commit, timestamp, replace)?;
+            let normalized_test_type = test_type.as_deref().map(normalize_test_type);
+            let line_source = normalized_test_type
+                .as_ref()
+                .map(|value| format!("coverage:{value}"))
+                .unwrap_or_else(|| "coverage".to_string());
+            let stats = ingest_coverage_json_with_options(
+                &storage,
+                &payload,
+                &format,
+                &commit,
+                timestamp,
+                replace,
+                &CoverageIngestOptions { line_source },
+            )?;
             println!(
                 "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
                 stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
             );
+            if let Some(test_type) = normalized_test_type {
+                let test_id =
+                    test_id.unwrap_or_else(|| default_coverage_test_id(&test_type, &input));
+                if replace {
+                    storage.delete_test_exposure_for_commit_test(&commit, &test_type, &test_id)?;
+                }
+                let records = parse_coverage_input(&payload, &format)?;
+                let records = resolve_coverage_record_paths(&storage, &records)?;
+                let exposure_payload = coverage_records_to_test_exposure_json(
+                    &records,
+                    &test_type,
+                    &test_id,
+                    "lineage ingest-coverage",
+                );
+                let git = GitProvider::open(&repo)?;
+                let extractor = HeuristicExtractor::default();
+                let normalizer = RepoPathNormalizer::new(&repo);
+                let exposure_stats = ingest_test_exposure_json(
+                    &storage,
+                    &normalizer,
+                    &git,
+                    &extractor,
+                    &exposure_payload,
+                    &commit,
+                    timestamp,
+                )?;
+                println!(
+                    "ingested coverage exposure: test_id={} test_type={} records={} events={} unverified={} skipped_files={} skipped_records={}",
+                    test_id,
+                    test_type,
+                    exposure_stats.records,
+                    exposure_stats.events,
+                    exposure_stats.unverified,
+                    exposure_stats.skipped_files,
+                    exposure_stats.skipped_records
+                );
+            }
         }
         Command::IngestTestExposure {
             db,
@@ -317,6 +376,33 @@ fn print_json_summary(units: &[lineage::UnitSummary]) {
         );
     }
     println!("]");
+}
+
+fn normalize_test_type(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>();
+    let normalized = normalized
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if normalized.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn default_coverage_test_id(test_type: &str, input: &std::path::Path) -> String {
+    let path = input
+        .to_string_lossy()
+        .trim_start_matches("./")
+        .replace('\\', "/");
+    format!("coverage:{test_type}:{path}")
 }
 
 fn json_escape(value: &str) -> String {

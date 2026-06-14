@@ -28,7 +28,11 @@ pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
     HazardEvent, QualityMetric, TestExposureEvent, UnitKind,
 };
-pub use quality::{ingest_coverage_json, CoverageIngestStats, CoverageRecord};
+pub use quality::{
+    coverage_records_to_test_exposure_json, ingest_coverage_json,
+    ingest_coverage_json_with_options, parse_coverage_input, resolve_coverage_record_paths,
+    CoverageIngestOptions, CoverageIngestStats, CoverageRecord,
+};
 pub use stack_trace::{
     ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider,
     StackIngestStats, StackPayload, StackTraceProvider,

@@ -75,6 +75,40 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
   --input coverage/coverage.xml
 ```
 
+Pass `--test-type` when a coverage artifact represents a specific
+verification lane. Lineage still stores aggregate line coverage, and it
+also writes suite-level `test_exposure_events` so the UI can distinguish
+which kind of test hit a line. The generated `test_id` names the coverage
+artifact, not an individual test case.
+
+Recommended CLEAR lanes:
+
+- Ruby unit specs: `--format simplecov --test-type unit`
+- Ruby transpile-tests/integration coverage: `--format simplecov --test-type integration`
+- Ruby tools/fuzz coverage: `--format simplecov --test-type fuzz`
+- Zig kcov unit coverage: `--format cobertura --test-type unit`
+- Zig systems evidence: use `--test-type loom`, `--test-type vopr`, or
+  `--test-type tsan` for lane-specific artifacts. Loom/VOPR hazard facts
+  can also be emitted with `tools/lineage_zig_system_exposure.rb`.
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+  --db /tmp/lineage.db \
+  --repo . \
+  --format simplecov \
+  --commit "$(git rev-parse HEAD)" \
+  --input coverage/.resultset.json \
+  --test-type unit
+
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+  --db /tmp/lineage.db \
+  --repo . \
+  --format cobertura \
+  --commit "$(git rev-parse HEAD)" \
+  --input zig/zig-out/coverage/merged/kcov-merged/cobertura.xml \
+  --test-type unit
+```
+
 Coverage ingestion is commit-scoped. Re-ingesting the same artifact for
 the same commit updates existing rows instead of duplicating them. Use
 `--replace` when an artifact is authoritative for that commit and should

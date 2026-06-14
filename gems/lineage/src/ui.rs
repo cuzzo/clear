@@ -207,17 +207,22 @@ pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
     let (tracked_lines, covered_lines, mutant_killed_covered_lines, multi_type_covered_lines) =
         storage.connection().query_row(
             r#"
-            WITH latest_lines AS (
+            WITH latest_source_lines AS (
               SELECT path, line, hits
               FROM (
-                SELECT path, line, hits,
+                SELECT path, line, source, hits,
                        ROW_NUMBER() OVER (
-                         PARTITION BY path, line
+                         PARTITION BY path, line, source
                          ORDER BY timestamp DESC, id DESC
                        ) AS rank
                 FROM coverage_line_events
               )
               WHERE rank = 1
+            ),
+            latest_lines AS (
+              SELECT path, line, MAX(hits) AS hits
+              FROM latest_source_lines
+              GROUP BY path, line
             ),
             line_tests AS (
               SELECT path,
@@ -627,15 +632,23 @@ fn apply_line_coverage(
 ) -> Result<bool> {
     let mut stmt = storage.connection().prepare(
         r#"
-        WITH latest AS (
-          SELECT line, hits,
-                 ROW_NUMBER() OVER (PARTITION BY line ORDER BY timestamp DESC, id DESC) AS rank
+        WITH latest_source AS (
+          SELECT line, source, hits,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY line, source
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rank
           FROM coverage_line_events
           WHERE path = ?1
+        ),
+        latest AS (
+          SELECT line, MAX(hits) AS hits
+          FROM latest_source
+          WHERE rank = 1
+          GROUP BY line
         )
         SELECT line, hits
         FROM latest
-        WHERE rank = 1
         ORDER BY line
         "#,
     )?;

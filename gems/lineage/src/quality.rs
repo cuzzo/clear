@@ -1,7 +1,19 @@
 use crate::model::{QualityEvent, QualityMetric};
 use crate::storage::Storage;
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
+
+const DEFAULT_COVERAGE_SOURCE: &str = "coverage";
+const RELATIVE_ROOTS: &[&str] = &[
+    "src/",
+    "gems/",
+    "tools/",
+    "transpile-tests/",
+    "zig/",
+    "examples/",
+    "benchmarks/",
+    "spec/",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverageRecord {
@@ -28,6 +40,19 @@ pub struct CoverageIngestStats {
     pub skipped_files: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageIngestOptions {
+    pub line_source: String,
+}
+
+impl Default for CoverageIngestOptions {
+    fn default() -> Self {
+        Self {
+            line_source: DEFAULT_COVERAGE_SOURCE.to_string(),
+        }
+    }
+}
+
 pub fn ingest_coverage_json(
     storage: &Storage,
     input: &str,
@@ -35,6 +60,26 @@ pub fn ingest_coverage_json(
     commit_hash: &str,
     timestamp: Option<i64>,
     replace: bool,
+) -> Result<CoverageIngestStats> {
+    ingest_coverage_json_with_options(
+        storage,
+        input,
+        format,
+        commit_hash,
+        timestamp,
+        replace,
+        &CoverageIngestOptions::default(),
+    )
+}
+
+pub fn ingest_coverage_json_with_options(
+    storage: &Storage,
+    input: &str,
+    format: &str,
+    commit_hash: &str,
+    timestamp: Option<i64>,
+    replace: bool,
+    options: &CoverageIngestOptions,
 ) -> Result<CoverageIngestStats> {
     if !storage.commit_exists(commit_hash)? {
         anyhow::bail!("commit {commit_hash} is not present in lineage metadata");
@@ -51,9 +96,13 @@ pub fn ingest_coverage_json(
 
     storage.begin_transaction()?;
     if replace {
-        storage.delete_coverage_for_commit(commit_hash)?;
+        if options.line_source == DEFAULT_COVERAGE_SOURCE {
+            storage.delete_coverage_for_commit(commit_hash)?;
+        } else {
+            storage.delete_coverage_lines_for_commit_source(commit_hash, &options.line_source)?;
+        }
     }
-    let result = ingest_records(storage, records, commit_hash, timestamp, &mut stats);
+    let result = ingest_records(storage, records, commit_hash, timestamp, &mut stats, options);
     match result {
         Ok(()) => {
             storage.commit_transaction()?;
@@ -72,6 +121,7 @@ fn ingest_records(
     commit_hash: &str,
     timestamp: i64,
     stats: &mut CoverageIngestStats,
+    options: &CoverageIngestOptions,
 ) -> Result<()> {
     for record in records {
         let Some(path) = storage.resolve_current_path(&record.path)? else {
@@ -119,12 +169,13 @@ fn ingest_records(
             )?;
         }
         for hit in &record.line_hits {
-            stats.line_events += usize::from(storage.record_coverage_line(
+            stats.line_events += usize::from(storage.record_coverage_line_with_source(
                 commit_hash,
                 timestamp,
                 &path,
                 hit.line,
                 hit.hits,
+                &options.line_source,
             )?);
         }
     }
@@ -145,6 +196,7 @@ pub fn parse_coverage_records(value: &Value, format: &str) -> Result<Vec<Coverag
     match format {
         "codecov" => Ok(parse_codecov_records(value)),
         "boobytrap" | "generic" => Ok(parse_generic_records(value)),
+        "simplecov" => Ok(parse_simplecov_records(value)),
         other => anyhow::bail!("unsupported coverage format {other:?}"),
     }
 }
@@ -206,6 +258,82 @@ fn parse_generic_records(value: &Value) -> Vec<CoverageRecord> {
         .into_iter()
         .flatten();
     rows.filter_map(record_from_generic_node).collect()
+}
+
+fn parse_simplecov_records(value: &Value) -> Vec<CoverageRecord> {
+    let mut by_path = std::collections::BTreeMap::<String, Vec<Option<u32>>>::new();
+    let Some(resultsets) = value.as_object() else {
+        return Vec::new();
+    };
+
+    for resultset in resultsets.values() {
+        let Some(coverage) = resultset.get("coverage").and_then(Value::as_object) else {
+            continue;
+        };
+        for (raw_path, file_coverage) in coverage {
+            let Some(lines) = simplecov_lines(file_coverage) else {
+                continue;
+            };
+            let path = normalize_path(raw_path);
+            let entry = by_path.entry(path).or_default();
+            if entry.len() < lines.len() {
+                entry.resize(lines.len(), None);
+            }
+            for (index, hits) in lines.into_iter().enumerate() {
+                let Some(hits) = hits else {
+                    continue;
+                };
+                let current = entry[index].unwrap_or(0);
+                entry[index] = Some(current.max(hits));
+            }
+        }
+    }
+
+    by_path
+        .into_iter()
+        .filter_map(|(path, lines)| {
+            let line_hits = lines
+                .iter()
+                .enumerate()
+                .filter_map(|(index, hits)| {
+                    hits.map(|hits| CoverageLineHit {
+                        line: (index + 1) as u32,
+                        hits,
+                    })
+                })
+                .collect::<Vec<_>>();
+            if line_hits.is_empty() {
+                return None;
+            }
+            let covered = line_hits.iter().filter(|hit| hit.hits > 0).count();
+            let line_coverage = Some((covered as f64) * 100.0 / (line_hits.len() as f64));
+            Some(CoverageRecord {
+                path,
+                line_coverage,
+                integration_coverage: None,
+                mutant_coverage: None,
+                hard_gated: None,
+                line_hits,
+            })
+        })
+        .collect()
+}
+
+fn simplecov_lines(file_coverage: &Value) -> Option<Vec<Option<u32>>> {
+    if let Some(lines) = file_coverage.get("lines").and_then(Value::as_array) {
+        return Some(
+            lines
+                .iter()
+                .map(|line| line.as_u64().and_then(|value| u32::try_from(value).ok()))
+                .collect(),
+        );
+    }
+    file_coverage.as_array().map(|lines| {
+        lines
+            .iter()
+            .map(|line| line.as_u64().and_then(|value| u32::try_from(value).ok()))
+            .collect()
+    })
 }
 
 fn record_from_generic_node(node: &Value) -> Option<CoverageRecord> {
@@ -328,7 +456,66 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
 }
 
 fn normalize_path(path: &str) -> String {
-    path.trim_start_matches("./").to_string()
+    let trimmed = path.trim_start_matches("./");
+    for root in RELATIVE_ROOTS {
+        if trimmed.starts_with(root) {
+            return trimmed.to_string();
+        }
+        let marker = format!("/{root}");
+        if let Some(index) = trimmed.find(&marker) {
+            return trimmed[index + 1..].to_string();
+        }
+    }
+    trimmed.trim_start_matches('/').to_string()
+}
+
+pub fn coverage_records_to_test_exposure_json(
+    records: &[CoverageRecord],
+    test_type: &str,
+    test_id: &str,
+    producer: &str,
+) -> String {
+    let hits = records
+        .iter()
+        .flat_map(|record| {
+            record
+                .line_hits
+                .iter()
+                .filter(|hit| hit.hits > 0)
+                .map(move |hit| {
+                    json!({
+                        "file": record.path,
+                        "line": hit.line,
+                        "test_id": test_id,
+                        "test_type": test_type,
+                        "coverage_hits": hit.hits,
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema": "test-exposure/v1",
+        "producer": producer,
+        "note": "Suite-level exposure synthesized from aggregate coverage; test_id names the coverage source, not an individual test case.",
+        "hits": hits,
+    })
+    .to_string()
+}
+
+pub fn resolve_coverage_record_paths(
+    storage: &Storage,
+    records: &[CoverageRecord],
+) -> Result<Vec<CoverageRecord>> {
+    let mut resolved = Vec::new();
+    for record in records {
+        let Some(path) = storage.resolve_current_path(&record.path)? else {
+            continue;
+        };
+        let mut record = record.clone();
+        record.path = path;
+        resolved.push(record);
+    }
+    Ok(resolved)
 }
 
 fn record_metric(
@@ -445,6 +632,73 @@ mod tests {
         assert_eq!(records[0].line_coverage, Some(50.0));
         assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 3 });
         assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0 });
+    }
+
+    #[test]
+    fn parses_simplecov_resultset_line_hits() {
+        let value = json!({
+          "RSpec": {
+            "coverage": {
+              "/repo/src/demo.rb": {
+                "lines": [null, 2, 0, null, 1],
+                "branches": {}
+              }
+            },
+            "timestamp": 10
+          },
+          "transpile-tests": {
+            "coverage": {
+              "/repo/src/demo.rb": {
+                "lines": [null, 0, 3, null, null],
+                "branches": {}
+              }
+            },
+            "timestamp": 11
+          }
+        });
+
+        let records = parse_coverage_records(&value, "simplecov").unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, "src/demo.rb");
+        assert_eq!(
+            records[0].line_hits,
+            vec![
+                CoverageLineHit { line: 2, hits: 2 },
+                CoverageLineHit { line: 3, hits: 3 },
+                CoverageLineHit { line: 5, hits: 1 },
+            ]
+        );
+        assert_eq!(records[0].line_coverage, Some(100.0));
+    }
+
+    #[test]
+    fn builds_suite_level_test_exposure_from_covered_lines() {
+        let records = vec![CoverageRecord {
+            path: "src/demo.rb".to_string(),
+            line_coverage: Some(50.0),
+            integration_coverage: None,
+            mutant_coverage: None,
+            hard_gated: None,
+            line_hits: vec![
+                CoverageLineHit { line: 1, hits: 2 },
+                CoverageLineHit { line: 2, hits: 0 },
+            ],
+        }];
+
+        let payload = coverage_records_to_test_exposure_json(
+            &records,
+            "unit",
+            "coverage:unit:coverage/.resultset.json",
+            "test",
+        );
+        let value: Value = serde_json::from_str(&payload).unwrap();
+        let hits = value.get("hits").and_then(Value::as_array).unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].get("file").and_then(Value::as_str), Some("src/demo.rb"));
+        assert_eq!(hits[0].get("line").and_then(Value::as_u64), Some(1));
+        assert_eq!(hits[0].get("test_type").and_then(Value::as_str), Some("unit"));
     }
 
     #[test]
@@ -628,5 +882,56 @@ mod tests {
             )
             .unwrap();
         assert_eq!(current, 100.0);
+    }
+
+    #[test]
+    fn typed_coverage_ingest_uses_source_specific_line_events() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/demo.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let payload = json!({
+          "files": [{
+            "path": "src/demo.rb",
+            "coverage": 50.0,
+            "line_hits": [{ "line": 1, "hits": 1 }]
+          }]
+        });
+
+        let options = CoverageIngestOptions {
+            line_source: "coverage:unit".to_string(),
+        };
+        let stats = ingest_coverage_json_with_options(
+            &storage,
+            &payload.to_string(),
+            "generic",
+            "abc",
+            None,
+            false,
+            &options,
+        )
+        .unwrap();
+
+        assert_eq!(stats.line_events, 1);
+        let source: String = storage
+            .connection()
+            .query_row("SELECT source FROM coverage_line_events LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(source, "coverage:unit");
     }
 }
