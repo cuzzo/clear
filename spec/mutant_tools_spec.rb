@@ -46,6 +46,22 @@ RSpec.describe MutationTesting do
       )
     end
   end
+
+  describe ".parse_shard and .shard_items" do
+    it "selects deterministic round-robin shards" do
+      shard = described_class.parse_shard("1/3")
+
+      expect(shard.index).to eq(1)
+      expect(shard.count).to eq(3)
+      expect(described_class.shard_items(%w[a b c d e f g], shard)).to eq(%w[b e])
+    end
+
+    it "rejects invalid shard bounds" do
+      expect { described_class.parse_shard("3/3") }.to raise_error(RuntimeError, /shard index/)
+      expect { described_class.parse_shard("0/0") }.to raise_error(RuntimeError, /shard count/)
+      expect { described_class.parse_shard("x/y") }.to raise_error(RuntimeError, /invalid shard/)
+    end
+  end
 end
 
 RSpec.describe RubySpecMutants do
@@ -130,11 +146,27 @@ RSpec.describe RubySpecMutants do
     opts = RubySpecMutants::Options.new(
       subject: "Lexer",
       since: nil,
+      shard: nil,
       out: "/tmp/unused",
       list: false
     )
 
     expect(described_class.selected_subjects(opts).map(&:expression)).to include("Lexer*")
+  end
+
+  it "shards selected subjects deterministically" do
+    opts = RubySpecMutants::Options.new(
+      subject: nil,
+      since: nil,
+      shard: MutationTesting.parse_shard("2/4"),
+      out: "/tmp/unused",
+      list: false
+    )
+
+    selected = described_class.selected_subjects(opts)
+
+    expect(selected).not_to be_empty
+    expect(selected).to eq(described_class::SUBJECTS.each_with_index.filter_map { |subject, index| subject if (index % 4) == 2 })
   end
 
   it "blocks failing hard-gate subjects" do

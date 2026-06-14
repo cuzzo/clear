@@ -24,6 +24,11 @@ module MutationTesting
     const :coverage, Float
   end
 
+  class Shard < T::Struct
+    const :index, Integer
+    const :count, Integer
+  end
+
   FuzzSummary = T.type_alias { T::Hash[Symbol, Integer] }
 
   sig { params(argv: T::Array[String], cwd: String, allow_failure: T::Boolean, log_path: T.nilable(String)).returns(CommandResult) }
@@ -75,6 +80,42 @@ module MutationTesting
       mir_error: match[:mir].to_i,
       unexpected_pass: match[:unexpected].to_i,
     }
+  end
+
+  sig { params(value: String).returns(Shard) }
+  def self.parse_shard(value)
+    parts = value.split('/', 2)
+    raise "invalid shard #{value.inspect}; expected INDEX/COUNT" unless parts.length == 2
+
+    shard(Integer(parts.fetch(0)), Integer(parts.fetch(1)))
+  rescue ArgumentError
+    raise "invalid shard #{value.inspect}; expected integer INDEX/COUNT"
+  end
+
+  sig { params(index: Integer, count: Integer).returns(Shard) }
+  def self.shard(index, count)
+    raise "shard count must be positive, got #{count}" unless count.positive?
+    raise "shard index must be between 0 and #{count - 1}, got #{index}" unless index >= 0 && index < count
+
+    Shard.new(index: index, count: count)
+  end
+
+  sig do
+    type_parameters(:Elem)
+      .params(items: T::Array[T.type_parameter(:Elem)], shard: T.nilable(Shard))
+      .returns(T::Array[T.type_parameter(:Elem)])
+  end
+  def self.shard_items(items, shard)
+    return items unless shard
+
+    items.each_with_index.filter_map do |item, index|
+      item if (index % shard.count) == shard.index
+    end
+  end
+
+  sig { params(shard: T.nilable(Shard)).returns(String) }
+  def self.shard_label(shard)
+    shard ? "#{shard.index}/#{shard.count}" : "all"
   end
 
   sig { params(output: String, label: String).returns(T.nilable(Integer)) }

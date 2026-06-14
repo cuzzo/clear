@@ -34,6 +34,7 @@ module RubySpecMutants
   class Options < T::Struct
     prop :subject, T.nilable(String)
     prop :since, T.nilable(String)
+    prop :shard, T.nilable(MutationTesting::Shard)
     prop :out, String
     prop :list, T::Boolean
   end
@@ -146,11 +147,12 @@ module RubySpecMutants
 
   sig { params(argv: T::Array[String]).returns(Options) }
   def self.parse_options(argv)
-    opts = Options.new(subject: nil, since: nil, out: '/tmp/clear-ruby-mutants', list: false)
+    opts = Options.new(subject: nil, since: nil, shard: nil, out: '/tmp/clear-ruby-mutants', list: false)
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby tools/mutants/ruby_specs.rb [--subject NAME] [--since REV] [--out DIR] [--list]'
+      o.banner = 'Usage: ruby tools/mutants/ruby_specs.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--list]'
       o.on('--subject NAME') { |v| opts.subject = v }
       o.on('--since REV') { |v| opts.since = v }
+      o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
       o.on('--out DIR') { |v| opts.out = File.expand_path(v) }
       o.on('--list') { opts.list = true }
       o.on('-h', '--help') { puts o; exit 0 }
@@ -185,21 +187,26 @@ module RubySpecMutants
 
   sig { params(opts: Options).returns(T::Array[Subject]) }
   def self.selected_subjects(opts)
-    return SUBJECTS unless opts.subject
+    selected =
+      if opts.subject
+        wanted_expression = subject_expression(T.must(opts.subject))
+        matches = SUBJECTS.select do |s|
+          s.name == opts.subject || s.expression == opts.subject || s.expression == wanted_expression
+        end
+        raise "unknown ruby mutant subject: #{opts.subject}" if matches.empty?
+        matches
+      else
+        SUBJECTS
+      end
 
-    wanted_expression = subject_expression(T.must(opts.subject))
-    selected = SUBJECTS.select do |s|
-      s.name == opts.subject || s.expression == opts.subject || s.expression == wanted_expression
-    end
-    raise "unknown ruby mutant subject: #{opts.subject}" if selected.empty?
-    selected
+    MutationTesting.shard_items(selected, opts.shard)
   end
 
   sig { params(argv: T::Array[String]).returns(Integer) }
   def self.main(argv)
     opts = parse_options(argv)
     if opts.list
-      SUBJECTS.each do |s|
+      selected_subjects(opts).each do |s|
         gate = s.hard_gate ? 'hard' : 'advisory'
         puts "#{s.name} #{s.expression} #{gate} min=#{format('%.2f', s.min_coverage)} specs=#{s.specs.join(',')}"
       end
@@ -208,7 +215,14 @@ module RubySpecMutants
 
     FileUtils.rm_rf(opts.out)
     FileUtils.mkdir_p(opts.out)
-    results = selected_subjects(opts).map do |subject|
+    subjects = selected_subjects(opts)
+    if subjects.empty?
+      puts "no ruby mutant subjects selected for shard #{MutationTesting.shard_label(opts.shard)}"
+      return 0
+    end
+
+    puts "ruby mutant shard #{MutationTesting.shard_label(opts.shard)}: #{subjects.length} subject(s)"
+    results = subjects.map do |subject|
       run_subject(subject, opts.since, File.join(opts.out, "#{subject.name}.log"))
     end
     results.any?(&:blocking) ? 1 : 0

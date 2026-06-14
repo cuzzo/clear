@@ -56,6 +56,7 @@ module TranspileTestMutants
   class Options < T::Struct
     prop :mutant, T.nilable(Symbol)
     prop :all, T::Boolean
+    prop :shard, T.nilable(MutationTesting::Shard)
     prop :out, String
     prop :list, T::Boolean
     prop :keep, T::Boolean
@@ -68,6 +69,7 @@ module TranspileTestMutants
     opts = Options.new(
       mutant: nil,
       all: false,
+      shard: nil,
       out: '/tmp/clear-transpile-mutants',
       list: false,
       keep: false,
@@ -75,9 +77,10 @@ module TranspileTestMutants
       dry_run: false
     )
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby tools/mutants/transpile_tests.rb [--mutant NAME | --all] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
+      o.banner = 'Usage: ruby tools/mutants/transpile_tests.rb [--mutant NAME | --all] [--shard INDEX/COUNT] [--out DIR] [--keep] [--dry-run] [--allow-dirty]'
       o.on('--mutant NAME') { |v| opts.mutant = v.to_sym }
       o.on('--all') { opts.all = true }
+      o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
       o.on('--out DIR') { |v| opts.out = File.expand_path(v) }
       o.on('--keep') { opts.keep = true }
       o.on('--dry-run') { opts.dry_run = true }
@@ -193,25 +196,48 @@ module TranspileTestMutants
 
   sig { params(opts: Options).returns(T::Array[Mutant]) }
   def self.selected_mutants(opts)
-    return REGISTRY if opts.all
-    raise 'pass --mutant NAME, --all, or --list' unless opts.mutant
+    selected =
+      if opts.all
+        REGISTRY
+      else
+        raise 'pass --mutant NAME, --all, or --list' unless opts.mutant
 
-    found = REGISTRY.find { |m| m.name == opts.mutant }
-    raise "unknown transpile mutant: #{opts.mutant}" unless found
-    [T.must(found)]
+        found = REGISTRY.find { |m| m.name == opts.mutant }
+        raise "unknown transpile mutant: #{opts.mutant}" unless found
+        [T.must(found)]
+      end
+
+    MutationTesting.shard_items(selected, opts.shard)
   end
 
   sig { params(argv: T::Array[String]).returns(Integer) }
   def self.main(argv)
     opts = parse_options(argv)
     if opts.list
-      REGISTRY.each { |m| puts "#{m.name} - #{m.description}" }
+      selected = opts.all || opts.shard ? selected_mutants(Options.new(
+        mutant: opts.mutant,
+        all: true,
+        shard: opts.shard,
+        out: opts.out,
+        list: opts.list,
+        keep: opts.keep,
+        allow_dirty: opts.allow_dirty,
+        dry_run: opts.dry_run
+      )) : REGISTRY
+      selected.each { |m| puts "#{m.name} - #{m.description}" }
       return 0
     end
 
     FileUtils.rm_rf(opts.out) unless opts.keep
     FileUtils.mkdir_p(opts.out)
-    selected_mutants(opts).map do |mutant|
+    mutants = selected_mutants(opts)
+    if mutants.empty?
+      puts "no transpile mutants selected for shard #{MutationTesting.shard_label(opts.shard)}"
+      return 0
+    end
+
+    puts "transpile mutant shard #{MutationTesting.shard_label(opts.shard)}: #{mutants.length} mutant(s)"
+    mutants.map do |mutant|
       run_mutant(mutant, opts.out, allow_dirty: opts.allow_dirty, dry_run: opts.dry_run)
     end.all? ? 0 : 1
   end
