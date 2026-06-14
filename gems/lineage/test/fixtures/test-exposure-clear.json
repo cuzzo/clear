@@ -1,0 +1,54 @@
+{
+  "schema": "test-exposure/v1",
+  "note": "Fixture for named test exposure ingestion. Mutation fields are intentionally sparse because CLEAR has little historical mutant data.",
+  "hits": [
+    {
+      "file": "src/ast/type.rb",
+      "function": "TypeCapabilities#with",
+      "line": 81,
+      "context_line": "next_ownership = T.let(ownership.equal?(UNSET) ? self.ownership : T.cast(ownership, T.nilable(Symbol)), T.nilable(Symbol))",
+      "test_id": "test/ast/type_test.rb:test_type_capabilities_with",
+      "test_type": "unit",
+      "mutation_status": "killed"
+    },
+    {
+      "file": "src/ast/type.rb",
+      "function": "TypeCapabilities#with",
+      "line": 82,
+      "context_line": "next_sync = T.let(sync.equal?(UNSET) ? self.sync : T.cast(sync, T.nilable(Symbol)), T.nilable(Symbol))",
+      "test_id": "test/integration/compiler_type_test.rb:test_capability_sync",
+      "test_type": "integration"
+    }
+  ],
+  "files": [
+    {
+      "file": "zig/lib/atomic_ptr.zig",
+      "functions": [
+        {
+          "name": "init",
+          "line": 99,
+          "context_line": "pub fn init(allocator: std.mem.Allocator, val: T) !Self {",
+          "tests": [
+            {
+              "id": "zig/runtime/atomic-ptr-stress-test.zig:init_publishes_initial_value",
+              "type": "zig-runtime"
+            }
+          ]
+        }
+      ],
+      "branches": [
+        {
+          "branch_id": "zig/lib/atomic_ptr.zig:112:error-retire",
+          "line": 112,
+          "context_line": "pub fn deinit(self: *Self, ebr_or_rt: anytype, allocator: std.mem.Allocator) !void {",
+          "tests": [
+            {
+              "id": "zig/runtime/atomic-ptr-loom-test.zig:deinit_retires_snapshot",
+              "type": "loom"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

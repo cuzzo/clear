@@ -1,6 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use lineage::{GitProvider, HeuristicExtractor, LineageEngine, Storage};
+use lineage::{
+    ingest_coverage_json, ingest_stack_traces, ingest_test_exposure_json, GitProvider,
+    HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider, Storage,
+};
+use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -37,6 +41,43 @@ enum Command {
         only: Vec<String>,
         #[arg(long, default_value = "text")]
         format: String,
+    },
+    /// Ingest aggregate coverage or mutation quality data for one commit.
+    IngestCoverage {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, default_value = "codecov")]
+        format: String,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        timestamp: Option<i64>,
+    },
+    /// Ingest named test exposure facts for one commit.
+    IngestTestExposure {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        timestamp: Option<i64>,
+    },
+    /// Ingest provider stack traces and anchor frames to logical units.
+    Ingest {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, default_value = "sentry")]
+        provider: String,
     },
 }
 
@@ -92,6 +133,79 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        Command::IngestCoverage {
+            db,
+            input,
+            format,
+            commit,
+            timestamp,
+        } => {
+            let storage = Storage::open(&db)?;
+            let payload = fs::read_to_string(&input)?;
+            let stats = ingest_coverage_json(&storage, &payload, &format, &commit, timestamp)?;
+            println!(
+                "ingested coverage: files={} units={} events={} skipped_files={}",
+                stats.files, stats.units, stats.events, stats.skipped_files
+            );
+        }
+        Command::IngestTestExposure {
+            db,
+            repo,
+            input,
+            commit,
+            timestamp,
+        } => {
+            let storage = Storage::open(&db)?;
+            let git = GitProvider::open(&repo)?;
+            let extractor = HeuristicExtractor::default();
+            let normalizer = RepoPathNormalizer::new(&repo);
+            let payload = fs::read_to_string(&input)?;
+            let stats = ingest_test_exposure_json(
+                &storage,
+                &normalizer,
+                &git,
+                &extractor,
+                &payload,
+                &commit,
+                timestamp,
+            )?;
+            println!(
+                "ingested test exposure: records={} events={} mutation_records={} unverified={} skipped_files={} skipped_records={}",
+                stats.records,
+                stats.events,
+                stats.mutation_records,
+                stats.unverified,
+                stats.skipped_files,
+                stats.skipped_records
+            );
+        }
+        Command::Ingest {
+            db,
+            repo,
+            input,
+            provider,
+        } => {
+            let storage = Storage::open(&db)?;
+            let git = GitProvider::open(&repo)?;
+            let extractor = HeuristicExtractor::default();
+            let normalizer = RepoPathNormalizer::new(&repo);
+            let payload = fs::read_to_string(&input)?;
+            let stats = match provider.as_str() {
+                "sentry" => ingest_stack_traces(
+                    &storage,
+                    &SentryProvider,
+                    &normalizer,
+                    &git,
+                    &extractor,
+                    &payload,
+                )?,
+                other => anyhow::bail!("unsupported stack trace provider {other:?}"),
+            };
+            println!(
+                "ingested stack traces: payloads={} frames={} events={} unverified={} skipped_frames={}",
+                stats.payloads, stats.frames, stats.events, stats.unverified, stats.skipped_frames
+            );
         }
     }
     Ok(())

@@ -1,0 +1,22 @@
+{
+  "event_id": "fixture-clear-1",
+  "release": "a17e9f7e695782e22650e311108961cdd1eb08cc",
+  "timestamp": 1760000000,
+  "exception": {
+    "values": [
+      {
+        "type": "RuntimeError",
+        "stacktrace": {
+          "frames": [
+            {
+              "filename": "/app/src/ast/type.rb",
+              "function": "with",
+              "lineno": 81,
+              "context_line": "next_ownership = T.let(ownership.equal?(UNSET) ? self.ownership : T.cast(ownership, T.nilable(Symbol)), T.nilable(Symbol))"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

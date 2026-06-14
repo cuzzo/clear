@@ -1,0 +1,58 @@
+{
+  "totals": {
+    "files": 202,
+    "lines": 61186,
+    "hits": 59758,
+    "misses": 1428,
+    "partials": 0,
+    "coverage": 97.66,
+    "branches": 13566,
+    "methods": 0,
+    "messages": 0,
+    "sessions": 34,
+    "complexity": 0.0,
+    "complexity_total": 0.0,
+    "complexity_ratio": 0,
+    "diff": null
+  },
+  "files": [
+    {
+      "name": "src/ast/type.rb",
+      "totals": {
+        "files": 0,
+        "lines": 1880,
+        "hits": 1876,
+        "misses": 4,
+        "partials": 0,
+        "coverage": 99.78,
+        "branches": 602,
+        "methods": 0,
+        "messages": 0,
+        "sessions": 0,
+        "complexity": 0.0,
+        "complexity_total": 0.0,
+        "complexity_ratio": 0,
+        "diff": 0
+      }
+    },
+    {
+      "name": "zig/lib/atomic_ptr.zig",
+      "totals": {
+        "files": 0,
+        "lines": 56,
+        "hits": 55,
+        "misses": 1,
+        "partials": 0,
+        "coverage": 98.21,
+        "branches": 0,
+        "methods": 0,
+        "messages": 0,
+        "sessions": 0,
+        "complexity": 0.0,
+        "complexity_total": 0.0,
+        "complexity_ratio": 0,
+        "diff": 0
+      }
+    }
+  ]
+}

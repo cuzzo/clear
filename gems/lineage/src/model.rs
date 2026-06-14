@@ -113,6 +113,66 @@ pub struct Event {
     pub timestamp: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QualityMetric {
+    LineCoverage,
+    IntegrationCoverage,
+    MutantCoverage,
+    GateStatus,
+}
+
+impl QualityMetric {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LineCoverage => "LINE_COV",
+            Self::IntegrationCoverage => "INTEGRATION_COV",
+            Self::MutantCoverage => "MUTANT_COV",
+            Self::GateStatus => "GATE_STATUS",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QualityEvent {
+    pub unit_id: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub metric_type: QualityMetric,
+    pub old_value: Option<f64>,
+    pub new_value: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrashEvent {
+    pub unit_id: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub error_class: String,
+    pub provider_id: String,
+    pub is_verified: bool,
+    pub path: String,
+    pub line: u32,
+    pub function: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestExposureEvent {
+    pub unit_id: String,
+    pub commit_hash: String,
+    pub timestamp: i64,
+    pub path: String,
+    pub function: Option<String>,
+    pub line: Option<u32>,
+    pub branch_id: Option<String>,
+    pub test_id: String,
+    pub test_type: String,
+    pub mutation_status: Option<String>,
+    pub is_mutation_verified: bool,
+    pub is_mutation_killed: bool,
+    pub is_verified: bool,
+    pub payload_json: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitMetadata {
     pub hash: String,

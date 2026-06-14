@@ -42,6 +42,9 @@ The CLI writes a SQLite database with:
 - `logical_units`
 - `events`
 - `metadata`
+- `quality_events`
+- `crash_events`
+- `test_exposure_events`
 
 Inspect the unit-level signal:
 
@@ -52,6 +55,40 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- summary \
   --only src/ \
   --only gems/ \
   --only zig/
+```
+
+Ingest aggregate coverage history after a build. The Codecov parser
+accepts API v2 `totals` responses and `report/tree` responses:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-coverage \
+  --db /tmp/lineage.db \
+  --format codecov \
+  --commit "$(git rev-parse HEAD)" \
+  --input gems/lineage/test/fixtures/codecov-clear-totals.json
+```
+
+Ingest named test exposure history after a test run. This stores one
+event per `(commit, logical unit, test)` hit, with optional line, branch,
+test type, and mutation status fields:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure \
+  --db /tmp/lineage.db \
+  --repo . \
+  --commit "$(git rev-parse HEAD)" \
+  --input gems/lineage/test/fixtures/test-exposure-clear.json
+```
+
+Ingest Sentry-style stack traces and anchor verified frames to logical
+units:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest \
+  --db /tmp/lineage.db \
+  --repo . \
+  --provider sentry \
+  --input gems/lineage/test/fixtures/sentry-clear-event.json
 ```
 
 The extractor boundary is deliberately separate from storage and VCS
