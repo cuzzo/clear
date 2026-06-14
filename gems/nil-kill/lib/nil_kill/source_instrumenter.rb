@@ -75,7 +75,7 @@ module NilKill
     def instrument_file_with_map(path)
       source = File.read(path)
       @line_offsets = line_offsets(source)
-      parsed = Prism.parse(source)
+      parsed = Syntax.parse(source)
       return [source, nil] unless parsed.success?
       edits = []
       collect_ivar_assignment_edits(parsed.value, edits)
@@ -113,7 +113,7 @@ module NilKill
     def instrument_file(path)
       source = File.read(path)
       @line_offsets = line_offsets(source)
-      parsed = Prism.parse(source)
+      parsed = Syntax.parse(source)
       return source unless parsed.success?
       edits = []
       collect_ivar_assignment_edits(parsed.value, edits)
@@ -134,7 +134,7 @@ module NilKill
 
     def collect_method_edits(node, path, edits)
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         plan = @method_plans_by_file_line[path][node.location.start_line]
         return unless plan
         # Endless defs (`def f = expr`) have no `end` keyword to anchor
@@ -191,7 +191,7 @@ module NilKill
     # the injected wrapper shifts every later line, so a raw __LINE__
     # would yield the instrumented line, not the src line.
     def collect_source_ref_edits(node, edits, _real_file = nil)
-      if node.is_a?(Prism::SourceLineNode)
+      if node.is_a?(Syntax::SourceLineNode)
         edits << [node.location.start_offset, node.location.end_offset, node.location.start_line.to_s]
       end
       node.child_nodes.compact.each { |child| collect_source_ref_edits(child, edits, _real_file) } if node.respond_to?(:child_nodes)
@@ -205,7 +205,7 @@ module NilKill
     def collect_return_edits(node, plan, edits)
       return unless node
       case node
-      when Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::LambdaNode
+      when Syntax::DefNode, Syntax::ClassNode, Syntax::ModuleNode, Syntax::LambdaNode
         # New scope: a `return` here belongs to it, not this method.
         # We DO recurse into BlockNode now so non-local `return`s inside
         # `do..end` / `{}` iterator and `proc` blocks are rewritten to a
@@ -214,7 +214,7 @@ module NilKill
         # are excluded here and below (lambda-local return is left as-is
         # -- it does not escape the wrapper).
         return
-      when Prism::ReturnNode
+      when Syntax::ReturnNode
         args = node.arguments&.arguments || []
         expr =
           if args.empty?
@@ -231,7 +231,7 @@ module NilKill
       # `lambda { ... }` body is lambda-scoped: do NOT rewrite its local
       # returns. Skip the whole call subtree; the caller's recursion
       # still walks siblings.
-      return if node.is_a?(Prism::CallNode) && node.name == :lambda && node.block.is_a?(Prism::BlockNode)
+      return if node.is_a?(Syntax::CallNode) && node.name == :lambda && node.block.is_a?(Syntax::BlockNode)
       node.child_nodes.compact.each { |child| collect_return_edits(child, plan, edits) } if node.respond_to?(:child_nodes)
     end
 
@@ -252,7 +252,7 @@ module NilKill
 
     def collect_ivar_assignment_edits(node, edits)
       case node
-      when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
+      when Syntax::InstanceVariableWriteNode, Syntax::ClassVariableWriteNode, Syntax::GlobalVariableWriteNode
         value = node.value
         if value&.location
           name = node.name.to_s

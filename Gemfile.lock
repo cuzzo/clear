@@ -10,7 +10,6 @@ PATH
     nil-kill (0.1.0)
       decomplex (= 0.0.1)
       parlour
-      prism (>= 1.6)
       rbs-trace
       sorbet-runtime
 

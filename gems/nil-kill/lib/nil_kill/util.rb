@@ -28,7 +28,7 @@ module NilKill
     stamp = [stat.size, mtime.to_i, mtime.nsec]
     entry = @cached_parse_files[path]
     return entry[1] if entry && entry[0] == stamp
-    parsed = Prism.parse_file(path)
+    parsed = Syntax.parse_file(path)
     @cached_parse_files[path] = [stamp, parsed]
     parsed
   end

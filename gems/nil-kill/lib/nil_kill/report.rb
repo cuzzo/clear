@@ -868,22 +868,22 @@ module NilKill
     def mark_return_usage(node, context, names, usage)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage(node.body, :return, names, usage)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           mark_return_usage(child, idx == body.length - 1 ? context : :statement, names, usage)
         end
-      when Prism::ReturnNode, Prism::ArgumentsNode
+      when Syntax::ReturnNode, Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage(child, :return, names, usage) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage(node.predicate, :value, names, usage) if node.respond_to?(:predicate)
         mark_return_usage(node.statements, context, names, usage)
         mark_return_usage(node.subsequent, context, names, usage)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage(node.statements, context, names, usage)
-      when Prism::CallNode
+      when Syntax::CallNode
         usage[node.name.to_s][context.to_s] += 1 if names.include?(node.name.to_s)
         node.child_nodes.compact.each { |child| mark_return_usage(child, :value, names, usage) }
       else
@@ -3088,25 +3088,25 @@ module NilKill
     def mark_return_usage_graph(node, context, current_method, candidate_names, method_return_types, used, return_edges)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           child_context = idx == body.length - 1 ? context : :statement
           mark_return_usage_graph(child, child_context, current_method, candidate_names, method_return_types, used, return_edges)
         end
-      when Prism::ReturnNode
+      when Syntax::ReturnNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, :return, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::ArgumentsNode
+      when Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, context, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage_graph(node.predicate, :value, current_method, candidate_names, method_return_types, used, return_edges) if node.respond_to?(:predicate)
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
         mark_return_usage_graph(node.subsequent, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::CallNode
+      when Syntax::CallNode
         if candidate_names.include?(node.name)
           if context == :return && current_method && candidate_names.include?(current_method)
             if typed_value_return?(method_return_types[current_method])

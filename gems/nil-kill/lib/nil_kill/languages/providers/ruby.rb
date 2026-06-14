@@ -14,7 +14,7 @@ module NilKill
         end
 
         def static_parser
-          "prism"
+          "tree_sitter"
         end
 
         def runtime_tracing?

@@ -213,10 +213,10 @@ module NilKill
       param_names = Array(record["params"]).map { |p| p["name"].to_s }
       assigns = {}
       each_ast(body) do |n|
-        assigns[n.name.to_s] ||= n.value if n.is_a?(Prism::LocalVariableWriteNode)
+        assigns[n.name.to_s] ||= n.value if n.is_a?(Syntax::LocalVariableWriteNode)
       end
       each_ast(body) do |n|
-        next unless n.is_a?(Prism::CallNode) && %i[is_a? kind_of?].include?(n.name) && n.receiver
+        next unless n.is_a?(Syntax::CallNode) && %i[is_a? kind_of?].include?(n.name) && n.receiver
         args = (n.arguments && n.arguments.arguments) || []
         next unless args.size == 1 && args.first.slice == "Type"
         kind, name = classify_origin(n.receiver, param_names, assigns, 0)
@@ -230,7 +230,7 @@ module NilKill
     end
 
     def each_ast(node, &blk)
-      return unless node.is_a?(Prism::Node)
+      return unless node.is_a?(Syntax::Node)
       yield node
       node.compact_child_nodes.each { |c| each_ast(c, &blk) }
     end
@@ -240,21 +240,21 @@ module NilKill
     # keys to `.type_info`.
     def classify_origin(node, param_names, assigns, depth)
       case node
-      when Prism::InstanceVariableReadNode
+      when Syntax::InstanceVariableReadNode
         ["ivar", node.slice]
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         nm = node.name.to_s
         return ["param", nm] if param_names.include?(nm)
         if depth.zero? && (rhs = assigns[nm])
           return classify_origin(rhs, param_names, assigns, depth + 1)
         end
         ["local", nil]
-      when Prism::CallNode
+      when Syntax::CallNode
         if node.name == :[]
           key = node.arguments && node.arguments.arguments && node.arguments.arguments.first
           k = case key
-              when Prism::SymbolNode then ":#{key.value}"
-              when Prism::StringNode then ":#{key.unescaped}"
+              when Syntax::SymbolNode then ":#{key.value}"
+              when Syntax::StringNode then ":#{key.unescaped}"
               end
           ["hashkey", k]
         elsif ((node.arguments && node.arguments.arguments) || []).any?
@@ -271,7 +271,7 @@ module NilKill
 
     def walk(node, scope)
       case node
-      when Prism::ClassNode, Prism::ModuleNode
+      when Syntax::ClassNode, Syntax::ModuleNode
         new_scope = scope + [node.constant_path.slice]
         old_class = @current_class_name
         @current_class_name = new_scope.join("::")
@@ -280,7 +280,7 @@ module NilKill
         ensure
           @current_class_name = old_class
         end
-      when Prism::DefNode
+      when Syntax::DefNode
         record = method_record(node, scope)
         record["return_origin"] = analyze_return_origin(node, record)
         @methods << record unless @warm_only
@@ -298,13 +298,13 @@ module NilKill
         @method_nodes << [node, record] unless @warm_only
         inspect_dispatcher(node, record) unless @warm_only
         scoped_facts(record) { child_walk(node.body, scope) }
-      when Prism::IfNode
+      when Syntax::IfNode
         inspect_branch_guard(node, inverted: false) unless @warm_only
         child_walk(node, scope)
-      when ->(n) { n.class.name == "Prism::UnlessNode" }
+      when Syntax::UnlessNode
         inspect_branch_guard(node, inverted: true) unless @warm_only
         child_walk(node, scope)
-      when Prism::CallNode
+      when Syntax::CallNode
         inspect_param_origins(node, scope) unless @warm_only
         update_collection_builder_call(node)
         inspect_call(node) unless @warm_only
@@ -315,17 +315,17 @@ module NilKill
         inspect_class_constructor_fields(node)
         inspect_attribute_shape_write(node)
         walk_call_children(node, scope)
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         inspect_array_literal(node) unless @warm_only
         child_walk(node, scope)
-      when Prism::HashNode
+      when Syntax::HashNode
         inspect_hash_literal(node) unless @warm_only
         child_walk(node, scope)
-      when Prism::LocalVariableWriteNode
+      when Syntax::LocalVariableWriteNode
         update_local_fact(node)
         inspect_local_container_origin(node) unless @warm_only
         child_walk(node, scope)
-      when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
+      when Syntax::InstanceVariableWriteNode, Syntax::ClassVariableWriteNode, Syntax::GlobalVariableWriteNode
         inspect_variable_write(node) unless @warm_only
         inspect_ivar_container_origin(node) unless @warm_only
         child_walk(node, scope)
@@ -413,7 +413,7 @@ module NilKill
     def refill_struct_constructor_types(node, index)
       return unless node
       return if nested_scope_node?(node)
-      if node.is_a?(Prism::CallNode) && node.name == :new && node.receiver
+      if node.is_a?(Syntax::CallNode) && node.name == :new && node.receiver
         klass = const_name(node.receiver)
         fields = @struct_fields_by_name[klass] || @struct_fields_by_name[klass.split("::").last] ||
           self.class.struct_fields_by_name[klass] || self.class.struct_fields_by_name[klass.split("::").last]
@@ -421,7 +421,7 @@ module NilKill
           full_class = @struct_full_by_name[klass] || @struct_full_by_name[klass.split("::").last] ||
             self.class.struct_full_by_name[klass] || self.class.struct_full_by_name[klass.split("::").last] || klass
           (node.arguments&.arguments || []).each_with_index do |arg, idx|
-            next if idx >= fields.size || arg.is_a?(Prism::KeywordHashNode)
+            next if idx >= fields.size || arg.is_a?(Syntax::KeywordHashNode)
             entries = index[[@rel, node.location.start_line, full_class, fields[idx], arg.slice]]
             next if entries.empty?
             next if entries.all? { |e| NilKill.useful_type?(e["type"].to_s) }
@@ -439,9 +439,9 @@ module NilKill
       return unless node
       return if nested_scope_node?(node)
       case node
-      when Prism::LocalVariableWriteNode
+      when Syntax::LocalVariableWriteNode
         inspect_local_container_origin(node)
-      when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
+      when Syntax::InstanceVariableWriteNode, Syntax::ClassVariableWriteNode, Syntax::GlobalVariableWriteNode
         inspect_ivar_container_origin(node)
       end
       node.compact_child_nodes.each { |child| collect_local_container_origins(child) } if node.respond_to?(:child_nodes)
@@ -451,13 +451,13 @@ module NilKill
       return unless node
       return if nested_scope_node?(node)
       case node
-      when Prism::CallNode
+      when Syntax::CallNode
         update_collection_builder_call(node)
         inspect_index_lookup(node, scope)
         inspect_hash_record_blocker(node, scope)
         inspect_hash_record_member_call(node, scope)
         collect_call_collection_index_facts(node, scope)
-      when Prism::LocalVariableWriteNode
+      when Syntax::LocalVariableWriteNode
         update_local_fact(node)
         inspect_local_container_origin(node)
         node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
@@ -495,7 +495,7 @@ module NilKill
     # original collector's DFS order, so output is byte-identical.
     def collect_prescan(node, cscope, iscope)
       case node
-      when Prism::ClassNode, Prism::ModuleNode
+      when Syntax::ClassNode, Syntax::ModuleNode
         name = const_name(node.constant_path)
         full_name = (cscope + [name]).join("::")
         @class_like_constants.add(full_name)
@@ -504,7 +504,7 @@ module NilKill
         child_i = iscope + [node.constant_path.slice]
         node.compact_child_nodes.each { |child| collect_prescan(child, child_c, child_i) }
         return
-      when Prism::ConstantWriteNode
+      when Syntax::ConstantWriteNode
         if struct_new_call?(node.value) || data_define_call?(node.value)
           klass = (cscope + [node.name.to_s]).join("::")
           fields = struct_fields(node.value)
@@ -530,9 +530,9 @@ module NilKill
           @class_like_constants.add(full_name)
           @class_like_constants.add(name)
         end
-      when Prism::InstanceVariableWriteNode
+      when Syntax::InstanceVariableWriteNode
         val = node.value
-        if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
+        if val.is_a?(Syntax::CallNode) && val.name == :let && val.receiver&.slice == "T"
           name = node.name.to_s
           @ivar_tlet_names.add(name)
           type_node = (val.arguments&.arguments || [])[1]
@@ -541,7 +541,7 @@ module NilKill
             (@ivar_tlet_types[[iscope.join("::"), name]] = type_str; @ep[0] += 1) if NilKill.useful_type?(type_str)
           end
         end
-      when Prism::DefNode
+      when Syntax::DefNode
         sig = sig_above(node.location.start_line)
         if sig
           ret = NilKill.extract_return_type(sig)
@@ -553,22 +553,22 @@ module NilKill
     end
 
     def struct_new_call?(node)
-      node.is_a?(Prism::CallNode) &&
+      node.is_a?(Syntax::CallNode) &&
         node.name == :new &&
-        node.receiver.is_a?(Prism::ConstantReadNode) &&
+        node.receiver.is_a?(Syntax::ConstantReadNode) &&
         node.receiver.name == :Struct
     end
 
     def data_define_call?(node)
-      node.is_a?(Prism::CallNode) &&
+      node.is_a?(Syntax::CallNode) &&
         node.name == :define &&
-        node.receiver.is_a?(Prism::ConstantReadNode) &&
+        node.receiver.is_a?(Syntax::ConstantReadNode) &&
         node.receiver.name == :Data
     end
 
     def struct_fields(node)
       (node.arguments&.arguments || []).filter_map do |arg|
-        arg.value.to_s if arg.is_a?(Prism::SymbolNode)
+        arg.value.to_s if arg.is_a?(Syntax::SymbolNode)
       end
     end
 
@@ -587,7 +587,7 @@ module NilKill
       return unless fields
       args = node.arguments&.arguments || []
       args.each_with_index do |arg, idx|
-        next if idx >= fields.size || arg.is_a?(Prism::KeywordHashNode)
+        next if idx >= fields.size || arg.is_a?(Syntax::KeywordHashNode)
         unless @warm_only
           @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
             "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
@@ -602,7 +602,7 @@ module NilKill
       return unless node.name == :new && node.receiver
       klass = const_name(node.receiver)
       return if klass.empty? || klass == "Struct"
-      keyword_args = (node.arguments&.arguments || []).grep(Prism::KeywordHashNode)
+      keyword_args = (node.arguments&.arguments || []).grep(Syntax::KeywordHashNode)
       keyword_args.each do |keywords|
         keywords.elements.each do |assoc|
           next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
@@ -617,7 +617,7 @@ module NilKill
 
     def inspect_array_literal(node)
       elements = node.elements || []
-      return if elements.size < 2 || elements.any? { |elem| elem.is_a?(Prism::SplatNode) }
+      return if elements.size < 2 || elements.any? { |elem| elem.is_a?(Syntax::SplatNode) }
       types = elements.map { |elem| expression_type(elem) }
       known = types.compact
       return if known.size != elements.size || known.uniq.size < 2
@@ -664,11 +664,11 @@ module NilKill
     def container_origin_for_value(value, name:)
       return nil unless value
       case value
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         types = Array(value.elements).map { |elem| expression_type(elem) }
         { "kind" => "array literal", "name" => name, "path" => @rel, "line" => value.location.start_line,
           "code" => value.slice, "array_element_types" => types.compact.uniq.sort }
-      when Prism::HashNode
+      when Syntax::HashNode
         key_types = []
         value_types = []
         Array(value.elements).each do |assoc|
@@ -679,11 +679,11 @@ module NilKill
         { "kind" => "hash literal", "name" => name, "path" => @rel, "line" => value.location.start_line,
           "code" => value.slice, "hash_key_types" => key_types.compact.uniq.sort,
           "hash_value_types" => value_types.compact.uniq.sort }
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         @local_container_origins[value.name.to_s]&.merge("name" => name, "alias_of" => value.name.to_s)
-      when Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+      when Syntax::InstanceVariableReadNode, Syntax::ClassVariableReadNode, Syntax::GlobalVariableReadNode
         @ivar_container_origins[value.name.to_s]&.merge("name" => name, "alias_of" => value.name.to_s)
-      when Prism::CallNode
+      when Syntax::CallNode
         { "kind" => "forwarded return", "name" => name, "path" => @rel, "line" => value.location.start_line,
           "code" => value.slice, "callee" => value.name.to_s }
       end
@@ -730,7 +730,7 @@ module NilKill
 
     def inspect_hash_record_member_call(node, scope)
       receiver = node.receiver
-      return unless receiver.is_a?(Prism::CallNode)
+      return unless receiver.is_a?(Syntax::CallNode)
       return unless %i[[] fetch].include?(receiver.name)
       return if receiver.name == :fetch && (receiver.arguments&.arguments || []).size > 1
       args = receiver.arguments&.arguments || []
@@ -751,7 +751,7 @@ module NilKill
     def hash_record_blocker_origin_for_receiver(receiver)
       origin = receiver_collection_origin(receiver)
       return origin if hash_record_blocker_origin?(origin)
-      if receiver.is_a?(Prism::LocalVariableReadNode) && @current_hash_shapes[receiver.name.to_s]
+      if receiver.is_a?(Syntax::LocalVariableReadNode) && @current_hash_shapes[receiver.name.to_s]
         { "kind" => "local hash shape", "name" => receiver.name.to_s, "path" => @rel,
           "line" => receiver.location.start_line, "shape" => @current_hash_shapes[receiver.name.to_s] }
       else
@@ -775,7 +775,7 @@ module NilKill
 
     def receiver_collection_origin(node)
       case node
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         name = node.name.to_s
         origin = @local_container_origins[name]
         if origin && origin["kind"] == "method parameter" && @current_hash_shapes[name]
@@ -790,13 +790,13 @@ module NilKill
         else
           { "kind" => "local variable", "name" => name }
         end
-      when Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+      when Syntax::InstanceVariableReadNode, Syntax::ClassVariableReadNode, Syntax::GlobalVariableReadNode
         @ivar_container_origins[node.name.to_s] || { "kind" => "instance variable", "name" => node.name.to_s }
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         container_origin_for_value(node, name: "literal")
-      when Prism::HashNode
+      when Syntax::HashNode
         container_origin_for_value(node, name: "literal")
-      when Prism::CallNode
+      when Syntax::CallNode
         if (shape = hash_shape_for_receiver(node))
           { "kind" => "local hash shape", "name" => node.slice, "path" => @rel,
             "line" => node.location.start_line, "shape" => shape }
@@ -826,9 +826,9 @@ module NilKill
 
     def collect_dispatch_arms(node, param_name, arms)
       return unless node
-      if node.is_a?(Prism::CaseNode)
+      if node.is_a?(Syntax::CaseNode)
         node.conditions.each do |condition|
-          next unless condition.is_a?(Prism::WhenNode)
+          next unless condition.is_a?(Syntax::WhenNode)
           helper = dispatch_helper_call(condition.statements, param_name)
           next unless helper
           classes = condition.conditions.filter_map { |cond| const_name(cond) }
@@ -842,20 +842,20 @@ module NilKill
       body = statements&.body || []
       return nil unless body.size == 1
       call = body.first
-      return nil unless call.is_a?(Prism::CallNode)
+      return nil unless call.is_a?(Syntax::CallNode)
       return nil if call.receiver
       args = call.arguments&.arguments || []
       return nil unless args.size == 1
       arg = args.first
-      return nil unless arg.is_a?(Prism::LocalVariableReadNode) && arg.name.to_s == param_name
+      return nil unless arg.is_a?(Syntax::LocalVariableReadNode) && arg.name.to_s == param_name
       call.name.to_s
     end
 
     def hash_key_name(node)
       case node
-      when Prism::SymbolNode
+      when Syntax::SymbolNode
         node.respond_to?(:value) ? node.value.to_s : node.slice.delete_prefix(":")
-      when Prism::StringNode
+      when Syntax::StringNode
         node.respond_to?(:unescaped) ? node.unescaped : node.slice.delete_prefix("\"").delete_prefix("'").delete_suffix("\"").delete_suffix("'")
       else
         nil
@@ -920,7 +920,7 @@ module NilKill
       SourceIndex.register_noreturn_method(node.name) if noreturn_candidate
       SourceIndex.register_noreturn_method(node.name) if sig && /returns\(\s*T\.noreturn\s*\)/.match?(sig)
       { "path" => @rel, "line" => node.location.start_line, "end_line" => node.location.end_line, "class" => scope.join("::"),
-        "method" => node.name.to_s, "kind" => node.receiver.is_a?(Prism::SelfNode) ? "class" : "instance",
+        "method" => node.name.to_s, "kind" => node.receiver.is_a?(Syntax::SelfNode) ? "class" : "instance",
         "has_sig" => !sig.nil?, "sig" => sig, "params" => method_params, "scope" => scope,
         "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => @warm_only ? false : uses_yield?(node.body),
         "untraceable_params" => @warm_only ? [] : untraceable_param_names(node),
@@ -938,26 +938,26 @@ module NilKill
       case node
       when nil
         false
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         return false if body.empty?
         noreturn_body?(body.last)
-      when Prism::BeginNode
+      when Syntax::BeginNode
         noreturn_body?(node.statements)
-      when Prism::IfNode
+      when Syntax::IfNode
         noreturn_body?(node.statements) && noreturn_body?(node.subsequent)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         noreturn_body?(node.statements)
-      when Prism::CaseNode
+      when Syntax::CaseNode
         conditions = node.conditions || []
         return false if conditions.empty?
         conditions.all? { |condition| noreturn_body?(condition.respond_to?(:statements) ? condition.statements : nil) } &&
           noreturn_body?(node.else_clause)
-      when Prism::RescueNode
+      when Syntax::RescueNode
         noreturn_body?(node.statements) && noreturn_body?(node.subsequent)
-      when Prism::EnsureNode
+      when Syntax::EnsureNode
         noreturn_body?(node.statements)
-      when Prism::CallNode
+      when Syntax::CallNode
         noreturn_call?(node)
       else
         false
@@ -1038,12 +1038,12 @@ module NilKill
     def collect_local_type_facts(node)
       return unless node
       return if nested_scope_node?(node)
-      if node.is_a?(Prism::IfNode)
+      if node.is_a?(Syntax::IfNode)
         collect_branch_local_type_facts(node)
         return
       end
-      update_local_fact(node) if node.is_a?(Prism::LocalVariableWriteNode)
-      update_collection_builder_call(node) if node.is_a?(Prism::CallNode)
+      update_local_fact(node) if node.is_a?(Syntax::LocalVariableWriteNode)
+      update_collection_builder_call(node) if node.is_a?(Syntax::CallNode)
       node.compact_child_nodes.each { |child| collect_local_type_facts(child) } if node.respond_to?(:child_nodes)
     end
 
@@ -1205,7 +1205,7 @@ module NilKill
       case expr
       when :bare_return
         nil
-      when Prism::StatementsNode, Prism::BeginNode, Prism::ElseNode, Prism::ParenthesesNode
+      when Syntax::StatementsNode, Syntax::BeginNode, Syntax::ElseNode, Syntax::ParenthesesNode
         hash_shape_for_expression(implicit_return_expression(expr))
       else
         if return_node?(expr)
@@ -1214,7 +1214,7 @@ module NilKill
           return hash_shape_for_expression(values.first || :bare_return)
         end
         case expr
-        when Prism::IfNode
+        when Syntax::IfNode
           left = hash_shape_for_expression(implicit_return_expression(expr.statements))
           right = expr.subsequent ? hash_shape_for_expression(implicit_return_expression(expr.subsequent)) : nil
           return nil unless left && right
@@ -1234,9 +1234,9 @@ module NilKill
         return nil_return_expression?(values.first)
       end
       case expr
-      when Prism::NilNode
+      when Syntax::NilNode
         true
-      when Prism::StatementsNode, Prism::BeginNode, Prism::ElseNode, Prism::ParenthesesNode
+      when Syntax::StatementsNode, Syntax::BeginNode, Syntax::ElseNode, Syntax::ParenthesesNode
         nil_return_expression?(implicit_return_expression(expr))
       else
         false
@@ -1254,7 +1254,7 @@ module NilKill
       case expr
       when :bare_return
         nil
-      when Prism::StatementsNode, Prism::BeginNode, Prism::ElseNode, Prism::ParenthesesNode
+      when Syntax::StatementsNode, Syntax::BeginNode, Syntax::ElseNode, Syntax::ParenthesesNode
         array_element_shape_for_expression(implicit_return_expression(expr))
       else
         if return_node?(expr)
@@ -1263,7 +1263,7 @@ module NilKill
           return array_element_shape_for_expression(values.first || :bare_return)
         end
         case expr
-        when Prism::IfNode
+        when Syntax::IfNode
           left = array_element_shape_for_expression(implicit_return_expression(expr.statements))
           right = expr.subsequent ? array_element_shape_for_expression(implicit_return_expression(expr.subsequent)) : nil
           return nil unless left && right
@@ -1276,7 +1276,7 @@ module NilKill
 
     def update_collection_builder_call(node)
       receiver = node.receiver
-      if receiver.is_a?(Prism::LocalVariableReadNode) && @current_collection_builders.key?(receiver.name.to_s)
+      if receiver.is_a?(Syntax::LocalVariableReadNode) && @current_collection_builders.key?(receiver.name.to_s)
         update_receiver_collection_builder(node, receiver.name.to_s)
       end
       poison_escaped_collection_builders(node)
@@ -1342,7 +1342,7 @@ module NilKill
       return if node.name.to_s == @current_method_name
       return if known_return_type(node.name.to_s, node: node, allow_rbi: false)
       (node.arguments&.arguments || []).each do |arg|
-        next unless arg.is_a?(Prism::LocalVariableReadNode)
+        next unless arg.is_a?(Syntax::LocalVariableReadNode)
         builder = @current_collection_builders[arg.name.to_s]
         next unless builder
         builder["poisoned"] = true; @ep[0] += 1
@@ -1351,7 +1351,7 @@ module NilKill
         @current_array_element_shapes.delete(arg.name.to_s)
       end
       (node.arguments&.arguments || []).each do |arg|
-        next unless arg.is_a?(Prism::LocalVariableReadNode)
+        next unless arg.is_a?(Syntax::LocalVariableReadNode)
         next unless @current_hash_shapes.key?(arg.name.to_s) || @current_array_element_shapes.key?(arg.name.to_s)
         @current_hash_shapes.delete(arg.name.to_s)
         @current_array_element_shapes.delete(arg.name.to_s)
@@ -1370,7 +1370,7 @@ module NilKill
 
     def add_array_collection_types(builder, expr)
       return unless builder && expr
-      if expr.is_a?(Prism::ArrayNode)
+      if expr.is_a?(Syntax::ArrayNode)
         expr.elements.each { |elem| add_collection_type(builder, elem) }
         return
       end
@@ -1397,7 +1397,7 @@ module NilKill
 
     def add_hash_literal_collection_types(builder, expr)
       return unless builder && expr
-      if expr.is_a?(Prism::HashNode) || expr.is_a?(Prism::KeywordHashNode)
+      if expr.is_a?(Syntax::HashNode) || expr.is_a?(Syntax::KeywordHashNode)
         expr.elements.each do |assoc|
           next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
           add_hash_collection_types(builder, assoc.key, assoc.value)
@@ -1453,13 +1453,13 @@ module NilKill
 
     def implicit_return_expression(node)
       case node
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         node.body&.last
-      when Prism::BeginNode
+      when Syntax::BeginNode
         implicit_return_expression(node.statements)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         implicit_return_expression(node.statements)
-      when Prism::ParenthesesNode
+      when Syntax::ParenthesesNode
         implicit_return_expression(node.body)
       else
         node
@@ -1485,7 +1485,7 @@ module NilKill
       case node
       when nil, :bare_return
         false
-      when Prism::IfNode, Prism::CaseNode, Prism::RescueNode
+      when Syntax::IfNode, Syntax::CaseNode, Syntax::RescueNode
         true
       else
         node.respond_to?(:child_nodes) && node.compact_child_nodes.any? { |child| branching_return_expression?(child) }
@@ -1504,12 +1504,12 @@ module NilKill
         return return_sources_for(values.first || :bare_return, blockers)
       end
 
-      if node.is_a?(Prism::StatementsNode) || node.is_a?(Prism::BeginNode) ||
-          node.is_a?(Prism::ElseNode) || node.is_a?(Prism::ParenthesesNode)
+      if node.is_a?(Syntax::StatementsNode) || node.is_a?(Syntax::BeginNode) ||
+          node.is_a?(Syntax::ElseNode) || node.is_a?(Syntax::ParenthesesNode)
         return return_sources_for(implicit_return_expression(node), blockers)
       end
 
-      if node.is_a?(Prism::InstanceVariableReadNode)
+      if node.is_a?(Syntax::InstanceVariableReadNode)
         ivar_type = ivar_expression_type(node.name.to_s)
         if NilKill.useful_type?(ivar_type)
           return [{ "kind" => "ivar_typed", "type" => ivar_type, "line" => line, "code" => code }]
@@ -1517,12 +1517,12 @@ module NilKill
         blockers << "untyped instance variable #{code} at #{@rel}:#{line}"
         return [{ "kind" => "ivar_read", "line" => line, "code" => code }]
       end
-      if node.is_a?(Prism::ClassVariableReadNode) || node.is_a?(Prism::GlobalVariableReadNode)
+      if node.is_a?(Syntax::ClassVariableReadNode) || node.is_a?(Syntax::GlobalVariableReadNode)
         blockers << "untyped instance variable #{code} at #{@rel}:#{line}"
         return [{ "kind" => "ivar_read", "line" => line, "code" => code }]
       end
 
-      if node.is_a?(Prism::IfNode)
+      if node.is_a?(Syntax::IfNode)
         sources = []
         sources.concat(return_sources_for(implicit_return_expression(node.statements), blockers))
         if node.subsequent
@@ -1534,7 +1534,7 @@ module NilKill
         return sources
       end
 
-      if node.class.name == "Prism::UnlessNode"
+      if node.is_a?(Syntax::UnlessNode)
         sources = []
         sources.concat(return_sources_for(implicit_return_expression(node.statements), blockers))
         if node.respond_to?(:else_clause) && node.else_clause
@@ -1546,7 +1546,7 @@ module NilKill
         return sources
       end
 
-      if node.is_a?(Prism::CaseNode)
+      if node.is_a?(Syntax::CaseNode)
         sources = []
         node.conditions.each do |condition|
           sources.concat(return_sources_for(implicit_return_expression(condition.statements), blockers)) if condition.respond_to?(:statements)
@@ -1556,11 +1556,11 @@ module NilKill
         return sources
       end
 
-      if node.is_a?(Prism::WhileNode) || node.is_a?(Prism::UntilNode)
+      if node.is_a?(Syntax::WhileNode) || node.is_a?(Syntax::UntilNode)
         return [{ "kind" => "nil", "type" => "NilClass", "line" => line, "code" => code }]
       end
 
-      if node.is_a?(Prism::CallNode)
+      if node.is_a?(Syntax::CallNode)
         callee = node.name.to_s
         if assignment_call?(node)
           arg = assignment_value_expression(node)
@@ -1593,9 +1593,9 @@ module NilKill
 
       # `@x = v` / `x = v` / `CONST = v` as the return expression: the
       # returned value IS the RHS, so type it as the RHS.
-      if node.is_a?(Prism::InstanceVariableWriteNode) || node.is_a?(Prism::LocalVariableWriteNode) ||
-         node.is_a?(Prism::ClassVariableWriteNode) || node.is_a?(Prism::GlobalVariableWriteNode) ||
-         node.is_a?(Prism::ConstantWriteNode)
+      if node.is_a?(Syntax::InstanceVariableWriteNode) || node.is_a?(Syntax::LocalVariableWriteNode) ||
+         node.is_a?(Syntax::ClassVariableWriteNode) || node.is_a?(Syntax::GlobalVariableWriteNode) ||
+         node.is_a?(Syntax::ConstantWriteNode)
         return return_sources_for(node.value, blockers)
       end
 
@@ -1613,7 +1613,7 @@ module NilKill
     def setter_call?(node)
       # Comparisons (`==`, `!=`, `<=`, `>=`, `===`) also end with `=`;
       # without excluding them `1 != 2` is misread as an assignment.
-      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.is_a?(Syntax::CallNode)
       name = node.name.to_s
       return false unless name.end_with?("=")
       return false if %w[== != <= >= ===].include?(name)
@@ -1621,7 +1621,7 @@ module NilKill
     end
 
     def index_assignment_call?(node)
-      node.is_a?(Prism::CallNode) && node.name == :[]= && (node.arguments&.arguments || []).size >= 2
+      node.is_a?(Syntax::CallNode) && node.name == :[]= && (node.arguments&.arguments || []).size >= 2
     end
 
     def assignment_value_expression(node)
@@ -1630,23 +1630,23 @@ module NilKill
     end
 
     def return_node?(node)
-      node.class.name == "Prism::ReturnNode"
+      node.is_a?(Syntax::ReturnNode)
     end
 
     def nested_scope_node?(node)
-      node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+      node.is_a?(Syntax::DefNode) || node.is_a?(Syntax::ClassNode) || node.is_a?(Syntax::ModuleNode)
     end
 
     def rbi_return_candidate?(node)
-      return false unless node.is_a?(Prism::CallNode)
+      return false unless node.is_a?(Syntax::CallNode)
       # A global-variable receiver (`$stderr.puts`) is dynamically
       # reassignable, so its RBI nominal return is unsound to narrow on.
-      return false if node.receiver.is_a?(Prism::GlobalVariableReadNode)
+      return false if node.receiver.is_a?(Syntax::GlobalVariableReadNode)
       node.receiver || %w[! == puts print warn raise].include?(node.name.to_s)
     end
 
     def rbi_return_source?(node)
-      node.is_a?(Prism::CallNode) && NilKill.rbi_return_type(node.name.to_s, receiver_type_for_call(node))
+      node.is_a?(Syntax::CallNode) && NilKill.rbi_return_type(node.name.to_s, receiver_type_for_call(node))
     end
 
     # rbi_return_source? needs the external sorbet RBI payload, which is
@@ -1670,7 +1670,7 @@ module NilKill
     end
 
     def propagated_core_return_type(node)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       receiver_type = receiver_type_for_call(node)
       case node.name.to_s
       when "[]"
@@ -1727,7 +1727,7 @@ module NilKill
     end
 
     def receiver_type_for_call(node)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       expression_type(node.receiver)
     end
 
@@ -1741,7 +1741,7 @@ module NilKill
       callee = node.name.to_s
       args = node.arguments&.arguments || []
       args.each_with_index do |arg, idx|
-        if arg.is_a?(Prism::KeywordHashNode)
+        if arg.is_a?(Syntax::KeywordHashNode)
           arg.elements.each do |assoc|
             next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
             key = hash_key_name(assoc.key)
@@ -1792,7 +1792,7 @@ module NilKill
     end
 
     def inspect_attribute_shape_write(node)
-      return unless node.is_a?(Prism::CallNode) && node.receiver
+      return unless node.is_a?(Syntax::CallNode) && node.receiver
       name = node.name.to_s
       return unless name.end_with?("=") && name != "=="
       args = node.arguments&.arguments || []
@@ -1843,7 +1843,7 @@ module NilKill
       type = expression_type(arg)
       origin_kind = type ? "static" : "unknown"
       source_method = nil
-      if arg.is_a?(Prism::CallNode)
+      if arg.is_a?(Syntax::CallNode)
         source_method = arg.name.to_s
         ret = known_return_type(source_method, node: arg, allow_rbi: rbi_return_candidate?(arg))
         if ret
@@ -1854,7 +1854,7 @@ module NilKill
         else
           origin_kind = "untyped_return"
         end
-      elsif arg.is_a?(Prism::LocalVariableReadNode)
+      elsif arg.is_a?(Syntax::LocalVariableReadNode)
         origin_kind = "local"
       end
       { "path" => @rel, "line" => call_node.location.start_line, "enclosing_scope" => scope.join("::"),
@@ -1881,25 +1881,25 @@ module NilKill
     def collect_unknown_expression_reasons(node, reasons)
       return unless node
       case node
-      when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode
+      when Syntax::InstanceVariableReadNode, Syntax::InstanceVariableWriteNode
         reasons << "instance variable #{node.name}"
-      when Prism::ClassVariableReadNode, Prism::ClassVariableWriteNode
+      when Syntax::ClassVariableReadNode, Syntax::ClassVariableWriteNode
         reasons << "class variable #{node.name}"
-      when Prism::GlobalVariableReadNode, Prism::GlobalVariableWriteNode
+      when Syntax::GlobalVariableReadNode, Syntax::GlobalVariableWriteNode
         reasons << "global variable #{node.name}"
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         reasons << "local variable #{node.name}"
-      when Prism::ConstantReadNode, Prism::ConstantPathNode
+      when Syntax::ConstantReadNode, Syntax::ConstantPathNode
         type = static_expression_type(node)
         reasons << (type ? "literal/static expression #{static_expression_reason(type)}" : "operation unresolved constant #{node.slice}")
         return
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         reasons << "struct/array/collection value Array"
         return
-      when Prism::HashNode, Prism::KeywordHashNode
+      when Syntax::HashNode, Syntax::KeywordHashNode
         reasons << "struct/array/collection value Hash"
         return
-      when Prism::CallNode
+      when Syntax::CallNode
         if node.receiver&.slice == "T" && %i[let cast unsafe bind].include?(node.name)
           reasons << "literal/static expression explicit #{node.receiver.slice}.#{node.name}"
           args = node.arguments&.arguments || []
@@ -1936,26 +1936,26 @@ module NilKill
 
     def collect_protocols(node, protocols, param_names)
       return unless node
-      if node.is_a?(Prism::CallNode)
+      if node.is_a?(Syntax::CallNode)
         receiver = node.receiver
-        if receiver.is_a?(Prism::LocalVariableReadNode) && protocols.key?(receiver.name.to_s)
+        if receiver.is_a?(Syntax::LocalVariableReadNode) && protocols.key?(receiver.name.to_s)
           protocols[receiver.name.to_s]["methods"] << node.name.to_s
         end
         # Covers `@x.token`, `T.must(@x).token`, and safe-nav.
-        if receiver.is_a?(Prism::InstanceVariableReadNode) && @current_class_name
+        if receiver.is_a?(Syntax::InstanceVariableReadNode) && @current_class_name
           @ivar_protocols[[@current_class_name, receiver.name.to_s]] << node.name.to_s
         end
         (node.arguments&.arguments || []).each_with_index do |arg, slot|
-          if arg.is_a?(Prism::LocalVariableReadNode) && protocols.key?(arg.name.to_s)
+          if arg.is_a?(Syntax::LocalVariableReadNode) && protocols.key?(arg.name.to_s)
             protocols[arg.name.to_s]["gaps"] << "forwarded to #{node.name} slot #{slot} at #{@rel}:#{node.location.start_line}"
           end
         end
-      elsif node.is_a?(Prism::LocalVariableWriteNode)
+      elsif node.is_a?(Syntax::LocalVariableWriteNode)
         source = unwrap_alias_source(node.value)
         if source && protocols.key?(source)
           protocols[source]["aliases"] << "#{node.name} at #{@rel}:#{node.location.start_line}"
         end
-      elsif node.is_a?(Prism::InstanceVariableWriteNode)
+      elsif node.is_a?(Syntax::InstanceVariableWriteNode)
         source = unwrap_alias_source(node.value)
         if source && protocols.key?(source)
           protocols[source]["gaps"] << "captured in #{node.name} at #{@rel}:#{node.location.start_line}"
@@ -1967,9 +1967,9 @@ module NilKill
 
     def unwrap_alias_source(node)
       case node
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         node.name.to_s
-      when Prism::CallNode
+      when Syntax::CallNode
         if node.receiver&.slice == "T" && %i[must cast let].include?(node.name)
           unwrap_alias_source(node.arguments&.arguments&.first)
         end
@@ -2010,7 +2010,7 @@ module NilKill
 
     # Splat/double-splat/block params can never get runtime evidence
     # and the sig text has no `*`/`**`/`&` marker, so they must be
-    # identified from the Prism parameter list, not the sig string.
+    # identified from the syntax parameter list, not the sig string.
     def untraceable_param_names(node)
       p = node.parameters
       return [] unless p
@@ -2033,12 +2033,12 @@ module NilKill
     end
 
     def nil_default?(node)
-      node.respond_to?(:value) && node.value.is_a?(Prism::NilNode)
+      node.respond_to?(:value) && node.value.is_a?(Syntax::NilNode)
     end
 
     def uses_yield?(node)
       return false unless node&.respond_to?(:child_nodes)
-      return true if node.is_a?(Prism::YieldNode)
+      return true if node.is_a?(Syntax::YieldNode)
       node.compact_child_nodes.any? { |child| uses_yield?(child) }
     end
 
@@ -2081,11 +2081,11 @@ module NilKill
     end
 
     def deterministic_predicate_result(node)
-      node = implicit_return_expression(node) if node.is_a?(Prism::ParenthesesNode)
+      node = implicit_return_expression(node) if node.is_a?(Syntax::ParenthesesNode)
       literal = literal_truth_value(node)
       return deterministic_guard_result(literal, "literal", "#{node.slice} is a boolean literal") unless literal.nil?
 
-      if node.is_a?(Prism::CallNode)
+      if node.is_a?(Syntax::CallNode)
         nil_result = deterministic_nil_predicate_result(node)
         return nil_result if nil_result
         class_result = deterministic_class_predicate_result(node)
@@ -2108,8 +2108,8 @@ module NilKill
 
     def literal_truth_value(node)
       case node
-      when Prism::TrueNode then true
-      when Prism::FalseNode then false
+      when Syntax::TrueNode then true
+      when Syntax::FalseNode then false
       else nil
       end
     end
@@ -2218,10 +2218,10 @@ module NilKill
     # type is already in the current source-index environment.
     def deterministic_guard_subject_type(node)
       case node
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         name = node.name.to_s
         @current_param_types[name] || @current_local_types[name]
-      when Prism::InstanceVariableReadNode
+      when Syntax::InstanceVariableReadNode
         ivar_expression_type(node.name.to_s)
       else
         static_expression_type(node)
@@ -2230,13 +2230,13 @@ module NilKill
 
     def literal_static_value(node)
       case node
-      when Prism::StringNode then node.respond_to?(:unescaped) ? node.unescaped : node.slice.delete_prefix("\"").delete_prefix("'").delete_suffix("\"").delete_suffix("'")
-      when Prism::SymbolNode then node.value.to_sym
-      when Prism::IntegerNode then node.value
-      when Prism::FloatNode then node.value
-      when Prism::TrueNode then true
-      when Prism::FalseNode then false
-      when Prism::NilNode then nil
+      when Syntax::StringNode then node.respond_to?(:unescaped) ? node.unescaped : node.slice.delete_prefix("\"").delete_prefix("'").delete_suffix("\"").delete_suffix("'")
+      when Syntax::SymbolNode then node.value.to_sym
+      when Syntax::IntegerNode then node.value
+      when Syntax::FloatNode then node.value
+      when Syntax::TrueNode then true
+      when Syntax::FalseNode then false
+      when Syntax::NilNode then nil
       else :__nil_kill_unknown
       end
     end
@@ -2253,13 +2253,13 @@ module NilKill
 
     def predicate_origin(node)
       case node
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         name = node.name.to_s
         return ["param", name] if @current_param_types.key?(name)
         return ["local", name] if @current_local_types.key?(name)
-      when Prism::InstanceVariableReadNode
+      when Syntax::InstanceVariableReadNode
         return ["ivar", node.name.to_s]
-      when Prism::CallNode
+      when Syntax::CallNode
         return ["attr", node.name.to_s] if node.receiver && ((node.arguments&.arguments) || []).empty?
         return ["call", node.name.to_s]
       end
@@ -2268,12 +2268,12 @@ module NilKill
 
     def provably_non_nil?(node)
       case node
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         name = node.name.to_s
         @non_nil_locals.include?(name) && !@maybe_nil_locals.include?(name)
-      when Prism::CallNode
+      when Syntax::CallNode
         !node.safe_navigation? && @non_nil_method_returns.include?(node.name.to_s)
-      when Prism::SelfNode
+      when Syntax::SelfNode
         true
       else
         !!non_nil_literal?(node)
@@ -2326,7 +2326,7 @@ module NilKill
     def hash_shape_for_value(value)
       return nil unless value
       case value
-      when Prism::HashNode, Prism::KeywordHashNode
+      when Syntax::HashNode, Syntax::KeywordHashNode
         shape = { "keys" => {}, "value_hash_shapes" => {}, "value_array_element_shapes" => {}, "poisoned" => false }
         value.elements.each do |assoc|
           next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
@@ -2349,9 +2349,9 @@ module NilKill
           end
         end
         shape
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         dup_hash_shape(@current_hash_shapes[value.name.to_s])
-      when Prism::CallNode
+      when Syntax::CallNode
         if assignment_call?(value)
           hash_shape_for_value(assignment_value_expression(value))
         elsif value.receiver&.slice == "T" && %i[must cast let].include?(value.name)
@@ -2365,7 +2365,7 @@ module NilKill
         else
           attribute_hash_shape_for_call(value)
         end
-      when Prism::OrNode
+      when Syntax::OrNode
         merge_optional_hash_shape(hash_shape_for_value(value.left), hash_shape_for_value(value.right))
       end
     end
@@ -2373,13 +2373,13 @@ module NilKill
     def array_element_shape_for_value(value)
       return nil unless value
       case value
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         shapes = value.elements.filter_map { |elem| hash_shape_for_value(elem) }
         return nil if shapes.empty?
         shapes.reduce { |acc, shape| merge_hash_record_shapes(acc, shape) }
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         dup_hash_shape(@current_array_element_shapes[value.name.to_s])
-      when Prism::CallNode
+      when Syntax::CallNode
         if assignment_call?(value)
           array_element_shape_for_value(assignment_value_expression(value))
         elsif value.receiver&.slice == "T" && %i[must cast let].include?(value.name)
@@ -2393,7 +2393,7 @@ module NilKill
         elsif value.receiver
           attribute_array_element_shape_for_call(value)
         end
-      when Prism::OrNode
+      when Syntax::OrNode
         merge_optional_hash_shape(array_element_shape_for_value(value.left), array_element_shape_for_value(value.right))
       end
     end
@@ -2406,7 +2406,7 @@ module NilKill
     end
 
     def attribute_hash_shape_for_call(node)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       return nil if node.name.to_s.end_with?("=")
       if (shape = struct_field_hash_shape_for_call(node))
         return shape
@@ -2415,7 +2415,7 @@ module NilKill
     end
 
     def attribute_array_element_shape_for_call(node)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       return nil if node.name.to_s.end_with?("=")
       if (shape = struct_field_array_element_shape_for_call(node))
         return shape
@@ -2443,7 +2443,7 @@ module NilKill
     end
 
     def hash_shape_for_literal_keys(value)
-      return nil unless value.is_a?(Prism::HashNode) || value.is_a?(Prism::KeywordHashNode)
+      return nil unless value.is_a?(Syntax::HashNode) || value.is_a?(Syntax::KeywordHashNode)
       shape = { "keys" => {}, "value_hash_shapes" => {}, "value_array_element_shapes" => {}, "poisoned" => false }
       value.elements.each do |assoc|
         next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
@@ -2493,7 +2493,7 @@ module NilKill
     end
 
     def struct_field_static_type_for_call(node)
-      return nil unless node.is_a?(Prism::CallNode) && node.receiver
+      return nil unless node.is_a?(Syntax::CallNode) && node.receiver
       receiver_type = expression_type(node.receiver)
       name = sym_to_s(node.name)
       types = receiver_classes_for_field_shape(receiver_type).flat_map do |klass|
@@ -2520,18 +2520,18 @@ module NilKill
     def collection_builder_for_assignment(value)
       return nil unless value
       case value
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         builder = collection_builder("array")
         value.elements.each { |elem| add_collection_type(builder, elem) }
         builder
-      when Prism::HashNode
+      when Syntax::HashNode
         builder = collection_builder("hash")
         value.elements.each do |assoc|
           next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
           add_hash_collection_types(builder, assoc.key, assoc.value)
         end
         builder
-      when Prism::CallNode
+      when Syntax::CallNode
         if value.name == :new && value.receiver&.slice == "Set"
           collection_builder("set")
         end
@@ -2539,16 +2539,16 @@ module NilKill
     end
 
     def preserve_collection_builder_assignment?(value)
-      value.is_a?(Prism::LocalVariableReadNode) && @current_collection_builders.key?(value.name.to_s)
+      value.is_a?(Syntax::LocalVariableReadNode) && @current_collection_builders.key?(value.name.to_s)
     end
 
     def preserve_hash_shape_assignment?(value)
-      value.is_a?(Prism::LocalVariableReadNode) && @current_hash_shapes.key?(value.name.to_s)
+      value.is_a?(Syntax::LocalVariableReadNode) && @current_hash_shapes.key?(value.name.to_s)
     end
 
     def hash_record_source_for_assignment(node, shape)
       value = node.value
-      if value.is_a?(Prism::HashNode) || value.is_a?(Prism::KeywordHashNode)
+      if value.is_a?(Syntax::HashNode) || value.is_a?(Syntax::KeywordHashNode)
         { "kind" => "hash literal", "name" => node.name.to_s, "path" => @rel,
           "line" => node.location.start_line, "code" => value.slice, "shape" => shape }
       else
@@ -2558,11 +2558,11 @@ module NilKill
     end
 
     def preserve_array_element_shape_assignment?(value)
-      value.is_a?(Prism::LocalVariableReadNode) && @current_array_element_shapes.key?(value.name.to_s)
+      value.is_a?(Syntax::LocalVariableReadNode) && @current_array_element_shapes.key?(value.name.to_s)
     end
 
     def inspect_variable_write(node)
-      if node.value.is_a?(Prism::CallNode) && node.value.name == :let && node.value.receiver&.slice == "T"
+      if node.value.is_a?(Syntax::CallNode) && node.value.name == :let && node.value.receiver&.slice == "T"
         @ivar_tlet_names.add(node.name.to_s)
         return
       end
@@ -2605,13 +2605,13 @@ module NilKill
         values = args&.arguments || []
         return expression_type(values.first) || "NilClass"
       end
-      if node.is_a?(Prism::CallNode) && node.name == :let && node.receiver&.slice == "T"
+      if node.is_a?(Syntax::CallNode) && node.name == :let && node.receiver&.slice == "T"
         return node.arguments&.arguments&.[](1)&.slice
       end
-      if node.is_a?(Prism::CallNode) && node.name == :must && node.receiver&.slice == "T"
+      if node.is_a?(Syntax::CallNode) && node.name == :must && node.receiver&.slice == "T"
         return expression_type(node.arguments&.arguments&.first)
       end
-      if node.is_a?(Prism::LocalVariableReadNode)
+      if node.is_a?(Syntax::LocalVariableReadNode)
         name = node.name.to_s
         builder_type = synthesized_collection_builder_type(@current_collection_builders[name])
         return builder_type if builder_has_evidence?(@current_collection_builders[name]) && NilKill.useful_type?(builder_type)
@@ -2620,32 +2620,32 @@ module NilKill
         return @current_local_types[name] if NilKill.useful_type?(@current_local_types[name])
         return @current_param_types[name]
       end
-      if node.is_a?(Prism::InstanceVariableReadNode)
+      if node.is_a?(Syntax::InstanceVariableReadNode)
         return ivar_expression_type(node.name.to_s)
       end
-      if node.is_a?(Prism::ParenthesesNode)
+      if node.is_a?(Syntax::ParenthesesNode)
         return expression_type(implicit_return_expression(node.body))
       end
-      if node.is_a?(Prism::StatementsNode)
+      if node.is_a?(Syntax::StatementsNode)
         return expression_type(node.body&.last)
       end
-      if node.is_a?(Prism::ElseNode)
+      if node.is_a?(Syntax::ElseNode)
         return expression_type(implicit_return_expression(node.statements))
       end
-      if node.is_a?(Prism::IfNode)
+      if node.is_a?(Syntax::IfNode)
         left = expression_type(implicit_return_expression(node.statements))
         right = node.subsequent ? expression_type(implicit_return_expression(node.subsequent)) : "NilClass"
         return NilKill.static_sorbet_type([left, right].compact)
       end
-      if node.class.name == "Prism::UnlessNode"
+      if node.is_a?(Syntax::UnlessNode)
         left = expression_type(implicit_return_expression(node.statements))
         right = node.respond_to?(:else_clause) && node.else_clause ? expression_type(implicit_return_expression(node.else_clause)) : "NilClass"
         return NilKill.static_sorbet_type([left, right].compact)
       end
-      if node.is_a?(Prism::WhileNode) || node.is_a?(Prism::UntilNode)
+      if node.is_a?(Syntax::WhileNode) || node.is_a?(Syntax::UntilNode)
         return "NilClass"
       end
-      if node.is_a?(Prism::OrNode)
+      if node.is_a?(Syntax::OrNode)
         left = expression_type(node.left)
         right = expression_type(node.right)
         non_nil = [left, right].compact.reject { |type| type == "NilClass" }
@@ -2654,7 +2654,7 @@ module NilKill
         return non_nil.first if non_nil.size == 1 && NilKill.useful_type?(non_nil.first)
         return left if left == right && NilKill.useful_type?(left)
       end
-      if node.is_a?(Prism::CallNode)
+      if node.is_a?(Syntax::CallNode)
         if assignment_call?(node)
           return expression_type(assignment_value_expression(node))
         end
@@ -2710,7 +2710,7 @@ module NilKill
         elem = info["element"]
         return nil if elem.to_s.empty? || elem.include?("T.untyped")
         index = args.first
-        if index.class.name == "Prism::RangeNode"
+        if index.is_a?(Syntax::RangeNode)
           "T::Array[#{elem}]"
         elsif expression_type(index) == "Integer"
           nilable_type(elem)
@@ -2736,11 +2736,11 @@ module NilKill
 
     def hash_shape_for_receiver(receiver)
       case receiver
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         @current_hash_shapes[receiver.name.to_s]
-      when Prism::HashNode, Prism::KeywordHashNode
+      when Syntax::HashNode, Syntax::KeywordHashNode
         hash_shape_for_value(receiver)
-      when Prism::CallNode
+      when Syntax::CallNode
         if receiver.receiver&.slice == "T" && %i[must cast let].include?(receiver.name)
           hash_shape_for_receiver(receiver.arguments&.arguments&.first)
         elsif %i[first last].include?(receiver.name)
@@ -2831,11 +2831,11 @@ module NilKill
 
     def array_element_shape_for_receiver(receiver)
       case receiver
-      when Prism::LocalVariableReadNode
+      when Syntax::LocalVariableReadNode
         @current_array_element_shapes[receiver.name.to_s]
-      when Prism::ArrayNode
+      when Syntax::ArrayNode
         array_element_shape_for_value(receiver)
-      when Prism::CallNode
+      when Syntax::CallNode
         if receiver.receiver&.slice == "T" && %i[must cast let].include?(receiver.name)
           array_element_shape_for_receiver(receiver.arguments&.arguments&.first)
         elsif %i[select reject compact].include?(receiver.name)
@@ -2875,7 +2875,7 @@ module NilKill
     end
 
     def constant_expression_type(node)
-      return nil unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+      return nil unless node.is_a?(Syntax::ConstantReadNode) || node.is_a?(Syntax::ConstantPathNode)
       name = node.slice
       return nil if name.to_s.empty?
       return "T.class_of(#{name})" if CORE_CLASS_CONSTANTS.include?(name.delete_prefix("::"))
@@ -2893,18 +2893,18 @@ module NilKill
 
     def literal_type(node)
       case node
-      when Prism::StringNode then "String"
-      when Prism::SymbolNode then "Symbol"
-      when Prism::IntegerNode then "Integer"
-      when Prism::FloatNode then "Float"
-      when Prism::TrueNode, Prism::FalseNode then "T::Boolean"
-      when Prism::NilNode then "NilClass"
-      when Prism::RangeNode then "Range"
-      when Prism::InterpolatedStringNode then "String"
-      when Prism::ArrayNode then "T::Array[T.untyped]"
-      when Prism::HashNode then "T::Hash[T.untyped, T.untyped]"
+      when Syntax::StringNode then "String"
+      when Syntax::SymbolNode then "Symbol"
+      when Syntax::IntegerNode then "Integer"
+      when Syntax::FloatNode then "Float"
+      when Syntax::TrueNode, Syntax::FalseNode then "T::Boolean"
+      when Syntax::NilNode then "NilClass"
+      when Syntax::RangeNode then "Range"
+      when Syntax::InterpolatedStringNode then "String"
+      when Syntax::ArrayNode then "T::Array[T.untyped]"
+      when Syntax::HashNode then "T::Hash[T.untyped, T.untyped]"
       else
-        node.is_a?(Prism::CallNode) && node.name == :new && node.receiver ? node.receiver.slice : nil
+        node.is_a?(Syntax::CallNode) && node.name == :new && node.receiver ? node.receiver.slice : nil
       end
     end
 

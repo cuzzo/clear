@@ -11,13 +11,6 @@ require "set"
 require "shellwords"
 require "time"
 
-begin
-  require "prism"
-rescue LoadError
-  warn "error: prism is required; run `bundle install`"
-  exit 2
-end
-
 module NilKill
   ROOT = File.expand_path("../../..", __dir__)
   TMP_DIR = File.expand_path(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), ROOT)
@@ -29,6 +22,7 @@ module NilKill
   SORBET_PAYLOAD_DIR = File.join(TMP_DIR, "sorbet-payload")
 end
 
+require_relative "nil_kill/syntax"
 require_relative "nil_kill/util"
 require_relative "nil_kill/schema/runtime_type"
 require_relative "nil_kill/schema/evidence_bundle"

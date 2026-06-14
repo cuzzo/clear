@@ -727,7 +727,7 @@ module NilKill
 
     def parsed_hash_record_source(abs)
       @parsed_hash_record_sources ||= {}
-      @parsed_hash_record_sources[abs] ||= Prism.parse(File.read(abs))
+      @parsed_hash_record_sources[abs] ||= Syntax.parse(File.read(abs))
     end
 
     def hash_record_value_escapes?(root, hash_node)
@@ -745,15 +745,15 @@ module NilKill
     # `recv[k] = x`.
     def value_in_collection_append_or_index_write?(root, target)
       each_node(root) do |node|
-        if node.is_a?(Prism::CallNode) && COLLECTION_APPEND_METHODS.include?(node.name.to_s)
+        if node.is_a?(Syntax::CallNode) && COLLECTION_APPEND_METHODS.include?(node.name.to_s)
           args = node.arguments&.arguments || []
           return true if args.any? { |a| a.equal?(target) }
         end
-        if node.is_a?(Prism::IndexOperatorWriteNode) || node.is_a?(Prism::IndexAndWriteNode) ||
-            node.is_a?(Prism::IndexOrWriteNode)
+        if node.is_a?(Syntax::IndexOperatorWriteNode) || node.is_a?(Syntax::IndexAndWriteNode) ||
+            node.is_a?(Syntax::IndexOrWriteNode)
           return true if node.respond_to?(:value) && node.value.equal?(target)
         end
-        if node.is_a?(Prism::CallNode) && node.name.to_s == "[]=" && node.arguments
+        if node.is_a?(Syntax::CallNode) && node.name.to_s == "[]=" && node.arguments
           last = node.arguments.arguments.last
           return true if last && last.equal?(target)
         end
@@ -764,7 +764,7 @@ module NilKill
     def enclosing_local_write_for(root, target)
       found = nil
       each_node(root) do |node|
-        if node.is_a?(Prism::LocalVariableWriteNode) && node.value.equal?(target)
+        if node.is_a?(Syntax::LocalVariableWriteNode) && node.value.equal?(target)
           found = node
         end
       end
@@ -777,9 +777,9 @@ module NilKill
     # by the callee).
     def escape_uses_of_local?(root, name, origin_hash)
       each_node(root) do |node|
-        next unless node.is_a?(Prism::CallNode)
+        next unless node.is_a?(Syntax::CallNode)
         args = node.arguments&.arguments || []
-        reads = args.select { |a| a.is_a?(Prism::LocalVariableReadNode) && a.name.to_s == name }
+        reads = args.select { |a| a.is_a?(Syntax::LocalVariableReadNode) && a.name.to_s == name }
         next if reads.empty?
         # `local[:k]` / `local.fetch(:k)` style reads have the local as
         # the RECEIVER, not an argument -- those are safe accessors and
@@ -788,8 +788,8 @@ module NilKill
       end
       # element of an array literal: `arr = [local]` / `[ local ]`
       each_node(root) do |node|
-        next unless node.is_a?(Prism::ArrayNode)
-        return true if node.elements.any? { |e| e.is_a?(Prism::LocalVariableReadNode) && e.name.to_s == name }
+        next unless node.is_a?(Syntax::ArrayNode)
+        return true if node.elements.any? { |e| e.is_a?(Syntax::LocalVariableReadNode) && e.name.to_s == name }
       end
       false
     end
@@ -809,7 +809,7 @@ module NilKill
       until stack.empty?
         node = stack.pop
         next unless node
-        if node.is_a?(Prism::HashNode) &&
+        if node.is_a?(Syntax::HashNode) &&
             node.location.start_line == line &&
             node.slice.strip == code
           return node
@@ -821,14 +821,14 @@ module NilKill
 
     # True if `target` (a HashNode) sits in an array-element position:
     # its nearest enclosing container before the statement is an
-    # ArrayNode. Parent links aren't available in Prism, so search from
+    # ArrayNode. Parent links are intentionally not used, so search from
     # the root for an ArrayNode that (transitively) contains the target.
     def hash_literal_in_array_literal?(root, target)
       stack = [root]
       until stack.empty?
         node = stack.pop
         next unless node
-        if node.is_a?(Prism::ArrayNode) && node_contains?(node, target)
+        if node.is_a?(Syntax::ArrayNode) && node_contains?(node, target)
           return true
         end
         stack.concat(node.child_nodes.compact) if node.respond_to?(:child_nodes)
@@ -997,25 +997,25 @@ module NilKill
     def mark_return_usage_graph(node, context, current_method, candidate_names, method_return_types, used, return_edges)
       return unless node
       case node
-      when Prism::DefNode
+      when Syntax::DefNode
         mark_return_usage_graph(node.body, :return, node.name, candidate_names, method_return_types, used, return_edges)
-      when Prism::StatementsNode
+      when Syntax::StatementsNode
         body = node.body || []
         body.each_with_index do |child, idx|
           child_context = idx == body.length - 1 ? context : :statement
           mark_return_usage_graph(child, child_context, current_method, candidate_names, method_return_types, used, return_edges)
         end
-      when Prism::ReturnNode
+      when Syntax::ReturnNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, :return, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::ArgumentsNode
+      when Syntax::ArgumentsNode
         node.child_nodes.compact.each { |child| mark_return_usage_graph(child, context, current_method, candidate_names, method_return_types, used, return_edges) }
-      when Prism::IfNode
+      when Syntax::IfNode
         mark_return_usage_graph(node.predicate, :value, current_method, candidate_names, method_return_types, used, return_edges) if node.respond_to?(:predicate)
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
         mark_return_usage_graph(node.subsequent, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::ElseNode
+      when Syntax::ElseNode
         mark_return_usage_graph(node.statements, context, current_method, candidate_names, method_return_types, used, return_edges)
-      when Prism::CallNode
+      when Syntax::CallNode
         if candidate_names.include?(node.name)
           if context == :return && current_method && candidate_names.include?(current_method)
             if typed_value_return?(method_return_types[current_method])

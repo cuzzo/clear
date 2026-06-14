@@ -95,7 +95,7 @@ module NilKill
 
     def tree_sitter_static?
       return true if %w[tree_sitter treesitter].include?(@parser)
-      return false if %w[ruby prism].include?(@parser)
+      return false if %w[ruby].include?(@parser)
       return true if ENV.fetch("DECOMPLEX_PARSER", "").to_s.tr("-", "_") == "tree_sitter"
       return true if @targets.any? { |target| non_ruby_target?(target) }
       return true if ENV.key?("NIL_KILL_TARGETS") && NilKill.target_dirs.any? { |target| non_ruby_target?(target) }

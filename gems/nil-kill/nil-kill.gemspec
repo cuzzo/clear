@@ -13,7 +13,6 @@ Gem::Specification.new do |spec|
   spec.executables = ["nil-kill"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "prism", ">= 1.6"
   spec.add_dependency "decomplex", "= 0.0.1"
   spec.add_dependency "parlour"
   spec.add_dependency "rbs-trace"

@@ -17,12 +17,12 @@ module NilKill
     Handler = Struct.new(:id, :method_id, :path, :line, :kind, :rescues, :calls, :direct_roots, :unknown_calls, keyword_init: true)
 
     STATIC_SOURCE_MIDS = %i[raise fail error!].freeze
-    METHOD_BOUNDARY_CLASSES = %w[
-      Prism::DefNode
-      Prism::ClassNode
-      Prism::ModuleNode
-      Prism::SingletonClassNode
-      Prism::LambdaNode
+    METHOD_BOUNDARY_CLASSES = [
+      Syntax::DefNode,
+      Syntax::ClassNode,
+      Syntax::ModuleNode,
+      Syntax::SingletonClassNode,
+      Syntax::LambdaNode,
     ].freeze
 
     def self.scan(files, runtime_methods: [], runtime_edges: [])
@@ -67,18 +67,18 @@ module NilKill
     end
 
     def collect_method_defs(node, scope, rel_path, default_owner: nil, default_kind: "instance")
-      return unless prism_node?(node)
+      return unless syntax_node?(node)
 
       case node
-      when Prism::ClassNode, Prism::ModuleNode
+      when Syntax::ClassNode, Syntax::ModuleNode
         new_scope = [qualify_const(scope, const_name(node.constant_path))]
         node.compact_child_nodes.each { |child| collect_method_defs(child, new_scope, rel_path) }
-      when Prism::SingletonClassNode
+      when Syntax::SingletonClassNode
         owner = singleton_owner(node.expression, scope)
         node.compact_child_nodes.each do |child|
           collect_method_defs(child, scope, rel_path, default_owner: owner, default_kind: "class")
         end
-      when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+      when Syntax::ConstantWriteNode, Syntax::ConstantPathWriteNode
         if (block = constant_assignment_block(node))
           collect_method_defs(block, [constant_assignment_owner(node, scope)], rel_path)
         else
@@ -86,9 +86,9 @@ module NilKill
             collect_method_defs(child, scope, rel_path, default_owner: default_owner, default_kind: default_kind)
           end
         end
-      when Prism::DefNode
+      when Syntax::DefNode
         register_method(node, scope, rel_path, default_owner: default_owner, default_kind: default_kind)
-      when Prism::CallNode
+      when Syntax::CallNode
         register_mixin_call(node, scope, default_owner: default_owner, default_kind: default_kind)
         node.compact_child_nodes.each do |child|
           collect_method_defs(child, scope, rel_path, default_owner: default_owner, default_kind: default_kind)
@@ -121,7 +121,7 @@ module NilKill
 
     def register_mixin_call(node, scope, default_owner:, default_kind:)
       return unless %i[include prepend extend].include?(node.name)
-      return unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+      return unless node.receiver.nil? || node.receiver.is_a?(Syntax::SelfNode)
 
       owner = default_owner || scope_owner(scope)
       return if owner.empty?
@@ -161,18 +161,18 @@ module NilKill
     end
 
     def collect_bodies(node, scope, rel_path, default_owner: nil, default_kind: "instance")
-      return unless prism_node?(node)
+      return unless syntax_node?(node)
 
       case node
-      when Prism::ClassNode, Prism::ModuleNode
+      when Syntax::ClassNode, Syntax::ModuleNode
         new_scope = [qualify_const(scope, const_name(node.constant_path))]
         node.compact_child_nodes.each { |child| collect_bodies(child, new_scope, rel_path) }
-      when Prism::SingletonClassNode
+      when Syntax::SingletonClassNode
         owner = singleton_owner(node.expression, scope)
         node.compact_child_nodes.each do |child|
           collect_bodies(child, scope, rel_path, default_owner: owner, default_kind: "class")
         end
-      when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+      when Syntax::ConstantWriteNode, Syntax::ConstantPathWriteNode
         if (block = constant_assignment_block(node))
           collect_bodies(block, [constant_assignment_owner(node, scope)], rel_path)
         else
@@ -180,7 +180,7 @@ module NilKill
             collect_bodies(child, scope, rel_path, default_owner: default_owner, default_kind: default_kind)
           end
         end
-      when Prism::DefNode
+      when Syntax::DefNode
         id = method_id(
           rel_path,
           node.location.start_line,
@@ -197,15 +197,15 @@ module NilKill
     end
 
     def collect_in_method(node, current_method_id, current_handler_id)
-      return unless prism_node?(node)
+      return unless syntax_node?(node)
       return if nested_method_boundary?(node)
 
       case node
-      when Prism::BeginNode
+      when Syntax::BeginNode
         collect_begin_node(node, current_method_id, current_handler_id)
-      when Prism::RescueModifierNode
+      when Syntax::RescueModifierNode
         collect_rescue_modifier(node, current_method_id, current_handler_id)
-      when Prism::CallNode
+      when Syntax::CallNode
         inspect_call_node(node, current_method_id, current_handler_id)
         node.compact_child_nodes.each { |child| collect_in_method(child, current_method_id, current_handler_id) }
       else
@@ -282,7 +282,7 @@ module NilKill
     end
 
     def direct_source_kind(node)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       return "fixable_error" if fixable_error_call?(node)
       return node.name.to_s if STATIC_SOURCE_MIDS.include?(node.name)
       nil
@@ -290,24 +290,24 @@ module NilKill
 
     def fixable_error_call?(node)
       return false unless node.name == :fixable!
-      (node.arguments&.arguments || []).grep(Prism::KeywordHashNode).any? do |kw|
+      (node.arguments&.arguments || []).grep(Syntax::KeywordHashNode).any? do |kw|
         kw.elements.any? do |assoc|
           assoc.respond_to?(:key) && assoc.respond_to?(:value) &&
             hash_key_name(assoc.key) == "level" &&
-            assoc.value.is_a?(Prism::SymbolNode) &&
+            assoc.value.is_a?(Syntax::SymbolNode) &&
             assoc.value.unescaped == "error"
         end
       end
     end
 
     def resolve_call(node, current_method_id)
-      return nil unless node.is_a?(Prism::CallNode)
+      return nil unless node.is_a?(Syntax::CallNode)
       return nil if direct_source_kind(node)
 
       current = @methods.fetch(current_method_id)
       name = node.name.to_s
       receiver = node.receiver
-      if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+      if receiver.nil? || receiver.is_a?(Syntax::SelfNode)
         same_owner = @methods_by_signature[[current.owner, current.kind, name]]
         return same_owner.first if same_owner.size == 1
 
@@ -548,7 +548,7 @@ module NilKill
       case receiver
       when nil
         default_owner || scope_owner(scope)
-      when Prism::SelfNode
+      when Syntax::SelfNode
         default_owner || scope_owner(scope)
       else
         constant_receiver?(receiver) ? qualify_const(scope, const_name(receiver)) : first_line(receiver.slice)
@@ -561,7 +561,7 @@ module NilKill
 
     def singleton_owner(expression, scope)
       case expression
-      when Prism::SelfNode
+      when Syntax::SelfNode
         scope_owner(scope)
       else
         return qualify_const(scope, const_name(expression)) if constant_receiver?(expression)
@@ -574,7 +574,7 @@ module NilKill
 
     def constant_assignment_block(node)
       value = node.respond_to?(:value) ? node.value : nil
-      value.is_a?(Prism::CallNode) && class_factory_call?(value) ? value.block : nil
+      value.is_a?(Syntax::CallNode) && class_factory_call?(value) ? value.block : nil
     end
 
     def class_factory_call?(node)
@@ -586,9 +586,9 @@ module NilKill
 
     def constant_assignment_owner(node, scope)
       case node
-      when Prism::ConstantWriteNode
+      when Syntax::ConstantWriteNode
         qualify_const(scope, node.name.to_s)
-      when Prism::ConstantPathWriteNode
+      when Syntax::ConstantPathWriteNode
         qualify_const(scope, const_name(node.target))
       else
         scope_owner(scope)
@@ -670,11 +670,11 @@ module NilKill
     end
 
     def nested_method_boundary?(node)
-      METHOD_BOUNDARY_CLASSES.include?(node.class.name)
+      METHOD_BOUNDARY_CLASSES.any? { |klass| node.is_a?(klass) }
     end
 
     def constant_receiver?(node)
-      node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+      node.is_a?(Syntax::ConstantReadNode) || node.is_a?(Syntax::ConstantPathNode)
     end
 
     def const_name(node)
@@ -684,15 +684,15 @@ module NilKill
 
     def hash_key_name(node)
       case node
-      when Prism::SymbolNode
+      when Syntax::SymbolNode
         node.unescaped.to_s
-      when Prism::StringNode
+      when Syntax::StringNode
         node.unescaped.to_s
       end
     end
 
     def projectish_call?(node)
-      node.is_a?(Prism::CallNode) &&
+      node.is_a?(Syntax::CallNode) &&
         !STATIC_SOURCE_MIDS.include?(node.name) &&
         !%i[is_a? kind_of? instance_of? respond_to? nil? class object_id].include?(node.name)
     end
@@ -701,8 +701,8 @@ module NilKill
       code.to_s.lines.first.to_s.strip[0, 160]
     end
 
-    def prism_node?(node)
-      node.is_a?(Prism::Node)
+    def syntax_node?(node)
+      node.is_a?(Syntax::Node)
     end
   end
 end
