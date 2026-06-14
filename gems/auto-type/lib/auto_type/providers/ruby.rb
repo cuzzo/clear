@@ -3,48 +3,23 @@
 
 module AutoType
   module Providers
-    class Provider
-      def language
-        raise NotImplementedError
-      end
+    class RubyProvider < Base
+      ACTION_KINDS = %w[
+        add_sig
+        fix_sig_param
+        fix_sig_return
+        narrow_generic_param
+        narrow_generic_return
+        narrow_tlet
+        add_tlet
+        remove_dead_safe_nav
+        replace_dead_nil_check
+        replace_nil_with_default
+        promote_hash_record_to_struct
+        promote_hash_record_cluster_to_struct
+        add_struct_field_sig
+      ].freeze
 
-      def supports?(_action)
-        false
-      end
-
-      def plan(action, _source_index = nil)
-        { "supported" => false, "action" => action, "diagnostics" => [unsupported_diagnostic(action)] }
-      end
-
-      def apply(_plan, _workspace = NilKill::ROOT)
-        0
-      end
-
-      def verify(_plan, _command_runner = nil)
-        true
-      end
-
-      private
-
-      def unsupported_diagnostic(action)
-        {
-          "severity" => "info",
-          "code" => "unsupported_auto_type_provider",
-          "language" => action["language"],
-          "path" => action.dig("target", "path") || action["path"],
-          "line" => action.dig("target", "line") || action["line"],
-          "message" => "no Auto-type provider supports #{action["kind"]} for #{action["language"]}",
-        }
-      end
-    end
-
-    class NullProvider < Provider
-      def language
-        "none"
-      end
-    end
-
-    class RubyProvider < Provider
       def initialize(dry_run: false)
         @dry_run = dry_run
       end
@@ -53,31 +28,51 @@ module AutoType
         "ruby"
       end
 
-      def supports?(action)
-        action["language"].to_s.empty? || action["language"].to_s == "ruby"
+      def capabilities
+        {
+          "language" => language,
+          "action_kinds" => ACTION_KINDS,
+          "deterministic" => true,
+          "plan_kind" => "legacy_ruby_actions",
+          "requires_verifier" => false,
+        }
       end
 
-      def plan(action, _source_index = nil)
+      def supports?(action)
+        language = action["language"].to_s
+        language = action.dig("target", "language").to_s if language.empty?
+        (language.empty? || language == "ruby") && ACTION_KINDS.include?(legacy_kind(action))
+      end
+
+      def plan(action, workspace:)
         return super unless supports?(action)
 
-        { "supported" => true, "actions" => [legacy_action(action)] }
-      end
-
-      def apply(plan, _workspace = NilKill::ROOT)
-        return 0 unless plan["supported"]
-
-        args = @dry_run ? ["--dry-run"] : []
-        Apply.new(args).apply_actions(plan["actions"])
+        RewritePlan.new(
+          provider: self.class.name,
+          language: language,
+          supported: true,
+          legacy_actions: [legacy_action(action)],
+          risk: review_action?(action) ? "review" : "low",
+          requires_verifier: review_action?(action),
+        )
       end
 
       private
 
+      def legacy_kind(action)
+        if action["schema_version"].to_i == 2
+          action.dig("data", "legacy_kind").to_s.empty? ? action["kind"].to_s : action.dig("data", "legacy_kind").to_s
+        else
+          action["kind"].to_s
+        end
+      end
+
       def legacy_action(action)
-        return action unless action["schema_version"].to_i == 2
+        return action.merge("kind" => legacy_kind(action)) unless action["schema_version"].to_i == 2
 
         data = action["data"] || {}
         {
-          "kind" => data["legacy_kind"] || action["kind"],
+          "kind" => legacy_kind(action),
           "confidence" => action["confidence"],
           "path" => action.dig("target", "path") || action["path"],
           "line" => action.dig("target", "line") || action["line"],
@@ -85,13 +80,12 @@ module AutoType
           "data" => data,
         }
       end
-    end
 
-    def self.provider_for(language, dry_run: false)
-      case language.to_s
-      when "ruby" then RubyProvider.new(dry_run: dry_run)
-      else NullProvider.new
+      def review_action?(action)
+        action["confidence"].to_s == AutoType.review_confidence
       end
     end
+
+    register(RubyProvider)
   end
 end

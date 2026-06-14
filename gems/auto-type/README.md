@@ -16,7 +16,9 @@ Auto-type currently supports Ruby/Sorbet rewrites:
 - verified loop application with rollback/bisection
 - guarded Sorbet autocorrect cleanup
 
-The provider API is intentionally language-oriented. Ruby is the first provider, but the CLI and plan boundary are designed so Python, JavaScript/TypeScript, Lua, or other languages can add providers later without changing Nil-kill's analyzer.
+Auto-type also has a narrow Python provider for `add_nullability` actions on existing annotations. It writes modern `T | None` annotations for unambiguous params, returns, and annotated fields. It intentionally does not manage `typing.Optional` imports or rewrite Python function bodies yet.
+
+The provider API is intentionally language-oriented. Ruby is the mature provider, and the CLI and plan boundary are designed so Python, JavaScript/TypeScript, Lua, or other languages can add more actions without changing Nil-kill's analyzer.
 
 ## Usage
 

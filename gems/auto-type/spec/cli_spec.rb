@@ -30,10 +30,43 @@ RSpec.describe AutoType::Providers do
 
     ruby = described_class.provider_for("ruby")
     python = described_class.provider_for("python")
+    ruby_plan = ruby.plan(ruby_action, workspace: AutoType::Workspace.new)
+    python_plan = python.plan(python_action, workspace: AutoType::Workspace.new)
 
     expect(ruby.supports?(ruby_action)).to be(true)
-    expect(ruby.plan(ruby_action)).to include("supported" => true, "actions" => [ruby_action])
+    expect(ruby_plan).to be_supported
+    expect(ruby_plan.legacy_actions).to eq([ruby_action])
+    expect(ruby.capabilities["action_kinds"]).to include("fix_sig_return")
     expect(python.supports?(python_action)).to be(false)
-    expect(python.plan(python_action).dig("diagnostics", 0, "code")).to eq("unsupported_auto_type_provider")
+    expect(python_plan).not_to be_supported
+    expect(python_plan.diagnostics.first["code"]).to eq("unsupported_auto_type_provider")
+  end
+
+  it "uses schema-v2 target language for provider support checks" do
+    action = {
+      "schema_version" => 2,
+      "kind" => "fix_sig_return",
+      "confidence" => "high",
+      "target" => { "language" => "python", "path" => "pkg/user.py", "line" => 1 },
+      "data" => { "type" => "str" },
+    }
+
+    provider = described_class.provider_for(action.dig("target", "language"))
+    plan = provider.plan(action, workspace: AutoType::Workspace.new)
+
+    expect(plan).not_to be_supported
+    expect(plan.diagnostics.first["language"]).to eq("python")
+  end
+
+  it "advertises the narrow Python add_nullability provider" do
+    provider = described_class.provider_for("python")
+
+    expect(described_class.registry.languages).to include("python")
+    expect(provider.capabilities).to include(
+      "language" => "python",
+      "plan_kind" => "text_edits",
+      "nilability_style" => "pep604",
+    )
+    expect(provider.capabilities["action_kinds"]).to eq(["add_nullability"])
   end
 end

@@ -3,39 +3,78 @@
 
 module AutoType
   class Apply
-    def initialize(argv)
+    def initialize(argv, workspace: nil, provider_registry: AutoType::Providers.registry)
       @dry_run = argv.include?("--dry-run") || ENV["DRY_RUN"] == "1"
       @all = argv.include?("--all")
+      @workspace = workspace || Workspace.new
+      @provider_registry = provider_registry
     end
 
-    # Lazily loaded: the `apply_actions` path (used by infer's sorbet
-    # pre-validate bisection) never needs evidence, so constructing an
-    # Apply must not eagerly JSON.parse the multi-100MB evidence.json.
+    # Lazily loaded: callers can use apply_actions directly without parsing
+    # the multi-100MB evidence.json.
     def evidence
-      @evidence ||= NilKill::Store.read
+      @evidence ||= AutoType.evidence
     end
 
     def run
       if @all && ENV["NIL_KILL_UNSAFE_APPLY_ALL"] != "1"
         abort "`apply --all` would apply review actions without verification. Use `loop --hash-records -- <verify command...>` for reviewed fixes, or set NIL_KILL_UNSAFE_APPLY_ALL=1 for debugging."
       end
-      actions = evidence["actions"].select { |a| @all || a["confidence"] == NilKill::HIGH }
+      actions = evidence["actions"].select { |a| @all || a["confidence"] == AutoType.high_confidence }
       apply_actions(actions)
     end
 
     def apply_actions(actions)
+      plans = actions.map { |action| provider_for_action(action).plan(action, workspace: @workspace) }
+      apply_plans(plans)
+    end
+
+    def apply_plans(plans)
+      emit_plan_diagnostics(plans)
+      changed = 0
+      edit_plans = plans.select { |plan| plan.supported? && plan.edit? }
+      changed += apply_text_edit_plans(edit_plans)
+      legacy_actions = plans.select { |plan| plan.supported? && plan.legacy? }.flat_map(&:legacy_actions)
+      changed += apply_legacy_actions(legacy_actions)
+      puts "#{@dry_run ? "would apply" : "applied"} #{changed} action(s)"
+      changed
+    end
+
+    def provider_for_action(action)
+      language = action["language"].to_s
+      language = action.dig("target", "language").to_s if language.empty?
+      @provider_registry.provider_for(language, dry_run: @dry_run)
+    end
+
+    def emit_plan_diagnostics(plans)
+      plans.flat_map(&:diagnostics).each do |diagnostic|
+        code = diagnostic["code"].to_s
+        prefix = code.empty? ? "auto-type:" : "auto-type: #{code}:"
+        warn "#{prefix} #{diagnostic["message"]}"
+      end
+    end
+
+    def apply_text_edit_plans(plans)
+      plans.flat_map(&:text_edits).group_by(&:path).sum do |path, edits|
+        if @dry_run
+          edits.size
+        else
+          @workspace.apply_text_edits(path, edits) ? edits.size : 0
+        end
+      end
+    end
+
+    def apply_legacy_actions(actions)
       changed = 0
       actions = expand_cross_file_actions(actions)
       actions.group_by { |a| a["path"] }.each do |rel_path, list|
-        path = File.join(NilKill::ROOT, rel_path)
-        next unless File.exist?(path)
-        lines = File.readlines(path)
+        next unless @workspace.file?(rel_path)
+        lines = @workspace.read_lines(rel_path)
         list.sort_by { |a| -a["line"].to_i }.each { |action| changed += 1 if apply_one(lines, action) }
         ensure_sorbet_runtime(lines) if list.any? { |a| %w[add_sig add_tlet narrow_tlet narrow_generic_param narrow_generic_return promote_hash_record_to_struct promote_hash_record_cluster_to_struct].include?(a["kind"]) }
         ensure_sig_extensions(lines, rel_path, list.select { |a| a["kind"] == "add_sig" })
-        File.write(path, lines.join) unless @dry_run
+        @workspace.write(rel_path, lines.join) unless @dry_run
       end
-      puts "#{@dry_run ? "would apply" : "applied"} #{changed} action(s)"
       changed
     end
 

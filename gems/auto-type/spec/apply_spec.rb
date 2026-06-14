@@ -4,10 +4,7 @@ require_relative "spec_helper"
 
 RSpec.describe AutoType::Apply do
   def applier
-    described_class.allocate.tap do |instance|
-      instance.instance_variable_set(:@dry_run, false)
-      instance.instance_variable_set(:@all, true)
-    end
+    described_class.new(["--all"])
   end
 
   it "refuses raw --all because review actions require verification" do

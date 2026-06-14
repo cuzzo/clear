@@ -8,7 +8,7 @@ module AutoType
     end
 
     def run
-      NilKill.ensure_src_restored!
+      AutoType.ensure_src_restored!
       command = @argv.shift
       case command
       when "apply" then Apply.new(@argv).run
@@ -32,8 +32,9 @@ module AutoType
           bundle exec auto-type guarded-autocorrect [--max-iterations N]
 
         Auto-type consumes Nil-kill evidence/actions and applies verified source rewrites.
-        Ruby is the only provider implemented today; the provider interface is designed
-        so other language rewriters can be added without changing Nil-kill's analyzer.
+        Ruby/Sorbet rewrites and narrow Python annotation rewrites are implemented today.
+        The provider interface is designed so other language rewriters can be added
+        without changing Nil-kill's analyzer.
 
         Config:
           NIL_KILL_UNSAFE_APPLY_ALL=1         debug-only: allow raw apply --all without verification
