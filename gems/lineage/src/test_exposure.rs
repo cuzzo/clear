@@ -94,7 +94,7 @@ where
             stats.mutation_records += 1;
         }
 
-        storage.insert_test_exposure_event(&TestExposureEvent {
+        if storage.insert_test_exposure_event(&TestExposureEvent {
             unit_id,
             commit_hash: commit_hash.to_string(),
             timestamp,
@@ -109,8 +109,9 @@ where
             is_mutation_killed,
             is_verified,
             payload_json: record.payload_json.clone(),
-        })?;
-        stats.events += 1;
+        })? {
+            stats.events += 1;
+        }
     }
 
     Ok(stats)

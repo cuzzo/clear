@@ -279,6 +279,40 @@ impl Storage {
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_crash_events_natural_key
               ON crash_events(unit_id, commit_hash, error_class, provider_id, path, line, function);
+
+            DELETE FROM test_exposure_events
+            WHERE id NOT IN (
+              SELECT (
+                SELECT t2.id
+                FROM test_exposure_events t2
+                WHERE t2.unit_id = t1.unit_id
+                  AND t2.commit_hash = t1.commit_hash
+                  AND t2.path = t1.path
+                  AND COALESCE(t2.line, -1) = COALESCE(t1.line, -1)
+                  AND COALESCE(t2.branch_id, '') = COALESCE(t1.branch_id, '')
+                  AND t2.test_id = t1.test_id
+                  AND t2.test_type = t1.test_type
+                ORDER BY t2.is_verified DESC,
+                         t2.is_mutation_killed DESC,
+                         t2.is_mutation_verified DESC,
+                         t2.timestamp DESC,
+                         t2.id DESC
+                LIMIT 1
+              )
+              FROM test_exposure_events t1
+              GROUP BY t1.unit_id, t1.commit_hash, t1.path, COALESCE(t1.line, -1),
+                       COALESCE(t1.branch_id, ''), t1.test_id, t1.test_type
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_test_exposure_events_natural_key
+              ON test_exposure_events(
+                unit_id,
+                commit_hash,
+                path,
+                COALESCE(line, -1),
+                COALESCE(branch_id, ''),
+                test_id,
+                test_type
+              );
             "#,
         )?;
         Ok(())
@@ -721,14 +755,27 @@ impl Storage {
         )?)
     }
 
-    pub fn insert_test_exposure_event(&self, event: &TestExposureEvent) -> Result<()> {
-        self.conn.execute(
+    pub fn insert_test_exposure_event(&self, event: &TestExposureEvent) -> Result<bool> {
+        let changed = self.conn.execute(
             r#"
             INSERT INTO test_exposure_events
               (unit_id, commit_hash, timestamp, path, function, line, branch_id,
                test_id, test_type, mutation_status, is_mutation_verified,
                is_mutation_killed, is_verified, payload_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ON CONFLICT DO UPDATE SET
+              timestamp = MAX(test_exposure_events.timestamp, excluded.timestamp),
+              function = COALESCE(excluded.function, test_exposure_events.function),
+              mutation_status = COALESCE(excluded.mutation_status, test_exposure_events.mutation_status),
+              is_mutation_verified = MAX(test_exposure_events.is_mutation_verified, excluded.is_mutation_verified),
+              is_mutation_killed = MAX(test_exposure_events.is_mutation_killed, excluded.is_mutation_killed),
+              is_verified = MAX(test_exposure_events.is_verified, excluded.is_verified),
+              payload_json = excluded.payload_json
+            WHERE excluded.timestamp > test_exposure_events.timestamp
+               OR excluded.is_mutation_verified > test_exposure_events.is_mutation_verified
+               OR excluded.is_mutation_killed > test_exposure_events.is_mutation_killed
+               OR excluded.is_verified > test_exposure_events.is_verified
+               OR excluded.payload_json <> test_exposure_events.payload_json
             "#,
             params![
                 event.unit_id,
@@ -747,8 +794,10 @@ impl Storage {
                 event.payload_json
             ],
         )?;
-        self.refresh_test_exposure_summary(&event.unit_id)?;
-        Ok(())
+        if changed > 0 {
+            self.refresh_test_exposure_summary(&event.unit_id)?;
+        }
+        Ok(changed > 0)
     }
 
     pub fn deactivate_active_hazards(&self, language: &str) -> Result<usize> {

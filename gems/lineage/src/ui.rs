@@ -253,6 +253,8 @@ pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
                  SELECT 1
                  FROM test_exposure_events t
                  WHERE t.unit_id = h.unit_id
+                   AND t.path = h.path
+                   AND t.line = h.line
                    AND t.is_verified = 1
                    AND lower(t.test_type) = lower(h.required_evidence)
                ) THEN 1 ELSE 0 END), 0)
@@ -703,6 +705,8 @@ fn apply_hazards(
                  SELECT 1
                  FROM test_exposure_events t
                  WHERE t.unit_id = h.unit_id
+                   AND t.path = h.path
+                   AND t.line = h.line
                    AND t.is_verified = 1
                    AND lower(t.test_type) = lower(h.required_evidence)
                ) AS verified
