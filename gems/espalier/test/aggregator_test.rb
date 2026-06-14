@@ -132,7 +132,7 @@ class AggregatorTest < Minitest::Test
     assert_includes fn[:DELEGATIONS][:always_calls], "@unknown_ivar.process"
   end
 
-  def test_uses_decomplex_topology_for_internal_call_graph
+  def test_uses_tree_sitter_delegations_for_internal_call_graph
     Dir.mktmpdir do |dir|
       path = File.join(dir, "worker.rb")
       File.write(path, <<~RB)
@@ -167,7 +167,7 @@ class AggregatorTest < Minitest::Test
     end
   end
 
-  def test_accepts_precomputed_decomplex_topology
+  def test_tree_sitter_delegations_handle_explicit_self_internal_calls
     Dir.mktmpdir do |dir|
       path = File.join(dir, "phase.rb")
       File.write(path, <<~RB)
@@ -181,8 +181,7 @@ class AggregatorTest < Minitest::Test
       RB
 
       modules = Espalier::AstExtractor.new(path).extract
-      topology = Decomplex::RubyTopology.scan([path])
-      manifest = Espalier::Aggregator.new(ruby_topology: topology).aggregate(modules)
+      manifest = Espalier::Aggregator.new.aggregate(modules)
 
       assert_equal [
         { caller: "run", callee: "prepare", type: :always }

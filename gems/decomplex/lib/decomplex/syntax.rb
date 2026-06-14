@@ -9,7 +9,7 @@ module Decomplex
                              :params, :signature, :kind, keyword_init: true)
     OwnerDef = Struct.new(:file, :name, :kind, :line, :span, keyword_init: true)
     CallSite = Struct.new(:receiver, :message, :file, :function, :owner, :line, :span,
-                          :conditional, :arguments, keyword_init: true)
+                          :conditional, :arguments, :control, keyword_init: true)
     StateDeclaration = Struct.new(:field, :owner, :type, :file, :line, :span, keyword_init: true)
     StateParamOrigin = Struct.new(:field, :receiver, :owner, :param, :file, :function,
                                   :line, :span, keyword_init: true)
@@ -405,6 +405,11 @@ module Decomplex
         stack.any? { |item| item.is_a?(Hash) && %i[conditional iterates].include?(item[:control]) }
       end
 
+      def current_control(stack)
+        entry = stack.reverse.find { |item| item.is_a?(Hash) && item[:control] }
+        entry ? entry[:control] : :always
+      end
+
       def function_context(node, stack)
         {
           function: function_name(node),
@@ -415,12 +420,15 @@ module Decomplex
 
       def function_name(node)
         case node.kind
+        when "body_statement"
+          hidden_ruby_method_name(node)
         when "method", "function_definition", "function_declaration",
              "method_definition", "function_item"
           named_field(node, "name")&.text || first_named_text(node, %w[identifier constant property_identifier])
         when "singleton_method"
-          named_field(node, "name")&.text ||
-            node.named_children.reverse.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+          name = named_field(node, "name")&.text ||
+                 node.named_children.reverse.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+          name && "self.#{name}"
         when "argument_list"
           inline_def_name(node)
         when "method_declaration"
@@ -435,12 +443,15 @@ module Decomplex
       end
 
       def visibility_for(node)
+        return ruby_inline_def_visibility(node) if inline_def_argument_list?(node)
         return :public if node.children.any? { |child| child.text == "pub" }
 
         nil
       end
 
       def function_params(node)
+        return hidden_ruby_method_params(node) if hidden_ruby_method_definition?(node)
+
         params = named_field(node, "parameters") ||
                  node.named_children.find { |child| %w[parameters formal_parameters parameter_list].include?(child.kind) }
         params ||= node.named_children.find { |child| child.kind == "method_parameters" } if inline_def_argument_list?(node)
@@ -466,6 +477,10 @@ module Decomplex
       end
 
       def function_signature(document, node)
+        if hidden_ruby_method_definition?(node)
+          return normalize_text(hidden_ruby_method_signature(document, node))
+        end
+
         body = named_field(node, "body")
         text =
           if body
@@ -484,7 +499,7 @@ module Decomplex
 
       def control_context(node)
         return :iterates if %w[while until while_statement for for_statement for_in_statement
-                               loop_expression].include?(node.kind)
+                               loop_expression do_block].include?(node.kind)
         return :conditional if branch_node?(node)
 
         nil
@@ -609,7 +624,7 @@ module Decomplex
       end
 
       def record_call_site(document, node, stack, out)
-        target = call_target(node)
+        target = call_target(document, node)
         return unless target
         return if noise_call?(target)
 
@@ -622,7 +637,8 @@ module Decomplex
           line: line(node),
           span: span(node),
           conditional: conditional_context?(stack),
-          arguments: target[:arguments]
+          arguments: target[:arguments],
+          control: current_control(stack)
         )
       end
 
@@ -1038,9 +1054,9 @@ module Decomplex
 
       def hidden_if?(node)
         return false unless ts_node?(node)
-        return false unless %w[expression_statement block].include?(node.kind)
+        return false unless %w[expression_statement block body_statement].include?(node.kind)
 
-        first_token_kind(node) == "if"
+        %w[if unless].include?(first_token_kind(node))
       end
 
       def hidden_modifier_if?(node)
@@ -1219,6 +1235,10 @@ module Decomplex
       end
 
       def owner_name_from_declaration(document, node)
+        if hidden_ruby_owner_declaration?(node)
+          return hidden_ruby_owner_name(node)
+        end
+
         case node.kind
         when "class", "class_definition", "class_declaration", "module"
           named_field(node, "name")&.text || first_named_text(node, %w[constant identifier type_identifier])
@@ -1232,6 +1252,8 @@ module Decomplex
       end
 
       def owner_kind(node)
+        return hidden_ruby_owner_kind(node) if hidden_ruby_owner_declaration?(node)
+
         case node.kind
         when "class", "class_definition", "class_declaration" then :class
         when "module" then :module
@@ -1296,10 +1318,14 @@ module Decomplex
         base.empty? ? "(file)" : base
       end
 
-      def call_target(node)
+      def call_target(document, node)
         case node.kind
         when "call"
           ruby_call_target(node)
+        when "body_statement"
+          ruby_bare_body_call_target(document, node)
+        when "identifier"
+          ruby_bare_call_target(document, node)
         when "call_expression", "method_invocation", "invocation_expression"
           generic_call_target(node)
         when "attribute"
@@ -1315,6 +1341,32 @@ module Decomplex
 
         {
           receiver: receiver ? normalize_text(receiver.text) : "self",
+          message: message,
+          arguments: ruby_argument_texts(node)
+        }
+      end
+
+      def ruby_bare_call_target(document, node)
+        return nil unless document.language == :ruby
+        return nil unless ruby_bare_call_identifier?(node)
+
+        {
+          receiver: "self",
+          message: node.text,
+          arguments: []
+        }
+      end
+
+      def ruby_bare_body_call_target(document, node)
+        return nil unless document.language == :ruby
+        return nil if hidden_ruby_method_definition?(node) || hidden_ruby_owner_declaration?(node)
+
+        message = node.text.to_s.strip
+        return nil unless message.match?(/\A[a-z_]\w*[!?=]?\z/)
+        return nil if %w[true false nil self].include?(message)
+
+        {
+          receiver: "self",
           message: message,
           arguments: []
         }
@@ -1381,7 +1433,6 @@ module Decomplex
         return true if message.empty?
         return true if NOISE_MESSAGES.include?(message)
         return true if message.start_with?("@")
-        return true if namespace_receiver?(receiver) && !receiver.include?(".")
         return true if receiver.match?(/\A(?:std|builtin|build_options)(?:\.|\z)/)
 
         false
@@ -1389,6 +1440,8 @@ module Decomplex
 
       def state_declaration(node)
         case node.kind
+        when "assignment"
+          ruby_t_let_state_declaration(node)
         when "container_field"
           zig_container_field_declaration(node)
         when "property_declaration", "public_field_definition", "field_definition", "field_declaration"
@@ -1564,7 +1617,116 @@ module Decomplex
 
         receiver_index = node.named_children.index { |child| child.kind == "self" || child.kind == "constant" }
         search = receiver_index ? node.named_children[(receiver_index + 1)..] : node.named_children
-        search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+        name = search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+        receiver_index ? "self.#{name}" : name
+      end
+
+      def hidden_ruby_method_definition?(node)
+        ts_node?(node) && node.kind == "body_statement" && node.children.first&.kind.to_s == "def"
+      end
+
+      def hidden_ruby_method_name(node)
+        return nil unless hidden_ruby_method_definition?(node)
+
+        receiver_index = node.named_children.index { |child| child.kind == "self" || child.kind == "constant" }
+        search = receiver_index ? node.named_children[(receiver_index + 1)..] : node.named_children
+        name = search&.find { |child| %w[identifier field_identifier property_identifier].include?(child.kind) }&.text
+        receiver_index ? "self.#{name}" : name
+      end
+
+      def hidden_ruby_method_params(node)
+        params = node.named_children.find { |child| child.kind == "method_parameters" }
+        return [] unless params
+
+        params.named_children.filter_map { |param| parameter_name(param) }.uniq
+      end
+
+      def hidden_ruby_method_signature(document, node)
+        body = node.named_children.find { |child| child.kind == "body_statement" }
+        end_byte = body ? body.start_byte : node.end_byte
+        document.source.byteslice(node.start_byte, end_byte - node.start_byte).to_s.strip.sub(/;+\z/, "")
+      rescue StandardError
+        line_text(document, node).strip
+      end
+
+      def hidden_ruby_owner_declaration?(node)
+        return false unless ts_node?(node)
+        return false unless node.kind == "body_statement"
+
+        %w[class module].include?(node.children.first&.kind.to_s)
+      end
+
+      def hidden_ruby_owner_name(node)
+        node.named_children.find { |child| %w[constant identifier type_identifier].include?(child.kind) }&.text
+      end
+
+      def hidden_ruby_owner_kind(node)
+        node.children.first&.kind.to_s == "module" ? :module : :class
+      end
+
+      def ruby_inline_def_visibility(node)
+        parent = parent_node(node)
+        return nil unless parent&.kind == "call"
+
+        target = ruby_call_target(parent)
+        visibility = target && target[:receiver] == "self" && target[:message]&.to_sym
+        %i[private protected public].include?(visibility) ? visibility : nil
+      end
+
+      def ruby_bare_call_identifier?(node)
+        parent = parent_node(node)
+        return false unless parent
+        return false if ruby_declaration_name?(node, parent)
+        return false if %w[method_parameters block_parameters argument_list assignment].include?(parent.kind)
+        if parent.kind == "call"
+          return false if named_field(parent, "receiver")
+
+          first = parent.named_children.first
+          return first == node && next_sibling(node)&.kind == "argument_list"
+        end
+        return false if next_sibling(node)&.text == "=" || prev_sibling(node)&.text == "="
+        return false if next_sibling(node)&.text == "." || prev_sibling(node)&.text == "."
+
+        %w[body_statement then else elsif ensure rescue].include?(parent.kind) ||
+          next_sibling(node)&.kind == "argument_list"
+      end
+
+      def ruby_declaration_name?(node, parent)
+        return true if hidden_ruby_method_definition?(parent)
+        return true if hidden_ruby_owner_declaration?(parent)
+        return true if %w[method singleton_method class module].include?(parent.kind)
+
+        false
+      end
+
+      def ruby_argument_texts(node)
+        args = named_field(node, "arguments") || node.named_children.find { |child| child.kind == "argument_list" }
+        return [] unless args
+
+        values = args.named_children.map { |child| normalize_text(child.text) }
+        return values unless values.empty?
+
+        text = args.text.to_s.strip
+        text = text[1...-1] if text.start_with?("(") && text.end_with?(")")
+        text.split(/\s*,\s*/).map { |arg| normalize_text(arg) }.reject(&:empty?)
+      end
+
+      def ruby_t_let_state_declaration(node)
+        lhs = named_field(node, "left") || node.named_children.first
+        rhs = named_field(node, "right") || named_field(node, "value") || node.named_children[1]
+        target = state_target(lhs)
+        return nil unless target && target[:receiver] == "self" && target[:field].to_s.start_with?("@")
+        return nil unless rhs&.kind == "call"
+
+        receiver = named_field(rhs, "receiver") || rhs.named_children.first
+        method = named_field(rhs, "method") || rhs.named_children.find { |child| child.kind == "identifier" }
+        return nil unless receiver&.text == "T" && method&.text == "let"
+
+        args = named_field(rhs, "arguments") || rhs.named_children.find { |child| child.kind == "argument_list" }
+        type = args&.named_children&.[](1)&.text
+        return nil if type.to_s.empty?
+
+        { field: target[:field], type: normalize_text(type) }
       end
 
       def ts_node?(node)
