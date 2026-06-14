@@ -14,7 +14,7 @@ module Decomplex
   # #8 (protocol-pair names: open/close, lock/unlock) is NOT here -- it
   # is already Broken Protocols (SequenceMine, Engler co-call mining).
   #
-  # Pure RubyVM::AST node matching. No dataflow, no CFG, no points-to.
+  # Pure normalized syntax-tree matching. No dataflow, no CFG, no points-to.
   # Lexicons mined from RuboCop/Reek/stdlib as reference DATA (copied
   # once at authoring time), never a runtime dependency (principle 1).
   # See docs/false-simplicity.md.
@@ -136,8 +136,7 @@ module Decomplex
       cpath = node.children[0]
       body  = node.children[node.type == :CLASS ? 2 : 1]
       simple = const_simple(cpath)
-      based  = cpath.is_a?(RubyVM::AbstractSyntaxTree::Node) &&
-               cpath.type == :COLON2 && !cpath.children[0].nil?
+      based = Ast.node?(cpath) && cpath.type == :COLON2 && !cpath.children[0].nil?
       fqn = (cls + [const_text(cpath)]).join("::")
       if has_def?(body)
         core = cls.empty? && !based && CORE.include?(simple)

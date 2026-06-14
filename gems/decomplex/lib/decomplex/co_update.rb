@@ -40,59 +40,6 @@ module Decomplex
       Report.new(writes)
     end
 
-    attr_reader :writes
-
-    def initialize(file, lines)
-      @file = file
-      @lines = lines
-      @writes = []
-    end
-
-    def walk(node, defstack)
-      return unless node.is_a?(RubyVM::AbstractSyntaxTree::Node)
-
-      case node.type
-      when :DEFN then defstack += [node.children[0].to_s]
-      when :DEFS then defstack += [node.children[1].to_s]
-      when :ATTRASGN
-        recv, msg, = node.children
-        # `obj[k] = v` is indexed-container mutation, not a named-attribute
-        # state edit -- same noise class as the lvar exclusion above; left
-        # in, its `[]` "attribute" manufactures spurious pairs with every
-        # real attr.
-        if msg == :[]=
-          node.children.each { |c| walk(c, defstack) }
-          return
-        end
-
-        attr = msg.to_s.sub(/=$/, "")
-        @writes << Write.new(attr: attr, recv: slice(recv), file: @file,
-                             defn: defstack.last || "(top-level)",
-                             line: node.first_lineno,
-                             span: [node.first_lineno, node.first_column,
-                                    node.last_lineno, node.last_column])
-      when :IASGN
-        @writes << Write.new(attr: node.children[0].to_s, recv: "self",
-                             file: @file, defn: defstack.last || "(top-level)",
-                             line: node.first_lineno,
-                             span: [node.first_lineno, node.first_column,
-                                    node.last_lineno, node.last_column])
-      end
-
-      node.children.each { |c| walk(c, defstack) }
-    end
-
-    private
-
-    def slice(node)
-      return "?" unless node.is_a?(RubyVM::AbstractSyntaxTree::Node)
-
-      sl = node.first_lineno
-      el = node.last_lineno
-      t = sl == el ? @lines[sl - 1][node.first_column...node.last_column] : @lines[sl - 1][node.first_column..]
-      t.to_s.strip.gsub(/\s+/, " ")
-    end
-
     # Frequent co-written attribute pairs + the methods that break them.
     class Report
       def initialize(writes)

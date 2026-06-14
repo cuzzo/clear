@@ -3,16 +3,16 @@
 
 require_relative "../lib/decomplex"
 
-def tree_sitter_parser?
-  ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_") == "tree_sitter"
+def parser_name
+  ENV.fetch("DECOMPLEX_PARSER", "tree_sitter").to_s
 end
 
 def supported_exts
-  Decomplex::Syntax.supported_exts(parser: tree_sitter_parser? ? "tree_sitter" : "rubyvm")
+  Decomplex::Syntax.supported_exts(parser: parser_name)
 end
 
 def no_files_message
-  tree_sitter_parser? ? "no supported source files" : "no .rb files"
+  "no supported source files"
 end
 
 def split_excludes(args)
@@ -37,7 +37,7 @@ def collect_files(args)
   targets, excludes = split_excludes(args)
   Decomplex::SourceFilter.collect(
     targets,
-    parser: tree_sitter_parser? ? "tree_sitter" : "rubyvm",
+    parser: parser_name,
     root: Dir.pwd,
     exclude: excludes
   )

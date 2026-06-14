@@ -17,17 +17,12 @@ module Decomplex
     module_function
 
     def parse(file)
-      if tree_sitter_enabled?
-        require_relative "syntax"
-        document = Syntax.parse(file)
-        key = [:tree_sitter, document.object_id]
-        return normalized_cache.fetch(key) do
-          normalized_cache[key] = [TreeSitterNormalizer.new(document).normalize, document.lines]
-        end
+      require_relative "syntax"
+      document = Syntax.parse(file, parser: "tree_sitter")
+      key = [:tree_sitter, document.object_id]
+      normalized_cache.fetch(key) do
+        normalized_cache[key] = [TreeSitterNormalizer.new(document).normalize, document.lines]
       end
-
-      src = File.read(file)
-      [RubyVM::AbstractSyntaxTree.parse(src, keep_script_lines: true), src.lines]
     end
 
     def normalized_cache
@@ -35,34 +30,18 @@ module Decomplex
     end
 
     def node?(n)
-      n.is_a?(RubyVM::AbstractSyntaxTree::Node) || n.is_a?(Node)
+      n.is_a?(Node)
     end
 
     # Exact source text of a node, trivial formatting normalised.
-    def slice(node, lines)
+    def slice(node, _lines)
       return "" unless node?(node)
-      return node.text.to_s.strip.gsub(/\s+/, " ") if node.is_a?(Node)
 
-      sl = node.first_lineno
-      el = node.last_lineno
-      txt =
-        if sl == el
-          lines[sl - 1].byteslice(node.first_column...node.last_column)
-        else
-          ([lines[sl - 1].byteslice(node.first_column..) ] +
-            lines[sl...(el - 1)] +
-            [lines[el - 1].byteslice(0...node.last_column)]).join
-      end
-      txt.to_s.strip.gsub(/\s+/, " ")
-    end
-
-    def tree_sitter_enabled?
-      parser = ENV.fetch("DECOMPLEX_PARSER", "rubyvm").to_s.tr("-", "_")
-      %w[tree_sitter treesitter].include?(parser)
+      node.text.to_s.strip.gsub(/\s+/, " ")
     end
 
     # Tree-sitter exposes each grammar's native node names. Decomplex's
-    # detectors already share a tiny RubyVM-like AST vocabulary, so this
+    # detectors share a small language-neutral AST vocabulary, so this
     # adapter normalizes common syntax categories into that vocabulary:
     # DEFN, CLASS, IF, CASE/WHEN, AND/OR, CALL, LASGN, ATTRASGN, IVAR,
     # LVAR, and friends. The goal is portable structural facts, not

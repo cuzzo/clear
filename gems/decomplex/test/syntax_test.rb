@@ -23,7 +23,10 @@ class SyntaxTest < Minitest::Test
     old.nil? ? ENV.delete(key) : ENV[key] = old
   end
 
-  def test_rubyvm_adapter_extracts_decision_and_write_facts
+  def test_default_tree_sitter_adapter_extracts_decision_and_write_facts
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "set DECOMPLEX_TS_RUBY_PATH to run default Tree-sitter adapter smoke test" unless grammar && File.file?(grammar)
+
     with_file(<<~RB) do |path|
       def classify(node)
         node.storage = :heap
@@ -34,7 +37,7 @@ class SyntaxTest < Minitest::Test
         return true if node.ready? && @enabled
       end
     RB
-      doc = Decomplex::Syntax.parse(path)
+      doc = Decomplex::Syntax.parse(path, language: :ruby)
 
       assert_equal :ruby, doc.language
       assert_equal [:case_dispatch, :conjunction], doc.decision_sites.map(&:kind)
