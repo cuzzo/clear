@@ -137,3 +137,26 @@ lines, and shows systems hazards with tooltip details. The HTML view is
 server-rendered; filtering, file navigation, version history, and line
 details use regular links, GET forms, and `<details>` controls rather
 than client-side JavaScript.
+
+The UI home page shows a Codecov-style current snapshot: exact line
+coverage, active hazards with required evidence, covered-line share with
+killed-mutant evidence, and covered-line share with multiple verified
+test types. The same aggregate is available as JSON:
+
+```sh
+curl http://127.0.0.1:8080/api/dashboard
+```
+
+Run the language server over stdio for editor integrations:
+
+```sh
+cargo run --manifest-path gems/lineage/Cargo.toml -- lsp \
+  --db /tmp/lineage.db \
+  --repo . \
+  --overlay tmp/slopcop-constraints.json
+```
+
+The LSP publishes standard diagnostics for uncovered dark arms and open
+hazards, hover text for logical-unit history and test evidence, CodeLens
+risk summaries above units, and a custom `lineage/gutterUpdate`
+notification for VS Code/Vim gutter wrappers.

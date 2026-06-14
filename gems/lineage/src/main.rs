@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
-    ingest_coverage_json, ingest_hazards, ingest_stack_traces, ingest_test_exposure_json, GitProvider,
-    serve_ui_with_overlays, HeuristicExtractor, LineageEngine, RepoPathNormalizer, SentryProvider,
-    Storage,
+    ingest_coverage_json, ingest_hazards, ingest_stack_traces, ingest_test_exposure_json,
+    serve_lsp, serve_ui_with_overlays, GitProvider, HeuristicExtractor, LineageEngine,
+    RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -53,6 +53,15 @@ enum Command {
         host: String,
         #[arg(long, default_value_t = 8080)]
         port: u16,
+        #[arg(long = "overlay")]
+        overlays: Vec<PathBuf>,
+    },
+    /// Run the Lineage language server over stdio.
+    Lsp {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
         #[arg(long = "overlay")]
         overlays: Vec<PathBuf>,
     },
@@ -176,6 +185,12 @@ fn main() -> Result<()> {
             overlays,
         } => {
             serve_ui_with_overlays(db, repo, &host, port, &overlays)?;
+        }
+        Command::Lsp { db, repo, overlays } => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(serve_lsp(db, repo, &overlays))?;
         }
         Command::IngestCoverage {
             db,
