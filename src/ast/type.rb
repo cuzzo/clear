@@ -920,6 +920,7 @@ class Type
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def collection=(value)
     apply_capabilities!(collection: value)
+    pin_heap_for_collection! if pool?
     value
   end
 
@@ -2055,7 +2056,7 @@ class Type
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   sig { returns(T::Boolean) }
   def needs_heap_backing?
-    pool? || sharded? || heap? || tense_observable?
+    sharded? || heap? || tense_observable?
   end
 
   sig { returns(T::Boolean) }

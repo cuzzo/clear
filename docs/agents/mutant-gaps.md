@@ -7,9 +7,9 @@ This tracker focuses on CLEAR's memory-safety mutation coverage. The P1 goal was
 | Area | Gate strategy | Current result | Status |
 | :--- | :--- | :--- | :--- |
 | `BorrowChecker` | Broad class gate | 86.07%, 833 mutations, 717 killed, 11 timeouts | Hard-gated |
-| `CleanupClassifier` | Exact safety-path gates | `classify_plan` 94.92%; `binding_cleanup_facts` 86.45%; `stamp_field_pre_cleanups!` 86.98%; `walk_moved_source_guards` 100% | Hard-gated |
-| `EscapeAnalysis` | Exact public/heap-promotion gates | `apply!` 100%; `apply_with_facts!` 98.96%; `propagate_caller_sync!` 91.48%; `mark_takes_args_heap!` 87.62% | Hard-gated |
-| `Type` | Exact ownership/payload gates | `binary_op` 96.05%; `heap_ptr?` 98.33%; `needs_escape_promotion?` 100%; `success_type` 100%; `value_payload_type` 88.46% | Hard-gated |
+| `CleanupClassifier` | Exact safety-path and frozen-fact gates | `classify_plan` 94.92%; `binding_cleanup_facts` 86.45%; `stamp_field_pre_cleanups!` 86.98%; `walk_moved_source_guards` 100%; `FrozenCleanupFacts#entry_for` 100%; `#entry_for_node` 98%; `#without_names` 98.3% | Hard-gated |
+| `EscapeAnalysis` | Exact public/heap-promotion and registry gates | `apply!` 100%; `apply_with_facts!` 98.96%; `propagate_caller_sync!` 91.48%; `mark_takes_args_heap!` 87.62%; `EscapeSink#matches?` 100%; registry validators 99-100% | Hard-gated |
+| `Type` | Exact ownership/payload gates | `binary_op` 96.05%; `heap_ptr?` 98.33%; `needs_escape_promotion?` 100%; `collection=` 100%; `needs_pointer_passing?` 100%; `needs_heap_backing?` 100%; `success_type` 100%; `value_payload_type` 88.46% | Hard-gated |
 
 ## Real Bugs Found
 
@@ -66,7 +66,15 @@ The focused spec proves the gate catches stale README counts, missing template m
 Broad `Type`, `CleanupClassifier`, and `EscapeAnalysis` mutation subjects are still advisory. That is intentional for now:
 
 - `Type` is a broad value-object facade with many delegation and formatting methods. A broad 85% gate would mostly force tests over non-safety surface area.
-- `CleanupClassifier` broad runs are expensive and noisy. The hard gates now cover cleanup facts, field pre-cleanup stamping, moved-source guard walking, and the existing plan classifier.
-- `EscapeAnalysis` broad recursive walking remains advisory, but the major public entry points and heap-placement path for TAKES/heap-backed args are hard-gated.
+- `CleanupClassifier` broad runs are expensive and noisy. The hard gates now cover cleanup facts, field pre-cleanup stamping, moved-source guard walking, frozen cleanup fact lookups, and the existing plan classifier.
+- `EscapeAnalysis` broad recursive walking remains advisory, but the major public entry points, heap-placement path for TAKES/heap-backed args, sink matching, and registry validator contracts are hard-gated.
+
+The remaining final-boss broad subject is `FsmTransform::Emit*`. The broad module
+gate is intentionally advisory because it includes a large amount of private
+shape-specific emission and helper code. Stable exact gates now cover
+`build_recursive`, `build_fsm_unified`, resume-target routing, context-field
+deduplication, recursive capture-map construction, and recursive destroy-action
+registration. Future work should add exact gates for newly stabilized helpers
+instead of trying to promote the entire emit module at once.
 
 Future work should add exact hard gates for newly discovered safety predicates rather than raising broad facade gates unless the subject is split into smaller cohesive units. Native CLEAR-source mutation for every `.cht` transpile-test is still separate from P2 patch mutants; patch mutants prove compiler invariants are load-bearing, while source mutants would prove individual corpus assertions are load-bearing.

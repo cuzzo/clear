@@ -216,10 +216,58 @@ RSpec.describe CleanupClassifier do
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
       node = var_decl(name: "item", type: Type.new(:String), value: nil)
       facts = CleanupClassifier::FrozenCleanupFacts.from_bindings("item" => entry)
+      binding_place = CleanupClassifier.place_for_binding_node("item", node)
 
+      expect(facts.entry_for(binding_place)).to eq(entry)
       expect(facts.entry_for_node("item", node)).to eq(entry)
       expect(facts.live_entry_for_node("item", node)).to eq(entry)
       expect(facts.live_entry_for_node("other", node)).to equal(CleanupEntry::NONE)
+    end
+
+    it "prefers binding-aware facts for node lookup and path facts for name lookup" do
+      path_entry = CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: false)
+      binding_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      node = var_decl(name: "item", type: Type.new(:String), value: nil)
+      place = CleanupClassifier.place_for_binding_node("item", node)
+      facts = CleanupClassifier::FrozenCleanupFacts.build(
+        CleanupClassifier::PlaceId.from_path("item") => path_entry,
+        place => binding_entry,
+      )
+
+      expect(facts.entry_for("item")).to eq(path_entry)
+      expect(facts.entry_for(:item)).to eq(path_entry)
+      expect(facts.entry_for(place)).to eq(binding_entry)
+      expect(facts.entry_for_node(:item, node)).to eq(binding_entry)
+      expect(facts.live_entry_for_node(:item, node)).to eq(binding_entry)
+    end
+
+    it "filters cleanup facts by path for strings, symbols, and place ids without mutating the source facts" do
+      keep_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      drop_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+      captured_path_entry = CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: false)
+      captured_binding_entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      captured_node = var_decl(name: "captured", type: Type.new(:String), value: nil)
+      captured_place = CleanupClassifier.place_for_binding_node("captured", captured_node)
+      facts = CleanupClassifier::FrozenCleanupFacts.build(
+        CleanupClassifier::PlaceId.from_path("keep") => keep_entry,
+        CleanupClassifier::PlaceId.from_path("drop") => drop_entry,
+        CleanupClassifier::PlaceId.from_path("captured") => captured_path_entry,
+        captured_place => captured_binding_entry,
+      )
+
+      filtered = facts.without_names([
+        "drop",
+        :captured,
+        CleanupClassifier::PlaceId.from_path("missing"),
+      ])
+
+      expect(filtered.entry_for("keep")).to eq(keep_entry)
+      expect(filtered.entry_for("drop")).to equal(CleanupEntry::NONE)
+      expect(filtered.entry_for("captured")).to equal(CleanupEntry::NONE)
+      expect(filtered.entry_for_node("captured", captured_node)).to equal(CleanupEntry::NONE)
+      expect(filtered.bindings).to eq("keep" => keep_entry)
+      expect(facts.entry_for("drop")).to eq(drop_entry)
+      expect(facts.entry_for_node("captured", captured_node)).to eq(captured_binding_entry)
     end
 
     it "updates cleanup lifecycle through typed mutators" do

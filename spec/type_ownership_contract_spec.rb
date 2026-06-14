@@ -51,6 +51,45 @@ RSpec.describe Type, "ownership and cleanup contracts" do
       expect(Type.new(:"Int64[]", collection: :list, shard_count: 4).needs_escape_promotion?).to eq(false)
       expect(Type.new(:Point).needs_escape_promotion?).to eq(false)
     end
+
+    it "requires pointer passing only for map and pool collection state" do
+      expect(Type.new(:"HashMap<String>").needs_pointer_passing?).to eq(true)
+      expect(Type.new(:"Int64[]", collection: :pool).needs_pointer_passing?).to eq(true)
+      expect(Type.new(:"Int64[]", collection: :list).needs_pointer_passing?).to eq(false)
+      expect(Type.new(:"Int64[]", collection: :set).needs_pointer_passing?).to eq(false)
+      expect(Type.new(:String).needs_pointer_passing?).to eq(false)
+    end
+
+    it "requires heap backing only for pool, sharded, heap, and terminal observable storage" do
+      expect(Type.new(:String).needs_heap_backing?).to eq(false)
+      expect(heap_string.needs_heap_backing?).to eq(true)
+      expect(Type.new(:"Int64[]", collection: :pool).needs_heap_backing?).to eq(true)
+      late_pool = Type.new(:"Int64[]")
+      expect(late_pool.send(:collection=, :pool)).to eq(:pool)
+      expect(late_pool.heap?).to eq(true)
+      expect(late_pool.needs_heap_backing?).to eq(true)
+      late_list = Type.new(:"Int64[]")
+      expect(late_list.send(:collection=, :list)).to eq(:list)
+      expect(late_list.heap?).to eq(false)
+      expect(late_list.needs_heap_backing?).to eq(false)
+      expect(Type.new(:"Int64[]", collection: :list, shard_count: 4).needs_heap_backing?).to eq(true)
+      expect(Type.new(:"HashMap<String>").needs_heap_backing?).to eq(false)
+      expect(Type.new(:"~Int64", observable: true).needs_heap_backing?).to eq(true)
+      expect(Type.new(:"~Int64").needs_heap_backing?).to eq(false)
+    end
+
+    it "exposes capability surface names without inventing names for plain values" do
+      expect(Type.new(:String).ownership_surface_name).to be_nil
+      expect(Type.new(:String, ownership: :multiowned).ownership_surface_name).to eq("@multiowned")
+      expect(Type.new(:String, ownership: :shared).ownership_surface_name).to eq("@shared")
+      expect(Type.new(:String, ownership: :frozen).ownership_surface_name).to eq("@frozen")
+
+      expect(Type.new(:String).sync_surface_name).to be_nil
+      expect(Type.new(:String, sync: :locked).sync_surface_name).to eq("@locked")
+      expect(Type.new(:String, sync: :write_locked).sync_surface_name).to eq("@writeLocked")
+      expect(Type.new(:String, sync: :atomic).sync_family_name).to eq("atomic")
+      expect(Type.new(:String, sync: :local).sync_family_name).to eq("local")
+    end
   end
 
   describe "cleanup and ownership predicates" do

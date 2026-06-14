@@ -363,6 +363,34 @@
   baseline: 97.65
   hard_gate: true
   max_timeouts: 0
+- subject: FsmTransform::Emit.tail_resume_target
+  expression: FsmTransform::Emit.tail_resume_target
+  require: backends/transpiler
+  spec: spec/fsm_transform_emit_spec.rb
+  baseline: 96.9
+  hard_gate: true
+  max_timeouts: 0
+- subject: FsmTransform::Emit.dedupe_context_fields
+  expression: FsmTransform::Emit.dedupe_context_fields
+  require: backends/transpiler
+  spec: spec/fsm_transform_emit_spec.rb
+  baseline: 92.6
+  hard_gate: true
+  max_timeouts: 0
+- subject: FsmTransform::Emit.build_recursive_capture_map
+  expression: FsmTransform::Emit.build_recursive_capture_map
+  require: backends/transpiler
+  spec: spec/fsm_transform_emit_spec.rb
+  baseline: 97.6
+  hard_gate: true
+  max_timeouts: 0
+- subject: FsmTransform::Emit.register_recursive_destroy_actions!
+  expression: FsmTransform::Emit.register_recursive_destroy_actions!
+  require: backends/transpiler
+  spec: spec/fsm_transform_emit_spec.rb
+  baseline: 92.3
+  hard_gate: true
+  max_timeouts: 0
 - subject: EscapeAnalysis
   require: backends/transpiler -r semantic/escape_analysis
   specs:
@@ -405,6 +433,34 @@
     - spec/escape_analysis_spec.rb
     - spec/propagate_caller_sync_spec.rb
   baseline: 87.6
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis::EscapeSink#matches?
+  expression: EscapeAnalysis::EscapeSink#matches?
+  require: semantic/escape_analysis
+  spec: spec/escape_analysis_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.validate_escape_sink_handlers!
+  expression: EscapeAnalysis.validate_escape_sink_handlers!
+  require: semantic/escape_analysis
+  spec: spec/escape_analysis_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.validate_derived_placement_handlers!
+  expression: EscapeAnalysis.validate_derived_placement_handlers!
+  require: semantic/escape_analysis
+  spec: spec/escape_analysis_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: EscapeAnalysis.validate_escape_sinks!
+  expression: EscapeAnalysis.validate_escape_sinks!
+  require: semantic/escape_analysis
+  spec: spec/escape_analysis_spec.rb
+  baseline: 99.0
   hard_gate: true
   max_timeouts: 0
 - subject: MIRLowering#alloc_expr
@@ -964,6 +1020,27 @@
   baseline: 100.0
   hard_gate: true
   max_timeouts: 0
+- subject: CleanupClassifier::FrozenCleanupFacts#entry_for
+  expression: CleanupClassifier::FrozenCleanupFacts#entry_for
+  require: backends/transpiler
+  spec: spec/cleanup_plan_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: CleanupClassifier::FrozenCleanupFacts#entry_for_node
+  expression: CleanupClassifier::FrozenCleanupFacts#entry_for_node
+  require: backends/transpiler
+  spec: spec/cleanup_plan_spec.rb
+  baseline: 98.0
+  hard_gate: true
+  max_timeouts: 8
+- subject: CleanupClassifier::FrozenCleanupFacts#without_names
+  expression: CleanupClassifier::FrozenCleanupFacts#without_names
+  require: backends/transpiler
+  spec: spec/cleanup_plan_spec.rb
+  baseline: 98.3
+  hard_gate: true
+  max_timeouts: 10
 - subject: CleanupClassifier
   require: backends/transpiler
   specs:
@@ -1022,6 +1099,27 @@
   max_timeouts: 0
 - subject: Type#needs_escape_promotion?
   expression: Type#needs_escape_promotion?
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#needs_pointer_passing?
+  expression: Type#needs_pointer_passing?
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#needs_heap_backing?
+  expression: Type#needs_heap_backing?
+  require: ast/lexer -r ast/ast -r ast/type
+  spec: spec/type_ownership_contract_spec.rb
+  baseline: 100.0
+  hard_gate: true
+  max_timeouts: 0
+- subject: Type#collection=
+  expression: Type#collection=
   require: ast/lexer -r ast/ast -r ast/type
   spec: spec/type_ownership_contract_spec.rb
   baseline: 100.0

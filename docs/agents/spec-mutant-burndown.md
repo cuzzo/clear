@@ -78,13 +78,14 @@ load-bearing.
 - The runner now accepts explicit YAML `expression:` matchers, which lets broad
   subjects be split into exact method gates without relying on wildcard
   expansion.
-- `FsmTransform::Emit` improved from `51.96%` to `64.76%` after attaching the
-  existing FSM emit/lowering specs, but still has thousands of survivors. The
-  remaining work is real survivor burn-down, not just mapping.
-- `Type*` improved from `4.03%` to `22.85%` after attaching the direct Type
-  specs, but still has 10,623 survivors and 63 timeouts. The class wildcard is
-  too broad for one effective subject gate; it needs method-level burn-down or a
-  major direct-spec expansion before it can become A-level.
+- `FsmTransform::Emit*` remains too broad for a meaningful class/module gate,
+  but exact gates now cover the stable build paths and helper contracts. The
+  remaining work is method-level survivor burn-down, not trying to force the
+  entire emitter module into one gate.
+- `Type*` improved after attaching the direct Type specs and is currently
+  advisory at `24.86%`. The class wildcard is too broad for one effective
+  subject gate; method-level hard gates now cover the safety-critical ownership,
+  payload, and operator predicates.
 - Low-baseline advisory subjects still remain in the registry. The next highest
   leverage targets are broad compiler/runtime helpers rather than the LSP/tool
   subjects already hard-gated below.
@@ -186,6 +187,10 @@ load-bearing.
     guard propagation. No real bug found; remaining survivors are equivalent
     string-coercion, `T.let` type-wrapper, and schema-removal variants that do
     not change the current heap-capture cleanup contract.
+    The frozen fact container now has exact hard gates as well:
+    `CleanupClassifier::FrozenCleanupFacts#entry_for` at `100%`,
+    `#entry_for_node` at `98%`, and `#without_names` at `98.3%`. These cover
+    binding-aware lookup, path fallback, and non-mutating fact filtering.
   - `FsmTransform::RecursiveSplitter*`: `56.15%`, `1524/2714` killed,
     `0` timeouts. The public `FsmTransform::RecursiveSplitter.split`
     entrypoint is now separately hard-gated at `100.00%`, `114/114` killed,
@@ -214,6 +219,12 @@ load-bearing.
     disagreement, and transitive sync/storage convergence. The pass also
     tightened declared-sync handling so declared param sync blocks caller
     inference by declaration rather than by incidental entry state.
+    Exact registry contracts are also hard-gated now:
+    `EscapeAnalysis::EscapeSink#matches?` at `100%`,
+    `validate_escape_sink_handlers!` at `100%`,
+    `validate_derived_placement_handlers!` at `100%`, and
+    `validate_escape_sinks!` at `99%`. These catch broken registry wiring
+    without forcing the broad walker subject to become a hard gate.
 - `PredicateRewriter*`: broad wildcard remains advisory (`73.48%`) because it
   includes many private source-span helpers. The public entrypoints are now
   separately hard-gated: `PredicateRewriter.rewrite` at `92.68%` (`38/41`
@@ -262,6 +273,16 @@ load-bearing.
   exceptions: Sorbet `T.let` generic type-argument mutations, `next nil` versus
   `next` inside `filter_map`, and equivalent Set copy/type-wrapper variants
   after the field membership behavior is already asserted.
+- Stable `FsmTransform::Emit` helper contracts are now separately hard-gated:
+  `tail_resume_target` at `96.9%`, `dedupe_context_fields` at `92.6%`,
+  `build_recursive_capture_map` at `97.6%`, and
+  `register_recursive_destroy_actions!` at `92.3%`. The exact pass made the
+  FSM emit spec helper pass typed `capture_finalizers` and existing
+  `destroy_actions`, then added structural coverage for resume routing,
+  context-field dedupe, recursive capture maps, and recursive destroy cleanup
+  registration. Remaining survivors are equivalent string coercions,
+  `T.let` type-argument changes, omitted `CleanupEntry.build` defaults, and an
+  implicit nil `else`.
 - `LockHelper#tarjan_scc` is hard-gated with classified non-semantic survivors
   as described above.
 - `PipelineRewriter*`: broad wildcard remains advisory (`33.01%`) because it
@@ -278,8 +299,18 @@ load-bearing.
   cleanup predicates, and Zig rendering. Metadata was fixed so the registered
   Type specs attach to the `Type` constant; the broad advisory moved from
   `5.38%` to `24.86%` with `107` selected tests on the bounded pure-Type spec
-  set. The direct operator resolver is now separately hard-gated:
-  `Type.binary_op` at `96.05%`, `146/152` killed, `0` timeouts. The exact pass
+  set. The direct operator resolver is separately hard-gated:
+  `Type.binary_op` at `96.05%`, `146/152` killed, `0` timeouts. Ownership and
+  placement contracts are also exact-gated: `Type#heap_ptr?` at `98.3%`,
+  `Type#needs_escape_promotion?` at `100%`,
+  `Type#collection=` at `100%`,
+  `Type#needs_pointer_passing?` at `100%`, and
+  `Type#needs_heap_backing?` at `100%`. The latest pass accepted a redundant
+  `pool?` branch out of `needs_heap_backing?` after fixing `collection=` to
+  pin late-assigned `@pool` types to heap placement. Pool collection types now
+  report `heap? == true` regardless of whether the modifier was provided at
+  construction or assigned later, so the predicate branch is not a distinct
+  contract. The exact operator pass
   removed defensive `respond_to?(:auto?)` checks from typed operands and added
   right-side Auto, OR, WRAP_ADD, CHECK_ADD, exact error-message, and invalid
   ADD coverage. No real bug found. Remaining survivors are equivalent

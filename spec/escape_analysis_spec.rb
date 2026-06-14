@@ -120,6 +120,13 @@ RSpec.describe EscapeAnalysis do
     decl = AST::VarDecl.new(tok, "value", Type.new(:String), lit, false)
     expect(sink.matches?(decl)).to eq(true)
     expect(sink.matches?(id("value"))).to eq(false)
+
+    locatable_sink = EscapeAnalysis::EscapeSink.new(
+      name: :any_ast_node,
+      node_classes: [AST::Locatable],
+      handler: :apply_binding_escape_sink!,
+    )
+    expect(locatable_sink.matches?(decl)).to eq(true)
   end
 
   it "validates handler registries and executable escape sinks" do
@@ -129,6 +136,50 @@ RSpec.describe EscapeAnalysis do
     expect {
       EscapeAnalysis.send(:validate_handler_registry!, "bad", missing: [:nope])
     }.to raise_error(RuntimeError, /bad is incomplete: missing=nope/)
+  end
+
+  it "rejects missing escape sink handler registry entries" do
+    stub_const(
+      "EscapeAnalysis::ESCAPE_SINK_HANDLERS",
+      { missing_sink: [:missing_handler].freeze }.freeze,
+    )
+
+    expect {
+      EscapeAnalysis.send(:validate_escape_sink_handlers!)
+    }.to raise_error(RuntimeError, /EscapeAnalysis sink registry is incomplete: missing_sink=missing_handler/)
+  end
+
+  it "rejects missing derived placement handler registry entries" do
+    stub_const(
+      "EscapeAnalysis::DERIVED_PLACEMENT_HANDLERS",
+      { missing_phase: [:missing_derived_handler].freeze }.freeze,
+    )
+
+    expect {
+      EscapeAnalysis.send(:validate_derived_placement_handlers!)
+    }.to raise_error(RuntimeError, /EscapeAnalysis derived placement registry is incomplete: missing_phase=missing_derived_handler/)
+  end
+
+  it "rejects executable escape sinks with unknown names or handlers" do
+    stub_const(
+      "EscapeAnalysis::ESCAPE_SINKS",
+      [
+        EscapeAnalysis::EscapeSink.new(
+          name: :unknown_sink,
+          node_classes: [AST::ReturnNode],
+          handler: :apply_return_escape_sink!,
+        ),
+        EscapeAnalysis::EscapeSink.new(
+          name: :owning_return,
+          node_classes: [AST::ReturnNode],
+          handler: :missing_escape_handler!,
+        ),
+      ].freeze,
+    )
+
+    expect {
+      EscapeAnalysis.send(:validate_escape_sinks!)
+    }.to raise_error(RuntimeError, /missing_escape_handler!, unknown_sink/)
   end
 
   it "apply! forwards inputs and returns the legacy heap tuple" do

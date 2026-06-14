@@ -22,9 +22,9 @@ Current matrix:
 
 | group | count |
 |---|---:|
-| total `src/` subjects | 157 |
-| hard gates | 139 |
-| advisory gates | 18 |
+| total `src/` subjects | 179 |
+| hard gates | 162 |
+| advisory gates | 17 |
 | `MIRLowering#method` subjects | 89 |
 
 Important implementation details:
@@ -53,13 +53,22 @@ Notable current advisory weak spots:
 
 | subject | current ratchet | reason |
 |---|---:|---|
-| `Type*` | 24.86% | broad value-object facade; exact high-risk methods should be promoted separately |
-| `CleanupClassifier*` | 31.97% | broad classifier module; exact cleanup methods need stronger focused gates |
-| `EscapeAnalysis*` | 32.58% | broad analysis module; key entrypoints are already hard-gated |
+| `Type*` | 24.86% | broad value-object facade; exact ownership/payload methods are hard-gated separately |
+| `CleanupClassifier*` | 31.97% | broad classifier module; exact cleanup-plan and frozen-fact methods are hard-gated separately |
+| `EscapeAnalysis*` | 32.58% | broad analysis module; exact entrypoints and registry validators are hard-gated separately |
 | `PipelineRewriter*` | 33.01% | broad rewriter surface; needs focused method gates before hard promotion |
 | `MIREmitter*` | 39.56% | broad emitter surface; `MIREmitter#emit` is hard-gated at 99.73% |
 | `FsmWrapperEmitter*` | 49.13% | broad emitter surface; `FsmWrapperEmitter.render` is hard-gated at 100% |
-| `FsmTransform::Emit*` | 1.33% | broad module subject is too coarse; focused emit methods are hard-gated |
+| `FsmTransform::Emit*` | 1.33% | broad module subject is too coarse; build and stable helper methods are hard-gated separately |
+
+Final-boss exact gates added after P3:
+
+| area | hard-gated subjects |
+|---|---|
+| `Type` | `collection=` 100%; `needs_pointer_passing?` 100%; `needs_heap_backing?` 100% |
+| `CleanupClassifier` | `FrozenCleanupFacts#entry_for` 100%; `#entry_for_node` 98%; `#without_names` 98.3% |
+| `EscapeAnalysis` | `EscapeSink#matches?` 100%; `validate_escape_sink_handlers!` 100%; `validate_derived_placement_handlers!` 100%; `validate_escape_sinks!` 99% |
+| `FsmTransform::Emit` | `tail_resume_target` 96.9%; `dedupe_context_fields` 92.6%; `build_recursive_capture_map` 97.6%; `register_recursive_destroy_actions!` 92.3% |
 
 ## Transpile Tests
 
@@ -194,7 +203,7 @@ or emitter marker is load-bearing. The two layers should coexist:
 
 Additional validation on this branch:
 
-- `bundle exec prspec spec/`: 5,839 examples, 0 failures.
+- `bundle exec prspec`: 6,167 examples, 0 failures.
 - `bundle exec prspec spec/ --tag integration`: 237 examples, 0 failures.
 - `bundle exec srb tc`: no errors.
 - Mutation tooling syntax check: all `tools/mutants/**/*.rb` and

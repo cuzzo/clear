@@ -44,6 +44,7 @@ RSpec.describe FsmTransform::Emit do
       captured: {},
       capture_close_plans: {},
       pointer_captures: Set.new,
+      capture_finalizers: [],
       is_void: true,
       pin_mode: false,
       parallel: false,
@@ -54,6 +55,7 @@ RSpec.describe FsmTransform::Emit do
       profile_site_id: nil,
       profile_line: nil,
       profile_column: nil,
+      destroy_actions: [],
     }.merge(overrides)
     FsmTransform::Emit::FsmEmitContext.new(
       id: raw.fetch(:id),
@@ -71,6 +73,7 @@ RSpec.describe FsmTransform::Emit do
       captured: raw.fetch(:captured),
       capture_close_plans: raw.fetch(:capture_close_plans),
       pointer_captures: raw.fetch(:pointer_captures),
+      capture_finalizers: raw.fetch(:capture_finalizers),
       extra_ctx_fields: FsmTransform.coerce_context_fields(raw.fetch(:extra_ctx_fields)),
       recursive_promoted_names: raw.fetch(:recursive_promoted_names),
       fresh_heap_cleanup_names: raw.fetch(:fresh_heap_cleanup_names),
@@ -81,6 +84,7 @@ RSpec.describe FsmTransform::Emit do
       profile_site_id: raw.fetch(:profile_site_id),
       profile_line: raw.fetch(:profile_line),
       profile_column: raw.fetch(:profile_column),
+      destroy_actions: raw.fetch(:destroy_actions),
     )
   end
 
@@ -155,8 +159,105 @@ RSpec.describe FsmTransform::Emit do
     expect(FsmWrapperEmitter.render(result.body)).not_to include("fn runSeg0")
   end
 
-  it "returns no resume target for terminal segment tails" do
+  it "returns resume targets only for tails that resume into another segment" do
     expect(described_class.send(:tail_resume_target, FsmTransform::Segments::Done.new(nil))).to be_nil
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::Goto.new(5))).to be_nil
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::IoSuspend.new(nil, nil, "io", 6))).to eq(6)
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::NextSuspend.new(nil, "next", 7))).to eq(7)
+    expect(described_class.send(:tail_resume_target, FsmTransform::Segments::LockSuspend.new(nil, nil, [], 8, 9))).to eq(9)
+    expect(described_class.send(:tail_resume_target, MIR::FsmTailJump.new(10))).to eq(10)
+    expect(described_class.send(:tail_resume_target, MIR::FsmTailYield.new(11, "WaitForIo"))).to eq(11)
+    expect(described_class.send(:tail_resume_target, MIR::FsmTailRegisterYield.new(12, MIR::Ident.new("ready"), "WaitForPromise"))).to eq(12)
+    expect(described_class.send(:tail_resume_target, MIR::FsmTailCondJump.new(MIR::Ident.new("ok"), 13, 14))).to be_nil
+  end
+
+  it "deduplicates context fields by name while preserving first definitions and anonymous fields" do
+    first_step = ctx_decl("step", "u8", MIR::Lit.new("0"))
+    duplicate_step = ctx_decl("step", "usize", MIR::Lit.new("99"))
+    first_extra = ctx_decl("extra", "i64", MIR::Lit.new("1"))
+    duplicate_extra = ctx_decl("extra", "i64", MIR::Lit.new("2"))
+    anonymous_a = ctx_decl("", "bool", MIR::Lit.new("false"))
+    anonymous_b = ctx_decl("", "u1", MIR::Lit.new("1"))
+
+    deduped = described_class.send(:dedupe_context_fields, [
+      first_step, duplicate_step, anonymous_a, first_extra, duplicate_extra, anonymous_b,
+    ])
+
+    expect(deduped).to eq([first_step, anonymous_a, first_extra, anonymous_b])
+  end
+
+  it "builds recursive capture maps from captures, live vars, conservative promotions, and named suspend results" do
+    liveness = FsmTransform::Liveness::Result.new({
+      "live" => FsmTransform::Liveness::CrossSegmentVarFact.new(
+        type_info: Type.new(:Int64),
+        first_def_seg: 0,
+        last_use_seg: 2,
+      ),
+    })
+    segments = [
+      FsmTransform::Segments::Segment.new(0, [], FsmTransform::Segments::Goto.new(1)),
+      FsmTransform::Segments::Segment.new(1, [], FsmTransform::Segments::IoSuspend.new(nil, nil, "io_result", 2)),
+      FsmTransform::Segments::Segment.new(2, [], FsmTransform::Segments::NextSuspend.new(nil, "_", 3)),
+      FsmTransform::Segments::Segment.new(3, [], FsmTransform::Segments::NextSuspend.new(nil, nil, 4)),
+      FsmTransform::Segments::Segment.new(4, [], FsmTransform::Segments::Done.new(nil)),
+    ]
+    ctx = fsm_ctx(
+      id: 42,
+      captured: { "cap" => :stub },
+      recursive_promoted_names: ["recursive", "live"],
+    )
+
+    capture_map = described_class.send(:build_recursive_capture_map, ctx, segments, liveness)
+
+    expect(capture_map).to eq(
+      "cap" => "__ctx_42.cap",
+      "live" => "__ctx_42.live",
+      "recursive" => "__ctx_42.recursive",
+      "io_result" => "__ctx_42.io_result",
+    )
+  end
+
+  it "rebuilds recursive destroy actions from capture cleanup facts and clears stale actions" do
+    stale = MIR::FsmDestroyStmt.new(
+      source_kind: :capture,
+      name: "stale",
+      stmt: MIR::ExprStmt.new(MIR::Lit.new("stale()"), false),
+    )
+    finalizer = MIR::RcRelease.new(ctx_field("__ctx_42", "finalized"), "Handle", "release", MIR::Ident.new("alloc"))
+    close_plan = Schemas::ResourceClosePlan.method("close")
+    ctx = fsm_ctx(
+      id: 42,
+      captured: { "plain" => :stub, "resource" => :stub },
+      capture_close_plans: { "resource" => close_plan },
+      fresh_heap_cleanup_names: ["fresh_copy"],
+      capture_finalizers: [finalizer],
+      destroy_actions: [stale],
+    )
+
+    described_class.send(:register_recursive_destroy_actions!, ctx)
+
+    expect(ctx.destroy_actions.map(&:name)).to eq(["resource", "fresh_copy", "finalized"])
+    resource_action = ctx.destroy_actions[0]
+    fresh_action = ctx.destroy_actions[1]
+    finalizer_action = ctx.destroy_actions[2]
+    expect(resource_action).to be_a(MIR::FsmDestroyCleanup)
+    expect(resource_action.source_kind).to eq(:capture)
+    expect(MIREmitter.new.emit(resource_action.target)).to eq("__ctx_42.resource")
+    expect(resource_action.cleanup_entry.kind).to eq(:resource)
+    expect(resource_action.cleanup_entry.alloc).to eq(:heap)
+    expect(resource_action.cleanup_entry.has_moved_guard?).to be(false)
+    expect(resource_action.cleanup_entry.resource_close_plan).to be(close_plan)
+    expect(fresh_action).to be_a(MIR::FsmDestroyCleanup)
+    expect(fresh_action.source_kind).to eq(:fresh_heap)
+    expect(MIREmitter.new.emit(fresh_action.target)).to eq("__ctx_42.fresh_copy")
+    expect(fresh_action.cleanup_entry.kind).to eq(:uniform)
+    expect(fresh_action.cleanup_entry.alloc).to eq(:heap)
+    expect(fresh_action.cleanup_entry.has_moved_guard?).to be(true)
+    expect(MIREmitter.new.emit(fresh_action.allocator)).to eq("__ctx_42.alloc")
+    expect(finalizer_action).to be_a(MIR::FsmDestroyStmt)
+    expect(finalizer_action.source_kind).to eq(:capture)
+    expect(finalizer_action.stmt).to be(finalizer)
+    expect(finalizer_action.ctx_cleanup_target_name).to eq("__ctx_42.finalized")
   end
 
   it "derives segment facts from MIR roots and prefers materialized structure roots" do
